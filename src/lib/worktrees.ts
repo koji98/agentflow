@@ -1,0 +1,100 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import type { Session, TaskLaunch } from './types.ts';
+
+/** Creates a git worktree branch. */
+export function addWorktree(
+  projectRoot: string,
+  branch: string,
+  target: string,
+  dryRun: boolean,
+): void {
+  const cmd = ['git', 'worktree', 'add', '-b', branch, target, 'HEAD'];
+  if (dryRun) {
+    // eslint-disable-next-line no-console
+    console.log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
+    return;
+  }
+
+  const result = spawnSync(cmd[0], cmd.slice(1), { cwd: projectRoot, stdio: 'inherit' });
+  if (result.status !== 0) {
+    throw new Error(`git worktree add failed (exit=${result.status}).`);
+  }
+}
+
+/** Removes a git worktree branch folder. */
+export function removeWorktree(projectRoot: string, target: string, dryRun: boolean): void {
+  const cmd = ['git', 'worktree', 'remove', '--force', target];
+  if (dryRun) {
+    // eslint-disable-next-line no-console
+    console.log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
+    return;
+  }
+
+  const result = spawnSync(cmd[0], cmd.slice(1), { cwd: projectRoot, stdio: 'inherit' });
+  if (result.status !== 0) {
+    throw new Error(`git worktree remove failed (exit=${result.status}).`);
+  }
+}
+
+/** Deletes a git branch created for a worktree execution. */
+export function removeBranch(projectRoot: string, branch: string, dryRun: boolean): void {
+  const cmd = ['git', 'branch', '-D', branch];
+  if (dryRun) {
+    // eslint-disable-next-line no-console
+    console.log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
+    return;
+  }
+
+  const result = spawnSync(cmd[0], cmd.slice(1), { cwd: projectRoot, stdio: 'inherit' });
+  if (result.status !== 0) {
+    throw new Error(`git branch -D failed (exit=${result.status}).`);
+  }
+}
+
+/** Prepares task directories and worktrees for a group. */
+export function prepareLaunches(session: Session, launches: TaskLaunch[]): void {
+  for (const launch of launches) {
+    if (!session.dry_run) {
+      fs.mkdirSync(launch.task_dir, { recursive: true });
+      if (launch.use_worktree && launch.branch && !fs.existsSync(launch.workspace_cwd)) {
+        addWorktree(session.project_root, launch.branch, launch.workspace_cwd, false);
+        session.created_worktrees.add(launch.workspace_cwd);
+        session.created_worktree_branches.add(launch.branch);
+      }
+      fs.writeFileSync(launch.prompt_path, launch.prompt_text, 'utf8');
+    } else {
+      // eslint-disable-next-line no-console
+      console.log(`[dry-run] prepare ${launch.task_dir}`);
+      if (launch.use_worktree && launch.branch) {
+        addWorktree(session.project_root, launch.branch, launch.workspace_cwd, true);
+        session.created_worktree_branches.add(launch.branch);
+      }
+    }
+  }
+}
+
+/** Cleans up created worktrees when enabled. */
+export function cleanupWorktrees(session: Session): void {
+  if (!session.plan.runtime.cleanup_worktrees) return;
+  if (session.created_worktrees.size === 0 && session.created_worktree_branches.size === 0) return;
+
+  // eslint-disable-next-line no-console
+  console.log('\ncleanup: removing worktrees');
+  for (const worktree of [...session.created_worktrees].sort()) {
+    try {
+      removeWorktree(session.project_root, worktree, session.dry_run);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.log(`warning: failed to remove worktree ${worktree}: ${String(error)}`);
+    }
+  }
+  for (const branch of [...session.created_worktree_branches].sort()) {
+    try {
+      removeBranch(session.project_root, branch, session.dry_run);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.log(`warning: failed to delete branch ${branch}: ${String(error)}`);
+    }
+  }
+}

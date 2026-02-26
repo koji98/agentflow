@@ -1,0 +1,71 @@
+{
+  "version": "1",
+  "setup": "Implement repository tasks with bounded iteration and quality gates.",
+  "objective": "Stop only when the loop quality gate confirms output quality is sufficient.",
+  "target": {
+    "repo_root": ".",
+    "use_worktrees": true
+  },
+  "defaults": {
+    "provider": "codex",
+    "model": "gpt-5-nano",
+    "reasoning": "xhigh"
+  },
+  "policy": {
+    "fail_mode": "stop",
+    "max_iterations": 4,
+    "max_runtime_sec": 14400,
+    "max_total_tasks": 40,
+    "max_failures": 6,
+    "retry": {
+      "max_retries": 1,
+      "retry_on": ["FAILED", "TIMEOUT"]
+    }
+  },
+  "runtime": {
+    "run_root": "tmp/agentflow_runs",
+    "dry_run": true,
+    "cleanup_worktrees": false,
+    "worker_timeout_sec": 3600,
+    "timeout_grace_sec": 20
+  },
+  "plan_doc": "README.md",
+  "context_files": [
+    "README.md"
+  ],
+  "flow": [
+    {
+      "type": "loop",
+      "id": "implementation_until_quality_gate",
+      "max_iterations": 4,
+      "gate": {
+        "type": "ai",
+        "id": "quality_gate",
+        "prompt": "Decide whether the implementation pass is complete, coherent, and ready to stop.",
+        "provider": "codex",
+        "model": "gpt-5-nano",
+        "reasoning": "xhigh",
+        "include_recent_tasks": 20,
+        "timeout_sec": 180,
+        "score_threshold": 0.9,
+        "required_artifacts": [
+          "src/cli.ts"
+        ]
+      },
+      "body": [
+        {
+          "type": "task",
+          "id": "implement_changes",
+          "prompt": "Implement the highest-priority pending changes for this objective.",
+          "notes": "Keep edits focused and avoid unrelated refactors."
+        },
+        {
+          "type": "task",
+          "id": "verify_changes",
+          "prompt": "Run targeted verification and fix deterministic failures before reporting DONE.",
+          "notes": "Use the smallest safe fix for each issue."
+        }
+      ]
+    }
+  ]
+}
