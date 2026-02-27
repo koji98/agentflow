@@ -33,6 +33,8 @@ export function runCommand({
   timeoutGraceSeconds,
   rawThoughtsPath,
   rawThoughtsTaskLabel,
+  useStdin,
+  stdoutCapturePath,
 }: RunCommandParams): Promise<RunCommandResult> {
   const banner = `$ (cd ${JSON.stringify(cwd)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`;
 
@@ -65,6 +67,10 @@ export function runCommand({
         logStream.write(trailer);
         appendRawThoughts(rawThoughtsPath, trailer);
       }
+      if (stdoutCapturePath && stdoutChunks.length > 0) {
+        fs.mkdirSync(path.dirname(stdoutCapturePath), { recursive: true });
+        fs.writeFileSync(stdoutCapturePath, stdoutChunks.join(''), 'utf8');
+      }
       logStream.end();
       appendRawThoughts(rawThoughtsPath, `\n[end task at ${nowUtcIso()}]\n`);
       resolve(result);
@@ -78,16 +84,26 @@ export function runCommand({
 
     let timedOut = false;
     let timeoutTerminationOutcome = null;
+    const stdoutChunks: string[] = [];
 
-    const onChunk = (chunk: Buffer | string) => {
+    const onStdout = (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      logStream.write(text);
+      appendRawThoughts(rawThoughtsPath, text);
+      if (stdoutCapturePath) stdoutChunks.push(text);
+    };
+    const onStderr = (chunk: Buffer | string) => {
       const text = chunk.toString();
       logStream.write(text);
       appendRawThoughts(rawThoughtsPath, text);
     };
 
-    child.stdout.on('data', onChunk);
-    child.stderr.on('data', onChunk);
-    child.stdin.write(stdinText);
+    child.stdout.on('data', onStdout);
+    child.stderr.on('data', onStderr);
+
+    if (useStdin) {
+      child.stdin.write(stdinText);
+    }
     child.stdin.end();
 
     if (timeoutSeconds && timeoutSeconds > 0) {

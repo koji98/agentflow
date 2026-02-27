@@ -6,7 +6,7 @@ import {
   REASONING_EFFORT_VALUES,
   PROVIDERS,
 } from './constants.ts';
-import type { Provider, ReasoningEffort } from './types.ts';
+import type { Provider, ReasoningEffort, SandboxMode } from './types.ts';
 
 /**
  * Returns the current UTC timestamp in stable short ISO format.
@@ -199,6 +199,18 @@ export function mapProjectPathToWorker(
   const absRoot = path.resolve(projectRoot);
   if (!absSource.startsWith(absRoot + path.sep) && absSource !== absRoot) return absSource;
   return path.resolve(workerCwd, path.relative(absRoot, absSource));
+}
+
+/**
+ * Maps agentflow's 3-tier sandbox mode to Cursor CLI's binary sandbox flag.
+ * Returns `'disabled'` only for `danger-full-access`. Returns `null` for
+ * other modes so the `--sandbox` flag is omitted entirely, avoiding failures
+ * on systems where cursor's sandbox feature is unavailable.
+ * @param mode Agentflow sandbox mode.
+ * @returns `'disabled'` for full access, `null` otherwise (omit the flag).
+ */
+export function mapSandboxForCursor(mode: SandboxMode): 'disabled' | null {
+  return mode === 'danger-full-access' ? 'disabled' : null;
 }
 
 /**

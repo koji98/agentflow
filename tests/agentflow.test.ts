@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 
 import { main } from '../src/cli.ts';
 import { normalizePlan } from '../src/lib/plan.ts';
+import { buildProviderCommand } from '../src/lib/providers.ts';
+import { mapSandboxForCursor, normalizeProvider } from '../src/lib/utils.ts';
+import type { TaskLaunch } from '../src/lib/types.ts';
 
 const WORKSPACE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -33,6 +36,85 @@ function mkRepo(prefix: string): string {
   runOrThrow('git', ['add', '.'], repoRoot);
   runOrThrow('git', ['commit', '-m', 'init'], repoRoot);
   return repoRoot;
+}
+
+function installMockAgent(binDir: string): string {
+  fs.mkdirSync(binDir, { recursive: true });
+  const mockPath = path.resolve(binDir, 'agent');
+  fs.writeFileSync(
+    mockPath,
+    `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+
+const args = process.argv.slice(2);
+const behaviorPath = process.env.MOCK_AGENT_BEHAVIOR;
+let behavior = { rules: [], default: { status: 'DONE', exitCode: 0, sleepMs: 0, skipReport: false } };
+if (behaviorPath && fs.existsSync(behaviorPath)) {
+  behavior = JSON.parse(fs.readFileSync(behaviorPath, 'utf8'));
+}
+
+// The prompt is the last positional argument (after all flags)
+const positionalArgs = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i].startsWith('-')) {
+    if (['--output-format', '--workspace', '--sandbox', '--model', '--mode'].includes(args[i])) {
+      i++; // skip the value
+    }
+    continue;
+  }
+  positionalArgs.push(args[i]);
+}
+const prompt = positionalArgs[positionalArgs.length - 1] || '';
+
+let rule = behavior.default || { status: 'DONE', exitCode: 0, sleepMs: 0, skipReport: false };
+for (const candidate of behavior.rules || []) {
+  if (prompt.includes(String(candidate.match || ''))) {
+    rule = { ...rule, ...candidate };
+    break;
+  }
+}
+
+if (Number(rule.sleepMs || 0) > 0) {
+  const block = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(block, 0, 0, Number(rule.sleepMs));
+}
+
+// cursor cli writes output to stdout (no -o flag)
+process.stdout.write('Status: ' + String(rule.status || 'DONE') + '\\n');
+
+const reportMatch = prompt.match(/Write a concise markdown report to:\\n\\s+([^\\n]+)/);
+const reportPath = reportMatch ? String(reportMatch[1]).trim() : null;
+if (reportPath && !rule.skipReport) {
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  fs.writeFileSync(reportPath, '# report\\nstatus=' + String(rule.status || 'DONE') + '\\n', 'utf8');
+}
+
+const logPath = process.env.MOCK_AGENT_LOG;
+if (logPath) {
+  const workspaceIdx = args.indexOf('--workspace');
+  fs.appendFileSync(
+    logPath,
+    JSON.stringify({
+      args,
+      cwd: process.cwd(),
+      workspace: workspaceIdx >= 0 ? args[workspaceIdx + 1] : null,
+      taskId: ((prompt.match(/Task ID:\\n-\\s+([^\\n]+)/) || [])[1] || null),
+      status: String(rule.status || 'DONE'),
+      reportPath,
+    }) + '\\n',
+    'utf8',
+  );
+}
+
+if (rule.stdout) process.stdout.write(String(rule.stdout));
+if (rule.stderr) process.stderr.write(String(rule.stderr));
+process.exit(Number(rule.exitCode ?? (rule.status === 'DONE' ? 0 : 1)));
+`,
+    'utf8',
+  );
+  fs.chmodSync(mockPath, 0o755);
+  return mockPath;
 }
 
 function installMockCodex(binDir: string): string {
@@ -1143,5 +1225,227 @@ test('agentflow runtime behavior', async (t) => {
     assert.ok(completion, 'expected run_completed event');
     assert.equal(completion?.status, 'FAILED');
     assert.ok(fs.existsSync(path.resolve(runDir, 'run_summary.md')));
+  });
+
+  await t.test('normalizeProvider accepts cursor', () => {
+    assert.equal(normalizeProvider('cursor'), 'cursor');
+    assert.equal(normalizeProvider('CURSOR'), 'cursor');
+    assert.equal(normalizeProvider('codex'), 'codex');
+    assert.equal(normalizeProvider(null), null);
+    assert.throws(() => normalizeProvider('unsupported'), /provider must be one of/);
+  });
+
+  await t.test('mapSandboxForCursor maps 3-tier modes correctly', () => {
+    assert.equal(mapSandboxForCursor('read-only'), null);
+    assert.equal(mapSandboxForCursor('workspace-write'), null);
+    assert.equal(mapSandboxForCursor('danger-full-access'), 'disabled');
+  });
+
+  await t.test('buildProviderCommand builds correct cursor argv', () => {
+    const launch = {
+      provider: 'cursor',
+      workspace_cwd: '/tmp/test-workspace',
+      sandbox_mode: 'workspace-write',
+      model: 'claude-sonnet',
+      reasoning_effort: 'high',
+      profile: 'my-profile',
+      prompt_text: 'Do the thing.',
+      last_message_path: '/tmp/out.md',
+      skip_git_repo_check: true,
+    } as unknown as TaskLaunch;
+
+    const cmd = buildProviderCommand(launch);
+    assert.equal(cmd[0], 'agent');
+    assert.ok(cmd.includes('-p'));
+    assert.ok(cmd.includes('--force'));
+    assert.ok(cmd.includes('--output-format'));
+    assert.ok(cmd.includes('text'));
+    assert.ok(cmd.includes('--model'));
+    assert.ok(cmd.includes('claude-sonnet'));
+    assert.ok(cmd.includes('--workspace'));
+    assert.ok(cmd.includes('/tmp/test-workspace'));
+    assert.ok(!cmd.includes('--sandbox'), 'sandbox flag omitted for workspace-write');
+    assert.ok(cmd.includes('Do the thing.'));
+    assert.ok(!cmd.includes('--profile'), 'cursor should not use --profile');
+    assert.ok(!cmd.includes('-c'), 'cursor should not use -c for reasoning');
+    assert.ok(!cmd.includes('-o'), 'cursor should not use -o');
+  });
+
+  await t.test('buildProviderCommand builds correct codex argv (unchanged)', () => {
+    const launch = {
+      provider: 'codex',
+      workspace_cwd: '/tmp/test-workspace',
+      sandbox_mode: 'workspace-write',
+      model: 'gpt-5-nano',
+      reasoning_effort: 'xhigh',
+      profile: 'my-profile',
+      prompt_text: 'Do the thing.',
+      last_message_path: '/tmp/out.md',
+      skip_git_repo_check: false,
+    } as unknown as TaskLaunch;
+
+    const cmd = buildProviderCommand(launch);
+    assert.equal(cmd[0], 'codex');
+    assert.ok(cmd.includes('exec'));
+    assert.ok(cmd.includes('-o'));
+    assert.ok(cmd.includes('-m'));
+    assert.ok(cmd.includes('gpt-5-nano'));
+    assert.ok(cmd.includes('-c'));
+    assert.ok(cmd.includes('model_reasoning_effort=xhigh'));
+    assert.ok(cmd.includes('--profile'));
+    assert.ok(cmd.includes('my-profile'));
+    assert.ok(cmd.includes('-'));
+  });
+
+  await t.test('plan normalization accepts cursor as provider', () => {
+    const plan = normalizePlan({
+      setup: 'cursor provider test',
+      target: { repo_root: '.' },
+      defaults: { provider: 'cursor', model: 'claude-sonnet' },
+      flow: [{ type: 'task', id: 'a', prompt: 'do it' }],
+    });
+    assert.equal(plan.defaults.provider, 'cursor');
+
+    const taskPlan = normalizePlan({
+      setup: 'task level cursor test',
+      target: { repo_root: '.' },
+      flow: [{ type: 'task', id: 'b', prompt: 'do it', provider: 'cursor' }],
+    });
+    assert.equal(taskPlan.workflow[0].type, 'task');
+    if (taskPlan.workflow[0].type === 'task') {
+      assert.equal(taskPlan.workflow[0].provider, 'cursor');
+    }
+  });
+
+  await t.test('cursor provider single-task happy path succeeds', async (t2) => {
+    const repoRoot = mkRepo('agentflow-cursor-happy-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockAgent(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_agent.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_agent_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 25 } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'cursor_happy_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'cursor happy path test',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'cursor', model: 'claude-sonnet' },
+          runtime: {
+            run_root: 'tmp/test_cursor_happy_runs',
+            dry_run: false,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [{ type: 'task', id: 'cursor_task', prompt: 'complete successfully' }],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_AGENT_LOG: mockLog,
+        MOCK_AGENT_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath]);
+        assert.equal(exitCode, 0);
+      },
+    );
+
+    const calls = parseJsonLines(mockLog);
+    assert.equal(calls.length, 1);
+    const args = (calls[0].args || []) as string[];
+    assert.ok(args.includes('-p'));
+    assert.ok(args.includes('--force'));
+    assert.ok(args.includes('--model'));
+    assert.ok(args.includes('claude-sonnet'));
+    assert.ok(args.includes('--output-format'));
+    assert.ok(args.includes('text'));
+    assert.ok(!args.includes('--sandbox'), 'sandbox flag omitted for workspace-write');
+    assert.ok(!args.includes('exec'), 'cursor should not use exec subcommand');
+    assert.ok(!args.includes('-o'), 'cursor should not use -o flag');
+    assert.ok(!args.includes('-'), 'cursor should not use stdin marker');
+
+    const runBase = path.resolve(repoRoot, 'tmp/test_cursor_happy_runs');
+    const runDir = getSingleRunDir(runBase);
+    const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+    const taskRows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
+    assert.equal(taskRows.length, 1);
+    assert.equal(taskRows[0].status, 'DONE');
+    assert.equal(taskRows[0].provider, 'cursor');
+  });
+
+  await t.test('cursor provider captures stdout to last_message_path', async (t2) => {
+    const repoRoot = mkRepo('agentflow-cursor-stdout-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockAgent(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_agent.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_agent_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'cursor_stdout_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'cursor stdout capture test',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'cursor', model: 'claude-sonnet' },
+          runtime: {
+            run_root: 'tmp/test_cursor_stdout_runs',
+            dry_run: false,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [{ type: 'task', id: 'stdout_task', prompt: 'produce output' }],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_AGENT_LOG: mockLog,
+        MOCK_AGENT_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath]);
+        assert.equal(exitCode, 0);
+      },
+    );
+
+    const runBase = path.resolve(repoRoot, 'tmp/test_cursor_stdout_runs');
+    const runDir = getSingleRunDir(runBase);
+    const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+    const taskRows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
+    assert.equal(taskRows.length, 1);
+    const lastMessagePath = String(taskRows[0].lastMessagePath);
+    assert.ok(fs.existsSync(lastMessagePath), 'last_message_path should exist from stdout capture');
+    const content = fs.readFileSync(lastMessagePath, 'utf8');
+    assert.match(content, /Status: DONE/);
   });
 });
