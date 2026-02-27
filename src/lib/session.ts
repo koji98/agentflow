@@ -12,30 +12,46 @@ import type {
   WorkerPlan,
 } from './types.ts';
 
-/** Writes JSON helper with mkdir safety. */
+/**
+ * Writes a JSON file, creating parent directories when needed.
+ * @param filePath Absolute or relative path to the target JSON file.
+ * @param payload JSON-serializable value to persist.
+ * @returns Nothing.
+ */
 function saveJson(filePath: string, payload: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
 }
 
-/** Appends one jsonl event line. */
+/**
+ * Appends one JSON object as a newline-delimited JSON (`.jsonl`) entry.
+ * @param filePath Absolute or relative path to the JSONL file.
+ * @param payload Event payload to serialize as one line.
+ * @returns Nothing.
+ */
 function appendJsonLine(filePath: string, payload: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
 }
 
-/** Builds initial session state for workflow execution. */
+/**
+ * Builds the in-memory execution session and initial persisted run state values.
+ * @param params Session bootstrap inputs resolved by CLI startup.
+ * @param params.projectRoot Absolute project root for task execution.
+ * @param params.planPath Absolute path to the normalized plan file.
+ * @param params.plan Normalized plan object used for the run.
+ * @param params.globalContextFiles Resolved global context files injected into each task.
+ * @returns A fully initialized `Session` object.
+ */
 export function createSession({
   projectRoot,
   planPath,
   plan,
-  planDocPath,
   globalContextFiles,
 }: {
   projectRoot: string;
   planPath: string;
   plan: WorkerPlan;
-  planDocPath: string | null;
   globalContextFiles: string[];
 }): Session {
   const runId = plan.runtime.run_id || nowRunId();
@@ -63,7 +79,6 @@ export function createSession({
     run_root: runRoot,
     run_id: runId,
     dry_run: Boolean(plan.runtime.dry_run),
-    plan_doc_path: planDocPath,
     global_context_files: globalContextFiles,
     state,
     state_path: path.resolve(runRoot, 'run_state.json'),
@@ -82,14 +97,23 @@ export function createSession({
   };
 }
 
-/** Allocates a new monotonic group index. */
+/**
+ * Allocates the next monotonic execution group index for the current run.
+ * @param session Active execution session.
+ * @returns The allocated group index.
+ */
 export function allocateGroupIndex(session: Session): number {
   const out = session.next_group_index;
   session.next_group_index += 1;
   return out;
 }
 
-/** Saves run state with refreshed timestamp. */
+/**
+ * Persists run state and updates aggregate counters/timestamps.
+ * Skips writes when dry-run mode is enabled.
+ * @param session Active execution session.
+ * @returns Nothing.
+ */
 export function saveState(session: Session): void {
   if (session.dry_run) return;
   session.state.updatedAtUtc = nowUtcIso();
@@ -99,13 +123,24 @@ export function saveState(session: Session): void {
   saveJson(session.state_path, session.state);
 }
 
-/** Appends run event line. */
+/**
+ * Appends one run event to the session event stream.
+ * Skips writes when dry-run mode is enabled.
+ * @param session Active execution session.
+ * @param event Event payload fields merged with the current UTC timestamp.
+ * @returns Nothing.
+ */
 export function appendEvent(session: Session, event: Record<string, unknown>): void {
   if (session.dry_run) return;
   appendJsonLine(session.events_path, { atUtc: nowUtcIso(), ...event });
 }
 
-/** Writes decision trace snapshot file. */
+/**
+ * Writes the full decision trace snapshot to disk.
+ * Skips writes when dry-run mode is enabled.
+ * @param session Active execution session.
+ * @returns Nothing.
+ */
 function writeDecisionTrace(session: Session): void {
   if (session.dry_run) return;
   saveJson(session.decision_trace_path, {
@@ -115,7 +150,14 @@ function writeDecisionTrace(session: Session): void {
   });
 }
 
-/** Adds one decision trace entry and mirrors it to events stream. */
+/**
+ * Records one decision trace entry and mirrors it into the event stream.
+ * @param session Active execution session.
+ * @param type Decision event category.
+ * @param nodePath Workflow node path where the decision occurred.
+ * @param detail Structured decision details for debugging/auditing.
+ * @returns Nothing.
+ */
 export function recordDecision(
   session: Session,
   type: DecisionTraceEntry['type'],
@@ -128,7 +170,12 @@ export function recordDecision(
   writeDecisionTrace(session);
 }
 
-/** Writes markdown summary table. */
+/**
+ * Renders and writes the markdown run summary file.
+ * Skips writes when dry-run mode is enabled.
+ * @param session Active execution session.
+ * @returns Nothing.
+ */
 export function writeSummary(session: Session): void {
   if (session.dry_run) return;
 
@@ -168,7 +215,12 @@ export function writeSummary(session: Session): void {
   fs.writeFileSync(session.summary_path, `${lines.join('\n')}\n`, 'utf8');
 }
 
-/** Initializes run root artifacts for non-dry runs. */
+/**
+ * Creates initial run artifacts (`run_state`, `run_events`, `summary`, `decision_trace`).
+ * Skips writes when dry-run mode is enabled.
+ * @param session Active execution session.
+ * @returns Nothing.
+ */
 export function initializeSessionArtifacts(session: Session): void {
   if (session.dry_run) return;
   fs.mkdirSync(session.run_root, { recursive: true });
@@ -178,7 +230,14 @@ export function initializeSessionArtifacts(session: Session): void {
   writeSummary(session);
 }
 
-/** Marks group start in state+events. */
+/**
+ * Marks a group as running in state and emits a `group_started` event.
+ * @param session Active execution session.
+ * @param groupIndex Numeric execution group index.
+ * @param taskCount Number of tasks expected in the group.
+ * @param label Human-readable label used in logs/state.
+ * @returns Nothing.
+ */
 export function markGroupRunning(
   session: Session,
   groupIndex: number,
@@ -206,7 +265,12 @@ export function markGroupRunning(
   });
 }
 
-/** Marks task start in state+events. */
+/**
+ * Marks a task launch as running in state and emits a `task_started` event.
+ * @param session Active execution session.
+ * @param launch Materialized launch metadata for the task attempt.
+ * @returns Nothing.
+ */
 export function markTaskRunning(session: Session, launch: TaskLaunch): void {
   const row = session.state.tasks[launch.task_key] || {
     taskKey: launch.task_key,
@@ -243,7 +307,14 @@ export function markTaskRunning(session: Session, launch: TaskLaunch): void {
   });
 }
 
-/** Records ordered results for one group. */
+/**
+ * Stores completed task results for a group, updates counters, and emits completion events.
+ * @param session Active execution session.
+ * @param groupIndex Numeric execution group index.
+ * @param label Human-readable group label.
+ * @param results Ordered task execution results for the group.
+ * @returns Nothing.
+ */
 export function recordGroupResults(
   session: Session,
   groupIndex: number,
@@ -315,12 +386,21 @@ export function recordGroupResults(
   });
 }
 
-/** Returns current count of failed tasks. */
+/**
+ * Counts non-`DONE` task rows in the current run state.
+ * @param session Active execution session.
+ * @returns Number of failed/non-done tasks.
+ */
 export function failureCount(session: Session): number {
   return Object.values(session.state.tasks).filter((row) => row.status !== 'DONE').length;
 }
 
-/** Finalizes run and writes final state+summary. */
+/**
+ * Finalizes the run by writing terminal events, state, decision trace, and summary.
+ * @param session Active execution session.
+ * @param status Final run status string (for example `DONE` or `FAILED`).
+ * @returns Nothing.
+ */
 export function finalizeSession(session: Session, status: string): void {
   appendEvent(session, { type: 'run_completed', status, failureCount: failureCount(session) });
   saveState(session);
@@ -328,7 +408,12 @@ export function finalizeSession(session: Session, status: string): void {
   writeSummary(session);
 }
 
-/** Appends a raw thoughts note for operational visibility. */
+/**
+ * Appends an operational note to the run-level raw thoughts file.
+ * @param session Active execution session.
+ * @param text Note text to append.
+ * @returns Nothing.
+ */
 export function noteRawThoughts(session: Session, text: string): void {
   appendRawThoughts(path.resolve(session.run_root, 'raw_thoughts.md'), text);
 }

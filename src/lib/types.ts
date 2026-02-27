@@ -1,26 +1,24 @@
 /** Shared type contracts for the agentflow runtime. */
 
-export type Provider = 'codex' | 'cursor';
+export type Provider = 'codex';
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type RetryOn = 'FAILED' | 'TIMEOUT' | 'BLOCKED';
 
 /** Parsed CLI arguments for one invocation. */
 export interface CliArgs {
   planFile: string | null;
-  repoRootOverride: string | null;
-  planDocOverride: string | null;
   dryRunOverride: boolean | null;
   planHelp: boolean;
   help: boolean;
 }
 
-/** Retry settings for one task node. */
+/** Global retry settings applied to all task nodes. */
 export interface RetryPolicy {
   max_retries: number;
   retry_on: RetryOn[];
 }
 
-/** Defaults applied to each task when fields are not set at task-level. */
+/** Defaults applied to task launches and AI gate launches. */
 export interface PlanDefaults {
   provider: Provider;
   model: string | null;
@@ -55,7 +53,6 @@ export interface PromptContract {
   require_status_line: boolean;
   allowed_statuses: string[];
   require_report_for_done: boolean;
-  default_report_filename: string;
 }
 
 /** Shared task shape used by workflow task nodes and launch rendering. */
@@ -64,12 +61,7 @@ export interface PlanTask {
   task: string;
   provider: Provider | null;
   model: string | null;
-  reasoning_effort: ReasoningEffort | null;
-  profile: string | null;
-  notes: string;
   context_files: string[];
-  report_filename: string | null;
-  retry: RetryPolicy;
 }
 
 /** One task node in workflow tree. */
@@ -140,10 +132,10 @@ export interface WorkerPlan {
   objective: string | null;
   target_repo_root: string;
   defaults: PlanDefaults;
+  retry_policy: RetryPolicy;
   runtime: PlanRuntime;
   termination: TerminationPolicy;
   prompt_contract: PromptContract;
-  plan_doc: string | null;
   context_files: string[];
   workflow: WorkflowNode[];
 }
@@ -264,7 +256,6 @@ export interface Session {
   run_root: string;
   run_id: string;
   dry_run: boolean;
-  plan_doc_path: string | null;
   global_context_files: string[];
   state: RunState;
   state_path: string;

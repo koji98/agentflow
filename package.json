@@ -3,14 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Standalone agentflow orchestrator with sequential/parallel task groups and pluggable CLI providers.",
+  "description": "Standalone agentflow orchestrator with task/group/loop workflows for coding agents.",
   "bin": {
     "agentflow": "./bin/agentflow.js"
   },
   "scripts": {
-    "start": "agentflow --help",
-    "dev": "agentflow",
-    "plan-help": "agentflow --plan-help",
+    "start": "node ./bin/agentflow.js --help",
+    "dev": "node ./bin/agentflow.js",
+    "plan-help": "node ./bin/agentflow.js --plan-help",
+    "setup:link": "npm link",
+    "setup:unlink": "npm unlink --global agentflow",
     "test": "node --import tsx --test tests/agentflow.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

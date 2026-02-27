@@ -1,7 +1,7 @@
 {
   "version": "1",
-  "setup": "Implement repository tasks with bounded iteration and quality gates.",
-  "objective": "Stop only when the loop quality gate confirms output quality is sufficient.",
+  "setup": "Demonstrate all supported flow node types with the simplified task schema.",
+  "objective": "Complete implementation and validation tasks with deterministic and AI-gated loops.",
   "target": {
     "repo_root": ".",
     "use_worktrees": true
@@ -9,14 +9,14 @@
   "defaults": {
     "provider": "codex",
     "model": "gpt-5-nano",
-    "reasoning": "xhigh"
+    "reasoning": "high"
   },
   "policy": {
     "fail_mode": "stop",
-    "max_iterations": 4,
+    "max_iterations": 6,
     "max_runtime_sec": 14400,
-    "max_total_tasks": 40,
-    "max_failures": 6,
+    "max_total_tasks": 30,
+    "max_failures": 4,
     "retry": {
       "max_retries": 1,
       "retry_on": ["FAILED", "TIMEOUT"]
@@ -24,28 +24,103 @@
   },
   "runtime": {
     "run_root": "tmp/agentflow_runs",
-    "dry_run": true,
-    "cleanup_worktrees": false,
-    "worker_timeout_sec": 3600,
-    "timeout_grace_sec": 20
+    "cleanup_worktrees": true,
+    "worker_timeout_sec": 1800,
+    "timeout_grace_sec": 20,
+    "max_parallel_tasks": 2
   },
-  "plan_doc": "README.md",
   "context_files": [
     "README.md"
   ],
   "flow": [
     {
+      "type": "task",
+      "id": "analyze_requirements",
+      "prompt": "Read README.md and summarize a concrete implementation plan before changing code."
+    },
+    {
+      "type": "task",
+      "id": "implement_small_change",
+      "prompt": "Implement one focused improvement and include a short change summary in the report.",
+      "provider": "codex",
+      "model": "gpt-5",
+      "context_files": [
+        "src/cli.ts",
+        "src/lib/types.ts"
+      ]
+    },
+    {
+      "type": "group",
+      "id": "sequential_preflight",
+      "parallel": false,
+      "steps": [
+        {
+          "type": "task",
+          "id": "inspect_workspace",
+          "prompt": "Inspect the repository state and summarize what changed so far."
+        },
+        {
+          "type": "task",
+          "id": "prep_validation",
+          "prompt": "Prepare a quick validation checklist before running tests."
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "id": "parallel_validation",
+      "parallel": true,
+      "steps": [
+        {
+          "type": "task",
+          "id": "run_unit_tests",
+          "prompt": "Run npm test and summarize outcomes. Return DONE only if tests are green.",
+          "context_files": ["package.json"]
+        },
+        {
+          "type": "task",
+          "id": "run_typecheck",
+          "prompt": "Run npm run typecheck and summarize outcomes. Return DONE only if clean."
+        }
+      ]
+    },
+    {
       "type": "loop",
-      "id": "implementation_until_quality_gate",
-      "max_iterations": 4,
+      "id": "deterministic_exit_example",
+      "max_iterations": 2,
+      "gate": {
+        "type": "deterministic",
+        "id": "deterministic_repo_sanity",
+        "command": "node",
+        "args": [
+          "-e",
+          "const fs=require('node:fs'); const pass=fs.existsSync('README.md'); console.log(JSON.stringify({passed:pass,score:pass?1:0,reasons:pass?['README.md exists']:['README.md missing']}));"
+        ],
+        "timeout_sec": 30,
+        "required_artifacts": [
+          "README.md"
+        ]
+      },
+      "body": [
+        {
+          "type": "task",
+          "id": "fix_repo_sanity",
+          "prompt": "Repair repository sanity issues so the deterministic gate can pass."
+        }
+      ]
+    },
+    {
+      "type": "loop",
+      "id": "ai_quality_loop_example",
+      "max_iterations": 3,
       "gate": {
         "type": "ai",
         "id": "quality_gate",
-        "prompt": "Decide whether the implementation pass is complete, coherent, and ready to stop.",
+        "prompt": "Inspect recent workflow results and decide if the objective is complete. Return JSON only.",
         "provider": "codex",
         "model": "gpt-5-nano",
-        "reasoning": "xhigh",
-        "include_recent_tasks": 20,
+        "reasoning": "high",
+        "include_recent_tasks": 10,
         "timeout_sec": 180,
         "score_threshold": 0.9,
         "required_artifacts": [
@@ -55,15 +130,8 @@
       "body": [
         {
           "type": "task",
-          "id": "implement_changes",
-          "prompt": "Implement the highest-priority pending changes for this objective.",
-          "notes": "Keep edits focused and avoid unrelated refactors."
-        },
-        {
-          "type": "task",
-          "id": "verify_changes",
-          "prompt": "Run targeted verification and fix deterministic failures before reporting DONE.",
-          "notes": "Use the smallest safe fix for each issue."
+          "id": "address_quality_feedback",
+          "prompt": "Apply the highest-impact improvement suggested by prior task outputs."
         }
       ]
     }

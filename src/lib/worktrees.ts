@@ -2,7 +2,14 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import type { Session, TaskLaunch } from './types.ts';
 
-/** Creates a git worktree branch. */
+/**
+ * Creates a git worktree on a new branch.
+ * @param projectRoot Repository root where git commands run.
+ * @param branch New branch name to create.
+ * @param target Filesystem path for the worktree checkout.
+ * @param dryRun When true, prints command without executing.
+ * @returns Nothing.
+ */
 export function addWorktree(
   projectRoot: string,
   branch: string,
@@ -22,7 +29,13 @@ export function addWorktree(
   }
 }
 
-/** Removes a git worktree branch folder. */
+/**
+ * Removes a git worktree directory.
+ * @param projectRoot Repository root where git commands run.
+ * @param target Worktree directory path to remove.
+ * @param dryRun When true, prints command without executing.
+ * @returns Nothing.
+ */
 export function removeWorktree(projectRoot: string, target: string, dryRun: boolean): void {
   const cmd = ['git', 'worktree', 'remove', '--force', target];
   if (dryRun) {
@@ -37,7 +50,13 @@ export function removeWorktree(projectRoot: string, target: string, dryRun: bool
   }
 }
 
-/** Deletes a git branch created for a worktree execution. */
+/**
+ * Deletes a git branch used for worktree execution.
+ * @param projectRoot Repository root where git commands run.
+ * @param branch Branch name to delete.
+ * @param dryRun When true, prints command without executing.
+ * @returns Nothing.
+ */
 export function removeBranch(projectRoot: string, branch: string, dryRun: boolean): void {
   const cmd = ['git', 'branch', '-D', branch];
   if (dryRun) {
@@ -52,7 +71,12 @@ export function removeBranch(projectRoot: string, branch: string, dryRun: boolea
   }
 }
 
-/** Prepares task directories and worktrees for a group. */
+/**
+ * Prepares directories and optional worktrees for a launch batch.
+ * @param session Active run session.
+ * @param launches Launches to materialize before task execution.
+ * @returns Nothing.
+ */
 export function prepareLaunches(session: Session, launches: TaskLaunch[]): void {
   for (const launch of launches) {
     if (!session.dry_run) {
@@ -74,7 +98,11 @@ export function prepareLaunches(session: Session, launches: TaskLaunch[]): void 
   }
 }
 
-/** Cleans up created worktrees when enabled. */
+/**
+ * Cleans up created worktrees and branches when enabled by runtime config.
+ * @param session Active run session.
+ * @returns Nothing.
+ */
 export function cleanupWorktrees(session: Session): void {
   if (!session.plan.runtime.cleanup_worktrees) return;
   if (session.created_worktrees.size === 0 && session.created_worktree_branches.size === 0) return;

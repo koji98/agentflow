@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { evaluateContract } from './contracts.ts';
+import { DEFAULT_REPORT_FILENAME } from './constants.ts';
 import { resolveConfigPaths } from './plan.ts';
 import { buildPrompt } from './prompt.ts';
 import { buildProviderCommand } from './providers.ts';
@@ -40,7 +41,17 @@ import {
 } from './utils.ts';
 import { prepareLaunches } from './worktrees.ts';
 
-/** Produces one concrete launch from a task node. */
+/**
+ * Materializes one executable task launch from a workflow task node.
+ * @param params Launch construction parameters.
+ * @param params.session Active execution session.
+ * @param params.node Task node definition to materialize.
+ * @param params.nodePath Logical workflow path for the node.
+ * @param params.attempt 1-based retry attempt number.
+ * @param params.groupIndex Execution group index assigned to this launch.
+ * @param params.taskIndex 1-based task index within the group.
+ * @returns Concrete launch metadata used by the process runner.
+ */
 function buildLaunchFromTaskNode({
   session,
   node,
@@ -61,12 +72,7 @@ function buildLaunchFromTaskNode({
     task: node.task,
     provider: node.provider,
     model: node.model,
-    reasoning_effort: node.reasoning_effort,
-    profile: node.profile,
-    notes: node.notes,
     context_files: node.context_files,
-    report_filename: node.report_filename,
-    retry: node.retry,
   };
   const taskSlug = safeSlug(`${node.task_id}-a${attempt}`);
   const taskDir = path.resolve(
@@ -74,7 +80,7 @@ function buildLaunchFromTaskNode({
     `group_${String(groupIndex).padStart(2, '0')}`,
     `task_${taskSlug}`,
   );
-  const reportFilename = task.report_filename || session.plan.prompt_contract.default_report_filename;
+  const reportFilename = DEFAULT_REPORT_FILENAME;
   const promptPath = path.resolve(taskDir, 'prompt.md');
   const logPath = path.resolve(taskDir, 'worker_exec.log');
   const lastMessagePath = path.resolve(taskDir, 'worker_last_message.md');
@@ -91,9 +97,6 @@ function buildLaunchFromTaskNode({
     ...session.global_context_files,
     ...resolveConfigPaths(session.config_path, session.project_root, task.context_files),
   ];
-  const workerPlanDoc = session.plan_doc_path
-    ? mapProjectPathToWorker(session.project_root, workspaceCwd, session.plan_doc_path)
-    : null;
   const workerContextFiles = mergedContextFiles.map((f) =>
     mapProjectPathToWorker(session.project_root, workspaceCwd, f),
   );
@@ -104,7 +107,6 @@ function buildLaunchFromTaskNode({
     setup: session.plan.setup,
     task,
     provider,
-    planDoc: workerPlanDoc,
     contextFiles: workerContextFiles,
     reportPath: workerReportPath,
     promptContract: session.plan.prompt_contract,
@@ -117,8 +119,8 @@ function buildLaunchFromTaskNode({
     task,
     provider,
     model: task.model || session.plan.defaults.model,
-    reasoning_effort: task.reasoning_effort || session.plan.defaults.reasoning_effort,
-    profile: task.profile || session.plan.defaults.profile,
+    reasoning_effort: session.plan.defaults.reasoning_effort,
+    profile: session.plan.defaults.profile,
     prompt_text: promptText,
     task_dir: taskDir,
     prompt_path: promptPath,
@@ -135,7 +137,13 @@ function buildLaunchFromTaskNode({
   };
 }
 
-/** Throws when global termination guards have been exceeded. */
+/**
+ * Validates global termination guards before launching more work.
+ * @param session Active execution session.
+ * @param nodePath Logical workflow path where the guard is being checked.
+ * @returns Nothing.
+ * @throws {Error} When shutdown signal or configured termination limits are exceeded.
+ */
 function assertTerminationGuards(session: Session, nodePath: string): void {
   const term = session.plan.termination;
   const elapsedSec = (Date.now() - session.started_at_ms) / 1000;
@@ -173,7 +181,12 @@ function assertTerminationGuards(session: Session, nodePath: string): void {
   }
 }
 
-/** Executes one launch and materializes result + report json. */
+/**
+ * Executes one launch command and produces normalized task result artifacts.
+ * @param session Active execution session.
+ * @param launch Materialized launch metadata for this attempt.
+ * @returns Normalized task execution result.
+ */
 export async function executeLaunch(
   session: Session,
   launch: TaskLaunch,
@@ -313,7 +326,15 @@ export async function executeLaunch(
   return result;
 }
 
-/** Executes one batch of launches as a numbered execution group. */
+/**
+ * Executes a group batch (single or concurrent launches), persists results, and enforces gate rules.
+ * @param session Active execution session.
+ * @param launches Launches to execute in this group.
+ * @param label Group label for logs, state, and decision events.
+ * @param enforceGate Whether to enforce `continue_on_error` for this batch.
+ * @returns Ordered task execution results for the batch.
+ * @throws {Error} When stop-on-failure or continue-on-error policy blocks progress.
+ */
 async function runLaunchBatch(
   session: Session,
   launches: TaskLaunch[],
@@ -349,16 +370,25 @@ async function runLaunchBatch(
   return ordered;
 }
 
-/** Determines whether a failed attempt qualifies for retry. */
-function shouldRetry(result: TaskExecutionResult, node: TaskNode): boolean {
-  const retrySet = new Set(node.retry.retry_on);
+/**
+ * Determines whether a completed attempt qualifies for retry based on global retry policy.
+ * @param result Completed attempt result.
+ * @param retryPolicy Global retry policy.
+ * @returns `true` when the result should be retried, otherwise `false`.
+ */
+function shouldRetry(result: TaskExecutionResult, retryPolicy: Session['plan']['retry_policy']): boolean {
+  const retrySet = new Set(retryPolicy.retry_on);
   if (result.timed_out && retrySet.has('TIMEOUT')) return true;
   if (result.status === 'FAILED' && retrySet.has('FAILED')) return true;
   if (result.status === 'BLOCKED' && retrySet.has('BLOCKED')) return true;
   return false;
 }
 
-/** Parses gate JSON output from raw model/command text. */
+/**
+ * Parses evaluator output into a JSON object from plain text, fenced JSON, or inline object text.
+ * @param text Raw evaluator output text.
+ * @returns Parsed JSON object or `null` when no valid JSON object can be extracted.
+ */
 function parseGateJsonOutput(text: string): Record<string, unknown> | null {
   const trimmed = String(text || '').trim();
   if (!trimmed) return null;
@@ -388,7 +418,12 @@ function parseGateJsonOutput(text: string): Record<string, unknown> | null {
   return null;
 }
 
-/** Evaluates pass/fail from parsed output + gate threshold rules. */
+/**
+ * Applies gate pass/fail rules to parsed evaluator payload.
+ * @param gate Evaluator gate configuration.
+ * @param payload Parsed evaluator JSON payload.
+ * @returns Normalized evaluator result used by while-loop control flow.
+ */
 function evaluateGateOutcome(
   gate: EvaluatorGate,
   payload: Record<string, unknown> | null,
@@ -426,7 +461,15 @@ function evaluateGateOutcome(
   };
 }
 
-/** Builds AI gate prompt with auto-injected loop group/task context. */
+/**
+ * Builds the AI gate evaluation prompt, injecting recent loop group/task summaries.
+ * @param session Active execution session.
+ * @param gate AI evaluator gate configuration.
+ * @param nodePath Logical path of the while node being evaluated.
+ * @param iteration Current 1-based loop iteration.
+ * @param phase Evaluation phase (`pre_body` or `post_body`).
+ * @returns Prompt text passed to the AI gate provider CLI.
+ */
 function buildAiGatePrompt(
   session: Session,
   gate: AiGate,
@@ -467,7 +510,14 @@ function buildAiGatePrompt(
   return `You are an evaluator gate for an agent workflow.\n\nEvaluate whether the loop objective is satisfied.\n\nLoop metadata:\n- loop_node_path: ${nodePath}\n- iteration: ${iteration}\n- phase: ${phase}\n\nRun setup:\n${session.plan.setup}\n\nObjective:\n${session.plan.objective || '(not provided)'}\n\nGate instruction:\n${gate.prompt}\n\nRecent loop group context:\n${groupSummary}\n\nRecent loop task context:\n${taskSummary}\n\nOutput format requirements:\n- Return JSON only.\n- Schema: { \"passed\": boolean, \"score\": number, \"reasons\": string[] }\n- If uncertain, set passed=false and include reasons.\n`;
 }
 
-/** Runs a deterministic gate command and parses JSON output. */
+/**
+ * Runs a deterministic evaluator command and normalizes its JSON/text output.
+ * @param session Active execution session.
+ * @param gate Deterministic evaluator configuration.
+ * @param gateDir Directory where evaluator log/json artifacts are written.
+ * @param evalBase File stem used for evaluator artifact filenames.
+ * @returns Normalized evaluator output.
+ */
 function runDeterministicGate(
   session: Session,
   gate: DeterministicGate,
@@ -514,7 +564,17 @@ function runDeterministicGate(
   return out;
 }
 
-/** Runs an AI gate using provider CLI and parses JSON output. */
+/**
+ * Runs an AI evaluator gate through provider CLI and normalizes parsed JSON output.
+ * @param session Active execution session.
+ * @param gate AI evaluator configuration.
+ * @param nodePath Logical path of the while node being evaluated.
+ * @param iteration Current 1-based loop iteration.
+ * @param phase Evaluation phase (`pre_body` or `post_body`).
+ * @param gateDir Directory where evaluator artifacts are written.
+ * @param evalBase File stem used for evaluator artifact filenames.
+ * @returns Normalized evaluator output.
+ */
 function runAiGate(
   session: Session,
   gate: AiGate,
@@ -588,7 +648,15 @@ function runAiGate(
   return out;
 }
 
-/** Evaluates one while gate command and returns normalized output. */
+/**
+ * Evaluates a while gate (deterministic or AI) and returns normalized evaluator output.
+ * @param session Active execution session.
+ * @param gate Evaluator gate configuration.
+ * @param nodePath Logical path of the while node.
+ * @param iteration Current 1-based loop iteration.
+ * @param phase Evaluation phase (`pre_body` or `post_body`).
+ * @returns Normalized evaluator output used to decide loop continuation.
+ */
 function evaluateGate(
   session: Session,
   gate: EvaluatorGate,
@@ -631,9 +699,16 @@ function evaluateGate(
   return runAiGate(session, gate, nodePath, iteration, phase, evalDir, evalBase);
 }
 
-/** Executes one task node with retries when configured. */
+/**
+ * Executes one task node, applying retry policy when configured.
+ * @param session Active execution session.
+ * @param node Task node to execute.
+ * @param nodePath Logical workflow path for this node.
+ * @returns Nothing.
+ * @throws {Error} When task fails and policy does not allow continuation.
+ */
 async function executeTaskNode(session: Session, node: TaskNode, nodePath: string): Promise<void> {
-  const maxAttempts = 1 + Math.max(0, node.retry.max_retries);
+  const maxAttempts = 1 + Math.max(0, session.plan.retry_policy.max_retries);
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     assertTerminationGuards(session, nodePath);
     const groupIndex = allocateGroupIndex(session);
@@ -653,7 +728,7 @@ async function executeTaskNode(session: Session, node: TaskNode, nodePath: strin
     );
 
     if (result.status === 'DONE') return;
-    const canRetry = attempt < maxAttempts && shouldRetry(result, node);
+    const canRetry = attempt < maxAttempts && shouldRetry(result, session.plan.retry_policy);
     if (canRetry) {
       recordDecision(session, 'task_retry', nodePath, {
         taskId: node.task_id,
@@ -673,17 +748,20 @@ async function executeTaskNode(session: Session, node: TaskNode, nodePath: strin
   }
 }
 
-/** Executes a group node either sequentially or in parallel. */
+/**
+ * Executes a group node sequentially or in concurrent chunked batches.
+ * @param session Active execution session.
+ * @param node Group node to execute.
+ * @param nodePath Logical workflow path for this node.
+ * @returns Nothing.
+ * @throws {Error} When one or more concurrent child nodes reject.
+ */
 async function executeGroupNode(session: Session, node: GroupNode, nodePath: string): Promise<void> {
   if (!node.parallel) {
     for (let i = 0; i < node.steps.length; i += 1) {
       await executeWorkflowNode(session, node.steps[i], `${nodePath}/step_${i + 1}`);
     }
     return;
-  }
-
-  if (!session.plan.runtime.use_worktrees) {
-    throw new Error(`Parallel group ${node.id} requires runtime.use_worktrees=true.`);
   }
 
   const maxParallel = session.plan.runtime.max_parallel_tasks || node.steps.length;
@@ -702,13 +780,20 @@ async function executeGroupNode(session: Session, node: GroupNode, nodePath: str
       const first = rejected[0];
       const head = first instanceof Error ? `${first.name}: ${first.message}` : String(first);
       throw new Error(
-        `Parallel group ${node.id} failed (${rejected.length} rejection${rejected.length === 1 ? '' : 's'}). First error: ${head}`,
+        `Group ${node.id} (parallel=true) failed (${rejected.length} rejection${rejected.length === 1 ? '' : 's'}). First error: ${head}`,
       );
     }
   }
 }
 
-/** Executes a while node until evaluator gate passes or iteration cap is hit. */
+/**
+ * Executes a while node until its evaluator gate passes or iteration limits are exhausted.
+ * @param session Active execution session.
+ * @param node While node to execute.
+ * @param nodePath Logical workflow path for this node.
+ * @returns Nothing.
+ * @throws {Error} When global/local iteration limits are exceeded without gate satisfaction.
+ */
 async function executeWhileNode(session: Session, node: WhileNode, nodePath: string): Promise<void> {
   const globalCap = session.plan.termination.max_iterations;
   const localCap = node.max_iterations || globalCap || 1;
@@ -782,7 +867,13 @@ async function executeWhileNode(session: Session, node: WhileNode, nodePath: str
   throw new Error(`While node ${node.id} exhausted max_iterations=${localCap} without satisfying gate.`);
 }
 
-/** Executes a single workflow node recursively. */
+/**
+ * Executes one workflow node by dispatching to task/group/while handlers.
+ * @param session Active execution session.
+ * @param node Workflow node to execute.
+ * @param nodePath Logical workflow path for this node.
+ * @returns Nothing.
+ */
 async function executeWorkflowNode(
   session: Session,
   node: WorkflowNode,
@@ -800,7 +891,11 @@ async function executeWorkflowNode(
   await executeWhileNode(session, node, `${nodePath}/while:${node.id}`);
 }
 
-/** Runs full workflow and emits start/finish events. */
+/**
+ * Runs the full workflow in plan order and emits pipeline lifecycle events.
+ * @param session Active execution session.
+ * @returns Nothing.
+ */
 export async function runWorkflow(session: Session): Promise<void> {
   appendEvent(session, { type: 'pipeline_started', workflowNodeCount: session.plan.workflow.length });
   for (let i = 0; i < session.plan.workflow.length; i += 1) {

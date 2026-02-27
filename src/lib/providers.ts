@@ -3,6 +3,9 @@ import type { TaskLaunch } from './types.ts';
 /**
  * Builds provider-specific command invocation for one task launch.
  * New providers should be added here behind the same launch contract.
+ * @param launch Materialized task launch metadata.
+ * @returns Shell argument vector where index 0 is the executable.
+ * @throws {Error} When the provider is unsupported or not yet implemented.
  */
 export function buildProviderCommand(launch: TaskLaunch): string[] {
   if (launch.provider === 'codex') {
@@ -12,12 +15,6 @@ export function buildProviderCommand(launch: TaskLaunch): string[] {
     if (launch.reasoning_effort) cmd.push('-c', `model_reasoning_effort=${launch.reasoning_effort}`);
     cmd.push('-');
     return cmd;
-  }
-
-  if (launch.provider === 'cursor') {
-    throw new Error(
-      "provider 'cursor' is not implemented yet. Add cursor adapter wiring in buildProviderCommand().",
-    );
   }
 
   throw new Error(`Unsupported provider: ${launch.provider}`);

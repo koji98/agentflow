@@ -162,6 +162,233 @@ test('agentflow runtime behavior', async (t) => {
     assert.equal(explicit.runtime.cleanup_worktrees, false);
   });
 
+  await t.test('unknown plan keys fail schema normalization with field-specific errors', async () => {
+    assert.throws(
+      () =>
+        normalizePlan({
+          setup: 'x',
+          target: { repo_root: '.' },
+          flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+          unexpected_top_level: true,
+        }),
+      /plan contains unknown key: "unexpected_top_level"\./,
+    );
+
+    assert.throws(
+      () =>
+        normalizePlan({
+          setup: 'x',
+          target: { repo_root: '.', unknown_target_field: true },
+          flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+        }),
+      /target contains unknown key: "unknown_target_field"\./,
+    );
+
+    assert.throws(
+      () =>
+        normalizePlan({
+          setup: 'x',
+          target: { repo_root: '.' },
+          flow: [{ type: 'task', id: 'a', prompt: 'b', extra_task_field: true }],
+        }),
+      /flow\[0\] contains unknown key: "extra_task_field"\./,
+    );
+  });
+
+  await t.test('flow uses group nodes and requires explicit parallel boolean', async () => {
+    assert.throws(
+      () =>
+        normalizePlan({
+          setup: 'x',
+          target: { repo_root: '.' },
+          flow: [{ type: 'parallel', id: 'legacy', steps: [] }],
+        }),
+      /flow\[0\]\.type must be one of: task, group, loop\./,
+    );
+
+    assert.throws(
+      () =>
+        normalizePlan({
+          setup: 'x',
+          target: { repo_root: '.' },
+          flow: [
+            {
+              type: 'group',
+              id: 'missing_parallel',
+              steps: [{ type: 'task', id: 'a', prompt: 'b' }],
+            },
+          ],
+        }),
+      /flow\[0\]\.parallel must be a boolean\./,
+    );
+  });
+
+  await t.test('unknown keys surface a clear user-facing CLI error', async (t2) => {
+    const repoRoot = mkRepo('agentflow-unknown-key-cli-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const planPath = path.resolve(repoRoot, 'unknown_key_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'unknown key cli message test',
+          target: { repo_root: '.', unknown_key: 'oops' },
+          flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const errors: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]): void => {
+      errors.push(args.map((v) => String(v)).join(' '));
+    };
+    try {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 1);
+    } finally {
+      console.error = original;
+    }
+    assert.match(errors.join('\n'), /target contains unknown key: "unknown_key"\./);
+  });
+
+  await t.test('dry-run is CLI-flag only (plan runtime.dry_run does not force dry mode)', async (t2) => {
+    const repoRoot = mkRepo('agentflow-dry-flag-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'dry_flag_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'dry flag behavior test',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
+          runtime: {
+            run_root: 'tmp/test_dry_flag_runs',
+            dry_run: true,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [{ type: 'task', id: 'live_without_flag', prompt: 'run live unless cli dry-run flag exists' }],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const liveExit = await main(['--plan', planPath]);
+        assert.equal(liveExit, 0);
+        const callsAfterLive = parseJsonLines(mockLog);
+        assert.equal(callsAfterLive.length, 1);
+
+        const dryExit = await main(['--plan', planPath, '--dry-run']);
+        assert.equal(dryExit, 0);
+        const callsAfterDry = parseJsonLines(mockLog);
+        assert.equal(callsAfterDry.length, 1);
+      },
+    );
+  });
+
+  await t.test('task-level provider/model overrides are applied per task', async (t2) => {
+    const repoRoot = mkRepo('agentflow-task-overrides-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'task_overrides_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'task override behavior test',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
+          runtime: {
+            run_root: 'tmp/test_task_overrides_runs',
+            dry_run: false,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [
+            { type: 'task', id: 'default_model_task', prompt: 'use default model' },
+            {
+              type: 'task',
+              id: 'override_model_task',
+              prompt: 'use override model',
+              provider: 'codex',
+              model: 'gpt-5',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath]);
+        assert.equal(exitCode, 0);
+      },
+    );
+
+    const calls = parseJsonLines(mockLog);
+    assert.equal(calls.length, 2);
+    const byTask = new Map<string, Record<string, unknown>>();
+    for (const call of calls) {
+      byTask.set(String(call.taskId), call);
+    }
+
+    const defaultCall = byTask.get('default_model_task');
+    const overrideCall = byTask.get('override_model_task');
+    assert.ok(defaultCall);
+    assert.ok(overrideCall);
+
+    const defaultArgs = (defaultCall?.args || []) as string[];
+    const overrideArgs = (overrideCall?.args || []) as string[];
+    assert.ok(defaultArgs.includes('gpt-5-nano'));
+    assert.ok(overrideArgs.includes('gpt-5'));
+  });
+
   await t.test('single-task happy path succeeds and persists DONE artifacts', async (t2) => {
     const repoRoot = mkRepo('agentflow-happy-single-');
     t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
@@ -211,7 +438,7 @@ test('agentflow runtime behavior', async (t) => {
         MOCK_CODEX_BEHAVIOR: mockBehavior,
       },
       async () => {
-        const exitCode = await main(['--plan', planPath, '--repo', repoRoot]);
+        const exitCode = await main(['--plan', planPath]);
         assert.equal(exitCode, 0);
       },
     );
@@ -249,7 +476,7 @@ test('agentflow runtime behavior', async (t) => {
     assert.equal(leftoverBranches, '');
   });
 
-  await t.test('parallel happy path succeeds with DONE results for all tasks', async (t2) => {
+  await t.test('group(parallel=true) happy path succeeds with DONE results for all tasks', async (t2) => {
     const repoRoot = mkRepo('agentflow-happy-parallel-');
     t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
 
@@ -278,7 +505,7 @@ test('agentflow runtime behavior', async (t) => {
       planPath,
       JSON.stringify(
         {
-          setup: 'happy parallel test',
+          setup: 'happy group parallel test',
           target: { repo_root: '.', use_worktrees: true },
           defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
           policy: { fail_mode: 'stop', retry: { max_retries: 0, retry_on: ['FAILED', 'TIMEOUT'] } },
@@ -291,8 +518,9 @@ test('agentflow runtime behavior', async (t) => {
           },
           flow: [
             {
-              type: 'parallel',
-              id: 'parallel_success_tasks',
+              type: 'group',
+              id: 'parallel_success_group',
+              parallel: true,
               steps: [
                 { type: 'task', id: 'fast_done', prompt: 'finish quickly' },
                 { type: 'task', id: 'slow_done', prompt: 'finish eventually' },
@@ -313,7 +541,7 @@ test('agentflow runtime behavior', async (t) => {
         MOCK_CODEX_BEHAVIOR: mockBehavior,
       },
       async () => {
-        const exitCode = await main(['--plan', planPath, '--repo', repoRoot]);
+        const exitCode = await main(['--plan', planPath]);
         assert.equal(exitCode, 0);
       },
     );
@@ -334,7 +562,7 @@ test('agentflow runtime behavior', async (t) => {
     assert.equal(completion?.status, 'DONE');
   });
 
-  await t.test('parallel failure waits for sibling task completion and records both task outcomes', async (t2) => {
+  await t.test('group(parallel=true) failure waits for sibling task completion and records both task outcomes', async (t2) => {
     const repoRoot = mkRepo('agentflow-parallel-');
     t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
 
@@ -363,7 +591,7 @@ test('agentflow runtime behavior', async (t) => {
       planPath,
       JSON.stringify(
         {
-          setup: 'parallel test',
+          setup: 'group parallel test',
           target: { repo_root: '.', use_worktrees: true },
           defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
           policy: { fail_mode: 'stop', retry: { max_retries: 0, retry_on: ['FAILED', 'TIMEOUT'] } },
@@ -376,8 +604,9 @@ test('agentflow runtime behavior', async (t) => {
           },
           flow: [
             {
-              type: 'parallel',
+              type: 'group',
               id: 'parallel_tasks',
+              parallel: true,
               steps: [
                 { type: 'task', id: 'fast_fail', prompt: 'fail quickly' },
                 { type: 'task', id: 'slow_done', prompt: 'finish after delay' },
@@ -399,11 +628,11 @@ test('agentflow runtime behavior', async (t) => {
       },
       async () => {
         const started = Date.now();
-        const exitCode = await main(['--plan', planPath, '--repo', repoRoot]);
+        const exitCode = await main(['--plan', planPath]);
         const elapsedMs = Date.now() - started;
 
         assert.equal(exitCode, 1);
-        assert.ok(elapsedMs >= 1000, `parallel flow exited too early: elapsed=${elapsedMs}ms`);
+        assert.ok(elapsedMs >= 1000, `group(parallel=true) flow exited too early: elapsed=${elapsedMs}ms`);
       },
     );
 
@@ -435,6 +664,162 @@ test('agentflow runtime behavior', async (t) => {
 
     const leftoverBranches = runOrThrow('git', ['branch', '--list', 'agentflow/*'], repoRoot).stdout.trim();
     assert.equal(leftoverBranches, '');
+  });
+
+  await t.test('group(parallel=false) executes child steps sequentially in order', async (t2) => {
+    const repoRoot = mkRepo('agentflow-group-sequential-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify(
+        {
+          rules: [
+            { match: 'Task ID:\n- first_step', status: 'DONE', exitCode: 0, sleepMs: 450 },
+            { match: 'Task ID:\n- second_step', status: 'DONE', exitCode: 0, sleepMs: 450 },
+          ],
+          default: { status: 'DONE', exitCode: 0, sleepMs: 0 },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'group_sequential_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'group sequential happy path',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
+          runtime: {
+            run_root: 'tmp/test_group_sequential_runs',
+            dry_run: false,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [
+            {
+              type: 'group',
+              id: 'sequential_group',
+              parallel: false,
+              steps: [
+                { type: 'task', id: 'first_step', prompt: 'execute first' },
+                { type: 'task', id: 'second_step', prompt: 'execute second' },
+              ],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const started = Date.now();
+        const exitCode = await main(['--plan', planPath]);
+        const elapsedMs = Date.now() - started;
+        assert.equal(exitCode, 0);
+        assert.ok(elapsedMs >= 800, `group(parallel=false) unexpectedly fast: elapsed=${elapsedMs}ms`);
+      },
+    );
+
+    const codexCalls = parseJsonLines(mockLog);
+    assert.equal(codexCalls.length, 2);
+    assert.deepEqual(
+      codexCalls.map((row) => String(row.taskId)),
+      ['first_step', 'second_step'],
+    );
+  });
+
+  await t.test('group(parallel=true) can run without worktrees when tasks are independent', async (t2) => {
+    const repoRoot = mkRepo('agentflow-group-parallel-no-worktree-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify(
+        {
+          rules: [
+            { match: 'Task ID:\n- left_task', status: 'DONE', exitCode: 0, sleepMs: 500 },
+            { match: 'Task ID:\n- right_task', status: 'DONE', exitCode: 0, sleepMs: 500 },
+          ],
+          default: { status: 'DONE', exitCode: 0, sleepMs: 0 },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'group_parallel_no_worktree_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'group parallel no-worktree happy path',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
+          runtime: {
+            run_root: 'tmp/test_group_parallel_no_worktree_runs',
+            dry_run: false,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [
+            {
+              type: 'group',
+              id: 'parallel_group',
+              parallel: true,
+              steps: [
+                { type: 'task', id: 'left_task', prompt: 'left side task' },
+                { type: 'task', id: 'right_task', prompt: 'right side task' },
+              ],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const started = Date.now();
+        const exitCode = await main(['--plan', planPath]);
+        const elapsedMs = Date.now() - started;
+        assert.equal(exitCode, 0);
+        assert.ok(elapsedMs < 900, `group(parallel=true) appears sequential: elapsed=${elapsedMs}ms`);
+      },
+    );
+
+    const codexCalls = parseJsonLines(mockLog);
+    assert.equal(codexCalls.length, 2);
   });
 
   await t.test('SIGINT triggers graceful finalize with FAILED completion event', async (t2) => {
@@ -483,7 +868,7 @@ test('agentflow runtime behavior', async (t) => {
 
     const child = spawn(
       process.execPath,
-      ['--import', 'tsx', path.resolve(WORKSPACE_ROOT, 'src/cli.ts'), '--plan', planPath, '--repo', repoRoot],
+      ['--import', 'tsx', path.resolve(WORKSPACE_ROOT, 'src/cli.ts'), '--plan', planPath],
       {
         cwd: WORKSPACE_ROOT,
         env: {

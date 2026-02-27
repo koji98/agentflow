@@ -1,7 +1,11 @@
 import { STATUS_LINE_RE } from './constants.ts';
 import type { ContractResult, PromptContract } from './types.ts';
 
-/** Parses worker-declared status line from last message. */
+/**
+ * Parses worker-declared `Status:` output from the final message.
+ * @param lastMessageText Full worker final message text.
+ * @returns Parsed status value and parse error code (if any).
+ */
 export function parseDeclaredStatus(lastMessageText: string): {
   declaredStatus: string | null;
   parseError: string | null;
@@ -15,7 +19,16 @@ export function parseDeclaredStatus(lastMessageText: string): {
   return { declaredStatus: matches[matches.length - 1], parseError: null };
 }
 
-/** Evaluates completion contract state for one task run. */
+/**
+ * Evaluates the completion contract for one executed task.
+ * @param input Contract evaluation input values.
+ * @param input.exitCode Process exit code from provider command.
+ * @param input.timedOut Whether execution hit timeout.
+ * @param input.lastMessageText Worker final message text.
+ * @param input.reportExists Whether required report file exists.
+ * @param input.promptContract Active prompt contract configuration.
+ * @returns Normalized contract evaluation result used by runtime state.
+ */
 export function evaluateContract({
   exitCode,
   timedOut,

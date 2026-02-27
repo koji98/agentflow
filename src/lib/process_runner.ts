@@ -9,7 +9,20 @@ import {
 import type { RunCommandParams, RunCommandResult } from './types.ts';
 import { appendRawThoughts, nowUtcIso } from './utils.ts';
 
-/** Runs a command and streams combined output to log + raw thoughts. */
+/**
+ * Runs one provider command and streams output to task log and raw thoughts.
+ * @param params Subprocess launch parameters.
+ * @param params.cmd Command vector (`cmd[0]` executable, rest args).
+ * @param params.cwd Working directory for subprocess execution.
+ * @param params.stdinText Text piped to stdin.
+ * @param params.logPath Destination file for combined stdout/stderr stream.
+ * @param params.dryRun When true, prints command and returns synthetic success.
+ * @param params.timeoutSeconds Soft timeout; null disables timeout logic.
+ * @param params.timeoutGraceSeconds Grace period between SIGTERM and SIGKILL.
+ * @param params.rawThoughtsPath Shared raw-thoughts log file path.
+ * @param params.rawThoughtsTaskLabel Task label used in raw-thoughts headers.
+ * @returns Promise resolving to normalized execution outcome metadata.
+ */
 export function runCommand({
   cmd,
   cwd,

@@ -7,7 +7,6 @@ import { usageText, planHelpText } from './lib/help.ts';
 import {
   collectTaskNodes,
   countWorkflowNodes,
-  hasParallelGroups,
   loadPayload,
   normalizePlan,
   resolveConfigPaths,
@@ -23,7 +22,14 @@ import { runWorkflow } from './lib/task_runner.ts';
 import { cleanupWorktrees } from './lib/worktrees.ts';
 import type { WorkerPlan } from './lib/types.ts';
 
-/** Validates only global context files at startup. Task context is validated lazily per task. */
+/**
+ * Resolves and validates only global context files at startup.
+ * Task-level context files are validated lazily when each task is materialized.
+ * @param plan Normalized workflow plan.
+ * @param planPath Absolute path to the source plan file.
+ * @param projectRoot Absolute project root used for relative path resolution.
+ * @returns Resolved absolute paths for global context files.
+ */
 function validateGlobalContextFiles(
   plan: WorkerPlan,
   planPath: string,
@@ -32,30 +38,12 @@ function validateGlobalContextFiles(
   return resolveConfigPaths(planPath, projectRoot, plan.context_files);
 }
 
-/** Resolves optional plan_doc path with CLI override support. */
-function resolvePlanDocPath({
-  plan,
-  planPath,
-  projectRoot,
-  cliPlanDocOverride,
-}: {
-  plan: WorkerPlan;
-  planPath: string;
-  projectRoot: string;
-  cliPlanDocOverride: string | null;
-}): string | null {
-  if (cliPlanDocOverride) {
-    return path.isAbsolute(cliPlanDocOverride)
-      ? path.resolve(cliPlanDocOverride)
-      : path.resolve(process.cwd(), cliPlanDocOverride);
-  }
-  if (!plan.plan_doc) return null;
-  const [resolved] = resolveConfigPaths(planPath, projectRoot, [plan.plan_doc]);
-  return resolved || null;
-}
-
-/** Executes the CLI flow and returns process exit code. */
-export async function main(argv = process.argv.slice(2)) {
+/**
+ * Executes the CLI workflow lifecycle from argument parsing to final run summary.
+ * @param argv CLI arguments without the node/binary prefix.
+ * @returns Process exit code (`0` success, non-zero failure).
+ */
+export async function main(argv = process.argv.slice(2)): Promise<number> {
   let args;
   try {
     args = parseArgs(argv);
@@ -103,43 +91,15 @@ export async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  if (hasParallelGroups(plan.workflow) && !plan.runtime.use_worktrees) {
-    // eslint-disable-next-line no-console
-    console.error('Parallel groups require runtime.use_worktrees=true.');
-    // eslint-disable-next-line no-console
-    console.error('Set use_worktrees=true or disable parallel group nodes.');
-    return 1;
-  }
-
-  const projectRoot = args.repoRootOverride
-    ? path.resolve(process.cwd(), args.repoRootOverride)
-    : resolveProjectRoot(planPath, plan.target_repo_root);
+  const projectRoot = resolveProjectRoot(planPath, plan.target_repo_root);
   if (!fs.existsSync(projectRoot)) {
     // eslint-disable-next-line no-console
     console.error(`Resolved repo root does not exist: ${projectRoot}`);
     return 1;
   }
 
-  if (args.dryRunOverride !== null) plan.runtime.dry_run = args.dryRunOverride;
-
-  let planDocPath = null;
-  try {
-    planDocPath = resolvePlanDocPath({
-      plan,
-      planPath,
-      projectRoot,
-      cliPlanDocOverride: args.planDocOverride,
-    });
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(String(error));
-    return 1;
-  }
-  if (planDocPath && !fs.existsSync(planDocPath)) {
-    // eslint-disable-next-line no-console
-    console.error(`plan_doc not found: ${planDocPath}`);
-    return 1;
-  }
+  // CLI controls dry-run mode: default is always live unless --dry-run is passed.
+  plan.runtime.dry_run = args.dryRunOverride === true;
 
   let globalContextFiles;
   try {
@@ -154,7 +114,6 @@ export async function main(argv = process.argv.slice(2)) {
     projectRoot,
     planPath,
     plan,
-    planDocPath,
     globalContextFiles,
   });
 
