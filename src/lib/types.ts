@@ -8,6 +8,7 @@ export type RetryOn = 'FAILED' | 'TIMEOUT' | 'BLOCKED';
 export interface CliArgs {
   planFile: string | null;
   dryRunOverride: boolean | null;
+  skipGitRepoCheck: boolean;
   planHelp: boolean;
   help: boolean;
 }
@@ -34,6 +35,7 @@ export interface PlanRuntime {
   continue_on_error: boolean;
   cleanup_worktrees: boolean;
   dry_run: boolean;
+  skip_git_repo_check: boolean;
   worker_timeout_sec: number;
   timeout_grace_sec: number;
   max_parallel_tasks: number | null;
@@ -161,6 +163,7 @@ export interface TaskLaunch {
   workspace_cwd: string;
   branch: string | null;
   use_worktree: boolean;
+  skip_git_repo_check: boolean;
   node_path: string;
   attempt: number;
 }

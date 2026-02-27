@@ -475,6 +475,7 @@ export function normalizePlan(payload: unknown): WorkerPlan {
     cleanup_worktrees:
       optionalBoolean(runtimePayload.cleanup_worktrees, 'runtime.cleanup_worktrees') ?? true,
     dry_run: optionalBoolean(runtimePayload.dry_run, 'runtime.dry_run') ?? false,
+    skip_git_repo_check: false,
     worker_timeout_sec: Number.isInteger(workerTimeoutCandidate)
       ? workerTimeoutCandidate
       : DEFAULT_WORKER_TIMEOUT_SEC,

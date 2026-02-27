@@ -162,6 +162,7 @@ test('agentflow runtime behavior', async (t) => {
     assert.match(out, /TLDR:/);
     assert.match(out, /agentflow --plan-help/);
     assert.match(out, /Show detailed plan schema and all supported keys\./);
+    assert.match(out, /--skip-git-repo-check/);
   });
 
   await t.test('--plan-help prints detailed plan schema guidance', async () => {
@@ -185,6 +186,7 @@ test('agentflow runtime behavior', async (t) => {
     assert.match(out, /Flow nodes:/);
     assert.match(out, /unknown keys hard-fail at every object level/);
     assert.match(out, /Common mistakes \(and actual error text\):/);
+    assert.match(out, /--skip-git-repo-check/);
   });
 
   await t.test('defaults cleanup_worktrees to true', async () => {
@@ -353,6 +355,61 @@ test('agentflow runtime behavior', async (t) => {
         assert.equal(callsAfterDry.length, 1);
       },
     );
+  });
+
+  await t.test('--skip-git-repo-check is forwarded to codex exec', async (t2) => {
+    const repoRoot = mkRepo('agentflow-skip-git-repo-check-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'skip_git_check_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'skip git repo check passthrough test',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
+          runtime: {
+            run_root: 'tmp/test_skip_git_repo_check_runs',
+            dry_run: false,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [{ type: 'task', id: 'skip_git_check_task', prompt: 'run task with skip git repo check flag' }],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath, '--skip-git-repo-check']);
+        assert.equal(exitCode, 0);
+      },
+    );
+
+    const calls = parseJsonLines(mockLog);
+    assert.equal(calls.length, 1);
+    const args = (calls[0].args || []) as string[];
+    assert.ok(args.includes('--skip-git-repo-check'));
   });
 
   await t.test('task-level provider/model overrides are applied per task', async (t2) => {

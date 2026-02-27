@@ -132,6 +132,7 @@ function buildLaunchFromTaskNode({
     workspace_cwd: workspaceCwd,
     branch,
     use_worktree: useWorktree,
+    skip_git_repo_check: session.plan.runtime.skip_git_repo_check,
     node_path: nodePath,
     attempt,
   };

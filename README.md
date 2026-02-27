@@ -47,6 +47,7 @@ npm run plan-help
 
 - `--plan <path>`: required JSON plan path
 - `--dry-run`: force dry-run (live is default)
+- `--skip-git-repo-check`: pass through to `codex exec` when repo trust checks block execution
 - `--plan-help`: print schema help
 
 ## Plan Schema (Complete)

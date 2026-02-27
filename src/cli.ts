@@ -100,6 +100,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   // CLI controls dry-run mode: default is always live unless --dry-run is passed.
   plan.runtime.dry_run = args.dryRunOverride === true;
+  // Optional CLI passthrough for Codex repository trust checks.
+  plan.runtime.skip_git_repo_check = args.skipGitRepoCheck;
 
   let globalContextFiles;
   try {
@@ -140,6 +142,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   console.log(`worktrees:      ${plan.runtime.use_worktrees}`);
   // eslint-disable-next-line no-console
   console.log(`dry_run:        ${session.dry_run}`);
+  // eslint-disable-next-line no-console
+  console.log(`skip_git_check: ${plan.runtime.skip_git_repo_check}`);
 
   initializeSessionArtifacts(session);
 

@@ -10,6 +10,7 @@ export function parseArgs(argv: string[]): CliArgs {
   const out: CliArgs = {
     planFile: null,
     dryRunOverride: null,
+    skipGitRepoCheck: false,
     planHelp: false,
     help: false,
   };
@@ -32,6 +33,10 @@ export function parseArgs(argv: string[]): CliArgs {
     }
     if (token === '--dry-run') {
       out.dryRunOverride = true;
+      continue;
+    }
+    if (token === '--skip-git-repo-check') {
+      out.skipGitRepoCheck = true;
       continue;
     }
     if (token.startsWith('-')) throw new Error(`Unsupported option: ${token}`);
