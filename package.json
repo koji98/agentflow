@@ -1,4 +1,4 @@
-{
+ {
   "name": "agentflow",
   "version": "0.1.0",
   "private": true,
@@ -13,7 +13,7 @@
     "plan-help": "node ./bin/agentflow.js --plan-help",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
-    "test": "node --import tsx --test tests/agentflow.test.ts",
+    "test": "source ~/.nvm/nvm.sh && nvm exec 20 node --import tsx --test tests/unit.test.ts tests/integration-cli.test.ts tests/integration-workflow.test.ts tests/integration-providers.test.ts tests/integration-features.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
@@ -24,6 +24,6 @@
     "typescript": "^5.7.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }

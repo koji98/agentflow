@@ -1,36 +1,50 @@
-import type { TaskLaunch } from './types.ts';
+import type { Provider, ReasoningEffort, SandboxMode } from './types.ts';
 import { mapSandboxForCursor } from './utils.ts';
 
+/** Shared inputs for building a provider CLI command. */
+export interface ProviderCommandInput {
+  provider: Provider;
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
+  profile: string | null;
+  promptText: string;
+  workspaceCwd: string;
+  lastMessagePath: string;
+  skipGitRepoCheck: boolean;
+  sandboxMode: SandboxMode;
+}
+
 /**
- * Builds provider-specific command invocation for one task launch.
- * New providers should be added here behind the same launch contract.
- * @param launch Materialized task launch metadata.
- * @returns Shell argument vector where index 0 is the executable.
- * @throws {Error} When the provider is unsupported or not yet implemented.
+ * Builds provider-specific command invocation.
+ * Used by both task launches and AI gate evaluations.
+ *
+ * @param input Provider command configuration.
+ * @returns Array of command tokens ready for spawn.
+ * @throws {Error} When provider is not supported.
  */
-export function buildProviderCommand(launch: TaskLaunch): string[] {
-  if (launch.provider === 'codex') {
-    const cmd = ['codex', 'exec', '-o', launch.last_message_path];
-    if (launch.skip_git_repo_check) cmd.push('--skip-git-repo-check');
-    cmd.push('--sandbox', launch.sandbox_mode);
-    if (launch.profile) cmd.push('--profile', launch.profile);
-    if (launch.model) cmd.push('-m', launch.model);
-    if (launch.reasoning_effort) cmd.push('-c', `model_reasoning_effort=${launch.reasoning_effort}`);
+export function buildProviderCommand(input: ProviderCommandInput): string[] {
+  if (input.provider === 'codex') {
+    const cmd = ['codex', 'exec', '-o', input.lastMessagePath];
+    if (input.skipGitRepoCheck) cmd.push('--skip-git-repo-check');
+    cmd.push('--sandbox', input.sandboxMode);
+    if (input.profile) cmd.push('--profile', input.profile);
+    if (input.model) cmd.push('-m', input.model);
+    if (input.reasoningEffort) cmd.push('-c', `model_reasoning_effort=${input.reasoningEffort}`);
     cmd.push('-');
     return cmd;
   }
 
-  if (launch.provider === 'cursor') {
+  if (input.provider === 'cursor') {
     const cmd = ['agent', '-p'];
     cmd.push('--output-format', 'text');
     cmd.push('--force');
-    cmd.push('--workspace', launch.workspace_cwd);
-    const cursorSandbox = mapSandboxForCursor(launch.sandbox_mode);
+    cmd.push('--workspace', input.workspaceCwd);
+    const cursorSandbox = mapSandboxForCursor(input.sandboxMode);
     if (cursorSandbox) cmd.push('--sandbox', cursorSandbox);
-    if (launch.model) cmd.push('--model', launch.model);
-    cmd.push(launch.prompt_text);
+    if (input.model) cmd.push('--model', input.model);
+    cmd.push(input.promptText);
     return cmd;
   }
 
-  throw new Error(`Unsupported provider: ${launch.provider}`);
+  throw new Error(`Unsupported provider: ${input.provider}`);
 }

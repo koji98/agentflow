@@ -18,6 +18,8 @@ export function parseArgs(argv: string[]): CliArgs {
     dryRunOverride: null,
     skipGitRepoCheck: false,
     sandboxMode: null,
+    validate: false,
+    resumeDir: null,
     planHelp: false,
     help: false,
   };
@@ -35,6 +37,17 @@ export function parseArgs(argv: string[]): CliArgs {
       const value = argv[i + 1];
       if (!value) throw new Error('--plan requires a value.');
       out.planFile = value;
+      i += 1;
+      continue;
+    }
+    if (token === '--validate') {
+      out.validate = true;
+      continue;
+    }
+    if (token === '--resume') {
+      const value = argv[i + 1];
+      if (!value) throw new Error('--resume requires a value.');
+      out.resumeDir = value;
       i += 1;
       continue;
     }

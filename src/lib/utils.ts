@@ -114,24 +114,6 @@ export function normalizeStringArray(value: unknown, fieldName: string): string[
 }
 
 /**
- * Validates a relative path and blocks traversal.
- * @param value Raw path input.
- * @param fieldName Field name used in validation errors.
- * @returns Validated relative path or `null` when absent/empty.
- * @throws {Error} When path is absolute or contains parent traversal.
- */
-export function validateRelativePath(value: unknown, fieldName: string): string | null {
-  if (value === undefined || value === null) return null;
-  const trimmed = String(value).trim();
-  if (!trimmed) return null;
-  if (path.isAbsolute(trimmed)) throw new Error(`${fieldName} must be relative.`);
-  if (trimmed.split(/[\\/]+/).includes('..')) {
-    throw new Error(`${fieldName} must not contain parent traversal.`);
-  }
-  return trimmed;
-}
-
-/**
  * Reads UTF-8 text from disk without throwing.
  * @param filePath File path to read.
  * @returns File contents or empty string when unreadable.
@@ -172,18 +154,6 @@ export function tailText(filePath: string, maxLines = 120, maxChars = 12000): st
 }
 
 /**
- * Appends text to the shared raw-thoughts stream file.
- * @param rawPath Destination raw-thoughts file path.
- * @param text Text chunk to append.
- * @returns Nothing.
- */
-export function appendRawThoughts(rawPath: string, text: string): void {
-  if (!rawPath || !text) return;
-  fs.mkdirSync(path.dirname(rawPath), { recursive: true });
-  fs.appendFileSync(rawPath, text, 'utf8');
-}
-
-/**
  * Maps a project path into worker cwd space when using worktrees.
  * @param projectRoot Canonical project root.
  * @param workerCwd Worker execution cwd (possibly worktree path).
@@ -206,15 +176,13 @@ export function mapProjectPathToWorker(
  * Returns `'disabled'` only for `danger-full-access`. Returns `null` for
  * other modes so the `--sandbox` flag is omitted entirely, avoiding failures
  * on systems where cursor's sandbox feature is unavailable.
- * @param mode Agentflow sandbox mode.
- * @returns `'disabled'` for full access, `null` otherwise (omit the flag).
  */
 export function mapSandboxForCursor(mode: SandboxMode): 'disabled' | null {
   return mode === 'danger-full-access' ? 'disabled' : null;
 }
 
 /**
- * Builds stable task key identifiers for run state/events.
+ * Builds stable task key identifiers for run state.
  * @param groupIndex Numeric group index.
  * @param taskId Task id or id+attempt segment.
  * @returns Stable key like `g01:task_a#a1`.

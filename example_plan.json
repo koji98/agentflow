@@ -1,37 +1,32 @@
 {
   "version": "1",
-  "setup": "Demonstrate all supported flow node types with the simplified task schema.",
+  "setup": "Demonstrate all supported flow node types with the simplified plan schema.",
   "objective": "Complete implementation and validation tasks with deterministic and AI-gated loops.",
-  "target": {
-    "repo_root": ".",
-    "use_worktrees": true
-  },
-  "defaults": {
-    "provider": "codex",
-    "model": "gpt-5-nano",
-    "reasoning": "high"
-  },
-  "policy": {
-    "fail_mode": "stop",
+  "persona": "You are a senior software engineer. Write clean, well-tested TypeScript code.",
+  "repos": { "main": "." },
+  "provider": "codex",
+  "model": "gpt-5-nano",
+  "reasoning": "high",
+  "on_failure": "stop",
+  "worktrees": true,
+  "context_files": [
+    "README.md"
+  ],
+  "limits": {
+    "max_retries": 1,
+    "retry_on": ["FAILED", "TIMEOUT"],
     "max_iterations": 6,
     "max_runtime_sec": 14400,
     "max_total_tasks": 30,
     "max_failures": 4,
-    "retry": {
-      "max_retries": 1,
-      "retry_on": ["FAILED", "TIMEOUT"]
-    }
-  },
-  "runtime": {
-    "run_root": "tmp/agentflow_runs",
-    "cleanup_worktrees": true,
     "worker_timeout_sec": 1800,
     "timeout_grace_sec": 20,
     "max_parallel_tasks": 2
   },
-  "context_files": [
-    "README.md"
-  ],
+  "options": {
+    "run_root": "tmp/agentflow_runs",
+    "cleanup_worktrees": true
+  },
   "flow": [
     {
       "type": "task",
@@ -54,7 +49,9 @@
       "id": "cursor_review",
       "prompt": "Review the recent changes for correctness and style. Summarize findings in the report.",
       "provider": "cursor",
-      "model": "claude-sonnet"
+      "model": "claude-sonnet",
+      "persona": "You are a meticulous code reviewer focused on correctness, edge cases, and maintainability.",
+      "context_from": ["analyze_requirements", "implement_small_change"]
     },
     {
       "type": "group",
@@ -81,13 +78,13 @@
         {
           "type": "task",
           "id": "run_unit_tests",
-          "prompt": "Run npm test and summarize outcomes. Return DONE only if tests are green.",
+          "prompt": "Run npm test and summarize outcomes. Write the report even if tests fail.",
           "context_files": ["package.json"]
         },
         {
           "type": "task",
           "id": "run_typecheck",
-          "prompt": "Run npm run typecheck and summarize outcomes. Return DONE only if clean."
+          "prompt": "Run npm run typecheck and summarize outcomes. Write the report even if it fails."
         }
       ]
     },
@@ -138,7 +135,8 @@
         {
           "type": "task",
           "id": "address_quality_feedback",
-          "prompt": "Apply the highest-impact improvement suggested by prior task outputs."
+          "prompt": "Apply the highest-impact improvement suggested by prior task outputs.",
+          "context_from": ["cursor_review", "run_unit_tests", "run_typecheck"]
         }
       ]
     }

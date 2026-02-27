@@ -6,22 +6,23 @@ import {
   TIMEOUT_CLASSIFICATION,
   TIMEOUT_EXIT_CODE,
 } from './constants.ts';
+import { log } from './log.ts';
 import type { RunCommandParams, RunCommandResult } from './types.ts';
-import { appendRawThoughts, nowUtcIso } from './utils.ts';
 
 /**
- * Runs one provider command and streams output to task log and raw thoughts.
- * @param params Subprocess launch parameters.
- * @param params.cmd Command vector (`cmd[0]` executable, rest args).
- * @param params.cwd Working directory for subprocess execution.
- * @param params.stdinText Text piped to stdin.
- * @param params.logPath Destination file for combined stdout/stderr stream.
- * @param params.dryRun When true, prints command and returns synthetic success.
- * @param params.timeoutSeconds Soft timeout; null disables timeout logic.
- * @param params.timeoutGraceSeconds Grace period between SIGTERM and SIGKILL.
- * @param params.rawThoughtsPath Shared raw-thoughts log file path.
- * @param params.rawThoughtsTaskLabel Task label used in raw-thoughts headers.
- * @returns Promise resolving to normalized execution outcome metadata.
+ * Runs one provider command and streams output to task log.
+ *
+ * @param params Command execution parameters.
+ * @param params.cmd Command tokens to spawn.
+ * @param params.cwd Working directory for the child process.
+ * @param params.stdinText Text piped to stdin when `useStdin` is true.
+ * @param params.logPath Path for combined stdout/stderr log.
+ * @param params.dryRun When true, prints command and returns simulated success.
+ * @param params.timeoutSeconds Optional wall-clock timeout in seconds.
+ * @param params.timeoutGraceSeconds Grace period before SIGKILL after SIGTERM.
+ * @param params.useStdin Whether to pipe `stdinText` to the process.
+ * @param params.stdoutCapturePath Optional separate path to capture raw stdout.
+ * @returns Promise resolving to the command execution result.
  */
 export function runCommand({
   cmd,
@@ -31,16 +32,13 @@ export function runCommand({
   dryRun,
   timeoutSeconds,
   timeoutGraceSeconds,
-  rawThoughtsPath,
-  rawThoughtsTaskLabel,
   useStdin,
   stdoutCapturePath,
 }: RunCommandParams): Promise<RunCommandResult> {
   const banner = `$ (cd ${JSON.stringify(cwd)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`;
 
   if (dryRun) {
-    // eslint-disable-next-line no-console
-    console.log(banner);
+    log(banner);
     return Promise.resolve({
       exitCode: 0,
       timedOut: false,
@@ -50,14 +48,13 @@ export function runCommand({
     });
   }
 
-  appendRawThoughts(rawThoughtsPath, `\n\n## ${nowUtcIso()} | ${rawThoughtsTaskLabel}\n\n${banner}\n\n`);
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   const logStream = fs.createWriteStream(logPath, { encoding: 'utf8' });
   logStream.write(`${banner}\n\n`);
 
   return new Promise<RunCommandResult>((resolve) => {
     let settled = false;
-    let timeoutTimer = null;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
     const finish = (result: RunCommandResult, trailer: string | null = null) => {
       if (settled) return;
@@ -65,14 +62,12 @@ export function runCommand({
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (trailer) {
         logStream.write(trailer);
-        appendRawThoughts(rawThoughtsPath, trailer);
       }
       if (stdoutCapturePath && stdoutChunks.length > 0) {
         fs.mkdirSync(path.dirname(stdoutCapturePath), { recursive: true });
         fs.writeFileSync(stdoutCapturePath, stdoutChunks.join(''), 'utf8');
       }
       logStream.end();
-      appendRawThoughts(rawThoughtsPath, `\n[end task at ${nowUtcIso()}]\n`);
       resolve(result);
     };
 
@@ -83,19 +78,17 @@ export function runCommand({
     });
 
     let timedOut = false;
-    let timeoutTerminationOutcome = null;
+    let timeoutTerminationOutcome: string | null = null;
     const stdoutChunks: string[] = [];
 
     const onStdout = (chunk: Buffer | string) => {
       const text = chunk.toString();
       logStream.write(text);
-      appendRawThoughts(rawThoughtsPath, text);
       if (stdoutCapturePath) stdoutChunks.push(text);
     };
     const onStderr = (chunk: Buffer | string) => {
       const text = chunk.toString();
       logStream.write(text);
-      appendRawThoughts(rawThoughtsPath, text);
     };
 
     child.stdout.on('data', onStdout);
@@ -110,9 +103,10 @@ export function runCommand({
       timeoutTimer = setTimeout(() => {
         timedOut = true;
 
-        if (process.platform !== 'win32') {
+        if (process.platform !== 'win32' && child.pid != null) {
+          const pid = child.pid;
           try {
-            process.kill(-child.pid, 'SIGTERM');
+            process.kill(-pid, 'SIGTERM');
             timeoutTerminationOutcome = 'sigterm';
           } catch {
             timeoutTerminationOutcome = 'already_exited';
@@ -121,7 +115,7 @@ export function runCommand({
           setTimeout(() => {
             if (child.exitCode === null) {
               try {
-                process.kill(-child.pid, 'SIGKILL');
+                process.kill(-pid, 'SIGKILL');
                 timeoutTerminationOutcome = 'sigterm_then_sigkill';
               } catch {
                 // keep best effort status
