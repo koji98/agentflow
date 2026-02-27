@@ -50,6 +50,13 @@
       ]
     },
     {
+      "type": "task",
+      "id": "cursor_review",
+      "prompt": "Review the recent changes for correctness and style. Summarize findings in the report.",
+      "provider": "cursor",
+      "model": "claude-sonnet"
+    },
+    {
       "type": "group",
       "id": "sequential_preflight",
       "parallel": false,

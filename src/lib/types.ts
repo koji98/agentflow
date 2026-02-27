@@ -1,6 +1,6 @@
 /** Shared type contracts for the agentflow runtime. */
 
-export type Provider = 'codex';
+export type Provider = 'codex' | 'cursor';
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type RetryOn = 'FAILED' | 'TIMEOUT' | 'BLOCKED';
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
@@ -300,6 +300,10 @@ export interface RunCommandParams {
   timeoutGraceSeconds: number;
   rawThoughtsPath: string;
   rawThoughtsTaskLabel: string;
+  /** When true, pipe stdinText to the child process. When false, close stdin immediately. */
+  useStdin: boolean;
+  /** When set, write stdout-only content to this path on process close. */
+  stdoutCapturePath: string | null;
 }
 
 /** Parsed/evaluated status contract from worker output. */

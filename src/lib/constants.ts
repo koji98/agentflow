@@ -1,7 +1,7 @@
 /** Shared constants for the agentflow package. */
 
 /** Regex used to parse a markdown-ish `Status: ...` line in worker output. */
-export const STATUS_LINE_RE = /^(?:\s*(?:[-*]\s+|\d+[.)]\s+)?(?:\*\*)?\s*status\s*:\s*(?:\*\*)?\s*([A-Za-z_]+)\s*)$/gim;
+export const STATUS_LINE_RE = /^(?:\s*(?:[-*]\s+|\d+[.)]\s+)?(?:#{1,6}\s+)?(?:\*\*)?\s*status\s*:\s*(?:\*\*)?\s*([A-Za-z_]+)\s*)$/gim;
 
 /** Timeout metadata values used in result payloads. */
 export const TIMEOUT_CLASSIFICATION = 'timeout';
@@ -22,4 +22,4 @@ export const REASONING_EFFORT_ALIASES = new Map([
 ]);
 
 /** Provider registry for per-task CLI adapters. */
-export const PROVIDERS = new Set(['codex']);
+export const PROVIDERS = new Set(['codex', 'cursor']);

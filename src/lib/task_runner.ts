@@ -34,6 +34,7 @@ import type {
 import {
   excerptText,
   mapProjectPathToWorker,
+  mapSandboxForCursor,
   readText,
   safeSlug,
   taskKey,
@@ -203,6 +204,7 @@ export async function executeLaunch(
   const startedAtUtc = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const started = Date.now();
 
+  const isCursor = launch.provider === 'cursor';
   const runResult = await runCommand({
     cmd,
     cwd: launch.workspace_cwd,
@@ -214,6 +216,8 @@ export async function executeLaunch(
     timeoutGraceSeconds: Math.max(1, session.plan.runtime.timeout_grace_sec),
     rawThoughtsPath: path.resolve(session.run_root, 'raw_thoughts.md'),
     rawThoughtsTaskLabel: `group_${String(launch.group_index).padStart(2, '0')}:${launch.task.task_id}`,
+    useStdin: !isCursor,
+    stdoutCapturePath: isCursor ? launch.last_message_path : null,
   });
 
   if (
@@ -591,7 +595,7 @@ function runAiGate(
   const reasoning = gate.reasoning_effort || session.plan.defaults.reasoning_effort;
   const profile = gate.profile || session.plan.defaults.profile;
 
-  if (provider !== 'codex') {
+  if (provider !== 'codex' && provider !== 'cursor') {
     const out: EvaluatorOutput = {
       passed: false,
       score: null,
@@ -605,17 +609,34 @@ function runAiGate(
   const messagePath = path.resolve(gateDir, `${evalBase}.last_message.md`);
   const logPath = path.resolve(gateDir, `${evalBase}.log`);
   const jsonPath = path.resolve(gateDir, `${evalBase}.json`);
-  const cmd = ['codex', 'exec', '-o', messagePath];
-  if (profile) cmd.push('--profile', profile);
-  if (model) cmd.push('-m', model);
-  if (reasoning) cmd.push('-c', `model_reasoning_effort=${reasoning}`);
-  cmd.push('-');
-
   const prompt = buildAiGatePrompt(session, gate, nodePath, iteration, phase);
   const timeoutSec = gate.timeout_sec || 120;
+
+  let cmd: string[];
+  let spawnInput: string | undefined;
+
+  if (provider === 'codex') {
+    cmd = ['codex', 'exec', '-o', messagePath];
+    if (profile) cmd.push('--profile', profile);
+    if (model) cmd.push('-m', model);
+    if (reasoning) cmd.push('-c', `model_reasoning_effort=${reasoning}`);
+    cmd.push('-');
+    spawnInput = prompt;
+  } else {
+    cmd = ['agent', '-p'];
+    cmd.push('--output-format', 'text');
+    cmd.push('--force');
+    cmd.push('--workspace', session.project_root);
+    const cursorSandbox = mapSandboxForCursor(session.plan.runtime.sandbox_mode);
+    if (cursorSandbox) cmd.push('--sandbox', cursorSandbox);
+    if (model) cmd.push('--model', model);
+    cmd.push(prompt);
+    spawnInput = undefined;
+  }
+
   const result = spawnSync(cmd[0], cmd.slice(1), {
     cwd: session.project_root,
-    input: prompt,
+    input: spawnInput,
     encoding: 'utf8',
     timeout: timeoutSec * 1000,
     maxBuffer: 30 * 1024 * 1024,
@@ -635,6 +656,10 @@ function runAiGate(
     `error=${result.error ? String(result.error) : ''}`,
   ].join('\n');
   fs.writeFileSync(logPath, logText, 'utf8');
+
+  if (provider === 'cursor' && result.stdout) {
+    fs.writeFileSync(messagePath, result.stdout, 'utf8');
+  }
 
   let out: EvaluatorOutput;
   if (result.error) {

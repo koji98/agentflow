@@ -8,14 +8,17 @@ You define a JSON plan, and `agentflow` executes it (tasks, groups, loops with g
 
 - Node.js `>=18`
 - `git` on `PATH`
-- `codex` CLI installed/authenticated for live runs
+- At least one supported provider CLI installed and authenticated:
+  - `codex` CLI (default provider)
+  - Cursor CLI (`agent` command) — install via `curl https://cursor.com/install -fsS | bash`
 
 Quick checks:
 
 ```bash
 node -v
 git --version
-codex --help
+codex --help    # if using codex provider
+agent --version # if using cursor provider
 ```
 
 ## Install
@@ -53,8 +56,8 @@ npm run plan-help
 
 - `--plan <path>`: required JSON plan path
 - `--dry-run`: force dry-run (live is default)
-- `--skip-git-repo-check`: pass through to `codex exec` when repo trust checks block execution
-- `--sandbox <mode>`: pass through to `codex exec` sandbox mode (`read-only`, `workspace-write`, or `danger-full-access`); default is `workspace-write`
+- `--skip-git-repo-check`: pass through to provider CLI when repo trust checks block execution (codex: `--skip-git-repo-check`, cursor: `--trust`)
+- `--sandbox <mode>`: sandbox mode (`read-only`, `workspace-write`, or `danger-full-access`); default is `workspace-write`. For cursor provider, maps to `enabled`/`disabled`.
 - `--plan-help`: print schema help
 
 ## Plan Schema (Complete)
@@ -86,10 +89,10 @@ Unknown keys are rejected at every schema level (top-level and nested objects).
 
 | Key | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `provider` | `"codex"` | No | `"codex"` | Launch provider. |
+| `provider` | `"codex"` \| `"cursor"` | No | `"codex"` | Launch provider. |
 | `model` | string | No | `"gpt-5-nano"` | Default model flag passed to provider CLI. |
-| `reasoning` | `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | No | `"xhigh"` | Default reasoning effort for provider CLI. |
-| `profile` | string | No | `null` | Optional default profile for provider CLI. |
+| `reasoning` | `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | No | `"xhigh"` | Default reasoning effort (codex only; ignored by cursor). |
+| `profile` | string | No | `null` | Optional default profile (codex only; ignored by cursor). |
 
 ### `policy`
 
@@ -130,7 +133,7 @@ Unknown keys are rejected at every schema level (top-level and nested objects).
 | `type` | `"task"` | Yes | none | Node discriminator. |
 | `id` | string | Yes | none | Task id (must be globally unique in plan). |
 | `prompt` | string | Yes | none | Task instruction text. |
-| `provider` | `"codex"` | No | `defaults.provider` | Optional per-task provider override. |
+| `provider` | `"codex"` \| `"cursor"` | No | `defaults.provider` | Optional per-task provider override. |
 | `model` | string | No | `defaults.model` | Optional per-task model override. |
 | `context_files` | string[] | No | `[]` | Task-only context files (added after global context files). |
 
@@ -178,7 +181,7 @@ Unknown keys are rejected at every schema level (top-level and nested objects).
 | Key | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `prompt` | string | Yes | none | Evaluator instructions. |
-| `provider` | `"codex"` | No | `defaults.provider` | Gate provider override. |
+| `provider` | `"codex"` \| `"cursor"` | No | `defaults.provider` | Gate provider override. |
 | `model` | string | No | `defaults.model` | Gate model override. |
 | `reasoning` | reasoning enum | No | `defaults.reasoning` | Gate reasoning override. |
 | `profile` | string | No | `defaults.profile` | Gate profile override. |
@@ -241,6 +244,16 @@ npm run typecheck
 npm test
 ```
 
-## Future Work
+## Providers
 
-- Add a `cursor` provider adapter.
+### codex (default)
+
+Uses `codex exec` with stdin piping and `-o` for output capture. Supports `--profile`, `--sandbox`, and `-c model_reasoning_effort=...` flags.
+
+### cursor
+
+Uses Cursor CLI (`agent -p`) in non-interactive print mode. The prompt is passed as a positional argument. Output is captured from stdout. Runs with `--force` and `--trust` for headless operation.
+
+Sandbox mapping: `read-only` and `workspace-write` map to `--sandbox enabled`; `danger-full-access` maps to `--sandbox disabled`.
+
+The `reasoning` and `profile` plan fields are silently ignored when the cursor provider is used, as the Cursor CLI does not support equivalent flags.

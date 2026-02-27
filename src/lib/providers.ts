@@ -1,4 +1,5 @@
 import type { TaskLaunch } from './types.ts';
+import { mapSandboxForCursor } from './utils.ts';
 
 /**
  * Builds provider-specific command invocation for one task launch.
@@ -16,6 +17,18 @@ export function buildProviderCommand(launch: TaskLaunch): string[] {
     if (launch.model) cmd.push('-m', launch.model);
     if (launch.reasoning_effort) cmd.push('-c', `model_reasoning_effort=${launch.reasoning_effort}`);
     cmd.push('-');
+    return cmd;
+  }
+
+  if (launch.provider === 'cursor') {
+    const cmd = ['agent', '-p'];
+    cmd.push('--output-format', 'text');
+    cmd.push('--force');
+    cmd.push('--workspace', launch.workspace_cwd);
+    const cursorSandbox = mapSandboxForCursor(launch.sandbox_mode);
+    if (cursorSandbox) cmd.push('--sandbox', cursorSandbox);
+    if (launch.model) cmd.push('--model', launch.model);
+    cmd.push(launch.prompt_text);
     return cmd;
   }
 

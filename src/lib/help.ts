@@ -24,9 +24,9 @@ Most useful commands:
 - agentflow --plan example_plan.json --dry-run
   Simulate execution without launching agent CLI sessions.
 - agentflow --plan plan.json --skip-git-repo-check
-  Forward --skip-git-repo-check to each codex exec invocation.
+  Forward trust/skip flags to each provider invocation.
 - agentflow --plan plan.json --sandbox workspace-write
-  Force codex worker sandbox mode for each task launch.
+  Force worker sandbox mode for each task launch.
 `;
 }
 
@@ -68,10 +68,10 @@ Full schema skeleton (all top-level objects shown):
     "use_worktrees": true
   },
   "defaults": {
-    "provider": "codex",
+    "provider": "codex",        // or "cursor"
     "model": "gpt-5-nano",
-    "reasoning": "xhigh",
-    "profile": null
+    "reasoning": "xhigh",       // codex only; ignored by cursor
+    "profile": null              // codex only; ignored by cursor
   },
   "policy": {
     "fail_mode": "stop",
@@ -125,7 +125,7 @@ Top-level keys:
 - setup (required)
 - objective (optional)
 - target (required): repo_root, use_worktrees
-- defaults (optional): provider, model, reasoning, profile
+- defaults (optional): provider ("codex" or "cursor"), model, reasoning, profile
 - policy (optional): fail_mode, max_runtime_sec, max_iterations, max_total_tasks, max_failures, retry
 - runtime (optional): run_root, run_id, cleanup_worktrees, dry_run, worker_timeout_sec, timeout_grace_sec, max_parallel_tasks
 - context_files (optional)
@@ -136,7 +136,7 @@ Flow nodes:
   - type: "task"
   - id: required, globally unique
   - prompt: required
-  - provider: optional (currently "codex" only)
+  - provider: optional ("codex" or "cursor")
   - model: optional
   - context_files: optional
 - group:
@@ -156,6 +156,7 @@ Loop gate shapes:
   { "type": "deterministic", "command": "...", "args": [], "cwd": "...", "timeout_sec": 30, "score_threshold": 0.9, "required_artifacts": [] }
 - ai gate:
   { "type": "ai", "prompt": "...", "provider": "codex", "model": "gpt-5-nano", "reasoning": "xhigh", "profile": null, "include_recent_tasks": 20, "timeout_sec": 120, "score_threshold": 0.9, "required_artifacts": [] }
+  (provider may also be "cursor"; reasoning/profile are codex-only)
 
 Gate output contract:
 - JSON object with: passed (boolean), score (number|null), reasons (string[])
@@ -193,7 +194,7 @@ Common mistakes (and actual error text):
 CLI options:
 - --plan <file>: plan file path (JSON)
 - --dry-run: force dry-run (live run is the default)
-- --skip-git-repo-check: pass through to codex exec for non-git/trust-check-blocked roots
-- --sandbox <mode>: pass through to codex exec (read-only, workspace-write, danger-full-access); default is workspace-write
+- --skip-git-repo-check: pass through to provider CLI for non-git/trust-check-blocked roots
+- --sandbox <mode>: worker sandbox mode (read-only, workspace-write, danger-full-access); default is workspace-write. For cursor provider, maps to enabled/disabled.
 `;
 }
