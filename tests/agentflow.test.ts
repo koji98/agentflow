@@ -145,6 +145,48 @@ async function withPatchedEnv(
 }
 
 test('agentflow runtime behavior', async (t) => {
+  await t.test('--help prints TLDR and points to plan help', async () => {
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]): void => {
+      logs.push(args.map((v) => String(v)).join(' '));
+    };
+    try {
+      const exitCode = await main(['--help']);
+      assert.equal(exitCode, 0);
+    } finally {
+      console.log = original;
+    }
+
+    const out = logs.join('\n');
+    assert.match(out, /TLDR:/);
+    assert.match(out, /agentflow --plan-help/);
+    assert.match(out, /Show detailed plan schema and all supported keys\./);
+  });
+
+  await t.test('--plan-help prints detailed plan schema guidance', async () => {
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]): void => {
+      logs.push(args.map((v) => String(v)).join(' '));
+    };
+    try {
+      const exitCode = await main(['--plan-help']);
+      assert.equal(exitCode, 0);
+    } finally {
+      console.log = original;
+    }
+
+    const out = logs.join('\n');
+    assert.match(out, /Plan File Help/);
+    assert.match(out, /Mental model:/);
+    assert.match(out, /Minimal valid plan \(JSON\):/);
+    assert.match(out, /Full schema skeleton \(all top-level objects shown\):/);
+    assert.match(out, /Flow nodes:/);
+    assert.match(out, /unknown keys hard-fail at every object level/);
+    assert.match(out, /Common mistakes \(and actual error text\):/);
+  });
+
   await t.test('defaults cleanup_worktrees to true', async () => {
     const plan = normalizePlan({
       setup: 'x',
