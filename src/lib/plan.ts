@@ -18,6 +18,7 @@ import type {
   DeterministicGate,
   EvaluatorGate,
   GroupNode,
+  PlanRuntime,
   Provider,
   RetryOn,
   RetryPolicy,
@@ -466,7 +467,7 @@ export function normalizePlan(payload: unknown): WorkerPlan {
     profile: optionalString(defaultsPayload.profile),
   };
 
-  const runtime = {
+  const runtime: PlanRuntime = {
     run_root: requiredString(runtimePayload.run_root ?? 'tmp/agentflow_runs', 'runtime.run_root'),
     run_id: optionalString(runtimePayload.run_id),
     use_worktrees:
@@ -476,7 +477,7 @@ export function normalizePlan(payload: unknown): WorkerPlan {
       optionalBoolean(runtimePayload.cleanup_worktrees, 'runtime.cleanup_worktrees') ?? true,
     dry_run: optionalBoolean(runtimePayload.dry_run, 'runtime.dry_run') ?? false,
     skip_git_repo_check: false,
-    sandbox_mode: null,
+    sandbox_mode: 'workspace-write',
     worker_timeout_sec: Number.isInteger(workerTimeoutCandidate)
       ? workerTimeoutCandidate
       : DEFAULT_WORKER_TIMEOUT_SEC,

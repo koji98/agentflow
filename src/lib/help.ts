@@ -194,6 +194,6 @@ CLI options:
 - --plan <file>: plan file path (JSON)
 - --dry-run: force dry-run (live run is the default)
 - --skip-git-repo-check: pass through to codex exec for non-git/trust-check-blocked roots
-- --sandbox <mode>: pass through to codex exec (read-only, workspace-write, danger-full-access)
+- --sandbox <mode>: pass through to codex exec (read-only, workspace-write, danger-full-access); default is workspace-write
 `;
 }

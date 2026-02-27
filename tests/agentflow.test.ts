@@ -412,6 +412,66 @@ test('agentflow runtime behavior', async (t) => {
     assert.equal(calls.length, 1);
     const args = (calls[0].args || []) as string[];
     assert.ok(args.includes('--skip-git-repo-check'));
+    const sandboxIndex = args.indexOf('--sandbox');
+    assert.ok(sandboxIndex >= 0);
+    assert.equal(args[sandboxIndex + 1], 'workspace-write');
+  });
+
+  await t.test('workspace-write sandbox is default when --sandbox is not provided', async (t2) => {
+    const repoRoot = mkRepo('agentflow-default-sandbox-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'default_sandbox_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'default sandbox behavior test',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
+          runtime: {
+            run_root: 'tmp/test_default_sandbox_runs',
+            dry_run: false,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [{ type: 'task', id: 'default_sandbox_task', prompt: 'run task without sandbox flag' }],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath]);
+        assert.equal(exitCode, 0);
+      },
+    );
+
+    const calls = parseJsonLines(mockLog);
+    assert.equal(calls.length, 1);
+    const args = (calls[0].args || []) as string[];
+    const sandboxIndex = args.indexOf('--sandbox');
+    assert.ok(sandboxIndex >= 0);
+    assert.equal(args[sandboxIndex + 1], 'workspace-write');
   });
 
   await t.test('--sandbox is forwarded to codex exec', async (t2) => {

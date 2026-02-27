@@ -102,8 +102,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   plan.runtime.dry_run = args.dryRunOverride === true;
   // Optional CLI passthrough for Codex repository trust checks.
   plan.runtime.skip_git_repo_check = args.skipGitRepoCheck;
-  // Optional CLI passthrough for Codex sandbox mode.
-  plan.runtime.sandbox_mode = args.sandboxMode;
+  // Sandbox defaults to workspace-write unless explicitly overridden by CLI.
+  plan.runtime.sandbox_mode = args.sandboxMode ?? plan.runtime.sandbox_mode;
 
   let globalContextFiles;
   try {
@@ -147,7 +147,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   // eslint-disable-next-line no-console
   console.log(`skip_git_check: ${plan.runtime.skip_git_repo_check}`);
   // eslint-disable-next-line no-console
-  console.log(`sandbox_mode:   ${plan.runtime.sandbox_mode || 'provider-default'}`);
+  console.log(`sandbox_mode:   ${plan.runtime.sandbox_mode}`);
 
   initializeSessionArtifacts(session);
 
