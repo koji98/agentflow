@@ -1,4 +1,10 @@
-import type { CliArgs } from './types.ts';
+import type { CliArgs, SandboxMode } from './types.ts';
+
+const SANDBOX_MODES = new Set<SandboxMode>([
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+]);
 
 /**
  * Parses agentflow CLI arguments.
@@ -11,6 +17,7 @@ export function parseArgs(argv: string[]): CliArgs {
     planFile: null,
     dryRunOverride: null,
     skipGitRepoCheck: false,
+    sandboxMode: null,
     planHelp: false,
     help: false,
   };
@@ -37,6 +44,18 @@ export function parseArgs(argv: string[]): CliArgs {
     }
     if (token === '--skip-git-repo-check') {
       out.skipGitRepoCheck = true;
+      continue;
+    }
+    if (token === '--sandbox') {
+      const value = argv[i + 1];
+      if (!value) throw new Error('--sandbox requires a value.');
+      if (!SANDBOX_MODES.has(value as SandboxMode)) {
+        throw new Error(
+          `--sandbox must be one of: read-only, workspace-write, danger-full-access.`,
+        );
+      }
+      out.sandboxMode = value as SandboxMode;
+      i += 1;
       continue;
     }
     if (token.startsWith('-')) throw new Error(`Unsupported option: ${token}`);

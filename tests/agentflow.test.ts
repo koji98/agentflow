@@ -163,6 +163,7 @@ test('agentflow runtime behavior', async (t) => {
     assert.match(out, /agentflow --plan-help/);
     assert.match(out, /Show detailed plan schema and all supported keys\./);
     assert.match(out, /--skip-git-repo-check/);
+    assert.match(out, /--sandbox <mode>/);
   });
 
   await t.test('--plan-help prints detailed plan schema guidance', async () => {
@@ -187,6 +188,7 @@ test('agentflow runtime behavior', async (t) => {
     assert.match(out, /unknown keys hard-fail at every object level/);
     assert.match(out, /Common mistakes \(and actual error text\):/);
     assert.match(out, /--skip-git-repo-check/);
+    assert.match(out, /--sandbox <mode>/);
   });
 
   await t.test('defaults cleanup_worktrees to true', async () => {
@@ -410,6 +412,81 @@ test('agentflow runtime behavior', async (t) => {
     assert.equal(calls.length, 1);
     const args = (calls[0].args || []) as string[];
     assert.ok(args.includes('--skip-git-repo-check'));
+  });
+
+  await t.test('--sandbox is forwarded to codex exec', async (t2) => {
+    const repoRoot = mkRepo('agentflow-sandbox-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'sandbox_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'sandbox passthrough test',
+          target: { repo_root: '.', use_worktrees: false },
+          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
+          runtime: {
+            run_root: 'tmp/test_sandbox_runs',
+            dry_run: false,
+            cleanup_worktrees: true,
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [{ type: 'task', id: 'sandbox_task', prompt: 'run task with sandbox flag' }],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath, '--sandbox', 'workspace-write']);
+        assert.equal(exitCode, 0);
+      },
+    );
+
+    const calls = parseJsonLines(mockLog);
+    assert.equal(calls.length, 1);
+    const args = (calls[0].args || []) as string[];
+    const sandboxIndex = args.indexOf('--sandbox');
+    assert.ok(sandboxIndex >= 0);
+    assert.equal(args[sandboxIndex + 1], 'workspace-write');
+  });
+
+  await t.test('--sandbox rejects unsupported values', async () => {
+    const errors: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]): void => {
+      errors.push(args.map((v) => String(v)).join(' '));
+    };
+    try {
+      const exitCode = await main(['--sandbox', 'write-all', '--plan', 'example_plan.json']);
+      assert.equal(exitCode, 2);
+    } finally {
+      console.error = original;
+    }
+
+    const out = errors.join('\n');
+    assert.match(out, /--sandbox must be one of: read-only, workspace-write, danger-full-access\./);
+    assert.match(out, /Usage:/);
   });
 
   await t.test('task-level provider/model overrides are applied per task', async (t2) => {

@@ -10,7 +10,7 @@ TLDR:
 - Run a JSON plan with task/group/loop nodes and deterministic artifacts.
 
 Usage:
-- agentflow --plan <plan_file> [--dry-run] [--skip-git-repo-check]
+- agentflow --plan <plan_file> [--dry-run] [--skip-git-repo-check] [--sandbox <mode>]
 - agentflow <plan_file>
 - agentflow --plan-help
 
@@ -25,6 +25,8 @@ Most useful commands:
   Simulate execution without launching agent CLI sessions.
 - agentflow --plan plan.json --skip-git-repo-check
   Forward --skip-git-repo-check to each codex exec invocation.
+- agentflow --plan plan.json --sandbox workspace-write
+  Force codex worker sandbox mode for each task launch.
 `;
 }
 
@@ -192,5 +194,6 @@ CLI options:
 - --plan <file>: plan file path (JSON)
 - --dry-run: force dry-run (live run is the default)
 - --skip-git-repo-check: pass through to codex exec for non-git/trust-check-blocked roots
+- --sandbox <mode>: pass through to codex exec (read-only, workspace-write, danger-full-access)
 `;
 }

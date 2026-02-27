@@ -3,12 +3,14 @@
 export type Provider = 'codex';
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type RetryOn = 'FAILED' | 'TIMEOUT' | 'BLOCKED';
+export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 /** Parsed CLI arguments for one invocation. */
 export interface CliArgs {
   planFile: string | null;
   dryRunOverride: boolean | null;
   skipGitRepoCheck: boolean;
+  sandboxMode: SandboxMode | null;
   planHelp: boolean;
   help: boolean;
 }
@@ -36,6 +38,7 @@ export interface PlanRuntime {
   cleanup_worktrees: boolean;
   dry_run: boolean;
   skip_git_repo_check: boolean;
+  sandbox_mode: SandboxMode | null;
   worker_timeout_sec: number;
   timeout_grace_sec: number;
   max_parallel_tasks: number | null;
@@ -164,6 +167,7 @@ export interface TaskLaunch {
   branch: string | null;
   use_worktree: boolean;
   skip_git_repo_check: boolean;
+  sandbox_mode: SandboxMode | null;
   node_path: string;
   attempt: number;
 }

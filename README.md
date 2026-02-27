@@ -36,6 +36,12 @@ Dry-run:
 npm run dev -- --plan example_plan.json --dry-run
 ```
 
+Live run with writable sandbox:
+
+```bash
+npm run dev -- --plan example_plan.json --sandbox workspace-write
+```
+
 CLI help:
 
 ```bash
@@ -48,6 +54,7 @@ npm run plan-help
 - `--plan <path>`: required JSON plan path
 - `--dry-run`: force dry-run (live is default)
 - `--skip-git-repo-check`: pass through to `codex exec` when repo trust checks block execution
+- `--sandbox <mode>`: pass through to `codex exec` sandbox mode (`read-only`, `workspace-write`, or `danger-full-access`)
 - `--plan-help`: print schema help
 
 ## Plan Schema (Complete)
