@@ -76,6 +76,12 @@ function assertTerminationGuards(session: Session, nodePath: string): void {
  * @param launch Task launch descriptor.
  * @returns Promise resolving to the task execution result.
  */
+function progressTag(session: Session): string {
+  const current = session.counters.executed_task_count + 1;
+  const total = session.counters.total_task_count;
+  return `[${current}/${total}]`;
+}
+
 export async function executeLaunch(
   session: Session,
   launch: TaskLaunch,
@@ -92,8 +98,9 @@ export async function executeLaunch(
     sandboxMode: launch.sandbox_mode,
   });
 
+  const tag = progressTag(session);
   log(
-    `[group ${String(launch.group_index).padStart(2, '0')}] task=${launch.task.task_id} provider=${launch.provider} cwd=${launch.workspace_cwd}`,
+    `${tag} [group ${String(launch.group_index).padStart(2, '0')}] task=${launch.task.task_id} provider=${launch.provider} cwd=${launch.workspace_cwd}`,
   );
 
   const startedAtUtc = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -156,13 +163,13 @@ export async function executeLaunch(
 
   if (result.timed_out) {
     log(
-      `  -> task ${result.task_id} timed out classification=${result.timeout_classification} (log: ${launch.log_path})`,
+      `${tag}   -> task ${result.task_id} timed out classification=${result.timeout_classification} (log: ${launch.log_path})`,
     );
   } else if (result.exit_code === 0 && result.status === 'DONE') {
-    log(`  -> task ${result.task_id} done (log: ${launch.log_path})`);
+    log(`${tag}   -> task ${result.task_id} done (log: ${launch.log_path})`);
   } else {
     log(
-      `  -> task ${result.task_id} status=${result.status} exit=${result.exit_code} (log: ${launch.log_path})`,
+      `${tag}   -> task ${result.task_id} status=${result.status} exit=${result.exit_code} (log: ${launch.log_path})`,
     );
   }
 
@@ -225,6 +232,12 @@ function shouldRetry(result: TaskExecutionResult, limits: Session['plan']['limit
  * @param nodePath Workflow node path for tracing.
  */
 async function executeTaskNode(session: Session, node: TaskNode, nodePath: string): Promise<void> {
+  const resumed = session.resumed_tasks.get(nodePath);
+  if (resumed && resumed.status === 'DONE') {
+    log(`[skip] task ${node.task_id} already completed (resumed)`);
+    return;
+  }
+
   const maxAttempts = 1 + Math.max(0, session.plan.limits.max_retries);
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     assertTerminationGuards(session, nodePath);

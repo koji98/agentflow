@@ -14,6 +14,8 @@ import {
 } from './lib/plan.ts';
 import {
   createSession,
+  createResumedSession,
+  loadResumedState,
   failureCount,
   finalizeSession,
   initializeSessionArtifacts,
@@ -105,12 +107,48 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 1;
   }
 
-  const session = createSession({
-    projectRoot,
-    planPath,
-    plan,
-    globalContextFiles,
-  });
+  const totalTaskCount = collectTaskNodes(plan.workflow).length;
+
+  if (args.validate) {
+    log('plan is valid');
+    log(`  workflow_nodes: ${countWorkflowNodes(plan.workflow)}`);
+    log(`  task_nodes:     ${totalTaskCount}`);
+    log(`  provider:       ${plan.provider}`);
+    log(`  repo:           ${projectRoot}`);
+    return 0;
+  }
+
+  let session;
+  if (args.resumeDir) {
+    const runDir = path.isAbsolute(args.resumeDir)
+      ? args.resumeDir
+      : path.resolve(process.cwd(), args.resumeDir);
+    let priorState;
+    try {
+      priorState = loadResumedState(runDir);
+    } catch (error) {
+      logError(String(error));
+      return 1;
+    }
+    session = createResumedSession({
+      projectRoot,
+      planPath,
+      plan,
+      globalContextFiles,
+      totalTaskCount,
+      priorState,
+      runDir,
+    });
+    log(`[resume] resuming run ${session.paths.run_id} (${session.resumed_tasks.size} completed tasks will be skipped)`);
+  } else {
+    session = createSession({
+      projectRoot,
+      planPath,
+      plan,
+      globalContextFiles,
+      totalTaskCount,
+    });
+  }
 
   if (session.dry_run) {
     log('[dry-run] no CLI sessions will be executed');
@@ -121,7 +159,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   log(`run_root:       ${session.paths.run_root}`);
   log(`run_id:         ${session.paths.run_id}`);
   log(`workflow_nodes: ${countWorkflowNodes(plan.workflow)}`);
-  log(`task_nodes:     ${collectTaskNodes(plan.workflow).length}`);
+  log(`task_nodes:     ${totalTaskCount}`);
   log(`worktrees:      ${plan.worktrees}`);
   log(`dry_run:        ${session.dry_run}`);
   log(`skip_git_check: ${plan.options.skip_git_repo_check}`);

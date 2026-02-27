@@ -9,6 +9,7 @@ import type {
   Session,
   TaskExecutionResult,
   TaskLaunch,
+  TaskStateRow,
   WorkerPlan,
 } from './types.ts';
 
@@ -37,11 +38,13 @@ export function createSession({
   planPath,
   plan,
   globalContextFiles,
+  totalTaskCount,
 }: {
   projectRoot: string;
   planPath: string;
   plan: WorkerPlan;
   globalContextFiles: string[];
+  totalTaskCount: number;
 }): Session {
   const runId = plan.options.run_id || nowRunId();
   const runRoot = path.resolve(projectRoot, plan.options.run_root, runId);
@@ -73,6 +76,7 @@ export function createSession({
     counters: {
       next_group_index: 1,
       started_at_ms: Date.now(),
+      total_task_count: totalTaskCount,
       executed_task_count: 0,
       failure_task_count: 0,
       loop_iteration_count: 0,
@@ -82,6 +86,111 @@ export function createSession({
       created_branches: new Set(),
     },
     state,
+    resumed_tasks: new Map(),
+    shutdown_signal: null,
+    decision_trace: [],
+  };
+}
+
+/**
+ * Loads a prior run's state from disk for resume.
+ * @param runDir Absolute path to the previous run directory.
+ * @returns The deserialized RunState.
+ * @throws {Error} When run_state.json cannot be read or parsed.
+ */
+export function loadResumedState(runDir: string): RunState {
+  const statePath = path.resolve(runDir, 'run_state.json');
+  if (!fs.existsSync(statePath)) {
+    throw new Error(`Cannot resume: run_state.json not found in ${runDir}`);
+  }
+  const raw = fs.readFileSync(statePath, 'utf8');
+  return JSON.parse(raw) as RunState;
+}
+
+/**
+ * Creates a session that resumes a prior failed run.
+ * Completed tasks are loaded from the previous run_state.json and will be
+ * skipped during workflow execution.
+ *
+ * @param params Session initialization inputs.
+ * @param params.projectRoot Absolute path to the target repository.
+ * @param params.planPath Absolute path to the plan JSON file.
+ * @param params.plan Normalized worker plan.
+ * @param params.globalContextFiles Resolved global context file paths.
+ * @param params.totalTaskCount Total number of task nodes in the workflow.
+ * @param params.priorState The RunState loaded from the previous run.
+ * @param params.runDir Absolute path to the previous run directory.
+ * @returns Session pre-populated with completed task state.
+ */
+export function createResumedSession({
+  projectRoot,
+  planPath,
+  plan,
+  globalContextFiles,
+  totalTaskCount,
+  priorState,
+  runDir,
+}: {
+  projectRoot: string;
+  planPath: string;
+  plan: WorkerPlan;
+  globalContextFiles: string[];
+  totalTaskCount: number;
+  priorState: RunState;
+  runDir: string;
+}): Session {
+  const runRoot = path.resolve(runDir);
+  const runId = priorState.runId;
+
+  const resumedTasks = new Map<string, TaskStateRow>();
+  const doneTasks: Record<string, TaskStateRow> = {};
+  let maxGroupIndex = 0;
+  let doneCount = 0;
+
+  for (const [key, row] of Object.entries(priorState.tasks)) {
+    if (row.groupIndex > maxGroupIndex) {
+      maxGroupIndex = row.groupIndex;
+    }
+    if (row.status === 'DONE') {
+      resumedTasks.set(row.nodePath, row);
+      doneTasks[key] = row;
+      doneCount += 1;
+    }
+  }
+
+  const state: RunState = {
+    ...priorState,
+    tasks: doneTasks,
+    groups: {},
+    updatedAtUtc: nowUtcIso(),
+  };
+
+  return {
+    plan,
+    dry_run: Boolean(plan.options.dry_run),
+    global_context_files: globalContextFiles,
+    paths: {
+      project_root: projectRoot,
+      config_path: planPath,
+      run_root: runRoot,
+      run_id: runId,
+      state_path: path.resolve(runRoot, 'run_state.json'),
+      summary_path: path.resolve(runRoot, 'run_summary.md'),
+    },
+    counters: {
+      next_group_index: maxGroupIndex + 1,
+      started_at_ms: Date.now(),
+      total_task_count: totalTaskCount,
+      executed_task_count: doneCount,
+      failure_task_count: 0,
+      loop_iteration_count: priorState.totalLoopIterations,
+    },
+    worktree_tracker: {
+      created: new Set(),
+      created_branches: new Set(),
+    },
+    state,
+    resumed_tasks: resumedTasks,
     shutdown_signal: null,
     decision_trace: [],
   };

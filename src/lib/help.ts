@@ -10,6 +10,8 @@ TLDR:
 
 Usage:
 - agentflow --plan <plan_file> [--dry-run] [--skip-git-repo-check] [--sandbox <mode>]
+- agentflow --plan <plan_file> --validate
+- agentflow --plan <plan_file> --resume <run_dir>
 - agentflow <plan_file>
 - agentflow --plan-help
 
@@ -22,6 +24,10 @@ Most useful commands:
   Execute a live run from a plan file.
 - agentflow --plan example_plan.json --dry-run
   Simulate execution without launching agent CLI sessions.
+- agentflow --plan example_plan.json --validate
+  Validate the plan schema and context files without running anything.
+- agentflow --plan example_plan.json --resume tmp/agentflow_runs/20260227_120000
+  Resume a previously failed run, skipping already-completed tasks.
 - agentflow --plan plan.json --skip-git-repo-check
   Forward trust/skip flags to each provider invocation.
 - agentflow --plan plan.json --sandbox workspace-write
@@ -210,6 +216,8 @@ Common mistakes (and actual error text):
 
 CLI options:
 - --plan <file>: plan file path (JSON)
+- --validate: validate plan schema and context files, then exit (no directories created)
+- --resume <run_dir>: resume a previously failed run, skipping already-completed tasks
 - --dry-run: force dry-run (live run is the default)
 - --skip-git-repo-check: pass through to provider CLI for non-git/trust-check-blocked roots
 - --sandbox <mode>: worker sandbox mode (read-only, workspace-write, danger-full-access); default is workspace-write. For cursor provider, maps to enabled/disabled.

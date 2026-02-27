@@ -7,6 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { main } from '../src/cli.ts';
+import { parseArgs } from '../src/lib/args.ts';
 import { buildAiGatePrompt } from '../src/lib/gates.ts';
 import { normalizePlan } from '../src/lib/plan.ts';
 import { buildPrompt } from '../src/lib/prompt.ts';
@@ -1775,5 +1776,199 @@ test('agentflow runtime behavior', async (t) => {
     const prompt = buildAiGatePrompt(mockSession, gate, 'loop_1', 1, 'post_body');
     assert.ok(!prompt.includes('## Run Setup'), 'empty setup should not produce Run Setup section');
     assert.match(prompt, /\(not provided\)/);
+  });
+
+  await t.test('parseArgs parses --validate flag', () => {
+    const args = parseArgs(['--plan', 'my_plan.json', '--validate']);
+    assert.equal(args.validate, true);
+    assert.equal(args.planFile, 'my_plan.json');
+  });
+
+  await t.test('parseArgs parses --resume flag with value', () => {
+    const args = parseArgs(['--plan', 'my_plan.json', '--resume', 'tmp/runs/run_001']);
+    assert.equal(args.resumeDir, 'tmp/runs/run_001');
+    assert.equal(args.planFile, 'my_plan.json');
+  });
+
+  await t.test('parseArgs throws when --resume has no value', () => {
+    assert.throws(() => parseArgs(['--plan', 'my_plan.json', '--resume']), /--resume requires a value/);
+  });
+
+  await t.test('--validate succeeds for valid plan and exits 0', async (t2) => {
+    const repoRoot = mkRepo('agentflow-validate-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const planPath = path.resolve(repoRoot, 'valid_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        repo: '.',
+        provider: 'codex',
+        flow: [{ type: 'task', id: 'task_a', prompt: 'do something' }],
+      }),
+      'utf8',
+    );
+
+    const exitCode = await main(['--plan', planPath, '--validate']);
+    assert.equal(exitCode, 0);
+
+    const runBase = path.resolve(repoRoot, 'tmp/agentflow_runs');
+    assert.ok(!fs.existsSync(runBase), 'validate should not create any run directories');
+  });
+
+  await t.test('--validate fails for invalid plan and exits 1', async () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agentflow-validate-bad-'));
+    const planPath = path.resolve(repoRoot, 'bad_plan.json');
+    fs.writeFileSync(planPath, JSON.stringify({ bad_key: true }), 'utf8');
+
+    const exitCode = await main(['--plan', planPath, '--validate']);
+    assert.equal(exitCode, 1);
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  await t.test('--resume skips completed tasks and re-runs failed ones', async (t2) => {
+    const repoRoot = mkRepo('agentflow-resume-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({
+        rules: [
+          { match: 'Goal (task_b)', exitCode: 1, skipReport: true },
+        ],
+        default: { exitCode: 0 },
+      }),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'resume_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        setup: 'resume test',
+        repo: '.',
+        worktrees: true,
+        provider: 'codex',
+        model: 'gpt-5-nano',
+        reasoning: 'xhigh',
+        on_failure: 'stop',
+        options: {
+          run_root: 'tmp/test_resume_runs',
+        },
+        limits: {
+          worker_timeout_sec: 30,
+          timeout_grace_sec: 1,
+        },
+        flow: [
+          { type: 'task', id: 'task_a', prompt: 'do task A' },
+          { type: 'task', id: 'task_b', prompt: 'do task B' },
+        ],
+      }),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode1 = await main(['--plan', planPath]);
+        assert.equal(exitCode1, 1, 'first run should fail because task_b fails');
+      },
+    );
+
+    const runBase = path.resolve(repoRoot, 'tmp/test_resume_runs');
+    const runDir = getSingleRunDir(runBase);
+    const state1 = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+    const rows1 = Object.values(state1.tasks) as Array<Record<string, unknown>>;
+    const doneRows = rows1.filter((r) => r.status === 'DONE');
+    const failedRows = rows1.filter((r) => r.status === 'FAILED');
+    assert.equal(doneRows.length, 1, 'task_a should be DONE');
+    assert.equal(failedRows.length, 1, 'task_b should be FAILED');
+
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { exitCode: 0 } }),
+      'utf8',
+    );
+    if (fs.existsSync(mockLog)) fs.unlinkSync(mockLog);
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode2 = await main(['--plan', planPath, '--resume', runDir]);
+        assert.equal(exitCode2, 0, 'resumed run should succeed');
+      },
+    );
+
+    const resumeCalls = parseJsonLines(mockLog);
+    assert.equal(resumeCalls.length, 1, 'only task_b should have been executed on resume');
+    const resumedTaskId = (resumeCalls[0].taskId || '') as string;
+    assert.equal(resumedTaskId, 'task_b', 'the re-executed task should be task_b');
+  });
+
+  await t.test('progress tag appears in task execution log', async (t2) => {
+    const repoRoot = mkRepo('agentflow-progress-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(mockBehavior, JSON.stringify({ default: { exitCode: 0 } }), 'utf8');
+
+    const planPath = path.resolve(repoRoot, 'progress_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        setup: 'progress test',
+        repo: '.',
+        provider: 'codex',
+        model: 'gpt-5-nano',
+        reasoning: 'xhigh',
+        worktrees: true,
+        options: { run_root: 'tmp/test_progress_runs' },
+        limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+        flow: [
+          { type: 'task', id: 'p1', prompt: 'task one' },
+          { type: 'task', id: 'p2', prompt: 'task two' },
+        ],
+      }),
+      'utf8',
+    );
+
+    const logLines: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logLines.push(args.map(String).join(' '));
+    };
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath]);
+        assert.equal(exitCode, 0);
+      },
+    );
+
+    console.log = origLog;
+
+    const progressLines = logLines.filter((l) => /^\[\d+\/\d+\]/.test(l));
+    assert.ok(progressLines.length >= 2, `expected progress lines, got: ${JSON.stringify(progressLines)}`);
+    assert.ok(progressLines.some((l) => l.startsWith('[1/2]')), 'should have [1/2] prefix');
+    assert.ok(progressLines.some((l) => l.startsWith('[2/2]')), 'should have [2/2] prefix');
   });
 });

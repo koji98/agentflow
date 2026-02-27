@@ -11,6 +11,8 @@ export interface CliArgs {
   dryRunOverride: boolean | null;
   skipGitRepoCheck: boolean;
   sandboxMode: SandboxMode | null;
+  validate: boolean;
+  resumeDir: string | null;
   planHelp: boolean;
   help: boolean;
 }
@@ -254,6 +256,7 @@ export interface RunPaths {
 export interface RunCounters {
   next_group_index: number;
   started_at_ms: number;
+  total_task_count: number;
   executed_task_count: number;
   failure_task_count: number;
   loop_iteration_count: number;
@@ -274,6 +277,8 @@ export interface Session {
   counters: RunCounters;
   worktree_tracker: WorktreeTracker;
   state: RunState;
+  /** Map of nodePath -> TaskStateRow for tasks completed in a prior run (used by --resume). */
+  resumed_tasks: Map<string, TaskStateRow>;
   shutdown_signal: NodeJS.Signals | null;
   decision_trace: DecisionTraceEntry[];
 }
