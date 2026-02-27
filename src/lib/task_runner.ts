@@ -70,11 +70,12 @@ function assertTerminationGuards(session: Session, nodePath: string): void {
   }
 }
 
-/** Formats a `[current/total]` progress prefix for log output. */
-function progressTag(session: Session): string {
+/** Formats a `[current/total]` progress prefix for log output. Retries show as `[current/total retry #N]`. */
+function progressTag(session: Session, attempt: number): string {
   const current = session.counters.executedTaskCount + 1;
   const total = session.counters.totalTaskCount;
-  return `[${current}/${total}]`;
+  const suffix = attempt > 1 ? ` retry #${attempt - 1}` : '';
+  return `[${current}/${total}${suffix}]`;
 }
 
 /**
@@ -102,7 +103,7 @@ export async function executeLaunch(
     sandboxMode: launch.sandboxMode,
   });
 
-  const tag = progressTag(session);
+  const tag = progressTag(session, launch.attempt);
   log(
     `${tag} [group ${String(launch.groupIndex).padStart(2, '0')}] task=${launch.task.taskId} provider=${launch.provider} cwd=${launch.workspaceCwd}`,
   );

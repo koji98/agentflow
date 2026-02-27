@@ -439,11 +439,21 @@ export function resolveRepoRoots(planPath: string, repos: Record<string, string>
  * @param planPath Absolute path to the plan JSON file.
  * @param repoRoots Map of alias to resolved absolute repo root.
  * @param values Array of raw path strings from the plan.
+ * @param defaultRoot Optional base directory for bare relative paths. When provided,
+ *   bare paths (no prefix) resolve relative to this directory instead of the plan
+ *   file directory. Used for task-level context files so they resolve against the
+ *   task's repo root.
  * @returns Array of resolved absolute paths.
  * @throws {Error} When any configured file does not exist.
  */
-export function resolveConfigPaths(planPath: string, repoRoots: Record<string, string>, values: string[]): string[] {
+export function resolveConfigPaths(
+  planPath: string,
+  repoRoots: Record<string, string>,
+  values: string[],
+  defaultRoot?: string,
+): string[] {
   const planDir = path.dirname(planPath);
+  const bareBase = defaultRoot ?? planDir;
   const out: string[] = [];
   const missing: string[] = [];
 
@@ -462,10 +472,10 @@ export function resolveConfigPaths(planPath: string, repoRoots: Record<string, s
         if (root) {
           resolved = path.resolve(root, rest);
         } else {
-          resolved = path.resolve(planDir, raw);
+          resolved = path.resolve(bareBase, raw);
         }
       } else {
-        resolved = path.resolve(planDir, raw);
+        resolved = path.resolve(bareBase, raw);
       }
     }
     if (fs.existsSync(resolved)) out.push(resolved);

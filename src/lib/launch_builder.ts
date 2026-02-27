@@ -108,7 +108,7 @@ export function buildLaunchFromTaskNode({
 
   const mergedContextFiles = [
     ...session.globalContextFiles,
-    ...resolveConfigPaths(session.paths.configPath, session.paths.repoRoots, task.contextFiles),
+    ...resolveConfigPaths(session.paths.configPath, session.paths.repoRoots, task.contextFiles, repoRoot),
   ];
   const workerContextFiles = mergedContextFiles.map((f) =>
     mapProjectPathToWorker(repoRoot, workspaceCwd, f),

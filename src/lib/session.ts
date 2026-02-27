@@ -388,7 +388,9 @@ export function recordGroupResults(
     row.timeoutTerminationOutcome = result.timeoutTerminationOutcome;
     row.failureReason = result.failureReason;
 
-    session.counters.executedTaskCount += 1;
+    if (result.attempt === 1) {
+      session.counters.executedTaskCount += 1;
+    }
     if (result.status !== 'DONE') {
       groupFailureCount += 1;
       session.counters.failureTaskCount += 1;
