@@ -18,12 +18,9 @@ import type {
   DeterministicGate,
   EvaluatorGate,
   GroupNode,
-  PlanRuntime,
   Provider,
   RetryOn,
-  RetryPolicy,
   TaskNode,
-  TerminationPolicy,
   WhileNode,
   WorkerPlan,
   WorkflowNode,
@@ -80,8 +77,8 @@ function optionalNonNegativeInt(value: unknown, fieldName: string): number | nul
  * Parses an optional object field.
  * @param value Raw value to parse.
  * @param fieldName Field label used in validation errors.
- * @returns Object payload or `{}` when omitted.
- * @throws {Error} When provided value is not an object.
+ * @returns Parsed object or empty object when unset.
+ * @throws {Error} When provided value is not a plain object.
  */
 function optionalObject(value: unknown, fieldName: string): Record<string, unknown> {
   if (value === undefined || value === null) return {};
@@ -92,12 +89,11 @@ function optionalObject(value: unknown, fieldName: string): Record<string, unkno
 }
 
 /**
- * Ensures an object contains only supported keys.
+ * Throws when an object contains keys outside the allowed set.
  * @param payload Object to validate.
- * @param fieldName Field label used in validation errors.
- * @param allowedKeys Exact supported keys.
- * @returns Nothing.
- * @throws {Error} When one or more unknown keys are found.
+ * @param fieldName Schema path for error messages.
+ * @param allowedKeys List of permitted key names.
+ * @throws {Error} When unknown keys are found.
  */
 function assertNoUnknownKeys(
   payload: Record<string, unknown>,
@@ -116,8 +112,8 @@ function assertNoUnknownKeys(
  * Parses an optional boolean field.
  * @param value Raw value to parse.
  * @param fieldName Field label used in validation errors.
- * @returns Boolean value or `null` when omitted.
- * @throws {Error} When provided value is not boolean.
+ * @returns Boolean value or `null` when unset.
+ * @throws {Error} When value is not a boolean.
  */
 function optionalBoolean(value: unknown, fieldName: string): boolean | null {
   if (value === undefined || value === null) return null;
@@ -130,7 +126,7 @@ function optionalBoolean(value: unknown, fieldName: string): boolean | null {
  * @param value Raw value to parse.
  * @param fieldName Field label used in validation errors.
  * @returns Boolean value.
- * @throws {Error} When value is not boolean.
+ * @throws {Error} When value is missing or not a boolean.
  */
 function requiredBoolean(value: unknown, fieldName: string): boolean {
   const parsed = optionalBoolean(value, fieldName);
@@ -139,47 +135,11 @@ function requiredBoolean(value: unknown, fieldName: string): boolean {
 }
 
 /**
- * Normalizes retry policy with strict defaults and validation.
- * @param value Raw retry payload from plan.
- * @param fieldName Field label used in validation errors.
- * @returns Normalized retry policy.
- */
-function normalizeRetryPolicy(value: unknown, fieldName: string): RetryPolicy {
-  const payload = optionalObject(value, fieldName);
-  assertNoUnknownKeys(payload, fieldName, ['max_retries', 'retry_on']);
-  const maxRetriesRaw = payload.max_retries;
-  const maxRetries = maxRetriesRaw === undefined ? 0 : Number(maxRetriesRaw);
-  if (!Number.isInteger(maxRetries) || maxRetries < 0) {
-    throw new Error(`${fieldName}.max_retries must be an integer >= 0.`);
-  }
-
-  const retryOnRaw = payload.retry_on;
-  const retryOn = normalizeStringArray(
-    retryOnRaw === undefined ? ['FAILED', 'TIMEOUT'] : retryOnRaw,
-    `${fieldName}.retry_on`,
-  )
-    .map((v) => v.toUpperCase())
-    .filter((v, i, arr) => arr.indexOf(v) === i);
-
-  const allowed = new Set(['FAILED', 'TIMEOUT', 'BLOCKED']);
-  for (const valueItem of retryOn) {
-    if (!allowed.has(valueItem)) {
-      throw new Error(`${fieldName}.retry_on contains unsupported value: ${valueItem}`);
-    }
-  }
-
-  return {
-    max_retries: maxRetries,
-    retry_on: retryOn as RetryOn[],
-  };
-}
-
-/**
- * Normalizes a deterministic gate payload.
+ * Normalizes a deterministic gate definition from raw plan JSON.
  * @param gatePayload Raw gate object.
- * @param fieldName Field label used in validation errors.
- * @param fallbackId Fallback id prefix used when gate id is missing.
- * @returns Normalized deterministic gate.
+ * @param fieldName Schema path for error messages.
+ * @param fallbackId Fallback id when gate id is omitted.
+ * @returns Validated deterministic gate node.
  */
 function normalizeDeterministicGate(
   gatePayload: Record<string, unknown>,
@@ -222,11 +182,11 @@ function normalizeDeterministicGate(
 }
 
 /**
- * Normalizes an AI gate payload.
+ * Normalizes an AI gate definition from raw plan JSON.
  * @param gatePayload Raw gate object.
- * @param fieldName Field label used in validation errors.
- * @param fallbackId Fallback id prefix used when gate id is missing.
- * @returns Normalized AI gate.
+ * @param fieldName Schema path for error messages.
+ * @param fallbackId Fallback id when gate id is omitted.
+ * @returns Validated AI gate node.
  */
 function normalizeAiGate(
   gatePayload: Record<string, unknown>,
@@ -275,11 +235,12 @@ function normalizeAiGate(
 }
 
 /**
- * Normalizes a public gate object into internal evaluator gate shape.
+ * Normalizes a loop gate definition, dispatching to deterministic or AI handler.
  * @param gatePayload Raw gate object.
- * @param fieldName Field label used in validation errors.
- * @param fallbackId Fallback id prefix used when gate id is missing.
- * @returns Normalized evaluator gate.
+ * @param fieldName Schema path for error messages.
+ * @param fallbackId Fallback id when gate id is omitted.
+ * @returns Validated evaluator gate node.
+ * @throws {Error} When gate type is not `deterministic` or `ai`.
  */
 function normalizeLoopGate(
   gatePayload: Record<string, unknown>,
@@ -297,11 +258,12 @@ function normalizeLoopGate(
 }
 
 /**
- * Normalizes one public task flow node.
- * @param payload Raw node object.
- * @param fieldName Field label used in validation errors.
- * @param seenTaskIds Set used to enforce unique task ids.
- * @returns Normalized task node.
+ * Normalizes a single task node from raw plan JSON.
+ * @param payload Raw task object.
+ * @param fieldName Schema path for error messages.
+ * @param seenTaskIds Set tracking already-seen task ids for uniqueness.
+ * @returns Validated task node.
+ * @throws {Error} On duplicate task id or schema violations.
  */
 function normalizeTaskNode(
   payload: Record<string, unknown>,
@@ -315,6 +277,8 @@ function normalizeTaskNode(
     'provider',
     'model',
     'context_files',
+    'context_from',
+    'persona',
   ]);
   const taskId = requiredString(payload.id, `${fieldName}.id`);
   if (seenTaskIds.has(taskId)) {
@@ -329,15 +293,18 @@ function normalizeTaskNode(
     provider: normalizeProvider(payload.provider) as Provider | null,
     model: optionalString(payload.model),
     context_files: normalizeStringArray(payload.context_files, `${fieldName}.context_files`),
+    context_from: normalizeStringArray(payload.context_from, `${fieldName}.context_from`),
+    persona: optionalString(payload.persona),
   };
 }
 
 /**
- * Recursively normalizes one public flow node.
- * @param payload Raw node value.
- * @param fieldName Field label used in validation errors.
- * @param seenTaskIds Set used to enforce unique task ids.
- * @returns Normalized workflow node.
+ * Normalizes a flow node (task, group, or loop) from raw plan JSON.
+ * @param payload Raw flow node object.
+ * @param fieldName Schema path for error messages.
+ * @param seenTaskIds Set tracking already-seen task ids for uniqueness.
+ * @returns Validated workflow node.
+ * @throws {Error} When node type is invalid or schema is violated.
  */
 function normalizeFlowNode(
   payload: unknown,
@@ -401,6 +368,39 @@ function normalizeFlowNode(
 }
 
 /**
+ * Normalizes retry-related fields from the limits section.
+ * @param limitsPayload Raw limits object.
+ * @returns Object with validated `max_retries` and `retry_on` values.
+ * @throws {Error} When retry configuration is invalid.
+ */
+function normalizeRetryFields(
+  limitsPayload: Record<string, unknown>,
+): { max_retries: number; retry_on: RetryOn[] } {
+  const maxRetriesRaw = limitsPayload.max_retries;
+  const maxRetries = maxRetriesRaw === undefined ? 0 : Number(maxRetriesRaw);
+  if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+    throw new Error('limits.max_retries must be an integer >= 0.');
+  }
+
+  const retryOnRaw = limitsPayload.retry_on;
+  const retryOn = normalizeStringArray(
+    retryOnRaw === undefined ? ['FAILED', 'TIMEOUT'] : retryOnRaw,
+    'limits.retry_on',
+  )
+    .map((v) => v.toUpperCase())
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+
+  const allowed = new Set(['FAILED', 'TIMEOUT', 'BLOCKED']);
+  for (const valueItem of retryOn) {
+    if (!allowed.has(valueItem)) {
+      throw new Error(`limits.retry_on contains unsupported value: ${valueItem}`);
+    }
+  }
+
+  return { max_retries: maxRetries, retry_on: retryOn as RetryOn[] };
+}
+
+/**
  * Validates and normalizes a raw plan payload into runtime schema.
  * @param payload Raw parsed JSON payload.
  * @returns Fully normalized worker plan.
@@ -416,87 +416,58 @@ export function normalizePlan(payload: unknown): WorkerPlan {
     'version',
     'setup',
     'objective',
-    'target',
-    'defaults',
-    'policy',
-    'runtime',
+    'persona',
+    'repo',
+    'provider',
+    'model',
+    'reasoning',
+    'profile',
+    'on_failure',
+    'worktrees',
     'context_files',
+    'limits',
+    'options',
     'flow',
   ]);
-  const targetPayload = optionalObject(input.target, 'target');
-  const defaultsPayload = optionalObject(input.defaults, 'defaults');
-  const runtimePayload = optionalObject(input.runtime, 'runtime');
-  const policyPayload = optionalObject(input.policy, 'policy');
-  assertNoUnknownKeys(targetPayload, 'target', ['repo_root', 'use_worktrees']);
-  assertNoUnknownKeys(defaultsPayload, 'defaults', ['provider', 'model', 'reasoning', 'profile']);
-  assertNoUnknownKeys(policyPayload, 'policy', [
-    'fail_mode',
-    'max_runtime_sec',
+
+  const limitsPayload = optionalObject(input.limits, 'limits');
+  assertNoUnknownKeys(limitsPayload, 'limits', [
+    'max_retries',
+    'retry_on',
     'max_iterations',
+    'max_runtime_sec',
     'max_total_tasks',
     'max_failures',
-    'retry',
-  ]);
-  assertNoUnknownKeys(runtimePayload, 'runtime', [
-    'run_root',
-    'run_id',
-    'cleanup_worktrees',
-    'dry_run',
     'worker_timeout_sec',
     'timeout_grace_sec',
     'max_parallel_tasks',
   ]);
 
-  const failMode = (optionalString(policyPayload.fail_mode) || 'stop').toLowerCase();
-  if (!['stop', 'continue'].includes(failMode)) {
-    throw new Error('policy.fail_mode must be one of: stop, continue.');
+  const optionsPayload = optionalObject(input.options, 'options');
+  assertNoUnknownKeys(optionsPayload, 'options', [
+    'run_root',
+    'run_id',
+    'cleanup_worktrees',
+  ]);
+
+  const onFailure = (optionalString(input.on_failure) || 'stop').toLowerCase();
+  if (!['stop', 'continue'].includes(onFailure)) {
+    throw new Error('on_failure must be one of: stop, continue.');
   }
 
-  const retryPolicy = normalizeRetryPolicy(policyPayload.retry, 'policy.retry');
-  const workerTimeoutCandidate = Number(runtimePayload.worker_timeout_sec);
-  const timeoutGraceCandidate = Number(runtimePayload.timeout_grace_sec);
-  const maxParallelCandidate = optionalPositiveInt(
-    runtimePayload.max_parallel_tasks,
-    'runtime.max_parallel_tasks',
-  );
+  const retryFields = normalizeRetryFields(limitsPayload);
+  const workerTimeoutCandidate = Number(limitsPayload.worker_timeout_sec);
+  const timeoutGraceCandidate = Number(limitsPayload.timeout_grace_sec);
 
-  const defaults = {
-    provider: normalizeProvider(defaultsPayload.provider) || 'codex',
-    model: optionalString(defaultsPayload.model) || 'gpt-5-nano',
-    reasoning_effort: normalizeReasoningEffort(defaultsPayload.reasoning) || 'xhigh',
-    profile: optionalString(defaultsPayload.profile),
-  };
+  const workerTimeoutSec = Number.isInteger(workerTimeoutCandidate)
+    ? workerTimeoutCandidate
+    : DEFAULT_WORKER_TIMEOUT_SEC;
+  const timeoutGraceSec = Number.isInteger(timeoutGraceCandidate)
+    ? timeoutGraceCandidate
+    : DEFAULT_TIMEOUT_GRACE_SEC;
 
-  const runtime: PlanRuntime = {
-    run_root: requiredString(runtimePayload.run_root ?? 'tmp/agentflow_runs', 'runtime.run_root'),
-    run_id: optionalString(runtimePayload.run_id),
-    use_worktrees:
-      optionalBoolean(targetPayload.use_worktrees, 'target.use_worktrees') ?? true,
-    continue_on_error: failMode === 'continue',
-    cleanup_worktrees:
-      optionalBoolean(runtimePayload.cleanup_worktrees, 'runtime.cleanup_worktrees') ?? true,
-    dry_run: optionalBoolean(runtimePayload.dry_run, 'runtime.dry_run') ?? false,
-    skip_git_repo_check: false,
-    sandbox_mode: 'workspace-write',
-    worker_timeout_sec: Number.isInteger(workerTimeoutCandidate)
-      ? workerTimeoutCandidate
-      : DEFAULT_WORKER_TIMEOUT_SEC,
-    timeout_grace_sec: Number.isInteger(timeoutGraceCandidate)
-      ? timeoutGraceCandidate
-      : DEFAULT_TIMEOUT_GRACE_SEC,
-    max_parallel_tasks: maxParallelCandidate,
-  };
-
-  if (runtime.worker_timeout_sec < 0) throw new Error('runtime.worker_timeout_sec must be >= 0.');
-  if (runtime.timeout_grace_sec < 1) throw new Error('runtime.timeout_grace_sec must be >= 1.');
-
-  const termination: TerminationPolicy = {
-    max_iterations: optionalPositiveInt(policyPayload.max_iterations, 'policy.max_iterations'),
-    max_runtime_sec: optionalPositiveInt(policyPayload.max_runtime_sec, 'policy.max_runtime_sec'),
-    max_total_tasks: optionalPositiveInt(policyPayload.max_total_tasks, 'policy.max_total_tasks'),
-    max_failures: optionalNonNegativeInt(policyPayload.max_failures, 'policy.max_failures'),
-    stop_on_first_failure: failMode === 'stop',
-  };
+  if (workerTimeoutSec < 0) throw new Error('limits.worker_timeout_sec must be >= 0.');
+  if (timeoutGraceSec < 1) throw new Error('limits.timeout_grace_sec must be >= 1.');
 
   const flowPayload = input.flow;
   if (!Array.isArray(flowPayload) || flowPayload.length === 0) {
@@ -509,29 +480,49 @@ export function normalizePlan(payload: unknown): WorkerPlan {
   }
 
   return {
-    setup: requiredString(input.setup, 'setup'),
+    setup: optionalString(input.setup) || '',
     objective: optionalString(input.objective),
-    target_repo_root: requiredString(targetPayload.repo_root, 'target.repo_root'),
-    defaults,
-    retry_policy: retryPolicy,
-    runtime,
-    termination,
-    prompt_contract: {
-      // Keep this internal and fixed for now.
-      require_status_line: true,
-      allowed_statuses: ['DONE', 'BLOCKED'],
-      require_report_for_done: true,
-    },
+    persona: optionalString(input.persona),
+    target_repo_root: requiredString(input.repo ?? '.', 'repo'),
+    provider: (normalizeProvider(input.provider) || 'codex') as WorkerPlan['provider'],
+    model: optionalString(input.model) || 'gpt-5-nano',
+    reasoning_effort: normalizeReasoningEffort(input.reasoning) || 'xhigh',
+    profile: optionalString(input.profile),
+    on_failure: onFailure as WorkerPlan['on_failure'],
+    worktrees: optionalBoolean(input.worktrees, 'worktrees') ?? true,
     context_files: normalizeStringArray(input.context_files, 'context_files'),
+    limits: {
+      max_retries: retryFields.max_retries,
+      retry_on: retryFields.retry_on,
+      max_iterations: optionalPositiveInt(limitsPayload.max_iterations, 'limits.max_iterations'),
+      max_runtime_sec: optionalPositiveInt(limitsPayload.max_runtime_sec, 'limits.max_runtime_sec'),
+      max_total_tasks: optionalPositiveInt(limitsPayload.max_total_tasks, 'limits.max_total_tasks'),
+      max_failures: optionalNonNegativeInt(limitsPayload.max_failures, 'limits.max_failures'),
+      worker_timeout_sec: workerTimeoutSec,
+      timeout_grace_sec: timeoutGraceSec,
+      max_parallel_tasks: optionalPositiveInt(
+        limitsPayload.max_parallel_tasks,
+        'limits.max_parallel_tasks',
+      ),
+    },
+    options: {
+      run_root: requiredString(optionsPayload.run_root ?? 'tmp/agentflow_runs', 'options.run_root'),
+      run_id: optionalString(optionsPayload.run_id),
+      cleanup_worktrees:
+        optionalBoolean(optionsPayload.cleanup_worktrees, 'options.cleanup_worktrees') ?? true,
+      dry_run: false,
+      skip_git_repo_check: false,
+      sandbox_mode: 'workspace-write',
+    },
     workflow,
   };
 }
 
 /**
  * Resolves target project root for a run.
- * @param planPath Plan file path.
- * @param targetRepoRoot Repo root declared in plan (if any).
- * @returns Absolute project root path.
+ * @param planPath Absolute path to the plan JSON file.
+ * @param targetRepoRoot Optional explicit repo root from plan or environment.
+ * @returns Absolute path to the project root directory.
  */
 export function resolveProjectRoot(planPath: string, targetRepoRoot: string | null = null): string {
   if (targetRepoRoot) {
@@ -560,11 +551,11 @@ export function resolveProjectRoot(planPath: string, targetRepoRoot: string | nu
 
 /**
  * Resolves and validates configured file paths.
- * @param planPath Plan file path.
- * @param projectRoot Resolved project root.
- * @param values Path values to resolve.
- * @returns Absolute existing file paths.
- * @throws {Error} When any configured file is missing.
+ * @param planPath Absolute path to the plan JSON file.
+ * @param projectRoot Absolute path to the project root.
+ * @param values Array of raw path strings from the plan.
+ * @returns Array of resolved absolute paths.
+ * @throws {Error} When any configured file does not exist.
  */
 export function resolveConfigPaths(planPath: string, projectRoot: string, values: string[]): string[] {
   const planDir = path.dirname(planPath);
@@ -595,8 +586,8 @@ export function resolveConfigPaths(planPath: string, projectRoot: string, values
 
 /**
  * Collects all task nodes from a workflow tree.
- * @param workflow Root workflow node list.
- * @returns Flattened task node list in traversal order.
+ * @param workflow Array of top-level workflow nodes.
+ * @returns Flat array of all task nodes in depth-first order.
  */
 export function collectTaskNodes(workflow: WorkflowNode[]): TaskNode[] {
   const tasks: TaskNode[] = [];
@@ -617,8 +608,8 @@ export function collectTaskNodes(workflow: WorkflowNode[]): TaskNode[] {
 
 /**
  * Counts all workflow nodes including nested group/loop children.
- * @param workflow Root workflow node list.
- * @returns Total node count.
+ * @param workflow Array of top-level workflow nodes.
+ * @returns Total count of all nodes in the tree.
  */
 export function countWorkflowNodes(workflow: WorkflowNode[]): number {
   let count = 0;

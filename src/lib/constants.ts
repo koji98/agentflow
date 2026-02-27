@@ -1,8 +1,5 @@
 /** Shared constants for the agentflow package. */
 
-/** Regex used to parse a markdown-ish `Status: ...` line in worker output. */
-export const STATUS_LINE_RE = /^(?:\s*(?:[-*]\s+|\d+[.)]\s+)?(?:#{1,6}\s+)?(?:\*\*)?\s*status\s*:\s*(?:\*\*)?\s*([A-Za-z_]+)\s*)$/gim;
-
 /** Timeout metadata values used in result payloads. */
 export const TIMEOUT_CLASSIFICATION = 'timeout';
 export const TIMEOUT_EXIT_CODE = 124;
@@ -11,6 +8,7 @@ export const TIMEOUT_EXIT_CODE = 124;
 export const DEFAULT_WORKER_TIMEOUT_SEC = 7200;
 export const DEFAULT_TIMEOUT_GRACE_SEC = 20;
 export const DEFAULT_REPORT_FILENAME = 'worker_report.md';
+export const DEFAULT_SUMMARY_FILENAME = 'worker_summary.md';
 
 /** Allowed reasoning effort values and common aliases. */
 export const REASONING_EFFORT_VALUES = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);

@@ -20,15 +20,18 @@ import {
 } from './lib/session.ts';
 import { runWorkflow } from './lib/task_runner.ts';
 import { cleanupWorktrees } from './lib/worktrees.ts';
+import { log, logError } from './lib/log.ts';
 import type { WorkerPlan } from './lib/types.ts';
 
 /**
  * Resolves and validates only global context files at startup.
  * Task-level context files are validated lazily when each task is materialized.
- * @param plan Normalized workflow plan.
- * @param planPath Absolute path to the source plan file.
- * @param projectRoot Absolute project root used for relative path resolution.
- * @returns Resolved absolute paths for global context files.
+ *
+ * @param plan Normalized worker plan with context_files array.
+ * @param planPath Absolute path to the plan JSON file.
+ * @param projectRoot Absolute path to the target repository root.
+ * @returns Array of resolved absolute paths to existing context files.
+ * @throws {Error} When any configured file does not exist.
  */
 function validateGlobalContextFiles(
   plan: WorkerPlan,
@@ -40,34 +43,30 @@ function validateGlobalContextFiles(
 
 /**
  * Executes the CLI workflow lifecycle from argument parsing to final run summary.
- * @param argv CLI arguments without the node/binary prefix.
- * @returns Process exit code (`0` success, non-zero failure).
+ *
+ * @param argv CLI tokens (without `node` and script path). Defaults to `process.argv.slice(2)`.
+ * @returns Exit code: 0 on success, 1 on failure, 2 on usage error.
  */
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   let args;
   try {
     args = parseArgs(argv);
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(String(error));
-    // eslint-disable-next-line no-console
-    console.error(usageText());
+    logError(String(error));
+    logError(usageText());
     return 2;
   }
 
   if (args.help) {
-    // eslint-disable-next-line no-console
-    console.log(usageText());
+    log(usageText());
     return 0;
   }
   if (args.planHelp) {
-    // eslint-disable-next-line no-console
-    console.log(`${planHelpText()}\n`);
+    log(`${planHelpText()}\n`);
     return 0;
   }
   if (!args.planFile) {
-    // eslint-disable-next-line no-console
-    console.error(usageText());
+    logError(usageText());
     return 2;
   }
 
@@ -75,8 +74,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     ? path.resolve(args.planFile)
     : path.resolve(process.cwd(), args.planFile);
   if (!fs.existsSync(planPath)) {
-    // eslint-disable-next-line no-console
-    console.error(`Plan file not found: ${planPath}`);
+    logError(`Plan file not found: ${planPath}`);
     return 1;
   }
 
@@ -84,33 +82,26 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
     plan = normalizePlan(loadPayload(planPath));
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(`Invalid plan schema at ${planPath}:`);
-    // eslint-disable-next-line no-console
-    console.error(String(error));
+    logError(`Invalid plan schema at ${planPath}:`);
+    logError(String(error));
     return 1;
   }
 
   const projectRoot = resolveProjectRoot(planPath, plan.target_repo_root);
   if (!fs.existsSync(projectRoot)) {
-    // eslint-disable-next-line no-console
-    console.error(`Resolved repo root does not exist: ${projectRoot}`);
+    logError(`Resolved repo root does not exist: ${projectRoot}`);
     return 1;
   }
 
-  // CLI controls dry-run mode: default is always live unless --dry-run is passed.
-  plan.runtime.dry_run = args.dryRunOverride === true;
-  // Optional CLI passthrough for Codex repository trust checks.
-  plan.runtime.skip_git_repo_check = args.skipGitRepoCheck;
-  // Sandbox defaults to workspace-write unless explicitly overridden by CLI.
-  plan.runtime.sandbox_mode = args.sandboxMode ?? plan.runtime.sandbox_mode;
+  plan.options.dry_run = args.dryRunOverride === true;
+  plan.options.skip_git_repo_check = args.skipGitRepoCheck;
+  plan.options.sandbox_mode = args.sandboxMode ?? plan.options.sandbox_mode;
 
   let globalContextFiles;
   try {
     globalContextFiles = validateGlobalContextFiles(plan, planPath, projectRoot);
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(String(error));
+    logError(String(error));
     return 1;
   }
 
@@ -122,32 +113,19 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   });
 
   if (session.dry_run) {
-    // eslint-disable-next-line no-console
-    console.log('[dry-run] no CLI sessions will be executed');
+    log('[dry-run] no CLI sessions will be executed');
   }
 
-  // eslint-disable-next-line no-console
-  console.log(`project_root:   ${session.project_root}`);
-  // eslint-disable-next-line no-console
-  console.log(`plan_file:      ${session.config_path}`);
-  // eslint-disable-next-line no-console
-  console.log(`run_root:       ${session.run_root}`);
-  // eslint-disable-next-line no-console
-  console.log(`run_id:         ${session.run_id}`);
-  // eslint-disable-next-line no-console
-  console.log(`raw_thoughts:   ${path.resolve(session.run_root, 'raw_thoughts.md')}`);
-  // eslint-disable-next-line no-console
-  console.log(`workflow_nodes: ${countWorkflowNodes(plan.workflow)}`);
-  // eslint-disable-next-line no-console
-  console.log(`task_nodes:     ${collectTaskNodes(plan.workflow).length}`);
-  // eslint-disable-next-line no-console
-  console.log(`worktrees:      ${plan.runtime.use_worktrees}`);
-  // eslint-disable-next-line no-console
-  console.log(`dry_run:        ${session.dry_run}`);
-  // eslint-disable-next-line no-console
-  console.log(`skip_git_check: ${plan.runtime.skip_git_repo_check}`);
-  // eslint-disable-next-line no-console
-  console.log(`sandbox_mode:   ${plan.runtime.sandbox_mode}`);
+  log(`project_root:   ${session.paths.project_root}`);
+  log(`plan_file:      ${session.paths.config_path}`);
+  log(`run_root:       ${session.paths.run_root}`);
+  log(`run_id:         ${session.paths.run_id}`);
+  log(`workflow_nodes: ${countWorkflowNodes(plan.workflow)}`);
+  log(`task_nodes:     ${collectTaskNodes(plan.workflow).length}`);
+  log(`worktrees:      ${plan.worktrees}`);
+  log(`dry_run:        ${session.dry_run}`);
+  log(`skip_git_check: ${plan.options.skip_git_repo_check}`);
+  log(`sandbox_mode:   ${plan.options.sandbox_mode}`);
 
   initializeSessionArtifacts(session);
 
@@ -168,11 +146,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (session.shutdown_signal) return;
     session.shutdown_signal = signal;
     runStatus = 'FAILED';
-    // eslint-disable-next-line no-console
-    console.log(`\nreceived ${signal}, shutting down...`);
+    log(`\nreceived ${signal}, shutting down...`);
     finalizeRun();
-    // eslint-disable-next-line no-console
-    console.log(`\ncompleted with failures: ${failures}`);
+    log(`\ncompleted with failures: ${failures}`);
     process.exit(signalExitCode(signal));
   };
   process.once('SIGINT', handleSignal);
@@ -180,10 +156,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   try {
     await runWorkflow(session);
-  } catch (error) {
+  } catch (err: unknown) {
     runStatus = 'FAILED';
-    // eslint-disable-next-line no-console
-    console.log(`\nrun failed: ${error?.name || 'Error'}: ${error?.message || String(error)}`);
+    const error = err instanceof Error ? err : null;
+    log(`\nrun failed: ${error?.name || 'Error'}: ${error?.message || String(err)}`);
   } finally {
     process.off('SIGINT', handleSignal);
     process.off('SIGTERM', handleSignal);
@@ -191,13 +167,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 
   if (runStatus === 'FAILED') {
-    // eslint-disable-next-line no-console
-    console.log(`\ncompleted with failures: ${failures}`);
+    log(`\ncompleted with failures: ${failures}`);
     return 1;
   }
 
-  // eslint-disable-next-line no-console
-  console.log('\ncompleted successfully');
+  log('\ncompleted successfully');
   return 0;
 }
 
@@ -207,9 +181,8 @@ const currentFile = path.resolve(fileURLToPath(import.meta.url));
 if (directEntry === currentFile) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
-    (error) => {
-      // eslint-disable-next-line no-console
-      console.error(error?.stack || String(error));
+    (err: unknown) => {
+      logError(err instanceof Error ? err.stack || String(err) : String(err));
       process.exit(1);
     },
   );

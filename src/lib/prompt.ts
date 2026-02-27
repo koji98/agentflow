@@ -1,18 +1,70 @@
+import type { PriorTaskSummary } from './types.ts';
+
+const DEFAULT_PERSONA = 'You are a senior software engineer. Write clean, well-tested code and explain your reasoning clearly.';
+
 /**
  * Builds the full prompt sent to a worker for one task launch.
- * @param params Prompt rendering inputs.
- * @param params.setup Run-level setup/instructions.
- * @param params.task Task payload (id, prompt, and task context files).
- * @param params.provider Selected provider id for the launch.
- * @param params.contextFiles Resolved context files to read before execution.
- * @param params.reportPath Destination path for the worker report file.
- * @param params.promptContract Prompt contract configuration for final status formatting.
- * @returns Rendered markdown prompt string.
+ *
+ * @param params Prompt construction inputs.
+ * @param params.persona Optional persona override; defaults to a senior engineer persona.
+ * @param params.objective Optional high-level objective prepended to the prompt.
+ * @param params.setup Background/setup section text.
+ * @param params.task Task node with `task_id` and `task` description.
+ * @param params.contextFiles Resolved file paths the agent should review.
+ * @param params.reportPath Path where the agent should write its completion report.
+ * @param params.summaryPath Path where the agent should write its downstream summary.
+ * @param params.priorTaskSummaries Summaries of previously completed tasks for context.
+ * @returns Complete prompt string ready for provider submission.
  */
-export function buildPrompt({ setup, task, provider, contextFiles, reportPath, promptContract }) {
-  const statusContract = promptContract.require_status_line
-    ? promptContract.allowed_statuses.map((status) => `   Status: ${status}`).join('\n')
-    : '   (Status line optional by contract)';
+export function buildPrompt({
+  persona,
+  objective,
+  setup,
+  task,
+  contextFiles,
+  reportPath,
+  summaryPath,
+  priorTaskSummaries,
+}: {
+  persona: string | null;
+  objective: string | null;
+  setup: string;
+  task: { task_id: string; task: string };
+  contextFiles: string[];
+  reportPath: string;
+  summaryPath: string;
+  priorTaskSummaries: PriorTaskSummary[];
+}): string {
+  const sections: string[] = [];
 
-  return `You are executing one task in an automated worker run.\n\nRun setup and intent:\n${setup}\n\nTask ID:\n- ${task.task_id}\n\nTask instruction:\n- ${task.task}\n\nExecution provider:\n- ${provider}\n\nRequired context files (read first):\n${contextFiles.length > 0 ? contextFiles.map((f) => `- ${f}`).join('\n') : '- (none configured)'}\n\nExecution rules:\n1) Complete only this task.\n2) Keep changes scoped and high quality.\n3) Run targeted tests for touched behavior.\n4) If blocked, report the exact blocking dependency.\n\nFinal response format:\n1) First line must be exactly one of:\n${statusContract}\n2) Files changed\n3) Tests run\n4) Blockers/dependencies\n\nMandatory report write:\n- Write a concise markdown report to:\n  ${reportPath}\n- Include status, summary, changed files, tests, blockers/dependencies.\n`;
+  sections.push(persona || DEFAULT_PERSONA);
+
+  if (objective) {
+    sections.push(`## Overall Goal\n${objective}`);
+  }
+
+  if (setup) {
+    sections.push(`## Background\n${setup}`);
+  }
+
+  sections.push(`## Your Task For Completing The Overall Goal (${task.task_id})\n${task.task}`);
+
+  if (priorTaskSummaries.length > 0) {
+    const summaryLines = priorTaskSummaries.map(
+      (s) => `- **${s.taskId}** (${s.status}): ${s.summary || '(no summary)'}`,
+    );
+    sections.push(`## What's Been Done So Far\n${summaryLines.join('\n')}`);
+  }
+
+  if (contextFiles.length > 0) {
+    sections.push(
+      `## Files to Review First\n${contextFiles.map((f) => `- ${f}`).join('\n')}`,
+    );
+  }
+
+  sections.push(
+    `## When You're Done\n- Write a detailed report to: ${reportPath}\n  Include: what you did, files changed, tests run, any blockers.\n  If you cannot complete the task, explain exactly what is blocking you.\n- Write a brief summary to: ${summaryPath}\n  2-5 sentences for downstream tasks: what was the outcome, key decisions, what the next task should know.`,
+  );
+
+  return sections.join('\n\n') + '\n';
 }

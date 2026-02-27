@@ -1,14 +1,15 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { log } from './log.ts';
 import type { Session, TaskLaunch } from './types.ts';
 
 /**
- * Creates a git worktree on a new branch.
- * @param projectRoot Repository root where git commands run.
- * @param branch New branch name to create.
- * @param target Filesystem path for the worktree checkout.
- * @param dryRun When true, prints command without executing.
- * @returns Nothing.
+ * Creates a new git worktree and its tracking branch.
+ * @param projectRoot Absolute path to the main repository.
+ * @param branch Branch name for the new worktree.
+ * @param target Absolute path where the worktree will be created.
+ * @param dryRun When true, prints the command without executing.
+ * @throws {Error} When the `git worktree add` command fails.
  */
 export function addWorktree(
   projectRoot: string,
@@ -18,8 +19,7 @@ export function addWorktree(
 ): void {
   const cmd = ['git', 'worktree', 'add', '-b', branch, target, 'HEAD'];
   if (dryRun) {
-    // eslint-disable-next-line no-console
-    console.log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
+    log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
     return;
   }
 
@@ -30,17 +30,16 @@ export function addWorktree(
 }
 
 /**
- * Removes a git worktree directory.
- * @param projectRoot Repository root where git commands run.
- * @param target Worktree directory path to remove.
- * @param dryRun When true, prints command without executing.
- * @returns Nothing.
+ * Force-removes a git worktree directory.
+ * @param projectRoot Absolute path to the main repository.
+ * @param target Absolute path to the worktree to remove.
+ * @param dryRun When true, prints the command without executing.
+ * @throws {Error} When the `git worktree remove` command fails.
  */
 export function removeWorktree(projectRoot: string, target: string, dryRun: boolean): void {
   const cmd = ['git', 'worktree', 'remove', '--force', target];
   if (dryRun) {
-    // eslint-disable-next-line no-console
-    console.log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
+    log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
     return;
   }
 
@@ -51,17 +50,16 @@ export function removeWorktree(projectRoot: string, target: string, dryRun: bool
 }
 
 /**
- * Deletes a git branch used for worktree execution.
- * @param projectRoot Repository root where git commands run.
+ * Force-deletes a local git branch.
+ * @param projectRoot Absolute path to the main repository.
  * @param branch Branch name to delete.
- * @param dryRun When true, prints command without executing.
- * @returns Nothing.
+ * @param dryRun When true, prints the command without executing.
+ * @throws {Error} When the `git branch -D` command fails.
  */
 export function removeBranch(projectRoot: string, branch: string, dryRun: boolean): void {
   const cmd = ['git', 'branch', '-D', branch];
   if (dryRun) {
-    // eslint-disable-next-line no-console
-    console.log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
+    log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
     return;
   }
 
@@ -72,57 +70,51 @@ export function removeBranch(projectRoot: string, branch: string, dryRun: boolea
 }
 
 /**
- * Prepares directories and optional worktrees for a launch batch.
- * @param session Active run session.
- * @param launches Launches to materialize before task execution.
- * @returns Nothing.
+ * Prepares task launch directories and worktrees, writing prompt files.
+ * @param session Current run session.
+ * @param launches Array of task launch descriptors to prepare.
  */
 export function prepareLaunches(session: Session, launches: TaskLaunch[]): void {
   for (const launch of launches) {
     if (!session.dry_run) {
       fs.mkdirSync(launch.task_dir, { recursive: true });
       if (launch.use_worktree && launch.branch && !fs.existsSync(launch.workspace_cwd)) {
-        addWorktree(session.project_root, launch.branch, launch.workspace_cwd, false);
-        session.created_worktrees.add(launch.workspace_cwd);
-        session.created_worktree_branches.add(launch.branch);
+        addWorktree(session.paths.project_root, launch.branch, launch.workspace_cwd, false);
+        session.worktree_tracker.created.add(launch.workspace_cwd);
+        session.worktree_tracker.created_branches.add(launch.branch);
       }
       fs.writeFileSync(launch.prompt_path, launch.prompt_text, 'utf8');
     } else {
-      // eslint-disable-next-line no-console
-      console.log(`[dry-run] prepare ${launch.task_dir}`);
+      log(`[dry-run] prepare ${launch.task_dir}`);
       if (launch.use_worktree && launch.branch) {
-        addWorktree(session.project_root, launch.branch, launch.workspace_cwd, true);
-        session.created_worktree_branches.add(launch.branch);
+        addWorktree(session.paths.project_root, launch.branch, launch.workspace_cwd, true);
+        session.worktree_tracker.created_branches.add(launch.branch);
       }
     }
   }
 }
 
 /**
- * Cleans up created worktrees and branches when enabled by runtime config.
- * @param session Active run session.
- * @returns Nothing.
+ * Removes all worktrees and branches created during the run.
+ * @param session Current run session.
  */
 export function cleanupWorktrees(session: Session): void {
-  if (!session.plan.runtime.cleanup_worktrees) return;
-  if (session.created_worktrees.size === 0 && session.created_worktree_branches.size === 0) return;
+  if (!session.plan.options.cleanup_worktrees) return;
+  if (session.worktree_tracker.created.size === 0 && session.worktree_tracker.created_branches.size === 0) return;
 
-  // eslint-disable-next-line no-console
-  console.log('\ncleanup: removing worktrees');
-  for (const worktree of [...session.created_worktrees].sort()) {
+  log('\ncleanup: removing worktrees');
+  for (const worktree of [...session.worktree_tracker.created].sort()) {
     try {
-      removeWorktree(session.project_root, worktree, session.dry_run);
+      removeWorktree(session.paths.project_root, worktree, session.dry_run);
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.log(`warning: failed to remove worktree ${worktree}: ${String(error)}`);
+      log(`warning: failed to remove worktree ${worktree}: ${String(error)}`);
     }
   }
-  for (const branch of [...session.created_worktree_branches].sort()) {
+  for (const branch of [...session.worktree_tracker.created_branches].sort()) {
     try {
-      removeBranch(session.project_root, branch, session.dry_run);
+      removeBranch(session.paths.project_root, branch, session.dry_run);
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.log(`warning: failed to delete branch ${branch}: ${String(error)}`);
+      log(`warning: failed to delete branch ${branch}: ${String(error)}`);
     }
   }
 }

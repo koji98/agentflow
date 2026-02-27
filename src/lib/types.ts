@@ -15,58 +15,15 @@ export interface CliArgs {
   help: boolean;
 }
 
-/** Global retry settings applied to all task nodes. */
-export interface RetryPolicy {
-  max_retries: number;
-  retry_on: RetryOn[];
-}
-
-/** Defaults applied to task launches and AI gate launches. */
-export interface PlanDefaults {
-  provider: Provider;
-  model: string | null;
-  reasoning_effort: ReasoningEffort | null;
-  profile: string | null;
-}
-
-/** Execution/runtime controls for a run. */
-export interface PlanRuntime {
-  run_root: string;
-  run_id: string | null;
-  use_worktrees: boolean;
-  continue_on_error: boolean;
-  cleanup_worktrees: boolean;
-  dry_run: boolean;
-  skip_git_repo_check: boolean;
-  sandbox_mode: SandboxMode;
-  worker_timeout_sec: number;
-  timeout_grace_sec: number;
-  max_parallel_tasks: number | null;
-}
-
-/** Top-level run termination policy. */
-export interface TerminationPolicy {
-  max_iterations: number | null;
-  max_runtime_sec: number | null;
-  max_total_tasks: number | null;
-  max_failures: number | null;
-  stop_on_first_failure: boolean;
-}
-
-/** Prompt-level completion contract expected from workers. */
-export interface PromptContract {
-  require_status_line: boolean;
-  allowed_statuses: string[];
-  require_report_for_done: boolean;
-}
-
 /** Shared task shape used by workflow task nodes and launch rendering. */
 export interface PlanTask {
   task_id: string;
   task: string;
   provider: Provider | null;
   model: string | null;
+  persona: string | null;
   context_files: string[];
+  context_from: string[];
 }
 
 /** One task node in workflow tree. */
@@ -131,18 +88,52 @@ export interface WhileNode {
 /** Supported workflow node union. */
 export type WorkflowNode = TaskNode | GroupNode | WhileNode;
 
+/** Resource limits and retry/termination policy. */
+export interface PlanLimits {
+  max_retries: number;
+  retry_on: RetryOn[];
+  max_iterations: number | null;
+  max_runtime_sec: number | null;
+  max_total_tasks: number | null;
+  max_failures: number | null;
+  worker_timeout_sec: number;
+  timeout_grace_sec: number;
+  max_parallel_tasks: number | null;
+}
+
+/** Rarely-changed runtime options. */
+export interface PlanOptions {
+  run_root: string;
+  run_id: string | null;
+  cleanup_worktrees: boolean;
+  dry_run: boolean;
+  skip_git_repo_check: boolean;
+  sandbox_mode: SandboxMode;
+}
+
 /** Fully normalized plan payload loaded from disk. */
 export interface WorkerPlan {
   setup: string;
   objective: string | null;
+  persona: string | null;
   target_repo_root: string;
-  defaults: PlanDefaults;
-  retry_policy: RetryPolicy;
-  runtime: PlanRuntime;
-  termination: TerminationPolicy;
-  prompt_contract: PromptContract;
+  provider: Provider;
+  model: string | null;
+  reasoning_effort: ReasoningEffort | null;
+  profile: string | null;
+  on_failure: 'stop' | 'continue';
+  worktrees: boolean;
   context_files: string[];
+  limits: PlanLimits;
+  options: PlanOptions;
   workflow: WorkflowNode[];
+}
+
+/** Summary of a previously completed task, injected into subsequent prompts. */
+export interface PriorTaskSummary {
+  taskId: string;
+  status: string;
+  summary: string;
 }
 
 /** One concrete launch unit, materialized from a task with runtime paths. */
@@ -162,7 +153,8 @@ export interface TaskLaunch {
   last_message_path: string;
   report_path: string;
   worker_report_path: string;
-  report_json_path: string;
+  summary_path: string;
+  worker_summary_path: string;
   workspace_cwd: string;
   branch: string | null;
   use_worktree: boolean;
@@ -178,7 +170,6 @@ export type RuntimeStatus =
   | 'RUNNING'
   | 'DONE'
   | 'FAILED'
-  | 'BLOCKED'
   | (string & {});
 
 /** Group-level state row in run_state.json. */
@@ -207,7 +198,7 @@ export interface TaskStateRow {
   logPath: string;
   lastMessagePath: string;
   reportPath: string;
-  reportJsonPath: string;
+  summaryPath: string;
   cwd: string;
   branch: string | null;
   exitCode?: number;
@@ -218,10 +209,7 @@ export interface TaskStateRow {
   timeoutSeconds?: number | null;
   timeoutClassification?: string | null;
   timeoutTerminationOutcome?: string | null;
-  declaredStatus?: string | null;
-  statusParseError?: string | null;
-  completionContractErrors?: string[];
-  completionContractSatisfied?: boolean;
+  failureReason?: string | null;
 }
 
 /** Top-level persisted run state model. */
@@ -236,9 +224,6 @@ export interface RunState {
   totalLoopIterations: number;
   groups: Record<string, GroupStateRow>;
   tasks: Record<string, TaskStateRow>;
-  eventsFile: string;
-  rawThoughtsPath: string;
-  decisionTraceFile: string;
 }
 
 /** Decision trace record for loop/evaluator and retry behavior. */
@@ -255,28 +240,41 @@ export interface DecisionTraceEntry {
   detail: Record<string, unknown>;
 }
 
-/** In-memory execution session shared across orchestration functions. */
-export interface Session {
+/** Resolved filesystem paths for one run. */
+export interface RunPaths {
   project_root: string;
   config_path: string;
-  plan: WorkerPlan;
   run_root: string;
   run_id: string;
-  dry_run: boolean;
-  global_context_files: string[];
-  state: RunState;
   state_path: string;
-  events_path: string;
   summary_path: string;
-  decision_trace_path: string;
-  created_worktrees: Set<string>;
-  created_worktree_branches: Set<string>;
-  shutdown_signal: NodeJS.Signals | null;
+}
+
+/** Mutable execution counters tracked across the run lifetime. */
+export interface RunCounters {
   next_group_index: number;
   started_at_ms: number;
   executed_task_count: number;
   failure_task_count: number;
   loop_iteration_count: number;
+}
+
+/** Tracks worktrees and branches created during the run for cleanup. */
+export interface WorktreeTracker {
+  created: Set<string>;
+  created_branches: Set<string>;
+}
+
+/** In-memory execution session shared across orchestration functions. */
+export interface Session {
+  plan: WorkerPlan;
+  dry_run: boolean;
+  global_context_files: string[];
+  paths: RunPaths;
+  counters: RunCounters;
+  worktree_tracker: WorktreeTracker;
+  state: RunState;
+  shutdown_signal: NodeJS.Signals | null;
   decision_trace: DecisionTraceEntry[];
 }
 
@@ -298,21 +296,16 @@ export interface RunCommandParams {
   dryRun: boolean;
   timeoutSeconds: number | null;
   timeoutGraceSeconds: number;
-  rawThoughtsPath: string;
-  rawThoughtsTaskLabel: string;
   /** When true, pipe stdinText to the child process. When false, close stdin immediately. */
   useStdin: boolean;
   /** When set, write stdout-only content to this path on process close. */
   stdoutCapturePath: string | null;
 }
 
-/** Parsed/evaluated status contract from worker output. */
+/** Parsed/evaluated completion contract from worker output. */
 export interface ContractResult {
   status: RuntimeStatus;
-  declaredStatus: string | null;
-  statusParseError: string | null;
-  completionContractErrors: string[];
-  completionContractSatisfied: boolean;
+  reason: string | null;
 }
 
 /** Result row emitted per task completion. */
@@ -332,11 +325,7 @@ export interface TaskExecutionResult {
   timeout_seconds: number | null;
   timeout_classification: string | null;
   timeout_termination_outcome: string | null;
-  declared_status: string | null;
-  status_parse_error: string | null;
-  completion_contract_errors: string[];
-  completion_contract_satisfied: boolean;
-  report_json_path: string;
+  failure_reason: string | null;
 }
 
 /** Evaluator command output used for while gates. */

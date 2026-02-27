@@ -7,10 +7,12 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { main } from '../src/cli.ts';
+import { buildAiGatePrompt } from '../src/lib/gates.ts';
 import { normalizePlan } from '../src/lib/plan.ts';
+import { buildPrompt } from '../src/lib/prompt.ts';
 import { buildProviderCommand } from '../src/lib/providers.ts';
+import type { Session } from '../src/lib/types.ts';
 import { mapSandboxForCursor, normalizeProvider } from '../src/lib/utils.ts';
-import type { TaskLaunch } from '../src/lib/types.ts';
 
 const WORKSPACE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -49,17 +51,16 @@ const path = require('node:path');
 
 const args = process.argv.slice(2);
 const behaviorPath = process.env.MOCK_AGENT_BEHAVIOR;
-let behavior = { rules: [], default: { status: 'DONE', exitCode: 0, sleepMs: 0, skipReport: false } };
+let behavior = { rules: [], default: { exitCode: 0, sleepMs: 0, skipReport: false } };
 if (behaviorPath && fs.existsSync(behaviorPath)) {
   behavior = JSON.parse(fs.readFileSync(behaviorPath, 'utf8'));
 }
 
-// The prompt is the last positional argument (after all flags)
 const positionalArgs = [];
 for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('-')) {
     if (['--output-format', '--workspace', '--sandbox', '--model', '--mode'].includes(args[i])) {
-      i++; // skip the value
+      i++;
     }
     continue;
   }
@@ -67,7 +68,7 @@ for (let i = 0; i < args.length; i++) {
 }
 const prompt = positionalArgs[positionalArgs.length - 1] || '';
 
-let rule = behavior.default || { status: 'DONE', exitCode: 0, sleepMs: 0, skipReport: false };
+let rule = behavior.default || { exitCode: 0, sleepMs: 0, skipReport: false };
 for (const candidate of behavior.rules || []) {
   if (prompt.includes(String(candidate.match || ''))) {
     rule = { ...rule, ...candidate };
@@ -80,14 +81,20 @@ if (Number(rule.sleepMs || 0) > 0) {
   Atomics.wait(block, 0, 0, Number(rule.sleepMs));
 }
 
-// cursor cli writes output to stdout (no -o flag)
-process.stdout.write('Status: ' + String(rule.status || 'DONE') + '\\n');
+process.stdout.write('Task completed successfully.\\n');
 
-const reportMatch = prompt.match(/Write a concise markdown report to:\\n\\s+([^\\n]+)/);
+const reportMatch = prompt.match(/Write a detailed report to:\\s*([^\\n]+)/);
 const reportPath = reportMatch ? String(reportMatch[1]).trim() : null;
 if (reportPath && !rule.skipReport) {
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-  fs.writeFileSync(reportPath, '# report\\nstatus=' + String(rule.status || 'DONE') + '\\n', 'utf8');
+  fs.writeFileSync(reportPath, '# report\\nTask completed.\\n', 'utf8');
+}
+
+const summaryMatch = prompt.match(/Write a brief summary to:\\s*([^\\n]+)/);
+const summaryPath = summaryMatch ? String(summaryMatch[1]).trim() : null;
+if (summaryPath && !rule.skipReport) {
+  fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
+  fs.writeFileSync(summaryPath, 'Task completed successfully. No issues found.\\n', 'utf8');
 }
 
 const logPath = process.env.MOCK_AGENT_LOG;
@@ -99,8 +106,7 @@ if (logPath) {
       args,
       cwd: process.cwd(),
       workspace: workspaceIdx >= 0 ? args[workspaceIdx + 1] : null,
-      taskId: ((prompt.match(/Task ID:\\n-\\s+([^\\n]+)/) || [])[1] || null),
-      status: String(rule.status || 'DONE'),
+      taskId: ((prompt.match(/Your Task[^(]*\\(([^)]+)\\)/) || [])[1] || null),
       reportPath,
     }) + '\\n',
     'utf8',
@@ -109,7 +115,7 @@ if (logPath) {
 
 if (rule.stdout) process.stdout.write(String(rule.stdout));
 if (rule.stderr) process.stderr.write(String(rule.stderr));
-process.exit(Number(rule.exitCode ?? (rule.status === 'DONE' ? 0 : 1)));
+process.exit(Number(rule.exitCode ?? 0));
 `,
     'utf8',
   );
@@ -131,11 +137,11 @@ const outIndex = args.indexOf('-o');
 const outPath = outIndex >= 0 ? args[outIndex + 1] : null;
 const stdin = fs.readFileSync(0, 'utf8');
 const behaviorPath = process.env.MOCK_CODEX_BEHAVIOR;
-let behavior = { rules: [], default: { status: 'DONE', exitCode: 0, sleepMs: 0, skipReport: false } };
+let behavior = { rules: [], default: { exitCode: 0, sleepMs: 0, skipReport: false } };
 if (behaviorPath && fs.existsSync(behaviorPath)) {
   behavior = JSON.parse(fs.readFileSync(behaviorPath, 'utf8'));
 }
-let rule = behavior.default || { status: 'DONE', exitCode: 0, sleepMs: 0, skipReport: false };
+let rule = behavior.default || { exitCode: 0, sleepMs: 0, skipReport: false };
 for (const candidate of behavior.rules || []) {
   if (stdin.includes(String(candidate.match || ''))) {
     rule = { ...rule, ...candidate };
@@ -150,14 +156,21 @@ if (Number(rule.sleepMs || 0) > 0) {
 
 if (outPath) {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, 'Status: ' + String(rule.status || 'DONE') + '\\n', 'utf8');
+  fs.writeFileSync(outPath, 'Task completed successfully.\\n', 'utf8');
 }
 
-const reportMatch = stdin.match(/Write a concise markdown report to:\\n\\s+([^\\n]+)/);
+const reportMatch = stdin.match(/Write a detailed report to:\\s*([^\\n]+)/);
 const reportPath = reportMatch ? String(reportMatch[1]).trim() : null;
 if (reportPath && !rule.skipReport) {
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-  fs.writeFileSync(reportPath, '# report\\nstatus=' + String(rule.status || 'DONE') + '\\n', 'utf8');
+  fs.writeFileSync(reportPath, '# report\\nTask completed.\\n', 'utf8');
+}
+
+const summaryMatch = stdin.match(/Write a brief summary to:\\s*([^\\n]+)/);
+const summaryPath = summaryMatch ? String(summaryMatch[1]).trim() : null;
+if (summaryPath && !rule.skipReport) {
+  fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
+  fs.writeFileSync(summaryPath, 'Task completed successfully. No issues found.\\n', 'utf8');
 }
 
 const logPath = process.env.MOCK_CODEX_LOG;
@@ -167,8 +180,7 @@ if (logPath) {
     JSON.stringify({
       args,
       cwd: process.cwd(),
-      taskId: ((stdin.match(/Task ID:\\n-\\s+([^\\n]+)/) || [])[1] || null),
-      status: String(rule.status || 'DONE'),
+      taskId: ((stdin.match(/Your Task[^(]*\\(([^)]+)\\)/) || [])[1] || null),
       reportPath,
     }) + '\\n',
     'utf8',
@@ -177,7 +189,7 @@ if (logPath) {
 
 if (rule.stdout) process.stdout.write(String(rule.stdout));
 if (rule.stderr) process.stderr.write(String(rule.stderr));
-process.exit(Number(rule.exitCode ?? (rule.status === 'DONE' ? 0 : 1)));
+process.exit(Number(rule.exitCode ?? 0));
 `,
     'utf8',
   );
@@ -265,7 +277,7 @@ test('agentflow runtime behavior', async (t) => {
     assert.match(out, /Plan File Help/);
     assert.match(out, /Mental model:/);
     assert.match(out, /Minimal valid plan \(JSON\):/);
-    assert.match(out, /Full schema skeleton \(all top-level objects shown\):/);
+    assert.match(out, /Full schema skeleton \(all keys shown\):/);
     assert.match(out, /Flow nodes:/);
     assert.match(out, /unknown keys hard-fail at every object level/);
     assert.match(out, /Common mistakes \(and actual error text\):/);
@@ -276,18 +288,16 @@ test('agentflow runtime behavior', async (t) => {
   await t.test('defaults cleanup_worktrees to true', async () => {
     const plan = normalizePlan({
       setup: 'x',
-      target: { repo_root: '.' },
       flow: [{ type: 'task', id: 'a', prompt: 'b' }],
     });
-    assert.equal(plan.runtime.cleanup_worktrees, true);
+    assert.equal(plan.options.cleanup_worktrees, true);
 
     const explicit = normalizePlan({
       setup: 'x',
-      target: { repo_root: '.' },
-      runtime: { cleanup_worktrees: false },
+      options: { cleanup_worktrees: false },
       flow: [{ type: 'task', id: 'a', prompt: 'b' }],
     });
-    assert.equal(explicit.runtime.cleanup_worktrees, false);
+    assert.equal(explicit.options.cleanup_worktrees, false);
   });
 
   await t.test('unknown plan keys fail schema normalization with field-specific errors', async () => {
@@ -295,7 +305,6 @@ test('agentflow runtime behavior', async (t) => {
       () =>
         normalizePlan({
           setup: 'x',
-          target: { repo_root: '.' },
           flow: [{ type: 'task', id: 'a', prompt: 'b' }],
           unexpected_top_level: true,
         }),
@@ -306,17 +315,16 @@ test('agentflow runtime behavior', async (t) => {
       () =>
         normalizePlan({
           setup: 'x',
-          target: { repo_root: '.', unknown_target_field: true },
+          limits: { unknown_limit: true },
           flow: [{ type: 'task', id: 'a', prompt: 'b' }],
         }),
-      /target contains unknown key: "unknown_target_field"\./,
+      /limits contains unknown key: "unknown_limit"\./,
     );
 
     assert.throws(
       () =>
         normalizePlan({
           setup: 'x',
-          target: { repo_root: '.' },
           flow: [{ type: 'task', id: 'a', prompt: 'b', extra_task_field: true }],
         }),
       /flow\[0\] contains unknown key: "extra_task_field"\./,
@@ -328,7 +336,6 @@ test('agentflow runtime behavior', async (t) => {
       () =>
         normalizePlan({
           setup: 'x',
-          target: { repo_root: '.' },
           flow: [{ type: 'parallel', id: 'legacy', steps: [] }],
         }),
       /flow\[0\]\.type must be one of: task, group, loop\./,
@@ -338,7 +345,6 @@ test('agentflow runtime behavior', async (t) => {
       () =>
         normalizePlan({
           setup: 'x',
-          target: { repo_root: '.' },
           flow: [
             {
               type: 'group',
@@ -361,7 +367,7 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'unknown key cli message test',
-          target: { repo_root: '.', unknown_key: 'oops' },
+          limits: { unknown_key: 'oops' },
           flow: [{ type: 'task', id: 'a', prompt: 'b' }],
         },
         null,
@@ -381,10 +387,10 @@ test('agentflow runtime behavior', async (t) => {
     } finally {
       console.error = original;
     }
-    assert.match(errors.join('\n'), /target contains unknown key: "unknown_key"\./);
+    assert.match(errors.join('\n'), /limits contains unknown key: "unknown_key"\./);
   });
 
-  await t.test('dry-run is CLI-flag only (plan runtime.dry_run does not force dry mode)', async (t2) => {
+  await t.test('dry-run is CLI-flag only (plan options.dry_run does not force dry mode)', async (t2) => {
     const repoRoot = mkRepo('agentflow-dry-flag-');
     t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
 
@@ -394,7 +400,7 @@ test('agentflow runtime behavior', async (t) => {
     const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
     fs.writeFileSync(
       mockBehavior,
-      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }, null, 2),
       'utf8',
     );
 
@@ -404,12 +410,16 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'dry flag behavior test',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_dry_flag_runs',
-            dry_run: true,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -451,7 +461,7 @@ test('agentflow runtime behavior', async (t) => {
     const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
     fs.writeFileSync(
       mockBehavior,
-      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }, null, 2),
       'utf8',
     );
 
@@ -461,12 +471,16 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'skip git repo check passthrough test',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_skip_git_repo_check_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -509,7 +523,7 @@ test('agentflow runtime behavior', async (t) => {
     const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
     fs.writeFileSync(
       mockBehavior,
-      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }, null, 2),
       'utf8',
     );
 
@@ -519,12 +533,16 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'default sandbox behavior test',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_default_sandbox_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -566,7 +584,7 @@ test('agentflow runtime behavior', async (t) => {
     const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
     fs.writeFileSync(
       mockBehavior,
-      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }, null, 2),
       'utf8',
     );
 
@@ -576,12 +594,16 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'sandbox passthrough test',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_sandbox_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -641,7 +663,7 @@ test('agentflow runtime behavior', async (t) => {
     const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
     fs.writeFileSync(
       mockBehavior,
-      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }, null, 2),
       'utf8',
     );
 
@@ -651,12 +673,16 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'task override behavior test',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_task_overrides_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -719,7 +745,7 @@ test('agentflow runtime behavior', async (t) => {
       mockBehavior,
       JSON.stringify(
         {
-          default: { status: 'DONE', exitCode: 0, sleepMs: 25 },
+          default: { exitCode: 0, sleepMs: 25 },
         },
         null,
         2,
@@ -733,11 +759,15 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'happy single test',
-          target: { repo_root: '.', use_worktrees: true },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: true,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_happy_single_runs',
-            dry_run: false,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -778,12 +808,11 @@ test('agentflow runtime behavior', async (t) => {
     assert.equal(taskRows.length, 1);
     assert.equal(taskRows[0].status, 'DONE');
     assert.ok(fs.existsSync(String(taskRows[0].reportPath)));
-    assert.ok(fs.existsSync(String(taskRows[0].reportJsonPath)));
 
-    const events = parseJsonLines(path.resolve(runDir, 'run_events.jsonl'));
-    const completion = events.find((event) => event.type === 'run_completed');
-    assert.ok(completion);
-    assert.equal(completion?.status, 'DONE');
+    assert.ok(fs.existsSync(path.resolve(runDir, 'run_summary.md')));
+    assert.ok(!fs.existsSync(path.resolve(runDir, 'run_events.jsonl')));
+    assert.ok(!fs.existsSync(path.resolve(runDir, 'raw_thoughts.md')));
+    assert.ok(!fs.existsSync(path.resolve(runDir, 'decision_trace.json')));
 
     const worktreeList = runOrThrow('git', ['worktree', 'list', '--porcelain'], repoRoot).stdout;
     const worktreeEntries = worktreeList
@@ -807,10 +836,10 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           rules: [
-            { match: 'Task ID:\n- fast_done', status: 'DONE', exitCode: 0, sleepMs: 50 },
-            { match: 'Task ID:\n- slow_done', status: 'DONE', exitCode: 0, sleepMs: 250 },
+            { match: 'Goal (fast_done)', exitCode: 0, sleepMs: 50 },
+            { match: 'Goal (slow_done)', exitCode: 0, sleepMs: 250 },
           ],
-          default: { status: 'DONE', exitCode: 0, sleepMs: 0 },
+          default: { exitCode: 0, sleepMs: 0 },
         },
         null,
         2,
@@ -824,15 +853,21 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'happy group parallel test',
-          target: { repo_root: '.', use_worktrees: true },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          policy: { fail_mode: 'stop', retry: { max_retries: 0, retry_on: ['FAILED', 'TIMEOUT'] } },
-          runtime: {
-            run_root: 'tmp/test_happy_parallel_runs',
-            dry_run: false,
-            cleanup_worktrees: true,
+          repo: '.',
+          worktrees: true,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          on_failure: 'stop',
+          limits: {
+            max_retries: 0,
+            retry_on: ['FAILED', 'TIMEOUT'],
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
+          },
+          options: {
+            run_root: 'tmp/test_happy_parallel_runs',
+            cleanup_worktrees: true,
           },
           flow: [
             {
@@ -873,11 +908,6 @@ test('agentflow runtime behavior', async (t) => {
     const taskRows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
     assert.equal(taskRows.length, 2);
     assert.ok(taskRows.every((row) => row.status === 'DONE'));
-
-    const events = parseJsonLines(path.resolve(runDir, 'run_events.jsonl'));
-    const completion = events.find((event) => event.type === 'run_completed');
-    assert.ok(completion);
-    assert.equal(completion?.status, 'DONE');
   });
 
   await t.test('group(parallel=true) failure waits for sibling task completion and records both task outcomes', async (t2) => {
@@ -893,10 +923,10 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           rules: [
-            { match: 'Task ID:\n- fast_fail', status: 'FAILED', exitCode: 1, sleepMs: 50, skipReport: true },
-            { match: 'Task ID:\n- slow_done', status: 'DONE', exitCode: 0, sleepMs: 1200 },
+            { match: 'Goal (fast_fail)', exitCode: 1, sleepMs: 50, skipReport: true },
+            { match: 'Goal (slow_done)', exitCode: 0, sleepMs: 1200 },
           ],
-          default: { status: 'DONE', exitCode: 0, sleepMs: 0 },
+          default: { exitCode: 0, sleepMs: 0 },
         },
         null,
         2,
@@ -910,15 +940,21 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'group parallel test',
-          target: { repo_root: '.', use_worktrees: true },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          policy: { fail_mode: 'stop', retry: { max_retries: 0, retry_on: ['FAILED', 'TIMEOUT'] } },
-          runtime: {
-            run_root: 'tmp/test_parallel_runs',
-            dry_run: false,
-            cleanup_worktrees: true,
+          repo: '.',
+          worktrees: true,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          on_failure: 'stop',
+          limits: {
+            max_retries: 0,
+            retry_on: ['FAILED', 'TIMEOUT'],
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
+          },
+          options: {
+            run_root: 'tmp/test_parallel_runs',
+            cleanup_worktrees: true,
           },
           flow: [
             {
@@ -997,10 +1033,10 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           rules: [
-            { match: 'Task ID:\n- first_step', status: 'DONE', exitCode: 0, sleepMs: 450 },
-            { match: 'Task ID:\n- second_step', status: 'DONE', exitCode: 0, sleepMs: 450 },
+            { match: 'Goal (first_step)', exitCode: 0, sleepMs: 450 },
+            { match: 'Goal (second_step)', exitCode: 0, sleepMs: 450 },
           ],
-          default: { status: 'DONE', exitCode: 0, sleepMs: 0 },
+          default: { exitCode: 0, sleepMs: 0 },
         },
         null,
         2,
@@ -1014,12 +1050,16 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'group sequential happy path',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_group_sequential_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -1077,10 +1117,10 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           rules: [
-            { match: 'Task ID:\n- left_task', status: 'DONE', exitCode: 0, sleepMs: 500 },
-            { match: 'Task ID:\n- right_task', status: 'DONE', exitCode: 0, sleepMs: 500 },
+            { match: 'Goal (left_task)', exitCode: 0, sleepMs: 500 },
+            { match: 'Goal (right_task)', exitCode: 0, sleepMs: 500 },
           ],
-          default: { status: 'DONE', exitCode: 0, sleepMs: 0 },
+          default: { exitCode: 0, sleepMs: 0 },
         },
         null,
         2,
@@ -1094,12 +1134,16 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'group parallel no-worktree happy path',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_group_parallel_no_worktree_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -1140,7 +1184,7 @@ test('agentflow runtime behavior', async (t) => {
     assert.equal(codexCalls.length, 2);
   });
 
-  await t.test('SIGINT triggers graceful finalize with FAILED completion event', async (t2) => {
+  await t.test('SIGINT triggers graceful finalize with FAILED status', async (t2) => {
     const repoRoot = mkRepo('agentflow-signal-');
     t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
 
@@ -1152,8 +1196,8 @@ test('agentflow runtime behavior', async (t) => {
       mockBehavior,
       JSON.stringify(
         {
-          rules: [{ match: 'Task ID:\n- long_task', status: 'DONE', exitCode: 0, sleepMs: 5000 }],
-          default: { status: 'DONE', exitCode: 0, sleepMs: 0 },
+          rules: [{ match: 'Goal (long_task)', exitCode: 0, sleepMs: 5000 }],
+          default: { exitCode: 0, sleepMs: 0 },
         },
         null,
         2,
@@ -1167,12 +1211,16 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'signal test',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'codex', model: 'gpt-5-nano', reasoning: 'xhigh' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
             run_root: 'tmp/test_signal_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 60,
             timeout_grace_sec: 1,
           },
@@ -1220,11 +1268,8 @@ test('agentflow runtime behavior', async (t) => {
 
     const runBase = path.resolve(repoRoot, 'tmp/test_signal_runs');
     const runDir = getSingleRunDir(runBase);
-    const events = parseJsonLines(path.resolve(runDir, 'run_events.jsonl'));
-    const completion = events.find((event) => event.type === 'run_completed');
-    assert.ok(completion, 'expected run_completed event');
-    assert.equal(completion?.status, 'FAILED');
     assert.ok(fs.existsSync(path.resolve(runDir, 'run_summary.md')));
+    assert.ok(fs.existsSync(path.resolve(runDir, 'run_state.json')));
   });
 
   await t.test('normalizeProvider accepts cursor', () => {
@@ -1242,19 +1287,18 @@ test('agentflow runtime behavior', async (t) => {
   });
 
   await t.test('buildProviderCommand builds correct cursor argv', () => {
-    const launch = {
+    const cmd = buildProviderCommand({
       provider: 'cursor',
-      workspace_cwd: '/tmp/test-workspace',
-      sandbox_mode: 'workspace-write',
       model: 'claude-sonnet',
       reasoning_effort: 'high',
       profile: 'my-profile',
-      prompt_text: 'Do the thing.',
-      last_message_path: '/tmp/out.md',
-      skip_git_repo_check: true,
-    } as unknown as TaskLaunch;
+      promptText: 'Do the thing.',
+      workspaceCwd: '/tmp/test-workspace',
+      lastMessagePath: '/tmp/out.md',
+      skipGitRepoCheck: true,
+      sandboxMode: 'workspace-write',
+    });
 
-    const cmd = buildProviderCommand(launch);
     assert.equal(cmd[0], 'agent');
     assert.ok(cmd.includes('-p'));
     assert.ok(cmd.includes('--force'));
@@ -1271,20 +1315,19 @@ test('agentflow runtime behavior', async (t) => {
     assert.ok(!cmd.includes('-o'), 'cursor should not use -o');
   });
 
-  await t.test('buildProviderCommand builds correct codex argv (unchanged)', () => {
-    const launch = {
+  await t.test('buildProviderCommand builds correct codex argv', () => {
+    const cmd = buildProviderCommand({
       provider: 'codex',
-      workspace_cwd: '/tmp/test-workspace',
-      sandbox_mode: 'workspace-write',
       model: 'gpt-5-nano',
       reasoning_effort: 'xhigh',
       profile: 'my-profile',
-      prompt_text: 'Do the thing.',
-      last_message_path: '/tmp/out.md',
-      skip_git_repo_check: false,
-    } as unknown as TaskLaunch;
+      promptText: 'Do the thing.',
+      workspaceCwd: '/tmp/test-workspace',
+      lastMessagePath: '/tmp/out.md',
+      skipGitRepoCheck: false,
+      sandboxMode: 'workspace-write',
+    });
 
-    const cmd = buildProviderCommand(launch);
     assert.equal(cmd[0], 'codex');
     assert.ok(cmd.includes('exec'));
     assert.ok(cmd.includes('-o'));
@@ -1300,15 +1343,14 @@ test('agentflow runtime behavior', async (t) => {
   await t.test('plan normalization accepts cursor as provider', () => {
     const plan = normalizePlan({
       setup: 'cursor provider test',
-      target: { repo_root: '.' },
-      defaults: { provider: 'cursor', model: 'claude-sonnet' },
+      provider: 'cursor',
+      model: 'claude-sonnet',
       flow: [{ type: 'task', id: 'a', prompt: 'do it' }],
     });
-    assert.equal(plan.defaults.provider, 'cursor');
+    assert.equal(plan.provider, 'cursor');
 
     const taskPlan = normalizePlan({
       setup: 'task level cursor test',
-      target: { repo_root: '.' },
       flow: [{ type: 'task', id: 'b', prompt: 'do it', provider: 'cursor' }],
     });
     assert.equal(taskPlan.workflow[0].type, 'task');
@@ -1327,7 +1369,7 @@ test('agentflow runtime behavior', async (t) => {
     const mockBehavior = path.resolve(repoRoot, 'mock_agent_behavior.json');
     fs.writeFileSync(
       mockBehavior,
-      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 25 } }, null, 2),
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 25 } }, null, 2),
       'utf8',
     );
 
@@ -1337,12 +1379,15 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'cursor happy path test',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'cursor', model: 'claude-sonnet' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'cursor',
+          model: 'claude-sonnet',
+          options: {
             run_root: 'tmp/test_cursor_happy_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -1399,7 +1444,7 @@ test('agentflow runtime behavior', async (t) => {
     const mockBehavior = path.resolve(repoRoot, 'mock_agent_behavior.json');
     fs.writeFileSync(
       mockBehavior,
-      JSON.stringify({ default: { status: 'DONE', exitCode: 0, sleepMs: 0 } }, null, 2),
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }, null, 2),
       'utf8',
     );
 
@@ -1409,12 +1454,15 @@ test('agentflow runtime behavior', async (t) => {
       JSON.stringify(
         {
           setup: 'cursor stdout capture test',
-          target: { repo_root: '.', use_worktrees: false },
-          defaults: { provider: 'cursor', model: 'claude-sonnet' },
-          runtime: {
+          repo: '.',
+          worktrees: false,
+          provider: 'cursor',
+          model: 'claude-sonnet',
+          options: {
             run_root: 'tmp/test_cursor_stdout_runs',
-            dry_run: false,
             cleanup_worktrees: true,
+          },
+          limits: {
             worker_timeout_sec: 30,
             timeout_grace_sec: 1,
           },
@@ -1446,6 +1494,286 @@ test('agentflow runtime behavior', async (t) => {
     const lastMessagePath = String(taskRows[0].lastMessagePath);
     assert.ok(fs.existsSync(lastMessagePath), 'last_message_path should exist from stdout capture');
     const content = fs.readFileSync(lastMessagePath, 'utf8');
-    assert.match(content, /Status: DONE/);
+    assert.match(content, /Task completed/);
+  });
+
+  await t.test('task fails when exit code 0 but no report written', async (t2) => {
+    const repoRoot = mkRepo('agentflow-no-report-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 0, skipReport: true } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'no_report_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'missing report test',
+          repo: '.',
+          worktrees: false,
+          on_failure: 'continue',
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
+            run_root: 'tmp/test_no_report_runs',
+            cleanup_worktrees: true,
+          },
+          limits: {
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [{ type: 'task', id: 'no_report_task', prompt: 'skip the report' }],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath]);
+        assert.equal(exitCode, 1);
+      },
+    );
+
+    const runBase = path.resolve(repoRoot, 'tmp/test_no_report_runs');
+    const runDir = getSingleRunDir(runBase);
+    const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+    const taskRows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
+    assert.equal(taskRows.length, 1);
+    assert.equal(taskRows[0].status, 'FAILED');
+    assert.equal(taskRows[0].failureReason, 'missing_report');
+  });
+
+  await t.test('prior task summaries appear in prompt for second task', async (t2) => {
+    const repoRoot = mkRepo('agentflow-prior-context-');
+    t2.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+    const mockBinDir = path.resolve(repoRoot, 'mockbin');
+    installMockCodex(mockBinDir);
+    const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+    const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+    fs.writeFileSync(
+      mockBehavior,
+      JSON.stringify({ default: { exitCode: 0, sleepMs: 25 } }, null, 2),
+      'utf8',
+    );
+
+    const planPath = path.resolve(repoRoot, 'prior_context_plan.json');
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify(
+        {
+          setup: 'prior context test',
+          repo: '.',
+          worktrees: false,
+          provider: 'codex',
+          model: 'gpt-5-nano',
+          reasoning: 'xhigh',
+          options: {
+            run_root: 'tmp/test_prior_context_runs',
+            cleanup_worktrees: true,
+          },
+          limits: {
+            worker_timeout_sec: 30,
+            timeout_grace_sec: 1,
+          },
+          flow: [
+            { type: 'task', id: 'first_task', prompt: 'do the first thing' },
+            { type: 'task', id: 'second_task', prompt: 'do the second thing' },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await withPatchedEnv(
+      {
+        PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+        MOCK_CODEX_LOG: mockLog,
+        MOCK_CODEX_BEHAVIOR: mockBehavior,
+      },
+      async () => {
+        const exitCode = await main(['--plan', planPath]);
+        assert.equal(exitCode, 0);
+      },
+    );
+
+    const runBase = path.resolve(repoRoot, 'tmp/test_prior_context_runs');
+    const runDir = getSingleRunDir(runBase);
+
+    const group02Dir = fs.readdirSync(runDir).filter((d) => d.startsWith('group_02')).sort();
+    assert.ok(group02Dir.length > 0, 'expected group_02 directory for second task');
+    const secondTaskDirs = fs.readdirSync(path.resolve(runDir, group02Dir[0]));
+    const secondTaskDir = secondTaskDirs.find((d) => d.includes('second'));
+    assert.ok(secondTaskDir, 'expected second_task directory');
+    const promptPath = path.resolve(runDir, group02Dir[0], secondTaskDir, 'prompt.md');
+    const promptContent = fs.readFileSync(promptPath, 'utf8');
+    assert.match(promptContent, /What's Been Done So Far/);
+    assert.match(promptContent, /first_task/);
+  });
+
+  await t.test('setup is optional and prompt omits Background when empty', () => {
+    const plan = normalizePlan({
+      flow: [{ type: 'task', id: 'a', prompt: 'do it' }],
+    });
+    assert.equal(plan.setup, '');
+
+    const prompt = buildPrompt({
+      persona: null,
+      objective: null,
+      setup: '',
+      task: { task_id: 'a', task: 'do it' },
+      contextFiles: [],
+      reportPath: '/tmp/report.md',
+      summaryPath: '/tmp/summary.md',
+      priorTaskSummaries: [],
+    });
+    assert.ok(!prompt.includes('## Background'), 'empty setup should not produce Background section');
+    assert.match(prompt, /do it/);
+
+    const promptWithSetup = buildPrompt({
+      persona: null,
+      objective: null,
+      setup: 'some context',
+      task: { task_id: 'b', task: 'do it' },
+      contextFiles: [],
+      reportPath: '/tmp/report.md',
+      summaryPath: '/tmp/summary.md',
+      priorTaskSummaries: [],
+    });
+    assert.match(promptWithSetup, /## Background\nsome context/);
+  });
+
+  await t.test('prompt includes both report and summary paths in completion instructions', () => {
+    const prompt = buildPrompt({
+      persona: null,
+      objective: null,
+      setup: 'test',
+      task: { task_id: 'a', task: 'do it' },
+      contextFiles: [],
+      reportPath: '/tmp/report.md',
+      summaryPath: '/tmp/summary.md',
+      priorTaskSummaries: [],
+    });
+    assert.match(prompt, /Write a detailed report to: \/tmp\/report\.md/);
+    assert.match(prompt, /Write a brief summary to: \/tmp\/summary\.md/);
+  });
+
+  await t.test('per-task persona overrides plan-level persona in prompt', () => {
+    const prompt = buildPrompt({
+      persona: 'task-level persona',
+      objective: null,
+      setup: '',
+      task: { task_id: 'a', task: 'do it' },
+      contextFiles: [],
+      reportPath: '/tmp/report.md',
+      summaryPath: '/tmp/summary.md',
+      priorTaskSummaries: [],
+    });
+    assert.match(prompt, /task-level persona/);
+    assert.ok(!prompt.includes('senior software engineer'));
+  });
+
+  await t.test('plan normalization accepts context_from on task nodes', () => {
+    const plan = normalizePlan({
+      setup: 'test',
+      flow: [
+        { type: 'task', id: 'a', prompt: 'do a' },
+        { type: 'task', id: 'b', prompt: 'do b', context_from: ['a'] },
+      ],
+    });
+    const taskB = plan.workflow[1];
+    assert.equal(taskB.type, 'task');
+    if (taskB.type === 'task') {
+      assert.deepEqual(taskB.context_from, ['a']);
+    }
+  });
+
+  await t.test('plan normalization accepts persona on task nodes', () => {
+    const plan = normalizePlan({
+      setup: 'test',
+      flow: [
+        { type: 'task', id: 'a', prompt: 'do a', persona: 'You are a QA engineer.' },
+        { type: 'task', id: 'b', prompt: 'do b' },
+      ],
+    });
+    const taskA = plan.workflow[0];
+    const taskB = plan.workflow[1];
+    assert.equal(taskA.type, 'task');
+    assert.equal(taskB.type, 'task');
+    if (taskA.type === 'task') {
+      assert.equal(taskA.persona, 'You are a QA engineer.');
+    }
+    if (taskB.type === 'task') {
+      assert.equal(taskB.persona, null);
+    }
+  });
+
+  await t.test('buildAiGatePrompt uses section-based format', () => {
+    const mockSession = {
+      plan: { setup: 'test setup', objective: 'test objective' },
+      state: { groups: {}, tasks: {} },
+    } as Session;
+    const gate = {
+      type: 'ai' as const,
+      id: 'test_gate',
+      prompt: 'evaluate this',
+      provider: null,
+      model: null,
+      reasoning_effort: null,
+      profile: null,
+      include_recent_tasks: null,
+      score_threshold: null,
+      timeout_sec: null,
+      required_artifacts: [],
+    };
+    const prompt = buildAiGatePrompt(mockSession, gate, 'loop_1', 1, 'post_body');
+    assert.match(prompt, /## Loop Metadata/);
+    assert.match(prompt, /## Run Setup/);
+    assert.match(prompt, /## Objective/);
+    assert.match(prompt, /## Gate Instruction/);
+    assert.match(prompt, /## Output Format Requirements/);
+    assert.ok(!prompt.includes('\\n\\n'), 'should not have literal escaped newlines');
+  });
+
+  await t.test('buildAiGatePrompt omits Run Setup when setup is empty', () => {
+    const mockSession = {
+      plan: { setup: '', objective: null },
+      state: { groups: {}, tasks: {} },
+    } as Session;
+    const gate = {
+      type: 'ai' as const,
+      id: 'test_gate',
+      prompt: 'evaluate this',
+      provider: null,
+      model: null,
+      reasoning_effort: null,
+      profile: null,
+      include_recent_tasks: null,
+      score_threshold: null,
+      timeout_sec: null,
+      required_artifacts: [],
+    };
+    const prompt = buildAiGatePrompt(mockSession, gate, 'loop_1', 1, 'post_body');
+    assert.ok(!prompt.includes('## Run Setup'), 'empty setup should not produce Run Setup section');
+    assert.match(prompt, /\(not provided\)/);
   });
 });
