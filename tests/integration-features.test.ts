@@ -15,7 +15,7 @@ test('--validate succeeds for valid plan and exits 0', async (t) => {
   fs.writeFileSync(
     planPath,
     JSON.stringify({
-      repo: '.',
+        repos: { main: '.' },
       provider: 'codex',
       flow: [{ type: 'task', id: 'task_a', prompt: 'do something' }],
     }),
@@ -64,7 +64,7 @@ test('--resume skips completed tasks and re-runs failed ones', async (t) => {
     planPath,
     JSON.stringify({
       setup: 'resume test',
-      repo: '.',
+        repos: { main: '.' },
       worktrees: true,
       provider: 'codex',
       model: 'gpt-5-nano',
@@ -145,7 +145,7 @@ test('progress tag appears in task execution log', async (t) => {
     planPath,
     JSON.stringify({
       setup: 'progress test',
-      repo: '.',
+        repos: { main: '.' },
       provider: 'codex',
       model: 'gpt-5-nano',
       reasoning: 'xhigh',
@@ -211,7 +211,7 @@ test('max_retries: 1 with on_failure: stop retries before stopping', async (t) =
     planPath,
     JSON.stringify({
       setup: 'retry test',
-      repo: '.',
+        repos: { main: '.' },
       worktrees: false,
       provider: 'codex',
       model: 'gpt-5-nano',
@@ -276,7 +276,7 @@ test('max_retries exhausted with on_failure: stop stops the run', async (t) => {
     planPath,
     JSON.stringify({
       setup: 'retry stop test',
-      repo: '.',
+        repos: { main: '.' },
       worktrees: false,
       provider: 'codex',
       model: 'gpt-5-nano',
@@ -336,7 +336,7 @@ test('worker timeout kills task and marks it FAILED/timed_out', async (t) => {
     planPath,
     JSON.stringify({
       setup: 'timeout test',
-      repo: '.',
+        repos: { main: '.' },
       worktrees: false,
       provider: 'codex',
       model: 'gpt-5-nano',
@@ -400,7 +400,7 @@ test('max_failures terminates run when exceeded', async (t) => {
     planPath,
     JSON.stringify({
       setup: 'max_failures test',
-      repo: '.',
+        repos: { main: '.' },
       worktrees: false,
       provider: 'codex',
       model: 'gpt-5-nano',

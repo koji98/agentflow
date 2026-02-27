@@ -123,7 +123,7 @@ agentflow --plan-help
 | `setup` | string | No | `""` | Global background/instructions injected into every task prompt. |
 | `objective` | string | No | `null` | Overall goal shared with agents and loop evaluators. |
 | `persona` | string | No | `null` | Agent identity/personality injected at top of prompt. |
-| `repo` | string | No | `"."` | Repo root path, resolved from plan file directory when relative. |
+| `repos` | object | Yes | none | Map of alias names to repo root paths, resolved from plan file directory when relative. |
 | `provider` | `"codex"` \| `"cursor"` | No | `"codex"` | Default launch provider. |
 | `model` | string | No | `"gpt-5-nano"` | Default model identifier passed to provider CLI. |
 | `reasoning` | string | No | `"xhigh"` | Reasoning effort (codex only; ignored by cursor). |
@@ -168,6 +168,7 @@ Unknown keys are rejected at every schema level.
 | `type` | `"task"` | Yes | | Node discriminator. |
 | `id` | string | Yes | | Globally unique task identifier. |
 | `prompt` | string | Yes | | Task instruction text. |
+| `repo` | string | No | single default | Alias from `repos`; required when multiple repos are defined. |
 | `provider` | string | No | plan-level | Per-task provider override. |
 | `model` | string | No | plan-level | Per-task model override. |
 | `persona` | string | No | plan-level | Per-task persona override. |
@@ -234,7 +235,7 @@ If `score_threshold` is set, passing requires `score >= threshold`. Otherwise pa
 For `context_files` values:
 
 - **absolute path**: used as-is
-- **`repo:<path>`**: resolved from repo root
+- **`<alias>:<path>`**: resolved from the named repo root (alias must match a key in `repos`)
 - **`plan:<path>`**: resolved from plan file directory
 - **plain relative path**: resolved from plan file directory
 
@@ -278,6 +279,27 @@ Run directory: `options.run_root/<run_id>/`
 | `0` | All tasks completed successfully. |
 | `1` | Validation or execution failure. |
 | `2` | CLI usage error. |
+
+## Multi-Repo
+
+`agentflow` supports plans that span multiple repositories. Define a `repos` map with one alias per repo:
+
+```json
+{
+  "repos": {
+    "api": "../api-service",
+    "web": "../web-app"
+  },
+  "flow": [
+    { "type": "task", "id": "schema", "repo": "api", "prompt": "Update the API schema." },
+    { "type": "task", "id": "client", "repo": "web", "prompt": "Regenerate the client from the new schema.", "context_from": ["schema"] }
+  ]
+}
+```
+
+When `repos` has a single entry, the task-level `repo` field is optional. When multiple entries exist, every task must specify which repo it targets.
+
+Context files can reference any repo by alias: `"context_files": ["api:src/schema.ts"]`.
 
 ## Example
 

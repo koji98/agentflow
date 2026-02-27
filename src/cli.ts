@@ -10,7 +10,7 @@ import {
   loadPayload,
   normalizePlan,
   resolveConfigPaths,
-  resolveProjectRoot,
+  resolveRepoRoots,
 } from './lib/plan.ts';
 import {
   createSession,
@@ -31,16 +31,16 @@ import type { WorkerPlan } from './lib/types.ts';
  *
  * @param plan Normalized worker plan with contextFiles array.
  * @param planPath Absolute path to the plan JSON file.
- * @param projectRoot Absolute path to the target repository root.
+ * @param repoRoots Map of alias to resolved absolute repo root.
  * @returns Array of resolved absolute paths to existing context files.
  * @throws {Error} When any configured file does not exist.
  */
 function validateGlobalContextFiles(
   plan: WorkerPlan,
   planPath: string,
-  projectRoot: string,
+  repoRoots: Record<string, string>,
 ): string[] {
-  return resolveConfigPaths(planPath, projectRoot, plan.contextFiles);
+  return resolveConfigPaths(planPath, repoRoots, plan.contextFiles);
 }
 
 /**
@@ -89,10 +89,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 1;
   }
 
-  const projectRoot = resolveProjectRoot(planPath, plan.targetRepoRoot);
-  if (!fs.existsSync(projectRoot)) {
-    logError(`Resolved repo root does not exist: ${projectRoot}`);
-    return 1;
+  const repoRoots = resolveRepoRoots(planPath, plan.repos);
+  for (const [alias, root] of Object.entries(repoRoots)) {
+    if (!fs.existsSync(root)) {
+      logError(`Resolved repo root for "${alias}" does not exist: ${root}`);
+      return 1;
+    }
   }
 
   plan.options.dryRun = args.dryRunOverride === true;
@@ -101,7 +103,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   let globalContextFiles;
   try {
-    globalContextFiles = validateGlobalContextFiles(plan, planPath, projectRoot);
+    globalContextFiles = validateGlobalContextFiles(plan, planPath, repoRoots);
   } catch (error) {
     logError(String(error));
     return 1;
@@ -114,7 +116,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     log(`  workflow_nodes: ${countWorkflowNodes(plan.workflow)}`);
     log(`  task_nodes:     ${totalTaskCount}`);
     log(`  provider:       ${plan.provider}`);
-    log(`  repo:           ${projectRoot}`);
+    for (const [alias, root] of Object.entries(repoRoots)) {
+      log(`  repo.${alias}:${' '.repeat(Math.max(1, 10 - alias.length))}${root}`);
+    }
     return 0;
   }
 
@@ -131,7 +135,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return 1;
     }
     session = createResumedSession({
-      projectRoot,
+      repoRoots,
       planPath,
       plan,
       globalContextFiles,
@@ -142,7 +146,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     log(`[resume] resuming run ${session.paths.runId} (${session.resumedTasks.size} completed tasks will be skipped)`);
   } else {
     session = createSession({
-      projectRoot,
+      repoRoots,
       planPath,
       plan,
       globalContextFiles,
@@ -154,7 +158,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     log('[dry-run] no CLI sessions will be executed');
   }
 
-  log(`project_root:   ${session.paths.projectRoot}`);
+  for (const [alias, root] of Object.entries(session.paths.repoRoots)) {
+    log(`repo.${alias}:${' '.repeat(Math.max(1, 10 - alias.length))}${root}`);
+  }
   log(`plan_file:      ${session.paths.configPath}`);
   log(`run_root:       ${session.paths.runRoot}`);
   log(`run_id:         ${session.paths.runId}`);

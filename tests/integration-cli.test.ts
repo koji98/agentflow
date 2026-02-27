@@ -59,7 +59,7 @@ test('dry-run is CLI-flag only (plan options.dry_run does not force dry mode)', 
     JSON.stringify(
       {
         setup: 'dry flag behavior test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -120,7 +120,7 @@ test('--skip-git-repo-check is forwarded to codex exec', async (t) => {
     JSON.stringify(
       {
         setup: 'skip git repo check passthrough test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -182,7 +182,7 @@ test('workspace-write sandbox is default when --sandbox is not provided', async 
     JSON.stringify(
       {
         setup: 'default sandbox behavior test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -243,7 +243,7 @@ test('--sandbox is forwarded to codex exec', async (t) => {
     JSON.stringify(
       {
         setup: 'sandbox passthrough test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',

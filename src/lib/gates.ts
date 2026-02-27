@@ -178,9 +178,10 @@ function runDeterministicGate(
   gateDir: string,
   evalBase: string,
 ): EvaluatorOutput {
+  const detDefaultRoot = Object.values(session.paths.repoRoots)[0];
   const logPath = path.resolve(gateDir, `${evalBase}.log`);
   const jsonPath = path.resolve(gateDir, `${evalBase}.json`);
-  const cwd = gate.exec.cwd ? path.resolve(session.paths.projectRoot, gate.exec.cwd) : session.paths.projectRoot;
+  const cwd = gate.exec.cwd ? path.resolve(detDefaultRoot, gate.exec.cwd) : detDefaultRoot;
   const cmd = [gate.exec.command, ...gate.exec.args];
   const timeoutSec = gate.timeoutSec || gate.exec.timeoutSec || 120;
   const result = spawnSync(cmd[0], cmd.slice(1), {
@@ -252,6 +253,7 @@ function runAiGate(
     return out;
   }
 
+  const aiDefaultRoot = Object.values(session.paths.repoRoots)[0];
   const messagePath = path.resolve(gateDir, `${evalBase}.last_message.md`);
   const logPath = path.resolve(gateDir, `${evalBase}.log`);
   const jsonPath = path.resolve(gateDir, `${evalBase}.json`);
@@ -264,7 +266,7 @@ function runAiGate(
     reasoningEffort: gate.reasoningEffort || session.plan.reasoningEffort,
     profile: gate.profile || session.plan.profile,
     promptText: prompt,
-    workspaceCwd: session.paths.projectRoot,
+    workspaceCwd: aiDefaultRoot,
     lastMessagePath: messagePath,
     skipGitRepoCheck: session.plan.options.skipGitRepoCheck,
     sandboxMode: session.plan.options.sandboxMode,
@@ -272,7 +274,7 @@ function runAiGate(
 
   const useStdin = provider === 'codex';
   const result = spawnSync(cmd[0], cmd.slice(1), {
-    cwd: session.paths.projectRoot,
+    cwd: aiDefaultRoot,
     input: useStdin ? prompt : undefined,
     encoding: 'utf8',
     timeout: timeoutSec * 1000,
@@ -280,7 +282,7 @@ function runAiGate(
   });
 
   const logText = [
-    `$ (cd ${JSON.stringify(session.paths.projectRoot)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`,
+    `$ (cd ${JSON.stringify(aiDefaultRoot)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`,
     '',
     '--- stdout ---',
     result.stdout || '',
@@ -337,11 +339,12 @@ export function evaluateGate(
     };
   }
 
+  const defaultRoot = Object.values(session.paths.repoRoots)[0];
   const missingArtifacts: string[] = [];
   for (const artifact of gate.requiredArtifacts) {
     const artifactPath = path.isAbsolute(artifact)
       ? path.resolve(artifact)
-      : path.resolve(session.paths.projectRoot, artifact);
+      : path.resolve(defaultRoot, artifact);
     if (!fs.existsSync(artifactPath)) missingArtifacts.push(artifact);
   }
   if (missingArtifacts.length > 0) {

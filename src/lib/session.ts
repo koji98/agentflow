@@ -27,27 +27,27 @@ function saveJson(filePath: string, payload: unknown): void {
  * Builds the in-memory execution session and initial persisted run state values.
  *
  * @param params Session initialization inputs.
- * @param params.projectRoot Absolute path to the target repository.
+ * @param params.repoRoots Map of alias to resolved absolute repo root.
  * @param params.planPath Absolute path to the plan JSON file.
  * @param params.plan Normalized worker plan.
  * @param params.globalContextFiles Resolved global context file paths.
  * @returns Fully initialized session object.
  */
 export function createSession({
-  projectRoot,
+  repoRoots,
   planPath,
   plan,
   globalContextFiles,
   totalTaskCount,
 }: {
-  projectRoot: string;
+  repoRoots: Record<string, string>;
   planPath: string;
   plan: WorkerPlan;
   globalContextFiles: string[];
   totalTaskCount: number;
 }): Session {
   const runId = plan.options.runId || nowRunId();
-  const runRoot = path.resolve(projectRoot, plan.options.runRoot, runId);
+  const runRoot = path.resolve(path.dirname(planPath), plan.options.runRoot, runId);
   const state: RunState = {
     runId,
     createdAtUtc: nowUtcIso(),
@@ -66,7 +66,7 @@ export function createSession({
     dryRun: Boolean(plan.options.dryRun),
     globalContextFiles,
     paths: {
-      projectRoot,
+      repoRoots,
       configPath: planPath,
       runRoot,
       runId,
@@ -82,8 +82,8 @@ export function createSession({
       loopIterationCount: 0,
     },
     worktreeTracker: {
-      created: new Set(),
-      createdBranches: new Set(),
+      created: new Map(),
+      createdBranches: new Map(),
     },
     state,
     resumedTasks: new Map(),
@@ -121,7 +121,7 @@ export function loadResumedState(runDir: string): RunState {
  * skipped during workflow execution.
  *
  * @param params Session initialization inputs.
- * @param params.projectRoot Absolute path to the target repository.
+ * @param params.repoRoots Map of alias to resolved absolute repo root.
  * @param params.planPath Absolute path to the plan JSON file.
  * @param params.plan Normalized worker plan.
  * @param params.globalContextFiles Resolved global context file paths.
@@ -131,7 +131,7 @@ export function loadResumedState(runDir: string): RunState {
  * @returns Session pre-populated with completed task state.
  */
 export function createResumedSession({
-  projectRoot,
+  repoRoots,
   planPath,
   plan,
   globalContextFiles,
@@ -139,7 +139,7 @@ export function createResumedSession({
   priorState,
   runDir,
 }: {
-  projectRoot: string;
+  repoRoots: Record<string, string>;
   planPath: string;
   plan: WorkerPlan;
   globalContextFiles: string[];
@@ -178,7 +178,7 @@ export function createResumedSession({
     dryRun: Boolean(plan.options.dryRun),
     globalContextFiles,
     paths: {
-      projectRoot,
+      repoRoots,
       configPath: planPath,
       runRoot,
       runId,
@@ -194,8 +194,8 @@ export function createResumedSession({
       loopIterationCount: priorState.totalLoopIterations,
     },
     worktreeTracker: {
-      created: new Set(),
-      createdBranches: new Set(),
+      created: new Map(),
+      createdBranches: new Map(),
     },
     state,
     resumedTasks,

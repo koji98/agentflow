@@ -21,6 +21,7 @@ export interface CliArgs {
 export interface PlanTask {
   taskId: string;
   task: string;
+  repo: string | null;
   provider: Provider | null;
   model: string | null;
   persona: string | null;
@@ -118,7 +119,7 @@ export interface WorkerPlan {
   setup: string;
   objective: string | null;
   persona: string | null;
-  targetRepoRoot: string;
+  repos: Record<string, string>;
   provider: Provider;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -164,6 +165,7 @@ export interface TaskLaunch {
   sandboxMode: SandboxMode;
   nodePath: string;
   attempt: number;
+  repoRoot: string;
 }
 
 /** Runtime status values tracked on groups/tasks. */
@@ -244,7 +246,7 @@ export interface DecisionTraceEntry {
 
 /** Resolved filesystem paths for one run. */
 export interface RunPaths {
-  projectRoot: string;
+  repoRoots: Record<string, string>;
   configPath: string;
   runRoot: string;
   runId: string;
@@ -262,10 +264,10 @@ export interface RunCounters {
   loopIterationCount: number;
 }
 
-/** Tracks worktrees and branches created during the run for cleanup. */
+/** Tracks worktrees and branches created during the run for cleanup. Maps path/branch to origin repoRoot. */
 export interface WorktreeTracker {
-  created: Set<string>;
-  createdBranches: Set<string>;
+  created: Map<string, string>;
+  createdBranches: Map<string, string>;
 }
 
 /** In-memory execution session shared across orchestration functions. */

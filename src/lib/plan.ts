@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -196,19 +195,30 @@ function normalizeTaskNode(
   payload: Record<string, unknown>,
   fieldName: string,
   seenTaskIds: Set<string>,
+  repoAliases: string[],
 ): TaskNode {
   const f = fields(payload, fieldName, [
-    'type', 'id', 'prompt', 'provider', 'model', 'context_files', 'context_from', 'persona',
+    'type', 'id', 'prompt', 'repo', 'provider', 'model', 'context_files', 'context_from', 'persona',
   ]);
   const taskId = f.strReq('id');
   if (seenTaskIds.has(taskId)) {
     throw new Error(`task id values must be unique across flow. Duplicate: ${taskId}`);
   }
   seenTaskIds.add(taskId);
+
+  const repo = f.str('repo');
+  if (repoAliases.length > 1 && !repo) {
+    throw new Error(`${fieldName}.repo is required when multiple repos are defined. Task "${taskId}" is missing it.`);
+  }
+  if (repo && !repoAliases.includes(repo)) {
+    throw new Error(`${fieldName}.repo "${repo}" does not match any key in repos (${repoAliases.join(', ')}).`);
+  }
+
   return {
     type: 'task',
     taskId,
     task: f.strReq('prompt'),
+    repo: repo || null,
     provider: normalizeProvider(f.raw('provider')) as Provider | null,
     model: f.str('model'),
     contextFiles: f.strArr('context_files'),
@@ -225,6 +235,7 @@ function normalizeFlowNode(
   payload: unknown,
   fieldName: string,
   seenTaskIds: Set<string>,
+  repoAliases: string[],
 ): WorkflowNode {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error(`${fieldName} must be an object.`);
@@ -232,7 +243,7 @@ function normalizeFlowNode(
   const nodePayload = payload as Record<string, unknown>;
   const type = requiredString(nodePayload.type, `${fieldName}.type`).toLowerCase();
 
-  if (type === 'task') return normalizeTaskNode(nodePayload, fieldName, seenTaskIds);
+  if (type === 'task') return normalizeTaskNode(nodePayload, fieldName, seenTaskIds, repoAliases);
 
   if (type === 'group') {
     const f = fields(nodePayload, fieldName, ['type', 'id', 'parallel', 'steps']);
@@ -244,7 +255,7 @@ function normalizeFlowNode(
       type: 'group',
       id: f.strReq('id'),
       parallel: f.boolReq('parallel'),
-      steps: stepsPayload.map((s, i) => normalizeFlowNode(s, `${fieldName}.steps[${i}]`, seenTaskIds)),
+      steps: stepsPayload.map((s, i) => normalizeFlowNode(s, `${fieldName}.steps[${i}]`, seenTaskIds, repoAliases)),
     };
     return node;
   }
@@ -262,7 +273,7 @@ function normalizeFlowNode(
       id: loopId,
       maxIterations: f.posInt('max_iterations'),
       until: normalizeLoopGate(gatePayload, `${fieldName}.gate`, loopId),
-      body: bodyPayload.map((b, i) => normalizeFlowNode(b, `${fieldName}.body[${i}]`, seenTaskIds)),
+      body: bodyPayload.map((b, i) => normalizeFlowNode(b, `${fieldName}.body[${i}]`, seenTaskIds, repoAliases)),
     };
   }
 
@@ -311,7 +322,7 @@ export function normalizePlan(payload: unknown): WorkerPlan {
   }
 
   const f = fields(payload as Record<string, unknown>, 'plan', [
-    'version', 'setup', 'objective', 'persona', 'repo', 'provider', 'model',
+    'version', 'setup', 'objective', 'persona', 'repos', 'provider', 'model',
     'reasoning', 'profile', 'on_failure', 'worktrees', 'context_files',
     'limits', 'options', 'flow',
   ]);
@@ -345,18 +356,32 @@ export function normalizePlan(payload: unknown): WorkerPlan {
   if (workerTimeoutSec < 0) throw new Error('limits.worker_timeout_sec must be >= 0.');
   if (timeoutGraceSec < 1) throw new Error('limits.timeout_grace_sec must be >= 1.');
 
+  const reposRaw = f.obj('repos');
+  const reposEntries = Object.entries(reposRaw);
+  if (reposEntries.length === 0) {
+    throw new Error('plan.repos must define at least one repository alias.');
+  }
+  const repos: Record<string, string> = {};
+  for (const [alias, val] of reposEntries) {
+    if (typeof val !== 'string' || !val) {
+      throw new Error(`plan.repos.${alias} must be a non-empty string path.`);
+    }
+    repos[alias] = val;
+  }
+  const repoAliases = Object.keys(repos);
+
   const flowPayload = (payload as Record<string, unknown>).flow;
   if (!Array.isArray(flowPayload) || flowPayload.length === 0) {
     throw new Error('flow must include at least one node (task, group, loop).');
   }
   const seenTaskIds = new Set<string>();
-  const workflow = flowPayload.map((n, i) => normalizeFlowNode(n, `flow[${i}]`, seenTaskIds));
+  const workflow = flowPayload.map((n, i) => normalizeFlowNode(n, `flow[${i}]`, seenTaskIds, repoAliases));
 
   return {
     setup: f.str('setup') || '',
     objective: f.str('objective'),
     persona: f.str('persona'),
-    targetRepoRoot: requiredString((payload as Record<string, unknown>).repo ?? '.', 'repo'),
+    repos,
     provider: (normalizeProvider(f.raw('provider')) || 'codex') as WorkerPlan['provider'],
     model: f.str('model') || 'gpt-5-nano',
     reasoningEffort: normalizeReasoningEffort(f.raw('reasoning')) || 'xhigh',
@@ -392,45 +417,32 @@ export function normalizePlan(payload: unknown): WorkerPlan {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves target project root for a run.
+ * Resolves repo alias paths to absolute directories.
  * @param planPath Absolute path to the plan JSON file.
- * @param targetRepoRoot Optional explicit repo root from plan or environment.
- * @returns Absolute path to the project root directory.
+ * @param repos Map of alias to unresolved path from plan.
+ * @returns Map of alias to resolved absolute path.
  */
-export function resolveProjectRoot(planPath: string, targetRepoRoot: string | null = null): string {
-  if (targetRepoRoot) {
-    const baseDir = path.dirname(planPath);
-    return path.isAbsolute(targetRepoRoot)
-      ? path.resolve(targetRepoRoot)
-      : path.resolve(baseDir, targetRepoRoot);
+export function resolveRepoRoots(planPath: string, repos: Record<string, string>): Record<string, string> {
+  const baseDir = path.dirname(planPath);
+  const resolved: Record<string, string> = {};
+  for (const [alias, raw] of Object.entries(repos)) {
+    resolved[alias] = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(baseDir, raw);
   }
-
-  const envRoot =
-    optionalString(process.env.AGENTFLOW_PROJECT_ROOT) ||
-    optionalString(process.env.AGENT_WORKERS_PROJECT_ROOT);
-  if (envRoot) return path.resolve(envRoot);
-
-  const git = spawnSync('git', ['rev-parse', '--show-toplevel'], {
-    cwd: path.dirname(planPath),
-    encoding: 'utf8',
-  });
-  if (git.status === 0) {
-    const out = optionalString(git.stdout);
-    if (out) return path.resolve(out);
-  }
-
-  return process.cwd();
+  return resolved;
 }
 
 /**
  * Resolves and validates configured file paths.
+ * Supports prefixes: `plan:`, `<alias>:` (repo alias from repos map), and absolute paths.
+ * Plain relative paths resolve from the plan directory.
+ *
  * @param planPath Absolute path to the plan JSON file.
- * @param projectRoot Absolute path to the project root.
+ * @param repoRoots Map of alias to resolved absolute repo root.
  * @param values Array of raw path strings from the plan.
  * @returns Array of resolved absolute paths.
  * @throws {Error} When any configured file does not exist.
  */
-export function resolveConfigPaths(planPath: string, projectRoot: string, values: string[]): string[] {
+export function resolveConfigPaths(planPath: string, repoRoots: Record<string, string>, values: string[]): string[] {
   const planDir = path.dirname(planPath);
   const out: string[] = [];
   const missing: string[] = [];
@@ -439,12 +451,22 @@ export function resolveConfigPaths(planPath: string, projectRoot: string, values
     let resolved: string;
     if (path.isAbsolute(raw)) {
       resolved = path.resolve(raw);
-    } else if (raw.startsWith('repo:')) {
-      resolved = path.resolve(projectRoot, raw.slice('repo:'.length));
     } else if (raw.startsWith('plan:')) {
       resolved = path.resolve(planDir, raw.slice('plan:'.length));
     } else {
-      resolved = path.resolve(planDir, raw);
+      const colonIdx = raw.indexOf(':');
+      if (colonIdx > 0) {
+        const prefix = raw.slice(0, colonIdx);
+        const rest = raw.slice(colonIdx + 1);
+        const root = repoRoots[prefix];
+        if (root) {
+          resolved = path.resolve(root, rest);
+        } else {
+          resolved = path.resolve(planDir, raw);
+        }
+      } else {
+        resolved = path.resolve(planDir, raw);
+      }
     }
     if (fs.existsSync(resolved)) out.push(resolved);
     else missing.push(raw);

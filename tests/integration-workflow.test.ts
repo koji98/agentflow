@@ -26,7 +26,7 @@ test('task-level provider/model overrides are applied per task', async (t) => {
     JSON.stringify(
       {
         setup: 'task override behavior test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -112,7 +112,7 @@ test('single-task happy path succeeds and persists DONE artifacts', async (t) =>
     JSON.stringify(
       {
         setup: 'happy single test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: true,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -206,7 +206,7 @@ test('group(parallel=true) happy path succeeds with DONE results for all tasks',
     JSON.stringify(
       {
         setup: 'happy group parallel test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: true,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -293,7 +293,7 @@ test('group(parallel=true) failure waits for sibling task completion and records
     JSON.stringify(
       {
         setup: 'group parallel test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: true,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -403,7 +403,7 @@ test('group(parallel=false) executes child steps sequentially in order', async (
     JSON.stringify(
       {
         setup: 'group sequential happy path',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -487,7 +487,7 @@ test('group(parallel=true) can run without worktrees when tasks are independent'
     JSON.stringify(
       {
         setup: 'group parallel no-worktree happy path',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -571,7 +571,7 @@ fi
     planPath,
     JSON.stringify({
       setup: 'loop deterministic gate test',
-      repo: '.',
+      repos: { main: '.' },
       worktrees: false,
       provider: 'codex',
       model: 'gpt-5-nano',
@@ -611,4 +611,67 @@ fi
 
   const codexCalls = parseJsonLines(mockLog);
   assert.equal(codexCalls.length, 1, 'loop body task should have executed exactly once before gate passed');
+});
+
+test('multi-repo plan with two repos targets different repos per task', async (t) => {
+  const repoA = mkRepo('agentflow-multirepo-api-');
+  const repoB = mkRepo('agentflow-multirepo-web-');
+  t.after(() => {
+    fs.rmSync(repoA, { recursive: true, force: true });
+    fs.rmSync(repoB, { recursive: true, force: true });
+  });
+
+  const mockBinDir = path.resolve(repoA, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoA, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoA, 'mock_behavior.json');
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoA, 'multi_repo_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'multi-repo integration test',
+      repos: { api: '.', web: repoB },
+      worktrees: false,
+      provider: 'codex',
+      model: 'gpt-5-nano',
+      reasoning: 'xhigh',
+      options: { run_root: 'tmp/test_multi_repo_runs' },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        { type: 'task', id: 'api_task', repo: 'api', prompt: 'update API schema' },
+        { type: 'task', id: 'web_task', repo: 'web', prompt: 'update web client' },
+      ],
+    }),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const codexCalls = parseJsonLines(mockLog);
+  assert.equal(codexCalls.length, 2, 'both tasks should have been invoked');
+  const taskIds = codexCalls.map((c) => c.taskId).sort();
+  assert.deepEqual(taskIds, ['api_task', 'web_task']);
+
+  const apiCall = codexCalls.find((c) => c.taskId === 'api_task');
+  const webCall = codexCalls.find((c) => c.taskId === 'web_task');
+  assert.ok(apiCall);
+  assert.ok(webCall);
+  assert.equal(apiCall.cwd, fs.realpathSync(repoA), 'api task should run in repo A');
+  assert.equal(webCall.cwd, fs.realpathSync(repoB), 'web task should run in repo B');
 });

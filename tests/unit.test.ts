@@ -70,12 +70,14 @@ test('--plan-help prints detailed plan schema guidance', async () => {
 test('defaults cleanup_worktrees to true', () => {
   const plan = normalizePlan({
     setup: 'x',
+    repos: { main: '.' },
     flow: [{ type: 'task', id: 'a', prompt: 'b' }],
   });
   assert.equal(plan.options.cleanupWorktrees, true);
 
   const explicit = normalizePlan({
     setup: 'x',
+    repos: { main: '.' },
     options: { cleanup_worktrees: false },
     flow: [{ type: 'task', id: 'a', prompt: 'b' }],
   });
@@ -107,6 +109,7 @@ test('unknown plan keys fail schema normalization with field-specific errors', (
     () =>
       normalizePlan({
         setup: 'x',
+        repos: { main: '.' },
         flow: [{ type: 'task', id: 'a', prompt: 'b', extra_task_field: true }],
       }),
     /flow\[0\] contains unknown key: "extra_task_field"\./,
@@ -118,6 +121,7 @@ test('flow uses group nodes and requires explicit parallel boolean', () => {
     () =>
       normalizePlan({
         setup: 'x',
+        repos: { main: '.' },
         flow: [{ type: 'parallel', id: 'legacy', steps: [] }],
       }),
     /flow\[0\]\.type must be one of: task, group, loop\./,
@@ -127,6 +131,7 @@ test('flow uses group nodes and requires explicit parallel boolean', () => {
     () =>
       normalizePlan({
         setup: 'x',
+        repos: { main: '.' },
         flow: [
           {
             type: 'group',
@@ -228,6 +233,7 @@ test('buildProviderCommand builds correct codex argv', () => {
 test('plan normalization accepts cursor as provider', () => {
   const plan = normalizePlan({
     setup: 'cursor provider test',
+    repos: { main: '.' },
     provider: 'cursor',
     model: 'claude-sonnet',
     flow: [{ type: 'task', id: 'a', prompt: 'do it' }],
@@ -236,6 +242,7 @@ test('plan normalization accepts cursor as provider', () => {
 
   const taskPlan = normalizePlan({
     setup: 'task level cursor test',
+    repos: { main: '.' },
     flow: [{ type: 'task', id: 'b', prompt: 'do it', provider: 'cursor' }],
   });
   assert.equal(taskPlan.workflow[0].type, 'task');
@@ -246,6 +253,7 @@ test('plan normalization accepts cursor as provider', () => {
 
 test('setup is optional and prompt omits Background when empty', () => {
   const plan = normalizePlan({
+    repos: { main: '.' },
     flow: [{ type: 'task', id: 'a', prompt: 'do it' }],
   });
   assert.equal(plan.setup, '');
@@ -309,6 +317,7 @@ test('per-task persona overrides plan-level persona in prompt', () => {
 test('plan normalization accepts context_from on task nodes', () => {
   const plan = normalizePlan({
     setup: 'test',
+    repos: { main: '.' },
     flow: [
       { type: 'task', id: 'a', prompt: 'do a' },
       { type: 'task', id: 'b', prompt: 'do b', context_from: ['a'] },
@@ -324,6 +333,7 @@ test('plan normalization accepts context_from on task nodes', () => {
 test('plan normalization accepts persona on task nodes', () => {
   const plan = normalizePlan({
     setup: 'test',
+    repos: { main: '.' },
     flow: [
       { type: 'task', id: 'a', prompt: 'do a', persona: 'You are a QA engineer.' },
       { type: 'task', id: 'b', prompt: 'do b' },
@@ -502,7 +512,7 @@ test('evaluateGateOutcome fails when payload is null', () => {
 
 // --- resolveConfigPaths ---
 
-test('resolveConfigPaths resolves repo: prefix from project root', (t) => {
+test('resolveConfigPaths resolves alias: prefix from repo root', (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentflow-resolve-'));
   t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
@@ -511,7 +521,8 @@ test('resolveConfigPaths resolves repo: prefix from project root', (t) => {
   fs.writeFileSync(path.resolve(projectRoot, 'src.ts'), 'code', 'utf8');
 
   const planPath = path.resolve(tmpDir, 'plan.json');
-  const resolved = resolveConfigPaths(planPath, projectRoot, ['repo:src.ts']);
+  const repoRoots = { main: projectRoot };
+  const resolved = resolveConfigPaths(planPath, repoRoots, ['main:src.ts']);
   assert.equal(resolved.length, 1);
   assert.equal(resolved[0], path.resolve(projectRoot, 'src.ts'));
 });
@@ -525,8 +536,8 @@ test('resolveConfigPaths resolves plan: prefix from plan directory', (t) => {
   fs.writeFileSync(path.resolve(planDir, 'context.md'), 'ctx', 'utf8');
 
   const planPath = path.resolve(planDir, 'plan.json');
-  const projectRoot = tmpDir;
-  const resolved = resolveConfigPaths(planPath, projectRoot, ['plan:context.md']);
+  const repoRoots = { main: tmpDir };
+  const resolved = resolveConfigPaths(planPath, repoRoots, ['plan:context.md']);
   assert.equal(resolved.length, 1);
   assert.equal(resolved[0], path.resolve(planDir, 'context.md'));
 });
@@ -537,7 +548,8 @@ test('resolveConfigPaths resolves plain relative paths from plan directory', (t)
 
   fs.writeFileSync(path.resolve(tmpDir, 'readme.md'), 'hi', 'utf8');
   const planPath = path.resolve(tmpDir, 'plan.json');
-  const resolved = resolveConfigPaths(planPath, tmpDir, ['readme.md']);
+  const repoRoots = { main: tmpDir };
+  const resolved = resolveConfigPaths(planPath, repoRoots, ['readme.md']);
   assert.equal(resolved.length, 1);
   assert.equal(resolved[0], path.resolve(tmpDir, 'readme.md'));
 });
@@ -545,8 +557,9 @@ test('resolveConfigPaths resolves plain relative paths from plan directory', (t)
 test('resolveConfigPaths throws for missing files', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentflow-resolve-'));
   const planPath = path.resolve(tmpDir, 'plan.json');
+  const repoRoots = { main: tmpDir };
   assert.throws(
-    () => resolveConfigPaths(planPath, tmpDir, ['nonexistent.md']),
+    () => resolveConfigPaths(planPath, repoRoots, ['nonexistent.md']),
     /Configured context file\(s\) not found/,
   );
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -598,4 +611,78 @@ test('excerptText truncates long files', (t) => {
 
   const short = excerptText(filePath, 200);
   assert.ok(!short.includes('...[truncated]'));
+});
+
+// --- multi-repo validation ---
+
+test('normalizePlan rejects plan with no repos', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+      }),
+    /plan\.repos must define at least one repository alias\./,
+  );
+});
+
+test('normalizePlan rejects task with missing repo when multiple repos exist', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { api: '.', web: '../web' },
+        flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+      }),
+    /flow\[0\]\.repo is required when multiple repos are defined\./,
+  );
+});
+
+test('normalizePlan rejects task with invalid repo alias', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { api: '.', web: '../web' },
+        flow: [{ type: 'task', id: 'a', prompt: 'b', repo: 'nonexistent' }],
+      }),
+    /flow\[0\]\.repo "nonexistent" does not match any key in repos/,
+  );
+});
+
+test('normalizePlan accepts task without repo when single repo', () => {
+  const plan = normalizePlan({
+    setup: 'x',
+    repos: { main: '.' },
+    flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+  });
+  assert.equal(plan.workflow[0].type, 'task');
+  if (plan.workflow[0].type === 'task') {
+    assert.equal(plan.workflow[0].repo, null);
+  }
+});
+
+test('normalizePlan stores repo on task when specified', () => {
+  const plan = normalizePlan({
+    setup: 'x',
+    repos: { api: '.', web: '../web' },
+    flow: [
+      { type: 'task', id: 'a', prompt: 'do a', repo: 'api' },
+      { type: 'task', id: 'b', prompt: 'do b', repo: 'web' },
+    ],
+  });
+  assert.equal(plan.workflow[0].type, 'task');
+  assert.equal(plan.workflow[1].type, 'task');
+  if (plan.workflow[0].type === 'task') assert.equal(plan.workflow[0].repo, 'api');
+  if (plan.workflow[1].type === 'task') assert.equal(plan.workflow[1].repo, 'web');
+});
+
+test('normalizePlan stores repos map on plan', () => {
+  const plan = normalizePlan({
+    repos: { api: '.', web: '../web' },
+    flow: [
+      { type: 'task', id: 'a', prompt: 'do a', repo: 'api' },
+    ],
+  });
+  assert.deepEqual(plan.repos, { api: '.', web: '../web' });
 });

@@ -3,7 +3,7 @@
   "setup": "Demonstrate all supported flow node types with the simplified plan schema.",
   "objective": "Complete implementation and validation tasks with deterministic and AI-gated loops.",
   "persona": "You are a senior software engineer. Write clean, well-tested TypeScript code.",
-  "repo": ".",
+  "repos": { "main": "." },
   "provider": "codex",
   "model": "gpt-5-nano",
   "reasoning": "high",

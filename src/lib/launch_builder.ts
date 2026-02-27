@@ -75,9 +75,13 @@ export function buildLaunchFromTaskNode({
   groupIndex: number;
   taskIndex: number;
 }): TaskLaunch {
+  const repoAlias = node.repo ?? Object.keys(session.paths.repoRoots)[0];
+  const repoRoot = session.paths.repoRoots[repoAlias];
+
   const task: TaskLaunch['task'] = {
     taskId: node.taskId,
     task: node.task,
+    repo: node.repo,
     provider: node.provider,
     model: node.model,
     persona: node.persona,
@@ -98,19 +102,19 @@ export function buildLaunchFromTaskNode({
 
   const useWorktree = Boolean(session.plan.worktrees);
   const branch = useWorktree
-    ? `agentflow/${safeSlug(`${session.paths.runId}-g${groupIndex}-t${task.taskId}-a${attempt}`)}`
+    ? `agentflow/${safeSlug(`${session.paths.runId}-r${repoAlias}-g${groupIndex}-t${task.taskId}-a${attempt}`)}`
     : null;
-  const workspaceCwd = useWorktree ? path.resolve(taskDir, 'worktree') : session.paths.projectRoot;
+  const workspaceCwd = useWorktree ? path.resolve(taskDir, 'worktree') : repoRoot;
 
   const mergedContextFiles = [
     ...session.globalContextFiles,
-    ...resolveConfigPaths(session.paths.configPath, session.paths.projectRoot, task.contextFiles),
+    ...resolveConfigPaths(session.paths.configPath, session.paths.repoRoots, task.contextFiles),
   ];
   const workerContextFiles = mergedContextFiles.map((f) =>
-    mapProjectPathToWorker(session.paths.projectRoot, workspaceCwd, f),
+    mapProjectPathToWorker(repoRoot, workspaceCwd, f),
   );
-  const workerReportPath = mapProjectPathToWorker(session.paths.projectRoot, workspaceCwd, reportPath);
-  const workerSummaryPath = mapProjectPathToWorker(session.paths.projectRoot, workspaceCwd, summaryPath);
+  const workerReportPath = mapProjectPathToWorker(repoRoot, workspaceCwd, reportPath);
+  const workerSummaryPath = mapProjectPathToWorker(repoRoot, workspaceCwd, summaryPath);
 
   const provider = task.provider || session.plan.provider;
   const promptText = buildPrompt({
@@ -149,5 +153,6 @@ export function buildLaunchFromTaskNode({
     sandboxMode: session.plan.options.sandboxMode,
     nodePath,
     attempt,
+    repoRoot,
   };
 }

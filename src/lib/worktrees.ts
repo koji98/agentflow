@@ -79,16 +79,16 @@ export function prepareLaunches(session: Session, launches: TaskLaunch[]): void 
     if (!session.dryRun) {
       fs.mkdirSync(launch.taskDir, { recursive: true });
       if (launch.useWorktree && launch.branch && !fs.existsSync(launch.workspaceCwd)) {
-        addWorktree(session.paths.projectRoot, launch.branch, launch.workspaceCwd, false);
-        session.worktreeTracker.created.add(launch.workspaceCwd);
-        session.worktreeTracker.createdBranches.add(launch.branch);
+        addWorktree(launch.repoRoot, launch.branch, launch.workspaceCwd, false);
+        session.worktreeTracker.created.set(launch.workspaceCwd, launch.repoRoot);
+        session.worktreeTracker.createdBranches.set(launch.branch, launch.repoRoot);
       }
       fs.writeFileSync(launch.promptPath, launch.promptText, 'utf8');
     } else {
       log(`[dry-run] prepare ${launch.taskDir}`);
       if (launch.useWorktree && launch.branch) {
-        addWorktree(session.paths.projectRoot, launch.branch, launch.workspaceCwd, true);
-        session.worktreeTracker.createdBranches.add(launch.branch);
+        addWorktree(launch.repoRoot, launch.branch, launch.workspaceCwd, true);
+        session.worktreeTracker.createdBranches.set(launch.branch, launch.repoRoot);
       }
     }
   }
@@ -103,16 +103,16 @@ export function cleanupWorktrees(session: Session): void {
   if (session.worktreeTracker.created.size === 0 && session.worktreeTracker.createdBranches.size === 0) return;
 
   log('\ncleanup: removing worktrees');
-  for (const worktree of [...session.worktreeTracker.created].sort()) {
+  for (const [worktree, repoRoot] of [...session.worktreeTracker.created.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     try {
-      removeWorktree(session.paths.projectRoot, worktree, session.dryRun);
+      removeWorktree(repoRoot, worktree, session.dryRun);
     } catch (error) {
       log(`warning: failed to remove worktree ${worktree}: ${String(error)}`);
     }
   }
-  for (const branch of [...session.worktreeTracker.createdBranches].sort()) {
+  for (const [branch, repoRoot] of [...session.worktreeTracker.createdBranches.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     try {
-      removeBranch(session.paths.projectRoot, branch, session.dryRun);
+      removeBranch(repoRoot, branch, session.dryRun);
     } catch (error) {
       log(`warning: failed to delete branch ${branch}: ${String(error)}`);
     }

@@ -55,6 +55,7 @@ Mental model:
 
 Minimal valid plan (JSON):
 {
+  "repos": { "main": "." },
   "flow": [
     { "type": "task", "id": "implement", "prompt": "Implement the feature." }
   ]
@@ -66,7 +67,7 @@ Full schema skeleton (all keys shown):
   "setup": "Global instructions for every task.",
   "objective": "Optional objective shared with agents and evaluators.",
   "persona": "You are a senior software engineer specializing in TypeScript.",
-  "repo": ".",
+  "repos": { "main": "." },
   "provider": "codex",
   "model": "gpt-5-nano",
   "reasoning": "xhigh",
@@ -96,8 +97,8 @@ Full schema skeleton (all keys shown):
       "id": "build_and_test",
       "parallel": false,
       "steps": [
-        { "type": "task", "id": "implement", "prompt": "Implement feature X." },
-        { "type": "task", "id": "test", "prompt": "Run tests and summarize results.", "context_from": ["implement"], "persona": "You are a QA engineer." }
+        { "type": "task", "id": "implement", "repo": "main", "prompt": "Implement feature X." },
+        { "type": "task", "id": "test", "repo": "main", "prompt": "Run tests and summarize results.", "context_from": ["implement"], "persona": "You are a QA engineer." }
       ]
     },
     {
@@ -121,7 +122,7 @@ Top-level keys:
 - setup (optional, default ""): global background/instructions injected into every task prompt
 - objective (optional): overall goal shared with agents and loop evaluators
 - persona (optional): agent identity/personality injected at top of prompt
-- repo (optional, default "."): repo root, resolved from plan directory
+- repos (required): object mapping alias names to repo root paths, resolved from plan directory
 - provider (optional, default "codex"): "codex" or "cursor"
 - model (optional, default "gpt-5-nano"): model identifier
 - reasoning (optional, default "xhigh"): codex only; ignored by cursor
@@ -154,6 +155,7 @@ Flow nodes:
   - type: "task"
   - id: required, globally unique
   - prompt: required
+  - repo: optional when repos has one entry; required when multiple repos
   - provider: optional ("codex" or "cursor")
   - model: optional
   - persona: optional (overrides plan-level persona for this task)
@@ -188,10 +190,10 @@ Task completion contract:
 
 Path resolution:
 - --plan path: resolved from shell cwd
-- repo: resolved from plan directory when relative
+- repos values: each resolved from plan directory when relative
 - context_files:
   - absolute path: used as-is
-  - repo:<path>: resolved from repo root
+  - <alias>:<path>: resolved from the named repo root (alias must match a key in repos)
   - plan:<path>: resolved from plan directory
   - plain relative path: resolved from plan directory
 

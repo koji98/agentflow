@@ -36,7 +36,7 @@ test('cursor provider single-task happy path succeeds', async (t) => {
     JSON.stringify(
       {
         setup: 'cursor happy path test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'cursor',
         model: 'claude-sonnet',
@@ -111,7 +111,7 @@ test('cursor provider captures stdout to last_message_path', async (t) => {
     JSON.stringify(
       {
         setup: 'cursor stdout capture test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'cursor',
         model: 'claude-sonnet',
@@ -174,7 +174,7 @@ test('task fails when exit code 0 but no report written', async (t) => {
     JSON.stringify(
       {
         setup: 'missing report test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         on_failure: 'continue',
         provider: 'codex',
@@ -237,7 +237,7 @@ test('prior task summaries appear in prompt for second task', async (t) => {
     JSON.stringify(
       {
         setup: 'prior context test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -314,7 +314,7 @@ test('SIGINT triggers graceful finalize with FAILED status', async (t) => {
     JSON.stringify(
       {
         setup: 'signal test',
-        repo: '.',
+        repos: { main: '.' },
         worktrees: false,
         provider: 'codex',
         model: 'gpt-5-nano',
@@ -394,7 +394,7 @@ test('context_from filters prior task summaries to specified task ids', async (t
     planPath,
     JSON.stringify({
       setup: 'context_from filter test',
-      repo: '.',
+      repos: { main: '.' },
       worktrees: false,
       provider: 'codex',
       model: 'gpt-5-nano',
@@ -462,7 +462,7 @@ test('on_failure: continue with multiple tasks runs all tasks despite failures',
     planPath,
     JSON.stringify({
       setup: 'on_failure continue multi test',
-      repo: '.',
+      repos: { main: '.' },
       worktrees: false,
       provider: 'codex',
       model: 'gpt-5-nano',
