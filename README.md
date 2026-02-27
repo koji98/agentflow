@@ -46,38 +46,58 @@ agent --version # if using cursor provider
 ## Install
 
 ```bash
+git clone <repo-url> && cd agentflow
 npm install
 ```
 
+### Global CLI (recommended)
+
+Link the module once so you can run `agentflow` from any directory:
+
+```bash
+npm run setup:link      # creates the global "agentflow" command
+```
+
+Verify it works:
+
+```bash
+agentflow --help
+```
+
+To unlink later:
+
+```bash
+npm run setup:unlink
+```
+
 ## Run
+
+With the global link installed:
+
+```bash
+agentflow --plan path/to/plan.json
+```
+
+Or from the project directory without linking:
 
 ```bash
 npm run dev -- --plan example_plan.json
 ```
 
-Dry-run:
+### Common commands
 
 ```bash
-npm run dev -- --plan example_plan.json --dry-run
-```
+# Dry-run (no agent sessions launched)
+agentflow --plan plan.json --dry-run
 
-Validate plan without running:
+# Validate plan schema without executing
+agentflow --plan plan.json --validate
 
-```bash
-npm run dev -- --plan example_plan.json --validate
-```
+# Resume a previously failed run
+agentflow --plan plan.json --resume tmp/agentflow_runs/<run_id>
 
-Resume a failed run:
-
-```bash
-npm run dev -- --plan example_plan.json --resume tmp/agentflow_runs/<run_id>
-```
-
-CLI help:
-
-```bash
-npm run start
-npm run plan-help
+# Detailed plan schema reference
+agentflow --plan-help
 ```
 
 ## CLI Options
@@ -266,8 +286,8 @@ See [example_plan.json](./example_plan.json) for a plan demonstrating all node t
 ## Development
 
 ```bash
-npm run typecheck
-npm test
+npm run typecheck   # type-check without emitting
+npm test            # run all unit + integration tests
 ```
 
 ## Providers

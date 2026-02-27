@@ -71,10 +71,10 @@ export function evaluateGateOutcome(
 
   let passed = true;
   const evaluationReasons = [...reasons];
-  if (gate.score_threshold !== null) {
-    if (score === null || score < gate.score_threshold) {
+  if (gate.scoreThreshold !== null) {
+    if (score === null || score < gate.scoreThreshold) {
       passed = false;
-      evaluationReasons.push(`score below score_threshold (${gate.score_threshold})`);
+      evaluationReasons.push(`score below score_threshold (${gate.scoreThreshold})`);
     }
   } else if (!basePassed) {
     passed = false;
@@ -111,7 +111,7 @@ export function buildAiGatePrompt(
   const taskRows = Object.values(session.state.tasks)
     .filter((row) => row.nodePath.startsWith(`${nodePath}/`))
     .sort((a, b) => (a.endedAtUtc || '').localeCompare(b.endedAtUtc || ''));
-  const recentLimit = gate.include_recent_tasks || 20;
+  const recentLimit = gate.includeRecentTasks || 20;
   const recentGroups = groupRows.slice(-recentLimit);
   const recentRows = taskRows.slice(-recentLimit);
 
@@ -180,9 +180,9 @@ function runDeterministicGate(
 ): EvaluatorOutput {
   const logPath = path.resolve(gateDir, `${evalBase}.log`);
   const jsonPath = path.resolve(gateDir, `${evalBase}.json`);
-  const cwd = gate.exec.cwd ? path.resolve(session.paths.project_root, gate.exec.cwd) : session.paths.project_root;
+  const cwd = gate.exec.cwd ? path.resolve(session.paths.projectRoot, gate.exec.cwd) : session.paths.projectRoot;
   const cmd = [gate.exec.command, ...gate.exec.args];
-  const timeoutSec = gate.timeout_sec || gate.exec.timeout_sec || 120;
+  const timeoutSec = gate.timeoutSec || gate.exec.timeoutSec || 120;
   const result = spawnSync(cmd[0], cmd.slice(1), {
     cwd,
     encoding: 'utf8',
@@ -256,23 +256,23 @@ function runAiGate(
   const logPath = path.resolve(gateDir, `${evalBase}.log`);
   const jsonPath = path.resolve(gateDir, `${evalBase}.json`);
   const prompt = buildAiGatePrompt(session, gate, nodePath, iteration, phase);
-  const timeoutSec = gate.timeout_sec || 120;
+  const timeoutSec = gate.timeoutSec || 120;
 
   const cmd = buildProviderCommand({
     provider,
     model,
-    reasoning_effort: gate.reasoning_effort || session.plan.reasoning_effort,
+    reasoningEffort: gate.reasoningEffort || session.plan.reasoningEffort,
     profile: gate.profile || session.plan.profile,
     promptText: prompt,
-    workspaceCwd: session.paths.project_root,
+    workspaceCwd: session.paths.projectRoot,
     lastMessagePath: messagePath,
-    skipGitRepoCheck: session.plan.options.skip_git_repo_check,
-    sandboxMode: session.plan.options.sandbox_mode,
+    skipGitRepoCheck: session.plan.options.skipGitRepoCheck,
+    sandboxMode: session.plan.options.sandboxMode,
   });
 
   const useStdin = provider === 'codex';
   const result = spawnSync(cmd[0], cmd.slice(1), {
-    cwd: session.paths.project_root,
+    cwd: session.paths.projectRoot,
     input: useStdin ? prompt : undefined,
     encoding: 'utf8',
     timeout: timeoutSec * 1000,
@@ -280,7 +280,7 @@ function runAiGate(
   });
 
   const logText = [
-    `$ (cd ${JSON.stringify(session.paths.project_root)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`,
+    `$ (cd ${JSON.stringify(session.paths.projectRoot)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`,
     '',
     '--- stdout ---',
     result.stdout || '',
@@ -328,7 +328,7 @@ export function evaluateGate(
   iteration: number,
   phase: 'pre_body' | 'post_body',
 ): EvaluatorOutput {
-  if (session.dry_run) {
+  if (session.dryRun) {
     return {
       passed: phase === 'post_body',
       score: phase === 'post_body' ? 1 : 0,
@@ -338,10 +338,10 @@ export function evaluateGate(
   }
 
   const missingArtifacts: string[] = [];
-  for (const artifact of gate.required_artifacts) {
+  for (const artifact of gate.requiredArtifacts) {
     const artifactPath = path.isAbsolute(artifact)
       ? path.resolve(artifact)
-      : path.resolve(session.paths.project_root, artifact);
+      : path.resolve(session.paths.projectRoot, artifact);
     if (!fs.existsSync(artifactPath)) missingArtifacts.push(artifact);
   }
   if (missingArtifacts.length > 0) {
@@ -353,7 +353,7 @@ export function evaluateGate(
     };
   }
 
-  const evalDir = path.resolve(session.paths.run_root, 'evaluations', safeSlug(gate.id));
+  const evalDir = path.resolve(session.paths.runRoot, 'evaluations', safeSlug(gate.id));
   const evalBase = `iter_${String(iteration).padStart(2, '0')}_${phase}`;
   fs.mkdirSync(evalDir, { recursive: true });
 

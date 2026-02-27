@@ -5,7 +5,7 @@ import { mapSandboxForCursor } from './utils.ts';
 export interface ProviderCommandInput {
   provider: Provider;
   model: string | null;
-  reasoning_effort: ReasoningEffort | null;
+  reasoningEffort: ReasoningEffort | null;
   profile: string | null;
   promptText: string;
   workspaceCwd: string;
@@ -29,7 +29,7 @@ export function buildProviderCommand(input: ProviderCommandInput): string[] {
     cmd.push('--sandbox', input.sandboxMode);
     if (input.profile) cmd.push('--profile', input.profile);
     if (input.model) cmd.push('-m', input.model);
-    if (input.reasoning_effort) cmd.push('-c', `model_reasoning_effort=${input.reasoning_effort}`);
+    if (input.reasoningEffort) cmd.push('-c', `model_reasoning_effort=${input.reasoningEffort}`);
     cmd.push('-');
     return cmd;
   }

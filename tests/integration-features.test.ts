@@ -185,7 +185,7 @@ test('progress tag appears in task execution log', async (t) => {
   assert.ok(progressLines.some((l) => l.startsWith('[2/2]')), 'should have [2/2] prefix');
 });
 
-test('max_retries: 1 retries a failed task and succeeds on second attempt', async (t) => {
+test('max_retries: 1 with on_failure: stop retries before stopping', async (t) => {
   const repoRoot = mkRepo('agentflow-retry-');
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
 
@@ -216,7 +216,7 @@ test('max_retries: 1 retries a failed task and succeeds on second attempt', asyn
       provider: 'codex',
       model: 'gpt-5-nano',
       reasoning: 'xhigh',
-      on_failure: 'continue',
+      on_failure: 'stop',
       options: { run_root: 'tmp/test_retry_runs' },
       limits: {
         worker_timeout_sec: 30,
@@ -243,7 +243,7 @@ test('max_retries: 1 retries a failed task and succeeds on second attempt', asyn
   );
 
   const codexCalls = parseJsonLines(mockLog);
-  assert.equal(codexCalls.length, 2, 'codex should have been invoked twice (fail + succeed)');
+  assert.equal(codexCalls.length, 2, 'codex should have been invoked twice (fail + succeed) even with on_failure: stop');
 
   const runBase = path.resolve(repoRoot, 'tmp/test_retry_runs');
   const runDir = getSingleRunDir(runBase);
@@ -251,6 +251,68 @@ test('max_retries: 1 retries a failed task and succeeds on second attempt', asyn
   const taskRows = Object.values(state.tasks) as Array<Record<string, unknown>>;
   const doneRow = taskRows.find((r) => r.status === 'DONE');
   assert.ok(doneRow, 'task should have a DONE row from the successful retry attempt');
+});
+
+test('max_retries exhausted with on_failure: stop stops the run', async (t) => {
+  const repoRoot = mkRepo('agentflow-retry-stop-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify({
+      rules: [{ match: 'Goal (always_fail)', exitCode: 1, skipReport: true }],
+      default: { exitCode: 0 },
+    }),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoRoot, 'retry_stop_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'retry stop test',
+      repo: '.',
+      worktrees: false,
+      provider: 'codex',
+      model: 'gpt-5-nano',
+      reasoning: 'xhigh',
+      on_failure: 'stop',
+      options: { run_root: 'tmp/test_retry_stop_runs' },
+      limits: {
+        worker_timeout_sec: 30,
+        timeout_grace_sec: 1,
+        max_retries: 1,
+        retry_on: ['FAILED'],
+      },
+      flow: [
+        { type: 'task', id: 'always_fail', prompt: 'will always fail' },
+        { type: 'task', id: 'never_run', prompt: 'should never execute' },
+      ],
+    }),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 1, 'run should fail after retries exhausted');
+    },
+  );
+
+  const codexCalls = parseJsonLines(mockLog);
+  assert.equal(codexCalls.length, 2, 'codex invoked twice: initial attempt + 1 retry');
+  const invokedTaskIds = codexCalls.map((c) => c.taskId);
+  assert.ok(!invokedTaskIds.includes('never_run'), 'second task should not run after stop');
 });
 
 test('worker timeout kills task and marks it FAILED/timed_out', async (t) => {

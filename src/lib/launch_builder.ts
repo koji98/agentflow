@@ -76,17 +76,17 @@ export function buildLaunchFromTaskNode({
   taskIndex: number;
 }): TaskLaunch {
   const task: TaskLaunch['task'] = {
-    task_id: node.task_id,
+    taskId: node.taskId,
     task: node.task,
     provider: node.provider,
     model: node.model,
     persona: node.persona,
-    context_files: node.context_files,
-    context_from: node.context_from,
+    contextFiles: node.contextFiles,
+    contextFrom: node.contextFrom,
   };
-  const taskSlug = safeSlug(`${node.task_id}-a${attempt}`);
+  const taskSlug = safeSlug(`${node.taskId}-a${attempt}`);
   const taskDir = path.resolve(
-    session.paths.run_root,
+    session.paths.runRoot,
     `group_${String(groupIndex).padStart(2, '0')}`,
     `task_${taskSlug}`,
   );
@@ -98,19 +98,19 @@ export function buildLaunchFromTaskNode({
 
   const useWorktree = Boolean(session.plan.worktrees);
   const branch = useWorktree
-    ? `agentflow/${safeSlug(`${session.paths.run_id}-g${groupIndex}-t${task.task_id}-a${attempt}`)}`
+    ? `agentflow/${safeSlug(`${session.paths.runId}-g${groupIndex}-t${task.taskId}-a${attempt}`)}`
     : null;
-  const workspaceCwd = useWorktree ? path.resolve(taskDir, 'worktree') : session.paths.project_root;
+  const workspaceCwd = useWorktree ? path.resolve(taskDir, 'worktree') : session.paths.projectRoot;
 
   const mergedContextFiles = [
-    ...session.global_context_files,
-    ...resolveConfigPaths(session.paths.config_path, session.paths.project_root, task.context_files),
+    ...session.globalContextFiles,
+    ...resolveConfigPaths(session.paths.configPath, session.paths.projectRoot, task.contextFiles),
   ];
   const workerContextFiles = mergedContextFiles.map((f) =>
-    mapProjectPathToWorker(session.paths.project_root, workspaceCwd, f),
+    mapProjectPathToWorker(session.paths.projectRoot, workspaceCwd, f),
   );
-  const workerReportPath = mapProjectPathToWorker(session.paths.project_root, workspaceCwd, reportPath);
-  const workerSummaryPath = mapProjectPathToWorker(session.paths.project_root, workspaceCwd, summaryPath);
+  const workerReportPath = mapProjectPathToWorker(session.paths.projectRoot, workspaceCwd, reportPath);
+  const workerSummaryPath = mapProjectPathToWorker(session.paths.projectRoot, workspaceCwd, summaryPath);
 
   const provider = task.provider || session.plan.provider;
   const promptText = buildPrompt({
@@ -121,33 +121,33 @@ export function buildLaunchFromTaskNode({
     contextFiles: workerContextFiles,
     reportPath: workerReportPath,
     summaryPath: workerSummaryPath,
-    priorTaskSummaries: gatherPriorTaskSummaries(session, node.context_from),
+    priorTaskSummaries: gatherPriorTaskSummaries(session, node.contextFrom),
   });
 
   return {
-    group_index: groupIndex,
-    task_index: taskIndex,
-    task_key: taskKey(groupIndex, `${task.task_id}#a${attempt}`),
+    groupIndex,
+    taskIndex,
+    taskKey: taskKey(groupIndex, `${task.taskId}#a${attempt}`),
     task,
     provider,
     model: task.model || session.plan.model,
-    reasoning_effort: session.plan.reasoning_effort,
+    reasoningEffort: session.plan.reasoningEffort,
     profile: session.plan.profile,
-    prompt_text: promptText,
-    task_dir: taskDir,
-    prompt_path: promptPath,
-    log_path: logPath,
-    last_message_path: lastMessagePath,
-    report_path: reportPath,
-    worker_report_path: workerReportPath,
-    summary_path: summaryPath,
-    worker_summary_path: workerSummaryPath,
-    workspace_cwd: workspaceCwd,
+    promptText,
+    taskDir,
+    promptPath,
+    logPath,
+    lastMessagePath,
+    reportPath,
+    workerReportPath,
+    summaryPath,
+    workerSummaryPath,
+    workspaceCwd,
     branch,
-    use_worktree: useWorktree,
-    skip_git_repo_check: session.plan.options.skip_git_repo_check,
-    sandbox_mode: session.plan.options.sandbox_mode,
-    node_path: nodePath,
+    useWorktree,
+    skipGitRepoCheck: session.plan.options.skipGitRepoCheck,
+    sandboxMode: session.plan.options.sandboxMode,
+    nodePath,
     attempt,
   };
 }

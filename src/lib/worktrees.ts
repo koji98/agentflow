@@ -76,19 +76,19 @@ export function removeBranch(projectRoot: string, branch: string, dryRun: boolea
  */
 export function prepareLaunches(session: Session, launches: TaskLaunch[]): void {
   for (const launch of launches) {
-    if (!session.dry_run) {
-      fs.mkdirSync(launch.task_dir, { recursive: true });
-      if (launch.use_worktree && launch.branch && !fs.existsSync(launch.workspace_cwd)) {
-        addWorktree(session.paths.project_root, launch.branch, launch.workspace_cwd, false);
-        session.worktree_tracker.created.add(launch.workspace_cwd);
-        session.worktree_tracker.created_branches.add(launch.branch);
+    if (!session.dryRun) {
+      fs.mkdirSync(launch.taskDir, { recursive: true });
+      if (launch.useWorktree && launch.branch && !fs.existsSync(launch.workspaceCwd)) {
+        addWorktree(session.paths.projectRoot, launch.branch, launch.workspaceCwd, false);
+        session.worktreeTracker.created.add(launch.workspaceCwd);
+        session.worktreeTracker.createdBranches.add(launch.branch);
       }
-      fs.writeFileSync(launch.prompt_path, launch.prompt_text, 'utf8');
+      fs.writeFileSync(launch.promptPath, launch.promptText, 'utf8');
     } else {
-      log(`[dry-run] prepare ${launch.task_dir}`);
-      if (launch.use_worktree && launch.branch) {
-        addWorktree(session.paths.project_root, launch.branch, launch.workspace_cwd, true);
-        session.worktree_tracker.created_branches.add(launch.branch);
+      log(`[dry-run] prepare ${launch.taskDir}`);
+      if (launch.useWorktree && launch.branch) {
+        addWorktree(session.paths.projectRoot, launch.branch, launch.workspaceCwd, true);
+        session.worktreeTracker.createdBranches.add(launch.branch);
       }
     }
   }
@@ -99,20 +99,20 @@ export function prepareLaunches(session: Session, launches: TaskLaunch[]): void 
  * @param session Current run session.
  */
 export function cleanupWorktrees(session: Session): void {
-  if (!session.plan.options.cleanup_worktrees) return;
-  if (session.worktree_tracker.created.size === 0 && session.worktree_tracker.created_branches.size === 0) return;
+  if (!session.plan.options.cleanupWorktrees) return;
+  if (session.worktreeTracker.created.size === 0 && session.worktreeTracker.createdBranches.size === 0) return;
 
   log('\ncleanup: removing worktrees');
-  for (const worktree of [...session.worktree_tracker.created].sort()) {
+  for (const worktree of [...session.worktreeTracker.created].sort()) {
     try {
-      removeWorktree(session.paths.project_root, worktree, session.dry_run);
+      removeWorktree(session.paths.projectRoot, worktree, session.dryRun);
     } catch (error) {
       log(`warning: failed to remove worktree ${worktree}: ${String(error)}`);
     }
   }
-  for (const branch of [...session.worktree_tracker.created_branches].sort()) {
+  for (const branch of [...session.worktreeTracker.createdBranches].sort()) {
     try {
-      removeBranch(session.paths.project_root, branch, session.dry_run);
+      removeBranch(session.paths.projectRoot, branch, session.dryRun);
     } catch (error) {
       log(`warning: failed to delete branch ${branch}: ${String(error)}`);
     }

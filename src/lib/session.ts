@@ -46,8 +46,8 @@ export function createSession({
   globalContextFiles: string[];
   totalTaskCount: number;
 }): Session {
-  const runId = plan.options.run_id || nowRunId();
-  const runRoot = path.resolve(projectRoot, plan.options.run_root, runId);
+  const runId = plan.options.runId || nowRunId();
+  const runRoot = path.resolve(projectRoot, plan.options.runRoot, runId);
   const state: RunState = {
     runId,
     createdAtUtc: nowUtcIso(),
@@ -63,32 +63,32 @@ export function createSession({
 
   return {
     plan,
-    dry_run: Boolean(plan.options.dry_run),
-    global_context_files: globalContextFiles,
+    dryRun: Boolean(plan.options.dryRun),
+    globalContextFiles,
     paths: {
-      project_root: projectRoot,
-      config_path: planPath,
-      run_root: runRoot,
-      run_id: runId,
-      state_path: path.resolve(runRoot, 'run_state.json'),
-      summary_path: path.resolve(runRoot, 'run_summary.md'),
+      projectRoot,
+      configPath: planPath,
+      runRoot,
+      runId,
+      statePath: path.resolve(runRoot, 'run_state.json'),
+      summaryPath: path.resolve(runRoot, 'run_summary.md'),
     },
     counters: {
-      next_group_index: 1,
-      started_at_ms: Date.now(),
-      total_task_count: totalTaskCount,
-      executed_task_count: 0,
-      failure_task_count: 0,
-      loop_iteration_count: 0,
+      nextGroupIndex: 1,
+      startedAtMs: Date.now(),
+      totalTaskCount,
+      executedTaskCount: 0,
+      failureTaskCount: 0,
+      loopIterationCount: 0,
     },
-    worktree_tracker: {
+    worktreeTracker: {
       created: new Set(),
-      created_branches: new Set(),
+      createdBranches: new Set(),
     },
     state,
-    resumed_tasks: new Map(),
-    shutdown_signal: null,
-    decision_trace: [],
+    resumedTasks: new Map(),
+    shutdownSignal: null,
+    decisionTrace: [],
   };
 }
 
@@ -104,7 +104,15 @@ export function loadResumedState(runDir: string): RunState {
     throw new Error(`Cannot resume: run_state.json not found in ${runDir}`);
   }
   const raw = fs.readFileSync(statePath, 'utf8');
-  return JSON.parse(raw) as RunState;
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+  const requiredFields = ['runId', 'configPath', 'groups', 'tasks'] as const;
+  const missing = requiredFields.filter((f) => !(f in parsed));
+  if (missing.length > 0) {
+    throw new Error(`Cannot resume: run_state.json is missing required fields: ${missing.join(', ')}`);
+  }
+
+  return parsed as unknown as RunState;
 }
 
 /**
@@ -167,32 +175,32 @@ export function createResumedSession({
 
   return {
     plan,
-    dry_run: Boolean(plan.options.dry_run),
-    global_context_files: globalContextFiles,
+    dryRun: Boolean(plan.options.dryRun),
+    globalContextFiles,
     paths: {
-      project_root: projectRoot,
-      config_path: planPath,
-      run_root: runRoot,
-      run_id: runId,
-      state_path: path.resolve(runRoot, 'run_state.json'),
-      summary_path: path.resolve(runRoot, 'run_summary.md'),
+      projectRoot,
+      configPath: planPath,
+      runRoot,
+      runId,
+      statePath: path.resolve(runRoot, 'run_state.json'),
+      summaryPath: path.resolve(runRoot, 'run_summary.md'),
     },
     counters: {
-      next_group_index: maxGroupIndex + 1,
-      started_at_ms: Date.now(),
-      total_task_count: totalTaskCount,
-      executed_task_count: doneCount,
-      failure_task_count: 0,
-      loop_iteration_count: priorState.totalLoopIterations,
+      nextGroupIndex: maxGroupIndex + 1,
+      startedAtMs: Date.now(),
+      totalTaskCount,
+      executedTaskCount: doneCount,
+      failureTaskCount: 0,
+      loopIterationCount: priorState.totalLoopIterations,
     },
-    worktree_tracker: {
+    worktreeTracker: {
       created: new Set(),
-      created_branches: new Set(),
+      createdBranches: new Set(),
     },
     state,
-    resumed_tasks: resumedTasks,
-    shutdown_signal: null,
-    decision_trace: [],
+    resumedTasks,
+    shutdownSignal: null,
+    decisionTrace: [],
   };
 }
 
@@ -202,8 +210,8 @@ export function createResumedSession({
  * @returns Next sequential group index.
  */
 export function allocateGroupIndex(session: Session): number {
-  const out = session.counters.next_group_index;
-  session.counters.next_group_index += 1;
+  const out = session.counters.nextGroupIndex;
+  session.counters.nextGroupIndex += 1;
   return out;
 }
 
@@ -212,12 +220,12 @@ export function allocateGroupIndex(session: Session): number {
  * @param session Current run session.
  */
 export function saveState(session: Session): void {
-  if (session.dry_run) return;
+  if (session.dryRun) return;
   session.state.updatedAtUtc = nowUtcIso();
-  session.state.totalTaskCount = session.counters.executed_task_count;
-  session.state.totalFailureCount = session.counters.failure_task_count;
-  session.state.totalLoopIterations = session.counters.loop_iteration_count;
-  saveJson(session.paths.state_path, session.state);
+  session.state.totalTaskCount = session.counters.executedTaskCount;
+  session.state.totalFailureCount = session.counters.failureTaskCount;
+  session.state.totalLoopIterations = session.counters.loopIterationCount;
+  saveJson(session.paths.statePath, session.state);
 }
 
 /**
@@ -234,7 +242,7 @@ export function recordDecision(
   detail: Record<string, unknown>,
 ): void {
   const entry: DecisionTraceEntry = { atUtc: nowUtcIso(), type, nodePath, detail };
-  session.decision_trace.push(entry);
+  session.decisionTrace.push(entry);
 }
 
 /**
@@ -242,16 +250,16 @@ export function recordDecision(
  * @param session Current run session.
  */
 export function writeSummary(session: Session): void {
-  if (session.dry_run) return;
+  if (session.dryRun) return;
 
   const lines: string[] = [];
   lines.push('# Agentflow Run Summary');
   lines.push('');
-  lines.push(`- Run ID: \`${session.paths.run_id}\``);
+  lines.push(`- Run ID: \`${session.paths.runId}\``);
   lines.push(`- Updated: \`${session.state.updatedAtUtc || ''}\``);
-  lines.push(`- Executed tasks: \`${session.counters.executed_task_count}\``);
-  lines.push(`- Failed tasks: \`${session.counters.failure_task_count}\``);
-  lines.push(`- Loop iterations: \`${session.counters.loop_iteration_count}\``);
+  lines.push(`- Executed tasks: \`${session.counters.executedTaskCount}\``);
+  lines.push(`- Failed tasks: \`${session.counters.failureTaskCount}\``);
+  lines.push(`- Loop iterations: \`${session.counters.loopIterationCount}\``);
   lines.push('');
   lines.push('## Groups');
   lines.push('');
@@ -276,8 +284,8 @@ export function writeSummary(session: Session): void {
     );
   }
 
-  fs.mkdirSync(path.dirname(session.paths.summary_path), { recursive: true });
-  fs.writeFileSync(session.paths.summary_path, `${lines.join('\n')}\n`, 'utf8');
+  fs.mkdirSync(path.dirname(session.paths.summaryPath), { recursive: true });
+  fs.writeFileSync(session.paths.summaryPath, `${lines.join('\n')}\n`, 'utf8');
 }
 
 /**
@@ -285,8 +293,8 @@ export function writeSummary(session: Session): void {
  * @param session Current run session.
  */
 export function initializeSessionArtifacts(session: Session): void {
-  if (session.dry_run) return;
-  fs.mkdirSync(session.paths.run_root, { recursive: true });
+  if (session.dryRun) return;
+  fs.mkdirSync(session.paths.runRoot, { recursive: true });
   saveState(session);
   writeSummary(session);
 }
@@ -325,29 +333,29 @@ export function markGroupRunning(
  * @param launch Task launch descriptor to register.
  */
 export function markTaskRunning(session: Session, launch: TaskLaunch): void {
-  const row = session.state.tasks[launch.task_key] || {
-    taskKey: launch.task_key,
-    taskId: launch.task.task_id,
-    groupIndex: launch.group_index,
-    taskIndex: launch.task_index,
-    nodePath: launch.node_path,
+  const row = session.state.tasks[launch.taskKey] || {
+    taskKey: launch.taskKey,
+    taskId: launch.task.taskId,
+    groupIndex: launch.groupIndex,
+    taskIndex: launch.taskIndex,
+    nodePath: launch.nodePath,
     attempt: launch.attempt,
     status: 'PENDING',
     provider: launch.provider,
     model: launch.model,
-    reasoningEffort: launch.reasoning_effort,
+    reasoningEffort: launch.reasoningEffort,
     profile: launch.profile,
-    promptPath: launch.prompt_path,
-    logPath: launch.log_path,
-    lastMessagePath: launch.last_message_path,
-    reportPath: launch.report_path,
-    summaryPath: launch.summary_path,
-    cwd: launch.workspace_cwd,
+    promptPath: launch.promptPath,
+    logPath: launch.logPath,
+    lastMessagePath: launch.lastMessagePath,
+    reportPath: launch.reportPath,
+    summaryPath: launch.summaryPath,
+    cwd: launch.workspaceCwd,
     branch: launch.branch,
   };
   row.status = 'RUNNING';
   row.startedAtUtc = nowUtcIso();
-  session.state.tasks[launch.task_key] = row;
+  session.state.tasks[launch.taskKey] = row;
   saveState(session);
 }
 
@@ -368,22 +376,22 @@ export function recordGroupResults(
   let groupFailureCount = 0;
 
   for (const result of results) {
-    const row = session.state.tasks[result.task_key];
+    const row = session.state.tasks[result.taskKey];
     row.status = result.status;
-    row.exitCode = result.exit_code;
-    row.startedAtUtc = result.started_at_utc;
-    row.endedAtUtc = result.ended_at_utc;
-    row.durationSec = Number(result.duration_sec.toFixed(3));
-    row.timedOut = result.timed_out;
-    row.timeoutSeconds = result.timeout_seconds;
-    row.timeoutClassification = result.timeout_classification;
-    row.timeoutTerminationOutcome = result.timeout_termination_outcome;
-    row.failureReason = result.failure_reason;
+    row.exitCode = result.exitCode;
+    row.startedAtUtc = result.startedAtUtc;
+    row.endedAtUtc = result.endedAtUtc;
+    row.durationSec = Number(result.durationSec.toFixed(3));
+    row.timedOut = result.timedOut;
+    row.timeoutSeconds = result.timeoutSeconds;
+    row.timeoutClassification = result.timeoutClassification;
+    row.timeoutTerminationOutcome = result.timeoutTerminationOutcome;
+    row.failureReason = result.failureReason;
 
-    session.counters.executed_task_count += 1;
+    session.counters.executedTaskCount += 1;
     if (result.status !== 'DONE') {
       groupFailureCount += 1;
-      session.counters.failure_task_count += 1;
+      session.counters.failureTaskCount += 1;
     }
   }
 
@@ -415,9 +423,8 @@ export function failureCount(session: Session): number {
 /**
  * Finalizes the run by writing terminal state and summary.
  * @param session Current run session.
- * @param _status Terminal run status string (reserved for future use).
  */
-export function finalizeSession(session: Session, _status: string): void {
+export function finalizeSession(session: Session): void {
   saveState(session);
   writeSummary(session);
 }

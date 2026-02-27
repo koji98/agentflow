@@ -29,7 +29,7 @@ import type { WorkerPlan } from './lib/types.ts';
  * Resolves and validates only global context files at startup.
  * Task-level context files are validated lazily when each task is materialized.
  *
- * @param plan Normalized worker plan with context_files array.
+ * @param plan Normalized worker plan with contextFiles array.
  * @param planPath Absolute path to the plan JSON file.
  * @param projectRoot Absolute path to the target repository root.
  * @returns Array of resolved absolute paths to existing context files.
@@ -40,7 +40,7 @@ function validateGlobalContextFiles(
   planPath: string,
   projectRoot: string,
 ): string[] {
-  return resolveConfigPaths(planPath, projectRoot, plan.context_files);
+  return resolveConfigPaths(planPath, projectRoot, plan.contextFiles);
 }
 
 /**
@@ -89,15 +89,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 1;
   }
 
-  const projectRoot = resolveProjectRoot(planPath, plan.target_repo_root);
+  const projectRoot = resolveProjectRoot(planPath, plan.targetRepoRoot);
   if (!fs.existsSync(projectRoot)) {
     logError(`Resolved repo root does not exist: ${projectRoot}`);
     return 1;
   }
 
-  plan.options.dry_run = args.dryRunOverride === true;
-  plan.options.skip_git_repo_check = args.skipGitRepoCheck;
-  plan.options.sandbox_mode = args.sandboxMode ?? plan.options.sandbox_mode;
+  plan.options.dryRun = args.dryRunOverride === true;
+  plan.options.skipGitRepoCheck = args.skipGitRepoCheck;
+  plan.options.sandboxMode = args.sandboxMode ?? plan.options.sandboxMode;
 
   let globalContextFiles;
   try {
@@ -139,7 +139,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       priorState,
       runDir,
     });
-    log(`[resume] resuming run ${session.paths.run_id} (${session.resumed_tasks.size} completed tasks will be skipped)`);
+    log(`[resume] resuming run ${session.paths.runId} (${session.resumedTasks.size} completed tasks will be skipped)`);
   } else {
     session = createSession({
       projectRoot,
@@ -150,20 +150,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     });
   }
 
-  if (session.dry_run) {
+  if (session.dryRun) {
     log('[dry-run] no CLI sessions will be executed');
   }
 
-  log(`project_root:   ${session.paths.project_root}`);
-  log(`plan_file:      ${session.paths.config_path}`);
-  log(`run_root:       ${session.paths.run_root}`);
-  log(`run_id:         ${session.paths.run_id}`);
+  log(`project_root:   ${session.paths.projectRoot}`);
+  log(`plan_file:      ${session.paths.configPath}`);
+  log(`run_root:       ${session.paths.runRoot}`);
+  log(`run_id:         ${session.paths.runId}`);
   log(`workflow_nodes: ${countWorkflowNodes(plan.workflow)}`);
   log(`task_nodes:     ${totalTaskCount}`);
   log(`worktrees:      ${plan.worktrees}`);
-  log(`dry_run:        ${session.dry_run}`);
-  log(`skip_git_check: ${plan.options.skip_git_repo_check}`);
-  log(`sandbox_mode:   ${plan.options.sandbox_mode}`);
+  log(`dry_run:        ${session.dryRun}`);
+  log(`skip_git_check: ${plan.options.skipGitRepoCheck}`);
+  log(`sandbox_mode:   ${plan.options.sandboxMode}`);
 
   initializeSessionArtifacts(session);
 
@@ -175,14 +175,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     cleanupWorktrees(session);
     failures = failureCount(session);
     if (runStatus === 'DONE' && failures > 0) runStatus = 'FAILED';
-    finalizeSession(session, runStatus);
+    finalizeSession(session);
     finalized = true;
   };
 
   const signalExitCode = (signal: NodeJS.Signals): number => (signal === 'SIGINT' ? 130 : 143);
   const handleSignal = (signal: NodeJS.Signals): void => {
-    if (session.shutdown_signal) return;
-    session.shutdown_signal = signal;
+    if (session.shutdownSignal) return;
+    session.shutdownSignal = signal;
     runStatus = 'FAILED';
     log(`\nreceived ${signal}, shutting down...`);
     finalizeRun();

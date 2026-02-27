@@ -9,7 +9,7 @@ const DEFAULT_PERSONA = 'You are a senior software engineer. Write clean, well-t
  * @param params.persona Optional persona override; defaults to a senior engineer persona.
  * @param params.objective Optional high-level objective prepended to the prompt.
  * @param params.setup Background/setup section text.
- * @param params.task Task node with `task_id` and `task` description.
+ * @param params.task Task node with `taskId` and `task` description.
  * @param params.contextFiles Resolved file paths the agent should review.
  * @param params.reportPath Path where the agent should write its completion report.
  * @param params.summaryPath Path where the agent should write its downstream summary.
@@ -29,7 +29,7 @@ export function buildPrompt({
   persona: string | null;
   objective: string | null;
   setup: string;
-  task: { task_id: string; task: string };
+  task: { taskId: string; task: string };
   contextFiles: string[];
   reportPath: string;
   summaryPath: string;
@@ -47,7 +47,7 @@ export function buildPrompt({
     sections.push(`## Background\n${setup}`);
   }
 
-  sections.push(`## Your Task For Completing The Overall Goal (${task.task_id})\n${task.task}`);
+  sections.push(`## Your Task For Completing The Overall Goal (${task.taskId})\n${task.task}`);
 
   if (priorTaskSummaries.length > 0) {
     const summaryLines = priorTaskSummaries.map(

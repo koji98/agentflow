@@ -72,14 +72,14 @@ test('defaults cleanup_worktrees to true', () => {
     setup: 'x',
     flow: [{ type: 'task', id: 'a', prompt: 'b' }],
   });
-  assert.equal(plan.options.cleanup_worktrees, true);
+  assert.equal(plan.options.cleanupWorktrees, true);
 
   const explicit = normalizePlan({
     setup: 'x',
     options: { cleanup_worktrees: false },
     flow: [{ type: 'task', id: 'a', prompt: 'b' }],
   });
-  assert.equal(explicit.options.cleanup_worktrees, false);
+  assert.equal(explicit.options.cleanupWorktrees, false);
 });
 
 test('unknown plan keys fail schema normalization with field-specific errors', () => {
@@ -175,7 +175,7 @@ test('buildProviderCommand builds correct cursor argv', () => {
   const cmd = buildProviderCommand({
     provider: 'cursor',
     model: 'claude-sonnet',
-    reasoning_effort: 'high',
+    reasoningEffort: 'high',
     profile: 'my-profile',
     promptText: 'Do the thing.',
     workspaceCwd: '/tmp/test-workspace',
@@ -204,7 +204,7 @@ test('buildProviderCommand builds correct codex argv', () => {
   const cmd = buildProviderCommand({
     provider: 'codex',
     model: 'gpt-5-nano',
-    reasoning_effort: 'xhigh',
+    reasoningEffort: 'xhigh',
     profile: 'my-profile',
     promptText: 'Do the thing.',
     workspaceCwd: '/tmp/test-workspace',
@@ -254,7 +254,7 @@ test('setup is optional and prompt omits Background when empty', () => {
     persona: null,
     objective: null,
     setup: '',
-    task: { task_id: 'a', task: 'do it' },
+    task: { taskId: 'a', task: 'do it' },
     contextFiles: [],
     reportPath: '/tmp/report.md',
     summaryPath: '/tmp/summary.md',
@@ -267,7 +267,7 @@ test('setup is optional and prompt omits Background when empty', () => {
     persona: null,
     objective: null,
     setup: 'some context',
-    task: { task_id: 'b', task: 'do it' },
+    task: { taskId: 'b', task: 'do it' },
     contextFiles: [],
     reportPath: '/tmp/report.md',
     summaryPath: '/tmp/summary.md',
@@ -281,7 +281,7 @@ test('prompt includes both report and summary paths in completion instructions',
     persona: null,
     objective: null,
     setup: 'test',
-    task: { task_id: 'a', task: 'do it' },
+    task: { taskId: 'a', task: 'do it' },
     contextFiles: [],
     reportPath: '/tmp/report.md',
     summaryPath: '/tmp/summary.md',
@@ -296,7 +296,7 @@ test('per-task persona overrides plan-level persona in prompt', () => {
     persona: 'task-level persona',
     objective: null,
     setup: '',
-    task: { task_id: 'a', task: 'do it' },
+    task: { taskId: 'a', task: 'do it' },
     contextFiles: [],
     reportPath: '/tmp/report.md',
     summaryPath: '/tmp/summary.md',
@@ -317,7 +317,7 @@ test('plan normalization accepts context_from on task nodes', () => {
   const taskB = plan.workflow[1];
   assert.equal(taskB.type, 'task');
   if (taskB.type === 'task') {
-    assert.deepEqual(taskB.context_from, ['a']);
+    assert.deepEqual(taskB.contextFrom, ['a']);
   }
 });
 
@@ -352,12 +352,12 @@ test('buildAiGatePrompt uses section-based format', () => {
     prompt: 'evaluate this',
     provider: null,
     model: null,
-    reasoning_effort: null,
+    reasoningEffort: null,
     profile: null,
-    include_recent_tasks: null,
-    score_threshold: null,
-    timeout_sec: null,
-    required_artifacts: [],
+    includeRecentTasks: null,
+    scoreThreshold: null,
+    timeoutSec: null,
+    requiredArtifacts: [],
   };
   const prompt = buildAiGatePrompt(mockSession, gate, 'loop_1', 1, 'post_body');
   assert.match(prompt, /## Loop Metadata/);
@@ -379,12 +379,12 @@ test('buildAiGatePrompt omits Run Setup when setup is empty', () => {
     prompt: 'evaluate this',
     provider: null,
     model: null,
-    reasoning_effort: null,
+    reasoningEffort: null,
     profile: null,
-    include_recent_tasks: null,
-    score_threshold: null,
-    timeout_sec: null,
-    required_artifacts: [],
+    includeRecentTasks: null,
+    scoreThreshold: null,
+    timeoutSec: null,
+    requiredArtifacts: [],
   };
   const prompt = buildAiGatePrompt(mockSession, gate, 'loop_1', 1, 'post_body');
   assert.ok(!prompt.includes('## Run Setup'), 'empty setup should not produce Run Setup section');
@@ -467,34 +467,34 @@ test('parseGateJsonOutput returns null for empty or non-JSON input', () => {
 // --- evaluateGateOutcome ---
 
 test('evaluateGateOutcome passes when passed=true and no threshold', () => {
-  const gate = { score_threshold: null } as EvaluatorGate;
+  const gate = { scoreThreshold: null } as EvaluatorGate;
   const result = evaluateGateOutcome(gate, { passed: true, score: null, reasons: [] });
   assert.equal(result.passed, true);
 });
 
 test('evaluateGateOutcome fails when passed=false and no threshold', () => {
-  const gate = { score_threshold: null } as EvaluatorGate;
+  const gate = { scoreThreshold: null } as EvaluatorGate;
   const result = evaluateGateOutcome(gate, { passed: false, score: null, reasons: [] });
   assert.equal(result.passed, false);
   assert.ok(result.reasons.some((r) => r.includes('passed=true not satisfied')));
 });
 
 test('evaluateGateOutcome passes when score meets threshold', () => {
-  const gate = { score_threshold: 0.8 } as EvaluatorGate;
+  const gate = { scoreThreshold: 0.8 } as EvaluatorGate;
   const result = evaluateGateOutcome(gate, { passed: false, score: 0.9, reasons: [] });
   assert.equal(result.passed, true);
   assert.equal(result.score, 0.9);
 });
 
 test('evaluateGateOutcome fails when score is below threshold', () => {
-  const gate = { score_threshold: 0.8 } as EvaluatorGate;
+  const gate = { scoreThreshold: 0.8 } as EvaluatorGate;
   const result = evaluateGateOutcome(gate, { passed: true, score: 0.5, reasons: [] });
   assert.equal(result.passed, false);
   assert.ok(result.reasons.some((r) => r.includes('score below score_threshold')));
 });
 
 test('evaluateGateOutcome fails when payload is null', () => {
-  const gate = { score_threshold: null } as EvaluatorGate;
+  const gate = { scoreThreshold: null } as EvaluatorGate;
   const result = evaluateGateOutcome(gate, null);
   assert.equal(result.passed, false);
   assert.ok(result.reasons.some((r) => r.includes('not valid JSON')));
