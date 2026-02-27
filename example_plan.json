@@ -49,7 +49,9 @@
       "id": "cursor_review",
       "prompt": "Review the recent changes for correctness and style. Summarize findings in the report.",
       "provider": "cursor",
-      "model": "claude-sonnet"
+      "model": "claude-sonnet",
+      "persona": "You are a meticulous code reviewer focused on correctness, edge cases, and maintainability.",
+      "context_from": ["analyze_requirements", "implement_small_change"]
     },
     {
       "type": "group",
@@ -133,7 +135,8 @@
         {
           "type": "task",
           "id": "address_quality_feedback",
-          "prompt": "Apply the highest-impact improvement suggested by prior task outputs."
+          "prompt": "Apply the highest-impact improvement suggested by prior task outputs.",
+          "context_from": ["cursor_review", "run_unit_tests", "run_typecheck"]
         }
       ]
     }

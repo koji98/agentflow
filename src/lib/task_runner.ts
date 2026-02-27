@@ -70,18 +70,22 @@ function assertTerminationGuards(session: Session, nodePath: string): void {
   }
 }
 
-/**
- * Executes one launch command and produces normalized task result artifacts.
- * @param session Current run session.
- * @param launch Task launch descriptor.
- * @returns Promise resolving to the task execution result.
- */
+/** Formats a `[current/total]` progress prefix for log output. */
 function progressTag(session: Session): string {
   const current = session.counters.executed_task_count + 1;
   const total = session.counters.total_task_count;
   return `[${current}/${total}]`;
 }
 
+/**
+ * Executes one launch command and produces normalized task result artifacts.
+ * Spawns the provider CLI, captures output, evaluates the completion contract,
+ * and writes execution logs, report, and summary files.
+ *
+ * @param session Current run session.
+ * @param launch Task launch descriptor with command, paths, and timeout config.
+ * @returns Promise resolving to the task execution result.
+ */
 export async function executeLaunch(
   session: Session,
   launch: TaskLaunch,
