@@ -24,7 +24,7 @@ flowchart LR
 - **loop** -- repeats its body until a gate passes or `max_iterations` is exhausted
 - **gate** -- loop evaluator, either deterministic (run a command) or AI (prompt a model); outputs `{ passed, score, reasons }`
 
-Each task gets an isolated git worktree (when `worktrees: true`), a structured prompt with persona/context/prior-task summaries, and writes a report + summary on completion.
+Each task gets an isolated git worktree (when `worktrees: true`), a structured prompt with persona/context/prior-task summaries (plus loop gate feedback when applicable), and writes a report + summary on completion.
 
 ## Prerequisites
 
@@ -122,7 +122,7 @@ agentflow --plan-help
 | `version` | string | No | none | Optional metadata. |
 | `setup` | string | No | `""` | Global background/instructions injected into every task prompt. |
 | `objective` | string | No | `null` | Overall goal shared with agents and loop evaluators. |
-| `persona` | string | No | `null` | Agent identity/personality injected at top of prompt. |
+| `persona` | string | No | `null` | Default persona injected into task prompts and used as AI-gate persona fallback. |
 | `repos` | object | Yes | none | Map of alias names to repo root paths, resolved from plan file directory when relative. |
 | `provider` | `"codex"` \| `"cursor"` | No | `"codex"` | Default launch provider. |
 | `model` | string | No | `"gpt-5-nano"` | Default model identifier passed to provider CLI. |
@@ -142,7 +142,7 @@ Unknown keys are rejected at every schema level.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `max_retries` | integer | `0` | Retry count per failed task. |
-| `retry_on` | string[] | `["FAILED","TIMEOUT"]` | Which statuses trigger retry. |
+| `retry_on` | string[] | `["FAILED","TIMEOUT"]` | Which task outcomes trigger retry (`FAILED`, `TIMEOUT`). |
 | `max_iterations` | integer | `null` | Global loop iteration cap. |
 | `max_runtime_sec` | integer | `null` | Max total run time in seconds. |
 | `max_total_tasks` | integer | `null` | Max total task executions. |
@@ -202,6 +202,7 @@ Runs a command and parses its stdout as JSON.
 
 | Key | Type | Required | Default |
 |---|---|---|---|
+| `repo` | string | No | first repo alias |
 | `command` | string | Yes | |
 | `args` | string[] | No | `[]` |
 | `cwd` | string | No | project root |
@@ -215,7 +216,9 @@ Prompts a model and parses its output as JSON.
 
 | Key | Type | Required | Default |
 |---|---|---|---|
+| `repo` | string | No | first repo alias |
 | `prompt` | string | Yes | |
+| `persona` | string | No | plan-level `persona` |
 | `provider` | string | No | plan-level |
 | `model` | string | No | plan-level |
 | `reasoning` | string | No | plan-level |
@@ -261,6 +264,7 @@ Run directory: `options.run_root/<run_id>/`
 |---|---|
 | `run_state.json` | Single source of truth for run state. |
 | `run_summary.md` | Human-readable markdown summary. |
+| `decision_trace.json` | Structured gate/retry/termination decision trace for debugging loop behavior. |
 
 **Per task** (in `group_NN/task_<slug>/`):
 

@@ -299,6 +299,22 @@ test('prompt includes both report and summary paths in completion instructions',
   assert.match(prompt, /Write a brief summary to: \/tmp\/summary\.md/);
 });
 
+test('prompt includes gate feedback section when provided', () => {
+  const prompt = buildPrompt({
+    persona: null,
+    objective: null,
+    setup: '',
+    task: { taskId: 'a', task: 'do it' },
+    contextFiles: [],
+    reportPath: '/tmp/report.md',
+    summaryPath: '/tmp/summary.md',
+    priorTaskSummaries: [],
+    gateFeedbackToAddress: ['Reason: lint is failing on src/lib/file.ts'],
+  });
+  assert.match(prompt, /## Gate Feedback To Address/);
+  assert.match(prompt, /lint is failing/);
+});
+
 test('per-task persona overrides plan-level persona in prompt', () => {
   const prompt = buildPrompt({
     persona: 'task-level persona',
@@ -359,7 +375,9 @@ test('buildAiGatePrompt uses section-based format', () => {
   const gate = {
     type: 'ai' as const,
     id: 'test_gate',
+    repo: null,
     prompt: 'evaluate this',
+    persona: null,
     provider: null,
     model: null,
     reasoningEffort: null,
@@ -386,7 +404,9 @@ test('buildAiGatePrompt omits Run Setup when setup is empty', () => {
   const gate = {
     type: 'ai' as const,
     id: 'test_gate',
+    repo: null,
     prompt: 'evaluate this',
+    persona: null,
     provider: null,
     model: null,
     reasoningEffort: null,
@@ -399,6 +419,57 @@ test('buildAiGatePrompt omits Run Setup when setup is empty', () => {
   const prompt = buildAiGatePrompt(mockSession, gate, 'loop_1', 1, 'post_body');
   assert.ok(!prompt.includes('## Run Setup'), 'empty setup should not produce Run Setup section');
   assert.match(prompt, /\(not provided\)/);
+});
+
+test('buildAiGatePrompt includes gate persona when provided', () => {
+  const mockSession = {
+    plan: { setup: '', objective: null, persona: 'plan persona' },
+    state: { groups: {}, tasks: {} },
+  } as Session;
+  const gate = {
+    type: 'ai' as const,
+    id: 'test_gate',
+    repo: null,
+    prompt: 'evaluate this',
+    persona: 'gate persona',
+    provider: null,
+    model: null,
+    reasoningEffort: null,
+    profile: null,
+    includeRecentTasks: null,
+    scoreThreshold: null,
+    timeoutSec: null,
+    requiredArtifacts: [],
+  };
+  const prompt = buildAiGatePrompt(mockSession, gate, 'loop_1', 1, 'post_body');
+  assert.match(prompt, /## Evaluator Persona/);
+  assert.match(prompt, /gate persona/);
+  assert.ok(!prompt.includes('plan persona'), 'gate persona should override plan persona');
+});
+
+test('buildAiGatePrompt falls back to plan persona when gate persona is missing', () => {
+  const mockSession = {
+    plan: { setup: '', objective: null, persona: 'plan persona' },
+    state: { groups: {}, tasks: {} },
+  } as Session;
+  const gate = {
+    type: 'ai' as const,
+    id: 'test_gate',
+    repo: null,
+    prompt: 'evaluate this',
+    persona: null,
+    provider: null,
+    model: null,
+    reasoningEffort: null,
+    profile: null,
+    includeRecentTasks: null,
+    scoreThreshold: null,
+    timeoutSec: null,
+    requiredArtifacts: [],
+  };
+  const prompt = buildAiGatePrompt(mockSession, gate, 'loop_1', 1, 'post_body');
+  assert.match(prompt, /## Evaluator Persona/);
+  assert.match(prompt, /plan persona/);
 });
 
 test('parseArgs parses --validate flag', () => {
@@ -685,4 +756,70 @@ test('normalizePlan stores repos map on plan', () => {
     ],
   });
   assert.deepEqual(plan.repos, { api: '.', web: '../web' });
+});
+
+test('normalizePlan rejects BLOCKED in limits.retry_on', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { main: '.' },
+        limits: { retry_on: ['BLOCKED'] },
+        flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+      }),
+    /limits.retry_on contains unsupported value: BLOCKED/,
+  );
+});
+
+test('normalizePlan stores loop gate repo and persona when configured', () => {
+  const plan = normalizePlan({
+    setup: 'x',
+    repos: { api: '.', web: '../web' },
+    flow: [
+      {
+        type: 'loop',
+        id: 'quality_loop',
+        gate: {
+          type: 'ai',
+          repo: 'web',
+          prompt: 'evaluate quality',
+          persona: 'You are a strict QA gate.',
+        },
+        body: [
+          { type: 'task', id: 'fix', repo: 'api', prompt: 'fix issues' },
+        ],
+      },
+    ],
+  });
+  assert.equal(plan.workflow[0].type, 'while');
+  if (plan.workflow[0].type !== 'while') return;
+  assert.equal(plan.workflow[0].until.repo, 'web');
+  assert.equal(plan.workflow[0].until.type, 'ai');
+  if (plan.workflow[0].until.type === 'ai') {
+    assert.equal(plan.workflow[0].until.persona, 'You are a strict QA gate.');
+  }
+});
+
+test('normalizePlan rejects loop gate with invalid repo alias', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { api: '.', web: '../web' },
+        flow: [
+          {
+            type: 'loop',
+            id: 'quality_loop',
+            gate: {
+              type: 'deterministic',
+              repo: 'bad_repo',
+              command: 'echo',
+              args: ['{"passed":true,"score":1,"reasons":[]}'],
+            },
+            body: [{ type: 'task', id: 'fix', repo: 'api', prompt: 'fix issues' }],
+          },
+        ],
+      }),
+    /flow\[0\]\.gate\.repo "bad_repo" does not match any key in repos/,
+  );
 });

@@ -70,6 +70,7 @@ export function gatherPriorTaskSummaries(
  * @param params.attempt Current attempt number (1-based).
  * @param params.groupIndex Assigned execution group index.
  * @param params.taskIndex Position within the group.
+ * @param params.gateFeedbackToAddress Latest loop-gate feedback that should be addressed by this task.
  * @returns Fully populated task launch descriptor.
  */
 export function buildLaunchFromTaskNode({
@@ -79,6 +80,7 @@ export function buildLaunchFromTaskNode({
   attempt,
   groupIndex,
   taskIndex,
+  gateFeedbackToAddress = [],
 }: {
   session: Session;
   node: TaskNode;
@@ -86,6 +88,7 @@ export function buildLaunchFromTaskNode({
   attempt: number;
   groupIndex: number;
   taskIndex: number;
+  gateFeedbackToAddress?: string[];
 }): TaskLaunch {
   const repoAlias = node.repo ?? Object.keys(session.paths.repoRoots)[0];
   const repoRoot = session.paths.repoRoots[repoAlias];
@@ -152,6 +155,7 @@ export function buildLaunchFromTaskNode({
     reportPath: workerReportPath,
     summaryPath: workerSummaryPath,
     priorTaskSummaries: gatherPriorTaskSummaries(session, node.contextFrom),
+    gateFeedbackToAddress,
   });
 
   return {

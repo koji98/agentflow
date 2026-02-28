@@ -24,6 +24,15 @@ function saveJson(filePath: string, payload: unknown): void {
 }
 
 /**
+ * Persists the in-memory decision trace to `decision_trace.json`.
+ * @param session Current run session.
+ */
+function saveDecisionTrace(session: Session): void {
+  if (session.dryRun) return;
+  saveJson(session.paths.decisionTracePath, session.decisionTrace);
+}
+
+/**
  * Builds the in-memory execution session and initial persisted run state values.
  *
  * @param params Session initialization inputs.
@@ -72,6 +81,7 @@ export function createSession({
       runId,
       statePath: path.resolve(runRoot, 'run_state.json'),
       summaryPath: path.resolve(runRoot, 'run_summary.md'),
+      decisionTracePath: path.resolve(runRoot, 'decision_trace.json'),
     },
     counters: {
       nextGroupIndex: 1,
@@ -149,6 +159,18 @@ export function createResumedSession({
 }): Session {
   const runRoot = path.resolve(runDir);
   const runId = priorState.runId;
+  const decisionTracePath = path.resolve(runRoot, 'decision_trace.json');
+  let resumedDecisionTrace: DecisionTraceEntry[] = [];
+  if (fs.existsSync(decisionTracePath)) {
+    try {
+      const rawTrace = JSON.parse(fs.readFileSync(decisionTracePath, 'utf8'));
+      if (Array.isArray(rawTrace)) {
+        resumedDecisionTrace = rawTrace as DecisionTraceEntry[];
+      }
+    } catch {
+      resumedDecisionTrace = [];
+    }
+  }
 
   const resumedTasks = new Map<string, TaskStateRow>();
   const doneTasks: Record<string, TaskStateRow> = {};
@@ -184,6 +206,7 @@ export function createResumedSession({
       runId,
       statePath: path.resolve(runRoot, 'run_state.json'),
       summaryPath: path.resolve(runRoot, 'run_summary.md'),
+      decisionTracePath,
     },
     counters: {
       nextGroupIndex: maxGroupIndex + 1,
@@ -200,7 +223,7 @@ export function createResumedSession({
     state,
     resumedTasks,
     shutdownSignal: null,
-    decisionTrace: [],
+    decisionTrace: resumedDecisionTrace,
   };
 }
 
@@ -243,6 +266,53 @@ export function recordDecision(
 ): void {
   const entry: DecisionTraceEntry = { atUtc: nowUtcIso(), type, nodePath, detail };
   session.decisionTrace.push(entry);
+  saveDecisionTrace(session);
+}
+
+/** Truncates a potentially long line for markdown summary readability. */
+function truncateLine(text: string, max = 180): string {
+  return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
+}
+
+/**
+ * Converts a decision trace entry into one summary markdown bullet.
+ * Only decisions relevant to gating/retry outcomes are surfaced.
+ * @param entry One decision trace entry.
+ * @returns One markdown bullet or `null` when not relevant for the summary section.
+ */
+function renderDecisionSummaryLine(entry: DecisionTraceEntry): string | null {
+  if (entry.type === 'while_gate_evaluation') {
+    const gateId = String(entry.detail.gateId || '(unknown_gate)');
+    const iteration = Number(entry.detail.iteration || 0);
+    const phase = String(entry.detail.phase || 'unknown_phase');
+    const passed = entry.detail.passed === true ? 'true' : 'false';
+    const score = entry.detail.score === null || entry.detail.score === undefined
+      ? 'null'
+      : String(entry.detail.score);
+    const reasons = Array.isArray(entry.detail.reasons)
+      ? (entry.detail.reasons as unknown[]).map((r) => String(r)).join('; ')
+      : '(none)';
+    return `- \`${entry.atUtc}\` gate=${gateId} iteration=${iteration} phase=${phase} passed=${passed} score=${score} reasons=${truncateLine(reasons)}`;
+  }
+  if (entry.type === 'task_retry') {
+    const taskId = String(entry.detail.taskId || '(unknown_task)');
+    const attempt = Number(entry.detail.attempt || 0);
+    const nextAttempt = Number(entry.detail.nextAttempt || 0);
+    const status = String(entry.detail.status || '(unknown_status)');
+    const timedOut = entry.detail.timedOut === true ? 'true' : 'false';
+    return `- \`${entry.atUtc}\` retry task=${taskId} attempt=${attempt}->${nextAttempt} status=${status} timed_out=${timedOut}`;
+  }
+  if (entry.type === 'while_exhausted') {
+    const whileId = String(entry.detail.whileId || '(unknown_while)');
+    const maxIterations = Number(entry.detail.maxIterations || 0);
+    const gateId = String(entry.detail.gateId || '(unknown_gate)');
+    return `- \`${entry.atUtc}\` while exhausted while_id=${whileId} gate=${gateId} max_iterations=${maxIterations}`;
+  }
+  if (entry.type === 'termination_guard') {
+    const reason = String(entry.detail.reason || '(unknown)');
+    return `- \`${entry.atUtc}\` termination guard triggered reason=${reason}`;
+  }
+  return null;
 }
 
 /**
@@ -284,6 +354,19 @@ export function writeSummary(session: Session): void {
     );
   }
 
+  lines.push('');
+  lines.push('## Latest Decisions');
+  lines.push('');
+  const decisionLines = session.decisionTrace
+    .map(renderDecisionSummaryLine)
+    .filter((line): line is string => line !== null)
+    .slice(-10);
+  if (decisionLines.length === 0) {
+    lines.push('- (none yet)');
+  } else {
+    lines.push(...decisionLines);
+  }
+
   fs.mkdirSync(path.dirname(session.paths.summaryPath), { recursive: true });
   fs.writeFileSync(session.paths.summaryPath, `${lines.join('\n')}\n`, 'utf8');
 }
@@ -296,6 +379,7 @@ export function initializeSessionArtifacts(session: Session): void {
   if (session.dryRun) return;
   fs.mkdirSync(session.paths.runRoot, { recursive: true });
   saveState(session);
+  saveDecisionTrace(session);
   writeSummary(session);
 }
 
@@ -428,5 +512,6 @@ export function failureCount(session: Session): number {
  */
 export function finalizeSession(session: Session): void {
   saveState(session);
+  saveDecisionTrace(session);
   writeSummary(session);
 }

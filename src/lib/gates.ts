@@ -90,6 +90,22 @@ export function evaluateGateOutcome(
 }
 
 /**
+ * Resolves the filesystem repo root used by a gate.
+ * @param session Current run session.
+ * @param gate Gate definition with optional repo alias.
+ * @returns Absolute repo root path for gate execution and artifact checks.
+ * @throws {Error} When the configured repo alias is unknown.
+ */
+function resolveGateRepoRoot(session: Session, gate: EvaluatorGate): string {
+  const repoAlias = gate.repo || Object.keys(session.paths.repoRoots)[0];
+  const repoRoot = session.paths.repoRoots[repoAlias];
+  if (!repoRoot) {
+    throw new Error(`Gate ${gate.id} references unknown repo alias "${repoAlias}".`);
+  }
+  return repoRoot;
+}
+
+/**
  * Builds the AI gate evaluation prompt, injecting recent loop group/task summaries.
  * @param session Current run session.
  * @param gate AI gate definition with prompt template.
@@ -137,6 +153,11 @@ export function buildAiGatePrompt(
 
   const sections: string[] = [];
 
+  const evaluatorPersona = gate.persona || session.plan.persona;
+  if (evaluatorPersona) {
+    sections.push(`## Evaluator Persona\n${evaluatorPersona}`);
+  }
+
   sections.push('You are an evaluator gate for an agent workflow.');
 
   sections.push('Evaluate whether the loop objective is satisfied.');
@@ -166,22 +187,21 @@ export function buildAiGatePrompt(
 
 /**
  * Runs a deterministic evaluator command and normalizes its JSON/text output.
- * @param session Current run session.
  * @param gate Deterministic gate definition with command spec.
+ * @param gateRoot Repo root resolved from `gate.repo` (or default repo).
  * @param gateDir Directory for gate evaluation artifacts.
  * @param evalBase Filename base for log and JSON output files.
  * @returns Normalized evaluator output.
  */
 function runDeterministicGate(
-  session: Session,
   gate: DeterministicGate,
+  gateRoot: string,
   gateDir: string,
   evalBase: string,
 ): EvaluatorOutput {
-  const detDefaultRoot = Object.values(session.paths.repoRoots)[0];
   const logPath = path.resolve(gateDir, `${evalBase}.log`);
   const jsonPath = path.resolve(gateDir, `${evalBase}.json`);
-  const cwd = gate.exec.cwd ? path.resolve(detDefaultRoot, gate.exec.cwd) : detDefaultRoot;
+  const cwd = gate.exec.cwd ? path.resolve(gateRoot, gate.exec.cwd) : gateRoot;
   const cmd = [gate.exec.command, ...gate.exec.args];
   const timeoutSec = gate.timeoutSec || gate.exec.timeoutSec || 120;
   const result = spawnSync(cmd[0], cmd.slice(1), {
@@ -226,6 +246,7 @@ function runDeterministicGate(
  * @param nodePath Workflow node path for the enclosing loop.
  * @param iteration Current loop iteration number.
  * @param phase Whether the gate runs before or after the loop body.
+ * @param gateRoot Repo root resolved from `gate.repo` (or default repo).
  * @param gateDir Directory for gate evaluation artifacts.
  * @param evalBase Filename base for log and JSON output files.
  * @returns Normalized evaluator output.
@@ -236,6 +257,7 @@ function runAiGate(
   nodePath: string,
   iteration: number,
   phase: 'pre_body' | 'post_body',
+  gateRoot: string,
   gateDir: string,
   evalBase: string,
 ): EvaluatorOutput {
@@ -253,7 +275,6 @@ function runAiGate(
     return out;
   }
 
-  const aiDefaultRoot = Object.values(session.paths.repoRoots)[0];
   const messagePath = path.resolve(gateDir, `${evalBase}.last_message.md`);
   const logPath = path.resolve(gateDir, `${evalBase}.log`);
   const jsonPath = path.resolve(gateDir, `${evalBase}.json`);
@@ -266,7 +287,7 @@ function runAiGate(
     reasoningEffort: gate.reasoningEffort || session.plan.reasoningEffort,
     profile: gate.profile || session.plan.profile,
     promptText: prompt,
-    workspaceCwd: aiDefaultRoot,
+    workspaceCwd: gateRoot,
     lastMessagePath: messagePath,
     skipGitRepoCheck: session.plan.options.skipGitRepoCheck,
     sandboxMode: session.plan.options.sandboxMode,
@@ -274,7 +295,7 @@ function runAiGate(
 
   const useStdin = provider === 'codex';
   const result = spawnSync(cmd[0], cmd.slice(1), {
-    cwd: aiDefaultRoot,
+    cwd: gateRoot,
     input: useStdin ? prompt : undefined,
     encoding: 'utf8',
     timeout: timeoutSec * 1000,
@@ -282,7 +303,7 @@ function runAiGate(
   });
 
   const logText = [
-    `$ (cd ${JSON.stringify(aiDefaultRoot)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`,
+    `$ (cd ${JSON.stringify(gateRoot)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`,
     '',
     '--- stdout ---',
     result.stdout || '',
@@ -339,12 +360,12 @@ export function evaluateGate(
     };
   }
 
-  const defaultRoot = Object.values(session.paths.repoRoots)[0];
+  const gateRoot = resolveGateRepoRoot(session, gate);
   const missingArtifacts: string[] = [];
   for (const artifact of gate.requiredArtifacts) {
     const artifactPath = path.isAbsolute(artifact)
       ? path.resolve(artifact)
-      : path.resolve(defaultRoot, artifact);
+      : path.resolve(gateRoot, artifact);
     if (!fs.existsSync(artifactPath)) missingArtifacts.push(artifact);
   }
   if (missingArtifacts.length > 0) {
@@ -361,7 +382,7 @@ export function evaluateGate(
   fs.mkdirSync(evalDir, { recursive: true });
 
   if (gate.type === 'deterministic') {
-    return runDeterministicGate(session, gate, evalDir, evalBase);
+    return runDeterministicGate(gate, gateRoot, evalDir, evalBase);
   }
-  return runAiGate(session, gate, nodePath, iteration, phase, evalDir, evalBase);
+  return runAiGate(session, gate, nodePath, iteration, phase, gateRoot, evalDir, evalBase);
 }

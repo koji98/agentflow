@@ -2,7 +2,7 @@
 
 export type Provider = 'codex' | 'cursor';
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-export type RetryOn = 'FAILED' | 'TIMEOUT' | 'BLOCKED';
+export type RetryOn = 'FAILED' | 'TIMEOUT';
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 /** Parsed CLI arguments for one invocation. */
@@ -46,6 +46,7 @@ export interface EvaluatorExec {
 export interface BaseGate {
   id: string;
   type: 'deterministic' | 'ai';
+  repo: string | null;
   scoreThreshold: number | null;
   timeoutSec: number | null;
   requiredArtifacts: string[];
@@ -61,6 +62,7 @@ export interface DeterministicGate extends BaseGate {
 export interface AiGate extends BaseGate {
   type: 'ai';
   prompt: string;
+  persona: string | null;
   provider: Provider | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -252,6 +254,7 @@ export interface RunPaths {
   runId: string;
   statePath: string;
   summaryPath: string;
+  decisionTracePath: string;
 }
 
 /** Mutable execution counters tracked across the run lifetime. */

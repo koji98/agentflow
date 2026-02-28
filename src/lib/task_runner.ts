@@ -17,6 +17,7 @@ import {
 } from './session.ts';
 import type {
   ContractResult,
+  EvaluatorOutput,
   GroupNode,
   Session,
   TaskExecutionResult,
@@ -240,12 +241,57 @@ function shouldRetry(result: TaskExecutionResult, limits: Session['plan']['limit
 }
 
 /**
+ * Merges gate feedback lines while preserving order and removing duplicates.
+ * @param existing Existing feedback lines already in scope.
+ * @param incoming New feedback lines to append.
+ * @returns Deduplicated feedback lines.
+ */
+function mergeGateFeedback(existing: string[], incoming: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of [...existing, ...incoming]) {
+    const normalized = String(line || '').trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+/**
+ * Produces concise feedback lines from a failed gate evaluation for task prompt injection.
+ * @param gateId Gate identifier.
+ * @param iteration Current loop iteration.
+ * @param phase Gate phase where evaluation happened.
+ * @param evaluation Gate evaluation output.
+ * @returns Prompt-ready feedback lines.
+ */
+function summarizeFailedGateEvaluation(
+  gateId: string,
+  iteration: number,
+  phase: 'pre_body' | 'post_body',
+  evaluation: EvaluatorOutput,
+): string[] {
+  const headline = `Gate ${gateId} failed (iteration=${iteration}, phase=${phase}, score=${evaluation.score ?? 'null'}).`;
+  const reasons = evaluation.reasons.length > 0
+    ? evaluation.reasons.map((reason) => `Reason: ${reason}`)
+    : ['Reason: (gate returned no explicit reasons)'];
+  return [headline, ...reasons];
+}
+
+/**
  * Executes one task node, applying retry policy when configured.
  * @param session Current run session.
  * @param node Task workflow node.
  * @param nodePath Workflow node path for tracing.
+ * @param gateFeedbackToAddress Optional gate feedback to include in the task prompt.
  */
-async function executeTaskNode(session: Session, node: TaskNode, nodePath: string): Promise<void> {
+async function executeTaskNode(
+  session: Session,
+  node: TaskNode,
+  nodePath: string,
+  gateFeedbackToAddress: string[] = [],
+): Promise<void> {
   const resumed = session.resumedTasks.get(nodePath);
   if (resumed && resumed.status === 'DONE') {
     log(`[skip] task ${node.taskId} already completed (resumed)`);
@@ -263,6 +309,7 @@ async function executeTaskNode(session: Session, node: TaskNode, nodePath: strin
       attempt,
       groupIndex,
       taskIndex: 1,
+      gateFeedbackToAddress,
     });
     const [result] = await runLaunchBatch(
       session,
@@ -296,11 +343,17 @@ async function executeTaskNode(session: Session, node: TaskNode, nodePath: strin
  * @param session Current run session.
  * @param node Group workflow node.
  * @param nodePath Workflow node path for tracing.
+ * @param gateFeedbackToAddress Optional gate feedback propagated to child tasks.
  */
-async function executeGroupNode(session: Session, node: GroupNode, nodePath: string): Promise<void> {
+async function executeGroupNode(
+  session: Session,
+  node: GroupNode,
+  nodePath: string,
+  gateFeedbackToAddress: string[] = [],
+): Promise<void> {
   if (!node.parallel) {
     for (let i = 0; i < node.steps.length; i += 1) {
-      await executeWorkflowNode(session, node.steps[i], `${nodePath}/step_${i + 1}`);
+      await executeWorkflowNode(session, node.steps[i], `${nodePath}/step_${i + 1}`, gateFeedbackToAddress);
     }
     return;
   }
@@ -310,7 +363,7 @@ async function executeGroupNode(session: Session, node: GroupNode, nodePath: str
     const chunk = node.steps.slice(i, i + maxParallel);
     const settled = await Promise.allSettled(
       chunk.map((child, idx) =>
-        executeWorkflowNode(session, child, `${nodePath}/step_${i + idx + 1}`),
+        executeWorkflowNode(session, child, `${nodePath}/step_${i + idx + 1}`, gateFeedbackToAddress),
       ),
     );
     const rejected = settled
@@ -332,11 +385,18 @@ async function executeGroupNode(session: Session, node: GroupNode, nodePath: str
  * @param session Current run session.
  * @param node While workflow node with gate and body.
  * @param nodePath Workflow node path for tracing.
+ * @param inheritedGateFeedback Optional gate feedback propagated from an outer loop.
  * @throws {Error} When loop exhausts max_iterations without gate satisfaction.
  */
-async function executeWhileNode(session: Session, node: WhileNode, nodePath: string): Promise<void> {
+async function executeWhileNode(
+  session: Session,
+  node: WhileNode,
+  nodePath: string,
+  inheritedGateFeedback: string[] = [],
+): Promise<void> {
   const globalCap = session.plan.limits.maxIterations;
   const localCap = node.maxIterations || globalCap || 1;
+  let carryForwardGateFeedback: string[] = [];
 
   for (let iteration = 1; iteration <= localCap; iteration += 1) {
     if (globalCap !== null && session.counters.loopIterationCount >= globalCap) {
@@ -374,8 +434,24 @@ async function executeWhileNode(session: Session, node: WhileNode, nodePath: str
       return;
     }
 
+    const preFailureFeedback = summarizeFailedGateEvaluation(
+      node.until.id,
+      iteration,
+      'pre_body',
+      preEval,
+    );
+    const loopGateFeedback = carryForwardGateFeedback.length > 0
+      ? carryForwardGateFeedback
+      : preFailureFeedback;
+    const feedbackForLoopBody = mergeGateFeedback(inheritedGateFeedback, loopGateFeedback);
+
     for (let i = 0; i < node.body.length; i += 1) {
-      await executeWorkflowNode(session, node.body[i], `${nodePath}/iter_${iteration}/body_${i + 1}`);
+      await executeWorkflowNode(
+        session,
+        node.body[i],
+        `${nodePath}/iter_${iteration}/body_${i + 1}`,
+        feedbackForLoopBody,
+      );
     }
 
     const postEval = evaluateGate(session, node.until, nodePath, iteration, 'post_body');
@@ -397,6 +473,13 @@ async function executeWhileNode(session: Session, node: WhileNode, nodePath: str
       });
       return;
     }
+
+    carryForwardGateFeedback = summarizeFailedGateEvaluation(
+      node.until.id,
+      iteration,
+      'post_body',
+      postEval,
+    );
   }
 
   recordDecision(session, 'while_exhausted', nodePath, {
@@ -412,22 +495,24 @@ async function executeWhileNode(session: Session, node: WhileNode, nodePath: str
  * @param session Current run session.
  * @param node Workflow node to execute (task, group, or while).
  * @param nodePath Workflow node path for tracing.
+ * @param gateFeedbackToAddress Optional gate feedback propagated from loop context.
  */
 async function executeWorkflowNode(
   session: Session,
   node: WorkflowNode,
   nodePath: string,
+  gateFeedbackToAddress: string[] = [],
 ): Promise<void> {
   assertTerminationGuards(session, nodePath);
   if (node.type === 'task') {
-    await executeTaskNode(session, node, `${nodePath}/task:${node.taskId}`);
+    await executeTaskNode(session, node, `${nodePath}/task:${node.taskId}`, gateFeedbackToAddress);
     return;
   }
   if (node.type === 'group') {
-    await executeGroupNode(session, node, `${nodePath}/group:${node.id}`);
+    await executeGroupNode(session, node, `${nodePath}/group:${node.id}`, gateFeedbackToAddress);
     return;
   }
-  await executeWhileNode(session, node, `${nodePath}/while:${node.id}`);
+  await executeWhileNode(session, node, `${nodePath}/while:${node.id}`, gateFeedbackToAddress);
 }
 
 /**
