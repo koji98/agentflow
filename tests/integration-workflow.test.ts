@@ -674,4 +674,27 @@ test('multi-repo plan with two repos targets different repos per task', async (t
   assert.ok(webCall);
   assert.equal(apiCall.cwd, fs.realpathSync(repoA), 'api task should run in repo A');
   assert.equal(webCall.cwd, fs.realpathSync(repoB), 'web task should run in repo B');
+
+  const apiReportPath = path.resolve(String(apiCall.reportPath || ''));
+  const webReportPath = path.resolve(String(webCall.reportPath || ''));
+  const apiRoot = path.resolve(repoA);
+  const webRoot = path.resolve(repoB);
+  assert.ok(
+    apiReportPath === apiRoot || apiReportPath.startsWith(apiRoot + path.sep),
+    `api task report path should be inside repo A, got: ${apiReportPath}`,
+  );
+  assert.ok(
+    webReportPath === webRoot || webReportPath.startsWith(webRoot + path.sep),
+    `web task report path should be inside repo B, got: ${webReportPath}`,
+  );
+
+  const runBase = path.resolve(repoA, 'tmp/test_multi_repo_runs');
+  const runDir = getSingleRunDir(runBase);
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const taskRows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
+  assert.equal(taskRows.length, 2);
+  for (const row of taskRows) {
+    assert.ok(fs.existsSync(String(row.reportPath)), `missing report artifact: ${String(row.reportPath)}`);
+    assert.ok(fs.existsSync(String(row.summaryPath)), `missing summary artifact: ${String(row.summaryPath)}`);
+  }
 });

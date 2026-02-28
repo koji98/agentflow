@@ -28,6 +28,32 @@ import type {
 import { prepareLaunches } from './worktrees.ts';
 
 /**
+ * Copies worker-generated artifacts into canonical run artifact paths when they differ.
+ * @param session Current run session.
+ * @param launch Task launch descriptor containing worker/canonical artifact paths.
+ */
+function syncWorkerArtifacts(session: Session, launch: TaskLaunch): void {
+  if (session.dryRun) return;
+
+  const artifacts = [
+    { workerPath: launch.workerReportPath, canonicalPath: launch.reportPath },
+    { workerPath: launch.workerSummaryPath, canonicalPath: launch.summaryPath },
+  ];
+
+  for (const { workerPath, canonicalPath } of artifacts) {
+    if (workerPath === canonicalPath) continue;
+    if (!fs.existsSync(workerPath)) continue;
+    fs.mkdirSync(path.dirname(canonicalPath), { recursive: true });
+    fs.copyFileSync(workerPath, canonicalPath);
+    try {
+      fs.unlinkSync(workerPath);
+    } catch {
+      // Best-effort cleanup: canonical artifact already persisted.
+    }
+  }
+}
+
+/**
  * Validates global termination guards before launching more work.
  * @param session Current run session.
  * @param nodePath Workflow node path for decision trace.
@@ -125,15 +151,7 @@ export async function executeLaunch(
     stdoutCapturePath: isCursor ? launch.lastMessagePath : null,
   });
 
-  if (
-    !session.dryRun &&
-    launch.workerReportPath !== launch.reportPath &&
-    !fs.existsSync(launch.reportPath) &&
-    fs.existsSync(launch.workerReportPath)
-  ) {
-    fs.mkdirSync(path.dirname(launch.reportPath), { recursive: true });
-    fs.copyFileSync(launch.workerReportPath, launch.reportPath);
-  }
+  syncWorkerArtifacts(session, launch);
 
   const reportExists =
     fs.existsSync(launch.reportPath) ||
