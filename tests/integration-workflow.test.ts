@@ -165,7 +165,12 @@ test('single-task happy path succeeds and persists DONE artifacts', async (t) =>
   assert.ok(fs.existsSync(path.resolve(runDir, 'run_summary.md')));
   assert.ok(!fs.existsSync(path.resolve(runDir, 'run_events.jsonl')));
   assert.ok(!fs.existsSync(path.resolve(runDir, 'raw_thoughts.md')));
-  assert.ok(!fs.existsSync(path.resolve(runDir, 'decision_trace.json')));
+  const decisionTracePath = path.resolve(runDir, 'decision_trace.json');
+  assert.ok(fs.existsSync(decisionTracePath));
+  const decisionTrace = JSON.parse(fs.readFileSync(decisionTracePath, 'utf8'));
+  assert.ok(Array.isArray(decisionTrace));
+  const summaryText = fs.readFileSync(path.resolve(runDir, 'run_summary.md'), 'utf8');
+  assert.match(summaryText, /## Latest Decisions/);
 
   const worktreeList = runOrThrow('git', ['worktree', 'list', '--porcelain'], repoRoot).stdout;
   const worktreeEntries = worktreeList
@@ -611,6 +616,17 @@ fi
 
   const codexCalls = parseJsonLines(mockLog);
   assert.equal(codexCalls.length, 1, 'loop body task should have executed exactly once before gate passed');
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_loop_runs');
+  const runDir = getSingleRunDir(runBase);
+  const groupDirs = fs.readdirSync(runDir).filter((d) => d.startsWith('group_01')).sort();
+  assert.ok(groupDirs.length > 0, 'expected first loop body group directory');
+  const taskDirs = fs.readdirSync(path.resolve(runDir, groupDirs[0]));
+  const loopTaskDir = taskDirs.find((d) => d.includes('loop-task'));
+  assert.ok(loopTaskDir, 'expected loop_task artifact directory');
+  const promptText = fs.readFileSync(path.resolve(runDir, groupDirs[0], loopTaskDir, 'prompt.md'), 'utf8');
+  assert.match(promptText, /## Gate Feedback To Address/);
+  assert.match(promptText, /not yet/);
 });
 
 test('multi-repo plan with two repos targets different repos per task', async (t) => {
@@ -674,4 +690,96 @@ test('multi-repo plan with two repos targets different repos per task', async (t
   assert.ok(webCall);
   assert.equal(apiCall.cwd, fs.realpathSync(repoA), 'api task should run in repo A');
   assert.equal(webCall.cwd, fs.realpathSync(repoB), 'web task should run in repo B');
+
+  const apiReportPath = path.resolve(String(apiCall.reportPath || ''));
+  const webReportPath = path.resolve(String(webCall.reportPath || ''));
+  const apiRoot = path.resolve(repoA);
+  const webRoot = path.resolve(repoB);
+  assert.ok(
+    apiReportPath === apiRoot || apiReportPath.startsWith(apiRoot + path.sep),
+    `api task report path should be inside repo A, got: ${apiReportPath}`,
+  );
+  assert.ok(
+    webReportPath === webRoot || webReportPath.startsWith(webRoot + path.sep),
+    `web task report path should be inside repo B, got: ${webReportPath}`,
+  );
+
+  const runBase = path.resolve(repoA, 'tmp/test_multi_repo_runs');
+  const runDir = getSingleRunDir(runBase);
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const taskRows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
+  assert.equal(taskRows.length, 2);
+  for (const row of taskRows) {
+    assert.ok(fs.existsSync(String(row.reportPath)), `missing report artifact: ${String(row.reportPath)}`);
+    assert.ok(fs.existsSync(String(row.summaryPath)), `missing summary artifact: ${String(row.summaryPath)}`);
+  }
+});
+
+test('loop gate repo scope resolves required artifacts and cwd against selected repo', async (t) => {
+  const repoA = mkRepo('agentflow-gate-repo-api-');
+  const repoB = mkRepo('agentflow-gate-repo-web-');
+  t.after(() => {
+    fs.rmSync(repoA, { recursive: true, force: true });
+    fs.rmSync(repoB, { recursive: true, force: true });
+  });
+
+  const mockBinDir = path.resolve(repoA, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoA, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoA, 'mock_behavior.json');
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }),
+    'utf8',
+  );
+
+  fs.writeFileSync(path.resolve(repoB, 'web_ready.txt'), 'ready', 'utf8');
+
+  const planPath = path.resolve(repoA, 'gate_repo_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'multi-repo gate scope test',
+      repos: { api: '.', web: repoB },
+      worktrees: false,
+      provider: 'codex',
+      model: 'gpt-5-nano',
+      reasoning: 'xhigh',
+      options: { run_root: 'tmp/test_gate_repo_runs' },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        {
+          type: 'loop',
+          id: 'repo_scoped_gate_loop',
+          max_iterations: 1,
+          gate: {
+            type: 'deterministic',
+            repo: 'web',
+            command: '/bin/sh',
+            args: ['-c', 'if [ -f web_ready.txt ]; then echo \'{"passed":true,"score":1,"reasons":[]}\' ; else echo \'{"passed":false,"score":0,"reasons":["missing web_ready.txt"]}\' ; fi'],
+            required_artifacts: ['web_ready.txt'],
+          },
+          body: [
+            { type: 'task', id: 'should_not_run', repo: 'api', prompt: 'this task should never run' },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const codexCalls = parseJsonLines(mockLog);
+  assert.equal(codexCalls.length, 0, 'loop body task should not run because pre-body gate passed');
 });

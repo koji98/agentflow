@@ -18,6 +18,18 @@ import {
 } from './utils.ts';
 
 /**
+ * Checks whether a target path is inside (or equal to) a base directory.
+ * @param baseDir Directory root to test against.
+ * @param targetPath Candidate target path.
+ * @returns `true` when targetPath is within baseDir.
+ */
+function isWithinDir(baseDir: string, targetPath: string): boolean {
+  const absBase = path.resolve(baseDir);
+  const absTarget = path.resolve(targetPath);
+  return absTarget === absBase || absTarget.startsWith(absBase + path.sep);
+}
+
+/**
  * Gathers summaries of completed prior tasks for prompt injection.
  * Reads exclusively from each task's `summary.md`. Tasks without a summary are skipped.
  * @param session Current run session.
@@ -58,6 +70,7 @@ export function gatherPriorTaskSummaries(
  * @param params.attempt Current attempt number (1-based).
  * @param params.groupIndex Assigned execution group index.
  * @param params.taskIndex Position within the group.
+ * @param params.gateFeedbackToAddress Latest loop-gate feedback that should be addressed by this task.
  * @returns Fully populated task launch descriptor.
  */
 export function buildLaunchFromTaskNode({
@@ -67,6 +80,7 @@ export function buildLaunchFromTaskNode({
   attempt,
   groupIndex,
   taskIndex,
+  gateFeedbackToAddress = [],
 }: {
   session: Session;
   node: TaskNode;
@@ -74,6 +88,7 @@ export function buildLaunchFromTaskNode({
   attempt: number;
   groupIndex: number;
   taskIndex: number;
+  gateFeedbackToAddress?: string[];
 }): TaskLaunch {
   const repoAlias = node.repo ?? Object.keys(session.paths.repoRoots)[0];
   const repoRoot = session.paths.repoRoots[repoAlias];
@@ -113,8 +128,22 @@ export function buildLaunchFromTaskNode({
   const workerContextFiles = mergedContextFiles.map((f) =>
     mapProjectPathToWorker(repoRoot, workspaceCwd, f),
   );
-  const workerReportPath = mapProjectPathToWorker(repoRoot, workspaceCwd, reportPath);
-  const workerSummaryPath = mapProjectPathToWorker(repoRoot, workspaceCwd, summaryPath);
+  const candidateWorkerReportPath = mapProjectPathToWorker(repoRoot, workspaceCwd, reportPath);
+  const candidateWorkerSummaryPath = mapProjectPathToWorker(repoRoot, workspaceCwd, summaryPath);
+  const workerArtifactsDir = path.resolve(
+    workspaceCwd,
+    '.agentflow',
+    'worker_artifacts',
+    session.paths.runId,
+    `group_${String(groupIndex).padStart(2, '0')}`,
+    `task_${taskSlug}`,
+  );
+  const workerReportPath = isWithinDir(workspaceCwd, candidateWorkerReportPath)
+    ? candidateWorkerReportPath
+    : path.resolve(workerArtifactsDir, DEFAULT_REPORT_FILENAME);
+  const workerSummaryPath = isWithinDir(workspaceCwd, candidateWorkerSummaryPath)
+    ? candidateWorkerSummaryPath
+    : path.resolve(workerArtifactsDir, DEFAULT_SUMMARY_FILENAME);
 
   const provider = task.provider || session.plan.provider;
   const promptText = buildPrompt({
@@ -126,6 +155,7 @@ export function buildLaunchFromTaskNode({
     reportPath: workerReportPath,
     summaryPath: workerSummaryPath,
     priorTaskSummaries: gatherPriorTaskSummaries(session, node.contextFrom),
+    gateFeedbackToAddress,
   });
 
   return {

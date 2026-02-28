@@ -126,17 +126,38 @@ function fields(
 // Gate normalizers
 // ---------------------------------------------------------------------------
 
-const SHARED_GATE_KEYS = ['type', 'id', 'score_threshold', 'timeout_sec', 'required_artifacts'] as const;
+const SHARED_GATE_KEYS = ['type', 'id', 'repo', 'score_threshold', 'timeout_sec', 'required_artifacts'] as const;
+
+/**
+ * Normalizes an optional gate repo alias and validates it against declared repos.
+ * @param repo Raw gate repo alias.
+ * @param fieldName Gate field path for errors.
+ * @param repoAliases Declared repo aliases from the plan.
+ * @returns Validated repo alias or `null` when omitted.
+ */
+function normalizeGateRepo(
+  repo: string | null,
+  fieldName: string,
+  repoAliases: string[],
+): string | null {
+  if (!repo) return null;
+  if (!repoAliases.includes(repo)) {
+    throw new Error(`${fieldName}.repo "${repo}" does not match any key in repos (${repoAliases.join(', ')}).`);
+  }
+  return repo;
+}
 
 function normalizeDeterministicGate(
   gatePayload: Record<string, unknown>,
   fieldName: string,
   fallbackId: string,
+  repoAliases: string[],
 ): DeterministicGate {
   const f = fields(gatePayload, fieldName, [...SHARED_GATE_KEYS, 'command', 'args', 'cwd']);
   return {
     type: 'deterministic',
     id: f.str('id') || `${fallbackId}_gate`,
+    repo: normalizeGateRepo(f.str('repo'), fieldName, repoAliases),
     scoreThreshold: f.threshold('score_threshold'),
     timeoutSec: f.posInt('timeout_sec'),
     requiredArtifacts: f.strArr('required_artifacts'),
@@ -153,17 +174,21 @@ function normalizeAiGate(
   gatePayload: Record<string, unknown>,
   fieldName: string,
   fallbackId: string,
+  repoAliases: string[],
 ): AiGate {
   const f = fields(gatePayload, fieldName, [
-    ...SHARED_GATE_KEYS, 'prompt', 'provider', 'model', 'reasoning', 'profile', 'include_recent_tasks',
+    ...SHARED_GATE_KEYS, 'prompt', 'persona', 'provider', 'model', 'reasoning', 'profile',
+    'include_recent_tasks',
   ]);
   return {
     type: 'ai',
     id: f.str('id') || `${fallbackId}_gate`,
+    repo: normalizeGateRepo(f.str('repo'), fieldName, repoAliases),
     scoreThreshold: f.threshold('score_threshold'),
     timeoutSec: f.posInt('timeout_sec'),
     requiredArtifacts: f.strArr('required_artifacts'),
     prompt: f.strReq('prompt'),
+    persona: f.str('persona'),
     provider: normalizeProvider(f.raw('provider')) as Provider | null,
     model: f.str('model'),
     reasoningEffort: normalizeReasoningEffort(f.raw('reasoning')),
@@ -180,10 +205,13 @@ function normalizeLoopGate(
   gatePayload: Record<string, unknown>,
   fieldName: string,
   fallbackId: string,
+  repoAliases: string[],
 ): EvaluatorGate {
   const gateType = requiredString(gatePayload.type, `${fieldName}.type`).toLowerCase();
-  if (gateType === 'deterministic') return normalizeDeterministicGate(gatePayload, fieldName, fallbackId);
-  if (gateType === 'ai') return normalizeAiGate(gatePayload, fieldName, fallbackId);
+  if (gateType === 'deterministic') {
+    return normalizeDeterministicGate(gatePayload, fieldName, fallbackId, repoAliases);
+  }
+  if (gateType === 'ai') return normalizeAiGate(gatePayload, fieldName, fallbackId, repoAliases);
   throw new Error(`${fieldName}.type must be one of: deterministic, ai.`);
 }
 
@@ -272,7 +300,7 @@ function normalizeFlowNode(
       type: 'while',
       id: loopId,
       maxIterations: f.posInt('max_iterations'),
-      until: normalizeLoopGate(gatePayload, `${fieldName}.gate`, loopId),
+      until: normalizeLoopGate(gatePayload, `${fieldName}.gate`, loopId, repoAliases),
       body: bodyPayload.map((b, i) => normalizeFlowNode(b, `${fieldName}.body[${i}]`, seenTaskIds, repoAliases)),
     };
   }
@@ -301,7 +329,7 @@ function normalizeRetryFields(
     .map((v) => v.toUpperCase())
     .filter((v, i, arr) => arr.indexOf(v) === i);
 
-  const allowed = new Set(['FAILED', 'TIMEOUT', 'BLOCKED']);
+  const allowed = new Set(['FAILED', 'TIMEOUT']);
   for (const valueItem of retryOn) {
     if (!allowed.has(valueItem)) {
       throw new Error(`limits.retry_on contains unsupported value: ${valueItem}`);

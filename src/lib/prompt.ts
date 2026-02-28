@@ -14,6 +14,7 @@ const DEFAULT_PERSONA = 'You are a senior software engineer. Write clean, well-t
  * @param params.reportPath Path where the agent should write its completion report.
  * @param params.summaryPath Path where the agent should write its downstream summary.
  * @param params.priorTaskSummaries Summaries of previously completed tasks for context.
+ * @param params.gateFeedbackToAddress Latest gate feedback that the task should explicitly address.
  * @returns Complete prompt string ready for provider submission.
  */
 export function buildPrompt({
@@ -25,6 +26,7 @@ export function buildPrompt({
   reportPath,
   summaryPath,
   priorTaskSummaries,
+  gateFeedbackToAddress = [],
 }: {
   persona: string | null;
   objective: string | null;
@@ -34,6 +36,7 @@ export function buildPrompt({
   reportPath: string;
   summaryPath: string;
   priorTaskSummaries: PriorTaskSummary[];
+  gateFeedbackToAddress?: string[];
 }): string {
   const sections: string[] = [];
 
@@ -48,6 +51,11 @@ export function buildPrompt({
   }
 
   sections.push(`## Your Task For Completing The Overall Goal (${task.taskId})\n${task.task}`);
+
+  if (gateFeedbackToAddress.length > 0) {
+    const feedbackLines = gateFeedbackToAddress.map((reason) => `- ${reason}`);
+    sections.push(`## Gate Feedback To Address\n${feedbackLines.join('\n')}`);
+  }
 
   if (priorTaskSummaries.length > 0) {
     const summaryLines = priorTaskSummaries.map(

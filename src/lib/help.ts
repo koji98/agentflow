@@ -107,6 +107,7 @@ Full schema skeleton (all keys shown):
       "max_iterations": 3,
       "gate": {
         "type": "deterministic",
+        "repo": "main",
         "command": "node",
         "args": ["scripts/evaluate.js"]
       },
@@ -121,7 +122,7 @@ Top-level keys:
 - version (optional)
 - setup (optional, default ""): global background/instructions injected into every task prompt
 - objective (optional): overall goal shared with agents and loop evaluators
-- persona (optional): agent identity/personality injected at top of prompt
+- persona (optional): default persona injected into task prompts and used as AI-gate persona fallback
 - repos (required): object mapping alias names to repo root paths, resolved from plan directory
 - provider (optional, default "codex"): "codex" or "cursor"
 - model (optional, default "gpt-5-nano"): model identifier
@@ -136,7 +137,7 @@ Top-level keys:
 
 Limits keys:
 - max_retries (default 0): retry count per failed task
-- retry_on (default ["FAILED","TIMEOUT"]): which statuses trigger retry
+- retry_on (default ["FAILED","TIMEOUT"]): which task outcomes trigger retry
 - max_iterations (default null): global loop iteration cap
 - max_runtime_sec (default null): max total run time in seconds
 - max_total_tasks (default null): max total task executions
@@ -175,9 +176,9 @@ Flow nodes:
 
 Loop gate shapes:
 - deterministic gate:
-  { "type": "deterministic", "command": "...", "args": [], "cwd": "...", "timeout_sec": 30, "score_threshold": 0.9, "required_artifacts": [] }
+  { "type": "deterministic", "repo": "main", "command": "...", "args": [], "cwd": "...", "timeout_sec": 30, "score_threshold": 0.9, "required_artifacts": [] }
 - ai gate:
-  { "type": "ai", "prompt": "...", "provider": "codex", "model": "gpt-5-nano", "reasoning": "xhigh", "profile": null, "include_recent_tasks": 20, "timeout_sec": 120, "score_threshold": 0.9, "required_artifacts": [] }
+  { "type": "ai", "repo": "main", "prompt": "...", "persona": "You are a strict QA evaluator.", "provider": "codex", "model": "gpt-5-nano", "reasoning": "xhigh", "profile": null, "include_recent_tasks": 20, "timeout_sec": 120, "score_threshold": 0.9, "required_artifacts": [] }
 
 Gate output contract:
 - JSON object with: passed (boolean), score (number|null), reasons (string[])
