@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 
 let tsxImport = 'tsx';
 try {
-  tsxImport = require.resolve('tsx/dist/loader.mjs');
+  tsxImport = require.resolve('tsx');
 } catch {
   // Fallback for environments where tsx is available on module resolution path.
 }
