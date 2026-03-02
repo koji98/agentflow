@@ -2,7 +2,7 @@
 
 > Paste this entire document into an LLM conversation to get help writing agentflow plans.
 
-agentflow is a file-driven workflow orchestrator for coding agents. You write a JSON plan with `task`, `group`, and `loop` nodes, and agentflow executes it — spawning agent CLI sessions sequentially or in parallel, managing git worktrees, evaluating loop gates, and writing deterministic run artifacts.
+agentflow is a file-driven workflow orchestrator for coding agents. You write a JSON plan with `task`, `command`, `group`, and `loop` nodes, and agentflow executes it — spawning agent CLI sessions, running deterministic shell commands, managing git worktrees, evaluating loop gates, and writing deterministic run artifacts.
 
 Plans are **blueprints**: structured specifications that decompose large-scale codebase work into atomic, sequential agent tasks with built-in validation.
 
@@ -51,7 +51,7 @@ Unknown keys are rejected at every level.
 | `retry_on` | string[] | `["FAILED","TIMEOUT"]` | Which outcomes trigger retry |
 | `max_iterations` | integer | `null` | Global loop iteration cap (prefer per-loop instead) |
 | `max_runtime_sec` | integer | `null` | Max total run time in seconds |
-| `max_total_tasks` | integer | `null` | Max total task executions (including retries) |
+| `max_total_tasks` | integer | `null` | Max total executable node executions (task + command, including retries) |
 | `max_failures` | integer | `null` | Max failures before abort |
 | `worker_timeout_sec` | integer | `7200` | Per-task timeout in seconds |
 | `timeout_grace_sec` | integer | `20` | Grace period between SIGTERM and SIGKILL |
@@ -80,6 +80,19 @@ Unknown keys are rejected at every level.
 | `persona` | string | No | plan-level |
 | `context_files` | string[] | No | `[]` |
 | `context_from` | string[] | No | all prior tasks |
+
+#### `command` — single deterministic shell command
+
+| Key | Type | Required | Default |
+|---|---|---|---|
+| `type` | `"command"` | Yes | — |
+| `id` | string | Yes | — (must be globally unique across task + command ids) |
+| `repo` | string | No | single repo default (required when multiple repos) |
+| `command` | string | Yes | — |
+| `args` | string[] | Yes | — (may be empty) |
+| `cwd` | string | No | repo root (must be relative) |
+| `timeout_sec` | integer | No | falls back to `limits.worker_timeout_sec` |
+| `allow_failure` | boolean | No | `false` |
 
 #### `group` — container of child nodes
 
@@ -156,6 +169,13 @@ Gate feedback (pass/fail, score, reasons) is automatically injected into the nex
 - **FAILED**: nonzero exit, timeout, or missing report
 
 Each task is prompted to write `report.md` (required for DONE) and `summary.md` (feeds into downstream `context_from`).
+
+### Command completion contract
+
+- **DONE**: exit code 0
+- **FAILED**: nonzero exit, timeout, or spawn error
+
+Each command node writes `command_exec.log`, `command_result.json`, `summary.md`, and `report.md`.
 
 ---
 
@@ -399,6 +419,48 @@ Independent prep tasks in parallel (safe when targeting different repos).
       "prompt": "Merge both references...",
       "context_files": ["ui:scripts/ref.json", "api:scripts/ref.json"],
       "context_from": ["extract_ui", "extract_api"]
+    }
+  ]
+}
+```
+
+### 6. Cascading PR Orchestrator (command nodes)
+
+Use command nodes to deterministically run child plans and git/gh commands per branch in sequence.
+
+```json
+{
+  "repos": { "main": "." },
+  "flow": [
+    {
+      "type": "command",
+      "id": "validate_child_01",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "agentflow --plan ./plans/child_01.json --validate"],
+      "timeout_sec": 600
+    },
+    {
+      "type": "command",
+      "id": "run_child_01",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "agentflow --plan ./plans/child_01.json"],
+      "timeout_sec": 7200
+    },
+    {
+      "type": "command",
+      "id": "push_child_01",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "git add -A && git commit -m 'chore: child 01' && git push -u origin HEAD"]
+    },
+    {
+      "type": "command",
+      "id": "pr_child_01",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "gh pr create --base stack/parent --title 'child 01' --body 'Automated by agentflow'"]
     }
   ]
 }

@@ -124,7 +124,7 @@ test('flow uses group nodes and requires explicit parallel boolean', () => {
         repos: { main: '.' },
         flow: [{ type: 'parallel', id: 'legacy', steps: [] }],
       }),
-    /flow\[0\]\.type must be one of: task, group, loop\./,
+    /flow\[0\]\.type must be one of: task, command, group, loop\./,
   );
 
   assert.throws(
@@ -141,6 +141,110 @@ test('flow uses group nodes and requires explicit parallel boolean', () => {
         ],
       }),
     /flow\[0\]\.parallel must be a boolean\./,
+  );
+});
+
+test('plan normalization accepts command nodes with required fields', () => {
+  const plan = normalizePlan({
+    setup: 'command node test',
+    repos: { main: '.' },
+    flow: [
+      {
+        type: 'command',
+        id: 'validate_child',
+        command: '/bin/sh',
+        args: ['-c', 'echo ok'],
+        cwd: '.',
+        timeout_sec: 30,
+        allow_failure: true,
+      },
+    ],
+  });
+
+  assert.equal(plan.workflow[0].type, 'command');
+  if (plan.workflow[0].type !== 'command') return;
+  assert.equal(plan.workflow[0].id, 'validate_child');
+  assert.equal(plan.workflow[0].command, '/bin/sh');
+  assert.deepEqual(plan.workflow[0].args, ['-c', 'echo ok']);
+  assert.equal(plan.workflow[0].cwd, '.');
+  assert.equal(plan.workflow[0].timeoutSec, 30);
+  assert.equal(plan.workflow[0].allowFailure, true);
+});
+
+test('plan normalization rejects context_from on command nodes', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { main: '.' },
+        flow: [
+          {
+            type: 'command',
+            id: 'bad_command_context_from',
+            command: '/bin/sh',
+            args: ['-c', 'echo bad'],
+            context_from: ['task_a'],
+          },
+        ],
+      }),
+    /flow\[0\] contains unknown key: "context_from"\./,
+  );
+});
+
+test('plan normalization rejects command node when args is missing', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { main: '.' },
+        flow: [
+          {
+            type: 'command',
+            id: 'missing_args',
+            command: '/bin/sh',
+          },
+        ],
+      }),
+    /flow\[0\]\.args is required and must be an array of strings\./,
+  );
+});
+
+test('plan normalization rejects command node when args is null', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { main: '.' },
+        flow: [
+          {
+            type: 'command',
+            id: 'null_args',
+            command: '/bin/sh',
+            args: null,
+          },
+        ],
+      }),
+    /flow\[0\]\.args is required and must be an array of strings\./,
+  );
+});
+
+test('plan normalization rejects command node with absolute cwd', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { main: '.' },
+        flow: [
+          {
+            type: 'command',
+            id: 'bad_cwd',
+            command: '/bin/sh',
+            args: ['-c', 'echo bad'],
+            cwd: '/tmp',
+          },
+        ],
+      }),
+    /flow\[0\]\.cwd must be a relative path\./,
   );
 });
 
@@ -709,6 +813,18 @@ test('normalizePlan rejects task with missing repo when multiple repos exist', (
   );
 });
 
+test('normalizePlan rejects command with missing repo when multiple repos exist', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { api: '.', web: '../web' },
+        flow: [{ type: 'command', id: 'cmd', command: '/bin/sh', args: ['-c', 'echo ok'] }],
+      }),
+    /flow\[0\]\.repo is required when multiple repos are defined\./,
+  );
+});
+
 test('normalizePlan rejects task with invalid repo alias', () => {
   assert.throws(
     () =>
@@ -716,6 +832,18 @@ test('normalizePlan rejects task with invalid repo alias', () => {
         setup: 'x',
         repos: { api: '.', web: '../web' },
         flow: [{ type: 'task', id: 'a', prompt: 'b', repo: 'nonexistent' }],
+      }),
+    /flow\[0\]\.repo "nonexistent" does not match any key in repos/,
+  );
+});
+
+test('normalizePlan rejects command with invalid repo alias', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { api: '.', web: '../web' },
+        flow: [{ type: 'command', id: 'cmd', repo: 'nonexistent', command: '/bin/sh', args: ['-c', 'echo ok'] }],
       }),
     /flow\[0\]\.repo "nonexistent" does not match any key in repos/,
   );

@@ -259,23 +259,43 @@ Multiple independent preparation tasks run before the main execution. If they op
 
 ## Pattern 7: Cascading PRs
 
-Create multiple PRs from one plan, each building on the previous. Useful for splitting large changes into reviewable chunks.
+Create multiple PRs from one plan, each building on the previous. Use `command` nodes to deterministically run child plans and git/gh operations.
 
 **When to use:** Changes too large for a single PR, where each PR should be independently reviewable.
 
 ```json
 {
+  "repos": { "main": "." },
   "flow": [
     {
-      "type": "task",
-      "id": "create_branch_1",
-      "prompt": "git checkout -b chore/update-part-1. Make changes. Commit. Push. Create PR with gh cli."
+      "type": "command",
+      "id": "validate_child_01",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "agentflow --plan ./plans/child_01.json --validate"],
+      "timeout_sec": 600
     },
     {
-      "type": "task",
-      "id": "create_branch_2",
-      "prompt": "git checkout master. git checkout -b chore/update-part-2. Make changes. Commit. Push. Create PR.",
-      "context_from": ["create_branch_1"]
+      "type": "command",
+      "id": "run_child_01",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "agentflow --plan ./plans/child_01.json"],
+      "timeout_sec": 7200
+    },
+    {
+      "type": "command",
+      "id": "push_child_01",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "git add -A && git commit -m 'chore: child 01' && git push -u origin HEAD"]
+    },
+    {
+      "type": "command",
+      "id": "pr_child_01",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "gh pr create --base stack/parent --title 'child 01' --body 'Automated by agentflow'"]
     }
   ]
 }

@@ -54,6 +54,18 @@
       "context_from": ["analyze_requirements", "implement_small_change"]
     },
     {
+      "type": "command",
+      "id": "preflight_validate_plan",
+      "command": "/bin/zsh",
+      "args": [
+        "-lc",
+        "agentflow --plan example_plan.json --validate"
+      ],
+      "cwd": ".",
+      "timeout_sec": 120,
+      "allow_failure": false
+    },
+    {
       "type": "group",
       "id": "sequential_preflight",
       "parallel": false,

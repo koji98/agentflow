@@ -6,6 +6,7 @@ import { parseArgs } from './lib/args.ts';
 import { usageText, planHelpText } from './lib/help.ts';
 import {
   collectTaskNodes,
+  countExecutableNodes,
   countWorkflowNodes,
   loadPayload,
   normalizePlan,
@@ -23,11 +24,15 @@ import {
 import { runWorkflow } from './lib/task_runner.ts';
 import { cleanupWorktrees } from './lib/worktrees.ts';
 import { log, logError } from './lib/log.ts';
-import type { WorkerPlan } from './lib/types.ts';
+import type {
+  TaskNode,
+  WorkerPlan,
+  WorkflowNode,
+} from './lib/types.ts';
 
 /**
  * Resolves and validates only global context files at startup.
- * Task-level context files are validated lazily when each task is materialized.
+ * Task-level context files are validated by `validateTaskContextFiles`.
  *
  * @param plan Normalized worker plan with contextFiles array.
  * @param planPath Absolute path to the plan JSON file.
@@ -41,6 +46,256 @@ function validateGlobalContextFiles(
   repoRoots: Record<string, string>,
 ): string[] {
   return resolveConfigPaths(planPath, repoRoots, plan.contextFiles);
+}
+
+/**
+ * Resolves and validates every task node's context files at startup.
+ * Task-level context files resolve from the task's repo root for bare relative paths.
+ *
+ * @param plan Normalized worker plan with workflow tree.
+ * @param planPath Absolute path to the plan JSON file.
+ * @param repoRoots Map of alias to resolved absolute repo root.
+ * @throws {Error} When any task references context files that do not exist.
+ */
+function validateTaskContextFiles(
+  plan: WorkerPlan,
+  planPath: string,
+  repoRoots: Record<string, string>,
+): void {
+  const defaultRepoAlias = Object.keys(repoRoots)[0];
+  const errors: string[] = [];
+
+  for (const task of collectTaskNodes(plan.workflow)) {
+    const repoAlias = task.repo || defaultRepoAlias;
+    const repoRoot = repoRoots[repoAlias];
+    try {
+      resolveConfigPaths(planPath, repoRoots, task.contextFiles, repoRoot);
+    } catch (error) {
+      errors.push(
+        `task "${task.taskId}" (repo "${repoAlias}"):\n${String(error)}`,
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Task context file validation failed:\n${errors.join('\n\n')}`);
+  }
+}
+
+/**
+ * Checks whether a target path is inside (or equal to) a base directory.
+ * @param baseDir Directory root to test against.
+ * @param targetPath Candidate target path.
+ * @returns `true` when targetPath is within baseDir.
+ */
+function isWithinDir(baseDir: string, targetPath: string): boolean {
+  const absBase = path.resolve(baseDir);
+  const absTarget = path.resolve(targetPath);
+  return absTarget === absBase || absTarget.startsWith(absBase + path.sep);
+}
+
+/**
+ * Validates one workflow cwd field against repo boundaries and filesystem reachability.
+ *
+ * @param params Validation input payload.
+ * @param params.nodePath Schema-style node path used in error messages.
+ * @param params.repoAlias Repo alias selected for this node.
+ * @param params.cwd Raw cwd value from plan payload.
+ * @param params.repoRoots Map of alias to absolute repo root.
+ * @param params.errors Mutable error accumulator.
+ */
+function validateNodeCwd({
+  nodePath,
+  repoAlias,
+  cwd,
+  repoRoots,
+  errors,
+}: {
+  nodePath: string;
+  repoAlias: string;
+  cwd: string | null;
+  repoRoots: Record<string, string>;
+  errors: string[];
+}): void {
+  if (!cwd) return;
+
+  if (path.isAbsolute(cwd)) {
+    errors.push(`${nodePath}.cwd must be a relative path.`);
+    return;
+  }
+
+  const repoRoot = repoRoots[repoAlias];
+  if (!repoRoot) {
+    errors.push(`${nodePath} references unknown repo alias "${repoAlias}".`);
+    return;
+  }
+
+  const resolved = path.resolve(repoRoot, cwd);
+  if (!isWithinDir(repoRoot, resolved)) {
+    errors.push(`${nodePath}.cwd resolves outside repo "${repoAlias}": ${resolved}`);
+    return;
+  }
+  if (!fs.existsSync(resolved)) {
+    errors.push(`${nodePath}.cwd not found: ${cwd}`);
+    return;
+  }
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(resolved);
+  } catch {
+    errors.push(`${nodePath}.cwd is not readable: ${cwd}`);
+    return;
+  }
+  if (!stats.isDirectory()) {
+    errors.push(`${nodePath}.cwd must be a directory: ${cwd}`);
+  }
+}
+
+/**
+ * Validates workflow-level references not covered by schema:
+ * - command/deterministic-gate cwd reachability within repo roots
+ * - task context_from references (existence, non-self, and ordering)
+ *
+ * @param plan Normalized worker plan with workflow tree.
+ * @param repoRoots Map of alias to resolved absolute repo root.
+ * @throws {Error} When any workflow reference is invalid.
+ */
+function validateWorkflowReferences(
+  plan: WorkerPlan,
+  repoRoots: Record<string, string>,
+): void {
+  interface ParallelScope {
+    groupPath: string;
+    stepIndex: number;
+  }
+
+  interface ExecutableMeta {
+    index: number;
+    scopes: ParallelScope[];
+  }
+
+  const defaultRepoAlias = Object.keys(repoRoots)[0];
+  const errors: string[] = [];
+  const taskRows: Array<{ task: TaskNode; nodePath: string }> = [];
+  const executableOrder = new Map<string, ExecutableMeta>();
+  let nextExecutableIndex = 0;
+
+  const walk = (node: WorkflowNode, nodePath: string, scopes: ParallelScope[]): void => {
+    if (node.type === 'task') {
+      taskRows.push({ task: node, nodePath });
+      executableOrder.set(node.taskId, {
+        index: nextExecutableIndex,
+        scopes,
+      });
+      nextExecutableIndex += 1;
+      return;
+    }
+
+    if (node.type === 'command') {
+      executableOrder.set(node.id, {
+        index: nextExecutableIndex,
+        scopes,
+      });
+      nextExecutableIndex += 1;
+      const repoAlias = node.repo ?? defaultRepoAlias;
+      validateNodeCwd({
+        nodePath,
+        repoAlias,
+        cwd: node.cwd,
+        repoRoots,
+        errors,
+      });
+      return;
+    }
+
+    if (node.type === 'group') {
+      if (!node.parallel) {
+        node.steps.forEach((child, i) => {
+          walk(child, `${nodePath}.steps[${i}]`, scopes);
+        });
+      } else {
+        node.steps.forEach((child, i) => {
+          walk(child, `${nodePath}.steps[${i}]`, [
+            ...scopes,
+            { groupPath: nodePath, stepIndex: i },
+          ]);
+        });
+      }
+      return;
+    }
+
+    const gate = node.until;
+    if (gate.type === 'deterministic') {
+      const repoAlias = gate.repo ?? defaultRepoAlias;
+      validateNodeCwd({
+        nodePath: `${nodePath}.gate`,
+        repoAlias,
+        cwd: gate.exec.cwd,
+        repoRoots,
+        errors,
+      });
+    }
+    node.body.forEach((child, i) => {
+      walk(child, `${nodePath}.body[${i}]`, scopes);
+    });
+  };
+
+  const hasCrossBranchParallelDependency = (
+    consumer: ExecutableMeta,
+    producer: ExecutableMeta,
+  ): { groupPath: string; consumerStep: number; producerStep: number } | null => {
+    for (const consumerScope of consumer.scopes) {
+      const producerScope = producer.scopes.find((scope) => scope.groupPath === consumerScope.groupPath);
+      if (!producerScope) continue;
+      if (producerScope.stepIndex !== consumerScope.stepIndex) {
+        return {
+          groupPath: consumerScope.groupPath,
+          consumerStep: consumerScope.stepIndex,
+          producerStep: producerScope.stepIndex,
+        };
+      }
+    }
+    return null;
+  };
+
+  plan.workflow.forEach((node, i) => walk(node, `flow[${i}]`, []));
+
+  for (const { task, nodePath } of taskRows) {
+    const currentMeta = executableOrder.get(task.taskId);
+    if (!currentMeta) {
+      errors.push(`${nodePath} could not determine executable order for task "${task.taskId}".`);
+      continue;
+    }
+
+    for (const reference of task.contextFrom) {
+      if (reference === task.taskId) {
+        errors.push(`${nodePath}.context_from cannot reference itself: "${reference}"`);
+        continue;
+      }
+      const referenceMeta = executableOrder.get(reference);
+      if (!referenceMeta) {
+        errors.push(`${nodePath}.context_from references unknown executable id: "${reference}"`);
+        continue;
+      }
+      if (referenceMeta.index >= currentMeta.index) {
+        errors.push(
+          `${nodePath}.context_from must reference an earlier executable node; "${reference}" is not earlier in flow order.`,
+        );
+        continue;
+      }
+
+      const invalidParallelDependency = hasCrossBranchParallelDependency(currentMeta, referenceMeta);
+      if (invalidParallelDependency) {
+        errors.push(
+          `${nodePath}.context_from cannot depend on "${reference}" across parallel branches in ${invalidParallelDependency.groupPath} (producer step ${invalidParallelDependency.producerStep + 1}, consumer step ${invalidParallelDependency.consumerStep + 1}).`,
+        );
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Workflow reference validation failed:\n${errors.map((e) => `- ${e}`).join('\n')}`);
+  }
 }
 
 /**
@@ -104,12 +359,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   let globalContextFiles;
   try {
     globalContextFiles = validateGlobalContextFiles(plan, planPath, repoRoots);
+    validateTaskContextFiles(plan, planPath, repoRoots);
+    validateWorkflowReferences(plan, repoRoots);
   } catch (error) {
     logError(String(error));
     return 1;
   }
 
   const totalTaskCount = collectTaskNodes(plan.workflow).length;
+  const totalExecutableCount = countExecutableNodes(plan.workflow);
 
   if (args.validate) {
     log('plan is valid');
@@ -139,7 +397,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       planPath,
       plan,
       globalContextFiles,
-      totalTaskCount,
+      totalTaskCount: totalExecutableCount,
       priorState,
       runDir,
     });
@@ -150,7 +408,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       planPath,
       plan,
       globalContextFiles,
-      totalTaskCount,
+      totalTaskCount: totalExecutableCount,
     });
   }
 

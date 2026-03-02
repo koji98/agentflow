@@ -783,3 +783,298 @@ test('loop gate repo scope resolves required artifacts and cwd against selected 
   const codexCalls = parseJsonLines(mockLog);
   assert.equal(codexCalls.length, 0, 'loop body task should not run because pre-body gate passed');
 });
+
+test('command node success writes command artifacts and DONE state', async (t) => {
+  const repoRoot = mkRepo('agentflow-command-success-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'command_success_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'command success integration test',
+      repos: { main: '.' },
+      worktrees: false,
+      on_failure: 'stop',
+      options: { run_root: 'tmp/test_command_success_runs' },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        {
+          type: 'command',
+          id: 'echo_ok',
+          repo: 'main',
+          command: '/bin/sh',
+          args: ['-c', 'echo command_ok'],
+          cwd: '.',
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath]);
+  assert.equal(exitCode, 0);
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_command_success_runs');
+  const runDir = getSingleRunDir(runBase);
+  const state = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const taskRows = Object.values(state.tasks || {}) as Array<Record<string, unknown>>;
+  assert.equal(taskRows.length, 1);
+  const row = taskRows[0];
+  assert.equal(row.taskId, 'echo_ok');
+  assert.equal(row.status, 'DONE');
+  assert.equal(row.provider, null);
+  assert.ok(fs.existsSync(String(row.logPath)));
+  assert.ok(fs.existsSync(String(row.reportPath)));
+  assert.ok(fs.existsSync(String(row.summaryPath)));
+
+  const taskDir = path.dirname(String(row.reportPath));
+  const resultPath = path.resolve(taskDir, 'command_result.json');
+  assert.ok(fs.existsSync(resultPath));
+  const commandResult = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+  assert.equal(commandResult.task_id, 'echo_ok');
+  assert.equal(commandResult.status, 'DONE');
+  assert.equal(commandResult.exit_code, 0);
+  assert.equal(commandResult.timed_out, false);
+
+  const summaryText = fs.readFileSync(String(row.summaryPath), 'utf8');
+  assert.match(summaryText, /Command `echo_ok` finished with status `DONE`/);
+});
+
+test('command node retries on FAILED and run succeeds on second attempt', async (t) => {
+  const repoRoot = mkRepo('agentflow-command-retry-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const sentinelPath = path.resolve(repoRoot, 'retry_once_sentinel');
+  const planPath = path.resolve(repoRoot, 'command_retry_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'command retry integration test',
+      repos: { main: '.' },
+      worktrees: false,
+      on_failure: 'stop',
+      options: { run_root: 'tmp/test_command_retry_runs' },
+      limits: {
+        worker_timeout_sec: 30,
+        timeout_grace_sec: 1,
+        max_retries: 1,
+        retry_on: ['FAILED'],
+      },
+      flow: [
+        {
+          type: 'command',
+          id: 'flaky_command',
+          repo: 'main',
+          command: '/bin/sh',
+          args: [
+            '-c',
+            `if [ ! -f "${sentinelPath}" ]; then touch "${sentinelPath}"; echo first_fail; exit 2; fi; echo second_ok; exit 0`,
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath]);
+  assert.equal(exitCode, 0);
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_command_retry_runs');
+  const runDir = getSingleRunDir(runBase);
+  const state = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const taskRows = Object.values(state.tasks || {}) as Array<Record<string, unknown>>;
+  assert.equal(taskRows.length, 2);
+  const statuses = taskRows.map((row) => String(row.status)).sort();
+  assert.deepEqual(statuses, ['DONE', 'FAILED']);
+
+  const decisionTrace = JSON.parse(fs.readFileSync(path.resolve(runDir, 'decision_trace.json'), 'utf8'));
+  const retryEntry = (decisionTrace as Array<Record<string, unknown>>).find(
+    (entry) =>
+      entry.type === 'task_retry' &&
+      typeof entry.detail === 'object' &&
+      entry.detail !== null &&
+      (entry.detail as Record<string, unknown>).taskId === 'flaky_command',
+  );
+  assert.ok(retryEntry, 'expected a retry decision for flaky_command');
+});
+
+test('command node timeout marks FAILED with timeout metadata', async (t) => {
+  const repoRoot = mkRepo('agentflow-command-timeout-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'command_timeout_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'command timeout integration test',
+      repos: { main: '.' },
+      worktrees: false,
+      on_failure: 'continue',
+      options: { run_root: 'tmp/test_command_timeout_runs' },
+      limits: {
+        worker_timeout_sec: 1,
+        timeout_grace_sec: 1,
+      },
+      flow: [
+        {
+          type: 'command',
+          id: 'slow_command',
+          repo: 'main',
+          command: '/bin/sh',
+          args: ['-c', 'sleep 3'],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath]);
+  assert.equal(exitCode, 1);
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_command_timeout_runs');
+  const runDir = getSingleRunDir(runBase);
+  const state = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const rows = Object.values(state.tasks || {}) as Array<Record<string, unknown>>;
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.taskId, 'slow_command');
+  assert.equal(row.status, 'FAILED');
+  assert.equal(row.timedOut, true);
+  assert.equal(row.failureReason, 'timed_out');
+  assert.equal(row.timeoutClassification, 'timeout');
+
+  const resultPath = path.resolve(path.dirname(String(row.reportPath)), 'command_result.json');
+  const commandResult = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+  assert.equal(commandResult.status, 'FAILED');
+  assert.equal(commandResult.timed_out, true);
+  assert.equal(commandResult.timeout_classification, 'timeout');
+});
+
+test('command summary is available to downstream task via context_from', async (t) => {
+  const repoRoot = mkRepo('agentflow-command-context-from-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoRoot, 'command_context_from_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'command context_from integration test',
+      repos: { main: '.' },
+      worktrees: false,
+      provider: 'codex',
+      model: 'gpt-5-nano',
+      reasoning: 'xhigh',
+      on_failure: 'stop',
+      options: { run_root: 'tmp/test_command_context_runs' },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        {
+          type: 'command',
+          id: 'collect_status',
+          repo: 'main',
+          command: '/bin/sh',
+          args: ['-c', 'echo lint_clean'],
+        },
+        {
+          type: 'task',
+          id: 'consume_status',
+          repo: 'main',
+          prompt: 'Use the prior command summary and proceed.',
+          context_from: ['collect_status'],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const codexCalls = parseJsonLines(mockLog);
+  assert.equal(codexCalls.length, 1);
+  assert.equal(codexCalls[0].taskId, 'consume_status');
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_command_context_runs');
+  const runDir = getSingleRunDir(runBase);
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const rows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
+  const taskRow = rows.find((row) => row.taskId === 'consume_status');
+  assert.ok(taskRow);
+  const promptText = fs.readFileSync(String(taskRow?.promptPath), 'utf8');
+  assert.match(promptText, /collect_status/);
+  assert.match(promptText, /Command `collect_status` finished with status `DONE`/);
+});
+
+test('parallel groups reject cross-branch context_from dependencies', async (t) => {
+  const repoRoot = mkRepo('agentflow-context-from-parallel-invalid-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'context_from_parallel_invalid_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'context_from cross-branch dependency should be rejected',
+      repos: { main: '.' },
+      worktrees: false,
+      provider: 'codex',
+      model: 'gpt-5-nano',
+      reasoning: 'xhigh',
+      on_failure: 'stop',
+      options: { run_root: 'tmp/test_context_from_parallel_invalid_runs' },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        {
+          type: 'group',
+          id: 'parallel_stage',
+          parallel: true,
+          steps: [
+            {
+              type: 'command',
+              id: 'collect_parallel_status',
+              repo: 'main',
+              command: '/bin/sh',
+              args: ['-c', 'echo parallel_ready'],
+            },
+            {
+              type: 'task',
+              id: 'consume_parallel_status',
+              repo: 'main',
+              prompt: 'Use the command summary.',
+              context_from: ['collect_parallel_status'],
+            },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const validateExit = await main(['--plan', planPath, '--validate']);
+  assert.equal(validateExit, 1);
+
+  const runExit = await main(['--plan', planPath]);
+  assert.equal(runExit, 1);
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_context_from_parallel_invalid_runs');
+  assert.ok(!fs.existsSync(runBase), 'invalid plan should fail before creating run directories');
+});

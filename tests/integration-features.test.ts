@@ -39,6 +39,200 @@ test('--validate fails for invalid plan and exits 1', async () => {
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
+test('--validate fails when task context_files include missing paths', async (t) => {
+  const repoRoot = mkRepo('agentflow-validate-missing-task-context-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'missing_task_context_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      repos: { main: '.' },
+      provider: 'codex',
+      flow: [
+        {
+          type: 'task',
+          id: 'task_a',
+          prompt: 'do something',
+          context_files: ['missing.md'],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath, '--validate']);
+  assert.equal(exitCode, 1);
+
+  const runBase = path.resolve(repoRoot, 'tmp/agentflow_runs');
+  assert.ok(!fs.existsSync(runBase), 'validate should not create any run directories');
+});
+
+test('--validate fails when command and deterministic gate cwd are unreachable', async (t) => {
+  const repoRoot = mkRepo('agentflow-validate-missing-cwd-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'missing_cwd_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      repos: { main: '.' },
+      provider: 'codex',
+      flow: [
+        {
+          type: 'command',
+          id: 'check_command_cwd',
+          command: '/bin/sh',
+          args: ['-c', 'echo command'],
+          cwd: 'missing-command-cwd',
+        },
+        {
+          type: 'loop',
+          id: 'check_gate_cwd',
+          max_iterations: 1,
+          gate: {
+            type: 'deterministic',
+            command: '/bin/sh',
+            args: ['-c', 'echo \'{"passed":true,"score":1,"reasons":[]}\''],
+            cwd: 'missing-gate-cwd',
+          },
+          body: [{ type: 'task', id: 'loop_body', prompt: 'no-op' }],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath, '--validate']);
+  assert.equal(exitCode, 1);
+
+  const runBase = path.resolve(repoRoot, 'tmp/agentflow_runs');
+  assert.ok(!fs.existsSync(runBase), 'validate should not create any run directories');
+});
+
+test('--validate fails when context_from references unknown task ids', async (t) => {
+  const repoRoot = mkRepo('agentflow-validate-context-from-unknown-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'context_from_unknown_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      repos: { main: '.' },
+      provider: 'codex',
+      flow: [
+        { type: 'task', id: 'task_a', prompt: 'do something' },
+        {
+          type: 'task',
+          id: 'task_b',
+          prompt: 'use prior context',
+          context_files: ['README.md'],
+          context_from: ['missing_task'],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath, '--validate']);
+  assert.equal(exitCode, 1);
+});
+
+test('--validate fails when context_from references self or a later task', async (t) => {
+  const repoRoot = mkRepo('agentflow-validate-context-from-order-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'context_from_order_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      repos: { main: '.' },
+      provider: 'codex',
+      flow: [
+        {
+          type: 'task',
+          id: 'task_a',
+          prompt: 'task a',
+          context_from: ['task_a', 'task_b'],
+        },
+        { type: 'task', id: 'task_b', prompt: 'task b' },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath, '--validate']);
+  assert.equal(exitCode, 1);
+});
+
+test('workflow mixing task + command + loop validates and executes', async (t) => {
+  const repoRoot = mkRepo('agentflow-mixed-workflow-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+  fs.writeFileSync(mockBehavior, JSON.stringify({ default: { exitCode: 0, sleepMs: 0 } }), 'utf8');
+
+  const planPath = path.resolve(repoRoot, 'mixed_workflow_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'mixed workflow smoke test',
+      repos: { main: '.' },
+      worktrees: false,
+      provider: 'codex',
+      model: 'gpt-5-nano',
+      reasoning: 'xhigh',
+      options: { run_root: 'tmp/test_mixed_workflow_runs' },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        { type: 'task', id: 'prep', prompt: 'prepare baseline' },
+        {
+          type: 'command',
+          id: 'validate_local',
+          command: '/bin/sh',
+          args: ['-c', 'echo local_check'],
+        },
+        {
+          type: 'loop',
+          id: 'done_loop',
+          max_iterations: 1,
+          gate: {
+            type: 'deterministic',
+            command: '/bin/sh',
+            args: ['-c', 'echo \'{"passed":true,"score":1,"reasons":[]}\''],
+          },
+          body: [
+            { type: 'task', id: 'should_not_run', prompt: 'this should not execute' },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const validateExit = await main(['--plan', planPath, '--validate']);
+  assert.equal(validateExit, 0);
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const codexCalls = parseJsonLines(mockLog);
+  assert.equal(codexCalls.length, 1);
+  assert.equal(codexCalls[0].taskId, 'prep');
+});
+
 test('--resume skips completed tasks and re-runs failed ones', async (t) => {
   const repoRoot = mkRepo('agentflow-resume-');
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
