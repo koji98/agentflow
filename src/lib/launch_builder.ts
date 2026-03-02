@@ -4,6 +4,8 @@ import { DEFAULT_REPORT_FILENAME, DEFAULT_SUMMARY_FILENAME } from './constants.t
 import { resolveConfigPaths } from './plan.ts';
 import { buildPrompt } from './prompt.ts';
 import type {
+  CommandLaunch,
+  CommandNode,
   PriorTaskSummary,
   Session,
   TaskLaunch,
@@ -181,6 +183,79 @@ export function buildLaunchFromTaskNode({
     useWorktree,
     skipGitRepoCheck: session.plan.options.skipGitRepoCheck,
     sandboxMode: session.plan.options.sandboxMode,
+    nodePath,
+    attempt,
+    repoRoot,
+  };
+}
+
+/**
+ * Materializes one executable command launch from a workflow command node.
+ *
+ * @param params Launch construction inputs.
+ * @param params.session Current run session.
+ * @param params.node Command workflow node.
+ * @param params.nodePath Workflow node path for tracing.
+ * @param params.attempt Current attempt number (1-based).
+ * @param params.groupIndex Assigned execution group index.
+ * @param params.taskIndex Position within the group.
+ * @returns Fully populated command launch descriptor.
+ */
+export function buildLaunchFromCommandNode({
+  session,
+  node,
+  nodePath,
+  attempt,
+  groupIndex,
+  taskIndex,
+}: {
+  session: Session;
+  node: CommandNode;
+  nodePath: string;
+  attempt: number;
+  groupIndex: number;
+  taskIndex: number;
+}): CommandLaunch {
+  const repoAlias = node.repo ?? Object.keys(session.paths.repoRoots)[0];
+  const repoRoot = session.paths.repoRoots[repoAlias];
+  const workspaceCwdCandidate = node.cwd ? path.resolve(repoRoot, node.cwd) : repoRoot;
+  if (!isWithinDir(repoRoot, workspaceCwdCandidate)) {
+    throw new Error(`Command node ${node.id} resolved cwd outside repo root: ${workspaceCwdCandidate}`);
+  }
+  const workspaceCwd = workspaceCwdCandidate;
+
+  const taskSlug = safeSlug(`${node.id}-a${attempt}`);
+  const taskDir = path.resolve(
+    session.paths.runRoot,
+    `group_${String(groupIndex).padStart(2, '0')}`,
+    `task_${taskSlug}`,
+  );
+  const promptPath = path.resolve(taskDir, 'command_request.md');
+  const logPath = path.resolve(taskDir, 'command_exec.log');
+  const lastMessagePath = path.resolve(taskDir, 'command_stdout.log');
+  const reportPath = path.resolve(taskDir, 'report.md');
+  const summaryPath = path.resolve(taskDir, 'summary.md');
+  const resultPath = path.resolve(taskDir, 'command_result.json');
+
+  return {
+    groupIndex,
+    taskIndex,
+    taskKey: taskKey(groupIndex, `${node.id}#a${attempt}`),
+    taskId: node.id,
+    command: node.command,
+    args: node.args,
+    timeoutSeconds: node.timeoutSec,
+    allowFailure: node.allowFailure,
+    priorTaskSummaries: gatherPriorTaskSummaries(session),
+    taskDir,
+    promptPath,
+    logPath,
+    lastMessagePath,
+    reportPath,
+    summaryPath,
+    resultPath,
+    workspaceCwd,
+    branch: null,
     nodePath,
     attempt,
     repoRoot,

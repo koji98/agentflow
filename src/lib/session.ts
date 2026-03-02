@@ -4,11 +4,11 @@ import path from 'node:path';
 import { nowRunId, nowUtcIso } from './utils.ts';
 import type {
   DecisionTraceEntry,
+  ExecutionLaunch,
   GroupStateRow,
   RunState,
   Session,
   TaskExecutionResult,
-  TaskLaunch,
   TaskStateRow,
   WorkerPlan,
 } from './types.ts';
@@ -40,6 +40,7 @@ function saveDecisionTrace(session: Session): void {
  * @param params.planPath Absolute path to the plan JSON file.
  * @param params.plan Normalized worker plan.
  * @param params.globalContextFiles Resolved global context file paths.
+ * @param params.totalTaskCount Total number of executable task-like nodes (task + command).
  * @returns Fully initialized session object.
  */
 export function createSession({
@@ -135,7 +136,7 @@ export function loadResumedState(runDir: string): RunState {
  * @param params.planPath Absolute path to the plan JSON file.
  * @param params.plan Normalized worker plan.
  * @param params.globalContextFiles Resolved global context file paths.
- * @param params.totalTaskCount Total number of task nodes in the workflow.
+ * @param params.totalTaskCount Total number of executable task-like nodes in the workflow.
  * @param params.priorState The RunState loaded from the previous run.
  * @param params.runDir Absolute path to the previous run directory.
  * @returns Session pre-populated with completed task state.
@@ -412,23 +413,73 @@ export function markGroupRunning(
 }
 
 /**
- * Marks a task launch as running in state.
- * @param session Current run session.
- * @param launch Task launch descriptor to register.
+ * Gets the stable task id for state rows across launch variants.
+ * @param launch Task or command launch descriptor.
+ * @returns Stable task id.
  */
-export function markTaskRunning(session: Session, launch: TaskLaunch): void {
+function stateTaskId(launch: ExecutionLaunch): string {
+  if ('task' in launch) return launch.task.taskId;
+  return launch.taskId;
+}
+
+/**
+ * Gets provider metadata for state rows across launch variants.
+ * @param launch Task or command launch descriptor.
+ * @returns Provider id or null for command launches.
+ */
+function stateProvider(launch: ExecutionLaunch): TaskStateRow['provider'] {
+  if ('task' in launch) return launch.provider;
+  return null;
+}
+
+/**
+ * Gets model metadata for state rows across launch variants.
+ * @param launch Task or command launch descriptor.
+ * @returns Model id or null.
+ */
+function stateModel(launch: ExecutionLaunch): TaskStateRow['model'] {
+  if ('task' in launch) return launch.model;
+  return null;
+}
+
+/**
+ * Gets reasoning metadata for state rows across launch variants.
+ * @param launch Task or command launch descriptor.
+ * @returns Reasoning effort or null.
+ */
+function stateReasoningEffort(launch: ExecutionLaunch): TaskStateRow['reasoningEffort'] {
+  if ('task' in launch) return launch.reasoningEffort;
+  return null;
+}
+
+/**
+ * Gets profile metadata for state rows across launch variants.
+ * @param launch Task or command launch descriptor.
+ * @returns Profile or null.
+ */
+function stateProfile(launch: ExecutionLaunch): TaskStateRow['profile'] {
+  if ('task' in launch) return launch.profile;
+  return null;
+}
+
+/**
+ * Marks a launch (task or command) as running in state.
+ * @param session Current run session.
+ * @param launch Launch descriptor to register.
+ */
+export function markLaunchRunning(session: Session, launch: ExecutionLaunch): void {
   const row = session.state.tasks[launch.taskKey] || {
     taskKey: launch.taskKey,
-    taskId: launch.task.taskId,
+    taskId: stateTaskId(launch),
     groupIndex: launch.groupIndex,
     taskIndex: launch.taskIndex,
     nodePath: launch.nodePath,
     attempt: launch.attempt,
     status: 'PENDING',
-    provider: launch.provider,
-    model: launch.model,
-    reasoningEffort: launch.reasoningEffort,
-    profile: launch.profile,
+    provider: stateProvider(launch),
+    model: stateModel(launch),
+    reasoningEffort: stateReasoningEffort(launch),
+    profile: stateProfile(launch),
     promptPath: launch.promptPath,
     logPath: launch.logPath,
     lastMessagePath: launch.lastMessagePath,
@@ -503,7 +554,14 @@ export function recordGroupResults(
  * @returns Number of task rows with a status other than DONE.
  */
 export function failureCount(session: Session): number {
-  return Object.values(session.state.tasks).filter((row) => row.status !== 'DONE').length;
+  const latestByNode = new Map<string, TaskStateRow>();
+  for (const row of Object.values(session.state.tasks)) {
+    const current = latestByNode.get(row.nodePath);
+    if (!current || row.attempt > current.attempt) {
+      latestByNode.set(row.nodePath, row);
+    }
+  }
+  return Array.from(latestByNode.values()).filter((row) => row.status !== 'DONE').length;
 }
 
 /**

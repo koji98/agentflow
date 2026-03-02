@@ -6,7 +6,7 @@ export function usageText() {
 
 TLDR:
 - File-driven workflow orchestrator for coding agents.
-- Run a JSON plan with task/group/loop nodes and deterministic artifacts.
+- Run a JSON plan with task/command/group/loop nodes and deterministic artifacts.
 
 Usage:
 - agentflow --plan <plan_file> [--dry-run] [--skip-git-repo-check] [--sandbox <mode>]
@@ -43,12 +43,13 @@ export function planHelpText() {
 
 What this command gives you:
 - A detailed plan schema reference.
-- A mental model for how task/group/loop execution works.
+- A mental model for how task/command/group/loop execution works.
 - Copy/paste JSON examples.
 - Common mistakes and exact error messages.
 
 Mental model:
 - task: one agent execution unit.
+- command: one deterministic shell command execution unit.
 - group: a container of child nodes; set parallel=false for sequential or parallel=true for concurrent.
 - loop: repeats body until its gate passes (or max_iterations is exhausted).
 - gate: loop evaluator, either deterministic (command) or ai (model output as JSON).
@@ -102,6 +103,16 @@ Full schema skeleton (all keys shown):
       ]
     },
     {
+      "type": "command",
+      "id": "validate_child_plan",
+      "repo": "main",
+      "command": "/bin/zsh",
+      "args": ["-lc", "agentflow --plan ./child.json --validate"],
+      "cwd": ".",
+      "timeout_sec": 600,
+      "allow_failure": false
+    },
+    {
       "type": "loop",
       "id": "quality_loop",
       "max_iterations": 3,
@@ -140,7 +151,7 @@ Limits keys:
 - retry_on (default ["FAILED","TIMEOUT"]): which task outcomes trigger retry
 - max_iterations (default null): global loop iteration cap
 - max_runtime_sec (default null): max total run time in seconds
-- max_total_tasks (default null): max total task executions
+- max_total_tasks (default null): max total executable node executions (task + command)
 - max_failures (default null): max allowed failures before abort
 - worker_timeout_sec (default 7200): per-task timeout
 - timeout_grace_sec (default 20): grace period between SIGTERM and SIGKILL
@@ -162,6 +173,15 @@ Flow nodes:
   - persona: optional (overrides plan-level persona for this task)
   - context_files: optional
   - context_from: optional array of task IDs whose summaries to inject (default: all prior tasks)
+- command:
+  - type: "command"
+  - id: required, globally unique (shares namespace with task ids)
+  - repo: optional when repos has one entry; required when multiple repos
+  - command: required executable name/path
+  - args: required array (may be empty)
+  - cwd: optional relative path from resolved repo root
+  - timeout_sec: optional command-level timeout override
+  - allow_failure: optional boolean (default false)
 - group:
   - type: "group"
   - id: required
@@ -189,6 +209,10 @@ Task completion contract:
 - exit code 0 + report file exists = DONE
 - anything else = FAILED
 
+Command completion contract:
+- exit code 0 = DONE
+- non-zero exit, timeout, or spawn error = FAILED
+
 Path resolution:
 - --plan path: resolved from shell cwd
 - repos values: each resolved from plan directory when relative
@@ -201,13 +225,13 @@ Path resolution:
 Schema behavior + invariants:
 - unknown keys hard-fail at every object level
 - flow must be non-empty
-- task ids must be unique across the entire workflow
+- task/command ids must be unique across the entire workflow
 - group.parallel is required and must be boolean
 - group.steps and loop.body must be non-empty
 
 Common mistakes (and actual error text):
 - using old node type "parallel":
-  - flow[0].type must be one of: task, group, loop.
+  - flow[0].type must be one of: task, command, group, loop.
 - omitting group.parallel:
   - flow[0].parallel must be a boolean.
 - unknown top-level key:

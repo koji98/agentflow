@@ -14,6 +14,7 @@ import {
 } from './utils.ts';
 import type {
   AiGate,
+  CommandNode,
   DeterministicGate,
   EvaluatorGate,
   GroupNode,
@@ -255,8 +256,55 @@ function normalizeTaskNode(
   };
 }
 
+
+function normalizeCommandNode(
+  payload: Record<string, unknown>,
+  fieldName: string,
+  seenTaskIds: Set<string>,
+  repoAliases: string[],
+): CommandNode {
+  const f = fields(payload, fieldName, [
+    'type', 'id', 'repo', 'command', 'args', 'cwd', 'timeout_sec', 'allow_failure',
+  ]);
+  const id = f.strReq('id');
+  if (seenTaskIds.has(id)) {
+    throw new Error(`task id values must be unique across flow. Duplicate: ${id}`);
+  }
+  seenTaskIds.add(id);
+
+  const repo = f.str('repo');
+  if (repoAliases.length > 1 && !repo) {
+    throw new Error(`${fieldName}.repo is required when multiple repos are defined. Command "${id}" is missing it.`);
+  }
+  if (repo && !repoAliases.includes(repo)) {
+    throw new Error(`${fieldName}.repo "${repo}" does not match any key in repos (${repoAliases.join(', ')}).`);
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(payload, 'args')) {
+    throw new Error(`${fieldName}.args is required and must be an array of strings.`);
+  }
+  if (payload.args === null) {
+    throw new Error(`${fieldName}.args is required and must be an array of strings.`);
+  }
+  const cwd = f.str('cwd');
+  if (cwd && path.isAbsolute(cwd)) {
+    throw new Error(`${fieldName}.cwd must be a relative path.`);
+  }
+
+  return {
+    type: 'command',
+    id,
+    repo: repo || null,
+    command: f.strReq('command'),
+    args: f.strArr('args'),
+    cwd,
+    timeoutSec: f.posInt('timeout_sec'),
+    allowFailure: f.bool('allow_failure') ?? false,
+  };
+}
+
 /**
- * Normalizes a flow node (task, group, or loop) from raw plan JSON.
+ * Normalizes a flow node (task, command, group, or loop) from raw plan JSON.
  * @throws {Error} When node type is invalid or schema is violated.
  */
 function normalizeFlowNode(
@@ -272,6 +320,8 @@ function normalizeFlowNode(
   const type = requiredString(nodePayload.type, `${fieldName}.type`).toLowerCase();
 
   if (type === 'task') return normalizeTaskNode(nodePayload, fieldName, seenTaskIds, repoAliases);
+
+  if (type === 'command') return normalizeCommandNode(nodePayload, fieldName, seenTaskIds, repoAliases);
 
   if (type === 'group') {
     const f = fields(nodePayload, fieldName, ['type', 'id', 'parallel', 'steps']);
@@ -305,7 +355,7 @@ function normalizeFlowNode(
     };
   }
 
-  throw new Error(`${fieldName}.type must be one of: task, group, loop.`);
+  throw new Error(`${fieldName}.type must be one of: task, command, group, loop.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +450,7 @@ export function normalizePlan(payload: unknown): WorkerPlan {
 
   const flowPayload = (payload as Record<string, unknown>).flow;
   if (!Array.isArray(flowPayload) || flowPayload.length === 0) {
-    throw new Error('flow must include at least one node (task, group, loop).');
+    throw new Error('flow must include at least one node (task, command, group, loop).');
   }
   const seenTaskIds = new Set<string>();
   const workflow = flowPayload.map((n, i) => normalizeFlowNode(n, `flow[${i}]`, seenTaskIds, repoAliases));
@@ -526,11 +576,34 @@ export function collectTaskNodes(workflow: WorkflowNode[]): TaskNode[] {
   const tasks: TaskNode[] = [];
   const walk = (node: WorkflowNode): void => {
     if (node.type === 'task') { tasks.push(node); return; }
+    if (node.type === 'command') return;
     if (node.type === 'group') { node.steps.forEach(walk); return; }
     node.body.forEach(walk);
   };
   workflow.forEach(walk);
   return tasks;
+}
+
+/**
+ * Counts executable task-like nodes (task + command) in a workflow tree.
+ * @param workflow Array of top-level workflow nodes.
+ * @returns Count of task and command nodes in depth-first order.
+ */
+export function countExecutableNodes(workflow: WorkflowNode[]): number {
+  let count = 0;
+  const walk = (node: WorkflowNode): void => {
+    if (node.type === 'task' || node.type === 'command') {
+      count += 1;
+      return;
+    }
+    if (node.type === 'group') {
+      node.steps.forEach(walk);
+      return;
+    }
+    node.body.forEach(walk);
+  };
+  workflow.forEach(walk);
+  return count;
 }
 
 /**

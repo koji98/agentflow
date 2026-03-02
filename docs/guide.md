@@ -1,6 +1,6 @@
 # Blueprint-Driven Agent Orchestration
 
-agentflow plans are **blueprints** — structured specifications that decompose _[large-scale]_ codebase changes into atomic, sequential agent tasks with built-in validation and review.
+agentflow plans are **blueprints** — structured specifications that decompose _[large-scale]_ codebase changes into atomic, sequential agent tasks/commands with built-in validation and review.
 
 This guide covers the methodology for designing effective blueprints that produce reliable, high-quality results across hundreds of files and multiple repositories.
 
@@ -150,6 +150,25 @@ Tasks run concurrently, each in its own worktree. Use for truly independent work
 ```
 
 Loops repeat until the gate passes or iterations are exhausted. Use for tasks where you can programmatically verify correctness.
+
+### Command nodes (for deterministic orchestration)
+
+Use `type: "command"` for deterministic steps that should run exactly as written (for example nested `agentflow --validate`, git operations, or PR creation):
+
+```json
+{
+  "type": "command",
+  "id": "validate_child",
+  "repo": "main",
+  "command": "/bin/zsh",
+  "args": ["-lc", "agentflow --plan ./child.json --validate"],
+  "cwd": ".",
+  "timeout_sec": 600,
+  "allow_failure": false
+}
+```
+
+`command` nodes write `command_exec.log`, `command_result.json`, `summary.md`, and `report.md`, and their summaries can be referenced by downstream tasks via `context_from`.
 
 ## Context File Strategy
 

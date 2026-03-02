@@ -2,7 +2,7 @@
 
 `agentflow` is a file-driven workflow orchestrator for coding agents.
 
-You define a JSON plan with task, group, and loop nodes, and `agentflow` executes it against a target repository — spawning agent CLI sessions, managing worktrees, evaluating gates, and writing deterministic run artifacts.
+You define a JSON plan with task, command, group, and loop nodes, and `agentflow` executes it against a target repository — spawning agent CLI sessions, running deterministic commands, managing worktrees, evaluating gates, and writing deterministic run artifacts.
 
 Plans are **blueprints** — structured specifications that decompose large-scale codebase changes into atomic, sequential agent tasks with built-in validation and review.
 
@@ -24,6 +24,7 @@ flowchart LR
 **Execution model:**
 
 - **task** -- one agent CLI invocation (codex or cursor)
+- **command** -- one deterministic shell command invocation (`command` + `args`)
 - **group** -- a container of child nodes; `parallel: false` for sequential, `parallel: true` for concurrent
 - **loop** -- repeats its body until a gate passes or `max_iterations` is exhausted
 - **gate** -- loop evaluator, either deterministic (run a command) or AI (prompt a model); outputs `{ passed, score, reasons }`
@@ -122,6 +123,7 @@ agentflow --plan-help
 A plan is a JSON file with `repos` (target repositories) and `flow` (an ordered array of nodes):
 
 - **task** -- one agent CLI invocation with a prompt
+- **command** -- one deterministic shell command
 - **group** -- a container of child nodes (sequential or parallel)
 - **loop** -- repeats its body until a gate passes or iterations are exhausted
 

@@ -34,6 +34,18 @@ export interface TaskNode extends PlanTask {
   type: 'task';
 }
 
+/** One deterministic shell command node in workflow tree. */
+export interface CommandNode {
+  type: 'command';
+  id: string;
+  repo: string | null;
+  command: string;
+  args: string[];
+  cwd: string | null;
+  timeoutSec: number | null;
+  allowFailure: boolean;
+}
+
 /** One evaluator execution block used by while gates. */
 export interface EvaluatorExec {
   command: string;
@@ -91,7 +103,7 @@ export interface WhileNode {
 }
 
 /** Supported workflow node union. */
-export type WorkflowNode = TaskNode | GroupNode | WhileNode;
+export type WorkflowNode = TaskNode | CommandNode | GroupNode | WhileNode;
 
 /** Resource limits and retry/termination policy. */
 export interface PlanLimits {
@@ -170,6 +182,34 @@ export interface TaskLaunch {
   repoRoot: string;
 }
 
+/** One concrete command launch unit, materialized from a command node with runtime paths. */
+export interface CommandLaunch {
+  groupIndex: number;
+  taskIndex: number;
+  taskKey: string;
+  taskId: string;
+  command: string;
+  args: string[];
+  timeoutSeconds: number | null;
+  allowFailure: boolean;
+  priorTaskSummaries: PriorTaskSummary[];
+  taskDir: string;
+  promptPath: string;
+  logPath: string;
+  lastMessagePath: string;
+  reportPath: string;
+  summaryPath: string;
+  resultPath: string;
+  workspaceCwd: string;
+  branch: string | null;
+  nodePath: string;
+  attempt: number;
+  repoRoot: string;
+}
+
+/** Generic launch row used by run-state persistence for both task and command nodes. */
+export type ExecutionLaunch = TaskLaunch | CommandLaunch;
+
 /** Runtime status values tracked on groups/tasks. */
 export type RuntimeStatus =
   | 'PENDING'
@@ -196,7 +236,7 @@ export interface TaskStateRow {
   nodePath: string;
   attempt: number;
   status: RuntimeStatus;
-  provider: Provider;
+  provider: Provider | null;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
   profile: string | null;
