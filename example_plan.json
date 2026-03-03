@@ -25,7 +25,8 @@
   },
   "options": {
     "run_root": "tmp/agentflow_runs",
-    "cleanup_worktrees": true
+    "cleanup_worktrees": true,
+    "worktree_branch_template": "agentflow-{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}"
   },
   "flow": [
     {

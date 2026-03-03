@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { DEFAULT_REPORT_FILENAME, DEFAULT_SUMMARY_FILENAME } from './constants.ts';
@@ -18,6 +19,7 @@ import {
   safeSlug,
   taskKey,
 } from './utils.ts';
+import { renderWorktreeBranchName } from './worktree_branch.ts';
 
 /**
  * Checks whether a target path is inside (or equal to) a base directory.
@@ -29,6 +31,21 @@ function isWithinDir(baseDir: string, targetPath: string): boolean {
   const absBase = path.resolve(baseDir);
   const absTarget = path.resolve(targetPath);
   return absTarget === absBase || absTarget.startsWith(absBase + path.sep);
+}
+
+function assertRuntimeDirectoryExists(absPath: string, contextLabel: string): void {
+  if (!fs.existsSync(absPath)) {
+    throw new Error(`${contextLabel} runtime cwd not found: ${absPath}`);
+  }
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(absPath);
+  } catch {
+    throw new Error(`${contextLabel} runtime cwd is not readable: ${absPath}`);
+  }
+  if (!stats.isDirectory()) {
+    throw new Error(`${contextLabel} runtime cwd must be a directory: ${absPath}`);
+  }
 }
 
 /**
@@ -118,8 +135,18 @@ export function buildLaunchFromTaskNode({
   const summaryPath = path.resolve(taskDir, DEFAULT_SUMMARY_FILENAME);
 
   const useWorktree = Boolean(session.plan.worktrees);
+  const baseRef = useWorktree
+    ? session.worktreeTracker.latestRefByRepo.get(repoRoot) || 'HEAD'
+    : 'HEAD';
   const branch = useWorktree
-    ? `agentflow/${safeSlug(`${session.paths.runId}-r${repoAlias}-g${groupIndex}-t${task.taskId}-a${attempt}`)}`
+    ? renderWorktreeBranchName(session.plan.options.worktreeBranchTemplate, {
+      runId: session.paths.runId,
+      repoAlias,
+      groupIndex,
+      nodeId: task.taskId,
+      attempt,
+      kind: 'task',
+    })
     : null;
   const workspaceCwd = useWorktree ? path.resolve(taskDir, 'worktree') : repoRoot;
 
@@ -165,6 +192,7 @@ export function buildLaunchFromTaskNode({
     taskIndex,
     taskKey: taskKey(groupIndex, `${task.taskId}#a${attempt}`),
     task,
+    repoAlias,
     provider,
     model: task.model || session.plan.model,
     reasoningEffort: session.plan.reasoningEffort,
@@ -179,6 +207,7 @@ export function buildLaunchFromTaskNode({
     summaryPath,
     workerSummaryPath,
     workspaceCwd,
+    baseRef,
     branch,
     useWorktree,
     skipGitRepoCheck: session.plan.options.skipGitRepoCheck,
@@ -218,11 +247,20 @@ export function buildLaunchFromCommandNode({
 }): CommandLaunch {
   const repoAlias = node.repo ?? Object.keys(session.paths.repoRoots)[0];
   const repoRoot = session.paths.repoRoots[repoAlias];
-  const workspaceCwdCandidate = node.cwd ? path.resolve(repoRoot, node.cwd) : repoRoot;
-  if (!isWithinDir(repoRoot, workspaceCwdCandidate)) {
-    throw new Error(`Command node ${node.id} resolved cwd outside repo root: ${workspaceCwdCandidate}`);
-  }
-  const workspaceCwd = workspaceCwdCandidate;
+  const useWorktree = Boolean(session.plan.worktrees);
+  const baseRef = useWorktree
+    ? session.worktreeTracker.latestRefByRepo.get(repoRoot) || 'HEAD'
+    : 'HEAD';
+  const branch = useWorktree
+    ? renderWorktreeBranchName(session.plan.options.worktreeBranchTemplate, {
+      runId: session.paths.runId,
+      repoAlias,
+      groupIndex,
+      nodeId: node.id,
+      attempt,
+      kind: 'command',
+    })
+    : null;
 
   const taskSlug = safeSlug(`${node.id}-a${attempt}`);
   const taskDir = path.resolve(
@@ -236,12 +274,25 @@ export function buildLaunchFromCommandNode({
   const reportPath = path.resolve(taskDir, 'report.md');
   const summaryPath = path.resolve(taskDir, 'summary.md');
   const resultPath = path.resolve(taskDir, 'command_result.json');
+  const workspaceRoot = useWorktree ? path.resolve(taskDir, 'worktree') : repoRoot;
+  const workspaceCwdCandidate = node.cwd ? path.resolve(workspaceRoot, node.cwd) : workspaceRoot;
+  if (!isWithinDir(workspaceRoot, workspaceCwdCandidate)) {
+    throw new Error(`Command node ${node.id} resolved cwd outside workspace root: ${workspaceCwdCandidate}`);
+  }
+  if (node.cwd && !session.dryRun) {
+    assertRuntimeDirectoryExists(
+      workspaceCwdCandidate,
+      `Command node ${node.id} at ${nodePath} (cwd=${node.cwd})`,
+    );
+  }
+  const workspaceCwd = workspaceCwdCandidate;
 
   return {
     groupIndex,
     taskIndex,
     taskKey: taskKey(groupIndex, `${node.id}#a${attempt}`),
     taskId: node.id,
+    repoAlias,
     command: node.command,
     args: node.args,
     timeoutSeconds: node.timeoutSec,
@@ -254,8 +305,11 @@ export function buildLaunchFromCommandNode({
     reportPath,
     summaryPath,
     resultPath,
+    workspaceRoot,
     workspaceCwd,
-    branch: null,
+    baseRef,
+    branch,
+    useWorktree,
     nodePath,
     attempt,
     repoRoot,

@@ -35,7 +35,7 @@ Plans are **blueprints**: structured specifications that decompose large-scale c
 | `reasoning` | string | No | `"xhigh"` | Reasoning effort (codex only; ignored by cursor) |
 | `profile` | string | No | `null` | Profile (codex only; ignored by cursor) |
 | `on_failure` | `"stop"` \| `"continue"` | No | `"stop"` | Stop on first failure or continue |
-| `worktrees` | boolean | No | `true` | Use git worktrees for per-task isolation |
+| `worktrees` | boolean | No | `false` | Opt in to isolated per-step git worktrees (sequential successes are snapshotted forward) |
 | `context_files` | string[] | No | `[]` | Files every task should read |
 | `limits` | object | No | see below | Resource limits, retries, caps |
 | `options` | object | No | see below | Runtime settings |
@@ -63,7 +63,10 @@ Unknown keys are rejected at every level.
 |---|---|---|
 | `run_root` | string | `"tmp/agentflow_runs"` |
 | `run_id` | string | `null` |
-| `cleanup_worktrees` | boolean | `true` |
+| `cleanup_worktrees` | boolean | `false` |
+| `worktree_branch_template` | string | `"agentflow/{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}"` |
+
+`worktree_branch_template` placeholders: `{run_id}`, `{repo}`, `{group}`, `{node}`, `{attempt}`, `{kind}`, `{kind_short}`. The template must include `{group}`.
 
 ### Node types
 

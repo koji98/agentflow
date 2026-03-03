@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  DEFAULT_WORKTREE_BRANCH_TEMPLATE,
   DEFAULT_TIMEOUT_GRACE_SEC,
   DEFAULT_WORKER_TIMEOUT_SEC,
 } from './constants.ts';
@@ -12,6 +13,7 @@ import {
   optionalString,
   requiredString,
 } from './utils.ts';
+import { validateWorktreeBranchTemplate } from './worktree_branch.ts';
 import type {
   AiGate,
   CommandNode,
@@ -413,7 +415,12 @@ export function normalizePlan(payload: unknown): WorkerPlan {
   ]);
 
   const optionsPayload = f.obj('options');
-  const of = fields(optionsPayload, 'options', ['run_root', 'run_id', 'cleanup_worktrees']);
+  const of = fields(optionsPayload, 'options', [
+    'run_root',
+    'run_id',
+    'cleanup_worktrees',
+    'worktree_branch_template',
+  ]);
 
   const onFailure = (f.str('on_failure') || 'stop').toLowerCase();
   if (!['stop', 'continue'].includes(onFailure)) {
@@ -455,6 +462,10 @@ export function normalizePlan(payload: unknown): WorkerPlan {
   const seenTaskIds = new Set<string>();
   const workflow = flowPayload.map((n, i) => normalizeFlowNode(n, `flow[${i}]`, seenTaskIds, repoAliases));
 
+  const worktreeBranchTemplate =
+    of.str('worktree_branch_template') || DEFAULT_WORKTREE_BRANCH_TEMPLATE;
+  validateWorktreeBranchTemplate(worktreeBranchTemplate, 'options.worktree_branch_template');
+
   return {
     setup: f.str('setup') || '',
     objective: f.str('objective'),
@@ -465,7 +476,7 @@ export function normalizePlan(payload: unknown): WorkerPlan {
     reasoningEffort: normalizeReasoningEffort(f.raw('reasoning')) || 'xhigh',
     profile: f.str('profile'),
     onFailure: onFailure as WorkerPlan['onFailure'],
-    worktrees: f.bool('worktrees') ?? true,
+    worktrees: f.bool('worktrees') ?? false,
     contextFiles: f.strArr('context_files'),
     limits: {
       maxRetries: retryFields.maxRetries,
@@ -481,7 +492,8 @@ export function normalizePlan(payload: unknown): WorkerPlan {
     options: {
       runRoot: requiredString(optionsPayload.run_root ?? 'tmp/agentflow_runs', 'options.run_root'),
       runId: of.str('run_id'),
-      cleanupWorktrees: of.bool('cleanup_worktrees') ?? true,
+      cleanupWorktrees: of.bool('cleanup_worktrees') ?? false,
+      worktreeBranchTemplate,
       dryRun: false,
       skipGitRepoCheck: false,
       sandboxMode: 'workspace-write',

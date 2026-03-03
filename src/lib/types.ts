@@ -123,6 +123,7 @@ export interface PlanOptions {
   runRoot: string;
   runId: string | null;
   cleanupWorktrees: boolean;
+  worktreeBranchTemplate: string;
   dryRun: boolean;
   skipGitRepoCheck: boolean;
   sandboxMode: SandboxMode;
@@ -159,6 +160,7 @@ export interface TaskLaunch {
   taskIndex: number;
   taskKey: string;
   task: PlanTask;
+  repoAlias: string;
   provider: Provider;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -173,6 +175,7 @@ export interface TaskLaunch {
   summaryPath: string;
   workerSummaryPath: string;
   workspaceCwd: string;
+  baseRef: string;
   branch: string | null;
   useWorktree: boolean;
   skipGitRepoCheck: boolean;
@@ -188,6 +191,7 @@ export interface CommandLaunch {
   taskIndex: number;
   taskKey: string;
   taskId: string;
+  repoAlias: string;
   command: string;
   args: string[];
   timeoutSeconds: number | null;
@@ -200,8 +204,11 @@ export interface CommandLaunch {
   reportPath: string;
   summaryPath: string;
   resultPath: string;
+  workspaceRoot: string;
   workspaceCwd: string;
+  baseRef: string;
   branch: string | null;
+  useWorktree: boolean;
   nodePath: string;
   attempt: number;
   repoRoot: string;
@@ -231,6 +238,7 @@ export interface GroupStateRow {
 export interface TaskStateRow {
   taskKey: string;
   taskId: string;
+  repoAlias?: string | null;
   groupIndex: number;
   taskIndex: number;
   nodePath: string;
@@ -267,6 +275,9 @@ export interface RunState {
   workflowLength: number;
   totalTaskCount: number;
   totalFailureCount: number;
+  totalTaskFailureCount?: number;
+  totalRunFailureCount?: number;
+  runFailureReasons?: string[];
   totalLoopIterations: number;
   groups: Record<string, GroupStateRow>;
   tasks: Record<string, TaskStateRow>;
@@ -304,6 +315,7 @@ export interface RunCounters {
   totalTaskCount: number;
   executedTaskCount: number;
   failureTaskCount: number;
+  runFailureCount: number;
   loopIterationCount: number;
 }
 
@@ -311,6 +323,8 @@ export interface RunCounters {
 export interface WorktreeTracker {
   created: Map<string, string>;
   createdBranches: Map<string, string>;
+  latestRefByRepo: Map<string, string>;
+  latestGroupIndexByRepo: Map<string, number>;
 }
 
 /** In-memory execution session shared across orchestration functions. */

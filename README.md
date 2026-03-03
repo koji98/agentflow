@@ -29,7 +29,7 @@ flowchart LR
 - **loop** -- repeats its body until a gate passes or `max_iterations` is exhausted
 - **gate** -- loop evaluator, either deterministic (run a command) or AI (prompt a model); outputs `{ passed, score, reasons }`
 
-Each task gets an isolated git worktree (when `worktrees: true`), a structured prompt with persona/context/prior-task summaries (plus loop gate feedback when applicable), and writes a report + summary on completion.
+Each task gets a structured prompt with persona/context/prior-task summaries (plus loop gate feedback when applicable), and writes a report + summary on completion. When `worktrees: true`, task and command steps run in isolated git worktrees, and successful sequential steps in the same repo are snapshotted forward.
 
 ## Prerequisites
 
@@ -137,6 +137,8 @@ Minimal example:
   ]
 }
 ```
+
+When using `worktrees: true`, you can customize branch naming with `options.worktree_branch_template` (for example to avoid `/` in branch names). Template placeholders: `{run_id}`, `{repo}`, `{group}`, `{node}`, `{attempt}`, `{kind}`, `{kind_short}`. The template must include `{group}`.
 
 For the complete plan schema, methodology, prompt patterns, and plan architectures, see [docs/blueprints.md](./docs/blueprints.md) — a self-contained reference you can also paste into any LLM conversation for plan-authoring help.
 

@@ -39,7 +39,7 @@ When creating or editing agentflow plan JSON files, follow these rules strictly.
 
 - `provider`: `"codex"` or `"cursor"`. Default: `"codex"`.
 - `model`: Model identifier string passed to the provider CLI.
-- `worktrees`: `true` (default) or `false`. Set `false` for sequential single-directory execution.
+- `worktrees`: `false` (default) or `true`. Set `true` only when you need isolated per-step workspaces.
 - `persona`: Default persona injected into all task prompts. Override per-task.
 - `setup`: Background instructions injected into every task prompt.
 - `objective`: Overall goal shared with agents and loop evaluators.
@@ -47,6 +47,7 @@ When creating or editing agentflow plan JSON files, follow these rules strictly.
 - `on_failure`: `"stop"` (default) or `"continue"`.
 - `limits`: Resource limits object.
 - `options`: Runtime options (run_root, cleanup_worktrees).
+- `options.worktree_branch_template`: Optional branch naming template for worktree mode. Placeholders: `{run_id}`, `{repo}`, `{group}`, `{node}`, `{attempt}`, `{kind}`, `{kind_short}`. Must include `{group}`.
 
 ### Node types
 
