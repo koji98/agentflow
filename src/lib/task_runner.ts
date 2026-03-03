@@ -28,7 +28,11 @@ import type {
   WhileNode,
   WorkflowNode,
 } from './types.ts';
-import { prepareLaunches } from './worktrees.ts';
+import {
+  captureSuccessfulWorktreeSnapshot,
+  prepareCommandLaunch,
+  prepareLaunches,
+} from './worktrees.ts';
 
 /**
  * Copies worker-generated artifacts into canonical run artifact paths when they differ.
@@ -322,6 +326,12 @@ export async function executeLaunch(
     timeoutTerminationOutcome: runResult.timeoutTerminationOutcome,
     failureReason: contract.reason,
   };
+  captureSuccessfulWorktreeSnapshot(
+    session,
+    launch,
+    result.status,
+    `${launch.task.taskId}#a${launch.attempt}`,
+  );
 
   if (result.timedOut) {
     log(
@@ -399,6 +409,12 @@ async function executeCommandLaunch(
     timeoutTerminationOutcome: runResult.timeoutTerminationOutcome,
     failureReason,
   };
+  captureSuccessfulWorktreeSnapshot(
+    session,
+    launch,
+    result.status,
+    `${launch.taskId}#a${launch.attempt}`,
+  );
 
   if (!session.dryRun) {
     writeCommandResultArtifacts(launch, result);
@@ -458,6 +474,7 @@ async function runCommandBatch(
   label: string,
 ): Promise<TaskExecutionResult> {
   markGroupRunning(session, launch.groupIndex, 1, label);
+  prepareCommandLaunch(session, launch);
   markLaunchRunning(session, launch);
   const result = await executeCommandLaunch(session, launch);
   recordGroupResults(session, launch.groupIndex, label, [result]);

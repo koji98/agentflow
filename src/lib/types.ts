@@ -123,6 +123,7 @@ export interface PlanOptions {
   runRoot: string;
   runId: string | null;
   cleanupWorktrees: boolean;
+  worktreeBranchTemplate: string;
   dryRun: boolean;
   skipGitRepoCheck: boolean;
   sandboxMode: SandboxMode;
@@ -173,6 +174,7 @@ export interface TaskLaunch {
   summaryPath: string;
   workerSummaryPath: string;
   workspaceCwd: string;
+  baseRef: string;
   branch: string | null;
   useWorktree: boolean;
   skipGitRepoCheck: boolean;
@@ -200,8 +202,11 @@ export interface CommandLaunch {
   reportPath: string;
   summaryPath: string;
   resultPath: string;
+  workspaceRoot: string;
   workspaceCwd: string;
+  baseRef: string;
   branch: string | null;
+  useWorktree: boolean;
   nodePath: string;
   attempt: number;
   repoRoot: string;
@@ -311,6 +316,8 @@ export interface RunCounters {
 export interface WorktreeTracker {
   created: Map<string, string>;
   createdBranches: Map<string, string>;
+  latestRefByRepo: Map<string, string>;
+  latestGroupIndexByRepo: Map<string, number>;
 }
 
 /** In-memory execution session shared across orchestration functions. */

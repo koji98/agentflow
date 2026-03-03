@@ -11,6 +11,11 @@ import { buildAiGatePrompt, evaluateGateOutcome, parseGateJsonOutput } from '../
 import { normalizePlan, resolveConfigPaths } from '../src/lib/plan.ts';
 import { buildPrompt } from '../src/lib/prompt.ts';
 import { buildProviderCommand } from '../src/lib/providers.ts';
+import {
+  DEFAULT_WORKTREE_BRANCH_TEMPLATE,
+  renderWorktreeBranchName,
+  validateWorktreeBranchTemplate,
+} from '../src/lib/worktree_branch.ts';
 import type { EvaluatorGate, Session } from '../src/lib/types.ts';
 import {
   excerptText,
@@ -67,21 +72,90 @@ test('--plan-help prints detailed plan schema guidance', async () => {
   assert.match(out, /--sandbox <mode>/);
 });
 
-test('defaults cleanup_worktrees to true', () => {
+test('defaults worktrees and cleanup_worktrees to false', () => {
   const plan = normalizePlan({
     setup: 'x',
     repos: { main: '.' },
     flow: [{ type: 'task', id: 'a', prompt: 'b' }],
   });
-  assert.equal(plan.options.cleanupWorktrees, true);
+  assert.equal(plan.worktrees, false);
+  assert.equal(plan.options.cleanupWorktrees, false);
+  assert.equal(plan.options.worktreeBranchTemplate, DEFAULT_WORKTREE_BRANCH_TEMPLATE);
 
   const explicit = normalizePlan({
     setup: 'x',
     repos: { main: '.' },
-    options: { cleanup_worktrees: false },
+    worktrees: true,
+    options: { cleanup_worktrees: true },
     flow: [{ type: 'task', id: 'a', prompt: 'b' }],
   });
-  assert.equal(explicit.options.cleanupWorktrees, false);
+  assert.equal(explicit.worktrees, true);
+  assert.equal(explicit.options.cleanupWorktrees, true);
+  assert.equal(explicit.options.worktreeBranchTemplate, DEFAULT_WORKTREE_BRANCH_TEMPLATE);
+});
+
+test('plan normalization accepts custom worktree_branch_template', () => {
+  const plan = normalizePlan({
+    setup: 'x',
+    repos: { main: '.' },
+    worktrees: true,
+    options: {
+      worktree_branch_template: 'agentflow-{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}',
+    },
+    flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+  });
+  assert.equal(
+    plan.options.worktreeBranchTemplate,
+    'agentflow-{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}',
+  );
+});
+
+test('plan normalization rejects invalid worktree_branch_template placeholders', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { main: '.' },
+        options: { worktree_branch_template: 'agentflow-{run_id}-{bogus}-{group}' },
+        flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+      }),
+    /options\.worktree_branch_template contains unknown placeholder "\{bogus\}"/,
+  );
+});
+
+test('plan normalization rejects worktree_branch_template missing {group}', () => {
+  assert.throws(
+    () =>
+      normalizePlan({
+        setup: 'x',
+        repos: { main: '.' },
+        options: { worktree_branch_template: 'agentflow-{run_id}-{node}' },
+        flow: [{ type: 'task', id: 'a', prompt: 'b' }],
+      }),
+    /options\.worktree_branch_template must include "\{group\}"/,
+  );
+});
+
+test('renderWorktreeBranchName interpolates known placeholders', () => {
+  const branch = renderWorktreeBranchName(
+    'agentflow-{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}',
+    {
+      runId: 'run_20260303T123000Z',
+      repoAlias: 'main',
+      groupIndex: 4,
+      nodeId: 'Build API',
+      attempt: 2,
+      kind: 'task',
+    },
+  );
+  assert.equal(branch, 'agentflow-run-20260303t123000z-rmain-g4-tbuild-api-a2');
+});
+
+test('validateWorktreeBranchTemplate rejects unmatched braces', () => {
+  assert.throws(
+    () => validateWorktreeBranchTemplate('agentflow-{run_id-{group}', 'options.worktree_branch_template'),
+    /unmatched opening brace/,
+  );
 });
 
 test('unknown plan keys fail schema normalization with field-specific errors', () => {

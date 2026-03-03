@@ -119,6 +119,7 @@ test('single-task happy path succeeds and persists DONE artifacts', async (t) =>
         reasoning: 'xhigh',
         options: {
           run_root: 'tmp/test_happy_single_runs',
+          cleanup_worktrees: true,
         },
         limits: {
           worker_timeout_sec: 30,
@@ -179,6 +180,66 @@ test('single-task happy path succeeds and persists DONE artifacts', async (t) =>
   assert.equal(worktreeEntries.length, 1, worktreeList);
   const leftoverBranches = runOrThrow('git', ['branch', '--list', 'agentflow/*'], repoRoot).stdout.trim();
   assert.equal(leftoverBranches, '');
+});
+
+test('worktree_branch_template supports slash-free branch names', async (t) => {
+  const repoRoot = mkRepo('agentflow-branch-template-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify({ default: { exitCode: 0, sleepMs: 10 } }, null, 2),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoRoot, 'branch_template_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify(
+      {
+        setup: 'branch template test',
+        repos: { main: '.' },
+        worktrees: true,
+        provider: 'codex',
+        model: 'gpt-5-nano',
+        reasoning: 'xhigh',
+        options: {
+          run_root: 'tmp/test_branch_template_runs',
+          cleanup_worktrees: false,
+          worktree_branch_template: 'agentflow-{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}',
+        },
+        limits: {
+          worker_timeout_sec: 30,
+          timeout_grace_sec: 1,
+        },
+        flow: [{ type: 'task', id: 'happy_task', prompt: 'complete successfully' }],
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const slashBranches = runOrThrow('git', ['branch', '--list', 'agentflow/*'], repoRoot).stdout.trim();
+  assert.equal(slashBranches, '');
+  const hyphenBranches = runOrThrow('git', ['branch', '--list', 'agentflow-*'], repoRoot).stdout.trim();
+  assert.match(hyphenBranches, /agentflow-/);
 });
 
 test('group(parallel=true) happy path succeeds with DONE results for all tasks', async (t) => {
@@ -460,6 +521,170 @@ test('group(parallel=false) executes child steps sequentially in order', async (
     codexCalls.map((row) => String(row.taskId)),
     ['first_step', 'second_step'],
   );
+});
+
+test('worktrees=true carries forward successful sequential task changes', async (t) => {
+  const repoRoot = mkRepo('agentflow-worktree-sequential-state-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify(
+      {
+        rules: [
+          { match: 'Goal (write_marker)', createFile: 'marker.txt', exitCode: 0 },
+          { match: 'Goal (read_marker)', requireFile: 'marker.txt', missingExitCode: 17, exitCode: 0 },
+        ],
+        default: { exitCode: 0, sleepMs: 0 },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoRoot, 'worktree_sequential_state_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify(
+      {
+        setup: 'worktree sequential state carryover test',
+        repos: { main: '.' },
+        worktrees: true,
+        provider: 'codex',
+        model: 'gpt-5-nano',
+        reasoning: 'xhigh',
+        on_failure: 'stop',
+        options: {
+          run_root: 'tmp/test_worktree_sequential_state_runs',
+          cleanup_worktrees: true,
+        },
+        limits: {
+          worker_timeout_sec: 30,
+          timeout_grace_sec: 1,
+        },
+        flow: [
+          { type: 'task', id: 'write_marker', prompt: 'create marker in workspace' },
+          { type: 'task', id: 'read_marker', prompt: 'verify marker from prior task' },
+        ],
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const codexCalls = parseJsonLines(mockLog);
+  assert.equal(codexCalls.length, 2);
+  const firstCwd = String(codexCalls[0].cwd || '');
+  const secondCwd = String(codexCalls[1].cwd || '');
+  assert.notEqual(firstCwd, secondCwd, 'steps should run in distinct worktrees');
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_worktree_sequential_state_runs');
+  const runDir = getSingleRunDir(runBase);
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const taskRows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
+  assert.equal(taskRows.length, 2);
+  assert.ok(taskRows.every((row) => row.status === 'DONE'));
+});
+
+test('worktrees=true uses deterministic latest base ref after parallel same-repo tasks', async (t) => {
+  const repoRoot = mkRepo('agentflow-worktree-parallel-base-ref-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify(
+      {
+        rules: [
+          { match: 'Goal (slow_branch)', createFile: 'marker_slow.txt', sleepMs: 300, exitCode: 0 },
+          { match: 'Goal (fast_branch)', createFile: 'marker_fast.txt', sleepMs: 10, exitCode: 0 },
+          { match: 'Goal (verify_latest)', requireFile: 'marker_fast.txt', missingExitCode: 19, exitCode: 0 },
+        ],
+        default: { exitCode: 0, sleepMs: 0 },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoRoot, 'worktree_parallel_base_ref_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify(
+      {
+        setup: 'parallel worktree latest base-ref determinism test',
+        repos: { main: '.' },
+        worktrees: true,
+        provider: 'codex',
+        model: 'gpt-5-nano',
+        reasoning: 'xhigh',
+        on_failure: 'stop',
+        options: {
+          run_root: 'tmp/test_worktree_parallel_base_ref_runs',
+          cleanup_worktrees: true,
+        },
+        limits: {
+          worker_timeout_sec: 30,
+          timeout_grace_sec: 1,
+        },
+        flow: [
+          {
+            type: 'group',
+            id: 'parallel_same_repo',
+            parallel: true,
+            steps: [
+              { type: 'task', id: 'slow_branch', prompt: 'write slow branch marker' },
+              { type: 'task', id: 'fast_branch', prompt: 'write fast branch marker' },
+            ],
+          },
+          { type: 'task', id: 'verify_latest', prompt: 'verify marker from selected latest branch' },
+        ],
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const codexCalls = parseJsonLines(mockLog);
+  assert.equal(codexCalls.length, 3);
+  const byTask = new Map(codexCalls.map((row) => [String(row.taskId), row]));
+  const verifyCall = byTask.get('verify_latest') as Record<string, unknown> | undefined;
+  assert.ok(verifyCall);
 });
 
 test('group(parallel=true) can run without worktrees when tasks are independent', async (t) => {
@@ -839,6 +1064,58 @@ test('command node success writes command artifacts and DONE state', async (t) =
 
   const summaryText = fs.readFileSync(String(row.summaryPath), 'utf8');
   assert.match(summaryText, /Command `echo_ok` finished with status `DONE`/);
+});
+
+test('worktrees=true runs command nodes in isolated worktrees with state carryover', async (t) => {
+  const repoRoot = mkRepo('agentflow-command-worktree-carry-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'command_worktree_carry_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'command worktree carryover test',
+      repos: { main: '.' },
+      worktrees: true,
+      on_failure: 'stop',
+      options: { run_root: 'tmp/test_command_worktree_carry_runs', cleanup_worktrees: true },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        {
+          type: 'command',
+          id: 'write_marker',
+          repo: 'main',
+          command: '/bin/sh',
+          args: ['-c', 'echo marker > carry_marker.txt'],
+        },
+        {
+          type: 'command',
+          id: 'read_marker',
+          repo: 'main',
+          command: '/bin/sh',
+          args: ['-c', 'test -f carry_marker.txt'],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath]);
+  assert.equal(exitCode, 0);
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_command_worktree_carry_runs');
+  const runDir = getSingleRunDir(runBase);
+  const state = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const rows = Object.values(state.tasks || {}) as Array<Record<string, unknown>>;
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.status === 'DONE'));
+
+  const byTask = new Map(rows.map((row) => [String(row.taskId), row]));
+  const writeRow = byTask.get('write_marker');
+  const readRow = byTask.get('read_marker');
+  assert.ok(writeRow);
+  assert.ok(readRow);
+  assert.notEqual(String(writeRow?.cwd || ''), String(readRow?.cwd || ''), 'commands should run in distinct worktrees');
 });
 
 test('command node retries on FAILED and run succeeds on second attempt', async (t) => {

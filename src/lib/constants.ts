@@ -31,3 +31,18 @@ export const REASONING_EFFORT_ALIASES = new Map([
 
 /** Set of supported provider identifiers for per-task CLI adapters. */
 export const PROVIDERS = new Set(['codex', 'cursor']);
+
+/** Default template for naming per-step worktree branches. */
+export const DEFAULT_WORKTREE_BRANCH_TEMPLATE =
+  'agentflow/{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}';
+
+/** Allowed placeholders in options.worktree_branch_template. */
+export const WORKTREE_BRANCH_TEMPLATE_TOKENS = new Set([
+  'run_id',
+  'repo',
+  'group',
+  'node',
+  'attempt',
+  'kind',
+  'kind_short',
+]);

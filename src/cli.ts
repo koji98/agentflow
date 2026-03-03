@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { parseArgs } from './lib/args.ts';
@@ -24,6 +25,7 @@ import {
 import { runWorkflow } from './lib/task_runner.ts';
 import { cleanupWorktrees } from './lib/worktrees.ts';
 import { log, logError } from './lib/log.ts';
+import { renderWorktreeBranchName } from './lib/worktree_branch.ts';
 import type {
   TaskNode,
   WorkerPlan,
@@ -299,6 +301,107 @@ function validateWorkflowReferences(
 }
 
 /**
+ * Validates rendered worktree branch names with git's ref-format rules.
+ * Ensures generated names are valid and collision-free within each repo.
+ */
+function validateWorktreeBranchTemplateRendering(
+  plan: WorkerPlan,
+  repoRoots: Record<string, string>,
+): void {
+  if (!plan.worktrees) return;
+
+  const defaultRepoAlias = Object.keys(repoRoots)[0];
+  const syntheticRunId = plan.options.runId || 'run_template_validation';
+  const errors: string[] = [];
+  const seenByRepo = new Map<string, Set<string>>();
+  let syntheticGroupIndex = 1;
+
+  const validateOne = ({
+    nodePath,
+    repoAlias,
+    nodeId,
+    kind,
+  }: {
+    nodePath: string;
+    repoAlias: string;
+    nodeId: string;
+    kind: 'task' | 'command';
+  }): void => {
+    const repoRoot = repoRoots[repoAlias];
+    let branch: string;
+    try {
+      branch = renderWorktreeBranchName(plan.options.worktreeBranchTemplate, {
+        runId: syntheticRunId,
+        repoAlias,
+        groupIndex: syntheticGroupIndex,
+        nodeId,
+        attempt: 1,
+        kind,
+      });
+    } catch (error) {
+      errors.push(`${nodePath}: ${String(error)}`);
+      syntheticGroupIndex += 1;
+      return;
+    }
+
+    const repoSeen = seenByRepo.get(repoRoot) || new Set<string>();
+    if (repoSeen.has(branch)) {
+      errors.push(
+        `${nodePath} generated duplicate worktree branch "${branch}" in repo "${repoAlias}". ` +
+        'Update options.worktree_branch_template to ensure uniqueness.',
+      );
+    }
+    repoSeen.add(branch);
+    seenByRepo.set(repoRoot, repoSeen);
+
+    const checkResult = spawnSync('git', ['check-ref-format', '--branch', branch], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    if (checkResult.status !== 0) {
+      const detail = String(checkResult.stderr || checkResult.stdout || '').trim();
+      errors.push(
+        `${nodePath} generated invalid worktree branch "${branch}" for repo "${repoAlias}". ` +
+        (detail || 'git check-ref-format --branch rejected it.'),
+      );
+    }
+    syntheticGroupIndex += 1;
+  };
+
+  const walk = (node: WorkflowNode, nodePath: string): void => {
+    if (node.type === 'task') {
+      validateOne({
+        nodePath,
+        repoAlias: node.repo || defaultRepoAlias,
+        nodeId: node.taskId,
+        kind: 'task',
+      });
+      return;
+    }
+    if (node.type === 'command') {
+      validateOne({
+        nodePath,
+        repoAlias: node.repo || defaultRepoAlias,
+        nodeId: node.id,
+        kind: 'command',
+      });
+      return;
+    }
+    if (node.type === 'group') {
+      node.steps.forEach((child, i) => walk(child, `${nodePath}.steps[${i}]`));
+      return;
+    }
+    node.body.forEach((child, i) => walk(child, `${nodePath}.body[${i}]`));
+  };
+
+  plan.workflow.forEach((node, i) => walk(node, `flow[${i}]`));
+
+  if (errors.length > 0) {
+    throw new Error(`Worktree branch template validation failed:\n${errors.map((e) => `- ${e}`).join('\n')}`);
+  }
+}
+
+/**
  * Executes the CLI workflow lifecycle from argument parsing to final run summary.
  *
  * @param argv CLI tokens (without `node` and script path). Defaults to `process.argv.slice(2)`.
@@ -361,6 +464,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     globalContextFiles = validateGlobalContextFiles(plan, planPath, repoRoots);
     validateTaskContextFiles(plan, planPath, repoRoots);
     validateWorkflowReferences(plan, repoRoots);
+    validateWorktreeBranchTemplateRendering(plan, repoRoots);
   } catch (error) {
     logError(String(error));
     return 1;

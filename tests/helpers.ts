@@ -131,6 +131,7 @@ const args = process.argv.slice(2);
 const outIndex = args.indexOf('-o');
 const outPath = outIndex >= 0 ? args[outIndex + 1] : null;
 const stdin = fs.readFileSync(0, 'utf8');
+const taskId = ((stdin.match(/Your Task[^(]*\\(([^)]+)\\)/) || [])[1] || null);
 const behaviorPath = process.env.MOCK_CODEX_BEHAVIOR;
 let behavior = { rules: [], default: { exitCode: 0, sleepMs: 0, skipReport: false } };
 if (behaviorPath && fs.existsSync(behaviorPath)) {
@@ -145,6 +146,22 @@ for (const candidate of behavior.rules || []) {
     }
     rule = { ...rule, ...candidate };
     break;
+  }
+}
+
+if (rule.createFile) {
+  const createPath = path.resolve(process.cwd(), String(rule.createFile));
+  fs.mkdirSync(path.dirname(createPath), { recursive: true });
+  fs.writeFileSync(createPath, String(rule.createFileContent || 'created by mock codex\\n'), 'utf8');
+}
+
+if (rule.requireFile) {
+  const requiredPath = path.resolve(process.cwd(), String(rule.requireFile));
+  if (!fs.existsSync(requiredPath)) {
+    rule = {
+      ...rule,
+      exitCode: Number(rule.missingExitCode ?? 1),
+    };
   }
 }
 
@@ -179,7 +196,7 @@ if (logPath) {
     JSON.stringify({
       args,
       cwd: process.cwd(),
-      taskId: ((stdin.match(/Your Task[^(]*\\(([^)]+)\\)/) || [])[1] || null),
+      taskId,
       reportPath,
     }) + '\\n',
     'utf8',

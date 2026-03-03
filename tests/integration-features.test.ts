@@ -165,6 +165,30 @@ test('--validate fails when context_from references self or a later task', async
   assert.equal(exitCode, 1);
 });
 
+test('--validate fails when worktree_branch_template renders invalid branch names', async (t) => {
+  const repoRoot = mkRepo('agentflow-validate-branch-template-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'invalid_branch_template_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      repos: { main: '.' },
+      worktrees: true,
+      options: {
+        worktree_branch_template: 'bad branch {group}',
+      },
+      flow: [
+        { type: 'task', id: 'task_a', prompt: 'do something' },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath, '--validate']);
+  assert.equal(exitCode, 1);
+});
+
 test('workflow mixing task + command + loop validates and executes', async (t) => {
   const repoRoot = mkRepo('agentflow-mixed-workflow-');
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
@@ -323,6 +347,109 @@ test('--resume skips completed tasks and re-runs failed ones', async (t) => {
   assert.equal(resumeCalls.length, 1, 'only task_b should have been executed on resume');
   const resumedTaskId = (resumeCalls[0].taskId || '') as string;
   assert.equal(resumedTaskId, 'task_b', 'the re-executed task should be task_b');
+});
+
+test('--resume with worktrees carries prior successful branch state forward', async (t) => {
+  const repoRoot = mkRepo('agentflow-resume-worktree-carry-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify(
+      {
+        rules: [
+          { match: 'Goal (task_a)', createFile: 'resume_marker.txt', exitCode: 0 },
+          { match: 'Goal (task_b)', exitCode: 1, skipReport: true },
+        ],
+        default: { exitCode: 0 },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoRoot, 'resume_worktree_carry_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify(
+      {
+        setup: 'resume worktree carry test',
+        repos: { main: '.' },
+        worktrees: true,
+        provider: 'codex',
+        model: 'gpt-5-nano',
+        reasoning: 'xhigh',
+        on_failure: 'stop',
+        options: {
+          run_root: 'tmp/test_resume_worktree_carry_runs',
+        },
+        limits: {
+          worker_timeout_sec: 30,
+          timeout_grace_sec: 1,
+        },
+        flow: [
+          { type: 'task', id: 'task_a', prompt: 'create marker in workspace' },
+          { type: 'task', id: 'task_b', prompt: 'verify marker from prior task' },
+        ],
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 1, 'first run should fail at task_b');
+    },
+  );
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_resume_worktree_carry_runs');
+  const runDir = getSingleRunDir(runBase);
+
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify(
+      {
+        rules: [
+          { match: 'Goal (task_b)', requireFile: 'resume_marker.txt', missingExitCode: 17, exitCode: 0 },
+        ],
+        default: { exitCode: 0 },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+  if (fs.existsSync(mockLog)) fs.unlinkSync(mockLog);
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath, '--resume', runDir]);
+      assert.equal(exitCode, 0, 'resumed task_b should see task_a marker via carried branch state');
+    },
+  );
+
+  const resumeCalls = parseJsonLines(mockLog);
+  assert.equal(resumeCalls.length, 1, 'resume should execute only task_b');
+  assert.equal(String(resumeCalls[0].taskId || ''), 'task_b');
 });
 
 test('progress tag appears in task execution log', async (t) => {

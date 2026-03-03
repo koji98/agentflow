@@ -124,9 +124,13 @@ All tasks execute one at a time in a single working directory. Simpler, predicta
 }
 ```
 
-Tasks run concurrently, each in its own worktree. Use for truly independent work across repos or directories with no shared state.
+Tasks run concurrently. With `worktrees: true`, each step gets its own isolated worktree branch.
+Use this only for truly independent work across repos or directories with no shared state.
 
-**Warning:** `parallel: true` creates git worktrees automatically. Don't use parallel within a single repo if tasks modify overlapping files.
+**Warning:** `parallel: true` does not imply worktrees by itself. If `worktrees: false`, parallel steps share one working directory and can race each other.
+
+When `worktrees: true` and steps run sequentially, each successful step's repo changes are snapshotted so later steps in the same repo start from that updated state.
+If your branch policy disallows `/`, set `options.worktree_branch_template` to a slash-free format (must include `{group}`).
 
 ### Loop + Gate (for convergent quality)
 

@@ -10,6 +10,7 @@ import type {
   Session,
   TaskExecutionResult,
   TaskStateRow,
+  WorkflowNode,
   WorkerPlan,
 } from './types.ts';
 
@@ -95,6 +96,8 @@ export function createSession({
     worktreeTracker: {
       created: new Map(),
       createdBranches: new Map(),
+      latestRefByRepo: new Map(),
+      latestGroupIndexByRepo: new Map(),
     },
     state,
     resumedTasks: new Map(),
@@ -124,6 +127,47 @@ export function loadResumedState(runDir: string): RunState {
   }
 
   return parsed as unknown as RunState;
+}
+
+/**
+ * Resolves a workflow node from a persisted nodePath (for example `flow[0].steps[1]`).
+ * Returns null when the path is malformed or does not resolve in the current plan.
+ */
+function resolveWorkflowNodeAtPath(plan: WorkerPlan, nodePath: string): WorkflowNode | null {
+  const segments = Array.from(nodePath.matchAll(/(flow|steps|body)\[(\d+)\]/g));
+  if (segments.length === 0) return null;
+
+  let cursor: unknown = { flow: plan.workflow };
+  for (const segment of segments) {
+    const key = segment[1];
+    const index = Number(segment[2]);
+    if (!Number.isInteger(index) || index < 0) return null;
+    if (!cursor || typeof cursor !== 'object') return null;
+    const next = (cursor as Record<string, unknown>)[key];
+    if (!Array.isArray(next) || index >= next.length) return null;
+    cursor = next[index];
+  }
+
+  if (!cursor || typeof cursor !== 'object') return null;
+  return cursor as WorkflowNode;
+}
+
+/**
+ * Resolves the concrete repo root for a completed node row.
+ * Falls back to the plan default repo alias when the node cannot be resolved.
+ */
+function resolveRepoRootForNodePath(
+  plan: WorkerPlan,
+  repoRoots: Record<string, string>,
+  nodePath: string,
+): string {
+  const defaultRepoAlias = Object.keys(repoRoots)[0];
+  const fallbackRepoRoot = repoRoots[defaultRepoAlias];
+  const node = resolveWorkflowNodeAtPath(plan, nodePath);
+  if (!node || (node.type !== 'task' && node.type !== 'command')) {
+    return fallbackRepoRoot;
+  }
+  return repoRoots[node.repo ?? defaultRepoAlias] || fallbackRepoRoot;
 }
 
 /**
@@ -195,6 +239,22 @@ export function createResumedSession({
     groups: {},
     updatedAtUtc: nowUtcIso(),
   };
+  const latestRefByRepo = new Map<string, string>();
+  const latestGroupIndexByRepo = new Map<string, number>();
+  if (plan.worktrees) {
+    const doneRows = Object.values(doneTasks)
+      .filter((row) => Boolean(row.branch))
+      .sort((a, b) => (
+        a.groupIndex - b.groupIndex ||
+        a.taskIndex - b.taskIndex ||
+        a.attempt - b.attempt
+      ));
+    for (const row of doneRows) {
+      const repoRoot = resolveRepoRootForNodePath(plan, repoRoots, row.nodePath);
+      latestRefByRepo.set(repoRoot, String(row.branch));
+      latestGroupIndexByRepo.set(repoRoot, row.groupIndex);
+    }
+  }
 
   return {
     plan,
@@ -220,6 +280,8 @@ export function createResumedSession({
     worktreeTracker: {
       created: new Map(),
       createdBranches: new Map(),
+      latestRefByRepo,
+      latestGroupIndexByRepo,
     },
     state,
     resumedTasks,

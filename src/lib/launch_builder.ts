@@ -18,6 +18,7 @@ import {
   safeSlug,
   taskKey,
 } from './utils.ts';
+import { renderWorktreeBranchName } from './worktree_branch.ts';
 
 /**
  * Checks whether a target path is inside (or equal to) a base directory.
@@ -118,8 +119,18 @@ export function buildLaunchFromTaskNode({
   const summaryPath = path.resolve(taskDir, DEFAULT_SUMMARY_FILENAME);
 
   const useWorktree = Boolean(session.plan.worktrees);
+  const baseRef = useWorktree
+    ? session.worktreeTracker.latestRefByRepo.get(repoRoot) || 'HEAD'
+    : 'HEAD';
   const branch = useWorktree
-    ? `agentflow/${safeSlug(`${session.paths.runId}-r${repoAlias}-g${groupIndex}-t${task.taskId}-a${attempt}`)}`
+    ? renderWorktreeBranchName(session.plan.options.worktreeBranchTemplate, {
+      runId: session.paths.runId,
+      repoAlias,
+      groupIndex,
+      nodeId: task.taskId,
+      attempt,
+      kind: 'task',
+    })
     : null;
   const workspaceCwd = useWorktree ? path.resolve(taskDir, 'worktree') : repoRoot;
 
@@ -179,6 +190,7 @@ export function buildLaunchFromTaskNode({
     summaryPath,
     workerSummaryPath,
     workspaceCwd,
+    baseRef,
     branch,
     useWorktree,
     skipGitRepoCheck: session.plan.options.skipGitRepoCheck,
@@ -218,11 +230,20 @@ export function buildLaunchFromCommandNode({
 }): CommandLaunch {
   const repoAlias = node.repo ?? Object.keys(session.paths.repoRoots)[0];
   const repoRoot = session.paths.repoRoots[repoAlias];
-  const workspaceCwdCandidate = node.cwd ? path.resolve(repoRoot, node.cwd) : repoRoot;
-  if (!isWithinDir(repoRoot, workspaceCwdCandidate)) {
-    throw new Error(`Command node ${node.id} resolved cwd outside repo root: ${workspaceCwdCandidate}`);
-  }
-  const workspaceCwd = workspaceCwdCandidate;
+  const useWorktree = Boolean(session.plan.worktrees);
+  const baseRef = useWorktree
+    ? session.worktreeTracker.latestRefByRepo.get(repoRoot) || 'HEAD'
+    : 'HEAD';
+  const branch = useWorktree
+    ? renderWorktreeBranchName(session.plan.options.worktreeBranchTemplate, {
+      runId: session.paths.runId,
+      repoAlias,
+      groupIndex,
+      nodeId: node.id,
+      attempt,
+      kind: 'command',
+    })
+    : null;
 
   const taskSlug = safeSlug(`${node.id}-a${attempt}`);
   const taskDir = path.resolve(
@@ -236,6 +257,12 @@ export function buildLaunchFromCommandNode({
   const reportPath = path.resolve(taskDir, 'report.md');
   const summaryPath = path.resolve(taskDir, 'summary.md');
   const resultPath = path.resolve(taskDir, 'command_result.json');
+  const workspaceRoot = useWorktree ? path.resolve(taskDir, 'worktree') : repoRoot;
+  const workspaceCwdCandidate = node.cwd ? path.resolve(workspaceRoot, node.cwd) : workspaceRoot;
+  if (!isWithinDir(workspaceRoot, workspaceCwdCandidate)) {
+    throw new Error(`Command node ${node.id} resolved cwd outside workspace root: ${workspaceCwdCandidate}`);
+  }
+  const workspaceCwd = workspaceCwdCandidate;
 
   return {
     groupIndex,
@@ -254,8 +281,11 @@ export function buildLaunchFromCommandNode({
     reportPath,
     summaryPath,
     resultPath,
+    workspaceRoot,
     workspaceCwd,
-    branch: null,
+    baseRef,
+    branch,
+    useWorktree,
     nodePath,
     attempt,
     repoRoot,

@@ -74,7 +74,7 @@ Full schema skeleton (all keys shown):
   "reasoning": "xhigh",
   "profile": null,
   "on_failure": "stop",
-  "worktrees": true,
+  "worktrees": false,
   "context_files": ["README.md"],
   "limits": {
     "max_retries": 0,
@@ -90,7 +90,8 @@ Full schema skeleton (all keys shown):
   "options": {
     "run_root": "tmp/agentflow_runs",
     "run_id": null,
-    "cleanup_worktrees": true
+    "cleanup_worktrees": false,
+    "worktree_branch_template": "agentflow/{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}"
   },
   "flow": [
     {
@@ -140,7 +141,7 @@ Top-level keys:
 - reasoning (optional, default "xhigh"): codex only; ignored by cursor
 - profile (optional): codex only; ignored by cursor
 - on_failure (optional, default "stop"): "stop" or "continue"
-- worktrees (optional, default true): use git worktrees for task isolation
+- worktrees (optional, default false): use git worktrees for per-step branch isolation (opt-in); successful sequential steps in same repo are snapshotted forward
 - context_files (optional): files every task should read first
 - limits (optional): resource limits, retries, and caps
 - options (optional): rarely changed runtime settings
@@ -160,7 +161,8 @@ Limits keys:
 Options keys:
 - run_root (default "tmp/agentflow_runs"): output directory base
 - run_id (default null): override auto-generated run id
-- cleanup_worktrees (default true): remove worktrees after run
+- cleanup_worktrees (default false): remove worktrees/branches created during run
+- worktree_branch_template (default "agentflow/{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}"): template for generated worktree branch names; must include {group}
 
 Flow nodes:
 - task:
