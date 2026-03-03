@@ -76,10 +76,16 @@ export function renderWorktreeBranchName(
   };
 
   const rendered = template.replace(/\{([^{}]+)\}/g, (_full, token: string) => values[token]);
-  if (!rendered.trim()) {
+  const sanitized = rendered
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => safeSlug(segment))
+    .join('/');
+  if (!sanitized.trim()) {
     throw new Error('options.worktree_branch_template rendered an empty branch name.');
   }
-  return rendered;
+  return sanitized;
 }
 
 export { DEFAULT_WORKTREE_BRANCH_TEMPLATE };

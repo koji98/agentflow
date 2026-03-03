@@ -67,6 +67,9 @@ export function createSession({
     workflowLength: plan.workflow.length,
     totalTaskCount: 0,
     totalFailureCount: 0,
+    totalTaskFailureCount: 0,
+    totalRunFailureCount: 0,
+    runFailureReasons: [],
     totalLoopIterations: 0,
     groups: {},
     tasks: {},
@@ -91,6 +94,7 @@ export function createSession({
       totalTaskCount,
       executedTaskCount: 0,
       failureTaskCount: 0,
+      runFailureCount: 0,
       loopIterationCount: 0,
     },
     worktreeTracker: {
@@ -130,26 +134,73 @@ export function loadResumedState(runDir: string): RunState {
 }
 
 /**
- * Resolves a workflow node from a persisted nodePath (for example `flow[0].steps[1]`).
+ * Resolves a workflow node from a persisted nodePath (for example `flow[0].steps[1]`
+ * or `workflow[0]/group:x/step_1/task:y`).
  * Returns null when the path is malformed or does not resolve in the current plan.
  */
 function resolveWorkflowNodeAtPath(plan: WorkerPlan, nodePath: string): WorkflowNode | null {
-  const segments = Array.from(nodePath.matchAll(/(flow|steps|body)\[(\d+)\]/g));
-  if (segments.length === 0) return null;
-
-  let cursor: unknown = { flow: plan.workflow };
-  for (const segment of segments) {
-    const key = segment[1];
-    const index = Number(segment[2]);
-    if (!Number.isInteger(index) || index < 0) return null;
+  const legacySegments = Array.from(nodePath.matchAll(/(flow|steps|body)\[(\d+)\]/g));
+  if (legacySegments.length > 0) {
+    let cursor: unknown = { flow: plan.workflow };
+    for (const segment of legacySegments) {
+      const key = segment[1];
+      const index = Number(segment[2]);
+      if (!Number.isInteger(index) || index < 0) return null;
+      if (!cursor || typeof cursor !== 'object') return null;
+      const next = (cursor as Record<string, unknown>)[key];
+      if (!Array.isArray(next) || index >= next.length) return null;
+      cursor = next[index];
+    }
     if (!cursor || typeof cursor !== 'object') return null;
-    const next = (cursor as Record<string, unknown>)[key];
-    if (!Array.isArray(next) || index >= next.length) return null;
-    cursor = next[index];
+    return cursor as WorkflowNode;
   }
 
-  if (!cursor || typeof cursor !== 'object') return null;
-  return cursor as WorkflowNode;
+  const rootMatch = /^workflow\[(\d+)\](?:\/|$)/.exec(nodePath);
+  if (!rootMatch) return null;
+  const rootIndex = Number(rootMatch[1]);
+  if (!Number.isInteger(rootIndex) || rootIndex < 0 || rootIndex >= plan.workflow.length) return null;
+
+  let cursor: WorkflowNode = plan.workflow[rootIndex];
+  const segments = nodePath.split('/').slice(1);
+  for (const segment of segments) {
+    if (!segment) continue;
+    if (segment.startsWith('group:')) {
+      if (cursor.type !== 'group') return null;
+      continue;
+    }
+    if (segment.startsWith('while:')) {
+      if (cursor.type !== 'while') return null;
+      continue;
+    }
+    if (segment.startsWith('task:')) {
+      if (cursor.type !== 'task') return null;
+      continue;
+    }
+    if (segment.startsWith('command:')) {
+      if (cursor.type !== 'command') return null;
+      continue;
+    }
+    if (segment.startsWith('iter_')) {
+      if (cursor.type !== 'while') return null;
+      continue;
+    }
+    if (segment.startsWith('step_')) {
+      if (cursor.type !== 'group') return null;
+      const stepIndex = Number(segment.slice('step_'.length)) - 1;
+      if (!Number.isInteger(stepIndex) || stepIndex < 0 || stepIndex >= cursor.steps.length) return null;
+      cursor = cursor.steps[stepIndex];
+      continue;
+    }
+    if (segment.startsWith('body_')) {
+      if (cursor.type !== 'while') return null;
+      const bodyIndex = Number(segment.slice('body_'.length)) - 1;
+      if (!Number.isInteger(bodyIndex) || bodyIndex < 0 || bodyIndex >= cursor.body.length) return null;
+      cursor = cursor.body[bodyIndex];
+      continue;
+    }
+    return null;
+  }
+  return cursor;
 }
 
 /**
@@ -168,6 +219,21 @@ function resolveRepoRootForNodePath(
     return fallbackRepoRoot;
   }
   return repoRoots[node.repo ?? defaultRepoAlias] || fallbackRepoRoot;
+}
+
+/**
+ * Resolves repo root for a completed task row, preferring persisted repoAlias.
+ * Falls back to nodePath parsing for backward compatibility with older run_state files.
+ */
+function resolveRepoRootForCompletedRow(
+  plan: WorkerPlan,
+  repoRoots: Record<string, string>,
+  row: TaskStateRow,
+): string {
+  if (typeof row.repoAlias === 'string' && repoRoots[row.repoAlias]) {
+    return repoRoots[row.repoAlias];
+  }
+  return resolveRepoRootForNodePath(plan, repoRoots, row.nodePath);
 }
 
 /**
@@ -238,6 +304,10 @@ export function createResumedSession({
     tasks: doneTasks,
     groups: {},
     updatedAtUtc: nowUtcIso(),
+    totalFailureCount: 0,
+    totalTaskFailureCount: 0,
+    totalRunFailureCount: 0,
+    runFailureReasons: [],
   };
   const latestRefByRepo = new Map<string, string>();
   const latestGroupIndexByRepo = new Map<string, number>();
@@ -250,7 +320,7 @@ export function createResumedSession({
         a.attempt - b.attempt
       ));
     for (const row of doneRows) {
-      const repoRoot = resolveRepoRootForNodePath(plan, repoRoots, row.nodePath);
+      const repoRoot = resolveRepoRootForCompletedRow(plan, repoRoots, row);
       latestRefByRepo.set(repoRoot, String(row.branch));
       latestGroupIndexByRepo.set(repoRoot, row.groupIndex);
     }
@@ -275,6 +345,7 @@ export function createResumedSession({
       totalTaskCount,
       executedTaskCount: doneCount,
       failureTaskCount: 0,
+      runFailureCount: 0,
       loopIterationCount: priorState.totalLoopIterations,
     },
     worktreeTracker: {
@@ -309,7 +380,10 @@ export function saveState(session: Session): void {
   if (session.dryRun) return;
   session.state.updatedAtUtc = nowUtcIso();
   session.state.totalTaskCount = session.counters.executedTaskCount;
-  session.state.totalFailureCount = session.counters.failureTaskCount;
+  session.state.totalTaskFailureCount = session.counters.failureTaskCount;
+  session.state.totalRunFailureCount = session.counters.runFailureCount;
+  session.state.totalFailureCount = session.counters.failureTaskCount + session.counters.runFailureCount;
+  session.state.runFailureReasons = [...(session.state.runFailureReasons || [])];
   session.state.totalLoopIterations = session.counters.loopIterationCount;
   saveJson(session.paths.statePath, session.state);
 }
@@ -330,6 +404,19 @@ export function recordDecision(
   const entry: DecisionTraceEntry = { atUtc: nowUtcIso(), type, nodePath, detail };
   session.decisionTrace.push(entry);
   saveDecisionTrace(session);
+}
+
+/**
+ * Records one run-level failure that is not represented by a task row.
+ * Used for control-flow failures (for example while exhaustion).
+ */
+export function recordRunFailure(session: Session, reason: string): void {
+  const normalized = String(reason || 'run_failure').trim() || 'run_failure';
+  const reasons = session.state.runFailureReasons || [];
+  reasons.push(normalized);
+  session.state.runFailureReasons = reasons;
+  session.counters.runFailureCount += 1;
+  saveState(session);
 }
 
 /** Truncates a potentially long line for markdown summary readability. */
@@ -392,7 +479,12 @@ export function writeSummary(session: Session): void {
   lines.push(`- Updated: \`${session.state.updatedAtUtc || ''}\``);
   lines.push(`- Executed tasks: \`${session.counters.executedTaskCount}\``);
   lines.push(`- Failed tasks: \`${session.counters.failureTaskCount}\``);
+  lines.push(`- Run-level failures: \`${session.counters.runFailureCount}\``);
   lines.push(`- Loop iterations: \`${session.counters.loopIterationCount}\``);
+  const runFailureReasons = session.state.runFailureReasons || [];
+  if (runFailureReasons.length > 0) {
+    lines.push(`- Run failure reasons: \`${runFailureReasons.join(' | ')}\``);
+  }
   lines.push('');
   lines.push('## Groups');
   lines.push('');
@@ -533,6 +625,7 @@ export function markLaunchRunning(session: Session, launch: ExecutionLaunch): vo
   const row = session.state.tasks[launch.taskKey] || {
     taskKey: launch.taskKey,
     taskId: stateTaskId(launch),
+    repoAlias: launch.repoAlias,
     groupIndex: launch.groupIndex,
     taskIndex: launch.taskIndex,
     nodePath: launch.nodePath,
@@ -551,6 +644,7 @@ export function markLaunchRunning(session: Session, launch: ExecutionLaunch): vo
     branch: launch.branch,
   };
   row.status = 'RUNNING';
+  row.repoAlias = launch.repoAlias;
   row.startedAtUtc = nowUtcIso();
   session.state.tasks[launch.taskKey] = row;
   saveState(session);
@@ -624,6 +718,16 @@ export function failureCount(session: Session): number {
     }
   }
   return Array.from(latestByNode.values()).filter((row) => row.status !== 'DONE').length;
+}
+
+/** Returns run-level failures (non-task failures) recorded for the session. */
+export function runFailureCount(session: Session): number {
+  return session.counters.runFailureCount;
+}
+
+/** Returns total failures including task and run-level failures. */
+export function totalFailureCount(session: Session): number {
+  return failureCount(session) + runFailureCount(session);
 }
 
 /**

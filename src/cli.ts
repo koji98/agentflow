@@ -21,6 +21,8 @@ import {
   failureCount,
   finalizeSession,
   initializeSessionArtifacts,
+  recordRunFailure,
+  totalFailureCount,
 } from './lib/session.ts';
 import { runWorkflow } from './lib/task_runner.ts';
 import { cleanupWorktrees } from './lib/worktrees.ts';
@@ -97,7 +99,7 @@ function isWithinDir(baseDir: string, targetPath: string): boolean {
 }
 
 /**
- * Validates one workflow cwd field against repo boundaries and filesystem reachability.
+ * Validates one workflow cwd field against repo boundaries.
  *
  * @param params Validation input payload.
  * @param params.nodePath Schema-style node path used in error messages.
@@ -137,25 +139,11 @@ function validateNodeCwd({
     errors.push(`${nodePath}.cwd resolves outside repo "${repoAlias}": ${resolved}`);
     return;
   }
-  if (!fs.existsSync(resolved)) {
-    errors.push(`${nodePath}.cwd not found: ${cwd}`);
-    return;
-  }
-  let stats: fs.Stats;
-  try {
-    stats = fs.statSync(resolved);
-  } catch {
-    errors.push(`${nodePath}.cwd is not readable: ${cwd}`);
-    return;
-  }
-  if (!stats.isDirectory()) {
-    errors.push(`${nodePath}.cwd must be a directory: ${cwd}`);
-  }
 }
 
 /**
  * Validates workflow-level references not covered by schema:
- * - command/deterministic-gate cwd reachability within repo roots
+ * - command/deterministic-gate cwd containment within repo roots
  * - task context_from references (existence, non-self, and ordering)
  *
  * @param plan Normalized worker plan with workflow tree.
@@ -541,7 +529,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const finalizeRun = (): void => {
     if (finalized) return;
     cleanupWorktrees(session);
-    failures = failureCount(session);
+    failures = totalFailureCount(session);
     if (runStatus === 'DONE' && failures > 0) runStatus = 'FAILED';
     finalizeSession(session);
     finalized = true;
@@ -552,6 +540,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (session.shutdownSignal) return;
     session.shutdownSignal = signal;
     runStatus = 'FAILED';
+    recordRunFailure(session, `signal:${signal}`);
     log(`\nreceived ${signal}, shutting down...`);
     finalizeRun();
     log(`\ncompleted with failures: ${failures}`);
@@ -565,6 +554,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   } catch (err: unknown) {
     runStatus = 'FAILED';
     const error = err instanceof Error ? err : null;
+    if (failureCount(session) === 0) {
+      recordRunFailure(session, error?.message || String(err));
+    }
     log(`\nrun failed: ${error?.name || 'Error'}: ${error?.message || String(err)}`);
   } finally {
     process.off('SIGINT', handleSignal);

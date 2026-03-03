@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { buildProviderCommand } from './providers.ts';
 import { readText, safeSlug } from './utils.ts';
+import { addDetachedWorktree, removeWorktree } from './worktrees.ts';
 import type {
   AiGate,
   DeterministicGate,
@@ -106,6 +107,67 @@ function resolveGateRepoRoot(session: Session, gate: EvaluatorGate): string {
 }
 
 /**
+ * Creates an ephemeral detached worktree rooted at the latest carried ref for a repo.
+ * Falls back to the canonical repo root when no carried ref exists.
+ */
+function resolveGateExecutionRoot(
+  session: Session,
+  gate: EvaluatorGate,
+  repoRoot: string,
+  evalBase: string,
+): { gateRoot: string; cleanup: () => void } {
+  if (!session.plan.worktrees) {
+    return { gateRoot: repoRoot, cleanup: () => {} };
+  }
+  const latestRef = session.worktreeTracker.latestRefByRepo.get(repoRoot);
+  if (!latestRef) {
+    return { gateRoot: repoRoot, cleanup: () => {} };
+  }
+
+  const gateRoot = path.resolve(
+    session.paths.runRoot,
+    '.agentflow',
+    'gate_worktrees',
+    safeSlug(gate.id),
+    evalBase,
+  );
+  if (fs.existsSync(gateRoot)) {
+    try {
+      removeWorktree(repoRoot, gateRoot, false);
+    } catch {
+      fs.rmSync(gateRoot, { recursive: true, force: true });
+    }
+  }
+  fs.mkdirSync(path.dirname(gateRoot), { recursive: true });
+  addDetachedWorktree(repoRoot, gateRoot, latestRef, false);
+  return {
+    gateRoot,
+    cleanup: () => {
+      try {
+        removeWorktree(repoRoot, gateRoot, false);
+      } catch {
+        // best effort only; stale gate worktrees are safe to clean manually
+      }
+    },
+  };
+}
+
+function assertRuntimeDirectoryExists(absPath: string, contextLabel: string): void {
+  if (!fs.existsSync(absPath)) {
+    throw new Error(`${contextLabel} runtime cwd not found: ${absPath}`);
+  }
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(absPath);
+  } catch {
+    throw new Error(`${contextLabel} runtime cwd is not readable: ${absPath}`);
+  }
+  if (!stats.isDirectory()) {
+    throw new Error(`${contextLabel} runtime cwd must be a directory: ${absPath}`);
+  }
+}
+
+/**
  * Builds the AI gate evaluation prompt, injecting recent loop group/task summaries.
  * @param session Current run session.
  * @param gate AI gate definition with prompt template.
@@ -195,6 +257,7 @@ export function buildAiGatePrompt(
  */
 function runDeterministicGate(
   gate: DeterministicGate,
+  nodePath: string,
   gateRoot: string,
   gateDir: string,
   evalBase: string,
@@ -202,6 +265,10 @@ function runDeterministicGate(
   const logPath = path.resolve(gateDir, `${evalBase}.log`);
   const jsonPath = path.resolve(gateDir, `${evalBase}.json`);
   const cwd = gate.exec.cwd ? path.resolve(gateRoot, gate.exec.cwd) : gateRoot;
+  assertRuntimeDirectoryExists(
+    cwd,
+    `Deterministic gate ${gate.id} at ${nodePath} (cwd=${gate.exec.cwd || '.'})`,
+  );
   const cmd = [gate.exec.command, ...gate.exec.args];
   const timeoutSec = gate.timeoutSec || gate.exec.timeoutSec || 120;
   const result = spawnSync(cmd[0], cmd.slice(1), {
@@ -360,29 +427,34 @@ export function evaluateGate(
     };
   }
 
-  const gateRoot = resolveGateRepoRoot(session, gate);
-  const missingArtifacts: string[] = [];
-  for (const artifact of gate.requiredArtifacts) {
-    const artifactPath = path.isAbsolute(artifact)
-      ? path.resolve(artifact)
-      : path.resolve(gateRoot, artifact);
-    if (!fs.existsSync(artifactPath)) missingArtifacts.push(artifact);
-  }
-  if (missingArtifacts.length > 0) {
-    return {
-      passed: false,
-      score: null,
-      reasons: [`missing required artifacts: ${missingArtifacts.join(', ')}`],
-      raw: { missingArtifacts },
-    };
-  }
-
+  const repoRoot = resolveGateRepoRoot(session, gate);
   const evalDir = path.resolve(session.paths.runRoot, 'evaluations', safeSlug(gate.id));
   const evalBase = `iter_${String(iteration).padStart(2, '0')}_${phase}`;
   fs.mkdirSync(evalDir, { recursive: true });
+  const execution = resolveGateExecutionRoot(session, gate, repoRoot, evalBase);
+  try {
+    const gateRoot = execution.gateRoot;
+    const missingArtifacts: string[] = [];
+    for (const artifact of gate.requiredArtifacts) {
+      const artifactPath = path.isAbsolute(artifact)
+        ? path.resolve(artifact)
+        : path.resolve(gateRoot, artifact);
+      if (!fs.existsSync(artifactPath)) missingArtifacts.push(artifact);
+    }
+    if (missingArtifacts.length > 0) {
+      return {
+        passed: false,
+        score: null,
+        reasons: [`missing required artifacts: ${missingArtifacts.join(', ')}`],
+        raw: { missingArtifacts },
+      };
+    }
 
-  if (gate.type === 'deterministic') {
-    return runDeterministicGate(gate, gateRoot, evalDir, evalBase);
+    if (gate.type === 'deterministic') {
+      return runDeterministicGate(gate, nodePath, gateRoot, evalDir, evalBase);
+    }
+    return runAiGate(session, gate, nodePath, iteration, phase, gateRoot, evalDir, evalBase);
+  } finally {
+    execution.cleanup();
   }
-  return runAiGate(session, gate, nodePath, iteration, phase, gateRoot, evalDir, evalBase);
 }

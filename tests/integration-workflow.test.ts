@@ -242,6 +242,47 @@ test('worktree_branch_template supports slash-free branch names', async (t) => {
   assert.match(hyphenBranches, /agentflow-/);
 });
 
+test('omitting worktrees defaults to repo-root execution (no extra worktrees)', async (t) => {
+  const repoRoot = mkRepo('agentflow-default-no-worktree-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'default_no_worktree_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'default worktree=false behavior',
+      repos: { main: '.' },
+      on_failure: 'stop',
+      options: { run_root: 'tmp/test_default_no_worktree_runs' },
+      flow: [
+        {
+          type: 'command',
+          id: 'repo_root_cmd',
+          command: '/bin/sh',
+          args: ['-c', 'echo default-no-worktree'],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath]);
+  assert.equal(exitCode, 0);
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_default_no_worktree_runs');
+  const runDir = getSingleRunDir(runBase);
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const rows = Object.values((runState as Record<string, unknown>).tasks as Record<string, unknown>) as Array<Record<string, unknown>>;
+  assert.equal(rows.length, 1);
+  assert.equal(fs.realpathSync(String(rows[0].cwd)), fs.realpathSync(repoRoot));
+
+  const worktreeList = runOrThrow('git', ['worktree', 'list', '--porcelain'], repoRoot).stdout;
+  const worktreeEntries = worktreeList
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '));
+  assert.equal(worktreeEntries.length, 1, worktreeList);
+});
+
 test('group(parallel=true) happy path succeeds with DONE results for all tasks', async (t) => {
   const repoRoot = mkRepo('agentflow-happy-parallel-');
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
@@ -854,6 +895,58 @@ fi
   assert.match(promptText, /not yet/);
 });
 
+test('worktrees=true evaluates loop deterministic gates against latest carried worktree ref', async (t) => {
+  const repoRoot = mkRepo('agentflow-loop-gate-worktree-root-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'loop_worktree_gate_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'loop gate uses latest worktree root',
+      repos: { main: '.' },
+      worktrees: true,
+      on_failure: 'stop',
+      options: {
+        run_root: 'tmp/test_loop_worktree_gate_runs',
+        cleanup_worktrees: true,
+      },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        {
+          type: 'loop',
+          id: 'worktree_gate_loop',
+          max_iterations: 3,
+          gate: {
+            type: 'deterministic',
+            command: '/bin/sh',
+            args: ['-c', 'if [ -f marker.txt ]; then echo \'{"passed":true,"score":1,"reasons":[]}\' ; else echo \'{"passed":false,"score":0,"reasons":["marker missing"]}\' ; fi'],
+          },
+          body: [
+            {
+              type: 'command',
+              id: 'write_marker',
+              command: '/bin/sh',
+              args: ['-c', 'echo marker > marker.txt'],
+            },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath]);
+  assert.equal(exitCode, 0);
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_loop_worktree_gate_runs');
+  const runDir = getSingleRunDir(runBase);
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const rows = Object.values((runState as Record<string, unknown>).tasks as Record<string, unknown>) as Array<Record<string, unknown>>;
+  assert.equal(rows.length, 1, 'loop body should execute once before post-body gate passes');
+  assert.equal(String(rows[0].status), 'DONE');
+});
+
 test('multi-repo plan with two repos targets different repos per task', async (t) => {
   const repoA = mkRepo('agentflow-multirepo-api-');
   const repoB = mkRepo('agentflow-multirepo-web-');
@@ -934,6 +1027,9 @@ test('multi-repo plan with two repos targets different repos per task', async (t
   const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
   const taskRows = Object.values(runState.tasks || {}) as Array<Record<string, unknown>>;
   assert.equal(taskRows.length, 2);
+  const aliasByTask = new Map(taskRows.map((row) => [String(row.taskId), String(row.repoAlias || '')]));
+  assert.equal(aliasByTask.get('api_task'), 'api');
+  assert.equal(aliasByTask.get('web_task'), 'web');
   for (const row of taskRows) {
     assert.ok(fs.existsSync(String(row.reportPath)), `missing report artifact: ${String(row.reportPath)}`);
     assert.ok(fs.existsSync(String(row.summaryPath)), `missing summary artifact: ${String(row.summaryPath)}`);

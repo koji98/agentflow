@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { DEFAULT_REPORT_FILENAME, DEFAULT_SUMMARY_FILENAME } from './constants.ts';
@@ -30,6 +31,21 @@ function isWithinDir(baseDir: string, targetPath: string): boolean {
   const absBase = path.resolve(baseDir);
   const absTarget = path.resolve(targetPath);
   return absTarget === absBase || absTarget.startsWith(absBase + path.sep);
+}
+
+function assertRuntimeDirectoryExists(absPath: string, contextLabel: string): void {
+  if (!fs.existsSync(absPath)) {
+    throw new Error(`${contextLabel} runtime cwd not found: ${absPath}`);
+  }
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(absPath);
+  } catch {
+    throw new Error(`${contextLabel} runtime cwd is not readable: ${absPath}`);
+  }
+  if (!stats.isDirectory()) {
+    throw new Error(`${contextLabel} runtime cwd must be a directory: ${absPath}`);
+  }
 }
 
 /**
@@ -176,6 +192,7 @@ export function buildLaunchFromTaskNode({
     taskIndex,
     taskKey: taskKey(groupIndex, `${task.taskId}#a${attempt}`),
     task,
+    repoAlias,
     provider,
     model: task.model || session.plan.model,
     reasoningEffort: session.plan.reasoningEffort,
@@ -262,6 +279,12 @@ export function buildLaunchFromCommandNode({
   if (!isWithinDir(workspaceRoot, workspaceCwdCandidate)) {
     throw new Error(`Command node ${node.id} resolved cwd outside workspace root: ${workspaceCwdCandidate}`);
   }
+  if (node.cwd && !session.dryRun) {
+    assertRuntimeDirectoryExists(
+      workspaceCwdCandidate,
+      `Command node ${node.id} at ${nodePath} (cwd=${node.cwd})`,
+    );
+  }
   const workspaceCwd = workspaceCwdCandidate;
 
   return {
@@ -269,6 +292,7 @@ export function buildLaunchFromCommandNode({
     taskIndex,
     taskKey: taskKey(groupIndex, `${node.id}#a${attempt}`),
     taskId: node.id,
+    repoAlias,
     command: node.command,
     args: node.args,
     timeoutSeconds: node.timeoutSec,

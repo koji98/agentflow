@@ -162,7 +162,7 @@ Options keys:
 - run_root (default "tmp/agentflow_runs"): output directory base
 - run_id (default null): override auto-generated run id
 - cleanup_worktrees (default false): remove worktrees/branches created during run
-- worktree_branch_template (default "agentflow/{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}"): template for generated worktree branch names; must include {group}
+- worktree_branch_template (default "agentflow/{run_id}-r{repo}-g{group}-{kind_short}{node}-a{attempt}"): template for generated worktree branch names; must include {group}; rendered segments are slug-sanitized
 
 Flow nodes:
 - task:

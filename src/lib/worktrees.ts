@@ -48,6 +48,32 @@ export function addWorktree(
   }
 }
 
+/**
+ * Creates a detached git worktree at a specific base ref.
+ * @param projectRoot Absolute path to the main repository.
+ * @param target Absolute path where the worktree will be created.
+ * @param baseRef Ref used as the detached checkout base.
+ * @param dryRun When true, prints the command without executing.
+ * @throws {Error} When the `git worktree add --detach` command fails.
+ */
+export function addDetachedWorktree(
+  projectRoot: string,
+  target: string,
+  baseRef: string,
+  dryRun: boolean,
+): void {
+  const cmd = ['git', 'worktree', 'add', '--detach', target, baseRef];
+  if (dryRun) {
+    log(`$ ${cmd.map((c) => JSON.stringify(c)).join(' ')}`);
+    return;
+  }
+
+  const result = spawnSync(cmd[0], cmd.slice(1), { cwd: projectRoot, stdio: 'inherit' });
+  if (result.status !== 0) {
+    throw new Error(`git worktree add --detach failed (exit=${result.status}).`);
+  }
+}
+
 function prepareWorktreeLaunch(session: Session, launch: WorktreeScopedLaunch): void {
   if (!launch.useWorktree || !launch.branch) return;
   if (fs.existsSync(launch.workspaceRoot)) return;

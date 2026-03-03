@@ -160,6 +160,7 @@ export interface TaskLaunch {
   taskIndex: number;
   taskKey: string;
   task: PlanTask;
+  repoAlias: string;
   provider: Provider;
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
@@ -190,6 +191,7 @@ export interface CommandLaunch {
   taskIndex: number;
   taskKey: string;
   taskId: string;
+  repoAlias: string;
   command: string;
   args: string[];
   timeoutSeconds: number | null;
@@ -236,6 +238,7 @@ export interface GroupStateRow {
 export interface TaskStateRow {
   taskKey: string;
   taskId: string;
+  repoAlias?: string | null;
   groupIndex: number;
   taskIndex: number;
   nodePath: string;
@@ -272,6 +275,9 @@ export interface RunState {
   workflowLength: number;
   totalTaskCount: number;
   totalFailureCount: number;
+  totalTaskFailureCount?: number;
+  totalRunFailureCount?: number;
+  runFailureReasons?: string[];
   totalLoopIterations: number;
   groups: Record<string, GroupStateRow>;
   tasks: Record<string, TaskStateRow>;
@@ -309,6 +315,7 @@ export interface RunCounters {
   totalTaskCount: number;
   executedTaskCount: number;
   failureTaskCount: number;
+  runFailureCount: number;
   loopIterationCount: number;
 }
 

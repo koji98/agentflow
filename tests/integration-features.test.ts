@@ -68,7 +68,7 @@ test('--validate fails when task context_files include missing paths', async (t)
   assert.ok(!fs.existsSync(runBase), 'validate should not create any run directories');
 });
 
-test('--validate fails when command and deterministic gate cwd are unreachable', async (t) => {
+test('--validate allows command and deterministic gate cwd to be checked at runtime', async (t) => {
   const repoRoot = mkRepo('agentflow-validate-missing-cwd-');
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
 
@@ -104,7 +104,7 @@ test('--validate fails when command and deterministic gate cwd are unreachable',
   );
 
   const exitCode = await main(['--plan', planPath, '--validate']);
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode, 0);
 
   const runBase = path.resolve(repoRoot, 'tmp/agentflow_runs');
   assert.ok(!fs.existsSync(runBase), 'validate should not create any run directories');
@@ -165,7 +165,7 @@ test('--validate fails when context_from references self or a later task', async
   assert.equal(exitCode, 1);
 });
 
-test('--validate fails when worktree_branch_template renders invalid branch names', async (t) => {
+test('--validate accepts worktree_branch_template and relies on branch sanitization', async (t) => {
   const repoRoot = mkRepo('agentflow-validate-branch-template-');
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
 
@@ -186,7 +186,152 @@ test('--validate fails when worktree_branch_template renders invalid branch name
   );
 
   const exitCode = await main(['--plan', planPath, '--validate']);
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode, 0);
+});
+
+test('runtime allows command cwd created by earlier steps', async (t) => {
+  const repoRoot = mkRepo('agentflow-runtime-dynamic-cwd-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'dynamic_cwd_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'dynamic cwd runtime test',
+      repos: { main: '.' },
+      worktrees: false,
+      options: { run_root: 'tmp/test_dynamic_cwd_runs' },
+      flow: [
+        {
+          type: 'command',
+          id: 'make_dir',
+          command: '/bin/sh',
+          args: ['-c', 'mkdir -p generated/subdir'],
+        },
+        {
+          type: 'command',
+          id: 'use_new_dir',
+          command: '/bin/sh',
+          args: ['-c', 'echo ok > wrote_from_runtime_cwd.txt'],
+          cwd: 'generated/subdir',
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const exitCode = await main(['--plan', planPath]);
+  assert.equal(exitCode, 0);
+  assert.ok(fs.existsSync(path.resolve(repoRoot, 'generated/subdir/wrote_from_runtime_cwd.txt')));
+});
+
+test('runtime missing command cwd surfaces nodePath and resolved absolute path', async (t) => {
+  const repoRoot = mkRepo('agentflow-runtime-missing-cwd-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'runtime_missing_cwd_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'runtime missing cwd test',
+      repos: { main: '.' },
+      worktrees: false,
+      options: { run_root: 'tmp/test_runtime_missing_cwd_runs' },
+      flow: [
+        {
+          type: 'command',
+          id: 'missing_cwd_command',
+          command: '/bin/sh',
+          args: ['-c', 'echo should_not_run'],
+          cwd: 'generated/not-created-yet',
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const logs: string[] = [];
+  const origLog = console.log;
+  console.log = (...args: unknown[]): void => {
+    logs.push(args.map(String).join(' '));
+  };
+  try {
+    const exitCode = await main(['--plan', planPath]);
+    assert.equal(exitCode, 1);
+  } finally {
+    console.log = origLog;
+  }
+
+  const combined = logs.join('\n');
+  assert.match(combined, /workflow\[0\]\/command:missing_cwd_command/);
+  assert.match(combined, new RegExp(path.resolve(repoRoot, 'generated/not-created-yet').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_runtime_missing_cwd_runs');
+  const runDir = getSingleRunDir(runBase);
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8')) as Record<string, unknown>;
+  assert.equal(Number(runState.totalTaskFailureCount || 0), 0);
+  assert.equal(Number(runState.totalRunFailureCount || 0), 1);
+  assert.equal(Number(runState.totalFailureCount || 0), 1);
+});
+
+test('control-flow failures are counted even when task rows are all DONE', async (t) => {
+  const repoRoot = mkRepo('agentflow-run-failure-count-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const planPath = path.resolve(repoRoot, 'run_failure_count_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'run-level failure counting test',
+      repos: { main: '.' },
+      worktrees: false,
+      options: { run_root: 'tmp/test_run_failure_count_runs' },
+      flow: [
+        {
+          type: 'loop',
+          id: 'never_passes',
+          max_iterations: 1,
+          gate: {
+            type: 'deterministic',
+            command: '/bin/sh',
+            args: ['-c', 'echo \'{"passed":false,"score":0,"reasons":["still failing"]}\''],
+          },
+          body: [
+            {
+              type: 'command',
+              id: 'body_ok',
+              command: '/bin/sh',
+              args: ['-c', 'echo body'],
+            },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  const logs: string[] = [];
+  const origLog = console.log;
+  console.log = (...args: unknown[]): void => {
+    logs.push(args.map(String).join(' '));
+  };
+  try {
+    const exitCode = await main(['--plan', planPath]);
+    assert.equal(exitCode, 1);
+  } finally {
+    console.log = origLog;
+  }
+  assert.match(logs.join('\n'), /completed with failures: 1/);
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_run_failure_count_runs');
+  const runDir = getSingleRunDir(runBase);
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const rows = Object.values((runState as Record<string, unknown>).tasks as Record<string, unknown>) as Array<Record<string, unknown>>;
+  assert.ok(rows.length > 0);
+  assert.ok(rows.every((row) => row.status === 'DONE'));
+  assert.equal(Number((runState as Record<string, unknown>).totalTaskFailureCount || 0), 0);
+  assert.equal(Number((runState as Record<string, unknown>).totalRunFailureCount || 0), 1);
+  assert.equal(Number((runState as Record<string, unknown>).totalFailureCount || 0), 1);
 });
 
 test('workflow mixing task + command + loop validates and executes', async (t) => {
@@ -450,6 +595,97 @@ test('--resume with worktrees carries prior successful branch state forward', as
   const resumeCalls = parseJsonLines(mockLog);
   assert.equal(resumeCalls.length, 1, 'resume should execute only task_b');
   assert.equal(String(resumeCalls[0].taskId || ''), 'task_b');
+});
+
+test('--resume with nested group paths preserves repo mapping via persisted repoAlias', async (t) => {
+  const repoApi = mkRepo('agentflow-resume-nested-api-');
+  const repoWeb = mkRepo('agentflow-resume-nested-web-');
+  t.after(() => {
+    fs.rmSync(repoApi, { recursive: true, force: true });
+    fs.rmSync(repoWeb, { recursive: true, force: true });
+  });
+
+  const planPath = path.resolve(repoApi, 'resume_nested_repo_alias_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'resume nested repoAlias mapping test',
+      repos: { api: '.', web: repoWeb },
+      worktrees: true,
+      on_failure: 'stop',
+      options: {
+        run_root: 'tmp/test_resume_nested_repo_alias_runs',
+      },
+      limits: {
+        worker_timeout_sec: 30,
+        timeout_grace_sec: 1,
+      },
+      flow: [
+        {
+          type: 'group',
+          id: 'outer',
+          parallel: false,
+          steps: [
+            {
+              type: 'group',
+              id: 'inner',
+              parallel: false,
+              steps: [
+                {
+                  type: 'command',
+                  id: 'web_seed',
+                  repo: 'web',
+                  command: '/bin/sh',
+                  args: ['-c', 'echo seeded > nested_resume_marker.txt'],
+                },
+                {
+                  type: 'command',
+                  id: 'api_gate',
+                  repo: 'api',
+                  command: '/bin/sh',
+                  args: ['-c', 'if [ "${FAIL_API_STEP:-0}" = "1" ]; then exit 7; fi; exit 0'],
+                },
+                {
+                  type: 'command',
+                  id: 'web_verify',
+                  repo: 'web',
+                  command: '/bin/sh',
+                  args: ['-c', 'test -f nested_resume_marker.txt'],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    { FAIL_API_STEP: '1' },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 1, 'first run should fail on api_gate');
+    },
+  );
+
+  const runBase = path.resolve(repoApi, 'tmp/test_resume_nested_repo_alias_runs');
+  const runDir = getSingleRunDir(runBase);
+
+  await withPatchedEnv(
+    { FAIL_API_STEP: '0' },
+    async () => {
+      const exitCode = await main(['--plan', planPath, '--resume', runDir]);
+      assert.equal(exitCode, 0, 'resume should reuse web branch lineage and pass web_verify');
+    },
+  );
+
+  const runState = JSON.parse(fs.readFileSync(path.resolve(runDir, 'run_state.json'), 'utf8'));
+  const rows = Object.values((runState as Record<string, unknown>).tasks as Record<string, unknown>) as Array<Record<string, unknown>>;
+  const byTask = new Map(rows.map((row) => [String(row.taskId), row]));
+  assert.equal(String(byTask.get('web_seed')?.status || ''), 'DONE');
+  assert.equal(String(byTask.get('api_gate')?.status || ''), 'DONE');
+  assert.equal(String(byTask.get('web_verify')?.status || ''), 'DONE');
 });
 
 test('progress tag appears in task execution log', async (t) => {

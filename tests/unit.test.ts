@@ -151,6 +151,21 @@ test('renderWorktreeBranchName interpolates known placeholders', () => {
   assert.equal(branch, 'agentflow-run-20260303t123000z-rmain-g4-tbuild-api-a2');
 });
 
+test('renderWorktreeBranchName sanitizes static template text predictably', () => {
+  const branch = renderWorktreeBranchName(
+    'Feature Branch/{run_id}/Repo {repo}/g{group}/{kind_short}{node}',
+    {
+      runId: 'RUN 123',
+      repoAlias: 'Main',
+      groupIndex: 7,
+      nodeId: 'Build API!',
+      attempt: 1,
+      kind: 'task',
+    },
+  );
+  assert.equal(branch, 'feature-branch/run-123/repo-main/g7/tbuild-api');
+});
+
 test('validateWorktreeBranchTemplate rejects unmatched braces', () => {
   assert.throws(
     () => validateWorktreeBranchTemplate('agentflow-{run_id-{group}', 'options.worktree_branch_template'),
