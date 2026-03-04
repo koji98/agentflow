@@ -172,7 +172,7 @@ Use `type: "command"` for deterministic steps that should run exactly as written
 }
 ```
 
-`command` nodes write `command_exec.log`, `command_result.json`, `summary.md`, and `report.md`, and their summaries can be referenced by downstream tasks via `context_from`.
+`command` nodes stream stdout/stderr live in the parent CLI and also write `command_exec.log`, `command_result.json`, `summary.md`, and `report.md`. Their summaries can be referenced by downstream tasks via `context_from`.
 
 ## Context File Strategy
 

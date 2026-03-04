@@ -364,6 +364,8 @@ export interface RunCommandParams {
   useStdin: boolean;
   /** When set, write stdout-only content to this path on process close. */
   stdoutCapturePath: string | null;
+  /** When true, mirror child stdout/stderr to this process stdout/stderr in real time. */
+  teeOutput?: boolean;
 }
 
 /** Parsed/evaluated completion contract from worker output. */

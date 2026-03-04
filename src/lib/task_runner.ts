@@ -384,6 +384,7 @@ async function executeCommandLaunch(
     timeoutGraceSeconds: Math.max(1, session.plan.limits.timeoutGraceSec),
     useStdin: false,
     stdoutCapturePath: launch.lastMessagePath,
+    teeOutput: true,
   });
   const failureReason = commandFailureReason(
     runResult.exitCode,

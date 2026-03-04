@@ -9,6 +9,7 @@ import { parseArgs } from '../src/lib/args.ts';
 import { evaluateContract } from '../src/lib/contracts.ts';
 import { buildAiGatePrompt, evaluateGateOutcome, parseGateJsonOutput } from '../src/lib/gates.ts';
 import { normalizePlan, resolveConfigPaths } from '../src/lib/plan.ts';
+import { runCommand } from '../src/lib/process_runner.ts';
 import { buildPrompt } from '../src/lib/prompt.ts';
 import { buildProviderCommand } from '../src/lib/providers.ts';
 import {
@@ -367,6 +368,57 @@ test('mapSandboxForCursor maps 3-tier modes correctly', () => {
   assert.equal(mapSandboxForCursor('read-only'), null);
   assert.equal(mapSandboxForCursor('workspace-write'), null);
   assert.equal(mapSandboxForCursor('danger-full-access'), 'disabled');
+});
+
+test('runCommand can tee subprocess stdout/stderr to parent streams', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentflow-tee-output-'));
+  const logPath = path.resolve(tmpDir, 'command.log');
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  const chunkToString = (chunk: unknown): string => {
+    if (typeof chunk === 'string') return chunk;
+    return Buffer.from(chunk as Uint8Array).toString();
+  };
+  let capturedStdout = '';
+  let capturedStderr = '';
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  const stdoutSink = ((chunk: unknown): boolean => {
+    capturedStdout += chunkToString(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  const stderrSink = ((chunk: unknown): boolean => {
+    capturedStderr += chunkToString(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+
+  process.stdout.write = stdoutSink;
+  process.stderr.write = stderrSink;
+  try {
+    const result = await runCommand({
+      cmd: ['/bin/sh', '-c', 'echo child_stdout && echo child_stderr 1>&2'],
+      cwd: tmpDir,
+      stdinText: '',
+      logPath,
+      dryRun: false,
+      timeoutSeconds: null,
+      timeoutGraceSeconds: 1,
+      useStdin: false,
+      stdoutCapturePath: null,
+      teeOutput: true,
+    });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.timedOut, false);
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+  }
+
+  assert.match(capturedStdout, /child_stdout/);
+  assert.match(capturedStderr, /child_stderr/);
+  const logText = fs.readFileSync(logPath, 'utf8');
+  assert.match(logText, /child_stdout/);
+  assert.match(logText, /child_stderr/);
 });
 
 test('buildProviderCommand builds correct cursor argv', () => {

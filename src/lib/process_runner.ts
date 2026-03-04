@@ -34,6 +34,7 @@ export function runCommand({
   timeoutGraceSeconds,
   useStdin,
   stdoutCapturePath,
+  teeOutput = false,
 }: RunCommandParams): Promise<RunCommandResult> {
   const banner = `$ (cd ${JSON.stringify(cwd)} && ${cmd.map((c) => JSON.stringify(c)).join(' ')})`;
 
@@ -85,10 +86,12 @@ export function runCommand({
       const text = chunk.toString();
       logStream.write(text);
       if (stdoutCapturePath) stdoutChunks.push(text);
+      if (teeOutput) process.stdout.write(text);
     };
     const onStderr = (chunk: Buffer | string) => {
       const text = chunk.toString();
       logStream.write(text);
+      if (teeOutput) process.stderr.write(text);
     };
 
     child.stdout.on('data', onStdout);
