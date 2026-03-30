@@ -20,6 +20,10 @@ export function parseArgs(argv: string[]): CliArgs {
     sandboxMode: null,
     validate: false,
     resumeDir: null,
+    supervisor: false,
+    supervisorConfigFile: null,
+    missionStateFile: null,
+    supervisorProfile: null,
     planHelp: false,
     help: false,
   };
@@ -33,10 +37,21 @@ export function parseArgs(argv: string[]): CliArgs {
       out.help = true;
       continue;
     }
+    if (token === 'supervise') {
+      throw new Error('`supervise` command was removed. Use --supervise <mission_state_file>.');
+    }
     if (token === '--plan') {
       const value = argv[i + 1];
       if (!value) throw new Error('--plan requires a value.');
       out.planFile = value;
+      i += 1;
+      continue;
+    }
+    if (token === '--supervise') {
+      const value = argv[i + 1];
+      if (!value) throw new Error('--supervise requires a value.');
+      out.supervisor = true;
+      out.missionStateFile = value;
       i += 1;
       continue;
     }
@@ -48,6 +63,20 @@ export function parseArgs(argv: string[]): CliArgs {
       const value = argv[i + 1];
       if (!value) throw new Error('--resume requires a value.');
       out.resumeDir = value;
+      i += 1;
+      continue;
+    }
+    if (token === '--supervisor-config') {
+      const value = argv[i + 1];
+      if (!value) throw new Error('--supervisor-config requires a value.');
+      out.supervisorConfigFile = value;
+      i += 1;
+      continue;
+    }
+    if (token === '--supervisor-profile') {
+      const value = argv[i + 1];
+      if (!value) throw new Error('--supervisor-profile requires a value.');
+      out.supervisorProfile = value;
       i += 1;
       continue;
     }

@@ -7,6 +7,7 @@ import { buildPrompt } from './prompt.ts';
 import type {
   CommandLaunch,
   CommandNode,
+  ContextArtifact,
   PriorTaskSummary,
   Session,
   TaskLaunch,
@@ -49,15 +50,17 @@ function assertRuntimeDirectoryExists(absPath: string, contextLabel: string): vo
 }
 
 /**
- * Gathers summaries of completed prior tasks for prompt injection.
- * Reads exclusively from each task's `summary.md`. Tasks without a summary are skipped.
+ * Gathers completed prior-task context for prompt injection.
+ * Reads either each task's summary or report artifact depending on the requested mode.
  * @param session Current run session.
  * @param contextFrom When non-empty, only include summaries from these task IDs.
+ * @param artifact Which prior-task artifact to load for prompt injection.
  * @returns Array of prior task summaries sorted by completion time.
  */
 export function gatherPriorTaskSummaries(
   session: Session,
   contextFrom: string[] = [],
+  artifact: ContextArtifact = 'summary',
 ): PriorTaskSummary[] {
   const filterSet = contextFrom.length > 0 ? new Set(contextFrom) : null;
   return Object.values(session.state.tasks)
@@ -65,15 +68,17 @@ export function gatherPriorTaskSummaries(
     .filter((row) => !filterSet || filterSet.has(row.taskId))
     .sort((a, b) => (a.endedAtUtc || '').localeCompare(b.endedAtUtc || ''))
     .map((row) => {
-      const summaryContent = readText(row.summaryPath);
-      if (!summaryContent) {
-        log(`[context_from] no summary.md found for task "${row.taskId}", skipping`);
+      const sourcePath = artifact === 'report' ? row.reportPath : row.summaryPath;
+      const sourceContent = readText(sourcePath);
+      if (!sourceContent) {
+        log(`[context_from] no ${artifact} artifact found for task "${row.taskId}", skipping`);
         return null;
       }
       return {
         taskId: row.taskId,
         status: row.status,
-        summary: summaryContent.trim(),
+        artifact,
+        content: sourceContent.trim(),
       };
     })
     .filter((s): s is PriorTaskSummary => s !== null);
@@ -121,6 +126,7 @@ export function buildLaunchFromTaskNode({
     persona: node.persona,
     contextFiles: node.contextFiles,
     contextFrom: node.contextFrom,
+    contextFromArtifact: node.contextFromArtifact,
   };
   const taskSlug = safeSlug(`${node.taskId}-a${attempt}`);
   const taskDir = path.resolve(
@@ -183,7 +189,7 @@ export function buildLaunchFromTaskNode({
     contextFiles: workerContextFiles,
     reportPath: workerReportPath,
     summaryPath: workerSummaryPath,
-    priorTaskSummaries: gatherPriorTaskSummaries(session, node.contextFrom),
+    priorTaskSummaries: gatherPriorTaskSummaries(session, node.contextFrom, node.contextFromArtifact),
     gateFeedbackToAddress,
   });
 

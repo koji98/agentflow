@@ -9,6 +9,7 @@ import { parseArgs } from '../src/lib/args.ts';
 import { evaluateContract } from '../src/lib/contracts.ts';
 import { buildAiGatePrompt, evaluateGateOutcome, parseGateJsonOutput } from '../src/lib/gates.ts';
 import { normalizePlan, resolveConfigPaths } from '../src/lib/plan.ts';
+import { runCommand } from '../src/lib/process_runner.ts';
 import { buildPrompt } from '../src/lib/prompt.ts';
 import { buildProviderCommand } from '../src/lib/providers.ts';
 import {
@@ -369,6 +370,57 @@ test('mapSandboxForCursor maps 3-tier modes correctly', () => {
   assert.equal(mapSandboxForCursor('danger-full-access'), 'disabled');
 });
 
+test('runCommand can tee subprocess stdout/stderr to parent streams', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentflow-tee-output-'));
+  const logPath = path.resolve(tmpDir, 'command.log');
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  const chunkToString = (chunk: unknown): string => {
+    if (typeof chunk === 'string') return chunk;
+    return Buffer.from(chunk as Uint8Array).toString();
+  };
+  let capturedStdout = '';
+  let capturedStderr = '';
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  const stdoutSink = ((chunk: unknown): boolean => {
+    capturedStdout += chunkToString(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  const stderrSink = ((chunk: unknown): boolean => {
+    capturedStderr += chunkToString(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+
+  process.stdout.write = stdoutSink;
+  process.stderr.write = stderrSink;
+  try {
+    const result = await runCommand({
+      cmd: ['/bin/sh', '-c', 'echo child_stdout && echo child_stderr 1>&2'],
+      cwd: tmpDir,
+      stdinText: '',
+      logPath,
+      dryRun: false,
+      timeoutSeconds: null,
+      timeoutGraceSeconds: 1,
+      useStdin: false,
+      stdoutCapturePath: null,
+      teeOutput: true,
+    });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.timedOut, false);
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+  }
+
+  assert.match(capturedStdout, /child_stdout/);
+  assert.match(capturedStderr, /child_stderr/);
+  const logText = fs.readFileSync(logPath, 'utf8');
+  assert.match(logText, /child_stdout/);
+  assert.match(logText, /child_stderr/);
+});
+
 test('buildProviderCommand builds correct cursor argv', () => {
   const cmd = buildProviderCommand({
     provider: 'cursor',
@@ -523,6 +575,29 @@ test('per-task persona overrides plan-level persona in prompt', () => {
   assert.ok(!prompt.includes('senior software engineer'));
 });
 
+test('prompt renders prior task report context with artifact label', () => {
+  const prompt = buildPrompt({
+    persona: null,
+    objective: null,
+    setup: '',
+    task: { taskId: 'b', task: 'do b' },
+    contextFiles: [],
+    reportPath: '/tmp/report.md',
+    summaryPath: '/tmp/summary.md',
+    priorTaskSummaries: [
+      {
+        taskId: 'a',
+        status: 'DONE',
+        artifact: 'report',
+        content: '# report\nDetailed context here.',
+      },
+    ],
+  });
+  assert.match(prompt, /## What's Been Done So Far/);
+  assert.match(prompt, /### a \(DONE, report\)/);
+  assert.match(prompt, /Detailed context here/);
+});
+
 test('plan normalization accepts context_from on task nodes', () => {
   const plan = normalizePlan({
     setup: 'test',
@@ -536,6 +611,24 @@ test('plan normalization accepts context_from on task nodes', () => {
   assert.equal(taskB.type, 'task');
   if (taskB.type === 'task') {
     assert.deepEqual(taskB.contextFrom, ['a']);
+    assert.equal(taskB.contextFromArtifact, 'summary');
+  }
+});
+
+test('plan normalization accepts context_from_artifact on task nodes', () => {
+  const plan = normalizePlan({
+    setup: 'test',
+    repos: { main: '.' },
+    flow: [
+      { type: 'task', id: 'a', prompt: 'do a' },
+      { type: 'task', id: 'b', prompt: 'do b', context_from: ['a'], context_from_artifact: 'report' },
+    ],
+  });
+  const taskB = plan.workflow[1];
+  assert.equal(taskB.type, 'task');
+  if (taskB.type === 'task') {
+    assert.deepEqual(taskB.contextFrom, ['a']);
+    assert.equal(taskB.contextFromArtifact, 'report');
   }
 });
 
@@ -679,6 +772,51 @@ test('parseArgs parses --resume flag with value', () => {
 
 test('parseArgs throws when --resume has no value', () => {
   assert.throws(() => parseArgs(['--plan', 'my_plan.json', '--resume']), /--resume requires a value/);
+});
+
+test('parseArgs parses supervisor mode flags', () => {
+  const args = parseArgs([
+    '--supervise',
+    'state/mission_state.json',
+    '--supervisor-config',
+    'agentflow.supervisor.json',
+    '--supervisor-profile',
+    'default',
+  ]);
+  assert.equal(args.supervisor, true);
+  assert.equal(args.missionStateFile, 'state/mission_state.json');
+  assert.equal(args.supervisorConfigFile, 'agentflow.supervisor.json');
+  assert.equal(args.supervisorProfile, 'default');
+});
+
+test('parseArgs requires a mission-state value for --supervise', () => {
+  assert.throws(() => parseArgs(['--supervise']), /--supervise requires a value/);
+});
+
+test('parseArgs rejects removed supervise subcommand syntax', () => {
+  assert.throws(
+    () => parseArgs(['supervise', 'state/mission_state.json']),
+    /supervise` command was removed/,
+  );
+});
+
+test('parseArgs rejects removed supervisor override flags', () => {
+  assert.throws(
+    () => parseArgs(['--supervise', 'state/mission_state.json', '--planner-prompt', 'planner.md']),
+    /Unsupported option: --planner-prompt/,
+  );
+  assert.throws(
+    () => parseArgs(['--supervise', 'state/mission_state.json', '--plan-qa-threshold', '0.9']),
+    /Unsupported option: --plan-qa-threshold/,
+  );
+  assert.throws(
+    () => parseArgs(['--supervise', 'state/mission_state.json', '--no-execute-approved-plan']),
+    /Unsupported option: --no-execute-approved-plan/,
+  );
+});
+
+test('parseArgs rejects removed --supervisor alias', () => {
+  assert.throws(() => parseArgs(['--supervisor']), /Unsupported option: --supervisor/);
 });
 
 // --- evaluateContract ---

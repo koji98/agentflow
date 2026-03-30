@@ -4,6 +4,7 @@ export type Provider = 'codex' | 'cursor';
 export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type RetryOn = 'FAILED' | 'TIMEOUT';
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+export type ContextArtifact = 'summary' | 'report';
 
 /** Parsed CLI arguments for one invocation. */
 export interface CliArgs {
@@ -13,6 +14,10 @@ export interface CliArgs {
   sandboxMode: SandboxMode | null;
   validate: boolean;
   resumeDir: string | null;
+  supervisor: boolean;
+  supervisorConfigFile: string | null;
+  missionStateFile: string | null;
+  supervisorProfile: string | null;
   planHelp: boolean;
   help: boolean;
 }
@@ -27,6 +32,7 @@ export interface PlanTask {
   persona: string | null;
   contextFiles: string[];
   contextFrom: string[];
+  contextFromArtifact: ContextArtifact;
 }
 
 /** One task node in workflow tree. */
@@ -151,7 +157,8 @@ export interface WorkerPlan {
 export interface PriorTaskSummary {
   taskId: string;
   status: string;
-  summary: string;
+  artifact: ContextArtifact;
+  content: string;
 }
 
 /** One concrete launch unit, materialized from a task with runtime paths. */
@@ -364,6 +371,8 @@ export interface RunCommandParams {
   useStdin: boolean;
   /** When set, write stdout-only content to this path on process close. */
   stdoutCapturePath: string | null;
+  /** When true, mirror child stdout/stderr to this process stdout/stderr in real time. */
+  teeOutput?: boolean;
 }
 
 /** Parsed/evaluated completion contract from worker output. */

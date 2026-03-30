@@ -51,7 +51,7 @@ When creating or editing agentflow plan JSON files, follow these rules strictly.
 
 ### Node types
 
-1. **`task`** — Single agent invocation. Fields: `type`, `id`, `prompt`, `repo` (required when multiple repos), `provider`, `model`, `persona`, `context_files`, `context_from`.
+1. **`task`** — Single agent invocation. Fields: `type`, `id`, `prompt`, `repo` (required when multiple repos), `provider`, `model`, `persona`, `context_files`, `context_from`, `context_from_artifact`.
 2. **`group`** — Container. Fields: `type`, `id`, `parallel` (boolean, required), `steps` (non-empty array).
 3. **`loop`** — Repeating container. Fields: `type`, `id`, `max_iterations`, `gate` (object), `body` (non-empty array).
 

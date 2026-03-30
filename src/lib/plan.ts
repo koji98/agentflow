@@ -83,6 +83,15 @@ function parseScoreThreshold(value: unknown, fieldName: string): number | null {
   return n;
 }
 
+function normalizeContextArtifact(value: unknown, fieldName: string): 'summary' | 'report' {
+  if (value === undefined || value === null || value === '') return 'summary';
+  const artifact = requiredString(value, fieldName).toLowerCase();
+  if (artifact !== 'summary' && artifact !== 'report') {
+    throw new Error(`${fieldName} must be one of: summary, report.`);
+  }
+  return artifact;
+}
+
 /**
  * Creates a scoped field accessor for a payload after validating that it
  * contains no keys outside `allowed`. Each accessor method builds the
@@ -229,7 +238,7 @@ function normalizeTaskNode(
   repoAliases: string[],
 ): TaskNode {
   const f = fields(payload, fieldName, [
-    'type', 'id', 'prompt', 'repo', 'provider', 'model', 'context_files', 'context_from', 'persona',
+    'type', 'id', 'prompt', 'repo', 'provider', 'model', 'context_files', 'context_from', 'context_from_artifact', 'persona',
   ]);
   const taskId = f.strReq('id');
   if (seenTaskIds.has(taskId)) {
@@ -254,6 +263,7 @@ function normalizeTaskNode(
     model: f.str('model'),
     contextFiles: f.strArr('context_files'),
     contextFrom: f.strArr('context_from'),
+    contextFromArtifact: normalizeContextArtifact(f.raw('context_from_artifact'), `${fieldName}.context_from_artifact`),
     persona: f.str('persona'),
   };
 }

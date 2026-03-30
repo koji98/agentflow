@@ -44,7 +44,7 @@ Every modification batch should end with a verification step — either within t
 
 ### 4. Chain Context, Don't Repeat It
 
-Use `context_from` to pass learnings between tasks. A review task's findings flow into the next batch via its summary, so the agent learns from prior runs without re-reading the full context.
+Use `context_from` to pass learnings between tasks. A review task's findings normally flow into the next batch via its summary, but tasks can opt into full reports with `context_from_artifact: "report"` when a short summary is not enough.
 
 ### 5. Fail Forward
 
@@ -172,7 +172,7 @@ Use `type: "command"` for deterministic steps that should run exactly as written
 }
 ```
 
-`command` nodes write `command_exec.log`, `command_result.json`, `summary.md`, and `report.md`, and their summaries can be referenced by downstream tasks via `context_from`.
+`command` nodes stream stdout/stderr live in the parent CLI and also write `command_exec.log`, `command_result.json`, `summary.md`, and `report.md`. Their summaries can be referenced by downstream tasks via `context_from`.
 
 ## Context File Strategy
 
@@ -202,7 +202,7 @@ Give each task only the files it needs. An extraction task needs the source file
 }
 ```
 
-### context_from (prior task summaries)
+### context_from (prior task context)
 
 By default, all prior task summaries are injected. Use explicit `context_from` to limit noise:
 
@@ -210,6 +210,15 @@ By default, all prior task summaries are injected. Use explicit `context_from` t
 {
   "context_from": ["extract_schema", "write_validator"]
 }
+
+Use `context_from_artifact: "report"` when a downstream task needs the full worker report instead of the brief summary:
+
+```json
+{
+  "context_from": ["extract_schema"],
+  "context_from_artifact": "report"
+}
+```
 ```
 
 This is critical for long plans — task 20 doesn't need the summary from task 3 if they're unrelated.
