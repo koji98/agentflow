@@ -575,6 +575,29 @@ test('per-task persona overrides plan-level persona in prompt', () => {
   assert.ok(!prompt.includes('senior software engineer'));
 });
 
+test('prompt renders prior task report context with artifact label', () => {
+  const prompt = buildPrompt({
+    persona: null,
+    objective: null,
+    setup: '',
+    task: { taskId: 'b', task: 'do b' },
+    contextFiles: [],
+    reportPath: '/tmp/report.md',
+    summaryPath: '/tmp/summary.md',
+    priorTaskSummaries: [
+      {
+        taskId: 'a',
+        status: 'DONE',
+        artifact: 'report',
+        content: '# report\nDetailed context here.',
+      },
+    ],
+  });
+  assert.match(prompt, /## What's Been Done So Far/);
+  assert.match(prompt, /### a \(DONE, report\)/);
+  assert.match(prompt, /Detailed context here/);
+});
+
 test('plan normalization accepts context_from on task nodes', () => {
   const plan = normalizePlan({
     setup: 'test',
@@ -588,6 +611,24 @@ test('plan normalization accepts context_from on task nodes', () => {
   assert.equal(taskB.type, 'task');
   if (taskB.type === 'task') {
     assert.deepEqual(taskB.contextFrom, ['a']);
+    assert.equal(taskB.contextFromArtifact, 'summary');
+  }
+});
+
+test('plan normalization accepts context_from_artifact on task nodes', () => {
+  const plan = normalizePlan({
+    setup: 'test',
+    repos: { main: '.' },
+    flow: [
+      { type: 'task', id: 'a', prompt: 'do a' },
+      { type: 'task', id: 'b', prompt: 'do b', context_from: ['a'], context_from_artifact: 'report' },
+    ],
+  });
+  const taskB = plan.workflow[1];
+  assert.equal(taskB.type, 'task');
+  if (taskB.type === 'task') {
+    assert.deepEqual(taskB.contextFrom, ['a']);
+    assert.equal(taskB.contextFromArtifact, 'report');
   }
 });
 
@@ -731,6 +772,51 @@ test('parseArgs parses --resume flag with value', () => {
 
 test('parseArgs throws when --resume has no value', () => {
   assert.throws(() => parseArgs(['--plan', 'my_plan.json', '--resume']), /--resume requires a value/);
+});
+
+test('parseArgs parses supervisor mode flags', () => {
+  const args = parseArgs([
+    '--supervise',
+    'state/mission_state.json',
+    '--supervisor-config',
+    'agentflow.supervisor.json',
+    '--supervisor-profile',
+    'default',
+  ]);
+  assert.equal(args.supervisor, true);
+  assert.equal(args.missionStateFile, 'state/mission_state.json');
+  assert.equal(args.supervisorConfigFile, 'agentflow.supervisor.json');
+  assert.equal(args.supervisorProfile, 'default');
+});
+
+test('parseArgs requires a mission-state value for --supervise', () => {
+  assert.throws(() => parseArgs(['--supervise']), /--supervise requires a value/);
+});
+
+test('parseArgs rejects removed supervise subcommand syntax', () => {
+  assert.throws(
+    () => parseArgs(['supervise', 'state/mission_state.json']),
+    /supervise` command was removed/,
+  );
+});
+
+test('parseArgs rejects removed supervisor override flags', () => {
+  assert.throws(
+    () => parseArgs(['--supervise', 'state/mission_state.json', '--planner-prompt', 'planner.md']),
+    /Unsupported option: --planner-prompt/,
+  );
+  assert.throws(
+    () => parseArgs(['--supervise', 'state/mission_state.json', '--plan-qa-threshold', '0.9']),
+    /Unsupported option: --plan-qa-threshold/,
+  );
+  assert.throws(
+    () => parseArgs(['--supervise', 'state/mission_state.json', '--no-execute-approved-plan']),
+    /Unsupported option: --no-execute-approved-plan/,
+  );
+});
+
+test('parseArgs rejects removed --supervisor alias', () => {
+  assert.throws(() => parseArgs(['--supervisor']), /Unsupported option: --supervisor/);
 });
 
 // --- evaluateContract ---

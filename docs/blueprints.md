@@ -83,6 +83,7 @@ Unknown keys are rejected at every level.
 | `persona` | string | No | plan-level |
 | `context_files` | string[] | No | `[]` |
 | `context_from` | string[] | No | all prior tasks |
+| `context_from_artifact` | `"summary"` \| `"report"` | No | `"summary"` |
 
 #### `command` — single deterministic shell command
 
@@ -171,7 +172,7 @@ Gate feedback (pass/fail, score, reasons) is automatically injected into the nex
 - **DONE**: exit code 0 + report file exists
 - **FAILED**: nonzero exit, timeout, or missing report
 
-Each task is prompted to write `report.md` (required for DONE) and `summary.md` (feeds into downstream `context_from`).
+Each task is prompted to write `report.md` (required for DONE) and `summary.md` (feeds into downstream `context_from` by default). A task can set `context_from_artifact: "report"` when downstream work needs the full report instead of the brief summary.
 
 ### Command completion contract
 

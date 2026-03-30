@@ -103,18 +103,27 @@ agentflow --plan plan.json --resume tmp/agentflow_runs/<run_id>
 
 # Detailed plan schema reference
 agentflow --plan-help
+
+# Run one supervisor cycle (planner + plan QA + approved child plan)
+agentflow --supervise state/mission_state.json
+
+# Validate supervisor config inputs without running a cycle
+agentflow --supervise state/mission_state.json --validate
 ```
 
 ## CLI Options
 
 | Flag | Description |
 |---|---|
-| `--plan <path>` | Plan file path (JSON). Also accepted as a positional argument. |
-| `--validate` | Validate plan schema and context files, then exit. No directories created. |
+| `--plan <path>` | Plan file path (JSON). |
+| `--validate` | With `--plan`, validate plan schema/context files; with `--supervise`, validate supervisor config inputs and required files. |
 | `--resume <run_dir>` | Resume a previously failed run, skipping already-completed tasks. |
 | `--dry-run` | Simulate execution without launching agent CLI sessions. |
 | `--skip-git-repo-check` | Pass through to provider CLI for non-git or trust-check-blocked repos. |
 | `--sandbox <mode>` | Worker sandbox mode: `read-only`, `workspace-write` (default), or `danger-full-access`. For cursor, maps to `enabled`/`disabled`. |
+| `--supervise <mission_state_file>` | Run one supervisor control-plane cycle (iterative planner + plan QA + optional child execution). |
+| `--supervisor-config <path>` | Supervisor config file (for `--supervise`; defaults to `agentflow.supervisor.json` in cwd when present). |
+| `--supervisor-profile <name>` | Supervisor profile selector (resolved from supervisor config/defaults). |
 | `--plan-help` | Print detailed plan schema reference. |
 | `--help` / `-h` | Show usage overview. |
 
@@ -183,6 +192,7 @@ See [example_plan.json](./example_plan.json) for a plan demonstrating all node t
 | [Blueprint Guide](./docs/guide.md) | Core principles, plan architecture, context strategy, anti-patterns |
 | [Prompt Patterns](./docs/prompt-patterns.md) | Reusable prompt structures: persona, batch modification, extraction, review, validation |
 | [Plan Patterns](./docs/plan-patterns.md) | Composable plan architectures: ETV, batch+review, loop-until-clean, multi-branch |
+| [Supervisor Defaults](./docs/supervisor.md) | Default planner/plan-QA prompts, rubric, and override precedence for long-running control-plane loops |
 | [Troubleshooting](./docs/troubleshooting.md) | Common errors, resume strategies, reading run artifacts |
 | [Cursor Rule](./docs/cursor-rule.md) | Copyable Cursor rule for AI-assisted plan authoring in your own repo |
 

@@ -158,9 +158,9 @@ function writeCommandRequestArtifact(launch: CommandLaunch): void {
     lines.push('- (none)');
   } else {
     for (const summary of launch.priorTaskSummaries) {
-      lines.push(`### ${summary.taskId} (${summary.status})`);
+      lines.push(`### ${summary.taskId} (${summary.status}, ${summary.artifact})`);
       lines.push('');
-      lines.push(summary.summary || '(empty)');
+      lines.push(summary.content || '(empty)');
       lines.push('');
     }
   }
@@ -234,9 +234,9 @@ function writeCommandResultArtifacts(
     reportLines.push('- (none)');
   } else {
     for (const summary of launch.priorTaskSummaries) {
-      reportLines.push(`### ${summary.taskId} (${summary.status})`);
+      reportLines.push(`### ${summary.taskId} (${summary.status}, ${summary.artifact})`);
       reportLines.push('');
-      reportLines.push(summary.summary || '(empty)');
+      reportLines.push(summary.content || '(empty)');
       reportLines.push('');
     }
   }

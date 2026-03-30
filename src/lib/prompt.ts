@@ -58,10 +58,10 @@ export function buildPrompt({
   }
 
   if (priorTaskSummaries.length > 0) {
-    const summaryLines = priorTaskSummaries.map(
-      (s) => `- **${s.taskId}** (${s.status}): ${s.summary || '(no summary)'}`,
+    const priorContextBlocks = priorTaskSummaries.map((s) =>
+      `### ${s.taskId} (${s.status}, ${s.artifact})\n${s.content || '(empty)'}`,
     );
-    sections.push(`## What's Been Done So Far\n${summaryLines.join('\n')}`);
+    sections.push(`## What's Been Done So Far\n${priorContextBlocks.join('\n\n')}`);
   }
 
   if (contextFiles.length > 0) {

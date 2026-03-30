@@ -1,0 +1,92 @@
+{
+  "version": "1",
+  "id": "agentflow_plan_qa_default",
+  "pass_threshold": 0.85,
+  "dimensions": [
+    {
+      "id": "objective_coverage",
+      "weight": 0.2,
+      "description": "Plan maps mission success criteria to concrete tasks with explicit outputs.",
+      "high_score_requirements": [
+        "Every success criterion has one or more task ids linked in rationale or plan structure.",
+        "No major objective area is unowned."
+      ]
+    },
+    {
+      "id": "research_strategy",
+      "weight": 0.15,
+      "description": "Unknowns are handled through explicit discovery/extraction tasks before implementation.",
+      "high_score_requirements": [
+        "Research tasks are early in the plan.",
+        "Research outputs are structured artifacts used by downstream tasks."
+      ]
+    },
+    {
+      "id": "execution_decomposition",
+      "weight": 0.15,
+      "description": "Work is decomposed into atomic, explicit, and tractable batches.",
+      "high_score_requirements": [
+        "Task prompts define scope and exclusions.",
+        "Batch sizes are reasonable for risk and complexity."
+      ]
+    },
+    {
+      "id": "verification_density",
+      "weight": 0.2,
+      "description": "Deterministic verification is present after each major modification phase.",
+      "high_score_requirements": [
+        "Modification batches are followed by deterministic command validation or deterministic loop gates.",
+        "Validation output expectations are explicit."
+      ]
+    },
+    {
+      "id": "sequencing_parallel_safety",
+      "weight": 0.1,
+      "description": "Ordering and parallelism choices are safe and dependency-aware.",
+      "high_score_requirements": [
+        "Parallel groups contain independent tasks.",
+        "No illegal cross-branch context dependencies."
+      ]
+    },
+    {
+      "id": "risk_recovery",
+      "weight": 0.1,
+      "description": "Plan includes canary review, failure handling, and resumable artifacts.",
+      "high_score_requirements": [
+        "At least one canary/review checkpoint exists before broad rollout.",
+        "Plan structure supports resume and iterative repair."
+      ]
+    },
+    {
+      "id": "budget_limits",
+      "weight": 0.1,
+      "description": "Limits are configured to bound runtime and failure blast radius.",
+      "high_score_requirements": [
+        "Plan sets practical values for runtime/task/failure caps.",
+        "Loop iteration caps are scoped appropriately."
+      ]
+    }
+  ],
+  "hard_fail_checks": [
+    {
+      "id": "invalid_plan_schema",
+      "description": "Plan is not valid Agentflow schema or has structurally invalid nodes."
+    },
+    {
+      "id": "missing_research_for_unknowns",
+      "description": "Mission includes unresolved unknowns but plan has no explicit research/extraction tasks."
+    },
+    {
+      "id": "missing_deterministic_validation",
+      "description": "Plan has modification tasks without deterministic validation command/gate coverage."
+    },
+    {
+      "id": "unsafe_or_unbounded_execution",
+      "description": "Limits are absent or effectively unbounded for the mission context."
+    },
+    {
+      "id": "high_risk_parallel_dependencies",
+      "description": "Parallel execution is proposed despite clear dependency ordering requirements."
+    }
+  ]
+}

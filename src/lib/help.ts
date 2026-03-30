@@ -12,7 +12,7 @@ Usage:
 - agentflow --plan <plan_file> [--dry-run] [--skip-git-repo-check] [--sandbox <mode>]
 - agentflow --plan <plan_file> --validate
 - agentflow --plan <plan_file> --resume <run_dir>
-- agentflow <plan_file>
+- agentflow --supervise <mission_state_file> [--supervisor-config <path>] [--supervisor-profile <name>] [--validate]
 - agentflow --plan-help
 
 Most useful commands:
@@ -32,6 +32,10 @@ Most useful commands:
   Forward trust/skip flags to each provider invocation.
 - agentflow --plan plan.json --sandbox workspace-write
   Force worker sandbox mode for each task launch.
+- agentflow --supervise state/mission_state.json
+  Run one supervisor cycle (planner + plan QA + approved child plan execution).
+- agentflow --supervise state/mission_state.json --validate
+  Validate supervisor config inputs without executing a cycle.
 `;
 }
 
@@ -100,7 +104,7 @@ Full schema skeleton (all keys shown):
       "parallel": false,
       "steps": [
         { "type": "task", "id": "implement", "repo": "main", "prompt": "Implement feature X." },
-        { "type": "task", "id": "test", "repo": "main", "prompt": "Run tests and summarize results.", "context_from": ["implement"], "persona": "You are a QA engineer." }
+        { "type": "task", "id": "test", "repo": "main", "prompt": "Run tests and summarize results.", "context_from": ["implement"], "context_from_artifact": "summary", "persona": "You are a QA engineer." }
       ]
     },
     {
@@ -174,7 +178,8 @@ Flow nodes:
   - model: optional
   - persona: optional (overrides plan-level persona for this task)
   - context_files: optional
-  - context_from: optional array of task IDs whose summaries to inject (default: all prior tasks)
+  - context_from: optional array of task IDs whose downstream context to inject (default: all prior tasks)
+  - context_from_artifact: optional, "summary" (default) or "report"; chooses whether context_from injects worker_summary.md or worker_report.md content
 - command:
   - type: "command"
   - id: required, globally unique (shares namespace with task ids)

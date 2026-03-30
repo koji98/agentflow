@@ -438,6 +438,68 @@ test('context_from filters prior task summaries to specified task ids', async (t
   assert.ok(!promptContent.includes('task_b'), 'prompt should NOT include task_b summary');
 });
 
+test('context_from_artifact=report injects full prior report into downstream prompt', async (t) => {
+  const repoRoot = mkRepo('agentflow-contextfrom-report-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockCodex(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_codex.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify({ default: { exitCode: 0 } }),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoRoot, 'context_from_report_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify({
+      setup: 'context_from report test',
+      repos: { main: '.' },
+      worktrees: false,
+      provider: 'codex',
+      model: 'gpt-5-nano',
+      reasoning: 'xhigh',
+      options: { run_root: 'tmp/test_context_from_report_runs' },
+      limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+      flow: [
+        { type: 'task', id: 'task_a', prompt: 'do task A' },
+        { type: 'task', id: 'task_b', prompt: 'do task B', context_from: ['task_a'], context_from_artifact: 'report' },
+      ],
+    }),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_CODEX_LOG: mockLog,
+      MOCK_CODEX_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_context_from_report_runs');
+  const runDir = getSingleRunDir(runBase);
+  const groupDirs = fs.readdirSync(runDir).filter((d) => d.startsWith('group_02')).sort();
+  assert.ok(groupDirs.length > 0, 'expected group directory for task_b');
+  const taskBDirs = fs.readdirSync(path.resolve(runDir, groupDirs[0]));
+  const taskBDir = taskBDirs.find((d) => d.includes('task-b'));
+  assert.ok(taskBDir, 'expected task_b directory');
+  const promptContent = fs.readFileSync(
+    path.resolve(runDir, groupDirs[0], taskBDir, 'prompt.md'),
+    'utf8',
+  );
+  assert.match(promptContent, /### task_a \(DONE, report\)/);
+  assert.match(promptContent, /# report/);
+  assert.ok(!promptContent.includes('Task completed successfully. No issues found.'), 'prompt should not inject the brief summary when report context is requested');
+});
+
 test('on_failure: continue with multiple tasks runs all tasks despite failures', async (t) => {
   const repoRoot = mkRepo('agentflow-continue-multi-');
   t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));

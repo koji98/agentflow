@@ -28,6 +28,7 @@ import { runWorkflow } from './lib/task_runner.ts';
 import { cleanupWorktrees } from './lib/worktrees.ts';
 import { log, logError } from './lib/log.ts';
 import { renderWorktreeBranchName } from './lib/worktree_branch.ts';
+import { runSupervisor, validateSupervisor } from './lib/supervisor.ts';
 import type {
   TaskNode,
   WorkerPlan,
@@ -413,6 +414,41 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     log(`${planHelpText()}\n`);
     return 0;
   }
+
+  const hasSupervisorOnlyFlags = Boolean(
+    args.supervisorConfigFile ||
+    args.supervisorProfile,
+  );
+
+  if (args.supervisor) {
+    if (args.planFile) {
+      logError('--supervise cannot be combined with --plan.');
+      logError(usageText());
+      return 2;
+    }
+    if (args.resumeDir) {
+      logError('--resume is not supported with --supervise.');
+      logError(usageText());
+      return 2;
+    }
+    try {
+      if (args.validate) return validateSupervisor(args);
+      return await runSupervisor({
+        args,
+        runPlan: (childArgv) => main(childArgv),
+      });
+    } catch (error) {
+      logError(String(error));
+      return 1;
+    }
+  }
+
+  if (hasSupervisorOnlyFlags) {
+    logError('Supervisor-specific flags require --supervise <mission_state_file>.');
+    logError(usageText());
+    return 2;
+  }
+
   if (!args.planFile) {
     logError(usageText());
     return 2;
