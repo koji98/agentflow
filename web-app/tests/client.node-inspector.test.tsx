@@ -7,95 +7,131 @@ import { MantineProvider } from '@mantine/core';
 
 import NodeInspector from '../client/src/components/NodeInspector.tsx';
 
-vi.mock('@mantine/charts', () => ({
-  AreaChart: () => <div data-testid="area-chart" />,
-}));
-
 describe('NodeInspector', () => {
-  it('renders a structured activity view, strips ansi noise from raw logs, and renders markdown artifacts', async () => {
+  it('renders a summary-first overview with activity-first actions and followed-child evidence guidance', async () => {
+    const onOpenEvidenceTab = vi.fn();
+    const onJumpToFollowNode = vi.fn();
+
     render(
       <MantineProvider>
         <NodeInspector
           selectedNode={{
-            graphId: 'alpha:0:0',
-            workflowId: 'alpha',
-            type: 'task',
-            label: 'alpha',
+            graphId: 'quality_gate:0:2',
+            workflowId: 'quality_gate',
+            type: 'loop_judge',
+            label: 'quality_gate',
             depth: 0,
-            order: 0,
+            order: 2,
             raw: {
+              type: 'loop_judge',
+              id: 'quality_gate',
+              pass_threshold: 8,
+            },
+            status: 'RUNNING',
+            subtitle: 'Pre-body judge scored 6 against 8 and kept the loop active.',
+          }}
+          summary={{
+            identity: {
+              nodeId: 'quality_gate',
+              type: 'loop_judge',
+              label: 'quality_gate',
+              breadcrumb: ['root', 'quality_gate'],
+            },
+            stateNow: {
+              status: 'RUNNING',
+              phase: 'pre_body_gate',
+              sinceAtUtc: '2026-04-01T01:00:00Z',
+            },
+            whyNow: {
+              reasonCode: 'judge_pre_body',
+              message: 'Pre-body judge scored 6 against 8 and kept the loop active.',
+              retryFailureReason: 'The previous draft was too vague.',
+            },
+            next: {
+              transition: 'enter_body',
+              label: 'Run body iteration 1',
+              targetNodeIds: ['refine_agent'],
+            },
+            progressItems: [
+              { label: 'Iteration', value: '1' },
+              { label: 'Max iterations', value: '2' },
+              { label: 'Score', value: '6 / 8' },
+            ],
+            graphMetrics: ['Iter 1 / 2', '6 / 8'],
+            evidence: {
+              summary: true,
+              report: true,
+              artifacts: 3,
+              logs: true,
+              traceEvents: 4,
+            },
+            alerts: [],
+            evidenceRow: {
+              taskKey: 'g04:refine_agent#a2',
+              taskId: 'refine_agent',
+              nodePath: 'workflow[2]/while:quality_gate/body[0]/task:refine_agent',
+              attempt: 2,
+              status: 'RUNNING',
+              failureReason: 'The previous draft was too vague.',
+            },
+            followTarget: {
+              descendant: true,
+              workflowId: 'refine_agent',
+              label: 'refine_agent',
               type: 'task',
-              id: 'alpha',
-              prompt: '## Solve it\n\n- tell a concise joke',
+              reason: 'active_body_child',
+              description: 'Artifacts and raw logs follow current body child refine_agent.',
             },
-            status: 'DONE',
-            subtitle: 'Tell a concise joke',
+            judge: {
+              phase: 'pre_body',
+              score: 6,
+              threshold: 8,
+              result: 'enter_body',
+              reasons: ['Make the punchline more specific and easier to repeat.'],
+              atUtc: '2026-04-01T01:00:03Z',
+            },
+            retry: {
+              attempt: 2,
+              previousAttempts: 1,
+              latestFailureReason: 'The previous draft was too vague.',
+              state: 'in_progress',
+              nextTarget: 'refine_agent',
+            },
           }}
-          taskRow={{
-            taskKey: 'g01:alpha#a1',
-            taskId: 'alpha',
-            nodePath: 'workflow[0]/task:alpha',
-            attempt: 1,
-            status: 'DONE',
-            startedAtUtc: '2026-04-01T01:00:00Z',
-            endedAtUtc: '2026-04-01T01:00:10Z',
-            durationSec: 10,
-            provider: 'codex',
-            model: 'gpt-5.4-mini',
-          } as any}
-          artifacts={[
-            {
-              key: 'report',
-              label: 'Report',
-              path: '/tmp/worker_report.md',
-              exists: true,
-            },
-          ]}
-          selectedArtifact={{
-            key: 'report',
-            label: 'Report',
-            path: '/tmp/worker_report.md',
-            exists: true,
-          }}
-          onSelectArtifact={() => undefined}
-          artifactPreview={'# Inspector heading\n\n- bullet one'}
-          artifactPreviewLoading={false}
-          selectedLogText={[
-            '\u001b[35m\u001b[3mthinking\u001b[0m\u001b[0m',
-            'Drafting a lighter response.',
-            '\u001b[35m\u001b[3mexec\u001b[0m\u001b[0m',
-            '\u001b[1m/bin/zsh -lc pwd\u001b[0m in /tmp/project',
-            '\u001b[35m\u001b[3mcodex\u001b[0m\u001b[0m',
-            'Completed the response.',
-          ].join('\n')}
-          judgeEvaluations={[]}
-          judgeChartData={[]}
-          traceEntries={[
-            {
-              atUtc: '2026-04-01T01:00:05Z',
-              type: 'task_retry',
-              detail: { taskId: 'alpha', attempt: 1, nextAttempt: 2 },
-            },
-          ]}
+          activeDetailTab="activity"
+          focusLabel="Selected scope"
+          onOpenEvidenceTab={onOpenEvidenceTab}
+          onJumpToFollowNode={onJumpToFollowNode}
         />
       </MantineProvider>,
     );
 
-    expect(screen.getByText('Prompt / command')).toBeTruthy();
-    expect(screen.getByText(/Solve it/)).toBeTruthy();
-    expect(screen.getByText('Reasoning summary')).toBeTruthy();
-    expect(screen.getByText('Drafting a lighter response.')).toBeTruthy();
-    expect(screen.getByText('Tool call')).toBeTruthy();
-    expect(screen.getByText('/bin/zsh -lc pwd in /tmp/project')).toBeTruthy();
-    expect(screen.getByText('Retry alpha from attempt 1 to 2')).toBeTruthy();
+    expect(screen.getAllByText('quality_gate').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Pre-body judge scored 6 against 8/)).toBeTruthy();
+    expect(screen.getByText('Activity briefing')).toBeTruthy();
+    expect(screen.getByText('Artifacts handoff')).toBeTruthy();
+    expect(screen.getAllByText('Selected scope').length).toBeGreaterThan(0);
+    expect(screen.getByText('Proof ready')).toBeTruthy();
+    expect(screen.getByText('Detail order')).toBeTruthy();
+    expect(screen.getByText('Read this node from summary to raw')).toBeTruthy();
+    expect(screen.getByText('Overview')).toBeTruthy();
+    expect(screen.getByText('Deep inspection')).toBeTruthy();
+    expect(screen.getByText('Artifacts + raw logs')).toBeTruthy();
+    expect(screen.getByText(/Selected-node summary for quality_gate/)).toBeTruthy();
+    expect(screen.getAllByText(/Judge, retry, and control flow stay on quality_gate/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('refine_agent').length).toBeGreaterThan(0);
+    expect(screen.getByText('Judge state')).toBeTruthy();
+    expect(screen.getByText(/Attempt 2 · in progress/)).toBeTruthy();
+    expect(screen.getAllByText('Activity').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Artifacts').length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Raw log' }));
-    expect(screen.getAllByText(/\/bin\/zsh -lc pwd/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Completed the response\./).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/thinking/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+    expect(onOpenEvidenceTab).toHaveBeenCalledWith('activity');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
-    expect(await screen.findByText('Inspector heading')).toBeTruthy();
-    expect(screen.getByText('bullet one')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    expect(onOpenEvidenceTab).toHaveBeenCalledWith('artifacts');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to refine_agent' }));
+    expect(onJumpToFollowNode).toHaveBeenCalledTimes(1);
   });
 });

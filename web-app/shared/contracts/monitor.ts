@@ -45,6 +45,8 @@ export interface MonitorMeta {
   planPath: string | null;
   isActive: boolean;
   cancelRequested: boolean;
+  canCancel: boolean;
+  canResume: boolean;
   lastExitCode: number | null;
   recentConsole: RunConsoleEntry[];
 }
@@ -57,8 +59,26 @@ export type RunSummary = {
   latestDecisions: Array<Record<string, unknown>>;
 };
 
-export type RunStateResponse = Record<string, any> & MonitorMeta;
+export type RunStateResponse = Record<string, any> & MonitorMeta & {
+  decisionTrace?: DecisionTraceResponse;
+};
 export type DecisionTraceResponse = Array<Record<string, unknown>>;
+export interface RunResolveMatch {
+  runDir: string;
+  planPath: string | null;
+  updatedAtUtc: string | null;
+}
+export interface RunResolveResponse {
+  runId: string;
+  runDir: string;
+  planPath: string | null;
+  isActive: boolean;
+}
+export interface RunResolveErrorResponse {
+  error: 'run_not_found' | 'run_id_ambiguous';
+  runId: string;
+  matches?: RunResolveMatch[];
+}
 
 export type SseEvent = any;
 

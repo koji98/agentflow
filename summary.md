@@ -1,15 +1,4 @@
-High-value UX choices
-- In-app filesystem browser with hidden-folder visibility makes plan/run selection fast without native pickers.
-- Graph-first layout keeps the run legible; node selection drives artifacts/logs instead of a log wall.
-- SSE-based updates for run state, decisions, and log tail keep UI responsive with low complexity.
-- Run settings surface risk clearly for `danger-full-access` sandbox.
-
-Known limitations
-- Graph layout is linear for v1; complex branching/parallel layout can be improved.
-- Artifacts preview is text-first; binary previews can be added.
-- No run list yet; open via file browser for now.
-Gaps to validate next
-- Ensure SSE bus removal on cancel/exit (avoid emitter leaks).
-- Add server ping heartbeats for long-lived SSE.
-- Surface loop_judge in the graph node type explicitly (badge + threshold).
-- Add a compact loop_judge details panel (pass threshold, latest score, iteration) fed from decision_trace).
+- Managed runs no longer look active, cancelable, or non-resumable after the bridge-owned child has already exited just because `run_state.json` still shows stale live markers. `/resolve`, `/state`, and cancel or resume preflight now all honor managed-process exit first.
+- The monitor also no longer duplicates decision-trace entries when it bootstraps from a tail-only `state.decisionTrace` and later receives a snapshot rewrite from SSE.
+- Coverage is tighter in both the real command-resume path and client trace-state reducers.
+- Residual risks are unchanged: unmanaged external runs remain non-cancellable, and a first historical open can still miss full trace history if the trace file is unreadable before any stable cache exists.

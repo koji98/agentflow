@@ -1,231 +1,254 @@
 import React from 'react';
-import {
-  Badge,
-  Button,
-  Group,
-  Loader,
-  ScrollArea,
-  Stack,
-  Tabs,
-  Text,
-} from '@mantine/core';
-import { AreaChart } from '@mantine/charts';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { Badge, Button, Group, Stack, Text } from '@mantine/core';
 
-import type { RunArtifactItem } from '../../../shared/contracts/monitor.ts';
 import {
-  formatTraceEntry,
-  parseLogActivityEvents,
-  requestPreviewForWorkflowItem,
-  stripAnsi,
-  type ExecutableRow,
-  type JudgeEvaluation,
+  buildSelectedNodeNarrative,
+  type MonitorDetailTab,
+  type NodeSummary,
   type WorkflowGraphItem,
 } from '../lib/monitor.ts';
-import { api } from '../api/client.ts';
 import { EmptyState, SurfaceLabel } from '../design/primitives.tsx';
 
-function shortName(filePath: string) {
-  const parts = filePath.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || filePath;
+function readableToken(value: string | null | undefined): string {
+  return String(value || '')
+    .replaceAll('_', ' ')
+    .replaceAll('-', ' ')
+    .trim();
 }
 
-function pathRows(taskRow: ExecutableRow | null) {
-  if (!taskRow) return [];
+function formatLocalTimestamp(value: string | null | undefined): string {
+  if (!value) return 'No timestamp yet';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'No timestamp yet';
+  return parsed.toLocaleString();
+}
+
+function sectionRows(summary: NodeSummary) {
   return [
-    ['Prompt', taskRow.promptPath],
-    ['Report', taskRow.reportPath],
-    ['Summary', taskRow.summaryPath],
-    ['Last message', taskRow.lastMessagePath],
-    ['Log', taskRow.logPath],
-  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+    {
+      label: 'State now',
+      value: summary.stateNow.phase
+        ? `${summary.stateNow.status.toLowerCase()} · ${readableToken(summary.stateNow.phase)}`
+        : summary.stateNow.status.toLowerCase(),
+    },
+    {
+      label: 'Updated',
+      value: formatLocalTimestamp(summary.stateNow.sinceAtUtc),
+    },
+    { label: 'Next', value: summary.next.label },
+    {
+      label: 'Proof ready',
+      value: buildProofReadyValue(summary),
+    },
+  ];
 }
 
-function artifactKind(filePath: string | null | undefined) {
-  const normalized = String(filePath || '').toLowerCase();
-  if (normalized.endsWith('.md')) return 'markdown';
-  if (normalized.endsWith('.json')) return 'json';
-  return 'text';
+function buildProofReadyValue(summary: NodeSummary) {
+  const segments: string[] = [];
+  if (summary.evidence.traceEvents > 0) {
+    segments.push(`Activity ${summary.evidence.traceEvents}`);
+  }
+  if (summary.evidence.artifacts > 0) {
+    segments.push(`Artifacts ${summary.evidence.artifacts}`);
+  } else if (summary.evidence.summary || summary.evidence.report) {
+    segments.push('Docs ready');
+  }
+  if (summary.evidence.logs) {
+    segments.push('Raw logs');
+  }
+  return segments.join(' · ') || 'Summary only';
 }
 
-function renderTraceDetail(entry: Record<string, unknown>) {
-  const detail = (entry.detail || {}) as Record<string, unknown>;
-  if (Array.isArray(detail.reasons) && detail.reasons.length > 0) {
-    return detail.reasons.map((reason) => `- ${String(reason)}`).join('\n');
-  }
-  if (typeof detail.reason === 'string' && detail.reason.trim()) {
-    return detail.reason.trim();
-  }
-  const nextAttempt = detail.nextAttempt ? `Next attempt: ${String(detail.nextAttempt)}` : '';
-  const iteration = detail.iteration ? `Iteration: ${String(detail.iteration)}` : '';
-  return [iteration, nextAttempt].filter(Boolean).join('\n');
+function evidenceItems(summary: NodeSummary) {
+  const artifactValue = summary.evidence.artifacts > 0
+    ? `${summary.evidence.artifacts} ${summary.evidence.artifacts === 1 ? 'file' : 'files'}`
+    : summary.evidence.summary || summary.evidence.report
+      ? 'Key docs ready'
+      : 'Waiting';
+  const activityValue = summary.evidence.traceEvents > 0
+    ? `${summary.evidence.traceEvents} ${summary.evidence.traceEvents === 1 ? 'event' : 'events'}`
+    : summary.judge || summary.retry
+      ? 'Overlay ready'
+      : 'Summary only';
+  return [
+    {
+      label: 'Activity',
+      value: activityValue,
+    },
+    {
+      label: 'Artifacts',
+      value: artifactValue,
+    },
+    { label: 'Raw logs', value: summary.evidence.logs ? 'Available' : 'None' },
+  ];
 }
 
-function DocumentPreview(props: {
-  content: string;
-  filePath?: string | null;
-  emptyText?: string;
-}) {
-  const { content, filePath, emptyText = 'No preview available.' } = props;
-  const trimmed = content.trim();
-  if (!trimmed) {
-    return (
-      <Text size="sm" c="dimmed">
-        {emptyText}
-      </Text>
-    );
+function inspectionLayers(summary: NodeSummary, activeDetailTab: MonitorDetailTab) {
+  const narrative = buildSelectedNodeNarrative(summary);
+
+  return [
+    {
+      key: 'overview',
+      step: '01',
+      label: 'Overview',
+      badge: 'Anchor',
+      current: false,
+      description: narrative.layers.overview,
+    },
+    {
+      key: 'activity',
+      step: '02',
+      label: 'Activity',
+      badge: activeDetailTab === 'activity' ? 'Open now' : 'Default detail',
+      current: activeDetailTab === 'activity',
+      description: narrative.layers.activity,
+    },
+    {
+      key: 'artifacts',
+      step: '03',
+      label: 'Artifacts',
+      badge: activeDetailTab === 'artifacts' ? 'Open now' : 'Files + docs',
+      current: activeDetailTab === 'artifacts',
+      description: narrative.layers.artifacts,
+    },
+    {
+      key: 'raw',
+      step: '04',
+      label: 'Raw logs',
+      badge: activeDetailTab === 'raw' ? 'Open now' : 'Deep inspection',
+      current: activeDetailTab === 'raw',
+      description: narrative.layers.raw,
+    },
+  ];
+}
+
+function buildScopeSignals(summary: NodeSummary) {
+  const items: Array<{ key: string; label: string; value: string; detail: string }> = [];
+  const iterationValue = summary.progressItems.find((item) => item.label === 'Iteration')?.value || null;
+  const maxIterationValue = summary.progressItems.find((item) => item.label === 'Max iterations')?.value || null;
+
+  if (summary.group) {
+    const stateLine = `${summary.group.doneChildren}/${summary.group.totalChildren} done`;
+    const detail = summary.group.blockingChildLabel
+      ? `Blocking child: ${summary.group.blockingChildLabel}`
+      : summary.group.activeChildLabel
+        ? `Active child: ${summary.group.activeChildLabel}`
+        : summary.group.nextEligibleChildLabel
+          ? `Next child: ${summary.group.nextEligibleChildLabel}`
+          : 'All group children are resolved.';
+    items.push({
+      key: 'group',
+      label: 'Group scope',
+      value: `${readableToken(summary.group.mode)} · ${stateLine}`,
+      detail,
+    });
   }
 
-  const kind = artifactKind(filePath);
-  if (kind === 'markdown') {
-    return (
-      <div className="af-markdown">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            a: ({ href, children, ...linkProps }) => {
-              const targetHref = href && href.startsWith('/') ? api.fs.downloadUrl(href) : href || '#';
-              return (
-                <a {...linkProps} href={targetHref} target="_blank" rel="noreferrer">
-                  {children}
-                </a>
-              );
-            },
-          }}
-        >
-          {trimmed}
-        </ReactMarkdown>
-      </div>
-    );
+  if (summary.identity.type === 'loop_judge' || summary.identity.type === 'loop' || summary.identity.type === 'while') {
+    const value = iterationValue
+      ? maxIterationValue
+        ? `Iteration ${iterationValue} / ${maxIterationValue}`
+        : `Iteration ${iterationValue}`
+      : summary.stateNow.phase
+        ? readableToken(summary.stateNow.phase)
+        : summary.stateNow.status.toLowerCase();
+    const detail = summary.loop?.failedBodyChildLabel
+      ? `Blocking body child: ${summary.loop.failedBodyChildLabel}`
+      : summary.loop?.activeBodyChildLabel
+        ? `Active body child: ${summary.loop.activeBodyChildLabel}`
+        : `Phase: ${summary.stateNow.phase ? readableToken(summary.stateNow.phase) : summary.stateNow.status.toLowerCase()}`;
+    items.push({
+      key: 'loop',
+      label: 'Loop scope',
+      value,
+      detail,
+    });
   }
 
-  if (kind === 'json') {
-    try {
-      return (
-        <Text className="af-code-block" component="pre">
-          {JSON.stringify(JSON.parse(trimmed), null, 2)}
-        </Text>
-      );
-    } catch {
-      return (
-        <Text className="af-code-block" component="pre">
-          {trimmed}
-        </Text>
-      );
-    }
+  if (summary.judge) {
+    const scoreText = summary.judge.score === null
+      ? 'No score'
+      : summary.judge.threshold === null
+        ? String(summary.judge.score)
+        : `${summary.judge.score}/${summary.judge.threshold}`;
+    items.push({
+      key: 'judge',
+      label: 'Judge state',
+      value: `${readableToken(summary.judge.phase)} · ${scoreText}`,
+      detail: summary.judge.reasons[0] || 'No judge reasons recorded yet.',
+    });
   }
 
-  return (
-    <Text className="af-code-block" component="pre">
-      {trimmed}
-    </Text>
-  );
+  if (summary.retry) {
+    items.push({
+      key: 'retry',
+      label: 'Retry state',
+      value: `Attempt ${summary.retry.attempt} · ${readableToken(summary.retry.state)}`,
+      detail: summary.retry.latestFailureReason || 'No retry failure reason was captured.',
+    });
+  }
+
+  return items;
+}
+
+function buildActivitySignals(summary: NodeSummary) {
+  const items = buildScopeSignals(summary);
+  if (items.length > 0) return items;
+
+  if (summary.evidence.traceEvents > 0) {
+    return [{
+      key: 'activity',
+      label: 'Activity layer',
+      value: `${summary.evidence.traceEvents} structured ${summary.evidence.traceEvents === 1 ? 'event' : 'events'}`,
+      detail: 'Open Activity to scan transitions and short execution notes before switching to artifacts or raw logs.',
+    }];
+  }
+
+  if (summary.evidence.logs) {
+    return [{
+      key: 'activity',
+      label: 'Activity layer',
+      value: 'Raw output ready',
+      detail: 'This scope has raw output on demand, but the summary already tells the high-signal story first.',
+    }];
+  }
+
+  return [{
+    key: 'activity',
+    label: 'Activity layer',
+    value: 'Summary-first only',
+    detail: 'No structured transitions are recorded yet, so Overview stays the primary explanation until new activity lands.',
+  }];
 }
 
 export default function NodeInspector(props: {
   selectedNode: WorkflowGraphItem | null;
-  taskRow: ExecutableRow | null;
-  artifacts: RunArtifactItem[];
-  selectedArtifact: RunArtifactItem | null;
-  onSelectArtifact(item: RunArtifactItem): void;
-  artifactPreview: string;
-  artifactPreviewLoading: boolean;
-  selectedLogText: string;
-  judgeEvaluations: JudgeEvaluation[];
-  judgeChartData: Array<Record<string, unknown>>;
-  traceEntries: Array<Record<string, unknown>>;
+  summary: NodeSummary | null;
+  activeDetailTab: MonitorDetailTab;
+  focusLabel: string;
+  onOpenEvidenceTab(tab: MonitorDetailTab): void;
+  onJumpToFollowNode?(): void;
 }) {
-  const {
-    selectedNode,
-    taskRow,
-    artifacts,
-    selectedArtifact,
-    onSelectArtifact,
-    artifactPreview,
-    artifactPreviewLoading,
-    selectedLogText,
-    judgeEvaluations,
-    judgeChartData,
-    traceEntries,
-  } = props;
-  const paths = pathRows(taskRow);
-  const sourcedFromDescendant = Boolean(taskRow && selectedNode && taskRow.taskId !== selectedNode.workflowId);
-  const [activityDocs, setActivityDocs] = React.useState<Record<string, string>>({});
-  const cleanedLogText = React.useMemo(() => stripAnsi(selectedLogText), [selectedLogText]);
-  const request = React.useMemo(
-    () => (selectedNode ? requestPreviewForWorkflowItem(selectedNode) : ''),
-    [selectedNode],
-  );
-  const parsedLogEvents = React.useMemo(
-    () => {
-      const events = parseLogActivityEvents(cleanedLogText);
-      return events.filter((event) => {
-        if (event.kind === 'prompt') return false;
-        if (
-          event.kind === 'system'
-          && event.title === 'Execution session'
-          && events.length > 1
-          && /workdir:|provider:|reasoning effort:|\$ \(cd /.test(event.body)
-        ) {
-          return false;
-        }
-        return true;
-      });
-    },
-    [cleanedLogText],
-  );
-  const displayRequest = activityDocs.prompt || request;
-  const outputCards = [
-    { key: 'lastMessage', label: 'Last message', content: activityDocs.lastMessage, path: taskRow?.lastMessagePath },
-    { key: 'summary', label: 'Summary', content: activityDocs.summary, path: taskRow?.summaryPath },
-    { key: 'report', label: 'Report', content: activityDocs.report, path: taskRow?.reportPath },
-  ].filter((item) => item.content);
+  const { selectedNode, summary, activeDetailTab, focusLabel, onOpenEvidenceTab, onJumpToFollowNode } = props;
 
-  React.useEffect(() => {
-    let disposed = false;
-    const targets = [
-      ['prompt', taskRow?.promptPath],
-      ['summary', taskRow?.summaryPath],
-      ['report', taskRow?.reportPath],
-      ['lastMessage', taskRow?.lastMessagePath],
-    ] as const;
-
-    setActivityDocs({});
-    if (targets.every(([, value]) => !value)) return () => {
-      disposed = true;
-    };
-
-    void Promise.all(
-      targets.map(async ([key, filePath]) => {
-        if (!filePath) return [key, ''] as const;
-        try {
-          const preview = await api.fs.read(String(filePath));
-          return [key, preview.text || [preview.head, preview.tail].filter(Boolean).join('\n...\n')] as const;
-        } catch {
-          return [key, ''] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (disposed) return;
-      setActivityDocs(
-        Object.fromEntries(entries.filter((entry) => entry[1])) as Record<string, string>,
-      );
-    });
-
-    return () => {
-      disposed = true;
-    };
-  }, [taskRow?.lastMessagePath, taskRow?.promptPath, taskRow?.reportPath, taskRow?.summaryPath]);
-
-  if (!selectedNode) {
+  if (!selectedNode || !summary) {
     return (
       <EmptyState
         title="No node selected"
-        description="Select a workflow node to inspect its request, outputs, artifacts, and logs."
+        description="Select a workflow node to see its current state, why it matters, and which activity, artifacts, or raw evidence sit behind it."
       />
     );
   }
+
+  const badgeColor = selectedNode.status === 'DONE'
+    ? 'signal'
+    : selectedNode.status === 'FAILED'
+      ? 'danger'
+      : selectedNode.status === 'RUNNING'
+        ? 'electric'
+        : 'ink';
+  const activitySignals = buildActivitySignals(summary);
+  const narrative = buildSelectedNodeNarrative(summary);
 
   return (
     <Stack gap="md">
@@ -236,311 +259,207 @@ export default function NodeInspector(props: {
             <Text fw={700} size="lg">
               {selectedNode.label}
             </Text>
-            <Text size="sm" c="dimmed">
-              {selectedNode.subtitle}
+            <Text size="sm" c="dimmed" className="af-preview-block">
+              {summary.identity.breadcrumb.join(' / ')}
             </Text>
           </div>
-          <Badge
-            color={
-              selectedNode.status === 'DONE'
-                ? 'signal'
-                : selectedNode.status === 'FAILED'
-                  ? 'danger'
-                  : selectedNode.status === 'RUNNING'
-                    ? 'electric'
-                    : 'ink'
-            }
-            variant="light"
-          >
-            {selectedNode.status.toLowerCase()}
-          </Badge>
+          <Stack gap={6} align="flex-end">
+            <Badge color={badgeColor} variant="light">
+              {selectedNode.status.toLowerCase()}
+            </Badge>
+            {summary.stateNow.phase && summary.stateNow.phase !== selectedNode.status.toLowerCase() ? (
+              <Badge variant="outline">
+                {summary.stateNow.phase.replaceAll('_', ' ')}
+              </Badge>
+            ) : null}
+          </Stack>
         </Group>
+
         <Group gap="xs">
           <Badge variant="outline">{selectedNode.type}</Badge>
-          {taskRow ? <Badge variant="outline">Attempt {taskRow.attempt}</Badge> : null}
-          {taskRow?.durationSec !== undefined ? <Badge variant="outline">{taskRow.durationSec}s</Badge> : null}
-          {sourcedFromDescendant ? <Badge variant="outline">Log source {taskRow?.taskId}</Badge> : null}
+          {summary.retry ? <Badge variant="outline">Attempt {summary.retry.attempt}</Badge> : null}
+          {summary.judge ? <Badge variant="outline">Judge visible</Badge> : null}
         </Group>
       </Stack>
 
-      <Tabs defaultValue="activity">
-        <Tabs.List grow>
-          <Tabs.Tab value="activity">Activity</Tabs.Tab>
-          <Tabs.Tab value="artifacts">Artifacts</Tabs.Tab>
-          <Tabs.Tab value="logs">Raw log</Tabs.Tab>
-          <Tabs.Tab value="judge">Judge / Loop</Tabs.Tab>
-        </Tabs.List>
-
-        <Tabs.Panel value="activity" pt="md">
-          <ScrollArea h={540}>
-            <Stack gap="md" pr={4}>
-              <div className="af-activity-card af-activity-card--system">
-                <Stack gap={8}>
-                  <Group justify="space-between" gap="sm" align="flex-start">
-                    <div>
-                      <SurfaceLabel>Run state</SurfaceLabel>
-                      <Text fw={700}>Attempt {taskRow?.attempt || 1}</Text>
-                    </div>
-                    <Badge variant="outline">{selectedNode.status.toLowerCase()}</Badge>
-                  </Group>
-                  <div className="af-stat-list">
-                    {taskRow?.startedAtUtc ? (
-                      <div className="af-stat-row">
-                        <Text size="sm" c="dimmed">Started</Text>
-                        <Text size="sm">{new Date(taskRow.startedAtUtc).toLocaleString()}</Text>
-                      </div>
-                    ) : null}
-                    {taskRow?.endedAtUtc ? (
-                      <div className="af-stat-row">
-                        <Text size="sm" c="dimmed">Ended</Text>
-                        <Text size="sm">{new Date(taskRow.endedAtUtc).toLocaleString()}</Text>
-                      </div>
-                    ) : null}
-                    {taskRow?.durationSec !== undefined ? (
-                      <div className="af-stat-row">
-                        <Text size="sm" c="dimmed">Duration</Text>
-                        <Text size="sm">{taskRow.durationSec}s</Text>
-                      </div>
-                    ) : null}
-                    {taskRow?.provider ? (
-                      <div className="af-stat-row">
-                        <Text size="sm" c="dimmed">Provider</Text>
-                        <Text size="sm">{String(taskRow.provider)}</Text>
-                      </div>
-                    ) : null}
-                    {taskRow?.model ? (
-                      <div className="af-stat-row">
-                        <Text size="sm" c="dimmed">Model</Text>
-                        <Text size="sm">{String(taskRow.model)}</Text>
-                      </div>
-                    ) : null}
-                  </div>
-                  {sourcedFromDescendant ? (
-                    <Text size="sm" c="dimmed">
-                      Following descendant activity from <strong>{taskRow?.taskId}</strong>.
-                    </Text>
-                  ) : null}
-                </Stack>
+      <div className="af-summary-card af-summary-card--hero">
+        <Stack gap="sm">
+          <div className="af-summary-key-grid af-summary-key-grid--quad">
+            {sectionRows(summary).map((row) => (
+              <div className="af-summary-key-card" key={row.label}>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                  {row.label}
+                </Text>
+                <Text size="sm" fw={700}>
+                  {row.value}
+                </Text>
               </div>
-
-              {taskRow?.failureReason ? (
-                <div className="af-activity-card af-activity-card--failure">
-                  <Stack gap={4}>
-                    <Group justify="space-between" gap="sm" align="flex-start">
-                      <SurfaceLabel>Failure</SurfaceLabel>
-                      <Badge color="danger" variant="light">failed</Badge>
-                    </Group>
-                    <Text fw={600} c="red.8">
-                      {String(taskRow.failureReason)}
-                    </Text>
-                  </Stack>
-                </div>
-              ) : null}
-
-              {displayRequest ? (
-                <div className="af-activity-card af-activity-card--prompt">
-                  <Stack gap={8}>
-                    <Group justify="space-between" gap="sm" align="flex-start">
-                      <SurfaceLabel>Prompt / command</SurfaceLabel>
-                      <Badge variant="outline">{selectedNode.type}</Badge>
-                    </Group>
-                    <DocumentPreview
-                      content={displayRequest}
-                      filePath={taskRow?.promptPath || null}
-                    />
-                  </Stack>
-                </div>
-              ) : null}
-
-              {traceEntries.map((entry, index) => (
-                <div className="af-activity-card af-activity-card--decision" key={`${String(entry.atUtc || 'trace')}-${index}`}>
-                  <Stack gap={8}>
-                    <Group justify="space-between" gap="sm" align="flex-start">
-                      <SurfaceLabel>Control flow</SurfaceLabel>
-                      <Badge variant="outline">{String(entry.type || '')}</Badge>
-                    </Group>
-                    <Text fw={600}>{formatTraceEntry(entry)}</Text>
-                    {renderTraceDetail(entry) ? (
-                      <Text size="sm" className="af-preview-block">
-                        {renderTraceDetail(entry)}
-                      </Text>
-                    ) : null}
-                    {entry.atUtc ? (
-                      <Text size="xs" c="dimmed">
-                        {new Date(String(entry.atUtc)).toLocaleString()}
-                      </Text>
-                    ) : null}
-                  </Stack>
-                </div>
-              ))}
-
-              {parsedLogEvents.map((event) => (
-                <div className={`af-activity-card af-activity-card--${event.kind}`} key={event.id}>
-                  <Stack gap={8}>
-                    <Group justify="space-between" gap="sm" align="flex-start">
-                      <SurfaceLabel>{event.kind.replace('_', ' ')}</SurfaceLabel>
-                      <Badge variant="outline">{event.title}</Badge>
-                    </Group>
-                    <Text className="af-code-block" component="pre">
-                      {event.body}
-                    </Text>
-                  </Stack>
-                </div>
-              ))}
-
-              {outputCards.map((item) => (
-                <div className="af-activity-card af-activity-card--artifact" key={item.key}>
-                  <Stack gap={8}>
-                    <Group justify="space-between" gap="sm" align="flex-start">
-                      <SurfaceLabel>Output</SurfaceLabel>
-                      <Badge variant="outline">{item.label}</Badge>
-                    </Group>
-                    <DocumentPreview
-                      content={String(item.content || '')}
-                      filePath={item.path}
-                    />
-                  </Stack>
-                </div>
-              ))}
-
-              {parsedLogEvents.length === 0 && traceEntries.length === 0 && !displayRequest && outputCards.length === 0 ? (
-                <EmptyState
-                  title="No structured activity yet"
-                  description="This node does not have parsed activity output yet. Use the raw log tab for the full execution log."
-                />
-              ) : null}
-            </Stack>
-          </ScrollArea>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="artifacts" pt="md">
-          <Stack gap="sm">
-            {paths.length > 0 ? (
-              <div className="af-file-list">
-                {paths.map(([label, value]) => (
-                  <div className="af-file-row" key={`${label}:${value}`}>
-                    <Text size="sm" fw={600}>{label}</Text>
-                    <Text size="sm" c="dimmed">{value}</Text>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {artifacts.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                No artifacts available for the selected node.
-              </Text>
-            ) : (
-              <div className="af-artifact-actions">
-                {artifacts.map((item) => (
-                  <Button
-                    key={item.path}
-                    variant={selectedArtifact?.path === item.path ? 'filled' : 'default'}
-                    size="compact-sm"
-                    onClick={() => onSelectArtifact(item)}
-                  >
-                    {item.label}
-                  </Button>
-                ))}
-              </div>
-            )}
-
-            {selectedArtifact ? (
-              <>
-                <Group justify="space-between" gap="sm">
-                  <Stack gap={2}>
-                    <SurfaceLabel>Selected artifact</SurfaceLabel>
-                    <Text fw={600} size="sm">{selectedArtifact.label}</Text>
-                  </Stack>
-                  <Button
-                    component="a"
-                    href={api.fs.downloadUrl(selectedArtifact.path)}
-                    variant="subtle"
-                    size="compact-sm"
-                  >
-                    Download {shortName(selectedArtifact.path)}
-                  </Button>
-                </Group>
-                {artifactPreviewLoading ? (
-                  <Group py="lg" justify="center">
-                    <Loader size="sm" />
-                  </Group>
-                ) : (
-                  <ScrollArea h={330}>
-                    <DocumentPreview
-                      content={artifactPreview}
-                      filePath={selectedArtifact.path}
-                    />
-                  </ScrollArea>
-                )}
-              </>
-            ) : null}
-          </Stack>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="logs" pt="md">
-          <div className="af-console-pane">
-            <ScrollArea h={420} className="af-console-scroll">
-              <Text component="pre" className="af-console-pre">
-                {cleanedLogText || 'No node log available for the selected item.'}
-              </Text>
-            </ScrollArea>
+            ))}
           </div>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="judge" pt="md">
-          <Stack gap="sm">
-            {judgeChartData.length > 0 ? (
-                <AreaChart
-                  h={180}
-                  data={judgeChartData}
-                  dataKey="step"
-                  series={[{ name: 'score', color: '#4dcfff' }]}
-                  valueFormatter={(value) => `${value}/10`}
-                  withLegend={false}
-                />
-            ) : (
-              <Text size="sm" c="dimmed">
-                No loop or judge evaluations available for this node.
+          <div className="af-summary-card af-summary-card--nested">
+            <Stack gap={6}>
+              <SurfaceLabel>Why now</SurfaceLabel>
+              <Text size="sm" className="af-preview-block">
+                {summary.whyNow.message}
               </Text>
-            )}
+            </Stack>
+          </div>
+        </Stack>
+      </div>
 
-            {judgeEvaluations.length > 0 ? (
-              <ScrollArea h={240}>
-                <Stack gap="xs">
-                  {judgeEvaluations.slice().reverse().map((evaluation) => (
-                    <div className="af-timeline-entry" key={`${evaluation.iteration}-${evaluation.phase}-${evaluation.atUtc}`}>
-                      <Stack gap={6}>
-                        <Group justify="space-between" align="flex-start">
-                          <Text fw={600} size="sm">
-                            Iteration {evaluation.iteration} · {evaluation.phase}
-                          </Text>
-                          <Badge color={evaluation.passed ? 'green' : 'orange'} variant="light">
-                            {evaluation.score === null ? 'No score' : `${evaluation.score}/10`}
-                          </Badge>
-                        </Group>
-                        {evaluation.reasons.length > 0 ? (
-                          <Stack gap={4}>
-                            {evaluation.reasons.map((reason, index) => (
-                              <Text key={`${evaluation.atUtc}-${index}`} size="sm">
-                                {reason}
-                              </Text>
-                            ))}
-                          </Stack>
-                        ) : (
-                          <Text size="sm" c="dimmed">
-                            No evaluator reasons recorded.
-                          </Text>
-                        )}
-                      </Stack>
-                    </div>
-                  ))}
+      {summary.progressItems.length > 0 ? (
+        <div className="af-summary-chip-grid">
+          {summary.progressItems.map((item) => (
+            <div className="af-summary-chip" key={`${item.label}:${item.value}`}>
+              <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                {item.label}
+              </Text>
+              <Text fw={700}>{item.value}</Text>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="af-summary-card af-summary-card--accent">
+        <Stack gap="sm">
+          <Group justify="space-between" gap="sm" align="flex-start">
+            <div>
+              <SurfaceLabel>Activity briefing</SurfaceLabel>
+              <Text fw={700} size="sm">
+                High-signal selected-scope activity before files or raw logs
+              </Text>
+            </div>
+            <Badge variant="outline">{summary.identity.label}</Badge>
+          </Group>
+          <Text size="sm" c="dimmed" className="af-preview-block">
+            {narrative.layers.activity}
+          </Text>
+          <div className="af-inspector-signal-grid">
+            {activitySignals.map((item) => (
+              <div className="af-inspector-signal-card" key={item.key}>
+                <Stack gap={6}>
+                  <SurfaceLabel>{item.label}</SurfaceLabel>
+                  <Text fw={700} size="sm">
+                    {item.value}
+                  </Text>
+                  <Text size="sm" c="dimmed" className="af-preview-block">
+                    {item.detail}
+                  </Text>
                 </Stack>
-              </ScrollArea>
+              </div>
+            ))}
+          </div>
+        </Stack>
+      </div>
+
+      <div className="af-summary-card">
+        <Stack gap="sm">
+          <Group justify="space-between" gap="sm" align="flex-start">
+            <div>
+              <SurfaceLabel>Artifacts handoff</SurfaceLabel>
+              <Text fw={700} size="sm">
+                {narrative.evidenceScopeIsDescendant
+                  ? `${summary.identity.label} keeps overview and activity while ${narrative.evidenceScopeLabel} holds artifacts and raw logs.`
+                  : `${summary.identity.label} keeps all four layers at one scope.`}
+              </Text>
+            </div>
+            <Badge variant="outline">{focusLabel}</Badge>
+          </Group>
+          <div className="af-summary-list">
+            <div className="af-summary-row">
+              <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                Selected scope
+              </Text>
+              <Text size="sm" fw={700}>
+                {summary.identity.label}
+              </Text>
+            </div>
+            <div className="af-summary-row">
+              <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                Artifacts + raw logs
+              </Text>
+              <Text size="sm" fw={700}>
+                {narrative.evidenceScopeLabel}
+              </Text>
+            </div>
+            {summary.followTarget?.descendant ? (
+              <div className="af-summary-row">
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                  Why this handoff
+                </Text>
+                <Text size="sm" c="dimmed" className="af-preview-block">
+                  {narrative.relationshipDetail}
+                </Text>
+              </div>
             ) : null}
-          </Stack>
-        </Tabs.Panel>
-      </Tabs>
+          </div>
+        </Stack>
+      </div>
+
+      <div className="af-summary-card af-summary-card--accent">
+        <Stack gap="sm">
+          <Group justify="space-between" gap="sm" align="flex-start">
+            <div>
+              <SurfaceLabel>Detail order</SurfaceLabel>
+              <Text fw={700} size="sm">
+                Read this node from summary to raw
+              </Text>
+            </div>
+            <Badge variant="outline">{activeDetailTab === 'raw' ? 'Raw open' : `${readableToken(activeDetailTab)} open`}</Badge>
+          </Group>
+          <Text size="sm" c="dimmed" className="af-preview-block">
+            {narrative.detailPanelDescription}
+          </Text>
+          <div className="af-inspector-ladder">
+            {inspectionLayers(summary, activeDetailTab).map((item) => (
+              <div className={`af-inspector-step ${item.current ? 'af-inspector-step--active' : ''}`} key={item.key}>
+                <div className="af-inspector-step__count">
+                  <Text size="xs" fw={800}>
+                    {item.step}
+                  </Text>
+                </div>
+                <div className="af-inspector-step__body">
+                  <Group justify="space-between" gap="xs" align="flex-start">
+                    <Text fw={700} size="sm">
+                      {item.label}
+                    </Text>
+                    <Badge variant={item.current ? 'filled' : 'outline'}>{item.badge}</Badge>
+                  </Group>
+                  <Text size="sm" c="dimmed" className="af-preview-block">
+                    {item.description}
+                  </Text>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="af-summary-chip-grid">
+            {evidenceItems(summary).map((item) => (
+              <div className="af-summary-chip" key={item.label}>
+                <Text size="xs" c="dimmed" fw={700} tt="uppercase">
+                  {item.label}
+                </Text>
+                <Text fw={700}>{item.value}</Text>
+              </div>
+            ))}
+          </div>
+          <div className="af-summary-actions">
+            <Button size="compact-sm" variant={activeDetailTab === 'activity' ? 'filled' : 'default'} onClick={() => onOpenEvidenceTab('activity')}>
+              Activity
+            </Button>
+            <Button size="compact-sm" variant={activeDetailTab === 'artifacts' ? 'filled' : 'default'} onClick={() => onOpenEvidenceTab('artifacts')}>
+              Artifacts
+            </Button>
+            <Button size="compact-sm" variant={activeDetailTab === 'raw' ? 'filled' : 'default'} onClick={() => onOpenEvidenceTab('raw')}>
+              Raw logs
+            </Button>
+            {summary.followTarget?.descendant && onJumpToFollowNode ? (
+              <Button size="compact-sm" variant="default" onClick={onJumpToFollowNode}>
+                Jump to {summary.followTarget.label}
+              </Button>
+            ) : null}
+          </div>
+        </Stack>
+      </div>
     </Stack>
   );
 }

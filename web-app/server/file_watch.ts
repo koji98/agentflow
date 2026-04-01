@@ -1,31 +1,34 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getBus } from './sse_bus.ts';
-
-function safeReadJson(filePath: string): Record<string, unknown> | null {
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
+import { readJsonFile } from './json_files.ts';
 
 export function deriveTraceUpdates(entries: Record<string, unknown>[], previousLength: number): {
   kind: 'snapshot' | 'append';
   entries: Record<string, unknown>[];
   nextLength: number;
+  startIndex: number;
 } | null {
   if (entries.length === 0) {
     return previousLength === 0
       ? null
-      : { kind: 'snapshot', entries: [], nextLength: 0 };
+      : { kind: 'snapshot', entries: [], nextLength: 0, startIndex: 0 };
   }
+  const snapshotStartIndex = Math.max(0, entries.length - 50);
   if (previousLength <= 0 || entries.length < previousLength) {
     return {
       kind: 'snapshot',
-      entries: entries.slice(Math.max(0, entries.length - 50)),
+      entries: entries.slice(snapshotStartIndex),
       nextLength: entries.length,
+      startIndex: snapshotStartIndex,
+    };
+  }
+  if (entries.length === previousLength) {
+    return {
+      kind: 'snapshot',
+      entries: entries.slice(snapshotStartIndex),
+      nextLength: entries.length,
+      startIndex: snapshotStartIndex,
     };
   }
   const appended = entries.slice(previousLength);
@@ -34,19 +37,23 @@ export function deriveTraceUpdates(entries: Record<string, unknown>[], previousL
     kind: 'append',
     entries: appended,
     nextLength: entries.length,
+    startIndex: previousLength,
   };
 }
 
 export function watchRunFiles(
   runId: string,
   runDir: string,
-  hooks?: { onState?: (state: Record<string, unknown>) => void },
+  hooks?: {
+    onState?: (state: Record<string, unknown>) => void;
+    onTrace?: (entries: Record<string, unknown>[]) => void;
+  },
 ): { close: () => void } {
   const bus = getBus(runId);
   const statePath = path.resolve(runDir, 'run_state.json');
   const tracePath = path.resolve(runDir, 'decision_trace.json');
 
-  const fileWatchers: fs.FSWatcher[] = [];
+  const fileWatchers = new Map<string, fs.FSWatcher>();
   const rootWatchers: fs.FSWatcher[] = [];
   const debounceMap = new Map<string, NodeJS.Timeout>();
   let lastTraceLength = 0;
@@ -57,60 +64,74 @@ export function watchRunFiles(
     debounceMap.set(file, setTimeout(emit, 120));
   };
 
-  const attachStateWatcher = (): void => {
+  const hasFileWatcher = (filePath: string): boolean => fileWatchers.has(filePath);
+  const detachFileWatcher = (filePath: string): void => {
+    const watcher = fileWatchers.get(filePath);
+    if (!watcher) return;
+    try { watcher.close(); } catch {}
+    fileWatchers.delete(filePath);
+  };
+
+  const emitStateUpdate = (): void => {
+    const json = readJsonFile<Record<string, unknown>>(statePath);
+    if (!json) return;
+    hooks?.onState?.(json);
+    bus.emit('event', { type: 'run-state', state: json });
+  };
+
+  const emitTraceUpdate = (): void => {
+    if (!fs.existsSync(tracePath)) {
+      if (lastTraceLength === 0) return;
+      lastTraceLength = 0;
+      hooks?.onTrace?.([]);
+      bus.emit('event', {
+        type: 'decision-trace-snapshot',
+        entries: [],
+        nextLength: 0,
+        startIndex: 0,
+      });
+      return;
+    }
+
     try {
-      const initial = safeReadJson(statePath);
-      if (initial) {
-        hooks?.onState?.(initial);
-        bus.emit('event', { type: 'run-state', state: initial });
+      const raw = fs.readFileSync(tracePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      const entries = parsed as Record<string, unknown>[];
+      const update = deriveTraceUpdates(entries, lastTraceLength);
+      lastTraceLength = entries.length;
+      hooks?.onTrace?.(entries);
+      if (!update) return;
+      if (update.kind === 'snapshot') {
+        bus.emit('event', {
+          type: 'decision-trace-snapshot',
+          entries: update.entries,
+          nextLength: update.nextLength,
+          startIndex: update.startIndex,
+        });
+        return;
       }
-      const w = fs.watch(statePath, () => onChange(statePath, () => {
-        const json = safeReadJson(statePath);
-        if (json) {
-          hooks?.onState?.(json);
-          bus.emit('event', { type: 'run-state', state: json });
-        }
-      }));
-      // Non-standard but helpful for reattachment guards
-      (w as any)._filename = statePath;
-      fileWatchers.push(w);
+      for (const entry of update.entries) {
+        bus.emit('event', { type: 'decision-trace', entry });
+      }
+    } catch {}
+  };
+
+  const attachStateWatcher = (): void => {
+    if (hasFileWatcher(statePath)) return;
+    try {
+      emitStateUpdate();
+      const w = fs.watch(statePath, () => onChange(statePath, emitStateUpdate));
+      fileWatchers.set(statePath, w);
     } catch {}
   };
 
   const attachTraceWatcher = (): void => {
+    if (hasFileWatcher(tracePath)) return;
     try {
-      // Initial snapshot: last 50 entries to avoid floods
-      try {
-        const raw = fs.readFileSync(tracePath, 'utf8');
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) {
-          const update = deriveTraceUpdates(arr as Record<string, unknown>[], 0);
-          lastTraceLength = Array.isArray(arr) ? arr.length : 0;
-          if (update) {
-            bus.emit('event', { type: 'decision-trace-snapshot', entries: update.entries });
-          }
-        }
-      } catch {}
-      const w = fs.watch(tracePath, () => onChange(tracePath, () => {
-        try {
-          const raw = fs.readFileSync(tracePath, 'utf8');
-          const arr = JSON.parse(raw);
-          if (Array.isArray(arr)) {
-            const update = deriveTraceUpdates(arr as Record<string, unknown>[], lastTraceLength);
-            lastTraceLength = arr.length;
-            if (!update) return;
-            if (update.kind === 'snapshot') {
-              bus.emit('event', { type: 'decision-trace-snapshot', entries: update.entries });
-              return;
-            }
-            for (const entry of update.entries) {
-              bus.emit('event', { type: 'decision-trace', entry });
-            }
-          }
-        } catch {}
-      }));
-      (w as any)._filename = tracePath;
-      fileWatchers.push(w);
+      emitTraceUpdate();
+      const w = fs.watch(tracePath, () => onChange(tracePath, emitTraceUpdate));
+      fileWatchers.set(tracePath, w);
     } catch {}
   };
 
@@ -123,15 +144,25 @@ export function watchRunFiles(
     const dirWatcher = fs.watch(runDir, { persistent: true }, (_eventType, filename) => {
       if (!filename) return;
       const full = path.resolve(runDir, filename.toString());
-      if (full === statePath && fs.existsSync(statePath)) {
-        if (!fileWatchers.find((w) => (w as any)._filename === statePath)) {
-          attachStateWatcher();
-        }
+      if (full === statePath) {
+        onChange(statePath, () => {
+          detachFileWatcher(statePath);
+          if (fs.existsSync(statePath)) {
+            attachStateWatcher();
+            return;
+          }
+          emitStateUpdate();
+        });
       }
-      if (full === tracePath && fs.existsSync(tracePath)) {
-        if (!fileWatchers.find((w) => (w as any)._filename === tracePath)) {
-          attachTraceWatcher();
-        }
+      if (full === tracePath) {
+        onChange(tracePath, () => {
+          detachFileWatcher(tracePath);
+          if (fs.existsSync(tracePath)) {
+            attachTraceWatcher();
+            return;
+          }
+          emitTraceUpdate();
+        });
       }
     });
     rootWatchers.push(dirWatcher);
@@ -139,7 +170,7 @@ export function watchRunFiles(
 
   return {
     close: () => {
-      for (const w of fileWatchers) { try { w.close(); } catch {} }
+      for (const watcher of fileWatchers.values()) { try { watcher.close(); } catch {} }
       for (const w of rootWatchers) { try { w.close(); } catch {} }
       for (const t of debounceMap.values()) clearTimeout(t);
     },

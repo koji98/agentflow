@@ -14,6 +14,7 @@
     "web:dev": "npm --prefix web-app run dev",
     "web:build": "npm --prefix web-app run build",
     "web:start": "npm --prefix web-app run start",
+    "fixtures:refresh-monitor": "node --import tsx scripts/refresh-monitor-sample-fixtures.ts",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
     "test": "source ~/.nvm/nvm.sh && nvm exec 20 node --import tsx --test tests/*.test.ts",

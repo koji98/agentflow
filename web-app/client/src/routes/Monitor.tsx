@@ -3,77 +3,122 @@ import {
   AppShell,
   Badge,
   Box,
-  Burger,
   Button,
   Group,
+  Loader,
   ScrollArea,
   SegmentedControl,
   Stack,
   Text,
   Title,
 } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
-import { DonutChart, Sparkline } from '@mantine/charts';
 import {
-  IconActivityHeartbeat,
   IconArrowLeft,
-  IconChartDonut,
   IconPlayerPause,
   IconRefresh,
-  IconRouteAltLeft,
 } from '@tabler/icons-react';
 import { Link, useParams } from 'react-router-dom';
 
 import Graph from '../components/Graph.tsx';
+import MonitorEvidencePanel from '../components/MonitorEvidencePanel.tsx';
 import NodeInspector from '../components/NodeInspector.tsx';
+import MonitorRunFeedPanel from '../components/MonitorRunFeedPanel.tsx';
 import { api } from '../api/client.ts';
-import { BentoGrid, BentoTile, KpiTile, SurfaceLabel, TileHeader } from '../design/primitives.tsx';
-import { useArtifactPreview, useRun } from '../state/monitorStore.ts';
+import { BentoGrid, BentoTile, EmptyState, SurfaceLabel, TileHeader } from '../design/primitives.tsx';
 import {
-  activitySparkline,
+  useArtifactPreview,
+  useMonitorPreference,
+  useRun,
+  useRunScopedMonitorPreference,
+} from '../state/monitorStore.ts';
+import {
+  buildFocusedWorkflowGraph,
+  buildJudgeChartData,
+  buildNodeSummary,
+  buildSelectedNodeNarrative,
   buildWorkflowGraph,
   collectJudgeEvaluations,
-  buildJudgeChartData,
   filterTraceForNode,
-  formatTraceEntry,
-  getRepresentativeTaskRow,
+  graphFocusModeDescription,
+  graphFocusModeLabel,
   pickInitialGraphSelection,
+  type GraphFocusMode,
+  type MonitorDetailTab,
 } from '../lib/monitor.ts';
 
-function renderPreview(text: string) {
-  return text || 'No content available.';
+type StoredMonitorDetailTab = MonitorDetailTab | 'outputs';
+
+function normalizeDetailTab(value: StoredMonitorDetailTab): MonitorDetailTab {
+  return value === 'outputs' ? 'artifacts' : value;
+}
+
+function readableToken(value: string | null | undefined): string {
+  return String(value || '')
+    .replaceAll('_', ' ')
+    .replaceAll('-', ' ')
+    .trim();
+}
+
+function formatLocalTimestamp(value: string | null | undefined): string {
+  if (!value) return 'No timestamp yet';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return 'No timestamp yet';
+  return parsed.toLocaleString();
 }
 
 export default function Monitor() {
   const { runId = '' } = useParams();
-  const [navbarOpened, { toggle: toggleNavbar }] = useDisclosure(false);
-  const { state, trace, consoleEntries, status, connected, totals } = useRun(runId);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const { state, trace, consoleEntries, status, connected, hydrating, loadIssue, totals, controls } = useRun(runId, refreshToken);
   const [plan, setPlan] = useState<Record<string, unknown> | null>(null);
-  const [selectedGraphId, setSelectedGraphId] = useState<string | null>(null);
+  const [planLoadState, setPlanLoadState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [selectedGraphId, setSelectedGraphId] = useRunScopedMonitorPreference<string | null>(runId, 'selectedGraphId', null);
+  const [focusMode, setFocusMode] = useMonitorPreference<GraphFocusMode>('focusMode', 'selected');
   const [artifacts, setArtifacts] = useState<any[]>([]);
   const [selectedArtifact, setSelectedArtifact] = useState<any | null>(null);
   const [selectedLogText, setSelectedLogText] = useState('');
-  const [timelineFilter, setTimelineFilter] = useState('all');
+  const [runActionBusy, setRunActionBusy] = useState<'resume' | 'cancel' | null>(null);
+  const [storedEvidenceTab, setStoredEvidenceTab] = useMonitorPreference<StoredMonitorDetailTab>('detailTab', 'activity');
+  const [timelineFilter, setTimelineFilter] = useMonitorPreference<string>('timelineFilter', 'all');
+  const [feedOpen, setFeedOpen] = useMonitorPreference<boolean>('feedOpen', false);
   const planConfigPath = state?.configPath || state?.planPath || null;
+  const evidenceTab = normalizeDetailTab(storedEvidenceTab);
 
   useEffect(() => {
-    if (!planConfigPath) return;
+    if (storedEvidenceTab === 'outputs') {
+      setStoredEvidenceTab('artifacts');
+    }
+  }, [setStoredEvidenceTab, storedEvidenceTab]);
+
+  useEffect(() => {
+    setPlan(null);
+    if (!planConfigPath) {
+      setPlanLoadState('idle');
+      return;
+    }
     let disposed = false;
+    setPlanLoadState('loading');
     api.fs.read(String(planConfigPath))
       .then((result) => {
         if (disposed) return;
         if (!result.text) {
           setPlan(null);
+          setPlanLoadState('error');
           return;
         }
         try {
           setPlan(JSON.parse(result.text));
+          setPlanLoadState('ready');
         } catch {
           setPlan(null);
+          setPlanLoadState('error');
         }
       })
       .catch(() => {
-        if (!disposed) setPlan(null);
+        if (!disposed) {
+          setPlan(null);
+          setPlanLoadState('error');
+        }
       });
     return () => {
       disposed = true;
@@ -83,7 +128,8 @@ export default function Monitor() {
   const graph = useMemo(() => buildWorkflowGraph(plan, state, trace), [plan, state, trace]);
 
   useEffect(() => {
-    setSelectedGraphId(null);
+    setPlan(null);
+    setPlanLoadState('idle');
   }, [runId]);
 
   useEffect(() => {
@@ -97,10 +143,68 @@ export default function Monitor() {
     ? graph.items.find((item) => item.graphId === selectedGraphId) || null
     : null;
   const selectedWorkflowId = selectedNode?.workflowId || null;
-  const selectedTaskRow = useMemo(
-    () => getRepresentativeTaskRow(state, selectedNode),
-    [selectedNode, state],
+  const selectedSummary = useMemo(
+    () => buildNodeSummary(graph, selectedNode, state, trace, { artifactCount: artifacts.length }),
+    [artifacts.length, graph, selectedNode, state, trace],
   );
+  const selectedNarrative = useMemo(
+    () => (selectedSummary ? buildSelectedNodeNarrative(selectedSummary) : null),
+    [selectedSummary],
+  );
+  const selectedFollowWorkflowId = selectedSummary?.followTarget?.workflowId || null;
+  const focusedGraph = useMemo(
+    () => buildFocusedWorkflowGraph(graph, {
+      selectedId: selectedGraphId || undefined,
+      selectionKey: 'graphId',
+      mode: focusMode,
+      followId: selectedFollowWorkflowId,
+    }),
+    [focusMode, graph, selectedFollowWorkflowId, selectedGraphId],
+  );
+  const focusedStatusCounts = useMemo(() => ({
+    running: focusedGraph.items.filter((item) => item.status === 'RUNNING').length,
+    failed: focusedGraph.items.filter((item) => item.status === 'FAILED').length,
+    pending: focusedGraph.items.filter((item) => item.status === 'PENDING').length,
+    done: focusedGraph.items.filter((item) => item.status === 'DONE').length,
+  }), [focusedGraph.items]);
+  const selectedTaskRow = selectedSummary?.evidenceRow || null;
+  const selectedFollowNode = selectedSummary?.followTarget
+    ? graph.nodeByWorkflowId.get(selectedSummary.followTarget.workflowId) || selectedNode
+    : selectedNode;
+  const selectedRawOutputSource = useMemo(() => {
+    if (!selectedTaskRow) return null;
+    const logArtifact = artifacts.find((item) => item.key === 'log' && item.path);
+    if (logArtifact) {
+      return {
+        kind: 'log' as const,
+        path: logArtifact.path,
+        label: 'Execution log',
+      };
+    }
+    const messageArtifact = artifacts.find((item) => item.key === 'message' && item.path);
+    if (messageArtifact) {
+      return {
+        kind: 'file' as const,
+        path: messageArtifact.path,
+        label: 'Last message / stdout',
+      };
+    }
+    if (selectedTaskRow.logPath) {
+      return {
+        kind: 'log' as const,
+        path: selectedTaskRow.logPath,
+        label: 'Execution log',
+      };
+    }
+    if (selectedTaskRow.lastMessagePath) {
+      return {
+        kind: 'file' as const,
+        path: selectedTaskRow.lastMessagePath,
+        label: 'Last message / stdout',
+      };
+    }
+    return null;
+  }, [artifacts, selectedTaskRow]);
 
   useEffect(() => {
     if (!selectedTaskRow?.taskKey) {
@@ -134,19 +238,37 @@ export default function Monitor() {
   const { content: artifactPreview, loading: artifactPreviewLoading } = useArtifactPreview(runId, selectedArtifact);
 
   useEffect(() => {
-    if (!selectedTaskRow?.taskKey) {
+    if (!selectedTaskRow?.taskKey || !selectedRawOutputSource) {
       setSelectedLogText('');
       return;
     }
     let disposed = false;
     setSelectedLogText('');
-    api.runs.logs(runId, selectedTaskRow.taskKey)
-      .then((text) => {
+    const loadStaticFile = async (filePath: string) => {
+      const preview = await api.fs.read(filePath);
+      return preview.text || [preview.head, preview.tail].filter(Boolean).join('\n...\n');
+    };
+    const loadInitialOutput = async () => {
+      try {
+        if (selectedRawOutputSource.kind === 'log') {
+          const text = await api.runs.logs(runId, selectedTaskRow.taskKey);
+          if (!disposed) setSelectedLogText(text);
+          return;
+        }
+        const text = await loadStaticFile(selectedRawOutputSource.path);
         if (!disposed) setSelectedLogText(text);
-      })
-      .catch(() => {
+      } catch {
+        if (selectedTaskRow.lastMessagePath && selectedRawOutputSource.path !== selectedTaskRow.lastMessagePath) {
+          try {
+            const fallback = await loadStaticFile(selectedTaskRow.lastMessagePath);
+            if (!disposed) setSelectedLogText(fallback);
+            return;
+          } catch {}
+        }
         if (!disposed) setSelectedLogText('');
-      });
+      }
+    };
+    void loadInitialOutput();
 
     if (!state?.isActive) {
       return () => {
@@ -162,11 +284,50 @@ export default function Monitor() {
         setSelectedLogText((current) => `${current}${current ? '\n' : ''}${payload.text}`);
       } catch {}
     });
+    source.addEventListener('log-snapshot', (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data) as { text?: string };
+        if (disposed) return;
+        setSelectedLogText(payload.text || '');
+      } catch {}
+    });
     return () => {
       disposed = true;
       source.close();
     };
-  }, [runId, selectedTaskRow?.taskKey, state?.isActive]);
+  }, [
+    runId,
+    selectedRawOutputSource,
+    selectedTaskRow?.lastMessagePath,
+    selectedTaskRow?.taskKey,
+    state?.isActive,
+  ]);
+
+  const handleResume = async () => {
+    if (!runId || !canResume || runActionBusy) return;
+    setRunActionBusy('resume');
+    try {
+      await api.runs.resumeById(runId);
+      setRefreshToken((current) => current + 1);
+    } catch {
+      // noop
+    } finally {
+      setRunActionBusy(null);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!runId || !canCancel || runActionBusy) return;
+    setRunActionBusy('cancel');
+    try {
+      await api.runs.cancel({ runId });
+      setRefreshToken((current) => current + 1);
+    } catch {
+      // noop
+    } finally {
+      setRunActionBusy(null);
+    }
+  };
 
   const judgeEvaluations = useMemo(
     () => collectJudgeEvaluations(trace, selectedWorkflowId || ''),
@@ -178,7 +339,7 @@ export default function Monitor() {
   );
 
   const timelineEntries = useMemo(() => {
-    const entries = filterTraceForNode(trace, selectedWorkflowId);
+    const entries = filterTraceForNode(trace, null);
     if (timelineFilter === 'gates') return entries.filter((entry) => String(entry.type).includes('while'));
     if (timelineFilter === 'retries') return entries.filter((entry) => String(entry.type) === 'task_retry');
     if (timelineFilter === 'failures') {
@@ -188,7 +349,7 @@ export default function Monitor() {
       });
     }
     return entries;
-  }, [selectedWorkflowId, timelineFilter, trace]);
+  }, [timelineFilter, trace]);
   const selectedNodeTraceEntries = useMemo(
     () => filterTraceForNode(trace, selectedWorkflowId),
     [selectedWorkflowId, trace],
@@ -215,30 +376,108 @@ export default function Monitor() {
         : status === 'CANCELLED'
           ? 'Viewing the final persisted cancelled state.'
           : 'Historical run loaded from disk.';
-  const dashboardBreakdown = [
-    { name: 'Done', value: totals.done, color: '#ffe14a' },
-    { name: 'Running', value: totals.running, color: '#8ed9ff' },
-    { name: 'Failed', value: totals.failed, color: '#ff8c84' },
-    { name: 'Pending', value: totals.pending, color: '#fff4cf' },
-  ].filter((item) => item.value > 0);
+  const monitorStripAccent = status === 'DONE'
+    ? 'yellow'
+    : status === 'FAILED' || status === 'CANCELLED'
+      ? 'red'
+      : status === 'RUNNING'
+        ? 'blue'
+        : 'paper';
+  const runStatusBadgeColor = status === 'RUNNING'
+    ? 'electric'
+    : status === 'DONE'
+      ? 'signal'
+      : status === 'FAILED' || status === 'CANCELLED'
+        ? 'danger'
+        : 'ink';
+  const focusLabel = graphFocusModeLabel(focusMode);
+  const focusDescription = graphFocusModeDescription(focusMode);
+  const selectedScopeLabel = selectedNarrative?.selectedScopeLabel || 'Choose a node in the graph';
+  const evidenceScopeLabel = selectedNarrative?.evidenceScopeLabel || 'No scope selected';
+  const currentEvidenceLabel = evidenceTab === 'activity'
+    ? 'Activity'
+    : evidenceTab === 'artifacts'
+      ? 'Artifacts'
+      : 'Raw logs';
+  const selectedStateLabel = selectedSummary
+    ? selectedSummary.stateNow.phase
+      ? `${selectedSummary.stateNow.status.toLowerCase()} · ${readableToken(selectedSummary.stateNow.phase)}`
+      : selectedSummary.stateNow.status.toLowerCase()
+    : 'Select a node to focus the monitor';
+  const selectedWhyLabel = selectedSummary?.whyNow.message || 'The graph stays primary. Select a node to understand the current scope, why it matters, and what happens next.';
+  const selectedNextLabel = selectedSummary?.next.label || 'Open a node to see the next transition.';
+  const selectedUpdatedLabel = selectedSummary ? formatLocalTimestamp(selectedSummary.stateNow.sinceAtUtc) : 'No timestamp yet';
+  const evidenceHandoffLabel = selectedNarrative?.detailPanelDescription
+    || 'Activity stays the first deeper layer, followed by Artifacts and Raw logs.';
+  const stageHandoffLabel = selectedNarrative?.stageHandoff
+    || 'Overview, Activity, Artifacts, and Raw logs stay on the selected scope.';
+  const feedToggleLabel = feedOpen ? 'Hide run feed' : 'Open run feed';
+  const detailSurfaceLabel = selectedSummary
+    ? evidenceTab === 'activity'
+      ? `${currentEvidenceLabel} stays scoped to ${selectedScopeLabel}`
+      : `${currentEvidenceLabel} follows ${evidenceScopeLabel}`
+    : 'Choose a graph node to inspect the next evidence layer.';
+  const isPlanHydrating = Boolean(planConfigPath) && planLoadState !== 'ready' && planLoadState !== 'error';
+  const showResolvingState = hydrating || isPlanHydrating;
+  const canResume = controls.canResume;
+  const canCancel = controls.canCancel;
+  const executionStats = [
+    { label: 'Tasks', value: String(totals.tasks) },
+    { label: 'Running', value: String(totals.running) },
+    { label: 'Failed', value: String(totals.failed) },
+    { label: 'Loops', value: String(state?.totalLoopIterations || 0) },
+  ];
+  const focusStats = [
+    { label: 'Visible', value: String(focusedGraph.counts.visible) },
+    { label: 'Hidden', value: String(focusedGraph.counts.hidden) },
+    { label: 'Running', value: String(focusedStatusCounts.running) },
+    { label: 'Failed', value: String(focusedStatusCounts.failed) },
+  ];
+  const selectedScopeStats = [
+    { label: 'State', value: selectedStateLabel },
+    { label: 'Updated', value: selectedUpdatedLabel },
+    { label: 'Next', value: selectedNextLabel },
+  ];
+  const jumpToFollowTarget = () => {
+    const followWorkflowId = selectedSummary?.followTarget?.workflowId;
+    if (!followWorkflowId) return;
+    const followNode = graph.nodeByWorkflowId.get(followWorkflowId);
+    if (!followNode) return;
+    setFocusMode('selected');
+    setSelectedGraphId(followNode.graphId);
+  };
+  const recoveryTitle = loadIssue?.kind === 'run_id_ambiguous'
+    ? 'Choose the exact historical run'
+    : loadIssue?.kind === 'run_not_found'
+      ? 'Run not found in the current local roots'
+      : 'Unable to hydrate this run';
+  const recoveryDescription = loadIssue?.kind === 'run_id_ambiguous'
+    ? `Multiple persisted runs match ${runId}. Open the exact run directory from Launch view so the monitor does not guess.`
+    : loadIssue?.kind === 'run_not_found'
+      ? `No persisted run with id ${runId} was found under the current allowed local roots.`
+      : 'The monitor could not load a persisted snapshot from the current local roots.';
+  const recoveryEmptyTitle = loadIssue?.kind === 'run_id_ambiguous'
+    ? 'Open the exact run directory from Launch view.'
+    : 'Open the run from Launch view or restore its local root.';
+  const recoveryEmptyDescription = loadIssue?.kind === 'run_id_ambiguous'
+    ? 'This deep link is not specific enough. Use Launch view -> Open existing run, pick the correct directory, and then return to the monitor.'
+    : 'If the run still exists on disk, reopen it from the launch board or add its parent path to AGENTFLOW_WEB_ALLOWED_ROOTS before retrying this deep link.';
 
   return (
     <AppShell
-      header={{ height: 74 }}
-      navbar={{ width: 310, breakpoint: 'lg', collapsed: { mobile: !navbarOpened } }}
+      header={{ height: { base: 196, sm: 86 } }}
       padding="lg"
     >
       <AppShell.Header className="af-shell-header">
-        <Group h="100%" px="lg" justify="space-between">
-          <Group>
-            <Burger opened={navbarOpened} onClick={toggleNavbar} hiddenFrom="lg" size="sm" />
+        <Group px="lg" py="sm" className="af-shell-header__inner">
+          <Box className="af-shell-header__meta">
             <Box>
               <Title order={3}>Run monitor</Title>
-              <Text size="sm" c="dimmed">
+              <Text size="sm" c="dimmed" className="af-shell-plan-path">
                 {state?.configPath || state?.planPath || 'Loading run metadata...'}
               </Text>
             </Box>
-          </Group>
+          </Box>
           <div className="af-shell-actions">
             <Button component={Link} to="/" variant="default" leftSection={<IconArrowLeft size={16} />}>
               Launch view
@@ -246,7 +485,9 @@ export default function Monitor() {
             <Button
               variant="default"
               leftSection={<IconRefresh size={16} />}
-              onClick={() => api.runs.resumeById(runId).catch(() => undefined)}
+              onClick={() => { void handleResume(); }}
+              disabled={!runId || !canResume || runActionBusy !== null}
+              loading={runActionBusy === 'resume'}
             >
               Resume
             </Button>
@@ -254,7 +495,9 @@ export default function Monitor() {
               variant="filled"
               color="orange"
               leftSection={<IconPlayerPause size={16} />}
-              onClick={() => api.runs.cancel({ runId }).catch(() => undefined)}
+              onClick={() => { void handleCancel(); }}
+              disabled={!runId || !canCancel || runActionBusy !== null}
+              loading={runActionBusy === 'cancel'}
             >
               Cancel
             </Button>
@@ -262,214 +505,377 @@ export default function Monitor() {
         </Group>
       </AppShell.Header>
 
-      <AppShell.Navbar className="af-shell-navbar" p="md">
-        <div className="af-rail">
-          <BentoTile
-            accent="yellow"
-            header={
-              <TileHeader
-                eyebrow="Run summary"
-                title="Execution state"
-                description="Core run metadata, kept anchored in a narrow rail."
-              />
-            }
-          >
-            <Stack gap="sm">
-              <Group gap="xs">
-                <Badge variant="outline">{runId}</Badge>
-                <Badge color={status === 'RUNNING' ? 'electric' : status === 'DONE' ? 'signal' : status === 'FAILED' ? 'danger' : status === 'CANCELLED' ? 'danger' : 'ink'}>
-                  {status.toLowerCase()}
-                </Badge>
-              </Group>
-              {state?.runDir ? (
-                <Text component="pre" className="af-code-block">
-                  {String(state.runDir)}
-                </Text>
-              ) : null}
-              <Text size="sm" c="dimmed">
-                Last update {state?.updatedAtUtc ? new Date(String(state.updatedAtUtc)).toLocaleString() : 'pending'}
-              </Text>
-            </Stack>
-          </BentoTile>
-
-          <BentoTile
-            accent="paper"
-            header={<TileHeader eyebrow="Task health" title="Execution distribution" description="State breakdown across all executable rows." />}
-          >
-            {dashboardBreakdown.length > 0 ? (
-              <DonutChart data={dashboardBreakdown} chartLabel={totals.tasks} />
-            ) : (
-              <Text size="sm" c="dimmed">Waiting for task state.</Text>
-            )}
-          </BentoTile>
-
-          <BentoTile
-            accent="red"
-            header={<TileHeader eyebrow="Recent activity" title="Decision cadence" description="A compact sparkline for loop and control-flow activity." />}
-          >
-            <Stack gap="sm">
-              <Sparkline data={activitySparkline(trace)} color="cyan.6" />
-              <Text size="sm" c="dimmed">{trace.length} decision events captured.</Text>
-              <Text size="sm" c="dimmed">{activityLabel}</Text>
-            </Stack>
-          </BentoTile>
-        </div>
-      </AppShell.Navbar>
-
       <AppShell.Main>
-        <BentoGrid>
-          <KpiTile
-            label="Run status"
-            value={status}
-            meta={transportLabel}
-            accent={status === 'DONE' ? 'signal' : status === 'FAILED' ? 'danger' : status === 'CANCELLED' ? 'danger' : 'electric'}
-            tileAccent={status === 'DONE' ? 'yellow' : status === 'FAILED' ? 'red' : status === 'CANCELLED' ? 'red' : 'blue'}
-            icon={<IconRouteAltLeft size={18} />}
-          />
-          <KpiTile
-            label="Tasks"
-            value={String(totals.tasks)}
-            meta={`${totals.done} done · ${totals.running} running · ${totals.failed} failed`}
-            accent="electric"
-            tileAccent="paper"
-            icon={<IconChartDonut size={18} />}
-          />
-          <KpiTile
-            label="Loop iterations"
-            value={String(state?.totalLoopIterations || 0)}
-            meta={`${judgeEvaluations.length} judge events on selected node`}
-            accent="signal"
-            tileAccent="yellow"
-            icon={<IconActivityHeartbeat size={18} />}
-          />
-          <KpiTile
-            label="Selected node"
-            value={selectedWorkflowId || 'None'}
-            meta={selectedNode ? selectedNode.type : 'Choose a node in the graph'}
-            accent="danger"
-            tileAccent="red"
-            icon={<IconRefresh size={18} />}
-          />
-
-          <BentoTile
-            col={8}
-            row={3}
-            tone="hero"
-            accent="paper"
-            className="graph-panel"
-            header={
-              <TileHeader
-                eyebrow="Workflow graph"
-                title="Topology, state, and selection"
-                description="The graph is the primary surface. Use it to track execution and drive the inspector."
-                actions={selectedWorkflowId ? <Badge variant="outline">Selected: {selectedWorkflowId}</Badge> : null}
-              />
-            }
-          >
-            <Box h={690}>
-              <Graph
-                plan={plan}
-                state={state}
-                trace={trace}
-                selectedId={selectedGraphId || undefined}
-                selectionKey="graphId"
-                onSelectNode={setSelectedGraphId}
-              />
-            </Box>
-          </BentoTile>
-
-          <BentoTile
-            col={4}
-            row={3}
-            accent="blue"
-            header={
-              <TileHeader
-                eyebrow="Inspector"
-                title="Selected node detail"
-                description="Prompt, artifacts, logs, and loop/judge output stay attached to the current selection."
-              />
-            }
-          >
-            <NodeInspector
-              selectedNode={selectedNode}
-              taskRow={selectedTaskRow}
-              artifacts={artifacts}
-              selectedArtifact={selectedArtifact}
-              onSelectArtifact={setSelectedArtifact}
-              artifactPreview={artifactPreview}
-              artifactPreviewLoading={artifactPreviewLoading}
-              selectedLogText={selectedLogText}
-              judgeEvaluations={judgeEvaluations}
-              judgeChartData={judgeChartData}
-              traceEntries={selectedNodeTraceEntries}
-            />
-          </BentoTile>
-
-          <BentoTile
-            col={4}
-            row={2}
-            tone="console"
-            accent="ink"
-            header={
-              <TileHeader
-                eyebrow="Runner console"
-                title="Live orchestration output"
-                description="Parent CLI stdout and stderr stream here while the run is active."
-              />
-            }
-          >
-            <div className="af-console-pane">
-              <ScrollArea h={350} className="af-console-scroll">
-                <Text component="pre" className="af-console-pre">
-                  {renderPreview(consoleText)}
+        {showResolvingState ? (
+          <BentoGrid className="af-monitor-grid">
+            <BentoTile
+              col={12}
+              row={2}
+              tone="hero"
+              accent="paper"
+              header={
+                <TileHeader
+                  eyebrow="Resolving run"
+                  title="Hydrating monitor surfaces"
+                  description="Load persisted run state, graph topology, and selected-scope context before showing the monitor shell."
+                />
+              }
+            >
+              <Stack align="center" justify="center" gap="md" py="xl">
+                <Loader size="sm" />
+                <Text fw={700}>{runId || 'Preparing monitor session'}</Text>
+                <Text size="sm" c="dimmed" ta="center" maw={540}>
+                  The monitor waits for the first run snapshot and plan topology so the graph, overview, and evidence tiles do not open in a misleading empty state.
                 </Text>
-              </ScrollArea>
-            </div>
-          </BentoTile>
-
-          <BentoTile
-            col={8}
-            row={2}
-            accent="yellow"
-            header={
-              <TileHeader
-                eyebrow="Activity timeline"
-                title="Recent control-flow events"
-                description="Filter retries, gates, and failures without leaving the dashboard."
-              />
-            }
-          >
-            <Stack gap="md">
-              <SegmentedControl
-                value={timelineFilter}
-                onChange={setTimelineFilter}
-                data={[
-                  { label: 'All', value: 'all' },
-                  { label: 'Gates', value: 'gates' },
-                  { label: 'Retries', value: 'retries' },
-                  { label: 'Failures', value: 'failures' },
-                ]}
-              />
-              <ScrollArea h={320}>
-                <div className="af-timeline-list">
-                  {timelineEntries.length === 0 ? (
-                    <Text size="sm" c="dimmed">No timeline entries for the current filter.</Text>
-                  ) : timelineEntries.map((entry, index) => (
-                    <div className="af-timeline-entry" key={`${String(entry.atUtc || 't')}-${index}`}>
-                      <Stack gap={6}>
-                        <Group justify="space-between" align="flex-start" gap="sm">
-                          <Text fw={600} size="sm">{formatTraceEntry(entry)}</Text>
-                          <Badge variant="outline">{String(entry.type || '')}</Badge>
+              </Stack>
+            </BentoTile>
+          </BentoGrid>
+        ) : !state ? (
+          <BentoGrid className="af-monitor-grid">
+            <BentoTile
+              col={12}
+              row={loadIssue?.kind === 'run_id_ambiguous' ? 3 : 2}
+              accent="red"
+              header={
+                <TileHeader
+                  eyebrow="Run unavailable"
+                  title={recoveryTitle}
+                  description={recoveryDescription}
+                />
+              }
+            >
+              <Stack gap="md">
+                <EmptyState
+                  title={recoveryEmptyTitle}
+                  description={recoveryEmptyDescription}
+                />
+                {loadIssue?.kind === 'run_id_ambiguous' && loadIssue.matches.length > 0 ? (
+                  <div className="af-monitor-recovery-list">
+                    {loadIssue.matches.map((match) => (
+                      <div key={match.runDir} className="af-monitor-recovery-card">
+                        <Group justify="space-between" gap="sm" align="flex-start">
+                          <div>
+                            <SurfaceLabel>Matched run</SurfaceLabel>
+                            <Text fw={700} size="sm">{match.runDir}</Text>
+                          </div>
+                          <Badge variant="outline">
+                            {match.updatedAtUtc ? formatLocalTimestamp(match.updatedAtUtc) : 'No timestamp'}
+                          </Badge>
                         </Group>
-                        <Text size="xs" c="dimmed">{String(entry.atUtc || '')}</Text>
-                      </Stack>
-                    </div>
-                  ))}
+                        <Text size="sm" c="dimmed">
+                          {match.planPath || 'No plan path recorded in run_state.json'}
+                        </Text>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </Stack>
+            </BentoTile>
+          </BentoGrid>
+        ) : (
+          <BentoGrid className="af-monitor-grid">
+            <BentoTile
+              col={8}
+              row={4}
+              tone="hero"
+              accent="paper"
+              className="graph-panel"
+              header={
+                <TileHeader
+                  eyebrow="Workflow graph"
+                  title={transportLabel}
+                  description="Select a node to reframe the topology. Run state, focus mode, and selected-scope evidence stay attached without pushing the graph out of view."
+                  actions={
+                    selectedSummary ? (
+                      <Group gap="xs">
+                        <Badge variant="outline">Scope: {selectedSummary.identity.label}</Badge>
+                        <Badge variant="outline">Evidence: {evidenceScopeLabel}</Badge>
+                        <Badge variant="outline">Layer: {currentEvidenceLabel}</Badge>
+                      </Group>
+                    ) : null
+                  }
+                />
+              }
+            >
+              <div className="af-monitor-stage-shell">
+                <div className="af-monitor-stage-strip">
+                  <div className="af-monitor-stage-card" data-accent={monitorStripAccent}>
+                    <Stack gap={8}>
+                      <Group justify="space-between" align="flex-start" gap="sm">
+                        <div className="af-monitor-stage-card__copy">
+                          <SurfaceLabel>Execution status</SurfaceLabel>
+                          <Text fw={700} size="sm">
+                            {transportLabel}
+                          </Text>
+                        </div>
+                        <Badge color={runStatusBadgeColor}>
+                          {status.toLowerCase()}
+                        </Badge>
+                      </Group>
+                      <Group gap="xs">
+                        <Badge variant="outline">{runId}</Badge>
+                        <Badge variant="outline">{connected && status === 'RUNNING' ? 'Live stream' : 'Snapshot view'}</Badge>
+                      </Group>
+                      <Text size="sm" c="dimmed" className="af-preview-block" lineClamp={2}>
+                        {activityLabel}
+                      </Text>
+                      {state?.runDir ? (
+                        <Text size="xs" c="dimmed" className="af-monitor-brief-path" title={String(state.runDir)}>
+                          {String(state.runDir)}
+                        </Text>
+                      ) : null}
+                      <div className="af-monitor-stage-stats">
+                        {executionStats.map((item) => (
+                          <div className="af-monitor-stage-stat" key={item.label}>
+                            <Text size="xs" c="dimmed" fw={700} tt="uppercase">{item.label}</Text>
+                            <Text fw={700}>{item.value}</Text>
+                          </div>
+                        ))}
+                      </div>
+                    </Stack>
+                  </div>
+
+                  <div className="af-monitor-stage-card">
+                    <Stack gap={8}>
+                      <Group justify="space-between" align="flex-start" gap="sm">
+                        <div className="af-monitor-stage-card__copy">
+                          <SurfaceLabel>Graph lens</SurfaceLabel>
+                          <Text fw={700} size="sm">
+                            {focusLabel}
+                          </Text>
+                        </div>
+                        <Badge variant="outline">{focusedGraph.counts.hidden} hidden</Badge>
+                      </Group>
+                      <Text size="sm" c="dimmed" className="af-preview-block" lineClamp={2}>
+                        {focusDescription}
+                      </Text>
+                      <SegmentedControl
+                        size="sm"
+                        value={focusMode}
+                        onChange={(value) => setFocusMode(value as GraphFocusMode)}
+                        data={[
+                          { label: 'Scope', value: 'selected' },
+                          { label: 'Active', value: 'active' },
+                          { label: 'Failed', value: 'failed' },
+                          { label: 'Collapse', value: 'collapse-completed' },
+                          { label: 'Full', value: 'full' },
+                        ]}
+                      />
+                      <div className="af-monitor-stage-stats af-monitor-stage-stats--focus">
+                        {focusStats.map((item) => (
+                          <div className="af-monitor-stage-stat" key={item.label}>
+                            <Text size="xs" c="dimmed" fw={700} tt="uppercase">{item.label}</Text>
+                            <Text fw={700}>{item.value}</Text>
+                          </div>
+                        ))}
+                      </div>
+                    </Stack>
+                  </div>
+
+                  <div className="af-monitor-stage-card af-monitor-stage-card--scope">
+                    <Stack gap={8}>
+                      <Group justify="space-between" gap="sm" align="flex-start">
+                        <div className="af-monitor-stage-card__copy">
+                          <SurfaceLabel>Selected path</SurfaceLabel>
+                          <Text fw={700} size="sm">
+                            {selectedScopeLabel}
+                          </Text>
+                        </div>
+                        {selectedSummary ? (
+                          <Badge variant="outline">{selectedSummary.identity.type.replaceAll('_', ' ')}</Badge>
+                        ) : (
+                          <Badge variant="outline">Awaiting selection</Badge>
+                        )}
+                      </Group>
+                      <div className="af-monitor-stage-meta">
+                        {selectedScopeStats.map((item) => (
+                          <div className="af-monitor-stage-meta__item" key={item.label}>
+                            <Text size="xs" c="dimmed" fw={700} tt="uppercase">{item.label}</Text>
+                            <Text fw={700} size="sm">{item.value}</Text>
+                          </div>
+                        ))}
+                      </div>
+                      <Text size="sm" fw={700} className="af-preview-block" lineClamp={2}>
+                        {selectedWhyLabel}
+                      </Text>
+                      <Text size="sm" c="dimmed" className="af-preview-block" lineClamp={2}>
+                        {stageHandoffLabel}
+                      </Text>
+                      <div className="af-monitor-stage-actions">
+                        <Button
+                          size="compact-sm"
+                          variant={evidenceTab === 'activity' ? 'filled' : 'default'}
+                          onClick={() => setStoredEvidenceTab('activity')}
+                        >
+                          Activity
+                        </Button>
+                        <Button
+                          size="compact-sm"
+                          variant={evidenceTab === 'artifacts' ? 'filled' : 'default'}
+                          onClick={() => setStoredEvidenceTab('artifacts')}
+                        >
+                          Artifacts
+                        </Button>
+                        <Button
+                          size="compact-sm"
+                          variant={evidenceTab === 'raw' ? 'filled' : 'default'}
+                          onClick={() => setStoredEvidenceTab('raw')}
+                        >
+                          Raw logs
+                        </Button>
+                        {selectedSummary?.followTarget?.descendant ? (
+                          <Button size="compact-sm" variant="default" onClick={jumpToFollowTarget}>
+                            Jump to {selectedSummary.followTarget.label}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </Stack>
+                  </div>
+                </div>
+                <Box className="af-monitor-graph-frame">
+                  <Graph
+                    graph={graph}
+                    plan={plan}
+                    state={state}
+                    trace={trace}
+                    selectedId={selectedGraphId || undefined}
+                    selectionKey="graphId"
+                    focusMode={focusMode}
+                    followId={selectedFollowWorkflowId || undefined}
+                    onSelectNode={setSelectedGraphId}
+                  />
+                </Box>
+              </div>
+            </BentoTile>
+
+            <BentoTile
+              col={4}
+              row={4}
+              accent="paper"
+              className="af-monitor-inspector-tile"
+              header={
+                <TileHeader
+                  eyebrow="Selected scope"
+                  title={selectedScopeLabel}
+                  description="Keep selection attached to the graph. Overview stays first, and the current evidence layer sits directly below it instead of competing as a separate full-width pane."
+                  actions={
+                    selectedSummary ? (
+                      <Group gap="xs">
+                        <Badge variant="outline">{currentEvidenceLabel}</Badge>
+                        <Badge variant="outline">Evidence {evidenceScopeLabel}</Badge>
+                      </Group>
+                    ) : null
+                  }
+                />
+              }
+            >
+              <ScrollArea className="af-monitor-inspector-scroll">
+                <div className="af-monitor-inspector-stack">
+                  <NodeInspector
+                    selectedNode={selectedNode}
+                    summary={selectedSummary}
+                    activeDetailTab={evidenceTab}
+                    focusLabel={focusLabel}
+                    onOpenEvidenceTab={setStoredEvidenceTab}
+                    onJumpToFollowNode={selectedSummary?.followTarget?.descendant ? jumpToFollowTarget : undefined}
+                  />
+
+                  <div className="af-summary-card af-summary-card--console af-monitor-inspector-detail">
+                    <Stack gap="sm">
+                      <Group justify="space-between" gap="sm" align="flex-start">
+                        <div>
+                          <SurfaceLabel>Selected-node detail</SurfaceLabel>
+                          <Text fw={700} size="sm">
+                            {selectedSummary ? `${currentEvidenceLabel} for ${selectedScopeLabel}` : 'Selected-scope deep dive'}
+                          </Text>
+                        </div>
+                        <Button size="compact-sm" variant="default" onClick={() => setFeedOpen((current) => !current)}>
+                          {feedToggleLabel}
+                        </Button>
+                      </Group>
+                      <Text size="sm" c="dimmed" className="af-preview-block">
+                        {detailSurfaceLabel}
+                      </Text>
+                      <Text size="sm" c="dimmed" className="af-preview-block">
+                        {evidenceHandoffLabel}
+                      </Text>
+                      <MonitorEvidencePanel
+                        selectedNode={selectedNode}
+                        followNode={selectedFollowNode}
+                        summary={selectedSummary}
+                        artifacts={artifacts}
+                        selectedArtifact={selectedArtifact}
+                        onSelectArtifact={setSelectedArtifact}
+                        artifactPreview={artifactPreview}
+                        artifactPreviewLoading={artifactPreviewLoading}
+                        selectedLogText={selectedLogText}
+                        rawOutputLabel={selectedRawOutputSource?.label || 'Raw execution log'}
+                        judgeEvaluations={judgeEvaluations}
+                        judgeChartData={judgeChartData}
+                        traceEntries={selectedNodeTraceEntries}
+                        tab={evidenceTab}
+                        onChangeTab={setStoredEvidenceTab}
+                        layout="embedded"
+                      />
+                    </Stack>
+                  </div>
                 </div>
               </ScrollArea>
-            </Stack>
-          </BentoTile>
-        </BentoGrid>
+            </BentoTile>
+
+            <BentoTile
+              col={12}
+              row={feedOpen ? 2 : 1}
+              accent="paper"
+              className="af-monitor-feed-tile"
+              header={
+                <TileHeader
+                  eyebrow="Whole-run feed"
+                  title={feedOpen ? 'Whole-run feed' : 'Whole-run feed stays secondary'}
+                  description={feedOpen
+                    ? 'Use this only after the graph and selected-scope inspector stop answering the question.'
+                    : 'Keep cross-scope console and timeline debugging folded away until the graph-first read is exhausted.'}
+                  actions={(
+                    <Group gap="xs">
+                      <Badge variant="outline">{feedOpen ? timelineFilter : 'Secondary surface'}</Badge>
+                      <Button size="compact-sm" variant="default" onClick={() => setFeedOpen((current) => !current)}>
+                        {feedToggleLabel}
+                      </Button>
+                    </Group>
+                  )}
+                />
+              }
+            >
+              {feedOpen ? (
+                <div className="af-monitor-feed-shell">
+                  <MonitorRunFeedPanel
+                    timelineEntries={timelineEntries}
+                    timelineFilter={timelineFilter}
+                    onChangeTimelineFilter={setTimelineFilter}
+                    consoleText={consoleText}
+                  />
+                </div>
+              ) : (
+                <div className="af-summary-card af-summary-card--console">
+                  <Stack gap="sm">
+                    <Group justify="space-between" gap="sm" align="flex-start">
+                      <div>
+                        <SurfaceLabel>Cross-scope debugging</SurfaceLabel>
+                        <Text fw={700} size="sm">
+                          Open the global timeline and runner console only when local graph context is not enough
+                        </Text>
+                      </div>
+                      <Badge variant="outline">{timelineEntries.length} events</Badge>
+                    </Group>
+                    <Text size="sm" c="dimmed" className="af-preview-block">
+                      The monitor now keeps graph, selection, and selected-node evidence together. The whole-run feed remains available for cross-scope debugging, but it no longer competes with the primary graph read on first paint.
+                    </Text>
+                  </Stack>
+                </div>
+              )}
+            </BentoTile>
+          </BentoGrid>
+        )}
       </AppShell.Main>
     </AppShell>
   );
