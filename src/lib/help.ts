@@ -12,6 +12,7 @@ Usage:
 - agentflow --plan <plan_file> [--dry-run] [--skip-git-repo-check] [--sandbox <mode>]
 - agentflow --plan <plan_file> --validate
 - agentflow --plan <plan_file> --resume <run_dir>
+- agentflow web [--plan <plan_file>] [--host <host>] [--port <port>] [--no-open]
 - agentflow --supervise <mission_state_file> [--supervisor-config <path>] [--supervisor-profile <name>] [--validate]
 - agentflow --plan-help
 
@@ -32,6 +33,10 @@ Most useful commands:
   Forward trust/skip flags to each provider invocation.
 - agentflow --plan plan.json --sandbox workspace-write
   Force worker sandbox mode for each task launch.
+- agentflow web --plan plan.json
+  Start or reuse the local operator dashboard and open the plan immediately.
+- agentflow web --host 127.0.0.1 --port 3208 --no-open
+  Start or reuse the local dashboard server without launching a browser tab.
 - agentflow --supervise state/mission_state.json
   Run one supervisor cycle (planner + plan QA + approved child plan execution).
 - agentflow --supervise state/mission_state.json --validate
@@ -55,7 +60,8 @@ Mental model:
 - task: one agent execution unit.
 - command: one deterministic shell command execution unit.
 - group: a container of child nodes; set parallel=false for sequential or parallel=true for concurrent.
-- loop: repeats body until its gate passes (or max_iterations is exhausted).
+  - loop: repeats body until its gate passes (or max_iterations is exhausted).
+  - loop_judge: sugar for an AI-gated loop with rubric-based scoring (0–10) and pass_threshold.
 - gate: loop evaluator, either deterministic (command) or ai (model output as JSON).
 
 Minimal valid plan (JSON):
@@ -126,6 +132,23 @@ Full schema skeleton (all keys shown):
         "repo": "main",
         "command": "node",
         "args": ["scripts/evaluate.js"]
+      },
+      "body": [
+        { "type": "task", "id": "fix_issues", "prompt": "Address evaluator feedback." }
+      ]
+    },
+    {
+      "type": "loop_judge",
+      "id": "quality_rubric",
+      "max_iterations": 3,
+      "pass_threshold": 8.0,
+      "rubric": {
+        "criteria": [
+          { "id": "correctness", "label": "Correctness", "weight": 0.4, "guidance": "No factual errors." },
+          { "id": "coverage",    "label": "Coverage",    "weight": 0.3, "guidance": "Addresses all requirements." },
+          { "id": "clarity",     "label": "Clarity",     "weight": 0.3, "guidance": "Readable, well structured." }
+        ],
+        "notes": "Score each 0–10; weighted average."
       },
       "body": [
         { "type": "task", "id": "fix_issues", "prompt": "Address evaluator feedback." }
@@ -238,7 +261,7 @@ Schema behavior + invariants:
 
 Common mistakes (and actual error text):
 - using old node type "parallel":
-  - flow[0].type must be one of: task, command, group, loop.
+  - flow[0].type must be one of: task, command, group, loop, loop_judge.
 - omitting group.parallel:
   - flow[0].parallel must be a boolean.
 - unknown top-level key:

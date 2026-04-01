@@ -1,0 +1,2031 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentflow Graph Viewer</title>
+  <style>
+    :root {
+      --bg: #f3ecdf;
+      --panel: #fffaf1;
+      --panel-strong: #f7f0e2;
+      --ink: #1f2b2a;
+      --muted: #6b7068;
+      --line: #d8ccb9;
+      --accent: #0d766f;
+      --accent-soft: rgba(13, 118, 111, 0.12);
+      --done: #1f7f4f;
+      --done-soft: rgba(31, 127, 79, 0.14);
+      --running: #c27616;
+      --running-soft: rgba(194, 118, 22, 0.16);
+      --failed: #b2492f;
+      --failed-soft: rgba(178, 73, 47, 0.16);
+      --pending: #7b7f75;
+      --pending-soft: rgba(123, 127, 117, 0.14);
+      --task: #0f766e;
+      --command: #2563eb;
+      --group: #8a5a00;
+      --while: #9a3412;
+      --gate: #475569;
+      --shadow: 0 16px 48px rgba(43, 46, 39, 0.12);
+      --radius: 20px;
+      --radius-sm: 12px;
+      --mono: "IBM Plex Mono", "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+      --sans: "Avenir Next", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at top left, rgba(13, 118, 111, 0.12), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(194, 118, 22, 0.16), transparent 32%),
+        linear-gradient(180deg, #faf5eb 0%, var(--bg) 100%);
+      color: var(--ink);
+      font-family: var(--sans);
+    }
+
+    body {
+      padding: 20px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: minmax(300px, 360px) minmax(420px, 1fr) minmax(300px, 360px);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel {
+      background: rgba(255, 250, 241, 0.94);
+      border: 1px solid rgba(216, 204, 185, 0.95);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(12px);
+    }
+
+    .panel-header {
+      padding: 18px 20px 12px;
+      border-bottom: 1px solid rgba(216, 204, 185, 0.75);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(247, 240, 226, 0.8));
+    }
+
+    .panel-header h1,
+    .panel-header h2,
+    .panel-header h3 {
+      margin: 0;
+      font-family: var(--serif);
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .panel-header h1 {
+      font-size: 1.5rem;
+      line-height: 1.1;
+    }
+
+    .panel-header p,
+    .panel-body p,
+    .panel-body li {
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .panel-body {
+      padding: 16px 18px 18px;
+    }
+
+    .section + .section {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(216, 204, 185, 0.75);
+    }
+
+    .section h3 {
+      margin: 0 0 10px;
+      font-size: 0.95rem;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+
+    .field {
+      display: block;
+      margin-bottom: 12px;
+    }
+
+    .field span {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .field input[type="text"],
+    .field input[type="number"],
+    .field input[type="file"],
+    .field textarea {
+      width: 100%;
+      border: 1px solid rgba(141, 130, 112, 0.32);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.86);
+      color: var(--ink);
+      font: inherit;
+    }
+
+    .field textarea {
+      min-height: 90px;
+      resize: vertical;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+
+    .field input[type="checkbox"] {
+      margin-right: 8px;
+      accent-color: var(--accent);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      color: #fff;
+      background: linear-gradient(135deg, #156e67, #0c5a55);
+      box-shadow: 0 8px 18px rgba(13, 118, 111, 0.24);
+      transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+    }
+
+    button.secondary {
+      color: var(--ink);
+      background: rgba(247, 240, 226, 0.96);
+      border: 1px solid rgba(141, 130, 112, 0.28);
+      box-shadow: none;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: default;
+      transform: none;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .stat-card {
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: var(--panel-strong);
+      border: 1px solid rgba(216, 204, 185, 0.75);
+    }
+
+    .stat-card strong {
+      display: block;
+      font-size: 1.2rem;
+      line-height: 1.1;
+      margin-bottom: 3px;
+    }
+
+    .stat-card span {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .graph-panel {
+      min-height: calc(100vh - 40px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .graph-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(216, 204, 185, 0.75);
+      background: rgba(247, 240, 226, 0.85);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ink);
+      background: rgba(216, 204, 185, 0.42);
+      border: 1px solid rgba(141, 130, 112, 0.2);
+    }
+
+    .graph-shell {
+      position: relative;
+      min-height: 720px;
+      overflow: auto;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.44)),
+        linear-gradient(90deg, rgba(216, 204, 185, 0.28) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(216, 204, 185, 0.28) 1px, transparent 1px);
+      background-size: auto, 28px 28px, 28px 28px;
+      padding: 12px;
+    }
+
+    #graphSvg {
+      display: block;
+      min-width: 100%;
+      min-height: 100%;
+    }
+
+    .empty-state {
+      padding: 42px 28px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .mono {
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      word-break: break-word;
+    }
+
+    .notice {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-size: 0.86rem;
+      line-height: 1.4;
+      background: rgba(247, 240, 226, 0.96);
+      border: 1px solid rgba(216, 204, 185, 0.75);
+      color: var(--muted);
+    }
+
+    .notice.error {
+      color: #7f1d1d;
+      background: rgba(253, 232, 230, 0.9);
+      border-color: rgba(178, 73, 47, 0.32);
+    }
+
+    .detail-card {
+      padding: 14px;
+      border-radius: 16px;
+      background: var(--panel-strong);
+      border: 1px solid rgba(216, 204, 185, 0.75);
+    }
+
+    .detail-card + .detail-card {
+      margin-top: 12px;
+    }
+
+    .detail-card h4 {
+      margin: 0 0 10px;
+      font-size: 0.92rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 8px 10px;
+      margin: 0;
+    }
+
+    .kv dt {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .kv dd {
+      margin: 0;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+
+    .decision-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 340px;
+      overflow: auto;
+    }
+
+    .decision-item {
+      padding: 12px 13px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(216, 204, 185, 0.7);
+    }
+
+    .decision-item strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.85rem;
+    }
+
+    .decision-item small {
+      display: block;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .decision-item p {
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--ink);
+    }
+
+    .log-output {
+      margin: 10px 0 0;
+      min-height: 180px;
+      max-height: 340px;
+      overflow: auto;
+      padding: 12px;
+      border-radius: 14px;
+      background: #16211f;
+      color: #d9efe7;
+      border: 1px solid rgba(21, 34, 31, 0.8);
+      font-family: var(--mono);
+      font-size: 0.79rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .legend .badge {
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .small {
+      font-size: 0.84rem;
+    }
+
+    .inline-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .inline-row .field {
+      flex: 1 1 120px;
+      margin-bottom: 0;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      background: rgba(247, 240, 226, 0.95);
+      padding: 2px 5px;
+      border-radius: 6px;
+    }
+
+    @media (max-width: 1320px) {
+      .app {
+        grid-template-columns: minmax(280px, 340px) minmax(420px, 1fr);
+      }
+
+      .app > :last-child {
+        grid-column: 1 / -1;
+      }
+
+      .graph-panel {
+        min-height: 760px;
+      }
+    }
+
+    @media (max-width: 960px) {
+      body {
+        padding: 14px;
+      }
+
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .graph-panel {
+        min-height: 560px;
+      }
+
+      .status-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="panel">
+      <div class="panel-header">
+        <h1>Agentflow Graph Viewer</h1>
+        <p>Standalone prototype: load a plan, overlay run state, and optionally poll the existing artifact files for live updates.</p>
+      </div>
+      <div class="panel-body">
+        <div class="section">
+          <h3>Files</h3>
+          <label class="field">
+            <span>Plan JSON</span>
+            <input id="planFile" type="file" accept=".json,application/json">
+          </label>
+          <label class="field">
+            <span>Run State JSON</span>
+            <input id="stateFile" type="file" accept=".json,application/json">
+          </label>
+          <label class="field">
+            <span>Decision Trace JSON</span>
+            <input id="traceFile" type="file" accept=".json,application/json">
+          </label>
+          <div class="actions">
+            <button id="loadExampleBtn" class="secondary" type="button">Load `example_plan.json`</button>
+            <button id="clearDataBtn" class="secondary" type="button">Clear Data</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>URL Mode</h3>
+          <p class="small">Use this when the repo is served over HTTP, for example <code>python3 -m http.server 8000</code> from the repo root.</p>
+          <label class="field">
+            <span>Plan URL</span>
+            <input id="planUrl" type="text" placeholder="example_plan.json">
+          </label>
+          <label class="field">
+            <span>Run State URL</span>
+            <input id="stateUrl" type="text" placeholder="tmp/agentflow_runs/&lt;run_id&gt;/run_state.json">
+          </label>
+          <label class="field">
+            <span>Decision Trace URL</span>
+            <input id="traceUrl" type="text" placeholder="tmp/agentflow_runs/&lt;run_id&gt;/decision_trace.json">
+          </label>
+          <div class="inline-row">
+            <label class="field">
+              <span>Poll Seconds</span>
+              <input id="pollSeconds" type="number" min="1" value="2">
+            </label>
+            <label class="field">
+              <span>Workspace Prefix</span>
+              <input id="workspacePrefix" type="text" placeholder="/Users/.../agentflow/">
+            </label>
+          </div>
+          <label class="field">
+            <span><input id="autoSelectRunning" type="checkbox" checked>Auto-select the newest running task</span>
+          </label>
+          <div class="actions">
+            <button id="loadUrlsBtn" type="button">Load URLs</button>
+            <button id="togglePollingBtn" class="secondary" type="button">Start Polling</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Run Snapshot</h3>
+          <div class="status-grid" id="statsGrid">
+            <div class="stat-card"><strong>0</strong><span>Tasks</span></div>
+            <div class="stat-card"><strong>0</strong><span>Done</span></div>
+            <div class="stat-card"><strong>0</strong><span>Running</span></div>
+            <div class="stat-card"><strong>0</strong><span>Failed</span></div>
+          </div>
+          <div class="notice" id="runMeta">Load a plan to render the graph. Add run artifacts to overlay status and decisions.</div>
+        </div>
+
+        <div class="section">
+          <h3>What This Proves</h3>
+          <ul class="small">
+            <li>The graph can be rendered from the plan JSON alone.</li>
+            <li>Live status can come from the existing <code>run_state.json</code> and <code>decision_trace.json</code>.</li>
+            <li>Log streaming does not need a new backend if polling files over a tiny local HTTP server is good enough.</li>
+          </ul>
+        </div>
+
+        <div id="noticeBox" class="notice">Waiting for plan data.</div>
+      </div>
+    </section>
+
+    <section class="panel graph-panel">
+      <div class="graph-meta">
+        <span class="badge" id="planTitleBadge">No plan loaded</span>
+        <span class="badge" id="planNodeBadge">0 nodes</span>
+        <span class="badge" id="runIdBadge">No run</span>
+        <span class="badge" id="pollBadge">Polling off</span>
+        <div class="legend">
+          <span class="badge">Pending</span>
+          <span class="badge" style="background: var(--running-soft); color: #7a4707;">Running</span>
+          <span class="badge" style="background: var(--done-soft); color: #166534;">Done</span>
+          <span class="badge" style="background: var(--failed-soft); color: #8a1f14;">Failed</span>
+        </div>
+      </div>
+      <div class="graph-shell" id="graphShell">
+        <div class="empty-state" id="graphEmptyState">
+          <h2 style="margin: 0 0 8px; font-family: var(--serif);">No Graph Yet</h2>
+          <p>Load <code>example_plan.json</code> or any agentflow plan to render the workflow.</p>
+        </div>
+        <svg id="graphSvg" aria-label="Agentflow graph"></svg>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Node Detail</h2>
+        <p>Click any card in the graph to inspect task metadata, loop decisions, and logs.</p>
+      </div>
+      <div class="panel-body">
+        <div class="detail-card" id="selectedNodeCard">
+          <h4>Selection</h4>
+          <p class="muted">Nothing selected yet.</p>
+        </div>
+
+        <div class="detail-card">
+          <h4>Recent Decisions</h4>
+          <div id="decisionList" class="decision-list">
+            <div class="decision-item">
+              <strong>No decision trace loaded</strong>
+              <p>Load <code>decision_trace.json</code> to see loop and retry events.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-card">
+          <h4>Logs</h4>
+          <label class="field">
+            <span>Log File</span>
+            <input id="logFile" type="file" accept=".log,.txt,.md">
+          </label>
+          <label class="field">
+            <span>Log URL</span>
+            <input id="logUrl" type="text" placeholder="tmp/agentflow_runs/&lt;run_id&gt;/group_01/task_x/worker_exec.log">
+          </label>
+          <div class="actions">
+            <button id="loadSelectedLogBtn" class="secondary" type="button">Use Selected Node Log</button>
+            <button id="loadLogBtn" type="button">Load Log</button>
+            <button id="toggleLogPollingBtn" class="secondary" type="button">Start Log Polling</button>
+          </div>
+          <div class="notice small" id="logHint">File mode can preview a snapshot. URL mode can poll logs when the page is served over HTTP.</div>
+          <pre class="log-output" id="logOutput">No log loaded.</pre>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const CARD_WIDTH = 244;
+      const CARD_HEIGHT = 92;
+      const HEADER_HEIGHT = 44;
+      const CLUSTER_PADDING = 20;
+      const FLOW_GAP = 34;
+      const ROOT_PADDING = 36;
+      const PARALLEL_GAP = 22;
+      const ROOT_MIN_WIDTH = 880;
+
+      const state = {
+        plan: null,
+        runState: null,
+        decisionTrace: [],
+        graph: null,
+        selectedNodeId: null,
+        pollingTimer: null,
+        logPollingTimer: null,
+        lastLogText: "",
+        currentLogSource: "",
+      };
+
+      const dom = {
+        planFile: document.getElementById("planFile"),
+        stateFile: document.getElementById("stateFile"),
+        traceFile: document.getElementById("traceFile"),
+        loadExampleBtn: document.getElementById("loadExampleBtn"),
+        clearDataBtn: document.getElementById("clearDataBtn"),
+        planUrl: document.getElementById("planUrl"),
+        stateUrl: document.getElementById("stateUrl"),
+        traceUrl: document.getElementById("traceUrl"),
+        pollSeconds: document.getElementById("pollSeconds"),
+        workspacePrefix: document.getElementById("workspacePrefix"),
+        autoSelectRunning: document.getElementById("autoSelectRunning"),
+        loadUrlsBtn: document.getElementById("loadUrlsBtn"),
+        togglePollingBtn: document.getElementById("togglePollingBtn"),
+        statsGrid: document.getElementById("statsGrid"),
+        runMeta: document.getElementById("runMeta"),
+        noticeBox: document.getElementById("noticeBox"),
+        planTitleBadge: document.getElementById("planTitleBadge"),
+        planNodeBadge: document.getElementById("planNodeBadge"),
+        runIdBadge: document.getElementById("runIdBadge"),
+        pollBadge: document.getElementById("pollBadge"),
+        graphShell: document.getElementById("graphShell"),
+        graphSvg: document.getElementById("graphSvg"),
+        graphEmptyState: document.getElementById("graphEmptyState"),
+        selectedNodeCard: document.getElementById("selectedNodeCard"),
+        decisionList: document.getElementById("decisionList"),
+        logFile: document.getElementById("logFile"),
+        logUrl: document.getElementById("logUrl"),
+        loadSelectedLogBtn: document.getElementById("loadSelectedLogBtn"),
+        loadLogBtn: document.getElementById("loadLogBtn"),
+        toggleLogPollingBtn: document.getElementById("toggleLogPollingBtn"),
+        logHint: document.getElementById("logHint"),
+        logOutput: document.getElementById("logOutput"),
+      };
+
+      const STATUS_STYLES = {
+        PENDING: { fill: "#f7f1e5", accent: "#7b7f75", text: "#46504a", badge: "rgba(123, 127, 117, 0.14)" },
+        RUNNING: { fill: "#fff1da", accent: "#c27616", text: "#7a4707", badge: "rgba(194, 118, 22, 0.16)" },
+        DONE: { fill: "#e8f6ee", accent: "#1f7f4f", text: "#166534", badge: "rgba(31, 127, 79, 0.15)" },
+        FAILED: { fill: "#fde9e6", accent: "#b2492f", text: "#8a1f14", badge: "rgba(178, 73, 47, 0.16)" },
+      };
+
+      const TYPE_COLORS = {
+        task: "#0f766e",
+        command: "#2563eb",
+        group: "#8a5a00",
+        while: "#9a3412",
+        gate: "#475569",
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function truncate(value, max = 100) {
+        const text = String(value ?? "");
+        return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
+      }
+
+      function normalizeStatus(status) {
+        const value = String(status || "PENDING").toUpperCase();
+        if (value === "RUNNING" || value === "DONE" || value === "FAILED" || value === "PENDING") {
+          return value;
+        }
+        return "PENDING";
+      }
+
+      function setNotice(message, isError = false) {
+        dom.noticeBox.textContent = message;
+        dom.noticeBox.classList.toggle("error", Boolean(isError));
+      }
+
+      async function readJsonFile(file, label) {
+        const text = await file.text();
+        try {
+          return JSON.parse(text);
+        } catch (error) {
+          throw new Error(`${label} is not valid JSON: ${String(error)}`);
+        }
+      }
+
+      async function fetchJson(url, label) {
+        const cacheBusted = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+        const response = await fetch(cacheBusted, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`${label} returned HTTP ${response.status}`);
+        }
+        return response.json();
+      }
+
+      async function fetchText(url, label) {
+        const cacheBusted = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+        const response = await fetch(cacheBusted, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`${label} returned HTTP ${response.status}`);
+        }
+        return response.text();
+      }
+
+      function clearTimers() {
+        if (state.pollingTimer) {
+          clearInterval(state.pollingTimer);
+          state.pollingTimer = null;
+        }
+        if (state.logPollingTimer) {
+          clearInterval(state.logPollingTimer);
+          state.logPollingTimer = null;
+        }
+        updatePollingBadges();
+      }
+
+      function normalizePlanPayload(payload) {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          throw new Error("Plan payload must be a JSON object.");
+        }
+
+        const workflow = Array.isArray(payload.flow)
+          ? payload.flow
+          : Array.isArray(payload.workflow)
+            ? payload.workflow
+            : null;
+
+        if (!workflow || workflow.length === 0) {
+          throw new Error("Plan payload must contain flow/workflow nodes.");
+        }
+
+        return {
+          title: payload.objective || payload.setup || "Untitled plan",
+          objective: payload.objective || "",
+          setup: payload.setup || "",
+          workflow,
+          raw: payload,
+        };
+      }
+
+      function createGraphNode(base) {
+        return {
+          graphId: base.graphId,
+          kind: base.kind,
+          label: base.label,
+          subtitle: base.subtitle || "",
+          executionId: base.executionId || null,
+          prompt: base.prompt || "",
+          commandLine: base.commandLine || "",
+          raw: base.raw || null,
+          parallel: Boolean(base.parallel),
+          children: [],
+          body: [],
+          gate: null,
+          runtime: null,
+          status: "PENDING",
+          loopStats: null,
+          layout: null,
+        };
+      }
+
+      function normalizeLeafId(raw) {
+        return raw?.id || raw?.taskId || raw?.task_id || "(unnamed)";
+      }
+
+      function normalizeLeafPrompt(raw) {
+        return raw?.prompt || raw?.task || "";
+      }
+
+      function buildCommandLine(raw) {
+        const command = String(raw?.command || "");
+        const args = Array.isArray(raw?.args) ? raw.args.map((item) => String(item)) : [];
+        return [command, ...args].filter(Boolean).join(" ");
+      }
+
+      function buildGraph(plan) {
+        const lookup = new Map();
+        const leafExecutionIds = [];
+        let nodeCount = 0;
+
+        function register(node) {
+          lookup.set(node.graphId, node);
+          nodeCount += 1;
+          if (node.executionId && (node.kind === "task" || node.kind === "command")) {
+            leafExecutionIds.push(node.executionId);
+          }
+          return node;
+        }
+
+        function walk(rawNode, pathPrefix) {
+          const rawType = String(rawNode?.type || "").toLowerCase();
+
+          if (rawType === "task") {
+            const executionId = normalizeLeafId(rawNode);
+            return register(createGraphNode({
+              graphId: `${pathPrefix}/task:${executionId}`,
+              kind: "task",
+              label: executionId,
+              subtitle: truncate(normalizeLeafPrompt(rawNode), 78),
+              executionId,
+              prompt: normalizeLeafPrompt(rawNode),
+              raw: rawNode,
+            }));
+          }
+
+          if (rawType === "command") {
+            const executionId = normalizeLeafId(rawNode);
+            return register(createGraphNode({
+              graphId: `${pathPrefix}/command:${executionId}`,
+              kind: "command",
+              label: executionId,
+              subtitle: truncate(buildCommandLine(rawNode), 78),
+              executionId,
+              commandLine: buildCommandLine(rawNode),
+              raw: rawNode,
+            }));
+          }
+
+          if (rawType === "group") {
+            const groupId = normalizeLeafId(rawNode);
+            const node = register(createGraphNode({
+              graphId: `${pathPrefix}/group:${groupId}`,
+              kind: "group",
+              label: groupId,
+              subtitle: rawNode.parallel ? "parallel group" : "sequential group",
+              parallel: rawNode.parallel,
+              raw: rawNode,
+            }));
+            const steps = Array.isArray(rawNode.steps) ? rawNode.steps : [];
+            node.children = steps.map((child, index) => walk(child, `${node.graphId}/step_${index + 1}`));
+            return node;
+          }
+
+          if (rawType === "loop" || rawType === "while") {
+            const whileId = normalizeLeafId(rawNode);
+            const node = register(createGraphNode({
+              graphId: `${pathPrefix}/while:${whileId}`,
+              kind: "while",
+              label: whileId,
+              subtitle: `max iterations: ${rawNode.max_iterations ?? rawNode.maxIterations ?? "default"}`,
+              executionId: whileId,
+              raw: rawNode,
+            }));
+            const gateRaw = rawNode.gate || rawNode.until || {};
+            const gateId = gateRaw.id || `${whileId}_gate`;
+            node.gate = register(createGraphNode({
+              graphId: `${node.graphId}/gate:${gateId}`,
+              kind: "gate",
+              label: gateId,
+              subtitle: `${String(gateRaw.type || "gate")} gate`,
+              executionId: gateId,
+              raw: gateRaw,
+            }));
+            const body = Array.isArray(rawNode.body) ? rawNode.body : [];
+            node.body = body.map((child, index) => walk(child, `${node.graphId}/body_${index + 1}`));
+            return node;
+          }
+
+          return register(createGraphNode({
+            graphId: `${pathPrefix}/unknown:${nodeCount + 1}`,
+            kind: "task",
+            label: rawNode?.id || "unknown",
+            subtitle: "Unsupported node type",
+            raw: rawNode,
+          }));
+        }
+
+        const roots = plan.workflow.map((node, index) => walk(node, `workflow[${index}]`));
+
+        return {
+          title: plan.title,
+          objective: plan.objective,
+          setup: plan.setup,
+          raw: plan.raw,
+          roots,
+          lookup,
+          nodeCount,
+          leafExecutionIds,
+        };
+      }
+
+      function compareRuntimeRows(a, b) {
+        const groupDelta = Number(a.groupIndex || 0) - Number(b.groupIndex || 0);
+        if (groupDelta !== 0) return groupDelta;
+        const attemptDelta = Number(a.attempt || 0) - Number(b.attempt || 0);
+        if (attemptDelta !== 0) return attemptDelta;
+        return String(a.startedAtUtc || "").localeCompare(String(b.startedAtUtc || ""));
+      }
+
+      function buildRuntimeIndex(runState) {
+        const map = new Map();
+        const taskRows = runState && runState.tasks && typeof runState.tasks === "object"
+          ? Object.values(runState.tasks)
+          : [];
+        for (const row of taskRows) {
+          if (!row || typeof row !== "object") continue;
+          const id = row.taskId || row.task_id;
+          if (!id) continue;
+          const current = map.get(id);
+          if (!current || compareRuntimeRows(current, row) < 0) {
+            map.set(id, row);
+          }
+        }
+        return map;
+      }
+
+      function getLoopEvents(whileId) {
+        return state.decisionTrace.filter((entry) => String(entry?.detail?.whileId || "") === String(whileId));
+      }
+
+      function summarizeLoopEvents(whileId) {
+        const events = getLoopEvents(whileId);
+        const iterations = events.filter((entry) => entry.type === "while_iteration_started").length;
+        const evaluations = events.filter((entry) => entry.type === "while_gate_evaluation");
+        const terminals = events.filter((entry) => entry.type === "while_satisfied" || entry.type === "while_exhausted");
+        const latestEvaluation = evaluations[evaluations.length - 1] || null;
+        const latestTerminal = terminals[terminals.length - 1] || null;
+        const latestEvent = events[events.length - 1] || null;
+
+        return {
+          whileId,
+          iterations,
+          latestEvaluation,
+          latestTerminal,
+          latestEvent,
+          satisfied: latestTerminal?.type === "while_satisfied",
+          exhausted: latestTerminal?.type === "while_exhausted",
+          running: Boolean(iterations > 0 && !latestTerminal),
+        };
+      }
+
+      function combineStatuses(statuses) {
+        const normalized = statuses.map((status) => normalizeStatus(status));
+        if (normalized.length === 0) return "PENDING";
+        if (normalized.includes("RUNNING")) return "RUNNING";
+        if (normalized.includes("FAILED")) return "FAILED";
+        if (normalized.every((status) => status === "DONE")) return "DONE";
+        if (normalized.includes("DONE")) return "RUNNING";
+        return "PENDING";
+      }
+
+      function deriveGateStatus(loopStats) {
+        if (!loopStats) return "PENDING";
+        if (!loopStats.latestEvaluation) {
+          return loopStats.iterations > 0 ? "RUNNING" : "PENDING";
+        }
+        if (loopStats.latestEvaluation.detail?.passed) return "DONE";
+        if (loopStats.exhausted) return "FAILED";
+        return "RUNNING";
+      }
+
+      function deriveLoopStatus(loopStats, bodyStatuses) {
+        if (!loopStats) return combineStatuses(bodyStatuses);
+        if (loopStats.exhausted) return "FAILED";
+        if (loopStats.satisfied) return "DONE";
+        if (bodyStatuses.includes("FAILED")) return "FAILED";
+        if (loopStats.iterations > 0 || bodyStatuses.includes("RUNNING") || bodyStatuses.includes("DONE")) {
+          return "RUNNING";
+        }
+        return "PENDING";
+      }
+
+      function applyRuntimeToGraph() {
+        if (!state.graph) return;
+        const runtimeIndex = buildRuntimeIndex(state.runState);
+
+        function decorate(node) {
+          if (node.kind === "task" || node.kind === "command") {
+            node.runtime = runtimeIndex.get(node.executionId) || null;
+            node.status = normalizeStatus(node.runtime?.status);
+            return node.status;
+          }
+
+          if (node.kind === "group") {
+            const childStatuses = node.children.map((child) => decorate(child));
+            node.status = combineStatuses(childStatuses);
+            return node.status;
+          }
+
+          if (node.kind === "while") {
+            const bodyStatuses = node.body.map((child) => decorate(child));
+            node.loopStats = summarizeLoopEvents(node.executionId);
+            if (node.gate) {
+              node.gate.loopStats = node.loopStats;
+              node.gate.status = deriveGateStatus(node.loopStats);
+            }
+            node.status = deriveLoopStatus(node.loopStats, bodyStatuses);
+            return node.status;
+          }
+
+          if (node.kind === "gate") {
+            node.status = deriveGateStatus(node.loopStats);
+            return node.status;
+          }
+
+          node.status = "PENDING";
+          return node.status;
+        }
+
+        state.graph.roots.forEach((root) => decorate(root));
+        ensureSelection();
+      }
+
+      function collectGraphNodes() {
+        return state.graph ? Array.from(state.graph.lookup.values()) : [];
+      }
+
+      function collectLeafNodes() {
+        return collectGraphNodes().filter((node) => node.kind === "task" || node.kind === "command");
+      }
+
+      function findNewestRunningLeaf() {
+        return collectLeafNodes()
+          .filter((node) => node.runtime && normalizeStatus(node.runtime.status) === "RUNNING")
+          .sort((a, b) => compareRuntimeRows(a.runtime, b.runtime))
+          .at(-1) || null;
+      }
+
+      function ensureSelection() {
+        if (!state.graph) {
+          state.selectedNodeId = null;
+          return;
+        }
+
+        if (dom.autoSelectRunning.checked) {
+          const running = findNewestRunningLeaf();
+          if (running) {
+            state.selectedNodeId = running.graphId;
+            return;
+          }
+        }
+
+        if (state.selectedNodeId && state.graph.lookup.has(state.selectedNodeId)) return;
+        state.selectedNodeId = state.graph.roots[0]?.graphId || null;
+      }
+
+      function measureVertical(children, gap) {
+        const measured = children.map((child) => measureNode(child));
+        const width = measured.length > 0 ? Math.max(...measured.map((item) => item.width)) : CARD_WIDTH;
+        let cursorY = 0;
+        const positions = measured.map((layout) => {
+          const position = {
+            x: Math.round((width - layout.width) / 2),
+            y: cursorY,
+          };
+          cursorY += layout.height + gap;
+          return position;
+        });
+        const height = measured.length > 0 ? cursorY - gap : CARD_HEIGHT;
+        return { width, height, positions };
+      }
+
+      function measureParallel(children) {
+        const measured = children.map((child) => measureNode(child));
+        const cols = Math.min(3, Math.max(1, measured.length));
+        const rows = Math.ceil(measured.length / cols);
+        const colWidths = Array.from({ length: cols }, () => 0);
+        const rowHeights = Array.from({ length: rows }, () => 0);
+
+        measured.forEach((layout, index) => {
+          const col = index % cols;
+          const row = Math.floor(index / cols);
+          colWidths[col] = Math.max(colWidths[col], layout.width);
+          rowHeights[row] = Math.max(rowHeights[row], layout.height);
+        });
+
+        const positions = [];
+        measured.forEach((layout, index) => {
+          const col = index % cols;
+          const row = Math.floor(index / cols);
+          let x = 0;
+          for (let i = 0; i < col; i += 1) x += colWidths[i] + PARALLEL_GAP;
+          let y = 0;
+          for (let i = 0; i < row; i += 1) y += rowHeights[i] + PARALLEL_GAP;
+          positions.push({
+            x: x + Math.round((colWidths[col] - layout.width) / 2),
+            y,
+          });
+        });
+
+        return {
+          width: colWidths.reduce((sum, value) => sum + value, 0) + PARALLEL_GAP * Math.max(0, cols - 1),
+          height: rowHeights.reduce((sum, value) => sum + value, 0) + PARALLEL_GAP * Math.max(0, rows - 1),
+          positions,
+        };
+      }
+
+      function measureNode(node) {
+        if (node.layout) return node.layout;
+
+        if (node.kind === "task" || node.kind === "command" || node.kind === "gate") {
+          node.layout = { width: CARD_WIDTH, height: CARD_HEIGHT };
+          return node.layout;
+        }
+
+        if (node.kind === "group") {
+          const inner = node.parallel
+            ? measureParallel(node.children)
+            : measureVertical(node.children, FLOW_GAP);
+          node.layout = {
+            width: inner.width + CLUSTER_PADDING * 2,
+            height: inner.height + HEADER_HEIGHT + CLUSTER_PADDING * 2,
+            childPositions: inner.positions,
+          };
+          return node.layout;
+        }
+
+        if (node.kind === "while") {
+          const gateLayout = node.gate ? measureNode(node.gate) : { width: CARD_WIDTH, height: CARD_HEIGHT };
+          const bodyLayout = measureVertical(node.body, FLOW_GAP);
+          const innerWidth = Math.max(gateLayout.width, bodyLayout.width);
+          const gateX = Math.round((innerWidth - gateLayout.width) / 2);
+          const bodyStartY = gateLayout.height + FLOW_GAP;
+          node.layout = {
+            width: innerWidth + CLUSTER_PADDING * 2,
+            height: HEADER_HEIGHT + CLUSTER_PADDING * 2 + gateLayout.height + FLOW_GAP + bodyLayout.height + 24,
+            gatePosition: { x: gateX, y: 0 },
+            bodyPositions: bodyLayout.positions.map((position) => ({
+              x: Math.round((innerWidth - measureNode(node.body[bodyLayout.positions.indexOf(position)]).width) / 2),
+              y: bodyStartY + position.y,
+            })),
+            innerWidth,
+            gateHeight: gateLayout.height,
+          };
+          return node.layout;
+        }
+
+        node.layout = { width: CARD_WIDTH, height: CARD_HEIGHT };
+        return node.layout;
+      }
+
+      function computeCanvasLayout() {
+        if (!state.graph) return null;
+        const flow = measureVertical(state.graph.roots, FLOW_GAP + 10);
+        const width = Math.max(ROOT_MIN_WIDTH, flow.width + ROOT_PADDING * 2);
+        const positions = flow.positions.map((position, index) => ({
+          x: Math.round((width - measureNode(state.graph.roots[index]).width) / 2),
+          y: ROOT_PADDING + position.y,
+        }));
+        return {
+          width,
+          height: flow.height + ROOT_PADDING * 2 + 20,
+          rootPositions: positions,
+        };
+      }
+
+      function createSvgElement(tag, attributes = {}) {
+        const element = document.createElementNS(SVG_NS, tag);
+        for (const [key, value] of Object.entries(attributes)) {
+          element.setAttribute(key, String(value));
+        }
+        return element;
+      }
+
+      function addMultilineText(group, lines, x, y, options = {}) {
+        const text = createSvgElement("text", {
+          x,
+          y,
+          "font-family": options.fontFamily || "Avenir Next, Segoe UI, sans-serif",
+          "font-size": options.fontSize || 14,
+          "font-weight": options.fontWeight || 600,
+          fill: options.fill || "#1f2b2a",
+        });
+
+        lines.forEach((line, index) => {
+          const tspan = createSvgElement("tspan", {
+            x,
+            dy: index === 0 ? 0 : (options.lineHeight || 18),
+          });
+          tspan.textContent = line;
+          text.appendChild(tspan);
+        });
+
+        group.appendChild(text);
+        return text;
+      }
+
+      function buildConnectorPath(x1, y1, x2, y2) {
+        const midY = y1 + Math.max(18, Math.round((y2 - y1) / 2));
+        return `M ${x1} ${y1} V ${midY} H ${x2} V ${y2}`;
+      }
+
+      function buildLoopBackPath(fromX, fromY, toX, toY, leftX) {
+        const topY = Math.min(fromY, toY) - 18;
+        return `M ${fromX} ${fromY} H ${leftX} V ${topY} H ${toX} V ${toY}`;
+      }
+
+      function appendConnector(svg, d, options = {}) {
+        const path = createSvgElement("path", {
+          d,
+          fill: "none",
+          stroke: options.stroke || "rgba(86, 89, 81, 0.75)",
+          "stroke-width": options.strokeWidth || 2,
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+          "marker-end": options.arrow === false ? "" : "url(#arrowhead)",
+        });
+        if (options.dash) {
+          path.setAttribute("stroke-dasharray", "6 6");
+        }
+        svg.appendChild(path);
+      }
+
+      function renderCard(svg, node, x, y, isSelected) {
+        const status = STATUS_STYLES[node.status] || STATUS_STYLES.PENDING;
+        const typeColor = TYPE_COLORS[node.kind] || TYPE_COLORS.task;
+        const group = createSvgElement("g", {
+          transform: `translate(${x}, ${y})`,
+          style: "cursor:pointer",
+        });
+
+        const shadow = createSvgElement("rect", {
+          x: 6,
+          y: 8,
+          width: CARD_WIDTH,
+          height: CARD_HEIGHT,
+          rx: 22,
+          fill: "rgba(34, 38, 32, 0.08)",
+        });
+        const rect = createSvgElement("rect", {
+          x: 0,
+          y: 0,
+          width: CARD_WIDTH,
+          height: CARD_HEIGHT,
+          rx: 22,
+          fill: status.fill,
+          stroke: isSelected ? typeColor : status.accent,
+          "stroke-width": isSelected ? 3 : 2,
+        });
+        const topBar = createSvgElement("rect", {
+          x: 0,
+          y: 0,
+          width: CARD_WIDTH,
+          height: 12,
+          rx: 22,
+          fill: typeColor,
+        });
+        const statusChip = createSvgElement("rect", {
+          x: CARD_WIDTH - 90,
+          y: 16,
+          width: 74,
+          height: 24,
+          rx: 12,
+          fill: status.badge,
+        });
+
+        group.appendChild(shadow);
+        group.appendChild(rect);
+        group.appendChild(topBar);
+        group.appendChild(statusChip);
+
+        addMultilineText(group, [node.kind.toUpperCase()], 18, 28, {
+          fontSize: 10,
+          fontWeight: 700,
+          fill: "rgba(255, 255, 255, 0.86)",
+          lineHeight: 12,
+        });
+
+        addMultilineText(group, [truncate(node.label, 22)], 18, 50, {
+          fontSize: 16,
+          fontWeight: 700,
+          fill: "#172221",
+          lineHeight: 18,
+        });
+
+        addMultilineText(group, [truncate(node.subtitle || "", 44)], 18, 72, {
+          fontSize: 12,
+          fontWeight: 500,
+          fill: "#58615c",
+          lineHeight: 16,
+        });
+
+        addMultilineText(group, [node.status], CARD_WIDTH - 78, 31, {
+          fontSize: 10,
+          fontWeight: 800,
+          fill: status.text,
+          lineHeight: 12,
+        });
+
+        group.addEventListener("click", () => {
+          state.selectedNodeId = node.graphId;
+          renderAll();
+        });
+
+        svg.appendChild(group);
+      }
+
+      function renderCluster(svg, node, x, y, isSelected) {
+        const status = STATUS_STYLES[node.status] || STATUS_STYLES.PENDING;
+        const typeColor = TYPE_COLORS[node.kind] || TYPE_COLORS.group;
+        const width = node.layout.width;
+        const height = node.layout.height;
+        const group = createSvgElement("g", {
+          transform: `translate(${x}, ${y})`,
+          style: "cursor:pointer",
+        });
+
+        group.appendChild(createSvgElement("rect", {
+          x: 8,
+          y: 12,
+          width,
+          height,
+          rx: 28,
+          fill: "rgba(31, 43, 42, 0.08)",
+        }));
+
+        group.appendChild(createSvgElement("rect", {
+          x: 0,
+          y: 0,
+          width,
+          height,
+          rx: 28,
+          fill: status.fill,
+          stroke: isSelected ? typeColor : "rgba(108, 112, 104, 0.3)",
+          "stroke-width": isSelected ? 3 : 2,
+        }));
+
+        group.appendChild(createSvgElement("rect", {
+          x: 0,
+          y: 0,
+          width,
+          height: HEADER_HEIGHT,
+          rx: 28,
+          fill: typeColor,
+        }));
+
+        group.appendChild(createSvgElement("rect", {
+          x: width - 106,
+          y: 10,
+          width: 86,
+          height: 24,
+          rx: 12,
+          fill: status.badge,
+        }));
+
+        addMultilineText(group, [node.kind === "while" ? "LOOP" : "GROUP"], 20, 27, {
+          fontSize: 11,
+          fontWeight: 800,
+          fill: "rgba(255, 255, 255, 0.88)",
+        });
+
+        addMultilineText(group, [truncate(node.label, 26)], 92, 27, {
+          fontSize: 15,
+          fontWeight: 700,
+          fill: "#fffdf8",
+        });
+
+        addMultilineText(group, [node.status], width - 88, 26, {
+          fontSize: 10,
+          fontWeight: 800,
+          fill: status.text,
+        });
+
+        addMultilineText(group, [truncate(node.subtitle, 48)], 20, 70, {
+          fontSize: 12,
+          fontWeight: 600,
+          fill: "#58615c",
+          lineHeight: 16,
+        });
+
+        group.addEventListener("click", () => {
+          state.selectedNodeId = node.graphId;
+          renderAll();
+        });
+
+        svg.appendChild(group);
+      }
+
+      function renderNode(svg, node, x, y) {
+        const isSelected = state.selectedNodeId === node.graphId;
+
+        if (node.kind === "task" || node.kind === "command" || node.kind === "gate") {
+          renderCard(svg, node, x, y, isSelected);
+          return;
+        }
+
+        renderCluster(svg, node, x, y, isSelected);
+        const contentX = x + CLUSTER_PADDING;
+        const contentY = y + HEADER_HEIGHT + CLUSTER_PADDING;
+
+        if (node.kind === "group") {
+          const childNodes = node.children;
+          const positions = node.layout.childPositions || [];
+
+          if (node.parallel && childNodes.length > 0) {
+            const branchX = x + Math.round(node.layout.width / 2);
+            const branchY = y + HEADER_HEIGHT;
+            for (let index = 0; index < childNodes.length; index += 1) {
+              const child = childNodes[index];
+              const childPosition = positions[index];
+              const childX = contentX + childPosition.x;
+              const childY = contentY + childPosition.y;
+              const childLayout = measureNode(child);
+              appendConnector(
+                svg,
+                buildConnectorPath(branchX, branchY + 4, childX + childLayout.width / 2, childY),
+                { stroke: "rgba(133, 102, 44, 0.72)" },
+              );
+              renderNode(svg, child, childX, childY);
+            }
+          } else {
+            for (let index = 0; index < childNodes.length; index += 1) {
+              const child = childNodes[index];
+              const childPosition = positions[index];
+              const childX = contentX + childPosition.x;
+              const childY = contentY + childPosition.y;
+              renderNode(svg, child, childX, childY);
+
+              if (index < childNodes.length - 1) {
+                const childLayout = measureNode(child);
+                const next = childNodes[index + 1];
+                const nextPosition = positions[index + 1];
+                const nextLayout = measureNode(next);
+                appendConnector(
+                  svg,
+                  buildConnectorPath(
+                    childX + childLayout.width / 2,
+                    childY + childLayout.height,
+                    contentX + nextPosition.x + nextLayout.width / 2,
+                    contentY + nextPosition.y,
+                  ),
+                );
+              }
+            }
+          }
+          return;
+        }
+
+        if (node.kind === "while") {
+          const gate = node.gate;
+          if (gate) {
+            const gatePosition = node.layout.gatePosition;
+            const gateX = contentX + gatePosition.x;
+            const gateY = contentY + gatePosition.y;
+            renderNode(svg, gate, gateX, gateY);
+
+            for (let index = 0; index < node.body.length; index += 1) {
+              const child = node.body[index];
+              const childPosition = node.layout.bodyPositions[index];
+              const childX = contentX + childPosition.x;
+              const childY = contentY + childPosition.y;
+              renderNode(svg, child, childX, childY);
+
+              if (index === 0) {
+                const gateLayout = measureNode(gate);
+                appendConnector(
+                  svg,
+                  buildConnectorPath(
+                    gateX + gateLayout.width / 2,
+                    gateY + gateLayout.height,
+                    childX + measureNode(child).width / 2,
+                    childY,
+                  ),
+                  { stroke: "rgba(154, 52, 18, 0.74)" },
+                );
+              }
+
+              if (index < node.body.length - 1) {
+                const next = node.body[index + 1];
+                const nextPosition = node.layout.bodyPositions[index + 1];
+                appendConnector(
+                  svg,
+                  buildConnectorPath(
+                    childX + measureNode(child).width / 2,
+                    childY + measureNode(child).height,
+                    contentX + nextPosition.x + measureNode(next).width / 2,
+                    contentY + nextPosition.y,
+                  ),
+                  { stroke: "rgba(154, 52, 18, 0.72)" },
+                );
+              }
+            }
+
+            if (node.body.length > 0) {
+              const lastChild = node.body[node.body.length - 1];
+              const lastPosition = node.layout.bodyPositions[node.body.length - 1];
+              const lastX = contentX + lastPosition.x;
+              const lastY = contentY + lastPosition.y;
+              const gateLayout = measureNode(gate);
+              const loopLeft = x + 22;
+              appendConnector(
+                svg,
+                buildLoopBackPath(
+                  lastX + measureNode(lastChild).width / 2,
+                  lastY + measureNode(lastChild).height + 6,
+                  gateX + gateLayout.width / 2,
+                  gateY,
+                  loopLeft,
+                ),
+                { stroke: "rgba(154, 52, 18, 0.62)", dash: true },
+              );
+            }
+          }
+        }
+      }
+
+      function renderGraph() {
+        dom.graphSvg.innerHTML = "";
+
+        if (!state.graph) {
+          dom.graphEmptyState.style.display = "block";
+          dom.graphSvg.style.display = "none";
+          return;
+        }
+
+        dom.graphEmptyState.style.display = "none";
+        dom.graphSvg.style.display = "block";
+
+        const layout = computeCanvasLayout();
+        const svgWidth = Math.max(layout.width, dom.graphShell.clientWidth - 24);
+        const svgHeight = Math.max(layout.height, dom.graphShell.clientHeight - 24, 720);
+        dom.graphSvg.setAttribute("viewBox", `0 0 ${svgWidth} ${svgHeight}`);
+        dom.graphSvg.setAttribute("width", svgWidth);
+        dom.graphSvg.setAttribute("height", svgHeight);
+
+        const defs = createSvgElement("defs");
+        const marker = createSvgElement("marker", {
+          id: "arrowhead",
+          viewBox: "0 0 10 10",
+          refX: "8.2",
+          refY: "5",
+          markerWidth: "7",
+          markerHeight: "7",
+          orient: "auto-start-reverse",
+        });
+        marker.appendChild(createSvgElement("path", {
+          d: "M 0 0 L 10 5 L 0 10 z",
+          fill: "rgba(86, 89, 81, 0.78)",
+        }));
+        defs.appendChild(marker);
+        dom.graphSvg.appendChild(defs);
+
+        state.graph.roots.forEach((root, index) => {
+          const position = layout.rootPositions[index];
+          renderNode(dom.graphSvg, root, position.x, position.y);
+          if (index < state.graph.roots.length - 1) {
+            const currentLayout = measureNode(root);
+            const nextRoot = state.graph.roots[index + 1];
+            const nextPosition = layout.rootPositions[index + 1];
+            const nextLayout = measureNode(nextRoot);
+            appendConnector(
+              dom.graphSvg,
+              buildConnectorPath(
+                position.x + currentLayout.width / 2,
+                position.y + currentLayout.height,
+                nextPosition.x + nextLayout.width / 2,
+                nextPosition.y,
+              ),
+            );
+          }
+        });
+      }
+
+      function statusBreakdown() {
+        const leaves = collectLeafNodes();
+        const summary = { total: leaves.length, done: 0, running: 0, failed: 0, pending: 0 };
+        for (const node of leaves) {
+          const key = normalizeStatus(node.status).toLowerCase();
+          if (Object.prototype.hasOwnProperty.call(summary, key)) {
+            summary[key] += 1;
+          } else {
+            summary.pending += 1;
+          }
+        }
+        return summary;
+      }
+
+      function renderStats() {
+        const counts = statusBreakdown();
+        dom.statsGrid.innerHTML = `
+          <div class="stat-card"><strong>${counts.total}</strong><span>Tasks</span></div>
+          <div class="stat-card"><strong>${counts.done}</strong><span>Done</span></div>
+          <div class="stat-card"><strong>${counts.running}</strong><span>Running</span></div>
+          <div class="stat-card"><strong>${counts.failed}</strong><span>Failed</span></div>
+        `;
+
+        const runId = state.runState?.runId || "none";
+        const loopIterations = state.runState?.totalLoopIterations ?? 0;
+        const failures = state.runState?.totalFailureCount ?? 0;
+        dom.runMeta.innerHTML = `
+          <div><strong>Run:</strong> <span class="mono">${escapeHtml(runId)}</span></div>
+          <div><strong>Loop iterations:</strong> ${loopIterations}</div>
+          <div><strong>Total failures:</strong> ${failures}</div>
+        `;
+
+        dom.planTitleBadge.textContent = state.graph ? truncate(state.graph.title, 36) : "No plan loaded";
+        dom.planNodeBadge.textContent = state.graph ? `${state.graph.nodeCount} graph nodes` : "0 nodes";
+        dom.runIdBadge.textContent = state.runState?.runId ? `Run ${state.runState.runId}` : "No run";
+      }
+
+      function formatDecision(entry) {
+        const detail = entry.detail || {};
+        if (entry.type === "while_gate_evaluation") {
+          const gateId = detail.gateId || "gate";
+          const phase = detail.phase || "phase";
+          const score = detail.score === null || detail.score === undefined ? "null" : detail.score;
+          const reasons = Array.isArray(detail.reasons) && detail.reasons.length > 0
+            ? detail.reasons.join("; ")
+            : "No reasons returned";
+          return {
+            title: `${gateId} ${detail.passed ? "passed" : "failed"} (${phase})`,
+            body: `Iteration ${detail.iteration || "?"}, score ${score}. ${reasons}`,
+          };
+        }
+        if (entry.type === "task_retry") {
+          return {
+            title: `Retry scheduled for ${detail.taskId || "task"}`,
+            body: `Attempt ${detail.attempt || "?"} -> ${detail.nextAttempt || "?"}. Status ${detail.status || "unknown"}.`,
+          };
+        }
+        if (entry.type === "while_satisfied") {
+          return {
+            title: `${detail.whileId || "loop"} satisfied`,
+            body: `Gate ${detail.gateId || "gate"} passed during ${detail.phase || "phase"} on iteration ${detail.iteration || "?"}.`,
+          };
+        }
+        if (entry.type === "while_exhausted") {
+          return {
+            title: `${detail.whileId || "loop"} exhausted`,
+            body: `Stopped after ${detail.maxIterations || "?"} iterations. Gate ${detail.gateId || "gate"} never passed.`,
+          };
+        }
+        if (entry.type === "termination_guard") {
+          return {
+            title: `Termination guard triggered`,
+            body: `Reason: ${detail.reason || "unknown"}.`,
+          };
+        }
+        return {
+          title: entry.type,
+          body: JSON.stringify(detail),
+        };
+      }
+
+      function renderDecisions() {
+        if (!state.decisionTrace || state.decisionTrace.length === 0) {
+          dom.decisionList.innerHTML = `
+            <div class="decision-item">
+              <strong>No decision trace loaded</strong>
+              <p>Load <code>decision_trace.json</code> to see loop and retry events.</p>
+            </div>
+          `;
+          return;
+        }
+
+        const selected = state.graph?.lookup.get(state.selectedNodeId) || null;
+        let decisions = state.decisionTrace;
+        if (selected?.kind === "while") {
+          decisions = decisions.filter((entry) => String(entry.detail?.whileId || "") === String(selected.executionId));
+        }
+
+        const rows = decisions.slice(-12).reverse().map((entry) => {
+          const formatted = formatDecision(entry);
+          return `
+            <div class="decision-item">
+              <strong>${escapeHtml(formatted.title)}</strong>
+              <small>${escapeHtml(entry.atUtc || "")} · ${escapeHtml(entry.type)}</small>
+              <p>${escapeHtml(formatted.body)}</p>
+            </div>
+          `;
+        }).join("");
+
+        dom.decisionList.innerHTML = rows || `
+          <div class="decision-item">
+            <strong>No node-specific decisions</strong>
+            <p>The selected node does not currently have matching decision trace entries.</p>
+          </div>
+        `;
+      }
+
+      function selectedNode() {
+        return state.graph?.lookup.get(state.selectedNodeId) || null;
+      }
+
+      function deriveRelativeUrlFromAbsolute(absolutePath) {
+        const prefix = String(dom.workspacePrefix.value || "").trim().replaceAll("\\", "/");
+        if (!absolutePath || !prefix) return "";
+        let normalizedPrefix = prefix;
+        if (!normalizedPrefix.endsWith("/")) normalizedPrefix += "/";
+        const normalizedPath = String(absolutePath).replaceAll("\\", "/");
+        if (!normalizedPath.startsWith(normalizedPrefix)) return "";
+        return normalizedPath.slice(normalizedPrefix.length)
+          .split("/")
+          .map((part) => encodeURIComponent(part))
+          .join("/");
+      }
+
+      function renderSelectedNode() {
+        const node = selectedNode();
+        if (!node) {
+          dom.selectedNodeCard.innerHTML = `
+            <h4>Selection</h4>
+            <p class="muted">Nothing selected yet.</p>
+          `;
+          return;
+        }
+
+        const runtime = node.runtime;
+        const loopStats = node.loopStats;
+        const latestEval = loopStats?.latestEvaluation?.detail || null;
+        const suggestedLogUrl = runtime?.logPath ? deriveRelativeUrlFromAbsolute(runtime.logPath) : "";
+
+        dom.selectedNodeCard.innerHTML = `
+          <h4>${escapeHtml(node.label)}</h4>
+          <dl class="kv">
+            <dt>Type</dt><dd>${escapeHtml(node.kind)}</dd>
+            <dt>Status</dt><dd>${escapeHtml(node.status)}</dd>
+            <dt>Path</dt><dd class="mono">${escapeHtml(node.graphId)}</dd>
+            <dt>ID</dt><dd class="mono">${escapeHtml(node.executionId || "-")}</dd>
+            <dt>Summary</dt><dd>${escapeHtml(node.subtitle || "-")}</dd>
+            ${runtime ? `<dt>Group</dt><dd>${escapeHtml(String(runtime.groupIndex || "-"))}</dd>` : ""}
+            ${runtime ? `<dt>Attempt</dt><dd>${escapeHtml(String(runtime.attempt || "-"))}</dd>` : ""}
+            ${runtime ? `<dt>CWD</dt><dd class="mono">${escapeHtml(runtime.cwd || "-")}</dd>` : ""}
+            ${runtime ? `<dt>Branch</dt><dd class="mono">${escapeHtml(runtime.branch || "-")}</dd>` : ""}
+            ${runtime ? `<dt>Started</dt><dd>${escapeHtml(runtime.startedAtUtc || "-")}</dd>` : ""}
+            ${runtime ? `<dt>Ended</dt><dd>${escapeHtml(runtime.endedAtUtc || "-")}</dd>` : ""}
+            ${runtime ? `<dt>Log</dt><dd class="mono">${escapeHtml(runtime.logPath || "-")}</dd>` : ""}
+            ${suggestedLogUrl ? `<dt>Log URL</dt><dd class="mono">${escapeHtml(suggestedLogUrl)}</dd>` : ""}
+            ${loopStats ? `<dt>Iterations</dt><dd>${escapeHtml(String(loopStats.iterations || 0))}</dd>` : ""}
+            ${latestEval ? `<dt>Gate</dt><dd>${escapeHtml(latestEval.gateId || node.gate?.label || "-")}</dd>` : ""}
+            ${latestEval ? `<dt>Gate Result</dt><dd>${escapeHtml(latestEval.passed ? "passed" : "failed")}</dd>` : ""}
+            ${latestEval ? `<dt>Reasons</dt><dd>${escapeHtml(Array.isArray(latestEval.reasons) ? latestEval.reasons.join("; ") : "-")}</dd>` : ""}
+          </dl>
+          ${node.prompt ? `<div class="notice small"><strong>Prompt</strong><br>${escapeHtml(node.prompt)}</div>` : ""}
+          ${node.commandLine ? `<div class="notice small"><strong>Command</strong><br><span class="mono">${escapeHtml(node.commandLine)}</span></div>` : ""}
+        `;
+      }
+
+      function updatePollingBadges() {
+        dom.pollBadge.textContent = state.pollingTimer ? "Polling on" : "Polling off";
+        dom.togglePollingBtn.textContent = state.pollingTimer ? "Stop Polling" : "Start Polling";
+        dom.toggleLogPollingBtn.textContent = state.logPollingTimer ? "Stop Log Polling" : "Start Log Polling";
+      }
+
+      function renderAll() {
+        applyRuntimeToGraph();
+        renderStats();
+        renderGraph();
+        renderSelectedNode();
+        renderDecisions();
+        updatePollingBadges();
+      }
+
+      async function loadPlanPayload(payload) {
+        state.plan = normalizePlanPayload(payload);
+        state.graph = buildGraph(state.plan);
+        ensureSelection();
+        renderAll();
+        setNotice("Plan loaded. Add run_state.json and decision_trace.json to overlay runtime details.");
+      }
+
+      async function handleJsonFileInput(input, targetKey, label) {
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+          const payload = await readJsonFile(file, label);
+          if (targetKey === "plan") {
+            await loadPlanPayload(payload);
+          } else if (targetKey === "runState") {
+            state.runState = payload;
+            renderAll();
+            setNotice("Run state loaded.");
+          } else if (targetKey === "decisionTrace") {
+            state.decisionTrace = Array.isArray(payload) ? payload : [];
+            renderAll();
+            setNotice("Decision trace loaded.");
+          }
+        } catch (error) {
+          setNotice(String(error), true);
+        }
+      }
+
+      async function loadExamplePlan() {
+        if (window.location.protocol === "file:") {
+          setNotice("Load example only works when served over HTTP. Use the file picker or run `python3 -m http.server` from the repo root.", true);
+          return;
+        }
+        dom.planUrl.value = dom.planUrl.value || "example_plan.json";
+        try {
+          const payload = await fetchJson(dom.planUrl.value, "Plan URL");
+          await loadPlanPayload(payload);
+        } catch (error) {
+          setNotice(`Could not load example plan: ${String(error)}`, true);
+        }
+      }
+
+      async function loadFromUrls() {
+        try {
+          const planUrl = dom.planUrl.value.trim();
+          const stateUrl = dom.stateUrl.value.trim();
+          const traceUrl = dom.traceUrl.value.trim();
+
+          if (planUrl) {
+            const planPayload = await fetchJson(planUrl, "Plan URL");
+            await loadPlanPayload(planPayload);
+          }
+          if (stateUrl) {
+            state.runState = await fetchJson(stateUrl, "Run state URL");
+          }
+          if (traceUrl) {
+            const tracePayload = await fetchJson(traceUrl, "Decision trace URL");
+            state.decisionTrace = Array.isArray(tracePayload) ? tracePayload : [];
+          }
+          renderAll();
+          setNotice("URL data loaded.");
+        } catch (error) {
+          setNotice(String(error), true);
+        }
+      }
+
+      function startPolling() {
+        const seconds = Math.max(1, Number(dom.pollSeconds.value || 2));
+        const planUrl = dom.planUrl.value.trim();
+        const stateUrl = dom.stateUrl.value.trim();
+        const traceUrl = dom.traceUrl.value.trim();
+        if (!planUrl && !stateUrl && !traceUrl) {
+          setNotice("Set at least one URL before starting polling.", true);
+          return;
+        }
+
+        if (state.pollingTimer) clearInterval(state.pollingTimer);
+        state.pollingTimer = setInterval(async () => {
+          try {
+            if (planUrl) {
+              const planPayload = await fetchJson(planUrl, "Plan URL");
+              state.plan = normalizePlanPayload(planPayload);
+              state.graph = buildGraph(state.plan);
+            }
+            if (stateUrl) {
+              state.runState = await fetchJson(stateUrl, "Run state URL");
+            }
+            if (traceUrl) {
+              const tracePayload = await fetchJson(traceUrl, "Decision trace URL");
+              state.decisionTrace = Array.isArray(tracePayload) ? tracePayload : [];
+            }
+            renderAll();
+            setNotice(`Polling every ${seconds}s.`);
+          } catch (error) {
+            setNotice(`Polling error: ${String(error)}`, true);
+          }
+        }, seconds * 1000);
+        updatePollingBadges();
+      }
+
+      function stopPolling() {
+        if (state.pollingTimer) {
+          clearInterval(state.pollingTimer);
+          state.pollingTimer = null;
+          updatePollingBadges();
+          setNotice("Polling stopped.");
+        }
+      }
+
+      async function loadLogFromUrl(url) {
+        if (!url) {
+          setNotice("Provide a log URL first.", true);
+          return;
+        }
+        try {
+          const text = await fetchText(url, "Log URL");
+          state.currentLogSource = url;
+          state.lastLogText = text;
+          dom.logOutput.textContent = text || "(empty log)";
+          dom.logOutput.scrollTop = dom.logOutput.scrollHeight;
+          dom.logHint.textContent = `Viewing ${url}`;
+        } catch (error) {
+          setNotice(`Could not load log: ${String(error)}`, true);
+        }
+      }
+
+      function startLogPolling() {
+        const url = dom.logUrl.value.trim();
+        const seconds = Math.max(1, Number(dom.pollSeconds.value || 2));
+        if (!url) {
+          setNotice("Set a log URL before starting log polling.", true);
+          return;
+        }
+
+        if (state.logPollingTimer) clearInterval(state.logPollingTimer);
+        state.logPollingTimer = setInterval(async () => {
+          try {
+            const text = await fetchText(url, "Log URL");
+            if (text !== state.lastLogText) {
+              const nearBottom = dom.logOutput.scrollTop + dom.logOutput.clientHeight >= dom.logOutput.scrollHeight - 80;
+              state.lastLogText = text;
+              dom.logOutput.textContent = text || "(empty log)";
+              if (nearBottom) dom.logOutput.scrollTop = dom.logOutput.scrollHeight;
+            }
+            state.currentLogSource = url;
+            dom.logHint.textContent = `Polling ${url} every ${seconds}s`;
+          } catch (error) {
+            dom.logHint.textContent = `Log polling error: ${String(error)}`;
+          }
+        }, seconds * 1000);
+        updatePollingBadges();
+      }
+
+      function stopLogPolling() {
+        if (state.logPollingTimer) {
+          clearInterval(state.logPollingTimer);
+          state.logPollingTimer = null;
+          updatePollingBadges();
+          dom.logHint.textContent = state.currentLogSource
+            ? `Viewing ${state.currentLogSource}`
+            : "Log polling stopped.";
+        }
+      }
+
+      async function handleLogFileInput() {
+        const file = dom.logFile.files?.[0];
+        if (!file) return;
+        state.lastLogText = await file.text();
+        state.currentLogSource = file.name;
+        dom.logOutput.textContent = state.lastLogText || "(empty log)";
+        dom.logHint.textContent = `Loaded snapshot from ${file.name}`;
+      }
+
+      function useSelectedNodeLog() {
+        const node = selectedNode();
+        const runtime = node?.runtime;
+        if (!runtime?.logPath) {
+          setNotice("The selected node does not have a runtime log path yet.", true);
+          return;
+        }
+        const suggested = deriveRelativeUrlFromAbsolute(runtime.logPath);
+        if (!suggested) {
+          dom.logUrl.value = runtime.logPath;
+          dom.logHint.textContent = "Inserted the raw log path. If you are serving the repo over HTTP, set Workspace Prefix so the viewer can convert absolute paths into relative URLs.";
+          return;
+        }
+        dom.logUrl.value = suggested;
+        dom.logHint.textContent = `Using selected node log: ${suggested}`;
+      }
+
+      function clearData() {
+        clearTimers();
+        state.plan = null;
+        state.runState = null;
+        state.decisionTrace = [];
+        state.graph = null;
+        state.selectedNodeId = null;
+        state.lastLogText = "";
+        state.currentLogSource = "";
+
+        dom.planFile.value = "";
+        dom.stateFile.value = "";
+        dom.traceFile.value = "";
+        dom.logFile.value = "";
+        dom.logUrl.value = "";
+        dom.logOutput.textContent = "No log loaded.";
+        dom.logHint.textContent = "File mode can preview a snapshot. URL mode can poll logs when the page is served over HTTP.";
+
+        renderStats();
+        renderGraph();
+        renderSelectedNode();
+        renderDecisions();
+        setNotice("Cleared all loaded data.");
+      }
+
+      function debounce(fn, delay) {
+        let timer = null;
+        return (...args) => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => fn(...args), delay);
+        };
+      }
+
+      dom.planFile.addEventListener("change", () => handleJsonFileInput(dom.planFile, "plan", "Plan file"));
+      dom.stateFile.addEventListener("change", () => handleJsonFileInput(dom.stateFile, "runState", "Run state file"));
+      dom.traceFile.addEventListener("change", () => handleJsonFileInput(dom.traceFile, "decisionTrace", "Decision trace file"));
+      dom.logFile.addEventListener("change", handleLogFileInput);
+      dom.loadExampleBtn.addEventListener("click", loadExamplePlan);
+      dom.clearDataBtn.addEventListener("click", clearData);
+      dom.loadUrlsBtn.addEventListener("click", loadFromUrls);
+      dom.togglePollingBtn.addEventListener("click", () => {
+        if (state.pollingTimer) stopPolling();
+        else startPolling();
+      });
+      dom.loadSelectedLogBtn.addEventListener("click", useSelectedNodeLog);
+      dom.loadLogBtn.addEventListener("click", () => loadLogFromUrl(dom.logUrl.value.trim()));
+      dom.toggleLogPollingBtn.addEventListener("click", () => {
+        if (state.logPollingTimer) stopLogPolling();
+        else startLogPolling();
+      });
+      window.addEventListener("resize", debounce(renderGraph, 120));
+
+      renderStats();
+      renderGraph();
+      renderSelectedNode();
+      renderDecisions();
+      updatePollingBadges();
+    })();
+  </script>
+</body>
+</html>

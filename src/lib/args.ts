@@ -24,11 +24,19 @@ export function parseArgs(argv: string[]): CliArgs {
     supervisorConfigFile: null,
     missionStateFile: null,
     supervisorProfile: null,
+    webMode: false,
+    webHost: null,
+    webPort: null,
+    webNoOpen: false,
     planHelp: false,
     help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
+    if (token === 'web' && i === 0) {
+      out.webMode = true;
+      continue;
+    }
     if (token === '--plan-help') {
       out.planHelp = true;
       continue;
@@ -57,6 +65,28 @@ export function parseArgs(argv: string[]): CliArgs {
     }
     if (token === '--validate') {
       out.validate = true;
+      continue;
+    }
+    if (token === '--host') {
+      const value = argv[i + 1];
+      if (!value) throw new Error('--host requires a value.');
+      out.webHost = value;
+      i += 1;
+      continue;
+    }
+    if (token === '--port') {
+      const value = argv[i + 1];
+      if (!value) throw new Error('--port requires a value.');
+      const port = Number(value);
+      if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+        throw new Error('--port must be an integer between 1 and 65535.');
+      }
+      out.webPort = port;
+      i += 1;
+      continue;
+    }
+    if (token === '--no-open') {
+      out.webNoOpen = true;
       continue;
     }
     if (token === '--resume') {

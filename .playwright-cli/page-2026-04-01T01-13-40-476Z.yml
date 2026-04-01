@@ -1,0 +1,198 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e7]:
+          - heading "Agentflow Web" [level=3] [ref=e8]
+          - paragraph [ref=e9]: Launch, reopen, and resume runs from a cleaner operator dashboard.
+        - generic [ref=e10]:
+          - generic [ref=e12]: agentflow 0.1.0 · web 0.1.0
+          - button "Choose plan" [ref=e13] [cursor=pointer]:
+            - generic [ref=e14]:
+              - img [ref=e16]
+              - generic [ref=e21]: Choose plan
+          - button "Open run" [ref=e22] [cursor=pointer]:
+            - generic [ref=e23]:
+              - img [ref=e25]
+              - generic [ref=e27]: Open run
+          - button "Resume run" [ref=e28] [cursor=pointer]:
+            - generic [ref=e29]:
+              - img [ref=e31]
+              - generic [ref=e34]: Resume run
+    - navigation [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e40]:
+            - paragraph [ref=e41]: Launch settings
+            - paragraph [ref=e42]: Execution defaults
+            - paragraph [ref=e43]: Keep the run settings close to the launcher, not buried in a form.
+          - generic [ref=e45]:
+            - generic [ref=e47]:
+              - switch "Skip git repo check"
+              - generic [ref=e52]: Skip git repo check
+            - generic [ref=e53]:
+              - generic [ref=e54]: Sandbox mode
+              - generic [ref=e55]:
+                - combobox "Sandbox mode" [ref=e56] [cursor=pointer]:
+                  - option "workspace-write" [selected]
+                  - option "read-only"
+                  - option "danger-full-access"
+                - generic:
+                  - img
+            - button "Start run" [ref=e57] [cursor=pointer]:
+              - generic [ref=e58]:
+                - img [ref=e60]
+                - generic [ref=e62]: Start run
+        - generic [ref=e63]:
+          - generic [ref=e66]:
+            - paragraph [ref=e67]: Recent plans
+            - paragraph [ref=e68]: Plan history
+            - paragraph [ref=e69]: Jump back into plans you inspected recently.
+          - generic [ref=e72]:
+            - generic [ref=e73]:
+              - paragraph [ref=e74]: sample-fun-plan.json
+              - paragraph [ref=e75]: /tmp/agentflow-web-browser-fixture/.tmp/sample-fun-plan.json
+            - button "Open" [ref=e76] [cursor=pointer]:
+              - generic [ref=e78]: Open
+        - generic [ref=e79]:
+          - generic [ref=e82]:
+            - paragraph [ref=e83]: Recent runs
+            - paragraph [ref=e84]: Run folders
+            - paragraph [ref=e85]: Open historical runs or resume them from disk.
+          - paragraph [ref=e88]: No recent runs yet.
+    - main [ref=e89]:
+      - generic [ref=e90]:
+        - generic [ref=e91]:
+          - generic [ref=e92]:
+            - generic [ref=e95]:
+              - generic [ref=e96]:
+                - paragraph [ref=e97]: Plan status
+                - paragraph [ref=e98]: Ready
+                - paragraph [ref=e99]: sample-fun-plan.json
+              - img [ref=e102]
+            - generic [ref=e109]:
+              - generic [ref=e110]:
+                - paragraph [ref=e111]: Workflow nodes
+                - paragraph [ref=e112]: "7"
+                - paragraph [ref=e113]: Total nodes discovered
+              - img [ref=e116]
+            - generic [ref=e122]:
+              - generic [ref=e123]:
+                - paragraph [ref=e124]: Executable steps
+                - paragraph [ref=e125]: "5"
+                - paragraph [ref=e126]: Tasks and commands ready to run
+              - img [ref=e129]
+            - generic [ref=e133]:
+              - generic [ref=e134]:
+                - paragraph [ref=e135]: Context health
+                - paragraph [ref=e136]: 0/0
+                - paragraph [ref=e137]: 1/1 repos found
+              - img [ref=e140]
+          - generic [ref=e144]:
+            - generic [ref=e146]:
+              - generic [ref=e147]:
+                - paragraph [ref=e148]: Workflow mix
+                - paragraph [ref=e149]: Shape of the workflow
+                - paragraph [ref=e150]: Use the count mix to spot whether the plan is mostly executable work or orchestration.
+              - generic [ref=e153]: 7 nodes
+            - generic [ref=e158]:
+              - generic [ref=e159]:
+                - paragraph [ref=e160]: Tasks
+                - generic [ref=e162]: "4"
+              - generic [ref=e163]:
+                - paragraph [ref=e164]: Commands
+                - generic [ref=e166]: "1"
+              - generic [ref=e167]:
+                - paragraph [ref=e168]: Groups
+                - generic [ref=e170]: "1"
+              - generic [ref=e171]:
+                - paragraph [ref=e172]: Loops
+                - generic [ref=e174]: "1"
+        - generic [ref=e175]:
+          - generic [ref=e178]:
+            - paragraph [ref=e179]: Workflow preview
+            - paragraph [ref=e180]: See the execution graph before you run
+            - paragraph [ref=e181]: The preview uses the inspected plan topology, so you can sanity-check orchestration and step order before launching.
+          - generic [ref=e183]:
+            - generic [ref=e186]:
+              - generic [ref=e188]:
+                - generic:
+                  - img
+              - img [ref=e189]
+            - region "Workflow walkthrough" [active] [ref=e193]:
+              - generic [ref=e194]:
+                - generic [ref=e195]:
+                  - paragraph [ref=e196]: Walkthrough
+                  - generic [ref=e198]: 5 actionable
+                - radiogroup [ref=e199]:
+                  - generic [ref=e201]:
+                    - radio "Actionable" [checked]
+                    - generic [ref=e202] [cursor=pointer]: Actionable
+                  - generic [ref=e203]:
+                    - radio "All"
+                    - generic [ref=e204] [cursor=pointer]: All
+                - generic [ref=e205]:
+                  - paragraph [ref=e206]: No node selected
+                  - paragraph [ref=e207]: Click a node in the graph preview or jump into the walkthrough from the first step.
+                - generic [ref=e208]:
+                  - paragraph [ref=e209]: "Tip: press Enter to jump in, then use ←/→ to step."
+                  - button "First action" [ref=e210] [cursor=pointer]:
+                    - generic [ref=e211]:
+                      - img [ref=e213]
+                      - generic [ref=e215]: First action
+        - generic [ref=e216]:
+          - generic [ref=e217]:
+            - generic [ref=e219]:
+              - generic [ref=e220]:
+                - paragraph [ref=e221]: Plan overview
+                - paragraph [ref=e222]: Launch from a readable plan summary
+                - paragraph [ref=e223]: Inspect a plan, confirm its topology and context, then start the run from the same surface.
+              - button "Start run" [ref=e225] [cursor=pointer]:
+                - generic [ref=e226]:
+                  - img [ref=e228]
+                  - generic [ref=e230]: Start run
+            - generic [ref=e232]:
+              - generic [ref=e233]: /tmp/agentflow-web-browser-fixture/.tmp/sample-fun-plan.json
+              - generic [ref=e236]: valid
+              - paragraph [ref=e237]: The selected plan is ready to launch. Use the supporting tiles to verify workflow shape, context files, and inferred run roots before starting.
+          - generic [ref=e239]:
+            - generic [ref=e242]:
+              - paragraph [ref=e243]: Context
+              - paragraph [ref=e244]: Repo and file health
+              - paragraph [ref=e245]: Resolve the critical paths before starting the run.
+            - generic [ref=e247]:
+              - generic [ref=e249]:
+                - generic [ref=e250]:
+                  - paragraph [ref=e251]: main
+                  - paragraph [ref=e252]: /tmp/agentflow-web-browser-fixture
+                - generic [ref=e254]: found
+              - paragraph [ref=e255]: 0 of 0 context files resolve from the selected plan.
+        - generic [ref=e256]:
+          - generic [ref=e257]:
+            - generic [ref=e260]:
+              - paragraph [ref=e261]: Run roots
+              - paragraph [ref=e262]: Inferred artifact directories
+              - paragraph [ref=e263]: These are the candidate run roots the bridge can use once the plan starts.
+            - generic [ref=e268]:
+              - generic [ref=e269]: /tmp/agentflow-web-browser-fixture/.tmp/agentflow_runs
+              - generic [ref=e270]: /tmp/agentflow-web-browser-fixture/tmp/agentflow_runs
+          - generic [ref=e271]:
+            - generic [ref=e274]:
+              - paragraph [ref=e275]: Nearby docs
+              - paragraph [ref=e276]: Context around the plan
+              - paragraph [ref=e277]: Useful markdown discovered near the plan and repo roots.
+            - generic [ref=e282]:
+              - generic [ref=e283]:
+                - generic [ref=e284]:
+                  - paragraph [ref=e285]: README.md
+                  - paragraph [ref=e286]: /tmp/agentflow-web-browser-fixture/README.md
+                - img [ref=e289]
+              - generic [ref=e292]:
+                - generic [ref=e293]:
+                  - paragraph [ref=e294]: sample-guide.md
+                  - paragraph [ref=e295]: /tmp/agentflow-web-browser-fixture/docs/sample-guide.md
+                - img [ref=e298]
+  - alert [ref=e303]:
+    - generic [ref=e305]: Plan inspected successfully.
+    - button [ref=e306] [cursor=pointer]:
+      - img [ref=e307]

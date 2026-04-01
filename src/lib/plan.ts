@@ -231,6 +231,132 @@ function normalizeLoopGate(
 // Flow node normalizers
 // ---------------------------------------------------------------------------
 
+/**
+ * Normalizes a loop_judge node by compiling it into a while node with an AI gate.
+ * The gate prompt is synthesized from a rubric and pass_threshold (0..10).
+ */
+function normalizeLoopJudgeNode(
+  payload: Record<string, unknown>,
+  fieldName: string,
+  seenTaskIds: Set<string>,
+  repoAliases: string[],
+): WhileNode {
+  const f = fields(payload, fieldName, [
+    'type',
+    'id',
+    'max_iterations',
+    'pass_threshold',
+    'rubric',
+    'judge',
+    'body',
+  ]);
+
+  const bodyPayload = payload.body;
+  if (!Array.isArray(bodyPayload) || bodyPayload.length === 0) {
+    throw new Error(`${fieldName}.body must include at least one flow node.`);
+  }
+
+  const loopId = f.strReq('id');
+
+  // pass_threshold (0..10)
+  const passRaw = (payload as Record<string, unknown>).pass_threshold;
+  if (passRaw === undefined || passRaw === null || passRaw === '') {
+    throw new Error(`${fieldName}.pass_threshold is required and must be a number between 0 and 10.`);
+  }
+  const passThreshold = Number(passRaw);
+  if (!Number.isFinite(passThreshold) || passThreshold < 0 || passThreshold > 10) {
+    throw new Error(`${fieldName}.pass_threshold must be a number between 0 and 10.`);
+  }
+
+  // rubric.criteria: non-empty, weights >= 0 and sum > 0; normalize to sum=1
+  const rubricPayload = f.obj('rubric');
+  const rf = fields(rubricPayload, `${fieldName}.rubric`, ['scale', 'criteria', 'notes']);
+  const criteriaRaw = rubricPayload.criteria;
+  if (!Array.isArray(criteriaRaw) || criteriaRaw.length === 0) {
+    throw new Error(`${fieldName}.rubric.criteria must be a non-empty array.`);
+  }
+  type Criterion = { id: string; label: string; weight: number; guidance?: string };
+  const criteria: Criterion[] = criteriaRaw.map((c, i) => {
+    if (!c || typeof c !== 'object' || Array.isArray(c)) {
+      throw new Error(`${fieldName}.rubric.criteria[${i}] must be an object.`);
+    }
+    const obj = c as Record<string, unknown>;
+    const id = requiredString(obj.id, `${fieldName}.rubric.criteria[${i}].id`);
+    const label = requiredString(obj.label, `${fieldName}.rubric.criteria[${i}].label`);
+    const wRaw = obj.weight;
+    const weight = Number(wRaw);
+    if (!Number.isFinite(weight) || weight < 0) {
+      throw new Error(`${fieldName}.rubric.criteria[${i}].weight must be a number >= 0.`);
+    }
+    const guidance = optionalString(obj.guidance);
+    return { id, label, weight, guidance: guidance || undefined };
+  });
+  const weightSum = criteria.reduce((acc, c) => acc + c.weight, 0);
+  if (!(weightSum > 0)) {
+    throw new Error(`${fieldName}.rubric.criteria weights must sum to > 0.`);
+  }
+  const normalized = criteria.map((c) => ({ ...c, weight: c.weight / weightSum }));
+  const notes = rf.str('notes') || null;
+
+  // judge overrides (provider/model/persona/reasoning/profile/include_recent_tasks)
+  const judgePayload = f.obj('judge');
+  const jf = fields(judgePayload, `${fieldName}.judge`, [
+    'provider',
+    'model',
+    'persona',
+    'reasoning',
+    'profile',
+    'include_recent_tasks',
+  ]);
+  const judgeProvider = normalizeProvider(jf.raw('provider')) as Provider | null;
+  const judgeModel = jf.str('model');
+  const judgePersona = jf.str('persona');
+  const judgeReasoning = normalizeReasoningEffort(jf.raw('reasoning'));
+  const judgeProfile = jf.str('profile');
+  const judgeRecent = jf.posInt('include_recent_tasks');
+
+  // Synthesize rubric prompt deterministically
+  const toPct = (w: number) => `${Math.round(w * 100)}%`;
+  const lines: string[] = [];
+  lines.push('Rubric-Based Judging (0–10)');
+  lines.push('Score each criterion 0–10. Compute weighted average.');
+  lines.push(`Pass threshold: ${passThreshold} (score >= threshold passes).`);
+  lines.push('Criteria:');
+  for (const c of normalized) {
+    const guide = c.guidance ? ` — ${c.guidance}` : '';
+    lines.push(`- ${c.id}: ${c.label} (weight ${toPct(c.weight)})${guide}`);
+  }
+  if (notes) lines.push(`Notes: ${notes}`);
+  lines.push(
+    'Output JSON only. Required keys: passed (boolean), score (number), reasons (string[]). Optional: breakdown (object criterionId->score), feedback (string[]).',
+  );
+  const rubricPrompt = lines.join('\n');
+
+  const gate: AiGate = {
+    type: 'ai',
+    id: `${loopId}_judge`,
+    repo: null,
+    scoreThreshold: passThreshold,
+    timeoutSec: null,
+    requiredArtifacts: [],
+    prompt: rubricPrompt,
+    persona: judgePersona,
+    provider: judgeProvider,
+    model: judgeModel,
+    reasoningEffort: judgeReasoning,
+    profile: judgeProfile,
+    includeRecentTasks: judgeRecent,
+  };
+
+  return {
+    type: 'while',
+    id: loopId,
+    maxIterations: f.posInt('max_iterations'),
+    until: gate,
+    body: bodyPayload.map((b, i) => normalizeFlowNode(b, `${fieldName}.body[${i}]`, seenTaskIds, repoAliases)),
+  };
+}
+
 function normalizeTaskNode(
   payload: Record<string, unknown>,
   fieldName: string,
@@ -367,7 +493,11 @@ function normalizeFlowNode(
     };
   }
 
-  throw new Error(`${fieldName}.type must be one of: task, command, group, loop.`);
+  if (type === 'loop_judge') {
+    return normalizeLoopJudgeNode(nodePayload, fieldName, seenTaskIds, repoAliases);
+  }
+
+  throw new Error(`${fieldName}.type must be one of: task, command, group, loop, loop_judge.`);
 }
 
 // ---------------------------------------------------------------------------

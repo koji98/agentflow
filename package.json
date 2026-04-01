@@ -11,9 +11,12 @@
     "start": "node ./bin/agentflow.js --help",
     "dev": "node ./bin/agentflow.js",
     "plan-help": "node ./bin/agentflow.js --plan-help",
+    "web:dev": "npm --prefix web-app run dev",
+    "web:build": "npm --prefix web-app run build",
+    "web:start": "npm --prefix web-app run start",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
-    "test": "source ~/.nvm/nvm.sh && nvm exec 20 node --import tsx --test tests/unit.test.ts tests/integration-cli.test.ts tests/integration-workflow.test.ts tests/integration-providers.test.ts tests/integration-features.test.ts",
+    "test": "source ~/.nvm/nvm.sh && nvm exec 20 node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

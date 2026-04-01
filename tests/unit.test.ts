@@ -214,7 +214,7 @@ test('flow uses group nodes and requires explicit parallel boolean', () => {
         repos: { main: '.' },
         flow: [{ type: 'parallel', id: 'legacy', steps: [] }],
       }),
-    /flow\[0\]\.type must be one of: task, command, group, loop\./,
+    /flow\[0\]\.type must be one of: task, command, group, loop, loop_judge\./,
   );
 
   assert.throws(

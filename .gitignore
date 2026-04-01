@@ -1,3 +1,6 @@
 .tmp
 tmp
 node_modules
+web-app/client/dist
+web-app/report.md
+web-app/summary.md

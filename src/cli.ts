@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { parseArgs } from './lib/args.ts';
 import { usageText, planHelpText } from './lib/help.ts';
+import { runWebMode } from './lib/web.ts';
 import {
   collectTaskNodes,
   countExecutableNodes,
@@ -413,6 +414,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (args.planHelp) {
     log(`${planHelpText()}\n`);
     return 0;
+  }
+  if (args.webMode) {
+    try {
+      return await runWebMode(args);
+    } catch (error) {
+      logError(String(error));
+      return 1;
+    }
   }
 
   const hasSupervisorOnlyFlags = Boolean(

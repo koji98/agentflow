@@ -1,0 +1,251 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]:
+        - heading "Run monitor" [level=3] [ref=e8]
+        - paragraph [ref=e9]: /tmp/agentflow-web-browser-fixture/.tmp/sample-fun-plan.json
+      - generic [ref=e10]:
+        - link "Launch view" [ref=e11] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e12]:
+            - img [ref=e14]
+            - generic [ref=e17]: Launch view
+        - button "Resume" [ref=e18] [cursor=pointer]:
+          - generic [ref=e19]:
+            - img [ref=e21]
+            - generic [ref=e24]: Resume
+        - button "Cancel" [ref=e25] [cursor=pointer]:
+          - generic [ref=e26]:
+            - img [ref=e28]
+            - generic [ref=e31]: Cancel
+  - navigation [ref=e32]:
+    - generic [ref=e33]:
+      - generic [ref=e34]:
+        - generic [ref=e37]:
+          - paragraph [ref=e38]: Run summary
+          - paragraph [ref=e39]: Execution state
+          - paragraph [ref=e40]: Core run metadata, kept anchored in a narrow rail.
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - generic [ref=e45]: run_sample_fun_agentflow-web-browser-fixture
+            - generic [ref=e47]: done
+          - generic [ref=e193]: /tmp/agentflow-web-browser-fixture/.tmp/agentflow_runs/run_sample_fun_agentflow-web-browser-fixture
+          - paragraph [ref=e48]: Last update 3/31/2026, 12:05:00 PM
+      - generic [ref=e49]:
+        - generic [ref=e52]:
+          - paragraph [ref=e53]: Task health
+          - paragraph [ref=e54]: Execution distribution
+          - paragraph [ref=e55]: State breakdown across all executable rows.
+        - img [ref=e197]:
+          - img [ref=e200]
+          - generic [ref=e201]: "5"
+      - generic [ref=e58]:
+        - generic [ref=e61]:
+          - paragraph [ref=e62]: Recent activity
+          - paragraph [ref=e63]: Decision cadence
+          - paragraph [ref=e64]: A compact sparkline for loop and control-flow activity.
+        - generic [ref=e66]:
+          - paragraph [ref=e67]: 4 decision events captured.
+          - paragraph [ref=e68]: Historical run loaded from disk.
+  - main [ref=e69]:
+    - generic [ref=e70]:
+      - generic [ref=e73]:
+        - generic [ref=e74]:
+          - paragraph [ref=e75]: Run status
+          - paragraph [ref=e76]: DONE
+          - paragraph [ref=e77]: Historical run snapshot
+        - img [ref=e80]
+      - generic [ref=e86]:
+        - generic [ref=e87]:
+          - paragraph [ref=e88]: Tasks
+          - paragraph [ref=e89]: "5"
+          - paragraph [ref=e90]: 5 done · 0 running
+        - img [ref=e93]
+      - generic [ref=e98]:
+        - generic [ref=e99]:
+          - paragraph [ref=e100]: Loop iterations
+          - paragraph [ref=e101]: "1"
+          - paragraph [ref=e102]: 0 judge events on selected node
+        - img [ref=e105]
+      - generic [ref=e109]:
+        - generic [ref=e110]:
+          - paragraph [ref=e111]: Selected node
+          - paragraph [ref=e112]: echo_status
+          - paragraph [ref=e113]: command
+        - img [ref=e116]
+      - generic [ref=e119]:
+        - generic [ref=e121]:
+          - generic [ref=e122]:
+            - paragraph [ref=e123]: Workflow graph
+            - paragraph [ref=e124]: Topology, state, and selection
+            - paragraph [ref=e125]: The graph is the primary surface. Use it to track execution and drive the inspector.
+          - generic [ref=e204]: "Selected: echo_status"
+        - generic [ref=e205]:
+          - generic [ref=e207]:
+            - generic:
+              - img:
+                - generic:
+                  - button "Edge from setup_agent:0:0 to parallel_fun:0:1" [ref=e389] [cursor=pointer]
+                  - button "Edge from parallel_fun:0:1 to joke_agent:1:2" [ref=e392] [cursor=pointer]
+                  - button "Edge from parallel_fun:0:1 to echo_status:1:3" [ref=e395] [cursor=pointer]
+                  - button "Edge from parallel_fun:0:1 to quality_gate:0:4" [ref=e398] [cursor=pointer]
+                  - button "Edge from quality_gate:0:4 to refine_agent:1:5" [ref=e401] [cursor=pointer]
+                  - button "Edge from refine_agent:1:5 to quality_gate:0:4" [ref=e404] [cursor=pointer]:
+                    - generic [ref=e407]:
+                      - generic: retry
+                  - button "Edge from quality_gate:0:4 to final_agent:0:6" [ref=e409] [cursor=pointer]
+              - generic:
+                - button "task setup_agent done Brainstorm a playful product pitch about cloud noodles." [ref=e231]:
+                  - generic [ref=e234]:
+                    - generic [ref=e235]:
+                      - generic [ref=e236]:
+                        - paragraph [ref=e237]: task
+                        - paragraph [ref=e238]: setup_agent
+                      - generic [ref=e240]: done
+                    - paragraph [ref=e241]: Brainstorm a playful product pitch about cloud noodles.
+                - button "group parallel_fun done GROUP" [ref=e243]:
+                  - generic [ref=e246]:
+                    - generic [ref=e247]:
+                      - generic [ref=e248]:
+                        - paragraph [ref=e249]: group
+                        - paragraph [ref=e250]: parallel_fun
+                      - generic [ref=e252]: done
+                    - paragraph [ref=e253]: GROUP
+                - button "task joke_agent done Tell a clean pun about databases and noodles." [ref=e255]:
+                  - generic [ref=e258]:
+                    - generic [ref=e259]:
+                      - generic [ref=e260]:
+                        - paragraph [ref=e261]: task
+                        - paragraph [ref=e262]: joke_agent
+                      - generic [ref=e264]: done
+                    - paragraph [ref=e265]: Tell a clean pun about databases and noodles.
+                - button "command echo_status done /bin/sh -c echo pipeline_ready" [active] [ref=e267]:
+                  - generic [ref=e270]:
+                    - generic [ref=e271]:
+                      - generic [ref=e272]:
+                        - paragraph [ref=e273]: command
+                        - paragraph [ref=e274]: echo_status
+                      - generic [ref=e276]: done
+                    - paragraph [ref=e277]: /bin/sh -c echo pipeline_ready
+                - button "loop judge quality_gate done Pass threshold 8" [ref=e279]:
+                  - generic [ref=e282]:
+                    - generic [ref=e283]:
+                      - generic [ref=e284]:
+                        - paragraph [ref=e285]: loop judge
+                        - paragraph [ref=e286]: quality_gate
+                      - generic [ref=e288]: done
+                    - paragraph [ref=e289]: Pass threshold 8
+                - button "task refine_agent done Improve the joke using the latest judge feedback." [ref=e291]:
+                  - generic [ref=e294]:
+                    - generic [ref=e295]:
+                      - generic [ref=e296]:
+                        - paragraph [ref=e297]: task
+                        - paragraph [ref=e298]: refine_agent
+                      - generic [ref=e300]: done
+                    - paragraph [ref=e301]: Improve the joke using the latest judge feedback.
+                - button "task final_agent done Summarize the strongest final line in one sentence." [ref=e303]:
+                  - generic [ref=e306]:
+                    - generic [ref=e307]:
+                      - generic [ref=e308]:
+                        - paragraph [ref=e309]: task
+                        - paragraph [ref=e310]: final_agent
+                      - generic [ref=e312]: done
+                    - paragraph [ref=e313]: Summarize the strongest final line in one sentence.
+          - img "React Flow mini map" [ref=e316]
+          - generic [ref=e324]:
+            - button "zoom in" [ref=e325] [cursor=pointer]:
+              - img [ref=e326]
+            - button "zoom out" [ref=e328] [cursor=pointer]:
+              - img [ref=e329]
+            - button "fit view" [ref=e331] [cursor=pointer]:
+              - img [ref=e332]
+          - img [ref=e334]
+      - generic [ref=e132]:
+        - generic [ref=e135]:
+          - paragraph [ref=e136]: Inspector
+          - paragraph [ref=e137]: Selected node detail
+          - paragraph [ref=e138]: Prompt, artifacts, logs, and loop/judge output stay attached to the current selection.
+        - generic [ref=e337]:
+          - generic [ref=e338]:
+            - generic [ref=e339]:
+              - generic [ref=e340]:
+                - paragraph [ref=e341]: command
+                - paragraph [ref=e342]: echo_status
+                - paragraph [ref=e343]: /bin/sh -c echo pipeline_ready
+              - generic [ref=e345]: done
+            - generic [ref=e346]:
+              - generic [ref=e348]: command
+              - generic [ref=e350]: Attempt 1
+              - generic [ref=e352]: 60s
+          - generic [ref=e353]:
+            - tablist [ref=e354]:
+              - tab "Overview" [selected] [ref=e355] [cursor=pointer]:
+                - generic [ref=e356]: Overview
+              - tab "Artifacts" [ref=e357] [cursor=pointer]:
+                - generic [ref=e358]: Artifacts
+              - tab "Logs" [ref=e359] [cursor=pointer]:
+                - generic [ref=e360]: Logs
+              - tab "Judge / Loop" [ref=e361] [cursor=pointer]:
+                - generic [ref=e362]: Judge / Loop
+            - tabpanel "Overview" [ref=e363]:
+              - generic [ref=e364]:
+                - generic [ref=e365]:
+                  - paragraph [ref=e366]: Prompt / command
+                  - generic [ref=e367]: /bin/sh -c echo pipeline_ready
+                - generic [ref=e368]:
+                  - generic [ref=e369]:
+                    - paragraph [ref=e370]: Started
+                    - paragraph [ref=e371]: 3/31/2026, 12:00:00 PM
+                  - generic [ref=e372]:
+                    - paragraph [ref=e373]: Ended
+                    - paragraph [ref=e374]: 3/31/2026, 12:01:00 PM
+                - generic [ref=e375]:
+                  - paragraph [ref=e376]: Artifacts on disk
+                  - generic [ref=e377]:
+                    - generic [ref=e419]:
+                      - paragraph: Prompt
+                      - paragraph [ref=e420]: /tmp/agentflow-web-browser-fixture/.tmp/agentflow_runs/run_sample_fun_agentflow-web-browser-fixture/group_03/task_echo-status-a1/prompt.md
+                    - generic [ref=e421]:
+                      - paragraph: Report
+                      - paragraph [ref=e422]: /tmp/agentflow-web-browser-fixture/.tmp/agentflow_runs/run_sample_fun_agentflow-web-browser-fixture/group_03/task_echo-status-a1/worker_report.md
+                    - generic [ref=e423]:
+                      - paragraph: Summary
+                      - paragraph [ref=e424]: /tmp/agentflow-web-browser-fixture/.tmp/agentflow_runs/run_sample_fun_agentflow-web-browser-fixture/group_03/task_echo-status-a1/worker_summary.md
+                    - generic [ref=e425]:
+                      - paragraph: Last message
+                      - paragraph [ref=e426]: /tmp/agentflow-web-browser-fixture/.tmp/agentflow_runs/run_sample_fun_agentflow-web-browser-fixture/group_03/task_echo-status-a1/worker_last_message.md
+                    - generic [ref=e427]:
+                      - paragraph: Log
+                      - paragraph [ref=e428]: /tmp/agentflow-web-browser-fixture/.tmp/agentflow_runs/run_sample_fun_agentflow-web-browser-fixture/group_03/task_echo-status-a1/worker_exec.log
+      - generic [ref=e143]:
+        - generic [ref=e146]:
+          - paragraph [ref=e147]: Activity timeline
+          - paragraph [ref=e148]: Recent control-flow events
+          - paragraph [ref=e149]: Filter retries, gates, and failures without leaving the dashboard.
+        - generic [ref=e151]:
+          - radiogroup [ref=e152]:
+            - generic [ref=e154]:
+              - radio "All" [checked]
+              - generic [ref=e155] [cursor=pointer]: All
+            - generic [ref=e156]:
+              - radio "Gates"
+              - generic [ref=e157] [cursor=pointer]: Gates
+            - generic [ref=e158]:
+              - radio "Retries"
+              - generic [ref=e159] [cursor=pointer]: Retries
+            - generic [ref=e160]:
+              - radio "Failures"
+              - generic [ref=e161] [cursor=pointer]: Failures
+          - paragraph [ref=e388]: No timeline entries for the current filter.
+      - generic [ref=e167]:
+        - generic [ref=e170]:
+          - paragraph [ref=e171]: Runner console
+          - paragraph [ref=e172]: Live orchestration output
+          - paragraph [ref=e173]: Parent CLI stdout and stderr stream here while the run is active.
+        - generic [ref=e179]: No content available.
+      - generic [ref=e180]:
+        - generic [ref=e183]:
+          - paragraph [ref=e184]: Selected node log
+          - paragraph [ref=e185]: Focused execution log
+          - paragraph [ref=e186]: Raw stdout and stderr for the current task or command node.
+        - generic [ref=e192]: pipeline_ready

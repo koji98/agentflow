@@ -18,6 +18,10 @@ export interface CliArgs {
   supervisorConfigFile: string | null;
   missionStateFile: string | null;
   supervisorProfile: string | null;
+  webMode: boolean;
+  webHost: string | null;
+  webPort: number | null;
+  webNoOpen: boolean;
   planHelp: boolean;
   help: boolean;
 }

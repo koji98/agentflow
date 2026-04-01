@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { main } from '../src/cli.ts';
-import { getSingleRunDir, installMockCodex, mkRepo, parseJsonLines, runOrThrow, withPatchedEnv } from './helpers.ts';
+import { getSingleRunDir, installMockAgent, installMockCodex, mkRepo, parseJsonLines, runOrThrow, withPatchedEnv } from './helpers.ts';
 
 test('task-level provider/model overrides are applied per task', async (t) => {
   const repoRoot = mkRepo('agentflow-task-overrides-');
@@ -893,6 +893,92 @@ fi
   const promptText = fs.readFileSync(path.resolve(runDir, groupDirs[0], loopTaskDir, 'prompt.md'), 'utf8');
   assert.match(promptText, /## Gate Feedback To Address/);
   assert.match(promptText, /not yet/);
+});
+
+test('loop_judge injects pre-body feedback into body prompt and passes post-body (cursor provider)', async (t) => {
+  const repoRoot = mkRepo('agentflow-loop-judge-');
+  t.after(() => fs.rmSync(repoRoot, { recursive: true, force: true }));
+
+  const mockBinDir = path.resolve(repoRoot, 'mockbin');
+  installMockAgent(mockBinDir);
+  const mockLog = path.resolve(repoRoot, 'mock_agent.log');
+  const mockBehavior = path.resolve(repoRoot, 'mock_behavior.json');
+  // For AI gate (cursor), return JSON with pass=false on pre_body, pass=true on post_body.
+  fs.writeFileSync(
+    mockBehavior,
+    JSON.stringify(
+      {
+        rules: [
+          { match: 'phase: pre_body', stdout: '{"passed":false,"score":7.0,"reasons":["needs improvements"]}' },
+          { match: 'phase: post_body', stdout: '{"passed":true,"score":9.0,"reasons":[]}' }
+        ],
+        default: { exitCode: 0, sleepMs: 0 }
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  const planPath = path.resolve(repoRoot, 'loop_judge_plan.json');
+  fs.writeFileSync(
+    planPath,
+    JSON.stringify(
+      {
+        setup: 'loop_judge integration test',
+        repos: { main: '.' },
+        worktrees: false,
+        provider: 'cursor',
+        model: 'claude-sonnet',
+        reasoning: 'high',
+        options: { run_root: 'tmp/test_loop_judge_runs' },
+        limits: { worker_timeout_sec: 30, timeout_grace_sec: 1 },
+        flow: [
+          {
+            type: 'loop_judge',
+            id: 'improve_with_rubric',
+            max_iterations: 3,
+            pass_threshold: 8,
+            rubric: {
+              criteria: [
+                { id: 'correctness', label: 'Correctness', weight: 0.5 },
+                { id: 'clarity', label: 'Clarity', weight: 0.5 }
+              ]
+            },
+            body: [
+              { type: 'task', id: 'loop_body_task', prompt: 'Improve work based on feedback.' }
+            ]
+          }
+        ]
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  await withPatchedEnv(
+    {
+      PATH: `${mockBinDir}${path.delimiter}${process.env.PATH || ''}`,
+      MOCK_AGENT_LOG: mockLog,
+      MOCK_AGENT_BEHAVIOR: mockBehavior,
+    },
+    async () => {
+      const exitCode = await main(['--plan', planPath]);
+      assert.equal(exitCode, 0);
+    },
+  );
+
+  const runBase = path.resolve(repoRoot, 'tmp/test_loop_judge_runs');
+  const runDir = getSingleRunDir(runBase);
+  const groupDirs = fs.readdirSync(runDir).filter((d) => d.startsWith('group_01')).sort();
+  assert.ok(groupDirs.length > 0, 'expected first loop body group directory');
+  const taskDirs = fs.readdirSync(path.resolve(runDir, groupDirs[0]));
+  const loopTaskDir = taskDirs.find((d) => d.includes('loop-body-task'));
+  assert.ok(loopTaskDir, 'expected loop_body_task artifact directory');
+  const promptText = fs.readFileSync(path.resolve(runDir, groupDirs[0], loopTaskDir, 'prompt.md'), 'utf8');
+  assert.match(promptText, /## Gate Feedback To Address/);
+  assert.match(promptText, /needs improvements/);
 });
 
 test('worktrees=true evaluates loop deterministic gates against latest carried worktree ref', async (t) => {

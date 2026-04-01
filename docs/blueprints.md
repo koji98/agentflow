@@ -584,3 +584,38 @@ agentflow --plan-help                         # full schema reference
   ]
 }
 ```
+#### `loop_judge` — rubric-based loop with AI judge (sugar)
+
+Compiles to an internal `while` node with an `ai` gate. The judge scores 0–10 and pass/fail is determined by `score >= pass_threshold`.
+
+```json
+{
+  "type": "loop_judge",
+  "id": "quality_rubric",
+  "max_iterations": 3,
+  "pass_threshold": 8.0,
+  "rubric": {
+    "criteria": [
+      { "id": "correctness", "label": "Correctness", "weight": 0.4, "guidance": "No factual errors." },
+      { "id": "coverage",    "label": "Coverage",    "weight": 0.3, "guidance": "Addresses all requirements." },
+      { "id": "clarity",     "label": "Clarity",     "weight": 0.3, "guidance": "Readable, well structured." }
+    ],
+    "notes": "Score each 0–10; weighted; explain deficits."
+  },
+  "judge": {
+    "persona": "You are a strict QA judge.",
+    "include_recent_tasks": 20
+  },
+  "body": [
+    { "type": "task", "id": "improve", "prompt": "Address evaluator feedback and improve the result." }
+  ]
+}
+```
+
+Semantics:
+- `pass_threshold` is required and must be within 0..10.
+- Each rubric criterion must have `id`, `label`, and non-negative `weight`. Weights are normalized to sum 1.0; at least one weight must be > 0.
+- The gate prompt is synthesized deterministically from the rubric and threshold.
+- The evaluator must return JSON: `{ "passed": boolean, "score": number, "reasons": string[] }`. Optional: `breakdown` map, `feedback` array.
+- When the judge fails, reasons are carried forward into the next iteration via the "Gate Feedback To Address" section in task prompts.
+- When the judge passes, the loop exits and execution continues.

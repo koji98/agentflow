@@ -1,0 +1,120 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]:
+        - heading "Run monitor" [level=3] [ref=e8]
+        - paragraph [ref=e9]: Loading run metadata...
+      - generic [ref=e10]:
+        - link "Launch view" [ref=e11] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e12]:
+            - img [ref=e14]
+            - generic [ref=e17]: Launch view
+        - button "Resume" [ref=e18] [cursor=pointer]:
+          - generic [ref=e19]:
+            - img [ref=e21]
+            - generic [ref=e24]: Resume
+        - button "Cancel" [ref=e25] [cursor=pointer]:
+          - generic [ref=e26]:
+            - img [ref=e28]
+            - generic [ref=e31]: Cancel
+  - navigation [ref=e32]:
+    - generic [ref=e33]:
+      - generic [ref=e34]:
+        - generic [ref=e37]:
+          - paragraph [ref=e38]: Run summary
+          - paragraph [ref=e39]: Execution state
+          - paragraph [ref=e40]: Core run metadata, kept anchored in a narrow rail.
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - generic [ref=e45]: run_sample_fun_agentflow-web-browser-fixture
+            - generic [ref=e47]: idle
+          - paragraph [ref=e48]: Last update pending
+      - generic [ref=e49]:
+        - generic [ref=e52]:
+          - paragraph [ref=e53]: Task health
+          - paragraph [ref=e54]: Execution distribution
+          - paragraph [ref=e55]: State breakdown across all executable rows.
+        - paragraph [ref=e57]: Waiting for task state.
+      - generic [ref=e58]:
+        - generic [ref=e61]:
+          - paragraph [ref=e62]: Recent activity
+          - paragraph [ref=e63]: Decision cadence
+          - paragraph [ref=e64]: A compact sparkline for loop and control-flow activity.
+        - generic [ref=e66]:
+          - paragraph [ref=e67]: 0 decision events captured.
+          - paragraph [ref=e68]: Historical run loaded from disk.
+  - main [ref=e69]:
+    - generic [ref=e70]:
+      - generic [ref=e73]:
+        - generic [ref=e74]:
+          - paragraph [ref=e75]: Run status
+          - paragraph [ref=e76]: IDLE
+          - paragraph [ref=e77]: Historical run snapshot
+        - img [ref=e80]
+      - generic [ref=e86]:
+        - generic [ref=e87]:
+          - paragraph [ref=e88]: Tasks
+          - paragraph [ref=e89]: "0"
+          - paragraph [ref=e90]: 0 done · 0 running
+        - img [ref=e93]
+      - generic [ref=e98]:
+        - generic [ref=e99]:
+          - paragraph [ref=e100]: Loop iterations
+          - paragraph [ref=e101]: "0"
+          - paragraph [ref=e102]: 0 judge events on selected node
+        - img [ref=e105]
+      - generic [ref=e109]:
+        - generic [ref=e110]:
+          - paragraph [ref=e111]: Selected node
+          - paragraph [ref=e112]: None
+          - paragraph [ref=e113]: Choose a node in the graph
+        - img [ref=e116]
+      - generic [ref=e119]:
+        - generic [ref=e122]:
+          - paragraph [ref=e123]: Workflow graph
+          - paragraph [ref=e124]: Topology, state, and selection
+          - paragraph [ref=e125]: The graph is the primary surface. Use it to track execution and drive the inspector.
+        - generic [ref=e129]:
+          - paragraph [ref=e130]: No graph available
+          - paragraph [ref=e131]: Load or start a plan to render the workflow topology.
+      - generic [ref=e132]:
+        - generic [ref=e135]:
+          - paragraph [ref=e136]: Inspector
+          - paragraph [ref=e137]: Selected node detail
+          - paragraph [ref=e138]: Prompt, artifacts, logs, and loop/judge output stay attached to the current selection.
+        - generic [ref=e140]:
+          - paragraph [ref=e141]: No node selected
+          - paragraph [ref=e142]: Select a workflow node to inspect its request, outputs, artifacts, and logs.
+      - generic [ref=e143]:
+        - generic [ref=e146]:
+          - paragraph [ref=e147]: Activity timeline
+          - paragraph [ref=e148]: Recent control-flow events
+          - paragraph [ref=e149]: Filter retries, gates, and failures without leaving the dashboard.
+        - generic [ref=e151]:
+          - radiogroup [ref=e152]:
+            - generic [ref=e154]:
+              - radio "All" [checked]
+              - generic [ref=e155] [cursor=pointer]: All
+            - generic [ref=e156]:
+              - radio "Gates"
+              - generic [ref=e157] [cursor=pointer]: Gates
+            - generic [ref=e158]:
+              - radio "Retries"
+              - generic [ref=e159] [cursor=pointer]: Retries
+            - generic [ref=e160]:
+              - radio "Failures"
+              - generic [ref=e161] [cursor=pointer]: Failures
+          - paragraph [ref=e166]: No timeline entries for the current filter.
+      - generic [ref=e167]:
+        - generic [ref=e170]:
+          - paragraph [ref=e171]: Runner console
+          - paragraph [ref=e172]: Live orchestration output
+          - paragraph [ref=e173]: Parent CLI stdout and stderr stream here while the run is active.
+        - generic [ref=e179]: No content available.
+      - generic [ref=e180]:
+        - generic [ref=e183]:
+          - paragraph [ref=e184]: Selected node log
+          - paragraph [ref=e185]: Focused execution log
+          - paragraph [ref=e186]: Raw stdout and stderr for the current task or command node.
+        - generic [ref=e192]: No content available.

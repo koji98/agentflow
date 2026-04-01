@@ -1,0 +1,189 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e7]:
+        - heading "Run monitor" [level=3] [ref=e8]
+        - paragraph [ref=e9]: /Users/chidiudeze/Documents/GitHub/agentflow/.tmp/joke-demo-plan.json
+      - generic [ref=e10]:
+        - link "Launch view" [ref=e11] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e12]:
+            - img [ref=e14]
+            - generic [ref=e17]: Launch view
+        - button "Resume" [ref=e18] [cursor=pointer]:
+          - generic [ref=e19]:
+            - img [ref=e21]
+            - generic [ref=e24]: Resume
+        - button "Cancel" [ref=e25] [cursor=pointer]:
+          - generic [ref=e26]:
+            - img [ref=e28]
+            - generic [ref=e31]: Cancel
+  - navigation [ref=e32]:
+    - generic [ref=e33]:
+      - generic [ref=e34]:
+        - generic [ref=e37]:
+          - paragraph [ref=e38]: Run summary
+          - paragraph [ref=e39]: Execution state
+          - paragraph [ref=e40]: Core run metadata, kept anchored in a narrow rail.
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - generic [ref=e45]: run_20260401T011437Z
+            - generic [ref=e47]: cancelled
+          - generic [ref=e48]: /Users/chidiudeze/Documents/GitHub/agentflow/.tmp/agentflow_runs/run_20260401T011437Z
+          - paragraph [ref=e49]: Last update 3/31/2026, 9:17:49 PM
+      - generic [ref=e50]:
+        - generic [ref=e53]:
+          - paragraph [ref=e54]: Task health
+          - paragraph [ref=e55]: Execution distribution
+          - paragraph [ref=e56]: State breakdown across all executable rows.
+        - img [ref=e61]:
+          - img [ref=e64]
+          - generic [ref=e65]: "3"
+      - generic [ref=e66]:
+        - generic [ref=e69]:
+          - paragraph [ref=e70]: Recent activity
+          - paragraph [ref=e71]: Decision cadence
+          - paragraph [ref=e72]: A compact sparkline for loop and control-flow activity.
+        - generic [ref=e74]:
+          - paragraph [ref=e75]: 0 decision events captured.
+          - paragraph [ref=e76]: Historical run loaded from disk.
+  - main [ref=e77]:
+    - generic [ref=e78]:
+      - generic [ref=e81]:
+        - generic [ref=e82]:
+          - paragraph [ref=e83]: Run status
+          - paragraph [ref=e84]: CANCELLED
+          - paragraph [ref=e85]: Historical run snapshot
+        - img [ref=e88]
+      - generic [ref=e94]:
+        - generic [ref=e95]:
+          - paragraph [ref=e96]: Tasks
+          - paragraph [ref=e97]: "3"
+          - paragraph [ref=e98]: 0 done · 0 running
+        - img [ref=e101]
+      - generic [ref=e106]:
+        - generic [ref=e107]:
+          - paragraph [ref=e108]: Loop iterations
+          - paragraph [ref=e109]: "0"
+          - paragraph [ref=e110]: 0 judge events on selected node
+        - img [ref=e113]
+      - generic [ref=e117]:
+        - generic [ref=e118]:
+          - paragraph [ref=e119]: Selected node
+          - paragraph [ref=e120]: parallel_joke_agents
+          - paragraph [ref=e121]: group
+        - img [ref=e124]
+      - generic [ref=e127]:
+        - generic [ref=e129]:
+          - generic [ref=e130]:
+            - paragraph [ref=e131]: Workflow graph
+            - paragraph [ref=e132]: Topology, state, and selection
+            - paragraph [ref=e133]: The graph is the primary surface. Use it to track execution and drive the inspector.
+          - generic [ref=e136]: "Selected: parallel_joke_agents"
+        - generic [ref=e140]:
+          - generic [ref=e142]:
+            - generic:
+              - img:
+                - generic:
+                  - button "Edge from parallel_joke_agents:0:0 to joke_agent_alpha:1:1" [ref=e143] [cursor=pointer]
+                  - button "Edge from parallel_joke_agents:0:0 to joke_agent_beta:1:2" [ref=e146] [cursor=pointer]
+                  - button "Edge from parallel_joke_agents:0:0 to joke_agent_gamma:1:3" [ref=e149] [cursor=pointer]
+              - generic:
+                - button "group parallel_joke_agents failed GROUP" [ref=e152]:
+                  - generic [ref=e155]:
+                    - generic [ref=e156]:
+                      - generic [ref=e157]:
+                        - paragraph [ref=e158]: group
+                        - paragraph [ref=e159]: parallel_joke_agents
+                      - generic [ref=e161]: failed
+                    - paragraph [ref=e162]: GROUP
+                - button "task joke_agent_alpha failed Tell exactly three short programmer jokes. Keep them clean and concise. In the r" [ref=e164]:
+                  - generic [ref=e167]:
+                    - generic [ref=e168]:
+                      - generic [ref=e169]:
+                        - paragraph [ref=e170]: task
+                        - paragraph [ref=e171]: joke_agent_alpha
+                      - generic [ref=e173]: failed
+                    - paragraph [ref=e174]: Tell exactly three short programmer jokes. Keep them clean and concise. In the r
+                - button "task joke_agent_beta failed Tell exactly three short math jokes. Keep them clean and concise. In the report," [ref=e176]:
+                  - generic [ref=e179]:
+                    - generic [ref=e180]:
+                      - generic [ref=e181]:
+                        - paragraph [ref=e182]: task
+                        - paragraph [ref=e183]: joke_agent_beta
+                      - generic [ref=e185]: failed
+                    - paragraph [ref=e186]: Tell exactly three short math jokes. Keep them clean and concise. In the report,
+                - button "task joke_agent_gamma failed Tell exactly three short absurd office jokes. Keep them clean and concise. In th" [ref=e188]:
+                  - generic [ref=e191]:
+                    - generic [ref=e192]:
+                      - generic [ref=e193]:
+                        - paragraph [ref=e194]: task
+                        - paragraph [ref=e195]: joke_agent_gamma
+                      - generic [ref=e197]: failed
+                    - paragraph [ref=e198]: Tell exactly three short absurd office jokes. Keep them clean and concise. In th
+          - img "React Flow mini map" [ref=e201]
+          - generic [ref=e206]:
+            - button "zoom in" [ref=e207] [cursor=pointer]:
+              - img [ref=e208]
+            - button "zoom out" [ref=e210] [cursor=pointer]:
+              - img [ref=e211]
+            - button "fit view" [ref=e213] [cursor=pointer]:
+              - img [ref=e214]
+          - img [ref=e216]
+      - generic [ref=e219]:
+        - generic [ref=e222]:
+          - paragraph [ref=e223]: Inspector
+          - paragraph [ref=e224]: Selected node detail
+          - paragraph [ref=e225]: Prompt, artifacts, logs, and loop/judge output stay attached to the current selection.
+        - generic [ref=e227]:
+          - generic [ref=e228]:
+            - generic [ref=e229]:
+              - generic [ref=e230]:
+                - paragraph [ref=e231]: group
+                - paragraph [ref=e232]: parallel_joke_agents
+                - paragraph [ref=e233]: GROUP
+              - generic [ref=e235]: failed
+            - generic [ref=e238]: group
+          - generic [ref=e239]:
+            - tablist [ref=e240]:
+              - tab "Overview" [selected] [ref=e241] [cursor=pointer]:
+                - generic [ref=e242]: Overview
+              - tab "Artifacts" [ref=e243] [cursor=pointer]:
+                - generic [ref=e244]: Artifacts
+              - tab "Logs" [ref=e245] [cursor=pointer]:
+                - generic [ref=e246]: Logs
+              - tab "Judge / Loop" [ref=e247] [cursor=pointer]:
+                - generic [ref=e248]: Judge / Loop
+            - tabpanel "Overview" [ref=e249]
+      - generic [ref=e250]:
+        - generic [ref=e253]:
+          - paragraph [ref=e254]: Activity timeline
+          - paragraph [ref=e255]: Recent control-flow events
+          - paragraph [ref=e256]: Filter retries, gates, and failures without leaving the dashboard.
+        - generic [ref=e258]:
+          - radiogroup [ref=e259]:
+            - generic [ref=e261]:
+              - radio "All" [checked]
+              - generic [ref=e262] [cursor=pointer]: All
+            - generic [ref=e263]:
+              - radio "Gates"
+              - generic [ref=e264] [cursor=pointer]: Gates
+            - generic [ref=e265]:
+              - radio "Retries"
+              - generic [ref=e266] [cursor=pointer]: Retries
+            - generic [ref=e267]:
+              - radio "Failures"
+              - generic [ref=e268] [cursor=pointer]: Failures
+          - paragraph [ref=e273]: No timeline entries for the current filter.
+      - generic [ref=e274]:
+        - generic [ref=e277]:
+          - paragraph [ref=e278]: Runner console
+          - paragraph [ref=e279]: Live orchestration output
+          - paragraph [ref=e280]: Parent CLI stdout and stderr stream here while the run is active.
+        - generic [ref=e286]: "[stdout] [resume] resuming run run_20260401T011437Z (0 completed tasks will be skipped) [stdout] repo.main: /Users/chidiudeze/Documents/GitHub/agentflow [stdout] plan_file: /Users/chidiudeze/Documents/GitHub/agentflow/.tmp/joke-demo-plan.json [stdout] run_root: /Users/chidiudeze/Documents/GitHub/agentflow/.tmp/agentflow_runs/run_20260401T011437Z [stdout] run_id: run_20260401T011437Z [stdout] workflow_nodes: 4 [stdout] task_nodes: 3 [stdout] worktrees: false [stdout] dry_run: false [stdout] skip_git_check: false [stdout] sandbox_mode: workspace-write [stdout] [1/3] [group 04] task=joke_agent_alpha provider=codex cwd=/Users/chidiudeze/Documents/GitHub/agentflow [stdout] [1/3] [group 05] task=joke_agent_beta provider=codex cwd=/Users/chidiudeze/Documents/GitHub/agentflow [stdout] [1/3] [group 06] task=joke_agent_gamma provider=codex cwd=/Users/chidiudeze/Documents/GitHub/agentflow [stdout] [1/3] -> task joke_agent_gamma status=FAILED exit=1 (log: /Users/chidiudeze/Documents/GitHub/agentflow/.tmp/agentflow_runs/run_20260401T011437Z/group_06/task_joke-agent-gamma-a1/worker_exec.log) [stdout] [1/3] -> task joke_agent_beta status=FAILED exit=1 (log: /Users/chidiudeze/Documents/GitHub/agentflow/.tmp/agentflow_runs/run_20260401T011437Z/group_05/task_joke-agent-beta-a1/worker_exec.log) [stdout] [1/3] -> task joke_agent_alpha status=FAILED exit=1 (log: /Users/chidiudeze/Documents/GitHub/agentflow/.tmp/agentflow_runs/run_20260401T011437Z/group_04/task_joke-agent-alpha-a1/worker_exec.log) [stdout] completed with failures: 3"
+      - generic [ref=e287]:
+        - generic [ref=e290]:
+          - paragraph [ref=e291]: Selected node log
+          - paragraph [ref=e292]: Focused execution log
+          - paragraph [ref=e293]: Raw stdout and stderr for the current task or command node.
+        - generic [ref=e299]: No content available.
