@@ -914,6 +914,7 @@ The projected state must answer:
 - active executions
 - latest execution summary per compiled node
 - repeat scope iteration state
+- artifact index for hashed node and execution directories
 
 ### Live-update contract
 

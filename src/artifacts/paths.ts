@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { isAbsolute, join, resolve } from "node:path";
 
 export const runsRootEnvironmentVariable = "AGENTFLOW_RUNS_ROOT";
+const maxPathSegmentLength = 120;
 
 export interface RunsRootOptions {
   currentWorkingDirectory: string;
@@ -17,11 +19,35 @@ export interface RunRootOptions {
 }
 
 function sanitizePathSegment(value: string): string {
-  return value
+  const sanitized =
+    value
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "graph";
+
+  if (sanitized.length <= maxPathSegmentLength) {
+    return sanitized;
+  }
+
+  const hash = createHash("sha1").update(sanitized).digest("hex").slice(0, 12);
+  const prefixLength = Math.max(1, maxPathSegmentLength - hash.length - 1);
+  const prefix = sanitized.slice(0, prefixLength).replace(/-+$/g, "") || "graph";
+  return `${prefix}-${hash}`;
+}
+
+function hashPathSegment(value: string, prefix: string): string {
+  const normalized = value.trim() || prefix;
+  const hash = createHash("sha1").update(normalized).digest("hex").slice(0, 16);
+  return `${prefix}-${hash}`;
+}
+
+export function resolveNodeArtifactDirectoryName(compiledId: string): string {
+  return hashPathSegment(compiledId, "node");
+}
+
+export function resolveExecutionDirectoryName(executionId: string): string {
+  return hashPathSegment(executionId, "exec");
 }
 
 function normalizeConfiguredRunsRoot(value: string, source: "runsRoot" | "environment"): string {
@@ -74,6 +100,7 @@ export function createRunRootPath(options: RunRootOptions): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const graphSegment = sanitizePathSegment(options.graphId);
   const labelSegment = options.runLabel ? `-${sanitizePathSegment(options.runLabel)}` : "";
+  const runSegment = sanitizePathSegment(`${timestamp}-${graphSegment}${labelSegment}`);
 
   return resolve(
     resolveRunsRoot({
@@ -81,7 +108,7 @@ export function createRunRootPath(options: RunRootOptions): string {
       ...(options.runsRoot ? { runsRoot: options.runsRoot } : {}),
       ...(options.environment ? { environment: options.environment } : {})
     }),
-    `${timestamp}-${graphSegment}${labelSegment}`
+    runSegment
   );
 }
 
@@ -127,9 +154,12 @@ export function resolveNodeExecutionDirectory(
   executionId: string
 ): string {
   return join(
-    resolveRunArtifactPaths(runRoot).nodes_dir,
-    sanitizePathSegment(compiledId),
+    resolveNodeArtifactDirectory(runRoot, compiledId),
     "executions",
-    sanitizePathSegment(executionId)
+    resolveExecutionDirectoryName(executionId)
   );
+}
+
+export function resolveNodeArtifactDirectory(runRoot: string, compiledId: string): string {
+  return join(resolveRunArtifactPaths(runRoot).nodes_dir, resolveNodeArtifactDirectoryName(compiledId));
 }

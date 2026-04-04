@@ -24,6 +24,7 @@
     "ui": "tsx src/cli/index.ts ui",
     "graph-help": "tsx src/cli/index.ts graph-help",
     "control": "tsx src/cli/index.ts control",
+    "resume": "tsx src/cli/index.ts resume",
     "web:dev": "npm run dev --workspace web-app",
     "web:build": "npm run build --workspace web-app",
     "web:start": "npm run start --workspace web-app",

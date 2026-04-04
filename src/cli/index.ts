@@ -23,6 +23,7 @@ import {
 } from "../graph/schema.js";
 import { managedWorkflowDescriptors } from "../managed/index.js";
 import { compileCommand } from "./commands/compile.js";
+import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
 import { uiCommand } from "./commands/ui.js";
 import { validateCommand } from "./commands/validate.js";
@@ -53,6 +54,7 @@ const optionDescriptions: Record<string, string> = {
   "workspace-backend":
     "--workspace-backend <name>   Run-scoped workspace backend override.",
   label: "--label <run_label>          Optional run label appended to the generated run root.",
+  "run-root": "--run-root <path>            Existing run root to resume.",
   mission: "--mission <path>             Mission state file reserved for the deferred controller surface.",
   help: "--help, -h                   Show command help."
 };
@@ -213,6 +215,7 @@ const commandRegistry = {
   validate: validateCommand,
   compile: compileCommand,
   run: runCommand,
+  resume: resumeCommand,
   ui: uiCommand,
   "graph-help": graphHelpCommand,
   control: controlCommand
@@ -241,13 +244,15 @@ function renderMainHelp(): string {
     "  2. validate: check the authored graph plus launch settings without running it",
     "  3. compile: inspect the compiled graph contract before execution",
     "  4. run: execute the compiled graph and write durable artifacts under the run root",
-    "  5. ui: point the launchpad or monitor at the same runs root",
+    "  5. resume: continue a failed or canceled run root without redoing passed work",
+    "  6. ui: point the launchpad or monitor at the same runs root",
     "",
     "Examples:",
     "  agentflow graph-help",
     "  agentflow validate --graph agentflow.graph.json",
     "  agentflow compile --graph agentflow.graph.json",
     "  agentflow run --graph agentflow.graph.json --workspace-backend worktree",
+    "  agentflow resume --run-root .agentflow/runs/<run-id>",
     "  agentflow ui --graph agentflow.graph.json",
     "  agentflow control --mission mission.json",
     "",
@@ -394,7 +399,7 @@ export async function executeCli(
         message: `Unexpected positional arguments: ${positionals.join(", ")}`,
         commandName: command.name,
         usage: command.usage,
-        includeGraphHelp: command.optionNames.includes("graph")
+        includeGraphHelp: (command.optionNames as readonly string[]).includes("graph")
       })
     };
   }
@@ -408,7 +413,7 @@ export async function executeCli(
         message: `Unexpected option(s): ${unexpectedOptions.map((optionName) => `--${optionName}`).join(", ")}`,
         commandName: command.name,
         usage: command.usage,
-        includeGraphHelp: command.optionNames.includes("graph")
+        includeGraphHelp: (command.optionNames as readonly string[]).includes("graph")
       })
     };
   }

@@ -262,6 +262,16 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("passed");
     expect(maxParallel).toBe(2);
     expect(run.state.status).toBe("passed");
+    expect(run.state.artifact_index.run_root).toBe(runRoot);
+    expect(run.state.artifact_index.node_dirs_by_compiled_id.root__setup).toContain("/nodes/node-");
+    expect(
+      run.state.artifact_index.compiled_id_by_node_hash[
+        run.state.artifact_index.node_hashes_by_compiled_id.root__setup
+      ]
+    ).toBe("root__setup");
+    expect(
+      run.state.artifact_index.execution_dirs_by_execution_id[run.attempts[0]!.execution_id]
+    ).toBe(run.attempts[0]!.execution_dir);
     expect(run.state.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(2);
     expect(run.state.repeat_scopes.scope__root__retry.status).toBe("passed");
     expect(

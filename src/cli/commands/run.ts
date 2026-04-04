@@ -21,6 +21,7 @@ import {
   renderCommandUsageError,
   runCancellationText
 } from "../command_support.js";
+import { createRuntimeProgressReporter } from "../progress.js";
 
 async function resolveRepoSources(
   absoluteGraphPath: string,
@@ -224,7 +225,11 @@ export const runCommand = {
       };
     }
 
+    const progress = createRuntimeProgressReporter(compilation.compiled_graph!);
     const run = await runCompiledGraph({
+      on_event: (event) => {
+        progress.onEvent(event);
+      },
       run_root: createRunRootPath({
         currentWorkingDirectory,
         graphId: loaded.document.graph_id,

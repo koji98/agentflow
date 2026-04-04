@@ -93,6 +93,7 @@ describe("spec design managed workflow", () => {
     const externalResearch = workflow.steps[3];
     const optionFanout = workflow.steps[5];
     const revisionLoop = workflow.steps[8];
+    const initialDraft = workflow.steps[7];
 
     if (!externalResearch || externalResearch.type !== "parallel") {
       throw new Error("Expected external research fanout to be parallel.");
@@ -106,9 +107,35 @@ describe("spec design managed workflow", () => {
       throw new Error("Expected a repeat-based revision loop.");
     }
 
+    if (!initialDraft || initialDraft.type !== "agent") {
+      throw new Error("Expected initial draft step to be an agent.");
+    }
+
     expect(externalResearch.steps).toHaveLength(2);
     expect(optionFanout.steps).toHaveLength(3);
     expect(revisionLoop.until.node).toBe("managed_nodes_spec__managed__spec_design__quality_check");
+    expect(initialDraft.prompt).toContain("The spec must be implementation-ready and self-contained");
+    expect(initialDraft.prompt).toContain("Required sections:");
+
+    if (revisionLoop.body.type !== "sequence") {
+      throw new Error("Expected revision loop body to be a sequence.");
+    }
+
+    const reviseNode = revisionLoop.body.steps[0];
+    const qualityCheck = revisionLoop.body.steps.at(-1);
+
+    if (!reviseNode || reviseNode.type !== "agent") {
+      throw new Error("Expected revise step to be an agent.");
+    }
+
+    if (!qualityCheck || qualityCheck.type !== "check") {
+      throw new Error("Expected quality check to be a check node.");
+    }
+
+    expect(reviseNode.prompt).toContain("implementation-ready design spec draft");
+    expect(reviseNode.prompt).toContain("Do not leave repo-specific UI boundaries");
+    expect(qualityCheck.prompt).toContain("direct input contract for execute_spec");
+    expect(qualityCheck.rubric).toContain("migration or compatibility unresolved");
     expect(workflow.steps.at(-1)).toEqual(
       expect.objectContaining({
         id: "managed_nodes_spec",

@@ -532,11 +532,32 @@ npm run run -- --graph ./agentflow.graph.json --profile default --label demo
 
 During a run, `agent` and AI `check` nodes append live harness output into each execution's `stdout.log` and `stderr.log` under the run root. The final completed logs still remain the authoritative artifact.
 
+While the graph is running, the CLI also prints human-readable progress to `stderr`. The final machine-readable command result remains on `stdout`, so piping `agentflow run ... | jq` still works.
+
 Cancel behavior:
 
 - Press `Ctrl-C` in the terminal that launched the run.
 - The runtime performs cleanup and writes durable canceled state.
 - The web monitor reflects that state from artifacts.
+
+### `resume`
+
+Resumes a failed or canceled run root in place.
+
+```bash
+npm run resume -- --run-root ./.agentflow/runs/<run-id>
+```
+
+Resume behavior:
+
+- preserves nodes whose latest durable outcome is `passed`
+- restarts failed, canceled, blocked, skipped, and pending nodes
+- restarts failed repeat scopes from iteration 1
+- appends new events and attempts into the same run root
+
+Like `run`, `resume` prints live graph progress to `stderr` and keeps its final structured result on `stdout`.
+
+This is meant for infrastructure or runtime interruptions where you do not want to redo already-passed work.
 
 ### `ui`
 
@@ -669,6 +690,7 @@ npm run graph-help
 npm run validate -- --graph .tmp/feature-showcase.json
 npm run compile -- --graph .tmp/feature-showcase.json
 npm run run -- --graph .tmp/feature-showcase.json
+npm run resume -- --run-root ./.agentflow/runs/<run-id>
 npm run web:dev
 ```
 

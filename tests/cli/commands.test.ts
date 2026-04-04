@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
 import { executeCli } from "../../src/cli/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -37,6 +38,10 @@ async function waitForPath(path: string, timeoutMs = 5000): Promise<void> {
 }
 
 describe("graph CLI", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders graph-native help with the release command surface", async () => {
     const result = await executeCli([]);
 
@@ -45,6 +50,7 @@ describe("graph CLI", () => {
     expect(result.stdout).toContain("validate");
     expect(result.stdout).toContain("compile");
     expect(result.stdout).toContain("run");
+    expect(result.stdout).toContain("resume");
     expect(result.stdout).toContain("ui");
     expect(result.stdout).toContain("graph-help");
     expect(result.stdout).toContain("control");
@@ -167,11 +173,13 @@ describe("graph CLI", () => {
       )}\n`
     );
 
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const result = await executeCli(["run", "--graph", graphPath], tempRoot);
     const payload = JSON.parse(result.stdout);
     const state = JSON.parse(await readFile(payload.artifacts.state_file, "utf8")) as {
       status: string;
     };
+    const progressOutput = stderrSpy.mock.calls.map(([chunk]) => String(chunk)).join("");
 
     expect(result.exitCode).toBe(0);
     expect(payload.command).toBe("run");
@@ -193,6 +201,13 @@ describe("graph CLI", () => {
     expect(payload.next_steps.start_monitor).toBe(payload.monitor.start_command);
     expect(state.status).toBe("passed");
     expect(await readFile(join(repoDir, "marker.txt"), "utf8")).toBe("ok\n");
+    expect(progressOutput).toContain('agentflow: compiled graph "cli-run-graph" with 2 executable nodes');
+    expect(progressOutput).toContain("agentflow: started run · workspace=inplace");
+    expect(progressOutput).toContain("[0/2] start exec write_marker · repo=main");
+    expect(progressOutput).toContain("[1/2] passed exec write_marker");
+    expect(progressOutput).toContain("[1/2] start check verify_marker · repo=main");
+    expect(progressOutput).toContain("[2/2] passed check verify_marker");
+    expect(progressOutput).toContain("agentflow: run passed · 2/2 terminal nodes");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -273,6 +288,150 @@ describe("graph CLI", () => {
 
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("resumes a failed run root while preserving passed work", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-resume-graph",
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {}
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "write_seed",
+                repo: "main",
+                command: "node",
+                args: [
+                  "-e",
+                  "require('node:fs').writeFileSync('seed.txt', 'seed\\n')"
+                ]
+              },
+              {
+                type: "check",
+                id: "gate_resume",
+                repo: "main",
+                check_kind: "deterministic",
+                command: "node",
+                args: [
+                  "-e",
+                  "const fs=require('node:fs'); const passed=fs.existsSync('resume-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                ],
+                pass_if: {
+                  json_path: "$.passed",
+                  equals: true
+                }
+              },
+              {
+                type: "exec",
+                id: "after_resume",
+                repo: "main",
+                command: "node",
+                args: [
+                  "-e",
+                  "const fs=require('node:fs'); if (!fs.existsSync('seed.txt')) process.exit(1); fs.writeFileSync('done.txt', 'done\\n');"
+                ]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const firstStderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const firstRun = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const firstPayload = JSON.parse(firstRun.stdout);
+    const firstProgress = firstStderrSpy.mock.calls.map(([chunk]) => String(chunk)).join("");
+
+    expect(firstRun.exitCode).toBe(1);
+    expect(firstPayload.command).toBe("run");
+    expect(firstPayload.status).toBe("failed");
+    expect(firstProgress).toContain('agentflow: compiled graph "cli-resume-graph" with 3 executable nodes');
+    expect(firstProgress).toContain("[0/3] start exec write_seed · repo=main");
+    expect(firstProgress).toContain("[1/3] passed exec write_seed");
+    expect(firstProgress).toContain("[1/3] start check gate_resume · repo=main");
+    expect(firstProgress).toContain("agentflow: check failed gate_resume");
+    expect(firstProgress).toContain("[2/3] failed check gate_resume");
+    expect(firstProgress).toContain("[3/3] blocked exec after_resume · terminal_failure");
+    expect(firstProgress).toContain("agentflow: run failed · 3/3 terminal nodes");
+
+    firstStderrSpy.mockRestore();
+
+    await writeFile(join(repoDir, "resume-ok.txt"), "ok\n");
+
+    const resumedStderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const resumedRun = await executeCli(["resume", "--run-root", firstPayload.run_root], tempRoot);
+    const resumedPayload = JSON.parse(resumedRun.stdout);
+    const resumedState = JSON.parse(
+      await readFile(join(firstPayload.run_root, "state.json"), "utf8")
+    ) as { status: string; counts: { passed: number } };
+    const resumedEvents = (await readFile(join(firstPayload.run_root, "events.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as {
+        type: string;
+        payload?: Record<string, unknown>;
+      });
+    const attempts = await readRunExecutionAttempts(firstPayload.run_root);
+    const resumedProgress = resumedStderrSpy.mock.calls.map(([chunk]) => String(chunk)).join("");
+
+    expect(resumedRun.exitCode).toBe(0);
+    expect(resumedPayload.command).toBe("resume");
+    expect(resumedPayload.status).toBe("passed");
+    expect(resumedPayload.run_root).toBe(firstPayload.run_root);
+    expect(resumedPayload.resumed_from_status).toBe("failed");
+    expect(resumedPayload.preserved_node_count).toBe(1);
+    expect(resumedPayload.restarted_node_count).toBe(2);
+    expect(resumedState.status).toBe("passed");
+    expect(resumedState.counts.passed).toBe(3);
+    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("done\n");
+    expect(
+      resumedEvents.filter((event) => event.type === "run.started").at(-1)?.payload
+    ).toEqual(
+      expect.objectContaining({
+        resumed: true,
+        previous_status: "failed",
+        preserved_node_count: 1,
+        restarted_node_count: 2
+      })
+    );
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
+    expect(resumedProgress).toContain(
+      "agentflow: resumed run from failed · preserved=1 restarted=2 · workspace=inplace"
+    );
+    expect(resumedProgress).toContain("[1/3] start check gate_resume · repo=main");
+    expect(resumedProgress).toContain("[2/3] passed check gate_resume");
+    expect(resumedProgress).toContain("[2/3] start exec after_resume · repo=main");
+    expect(resumedProgress).toContain("[3/3] passed exec after_resume");
+    expect(resumedProgress).toContain("agentflow: run passed · 3/3 terminal nodes");
+
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("rejects a relative AGENTFLOW_RUNS_ROOT override before UI handoff", async () => {

@@ -11,7 +11,7 @@ import type {
 import { createRunOwnerRecord, type RunOwnerRecord } from "../../artifacts/owner.js";
 import type { GraphDiagnostic, GraphOutcome, HarnessName } from "../../graph/schema.js";
 import { ArtifactWriter } from "../../artifacts/writer.js";
-import { readRunEvents } from "../../artifacts/reader.js";
+import { readRunEvents, readRunExecutionAttempts } from "../../artifacts/reader.js";
 import { renderRunSummary } from "../delivery/summary.js";
 import {
   buildExecutionId,
@@ -101,6 +101,16 @@ export interface RunCompiledGraphOptions {
   executors?: RuntimeExecutorRegistry;
   harnesses?: Partial<Record<HarnessName, HarnessAdapter>>;
   signal?: AbortSignal;
+  on_event?: (event: RuntimeEventEnvelope) => Promise<void> | void;
+}
+
+export interface ResumeCompiledGraphOptions extends RunCompiledGraphOptions {
+  resumed_session: RuntimeSession;
+  prior_events: RuntimeEventEnvelope[];
+  workspace: WorkspaceSetup;
+  previous_status: RuntimeRunStatus;
+  preserved_node_count: number;
+  restarted_node_count: number;
 }
 
 export interface RunCompiledGraphResult {
@@ -390,7 +400,7 @@ async function writeTerminalRunSummary(
   events: RuntimeEventEnvelope[]
 ): Promise<ReturnType<typeof buildRuntimeStateSnapshot>> {
   const state = buildRuntimeStateSnapshot(session);
-  await writer.writeRunSummary(renderRunSummary(state, flattenAttempts(session), events));
+  await writer.writeRunSummary(renderRunSummary(state, await readRunExecutionAttempts(writer.run_root), events));
   return state;
 }
 
@@ -399,6 +409,7 @@ async function emitEvent(
   writer: ArtifactWriter,
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
+  onEvent: RunCompiledGraphOptions["on_event"],
   type: RuntimeEventEnvelope["type"],
   payload: unknown,
   context: RuntimeEventContext = {
@@ -420,6 +431,13 @@ async function emitEvent(
   events.push(event);
   await writer.appendEvent(event);
   await syncRunArtifacts(session, writer, runOwner);
+  if (onEvent) {
+    try {
+      await onEvent(event);
+    } catch {
+      // CLI progress rendering is best-effort and must not fail the run.
+    }
+  }
   return event;
 }
 
@@ -429,6 +447,7 @@ async function queueReadyNode(
   writer: ArtifactWriter,
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
+  onEvent: RunCompiledGraphOptions["on_event"],
   readyNode: ReadyNode
 ): Promise<void> {
   const key = createReadyNodeKey(readyNode);
@@ -440,7 +459,7 @@ async function queueReadyNode(
   readyQueue.queued_keys.add(key);
   readyQueue.queue.push(readyNode);
   setNodeStatus(session, readyNode.compiled_id, "ready");
-  await emitEvent(session, writer, runOwner, events, "node.ready", {
+  await emitEvent(session, writer, runOwner, events, onEvent, "node.ready", {
     deps_satisfied: readyNode.deps_satisfied
   }, {
     compiled_id: readyNode.compiled_id,
@@ -456,6 +475,7 @@ async function refreshReadyNodes(
   writer: ArtifactWriter,
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
+  onEvent: RunCompiledGraphOptions["on_event"],
   topology: SchedulerTopology,
   readyQueue: ReturnType<typeof createReadyQueueState>
 ): Promise<void> {
@@ -484,7 +504,7 @@ async function refreshReadyNodes(
     }
 
     const opened = openRepeatIteration(session, repeatScopeId);
-    await emitEvent(session, writer, runOwner, events, "repeat.iteration.started", {
+    await emitEvent(session, writer, runOwner, events, onEvent, "repeat.iteration.started", {
       max_attempts: opened.max_attempts
     }, {
       compiled_id: undefined,
@@ -496,7 +516,7 @@ async function refreshReadyNodes(
 
     await Promise.all(
       scope.body_entry_node_ids.map((compiledId, index) =>
-        queueReadyNode(readyQueue, session, writer, runOwner, events, {
+        queueReadyNode(readyQueue, session, writer, runOwner, events, onEvent, {
           compiled_id: compiledId,
           deps_satisfied: bodyEntryDeps[index] ?? [],
           repeat_scope_id: repeatScopeId,
@@ -534,7 +554,7 @@ async function refreshReadyNodes(
       );
 
       if (depsSatisfied) {
-        await queueReadyNode(readyQueue, session, writer, runOwner, events, {
+        await queueReadyNode(readyQueue, session, writer, runOwner, events, onEvent, {
           compiled_id: node.compiled_id,
           deps_satisfied: depsSatisfied,
           repeat_scope_id: node.repeat_scope_id,
@@ -556,7 +576,7 @@ async function refreshReadyNodes(
     const depsSatisfied = computeReadyDeps(session, topology, node);
 
     if (depsSatisfied) {
-      await queueReadyNode(readyQueue, session, writer, runOwner, events, {
+      await queueReadyNode(readyQueue, session, writer, runOwner, events, onEvent, {
         compiled_id: node.compiled_id,
         deps_satisfied: depsSatisfied,
         repeat_scope_id: undefined,
@@ -1036,7 +1056,7 @@ async function startReadyNode(
       abortControl.dispose();
     });
 
-    await emitEvent(session, writer, runOwner, events, "node.started", {
+    await emitEvent(session, writer, runOwner, events, options.on_event, "node.started", {
       kind: node.kind,
       repo_alias: node.repo,
       profile_name: node.effective_policy.profile_name
@@ -1072,6 +1092,7 @@ async function markPendingNodesBlocked(
   writer: ArtifactWriter,
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
+  onEvent: RunCompiledGraphOptions["on_event"],
   failedNode: CompiledExecutableNode
 ): Promise<void> {
   for (const [compiledId, status] of session.node_statuses.entries()) {
@@ -1080,7 +1101,7 @@ async function markPendingNodesBlocked(
     }
 
     setNodeStatus(session, compiledId, "blocked");
-    await emitEvent(session, writer, runOwner, events, "node.blocked", {
+    await emitEvent(session, writer, runOwner, events, onEvent, "node.blocked", {
       reason: "terminal_failure",
       upstream_compiled_id: failedNode.compiled_id
     }, {
@@ -1098,6 +1119,7 @@ async function markPendingNodesSkipped(
   writer: ArtifactWriter,
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
+  onEvent: RunCompiledGraphOptions["on_event"],
   reason: string
 ): Promise<void> {
   for (const [compiledId, status] of session.node_statuses.entries()) {
@@ -1106,7 +1128,7 @@ async function markPendingNodesSkipped(
     }
 
     setNodeStatus(session, compiledId, "skipped");
-    await emitEvent(session, writer, runOwner, events, "node.skipped", {
+    await emitEvent(session, writer, runOwner, events, onEvent, "node.skipped", {
       reason
     }, {
       compiled_id: compiledId,
@@ -1123,6 +1145,7 @@ async function finalizeRun(
   writer: ArtifactWriter,
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
+  onEvent: RunCompiledGraphOptions["on_event"],
   outcome: RuntimeRunStatus,
   reason?: string
 ): Promise<RunCompiledGraphResult> {
@@ -1131,18 +1154,17 @@ async function finalizeRun(
   const duration_ms = Math.max(0, Date.parse(session.ended_at) - Date.parse(session.started_at));
 
   if (outcome === "canceled") {
-    await emitEvent(session, writer, runOwner, events, "run.canceled", {
+    await emitEvent(session, writer, runOwner, events, onEvent, "run.canceled", {
       reason: reason ?? "operator_cancel"
     });
   } else {
-    await emitEvent(session, writer, runOwner, events, "run.completed", {
+    await emitEvent(session, writer, runOwner, events, onEvent, "run.completed", {
       outcome,
       duration_ms,
       ...(reason ? { reason } : {})
     });
   }
 
-  const attempts = flattenAttempts(session);
   const state = await writeTerminalRunSummary(session, writer, events);
 
   return {
@@ -1150,7 +1172,7 @@ async function finalizeRun(
     run_root: writer.run_root,
     outcome,
     state,
-    attempts,
+    attempts: await readRunExecutionAttempts(writer.run_root),
     events: await readRunEvents(writer.run_root)
   };
 }
@@ -1160,6 +1182,7 @@ async function finalizeRunWithWorkspaceCleanup(
   writer: ArtifactWriter,
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
+  onEvent: RunCompiledGraphOptions["on_event"],
   workspace: WorkspaceSetup | undefined,
   outcome: RuntimeRunStatus,
   reason?: string
@@ -1179,7 +1202,252 @@ async function finalizeRunWithWorkspaceCleanup(
     }
   }
 
-  return finalizeRun(session, writer, runOwner, events, finalOutcome, finalReason);
+  return finalizeRun(session, writer, runOwner, events, onEvent, finalOutcome, finalReason);
+}
+
+async function executeRunLoop(
+  options: RunCompiledGraphOptions,
+  session: RuntimeSession,
+  writer: ArtifactWriter,
+  runOwner: RunOwnerRecord,
+  events: RuntimeEventEnvelope[],
+  workspace: WorkspaceSetup,
+  topology: SchedulerTopology
+): Promise<RunCompiledGraphResult> {
+  const readyQueue = createReadyQueueState();
+  const activeExecutions = new Map<string, ActiveExecutionHandle>();
+
+  while (true) {
+    if (options.signal?.aborted && session.status !== "canceled") {
+      session.status = "canceled";
+      await markPendingNodesSkipped(session, writer, runOwner, events, options.on_event, "operator_cancel");
+      cancelActiveExecutions(activeExecutions);
+    }
+
+    if (session.status === "running") {
+      await refreshReadyNodes(session, writer, runOwner, events, options.on_event, topology, readyQueue);
+    }
+
+    while (
+      session.status === "running" &&
+      (await startReadyNode(
+        options,
+        session,
+        writer,
+        runOwner,
+        events,
+        activeExecutions,
+        readyQueue,
+        topology
+      ))
+    ) {
+      // Keep dispatching while the scheduler can consume ready nodes.
+    }
+
+    if (session.status === "canceled" && activeExecutions.size === 0) {
+      return finalizeRunWithWorkspaceCleanup(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        workspace,
+        "canceled",
+        "operator_cancel"
+      );
+    }
+
+    if (session.status === "failed" && activeExecutions.size === 0) {
+      return finalizeRunWithWorkspaceCleanup(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        workspace,
+        "failed"
+      );
+    }
+
+    if (session.status === "running" && activeExecutions.size === 0) {
+      const remainingReady = readyQueue.queue.length > 0;
+      const unfinishedNodes = [...session.node_statuses.values()].some((status) =>
+        ["pending", "ready", "running"].includes(status)
+      );
+
+      if (!remainingReady && !unfinishedNodes) {
+        return finalizeRunWithWorkspaceCleanup(
+          session,
+          writer,
+          runOwner,
+          events,
+          options.on_event,
+          workspace,
+          "passed"
+        );
+      }
+
+      if (!remainingReady && unfinishedNodes && session.status === "running") {
+        session.status = "failed";
+        const failedNode =
+          session.graph.nodes.find((candidate) => session.node_statuses.get(candidate.compiled_id) === "failed") ??
+          session.graph.nodes[0];
+
+        if (!failedNode) {
+          return finalizeRunWithWorkspaceCleanup(
+            session,
+            writer,
+            runOwner,
+            events,
+            options.on_event,
+            workspace,
+            "failed"
+          );
+        }
+
+        await markPendingNodesBlocked(
+          session,
+          writer,
+          runOwner,
+          events,
+          options.on_event,
+          failedNode
+        );
+        return finalizeRunWithWorkspaceCleanup(
+          session,
+          writer,
+          runOwner,
+          events,
+          options.on_event,
+          workspace,
+          "failed"
+        );
+      }
+    }
+
+    const completion = await Promise.race(
+      [...activeExecutions.values()].map(async (handle) => ({
+        execution_id: handle.attempt.execution_id,
+        completed: await handle.promise
+      }))
+    );
+
+    activeExecutions.delete(completion.execution_id);
+    const { node, attempt, result } = completion.completed;
+    finalizeExecutionSummary(session, attempt);
+
+    if (result.check) {
+      await emitEvent(session, writer, runOwner, events, options.on_event, "check.evaluated", result.check, {
+        compiled_id: node.compiled_id,
+        execution_id: attempt.execution_id,
+        repeat_scope_id: attempt.repeat_scope_id,
+        iteration_index: attempt.iteration_index,
+        attempt_index: attempt.attempt_index
+      });
+    }
+
+    if (result.status === "canceled") {
+      await emitEvent(session, writer, runOwner, events, options.on_event, "node.canceled", {
+        reason: session.status === "failed" ? "terminal_failure" : "operator_cancel"
+      }, {
+        compiled_id: node.compiled_id,
+        execution_id: attempt.execution_id,
+        repeat_scope_id: attempt.repeat_scope_id,
+        iteration_index: attempt.iteration_index,
+        attempt_index: attempt.attempt_index
+      });
+      continue;
+    }
+
+    const outcome = result.outcome ?? "failed";
+    await emitEvent(session, writer, runOwner, events, options.on_event, "node.completed", {
+      outcome,
+      duration_ms: attempt.duration_ms ?? 0
+    }, {
+      compiled_id: node.compiled_id,
+      execution_id: attempt.execution_id,
+      repeat_scope_id: attempt.repeat_scope_id,
+      iteration_index: attempt.iteration_index,
+      attempt_index: attempt.attempt_index
+    });
+
+    const repeatScopeId = node.repeat_scope_id;
+    const repeatScope = repeatScopeId ? session.repeat_scopes.get(repeatScopeId) : undefined;
+
+    if (
+      repeatScope &&
+      repeatScopeId &&
+      node.compiled_id === repeatScope.until_compiled_id &&
+      attempt.iteration_index !== undefined
+    ) {
+      await emitEvent(session, writer, runOwner, events, options.on_event, "repeat.iteration.completed", {
+        outcome,
+        iteration_index: attempt.iteration_index
+      }, {
+        compiled_id: undefined,
+        execution_id: undefined,
+        repeat_scope_id: repeatScopeId,
+        iteration_index: attempt.iteration_index,
+        attempt_index: undefined
+      });
+
+      if (outcome === "failed") {
+        const attemptsRemaining = repeatScope.latest_iteration_index < repeatScope.max_attempts;
+
+        if (attemptsRemaining) {
+          const updatedScope = openRepeatIteration(session, repeatScopeId);
+          await emitEvent(session, writer, runOwner, events, options.on_event, "repeat.iteration.started", {
+            max_attempts: updatedScope.max_attempts
+          }, {
+            compiled_id: undefined,
+            execution_id: undefined,
+            repeat_scope_id: repeatScopeId,
+            iteration_index: updatedScope.active_iteration_index,
+            attempt_index: undefined
+          });
+
+          const bodyEntryDeps = topology.repeat_scopes_by_id.get(repeatScopeId)?.body_entry_node_ids.map(
+            (compiledId) =>
+              computeReadyDeps(
+                session,
+                topology,
+                topology.nodes_by_id.get(compiledId)!,
+                updatedScope.active_iteration_index
+              ) ?? []
+          ) ?? [];
+
+          await Promise.all(
+            (topology.repeat_scopes_by_id.get(repeatScopeId)?.body_entry_node_ids ?? []).map(
+              (compiledId, index) =>
+                queueReadyNode(readyQueue, session, writer, runOwner, events, options.on_event, {
+                  compiled_id: compiledId,
+                  deps_satisfied: bodyEntryDeps[index] ?? [],
+                  repeat_scope_id: repeatScopeId,
+                  iteration_index: updatedScope.active_iteration_index
+                })
+            )
+          );
+          continue;
+        }
+
+        completeRepeatIteration(session, repeatScopeId, "failed");
+        session.status = "failed";
+        await markPendingNodesBlocked(session, writer, runOwner, events, options.on_event, node);
+        cancelActiveExecutions(activeExecutions);
+        continue;
+      }
+
+      completeRepeatIteration(session, repeatScopeId, "passed");
+      continue;
+    }
+
+    if (outcome === "failed" && !hasFailureContinuation(topology, node)) {
+      session.status = "failed";
+      await markPendingNodesBlocked(session, writer, runOwner, events, options.on_event, node);
+      cancelActiveExecutions(activeExecutions);
+      continue;
+    }
+  }
 }
 
 function collectPreflightDiagnostics(
@@ -1263,19 +1531,18 @@ export async function runCompiledGraph(
   );
   const session = createRuntimeSession(
     run_id,
+    options.run_root,
     options.compiled_graph,
     createAttemptRegistry(),
     predictedBindings
   );
   const events: RuntimeEventEnvelope[] = [];
   const topology = buildSchedulerTopology(options.compiled_graph);
-  const readyQueue = createReadyQueueState();
-  const activeExecutions = new Map<string, ActiveExecutionHandle>();
   const runOwner = await createRunOwnerRecord();
   let workspace: WorkspaceSetup | undefined;
 
   await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
-  await emitEvent(session, writer, runOwner, events, "graph.compiled", {
+  await emitEvent(session, writer, runOwner, events, options.on_event, "graph.compiled", {
     graph_id: options.compiled_graph.graph_id,
     compiled_node_count: options.compiled_graph.nodes.length,
     scope_count: options.compiled_graph.scopes.length
@@ -1291,7 +1558,7 @@ export async function runCompiledGraph(
   if (preflightDiagnostics.length > 0) {
     session.status = "failed";
     session.ended_at = new Date().toISOString();
-    await emitEvent(session, writer, runOwner, events, "run.preflight_failed", {
+    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
       reason: "preflight",
       message: preflightDiagnostics.join(" | ")
     });
@@ -1318,7 +1585,7 @@ export async function runCompiledGraph(
     session.status = "failed";
     session.ended_at = new Date().toISOString();
     await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
-    await emitEvent(session, writer, runOwner, events, "run.preflight_failed", {
+    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
       reason: "workspace_backend_init",
       message: error instanceof Error ? error.message : String(error)
     });
@@ -1336,234 +1603,77 @@ export async function runCompiledGraph(
 
   session.status = "running";
   await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
-  await emitEvent(session, writer, runOwner, events, "run.started", {
+  await emitEvent(session, writer, runOwner, events, options.on_event, "run.started", {
     workspace_backend: session.manifest.workspace_backend,
     repo_workspaces: session.manifest.repo_workspaces
   });
 
-  while (true) {
-    if (options.signal?.aborted && session.status !== "canceled") {
-      session.status = "canceled";
-      await markPendingNodesSkipped(session, writer, runOwner, events, "operator_cancel");
-      cancelActiveExecutions(activeExecutions);
-    }
+  return executeRunLoop(
+    options,
+    session,
+    writer,
+    runOwner,
+    events,
+    workspace,
+    topology
+  );
+}
 
-    if (session.status === "running") {
-      await refreshReadyNodes(session, writer, runOwner, events, topology, readyQueue);
-    }
+export async function resumeCompiledGraph(
+  options: ResumeCompiledGraphOptions
+): Promise<RunCompiledGraphResult> {
+  const writer = new ArtifactWriter(options.run_root);
+  const runOwner = await createRunOwnerRecord();
+  const session = options.resumed_session;
+  const events = [...options.prior_events];
+  const topology = buildSchedulerTopology(options.compiled_graph);
 
-    while (
-      session.status === "running" &&
-      (await startReadyNode(
-        options,
-        session,
-        writer,
-        runOwner,
-        events,
-        activeExecutions,
-        readyQueue,
-        topology
-      ))
-    ) {
-      // Keep dispatching while the scheduler can consume ready nodes.
-    }
+  const preflightDiagnostics = collectPreflightDiagnostics(
+    options.compiled_graph,
+    options.repo_sources,
+    options.executors,
+    options.harnesses
+  );
 
-    if (session.status === "canceled" && activeExecutions.size === 0) {
-      return finalizeRunWithWorkspaceCleanup(
-        session,
-        writer,
-        runOwner,
-        events,
-        workspace,
-        "canceled",
-        "operator_cancel"
-      );
-    }
-
-    if (session.status === "failed" && activeExecutions.size === 0) {
-      return finalizeRunWithWorkspaceCleanup(
-        session,
-        writer,
-        runOwner,
-        events,
-        workspace,
-        "failed"
-      );
-    }
-
-    if (session.status === "running" && activeExecutions.size === 0) {
-      const remainingReady = readyQueue.queue.length > 0;
-      const unfinishedNodes = [...session.node_statuses.values()].some((status) =>
-        ["pending", "ready", "running"].includes(status)
-      );
-
-      if (!remainingReady && !unfinishedNodes) {
-        return finalizeRunWithWorkspaceCleanup(
-          session,
-          writer,
-          runOwner,
-          events,
-          workspace,
-          "passed"
-        );
-      }
-
-      if (!remainingReady && unfinishedNodes && session.status === "running") {
-        session.status = "failed";
-        const failedNode =
-          session.graph.nodes.find((candidate) => session.node_statuses.get(candidate.compiled_id) === "failed") ??
-          session.graph.nodes[0];
-
-        if (!failedNode) {
-          return finalizeRunWithWorkspaceCleanup(
-            session,
-            writer,
-            runOwner,
-            events,
-            workspace,
-            "failed"
-          );
-        }
-
-        await markPendingNodesBlocked(
-          session,
-          writer,
-          runOwner,
-          events,
-          failedNode
-        );
-        return finalizeRunWithWorkspaceCleanup(
-          session,
-          writer,
-          runOwner,
-          events,
-          workspace,
-          "failed"
-        );
-      }
-    }
-
-    const completion = await Promise.race(
-      [...activeExecutions.values()].map(async (handle) => ({
-        execution_id: handle.attempt.execution_id,
-        completed: await handle.promise
-      }))
-    );
-
-    activeExecutions.delete(completion.execution_id);
-    const { node, attempt, result } = completion.completed;
-    finalizeExecutionSummary(session, attempt);
-
-    if (result.check) {
-      await emitEvent(session, writer, runOwner, events, "check.evaluated", result.check, {
-        compiled_id: node.compiled_id,
-        execution_id: attempt.execution_id,
-        repeat_scope_id: attempt.repeat_scope_id,
-        iteration_index: attempt.iteration_index,
-        attempt_index: attempt.attempt_index
-      });
-    }
-
-    if (result.status === "canceled") {
-      await emitEvent(session, writer, runOwner, events, "node.canceled", {
-        reason: session.status === "failed" ? "terminal_failure" : "operator_cancel"
-      }, {
-        compiled_id: node.compiled_id,
-        execution_id: attempt.execution_id,
-        repeat_scope_id: attempt.repeat_scope_id,
-        iteration_index: attempt.iteration_index,
-        attempt_index: attempt.attempt_index
-      });
-      continue;
-    }
-
-    const outcome = result.outcome ?? "failed";
-    await emitEvent(session, writer, runOwner, events, "node.completed", {
-      outcome,
-      duration_ms: attempt.duration_ms ?? 0
-    }, {
-      compiled_id: node.compiled_id,
-      execution_id: attempt.execution_id,
-      repeat_scope_id: attempt.repeat_scope_id,
-      iteration_index: attempt.iteration_index,
-      attempt_index: attempt.attempt_index
+  if (preflightDiagnostics.length > 0) {
+    session.status = "failed";
+    session.ended_at = new Date().toISOString();
+    await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
+    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
+      reason: "resume_preflight",
+      message: preflightDiagnostics.join(" | ")
     });
+    const state = await writeTerminalRunSummary(session, writer, events);
 
-    const repeatScopeId = node.repeat_scope_id;
-    const repeatScope = repeatScopeId ? session.repeat_scopes.get(repeatScopeId) : undefined;
-
-    if (
-      repeatScope &&
-      repeatScopeId &&
-      node.compiled_id === repeatScope.until_compiled_id &&
-      attempt.iteration_index !== undefined
-    ) {
-      await emitEvent(session, writer, runOwner, events, "repeat.iteration.completed", {
-        outcome,
-        iteration_index: attempt.iteration_index
-      }, {
-        compiled_id: undefined,
-        execution_id: undefined,
-        repeat_scope_id: repeatScopeId,
-        iteration_index: attempt.iteration_index,
-        attempt_index: undefined
-      });
-
-      if (outcome === "failed") {
-        const attemptsRemaining = repeatScope.latest_iteration_index < repeatScope.max_attempts;
-
-        if (attemptsRemaining) {
-          const updatedScope = openRepeatIteration(session, repeatScopeId);
-          await emitEvent(session, writer, runOwner, events, "repeat.iteration.started", {
-            max_attempts: updatedScope.max_attempts
-          }, {
-            compiled_id: undefined,
-            execution_id: undefined,
-            repeat_scope_id: repeatScopeId,
-            iteration_index: updatedScope.active_iteration_index,
-            attempt_index: undefined
-          });
-
-          const bodyEntryDeps = topology.repeat_scopes_by_id.get(repeatScopeId)?.body_entry_node_ids.map(
-            (compiledId) =>
-              computeReadyDeps(
-                session,
-                topology,
-                topology.nodes_by_id.get(compiledId)!,
-                updatedScope.active_iteration_index
-              ) ?? []
-          ) ?? [];
-
-          await Promise.all(
-            (topology.repeat_scopes_by_id.get(repeatScopeId)?.body_entry_node_ids ?? []).map(
-              (compiledId, index) =>
-                queueReadyNode(readyQueue, session, writer, runOwner, events, {
-                  compiled_id: compiledId,
-                  deps_satisfied: bodyEntryDeps[index] ?? [],
-                  repeat_scope_id: repeatScopeId,
-                  iteration_index: updatedScope.active_iteration_index
-                })
-            )
-          );
-          continue;
-        }
-
-        completeRepeatIteration(session, repeatScopeId, "failed");
-        session.status = "failed";
-        await markPendingNodesBlocked(session, writer, runOwner, events, node);
-        cancelActiveExecutions(activeExecutions);
-        continue;
-      }
-
-      completeRepeatIteration(session, repeatScopeId, "passed");
-      continue;
-    }
-
-    if (outcome === "failed" && !hasFailureContinuation(topology, node)) {
-      session.status = "failed";
-      await markPendingNodesBlocked(session, writer, runOwner, events, node);
-      cancelActiveExecutions(activeExecutions);
-      continue;
-    }
+    return {
+      run_id: session.run_id,
+      run_root: writer.run_root,
+      outcome: "failed",
+      state,
+      attempts: flattenAttempts(session),
+      events: await readRunEvents(writer.run_root)
+    };
   }
+
+  session.status = "running";
+  delete session.ended_at;
+  await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
+  await emitEvent(session, writer, runOwner, events, options.on_event, "run.started", {
+    workspace_backend: session.manifest.workspace_backend,
+    repo_workspaces: session.manifest.repo_workspaces,
+    resumed: true,
+    previous_status: options.previous_status,
+    preserved_node_count: options.preserved_node_count,
+    restarted_node_count: options.restarted_node_count
+  });
+
+  return executeRunLoop(
+    options,
+    session,
+    writer,
+    runOwner,
+    events,
+    options.workspace,
+    topology
+  );
 }

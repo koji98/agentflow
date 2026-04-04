@@ -117,6 +117,20 @@ function formatDeliverable(deliverable: SpecDesignDeliverable): string[] {
   return lines;
 }
 
+function buildImplementationReadinessLines(config: SpecDesignWorkflowConfig): string[] {
+  const requiredSections =
+    config.deliverable.sections && config.deliverable.sections.length > 0
+      ? config.deliverable.sections.join(", ")
+      : "problem, requirements, recommendation, architecture, file_plan, acceptance_criteria, risks, open_questions";
+
+  return [
+    "The spec must be implementation-ready and self-contained for the next execution step.",
+    `Required sections: ${requiredSections}.`,
+    "Make migration, rollout, compatibility, validation, and ownership boundaries explicit whenever existing behavior or contracts are being replaced.",
+    "Do not leave repo-specific UI boundaries, operational behavior, cache semantics, or validation ownership implicit when they materially affect implementation."
+  ];
+}
+
 function buildClarifyPrompt(config: SpecDesignWorkflowConfig): string {
   return [
     "Clarify the problem and rewrite it into a concrete design brief.",
@@ -238,19 +252,22 @@ function buildInitialDraftPrompt(config: SpecDesignWorkflowConfig): string {
     "Deliverable contract:",
     ...formatDeliverable(config.deliverable),
     "",
+    ...buildImplementationReadinessLines(config),
+    "",
     "Write `spec-draft.md` to the output directory."
   ].join("\n");
 }
 
 function buildRevisionPrompt(config: SpecDesignWorkflowConfig): string {
   return [
-    "Produce a stronger current design spec draft from the core design materials.",
+    "Produce the strongest current implementation-ready design spec draft from the core design materials.",
     "",
     `Problem: ${config.problem}`,
     `Goal: ${config.goal}`,
     "",
     "Use the initial draft, the repository findings, the synthesized constraints, and the tradeoff recommendation.",
-    "Write a concrete, implementation-ready spec draft that is more precise and structured than the initial draft.",
+    ...buildImplementationReadinessLines(config),
+    "Write a concrete revised spec that resolves ambiguity instead of deferring key policy, migration, boundary, or validation decisions.",
     "Write `spec-revision.md` to the output directory."
   ].join("\n");
 }
@@ -288,7 +305,8 @@ function buildQualityCheckPrompt(config: SpecDesignWorkflowConfig): string {
     `Problem: ${config.problem}`,
     `Goal: ${config.goal}`,
     "",
-    "Use the revised spec, merged critiques, and tradeoff recommendation in context."
+    "Use the revised spec, merged critiques, and tradeoff recommendation in context.",
+    "Judge it as the direct input contract for execute_spec: an implementer should not need to invent missing migration, operational, validation, or boundary decisions."
   ].join("\n");
 }
 
@@ -300,7 +318,7 @@ function buildQualityCheckRubric(config: SpecDesignWorkflowConfig): string {
 
   return [
     sectionRequirement,
-    "Fail if the spec is missing implementation consequences, ignores repository conventions, lacks acceptance criteria, or leaves core decisions ambiguous."
+    "Fail if the spec is missing implementation consequences, ignores repository conventions, lacks acceptance criteria, leaves migration or compatibility unresolved, omits concrete file or ownership boundaries, or lacks explicit risks and open questions when those affect execution."
   ].join(" ");
 }
 

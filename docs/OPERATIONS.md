@@ -62,6 +62,7 @@ Lifecycle rules that matter operationally:
 - `validate` and `compile` never create a run root.
 - `run` creates the run root before execution so preflight failures still leave inspectable artifacts.
 - `summary.md`, `run.json`, `state.json`, and `events.jsonl` are expected to agree on the terminal outcome.
+- `state.json` now includes an `artifact_index` block so hashed `nodes/node-*` and `executions/exec-*` directories can be mapped back to compiled ids, execution ids, and full paths without manual guessing.
 
 Cleanup and reconciliation rules:
 
@@ -70,12 +71,14 @@ Cleanup and reconciliation rules:
 - On `passed`, `failed`, and `canceled` outcomes, the runtime cleans up worktree registrations before finalizing terminal artifacts.
 - If worktree initialization fails partway through, already-created worktrees are rolled back before the run is marked failed.
 - If worktree cleanup itself fails, the run is forced to terminal `failed` and the cleanup error is recorded in the terminal reason.
+- `agentflow resume --run-root <run-root>` reuses the same run root, preserves nodes whose latest durable outcome is `passed`, restarts everything else, and recreates missing worktree paths when the original failed run already cleaned them up.
 - When the monitor reopens stale `pending` or `running` artifacts, projection reconciles them from durable state or from a recorded local runtime owner fingerprint that no longer matches a live process on this host instead of leaving them live forever.
 
 What the operator should expect:
 
 - A preflight failure can happen before any node starts and still produce a readable run in the monitor.
 - A canceled run is canceled from the terminal that launched `run` with `Ctrl-C`; the monitor only reflects the durable result.
+- `run` and `resume` print live graph progress to `stderr` while the final structured JSON result stays on `stdout`, so shell pipelines can still consume the command result without parsing progress noise.
 - The `workspaces/` directory is an implementation detail of the run and is not preserved as a long-lived checkout contract after worktree cleanup.
 
 ## Recommended Dev Workflow
@@ -263,6 +266,8 @@ npm run test:browser -- --headed
 That standalone smoke proves the built client and built web server artifact can share one runs root, list deterministic recent runs, compile the selected graph from the launchpad, open the newest run, and render the monitor timeline, inspector, stdout, artifact preview, and passed header status. It does not prove live SSE updates, browser-driven cancellation, or multi-browser behavior.
 
 For active runs, `agent` and AI `check` executions append live harness output directly into the current execution's `stdout.log` and `stderr.log`. The UI tail view reads those files while the run is in progress, and completion still rewrites the final authoritative log contents.
+
+That live harness output is separate from the CLI progress stream. CLI progress is human-oriented terminal status on `stderr`; durable execution logs remain the source of truth for the monitor and artifacts.
 
 Optional machine-local proof is separate:
 

@@ -1,5 +1,11 @@
 import type { CompiledExecutableNode, CompiledGraph, CompiledRepeatScope } from "../graph/compiled.js";
 import type { WorkspaceBackend } from "../graph/schema.js";
+import {
+  resolveExecutionDirectoryName,
+  resolveNodeArtifactDirectory,
+  resolveNodeArtifactDirectoryName,
+  resolveRunArtifactPaths
+} from "../artifacts/paths.js";
 import type { AttemptRegistry, RuntimeNodeAttempt } from "./attempts.js";
 
 export type RuntimeNodeStatus =
@@ -100,12 +106,23 @@ export interface RuntimeStateSnapshot {
   active_executions: Record<string, ActiveExecutionSummary>;
   latest_execution_by_compiled_id: Record<string, LatestExecutionSummary>;
   repeat_scopes: Record<string, RepeatScopeState>;
+  artifact_index: {
+    run_root: string;
+    nodes_dir: string;
+    node_dirs_by_compiled_id: Record<string, string>;
+    node_hashes_by_compiled_id: Record<string, string>;
+    compiled_id_by_node_hash: Record<string, string>;
+    execution_dirs_by_execution_id: Record<string, string>;
+    execution_hashes_by_execution_id: Record<string, string>;
+    execution_id_by_execution_hash: Record<string, string>;
+  };
   started_at: string;
   ended_at?: string;
 }
 
 export interface RuntimeSession {
   run_id: string;
+  run_root: string;
   graph: CompiledGraph;
   manifest: ExecutionManifest;
   status: RuntimeRunStatus;
@@ -165,6 +182,7 @@ export function buildExecutionManifest(
 
 export function createRuntimeSession(
   runId: string,
+  runRoot: string,
   graph: CompiledGraph,
   attempts: AttemptRegistry,
   repoWorkspaces: Record<string, WorkspaceBinding>
@@ -189,6 +207,7 @@ export function createRuntimeSession(
 
   return {
     run_id: runId,
+    run_root: runRoot,
     graph,
     manifest: buildExecutionManifest(runId, graph, repoWorkspaces),
     status: "pending",
@@ -286,6 +305,26 @@ export function completeRepeatIteration(
 
 export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeStateSnapshot {
   const snapshot_seq = Math.max(0, session.next_event_seq - 1);
+  const runPaths = resolveRunArtifactPaths(session.run_root);
+  const node_dirs_by_compiled_id = Object.fromEntries(
+    session.graph.nodes.map((node) => [node.compiled_id, resolveNodeArtifactDirectory(session.run_root, node.compiled_id)])
+  );
+  const node_hashes_by_compiled_id = Object.fromEntries(
+    session.graph.nodes.map((node) => [node.compiled_id, resolveNodeArtifactDirectoryName(node.compiled_id)])
+  );
+  const compiled_id_by_node_hash = Object.fromEntries(
+    session.graph.nodes.map((node) => [resolveNodeArtifactDirectoryName(node.compiled_id), node.compiled_id])
+  );
+  const attempts = [...session.attempts.by_compiled_id.values()].flat();
+  const execution_dirs_by_execution_id = Object.fromEntries(
+    attempts.map((attempt) => [attempt.execution_id, attempt.execution_dir])
+  );
+  const execution_hashes_by_execution_id = Object.fromEntries(
+    attempts.map((attempt) => [attempt.execution_id, resolveExecutionDirectoryName(attempt.execution_id)])
+  );
+  const execution_id_by_execution_hash = Object.fromEntries(
+    attempts.map((attempt) => [resolveExecutionDirectoryName(attempt.execution_id), attempt.execution_id])
+  );
 
   return {
     run_id: session.run_id,
@@ -299,6 +338,16 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     active_executions: Object.fromEntries(session.active_executions),
     latest_execution_by_compiled_id: Object.fromEntries(session.latest_execution_by_compiled_id),
     repeat_scopes: Object.fromEntries(session.repeat_scopes),
+    artifact_index: {
+      run_root: session.run_root,
+      nodes_dir: runPaths.nodes_dir,
+      node_dirs_by_compiled_id,
+      node_hashes_by_compiled_id,
+      compiled_id_by_node_hash,
+      execution_dirs_by_execution_id,
+      execution_hashes_by_execution_id,
+      execution_id_by_execution_hash
+    },
     started_at: session.started_at,
     ...(session.ended_at ? { ended_at: session.ended_at } : {})
   };

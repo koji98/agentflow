@@ -66,7 +66,7 @@ async function removeWorktreeBinding(binding: WorkspaceBackendBinding): Promise<
   }
 }
 
-async function cleanupWorktreeBindings(bindings: WorkspaceBackendBinding[]): Promise<void> {
+export async function cleanupWorktreeBindings(bindings: WorkspaceBackendBinding[]): Promise<void> {
   const cleanupErrors: string[] = [];
 
   for (const binding of [...bindings].reverse()) {
