@@ -1,303 +1,164 @@
-import type { FastifyInstance, FastifyReply } from 'fastify';
-import fs from 'node:fs';
-import path from 'node:path';
-import {
-  startRun,
-  openRun,
-  resumeRun,
-  cancelRun,
-  deriveRunCapabilities,
-  getHandle,
-  inspectRunResolution,
-  inferHandleActive,
-  inferActiveFromState,
-  refreshHandleFromState,
-  type RunHandle,
-} from '../run_manager.ts';
-import { isPathAllowed } from '../fs_access.ts';
-import { readJsonFileWithRetries } from '../json_files.ts';
-import { resolvePreferredRawOutputSource } from '../raw_output.ts';
+import { setTimeout as delay } from "node:timers/promises";
+import { resolve } from "node:path";
 
-function artifactItemsForRow(row: Record<string, unknown>) {
-  const items = [
-    { key: 'prompt', label: 'Prompt', path: String(row.promptPath || '') },
-    { key: 'log', label: 'Execution Log', path: String(row.logPath || '') },
-    { key: 'message', label: 'Last Message / Stdout', path: String(row.lastMessagePath || '') },
-    { key: 'report', label: 'Report', path: String(row.reportPath || '') },
-    { key: 'summary', label: 'Summary', path: String(row.summaryPath || '') },
-  ];
-  const taskArtifactPath = [
-    row.promptPath,
-    row.logPath,
-    row.lastMessagePath,
-    row.reportPath,
-    row.summaryPath,
-  ].find((value) => typeof value === 'string' && value.length > 0);
-  const taskDir = typeof taskArtifactPath === 'string' ? path.dirname(taskArtifactPath) : null;
-  if (taskDir) {
-    items.push(
-      { key: 'result', label: 'Command Result', path: path.resolve(taskDir, 'command_result.json') },
-      { key: 'worker_report', label: 'Worker Report', path: path.resolve(taskDir, 'worker_report.md') },
-      { key: 'worker_summary', label: 'Worker Summary', path: path.resolve(taskDir, 'worker_summary.md') },
-    );
-  }
-  const seenPaths = new Set<string>();
-  return items
-    .filter((item) => item.path)
-    .filter((item) => isPathAllowed(item.path))
-    .filter((item) => {
-      if (seenPaths.has(item.path)) return false;
-      seenPaths.add(item.path);
-      return true;
-    })
-    .map((item) => ({
-      ...item,
-      exists: fs.existsSync(item.path),
-    }))
-    .filter((item) => item.exists);
+import {
+  listProjectedRuns,
+  projectNodeDetail,
+  projectRunEvents,
+  projectRunSnapshot,
+  type ProjectedRunEvent
+} from "../../../src/artifacts/projection.js";
+import { readRunState } from "../../../src/artifacts/reader.js";
+import type { NodeDetail, RunEventPage, RunSnapshot, RunSummary } from "../../shared/contracts/runs.js";
+
+export const runsRoutePaths = {
+  list: "/api/runs",
+  detail: "/api/runs/:runId",
+  node: "/api/runs/:runId/nodes/:compiledId",
+  events: "/api/runs/:runId/events",
+  stream: "/api/runs/:runId/events/stream"
+} as const;
+
+export interface RunEventStreamSink {
+  write(event: string, payload: ProjectedRunEvent): Promise<void> | void;
+  close(): void;
 }
 
-async function describeRunResolutionMatch(runDir: string) {
-  const statePath = path.resolve(runDir, 'run_state.json');
-  const state = await readJsonFileWithRetries<Record<string, unknown>>(statePath);
+function fail(status: number, error: string, message: string): never {
+  const routeError = new Error(message) as Error & {
+    status: number;
+    error: string;
+  };
+  routeError.status = status;
+  routeError.error = error;
+  throw routeError;
+}
+
+function sanitizeSegment(value: string, label: string): string {
+  if (!value || value.includes("/") || value.includes("\\") || value === "." || value === "..") {
+    fail(400, `${label}_invalid`, `Invalid ${label}.`);
+  }
+
+  return value;
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+export function resolveRunRoot(runsRoot: string, runId: string): string {
+  return resolve(runsRoot, sanitizeSegment(runId, "run_id"));
+}
+
+async function assertRunReadable(runRoot: string): Promise<void> {
+  try {
+    await readRunState(runRoot);
+  } catch {
+    fail(404, "run_not_found", `Run artifacts were not found at ${runRoot}.`);
+  }
+}
+
+export async function listRuns(options: {
+  runs_root: string;
+  graph_id?: string;
+}): Promise<{
+  runs: RunSummary[];
+}> {
+  const runs = await listProjectedRuns(options.runs_root);
+
   return {
-    runDir,
-    planPath: typeof state?.configPath === 'string' ? state.configPath : null,
-    updatedAtUtc: typeof state?.updatedAtUtc === 'string' ? state.updatedAtUtc : null,
+    runs: options.graph_id ? runs.filter((run) => run.graph_id === options.graph_id) : runs
   };
 }
 
-async function readHandleState(handle: RunHandle): Promise<Record<string, unknown> | null> {
-  const statePath = path.resolve(handle.runDir, 'run_state.json');
-  const state = await readJsonFileWithRetries<Record<string, unknown>>(statePath);
-  if (state) {
-    refreshHandleFromState(handle, state);
-    return state;
-  }
-  return handle.lastKnownState ? { ...handle.lastKnownState } : null;
+export async function readRunSnapshot(options: {
+  runs_root: string;
+  run_id: string;
+}): Promise<RunSnapshot> {
+  const runRoot = resolveRunRoot(options.runs_root, options.run_id);
+  await assertRunReadable(runRoot);
+  return projectRunSnapshot(runRoot);
 }
 
-async function readHandleTrace(handle: RunHandle): Promise<Array<Record<string, unknown>>> {
-  const tracePath = path.resolve(handle.runDir, 'decision_trace.json');
-  if (!fs.existsSync(tracePath)) {
-    return Array.isArray(handle.lastKnownDecisionTrace)
-      ? [...handle.lastKnownDecisionTrace]
-      : [];
-  }
-  const trace = await readJsonFileWithRetries<Array<Record<string, unknown>>>(tracePath);
-  if (Array.isArray(trace)) {
-    handle.lastKnownDecisionTrace = trace;
-    return trace;
-  }
-  return Array.isArray(handle.lastKnownDecisionTrace)
-    ? [...handle.lastKnownDecisionTrace]
-    : [];
-}
+export async function readRunNodeDetail(options: {
+  runs_root: string;
+  run_id: string;
+  compiled_id: string;
+}): Promise<NodeDetail> {
+  const runRoot = resolveRunRoot(options.runs_root, options.run_id);
+  await assertRunReadable(runRoot);
 
-async function readRunTrace(
-  runDir: string,
-): Promise<Array<Record<string, unknown>>> {
-  const tracePath = path.resolve(runDir, 'decision_trace.json');
-  if (!fs.existsSync(tracePath)) return [];
-  const trace = await readJsonFileWithRetries<Array<Record<string, unknown>>>(tracePath);
-  return Array.isArray(trace) ? trace : [];
-}
-
-async function requireHandle(runId: string, reply: FastifyReply): Promise<RunHandle | null> {
-  const resolution = inspectRunResolution(runId);
-  if (resolution.kind === 'resolved') return resolution.handle;
-  if (resolution.kind === 'ambiguous') {
-    const matches = await Promise.all(resolution.runDirs.map((runDir) => describeRunResolutionMatch(runDir)));
-    matches.sort((left, right) => String(right.updatedAtUtc || '').localeCompare(String(left.updatedAtUtc || '')));
-    await reply.code(409).send({
-      error: 'run_id_ambiguous',
-      runId,
-      matches,
-    });
-    return null;
-  }
-  await reply.code(404).send({ error: 'run_not_found', runId });
-  return null;
-}
-
-export default async function runsRouter(app: FastifyInstance): Promise<void> {
-  (app as any).getHandle = getHandle;
-
-  app.post('/start', async (req, reply) => {
-    const body = req.body as any || {};
-    const planPath = String(body.planPath || '');
-    if (!planPath || !path.isAbsolute(planPath)) return reply.code(400).send({ error: 'absolute_plan_path_required' });
-    if (!isPathAllowed(planPath)) return reply.code(403).send({ error: 'path_not_allowed' });
-    if (!fs.existsSync(planPath)) return reply.code(404).send({ error: 'plan_not_found' });
-
-    const settings = body.settings || {};
-    const handle = await startRun({
-      planPath,
-      skipGitRepoCheck: Boolean(settings.skipGitRepoCheck),
-      sandbox: settings.sandbox,
-      dryRun: Boolean(settings.dryRun),
-    });
-    return { runId: handle.runId, runDir: handle.runDir };
-  });
-
-  app.post('/open', async (req, reply) => {
-    const body = req.body as any || {};
-    const runDir = String(body.runDir || '');
-    if (!runDir || !path.isAbsolute(runDir)) return reply.code(400).send({ error: 'absolute_run_dir_required' });
-    if (!isPathAllowed(runDir)) return reply.code(403).send({ error: 'path_not_allowed' });
-    if (!fs.existsSync(path.resolve(runDir, 'run_state.json'))) return reply.code(404).send({ error: 'state_missing' });
-    const handle = openRun(runDir);
-    return { runId: handle.runId, runDir: handle.runDir };
-  });
-
-  app.get('/:runId/resolve', async (req, reply) => {
-    const { runId } = req.params as { runId: string };
-    const handle = await requireHandle(runId, reply);
-    if (!handle) return reply;
-    return {
-      runId: handle.runId,
-      runDir: handle.runDir,
-      planPath: handle.planPath || null,
-      isActive: handle.isActive,
-    };
-  });
-
-  app.post('/resume', async (req, reply) => {
-    const body = req.body as any || {};
-    const runDir = String(body.runDir || '');
-    if (!runDir || !path.isAbsolute(runDir)) return reply.code(400).send({ error: 'absolute_run_dir_required' });
-    if (!isPathAllowed(runDir)) return reply.code(403).send({ error: 'path_not_allowed' });
-    const statePath = path.resolve(runDir, 'run_state.json');
-    if (!fs.existsSync(statePath)) return reply.code(404).send({ error: 'state_missing' });
-    const state = await readJsonFileWithRetries<Record<string, unknown>>(statePath) || null;
-    if (!state) return reply.code(503).send({ error: 'state_unavailable' });
-    const trace = await readRunTrace(runDir);
-    const existing = state.runId ? getHandle(String(state.runId)) : undefined;
-    const capabilities = deriveRunCapabilities(existing, state, trace);
-    if (!capabilities.canResume) {
-      const isActive = existing
-        ? inferHandleActive(existing, state, trace)
-        : inferActiveFromState(state, trace);
-      return reply.code(409).send({ error: isActive ? 'run_already_active' : 'run_not_resumable' });
+  try {
+    return await projectNodeDetail(runRoot, sanitizeSegment(options.compiled_id, "compiled_id"));
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Unknown compiled node")) {
+      fail(404, "node_not_found", error.message);
     }
-    const settings = body.settings || {};
-    const handle = await resumeRun({
-      runDir,
-      planPath: body.planPath,
-      skipGitRepoCheck: Boolean(settings.skipGitRepoCheck),
-      sandbox: settings.sandbox,
-      dryRun: Boolean(settings.dryRun),
+
+    throw error;
+  }
+}
+
+export async function readRunEventPage(options: {
+  runs_root: string;
+  run_id: string;
+  after_seq?: string;
+  compiled_id?: string;
+  limit?: string;
+}): Promise<RunEventPage> {
+  const runRoot = resolveRunRoot(options.runs_root, options.run_id);
+  await assertRunReadable(runRoot);
+
+  return projectRunEvents(runRoot, {
+    after_seq: parsePositiveInteger(options.after_seq, 0),
+    ...(options.compiled_id ? { compiled_id: sanitizeSegment(options.compiled_id, "compiled_id") } : {}),
+    limit: parsePositiveInteger(options.limit, 200)
+  });
+}
+
+export async function streamRunEvents(options: {
+  runs_root: string;
+  run_id: string;
+  after_seq?: string;
+  sink: RunEventStreamSink;
+  signal?: AbortSignal;
+  poll_interval_ms?: number;
+}): Promise<void> {
+  const runRoot = resolveRunRoot(options.runs_root, options.run_id);
+  await assertRunReadable(runRoot);
+
+  let cursor = parsePositiveInteger(options.after_seq, 0);
+
+  while (!options.signal?.aborted) {
+    const page = await projectRunEvents(runRoot, {
+      after_seq: cursor
     });
-    return { runId: handle.runId, runDir: handle.runDir };
-  });
 
-  // Convenience: resume by runId (derive runDir + planPath from state)
-  app.post('/:runId/resume', async (req, reply) => {
-    const { runId } = req.params as { runId: string };
-    const handle = await requireHandle(runId, reply);
-    if (!handle) return reply;
-    const statePath = path.resolve(handle.runDir, 'run_state.json');
-    if (!fs.existsSync(statePath)) return reply.code(404).send({ error: 'state_missing' });
-    const state = await readHandleState(handle);
-    if (!state) return reply.code(503).send({ error: 'state_unavailable' });
-    const trace = await readHandleTrace(handle);
-    const capabilities = deriveRunCapabilities(handle, state, trace);
-    if (!capabilities.canResume) {
-      const isActive = inferHandleActive(handle, state, trace);
-      return reply.code(409).send({ error: isActive ? 'run_already_active' : 'run_not_resumable' });
+    for (const event of page.events) {
+      cursor = event.seq;
+      await options.sink.write(event.type, event);
     }
-    const inferredPlan = String(state.configPath || handle.planPath || '');
-    if (!inferredPlan) return reply.code(400).send({ error: 'plan_missing' });
-    const body = req.body as any || {};
-    const settings = body.settings || {};
-    const resumed = await resumeRun({ runDir: handle.runDir, planPath: inferredPlan, skipGitRepoCheck: Boolean(settings.skipGitRepoCheck), sandbox: settings.sandbox, dryRun: Boolean(settings.dryRun) });
-    return { runId: resumed.runId, runDir: resumed.runDir };
-  });
 
-  app.post('/cancel', async (req, reply) => {
-    const body = req.body as any || {};
-    const runId = String(body.runId || '');
-    if (!runId) return reply.code(400).send({ error: 'runId_required' });
-    const handle = await requireHandle(runId, reply);
-    if (!handle) return reply;
-    if (!handle.isActive) return reply.code(409).send({ error: 'run_not_active' });
-    if (!handle.child) return reply.code(409).send({ error: 'run_not_controllable' });
-    const ok = await cancelRun(runId);
-    if (!ok) return reply.code(409).send({ error: 'run_not_active' });
-    return { ok: true };
-  });
+    const state = await readRunState(runRoot);
 
-  app.get('/:runId/state', async (req, reply) => {
-    const { runId } = req.params as { runId: string };
-    const handle = await requireHandle(runId, reply);
-    if (!handle) return reply;
-    const p = path.resolve(handle.runDir, 'run_state.json');
-    if (!fs.existsSync(p)) return reply.code(404).send({ error: 'state_missing' });
-    const state = await readHandleState(handle);
-    if (!state) return reply.code(503).send({ error: 'state_unavailable' });
-    const trace = await readHandleTrace(handle);
-    const isActive = inferHandleActive(handle, state, trace);
-    const capabilities = deriveRunCapabilities(handle, state, trace);
-    if (trace.length > 0) state.decisionTrace = trace.slice(-50);
-    return {
-      ...state,
-      runDir: handle.runDir,
-      planPath: handle.planPath || null,
-      isActive,
-      cancelRequested: handle.child ? handle.cancelRequested : Boolean(state.cancelRequested ?? handle.cancelRequested),
-      canCancel: capabilities.canCancel,
-      canResume: capabilities.canResume,
-      lastExitCode: handle.lastExitCode,
-      recentConsole: handle.recentConsole,
-    };
-  });
+    if (state.status !== "running") {
+      break;
+    }
 
-  app.get('/:runId/trace', async (req, reply) => {
-    const { runId } = req.params as { runId: string };
-    const handle = await requireHandle(runId, reply);
-    if (!handle) return reply;
-    return reply.code(200).send(await readHandleTrace(handle));
-  });
-
-  app.get('/:runId/logs/:taskKey', async (req, reply) => {
-    const { runId, taskKey } = req.params as { runId: string; taskKey: string };
-    const handle = await requireHandle(runId, reply);
-    if (!handle) return reply;
-    const statePath = path.resolve(handle.runDir, 'run_state.json');
-    if (!fs.existsSync(statePath)) return reply.code(404).send({ error: 'state_missing' });
-    const state = await readHandleState(handle);
-    if (!state) return reply.code(503).send({ error: 'state_unavailable' });
-    const tasks = (state.tasks as Record<string, Record<string, unknown>> | undefined) || undefined;
-    const row = tasks?.[taskKey];
-    const source = row ? resolvePreferredRawOutputSource(row) : null;
-    if (!source) return reply.code(404).send({ error: 'log_not_found' });
-    if (!isPathAllowed(source.path)) return reply.code(403).send({ error: 'path_not_allowed' });
     try {
-      const text = fs.readFileSync(source.path, 'utf8');
-      return reply.type('text/plain').send(text);
+      await delay(options.poll_interval_ms ?? 500, undefined, {
+        signal: options.signal
+      });
     } catch {
-      return reply.code(500).send({ error: 'read_failed' });
+      break;
     }
-  });
+  }
 
-  app.get('/:runId/artifacts/:taskKey', async (req, reply) => {
-    const { runId, taskKey } = req.params as { runId: string; taskKey: string };
-    const handle = await requireHandle(runId, reply);
-    if (!handle) return reply;
-    const statePath = path.resolve(handle.runDir, 'run_state.json');
-    if (!fs.existsSync(statePath)) return reply.code(404).send({ error: 'state_missing' });
-    const state = await readHandleState(handle);
-    if (!state) return reply.code(503).send({ error: 'state_unavailable' });
-    const tasks = (state.tasks as Record<string, Record<string, unknown>> | undefined) || undefined;
-    const row = tasks?.[taskKey];
-    if (!row) return reply.code(404).send({ error: 'task_not_found' });
-    return { items: artifactItemsForRow(row) };
-  });
-
-  app.get('/:runId/console', async (req, reply) => {
-    const { runId } = req.params as { runId: string };
-    const handle = await requireHandle(runId, reply);
-    if (!handle) return reply;
-    return { entries: handle.recentConsole };
-  });
+  options.sink.close();
 }

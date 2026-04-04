@@ -1,33 +1,49 @@
- {
+{
   "name": "agentflow",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Standalone agentflow orchestrator with task/group/loop workflows for coding agents.",
+  "description": "Local-first graph executor for coding agents.",
+  "engines": {
+    "node": ">=20.7.0"
+  },
+  "workspaces": [
+    "web-app"
+  ],
   "bin": {
-    "agentflow": "./bin/agentflow.js"
+    "agentflow": "./dist/cli/index.js"
   },
   "scripts": {
-    "start": "node ./bin/agentflow.js --help",
-    "dev": "node ./bin/agentflow.js",
-    "plan-help": "node ./bin/agentflow.js --plan-help",
-    "web:dev": "npm --prefix web-app run dev",
-    "web:build": "npm --prefix web-app run build",
-    "web:start": "npm --prefix web-app run start",
-    "fixtures:refresh-monitor": "node --import tsx scripts/refresh-monitor-sample-fixtures.ts",
+    "dev": "tsx src/cli/index.ts",
+    "help": "npm run dev --",
+    "start": "node dist/cli/index.js --help",
+    "plan-help": "npm run graph-help",
+    "run": "tsx src/cli/index.ts run",
+    "validate": "tsx src/cli/index.ts validate",
+    "compile": "tsx src/cli/index.ts compile",
+    "ui": "tsx src/cli/index.ts ui",
+    "graph-help": "tsx src/cli/index.ts graph-help",
+    "control": "tsx src/cli/index.ts control",
+    "web:dev": "npm run dev --workspace web-app",
+    "web:build": "npm run build --workspace web-app",
+    "web:start": "npm run start --workspace web-app",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
-    "test": "source ~/.nvm/nvm.sh && nvm exec 20 node --import tsx --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
-  },
-  "dependencies": {
-    "tsx": "^4.19.2"
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace web-app",
+    "test": "vitest run",
+    "test:coverage": "node scripts/test-coverage.mjs",
+    "test:browser": "node scripts/test-browser.mjs",
+    "build": "tsc -p tsconfig.json && npm run build --workspace web-app",
+    "validate:smoke": "node scripts/validate-smoke.mjs",
+    "validate:confidence": "node scripts/validate-confidence.mjs",
+    "validate:real-harness": "node scripts/validate-real-harness.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.10.1",
-    "typescript": "^5.7.2"
-  },
-  "engines": {
-    "node": ">=20.0.0"
+    "@vitest/coverage-v8": "^2.1.8",
+    "@types/node": "^22.10.2",
+    "playwright": "^1.51.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Frontend Design System"
-  short_description: "Tokens, theming, and component contracts"
-  default_prompt: "Use $frontend-design-system to define tokens and component contracts for this frontend."

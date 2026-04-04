@@ -1,0 +1,532 @@
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
+
+import type { ContextReference, InputItem } from "../../graph/authored.js";
+import type { CompiledExecutableNode, CompiledGraph } from "../../graph/compiled.js";
+import type { AttemptRegistry, AttemptSelector, RuntimeNodeAttempt } from "../attempts.js";
+import { listAttemptsForCompiledNode, selectAttempt } from "../attempts.js";
+import type {
+  ContextPacket,
+  ContextPacketMaterializedItem,
+  ContextPacketOmittedItem,
+  ContextPacketRuleFile
+} from "./packet.js";
+
+interface MaterializedPayload {
+  bytes: number;
+  truncated: boolean;
+  file_path: string;
+}
+
+export interface ResolveContextOptions {
+  compiled_graph: CompiledGraph;
+  node: CompiledExecutableNode;
+  execution_id: string;
+  execution_dir: string;
+  workspace_path: string;
+  repo_workspaces: Record<string, string>;
+  attempts: AttemptRegistry;
+}
+
+interface RuleFileSource {
+  rule_kind: ContextPacketRuleFile["rule_kind"];
+  source_path: string;
+  relative_path: string;
+}
+
+function normalizeRelativePath(value: string): string {
+  return value.split("\\").join("/");
+}
+
+function globPatternToRegExp(pattern: string): RegExp {
+  const escaped = normalizeRelativePath(pattern)
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, ":::DOUBLE_STAR:::")
+    .replace(/\*/g, "[^/]*")
+    .replace(/:::DOUBLE_STAR:::/g, ".*")
+    .replace(/\?/g, ".");
+
+  return new RegExp(`^${escaped}$`);
+}
+
+async function walkFiles(rootPath: string, currentPath = rootPath): Promise<string[]> {
+  const entries = await (await import("node:fs/promises")).readdir(currentPath, {
+    withFileTypes: true
+  });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = join(currentPath, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...(await walkFiles(rootPath, entryPath)));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
+}
+
+async function pathExists(pathValue: string): Promise<boolean> {
+  try {
+    await access(pathValue);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function materializeBytes(
+  contents: string | Buffer,
+  destinationPath: string,
+  maxBytesPerItem: number
+): Promise<MaterializedPayload> {
+  await mkdir(dirname(destinationPath), { recursive: true });
+  const buffer = Buffer.isBuffer(contents) ? contents : Buffer.from(contents);
+  const truncatedBuffer =
+    buffer.byteLength > maxBytesPerItem ? buffer.subarray(0, maxBytesPerItem) : buffer;
+  await writeFile(destinationPath, truncatedBuffer);
+
+  return {
+    bytes: truncatedBuffer.byteLength,
+    truncated: truncatedBuffer.byteLength !== buffer.byteLength,
+    file_path: destinationPath
+  };
+}
+
+function splitQualifiedPath(
+  value: string,
+  fallbackRepo: string
+): {
+  repo_alias: string;
+  repo_relative_path: string;
+} {
+  const separatorIndex = value.indexOf(":");
+
+  if (separatorIndex <= 0) {
+    return {
+      repo_alias: fallbackRepo,
+      repo_relative_path: value
+    };
+  }
+
+  return {
+    repo_alias: value.slice(0, separatorIndex),
+    repo_relative_path: value.slice(separatorIndex + 1)
+  };
+}
+
+function selectAttemptsForReference(
+  registry: AttemptRegistry,
+  compiledIds: string[],
+  reference: ContextReference
+): RuntimeNodeAttempt[] {
+  const attempts = compiledIds.flatMap((compiledId) => listAttemptsForCompiledNode(registry, compiledId));
+
+  if (attempts.length === 0) {
+    return [];
+  }
+
+  const iterationSelector = reference.iteration as AttemptSelector | undefined;
+  const attemptSelector = (reference.attempt ?? "latest") as AttemptSelector;
+
+  const filteredByIteration =
+    iterationSelector === undefined
+      ? attempts
+      : typeof iterationSelector === "number"
+        ? attempts.filter((attempt) => attempt.iteration_index === iterationSelector)
+        : (() => {
+            const candidate = selectAttempt(
+              attempts.filter((attempt) => attempt.iteration_index !== undefined),
+              iterationSelector
+            );
+
+            return candidate ? attempts.filter((attempt) => attempt.iteration_index === candidate.iteration_index) : [];
+          })();
+
+  const selected = selectAttempt(filteredByIteration, attemptSelector);
+  return selected ? [selected] : [];
+}
+
+async function discoverRuleFileSources(workspacePath: string): Promise<RuleFileSource[]> {
+  const discovered: RuleFileSource[] = [];
+
+  const staticRuleFiles: Array<{
+    relative_path: string;
+    rule_kind: RuleFileSource["rule_kind"];
+  }> = [
+    {
+      relative_path: "AGENTS.md",
+      rule_kind: "agents"
+    },
+    {
+      relative_path: "CLAUDE.md",
+      rule_kind: "claude"
+    },
+    {
+      relative_path: ".cursorrules",
+      rule_kind: "cursor-legacy"
+    }
+  ];
+
+  for (const ruleFile of staticRuleFiles) {
+    const sourcePath = join(workspacePath, ruleFile.relative_path);
+
+    if (await pathExists(sourcePath)) {
+      discovered.push({
+        rule_kind: ruleFile.rule_kind,
+        source_path: sourcePath,
+        relative_path: ruleFile.relative_path
+      });
+    }
+  }
+
+  const cursorRulesRoot = join(workspacePath, ".cursor", "rules");
+
+  if (!(await pathExists(cursorRulesRoot))) {
+    return discovered;
+  }
+
+  const rulePaths = (await walkFiles(cursorRulesRoot)).sort((left, right) => left.localeCompare(right));
+
+  for (const rulePath of rulePaths) {
+    discovered.push({
+      rule_kind: "cursor-rule",
+      source_path: rulePath,
+      relative_path: normalizeRelativePath(relative(workspacePath, rulePath))
+    });
+  }
+
+  return discovered;
+}
+
+async function materializeRuleFiles(
+  options: ResolveContextOptions,
+  maxBytesPerItem: number
+): Promise<ContextPacketRuleFile[]> {
+  const ruleSources = await discoverRuleFileSources(options.workspace_path);
+
+  return Promise.all(
+    ruleSources.map(async (ruleSource, index) => {
+      const contents = await readFile(ruleSource.source_path);
+      const destinationPath = join(
+        options.execution_dir,
+        "context_materialized",
+        "rules",
+        ...normalizeRelativePath(ruleSource.relative_path).split("/")
+      );
+      const materialized = await materializeBytes(contents, destinationPath, maxBytesPerItem);
+
+      return {
+        key: `rule_${index + 1}`,
+        rule_kind: ruleSource.rule_kind,
+        source_path: ruleSource.source_path,
+        materialized_path: destinationPath,
+        bytes: materialized.bytes,
+        truncated: materialized.truncated
+      };
+    })
+  );
+}
+
+async function materializeInputItem(
+  input: InputItem,
+  index: number,
+  options: ResolveContextOptions,
+  maxBytesPerItem: number
+): Promise<ContextPacketMaterializedItem[]> {
+  const materialsRoot = join(options.execution_dir, "context_materialized", `input_${index + 1}`);
+
+  if (input.kind === "text") {
+    const destinationPath = join(materialsRoot, `${input.name}.txt`);
+    const materialized = await materializeBytes(input.text, destinationPath, maxBytesPerItem);
+
+    return [
+      {
+        key: `input_${index + 1}`,
+        kind: "input",
+        source: input,
+        materialized_path: destinationPath,
+        bytes: materialized.bytes,
+        truncated: materialized.truncated
+      }
+    ];
+  }
+
+  if (input.kind === "file") {
+    const { repo_alias, repo_relative_path } = splitQualifiedPath(input.path, options.node.repo);
+    const repoRoot = options.repo_workspaces[repo_alias];
+
+    if (!repoRoot) {
+      throw new Error(`Unknown repo alias "${repo_alias}" while resolving input.`);
+    }
+
+    const sourcePath = resolve(repoRoot, repo_relative_path);
+    const contents = await readFile(sourcePath);
+    const destinationPath = join(materialsRoot, basename(repo_relative_path));
+    const materialized = await materializeBytes(contents, destinationPath, maxBytesPerItem);
+
+    return [
+      {
+        key: `input_${index + 1}`,
+        kind: "input",
+        source: input,
+        materialized_path: destinationPath,
+        bytes: materialized.bytes,
+        truncated: materialized.truncated
+      }
+    ];
+  }
+
+  const { repo_alias, repo_relative_path } = splitQualifiedPath(input.path, options.node.repo);
+  const repoRoot = options.repo_workspaces[repo_alias];
+
+  if (!repoRoot) {
+    throw new Error(`Unknown repo alias "${repo_alias}" while resolving glob input.`);
+  }
+
+  const allFiles = await walkFiles(repoRoot);
+  const matcher = globPatternToRegExp(normalizeRelativePath(repo_relative_path));
+  const matches = allFiles
+    .filter((filePath) => matcher.test(normalizeRelativePath(relative(repoRoot, filePath))))
+    .slice(0, input.max_files ?? Number.MAX_SAFE_INTEGER);
+
+  return Promise.all(
+    matches.map(async (filePath, matchIndex) => {
+      const contents = await readFile(filePath);
+      const destinationPath = join(materialsRoot, `${matchIndex + 1}-${basename(filePath)}`);
+      const materialized = await materializeBytes(contents, destinationPath, maxBytesPerItem);
+
+      return {
+        key: `input_${index + 1}_${matchIndex + 1}`,
+        kind: "input" as const,
+        source: input,
+        materialized_path: destinationPath,
+        bytes: materialized.bytes,
+        truncated: materialized.truncated
+      };
+    })
+  );
+}
+
+async function materializeContextReference(
+  reference: ContextReference,
+  index: number,
+  options: ResolveContextOptions,
+  maxBytesPerItem: number
+): Promise<{
+  materials: ContextPacketMaterializedItem[];
+  omitted: ContextPacketOmittedItem[];
+}> {
+  const compiledIds = options.compiled_graph.authored_to_compiled[reference.node] ?? [];
+  const attempts = selectAttemptsForReference(options.attempts, compiledIds, reference);
+
+  if (attempts.length === 0) {
+    if (reference.optional) {
+      return {
+        materials: [],
+        omitted: [
+          {
+            key: `context_${index + 1}`,
+            source: reference,
+            reason: `No execution matched "${reference.node}".`,
+            optional: true
+          }
+        ]
+      };
+    }
+
+    throw new Error(`No execution matched required context reference "${reference.node}".`);
+  }
+
+  const selected = attempts[0];
+
+  if (!selected) {
+    throw new Error(`No execution matched required context reference "${reference.node}".`);
+  }
+
+  let sourcePath: string | undefined;
+
+  if (reference.include === "summary") {
+    sourcePath = selected.context_summary_path;
+  } else if (reference.include === "result") {
+    sourcePath = selected.result_path;
+  } else {
+    sourcePath = reference.output ? selected.output_artifacts[reference.output] : undefined;
+  }
+
+  if (!sourcePath) {
+    if (reference.optional) {
+      return {
+        materials: [],
+        omitted: [
+          {
+            key: `context_${index + 1}`,
+            source: reference,
+            reason: `Selected execution for "${reference.node}" did not produce the requested artifact.`,
+            optional: true
+          }
+        ]
+      };
+    }
+
+    throw new Error(`Required context artifact is missing for "${reference.node}".`);
+  }
+
+  const contents = await readFile(sourcePath);
+  const destinationPath = join(
+    options.execution_dir,
+    "context_materialized",
+    `context_${index + 1}`,
+    basename(sourcePath)
+  );
+  const materialized = await materializeBytes(contents, destinationPath, maxBytesPerItem);
+
+  return {
+    materials: [
+      {
+        key: `context_${index + 1}`,
+        kind: "context",
+        source: reference,
+        materialized_path: destinationPath,
+        bytes: materialized.bytes,
+        truncated: materialized.truncated
+      }
+    ],
+    omitted: []
+  };
+}
+
+function renderContextSummary(packet: ContextPacket): string {
+  const lines = [
+    `# Context Summary: ${packet.execution_id}`,
+    "",
+    `- Compiled node: \`${packet.compiled_id}\``,
+    `- Repo: \`${packet.repo_alias}\``,
+    `- Workspace: \`${packet.workspace_path}\``,
+    `- Materialized items: \`${packet.totals.material_count}\``,
+    `- Rule files: \`${packet.totals.rule_file_count}\``,
+    `- Total files: \`${packet.totals.file_count}\``,
+    `- Total bytes: \`${packet.totals.total_bytes}\``,
+    ""
+  ];
+
+  if (packet.materials.length > 0) {
+    lines.push("## Materials", "");
+
+    for (const item of packet.materials) {
+      lines.push(`- \`${item.key}\` -> \`${item.materialized_path}\` (${item.bytes} bytes)`);
+    }
+
+    lines.push("");
+  }
+
+  if (packet.rule_files.length > 0) {
+    lines.push("## Rule Files", "");
+
+    for (const ruleFile of packet.rule_files) {
+      lines.push(
+        `- \`${ruleFile.key}\` -> \`${ruleFile.materialized_path}\` (${ruleFile.rule_kind}, ${ruleFile.bytes} bytes)`
+      );
+    }
+
+    lines.push("");
+  }
+
+  if (packet.omitted.length > 0) {
+    lines.push("## Omitted", "");
+
+    for (const item of packet.omitted) {
+      lines.push(`- \`${item.key}\`: ${item.reason}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export async function resolveExecutionContext(
+  options: ResolveContextOptions
+): Promise<{
+  packet: ContextPacket;
+  packet_path: string;
+  summary_path: string;
+}> {
+  const materials: ContextPacketMaterializedItem[] = [];
+  const rule_files = await materializeRuleFiles(
+    options,
+    options.node.effective_policy.input_rules.max_bytes_per_item
+  );
+  const omitted: ContextPacketOmittedItem[] = [];
+
+  for (const [index, input] of (options.node.inputs ?? []).entries()) {
+    materials.push(
+      ...(await materializeInputItem(
+        input,
+        index,
+        options,
+        options.node.effective_policy.input_rules.max_bytes_per_item
+      ))
+    );
+  }
+
+  for (const [index, reference] of (options.node.context_from ?? []).entries()) {
+    const resolved = await materializeContextReference(
+      reference,
+      index,
+      options,
+      options.node.effective_policy.input_rules.max_bytes_per_item
+    );
+    materials.push(...resolved.materials);
+    omitted.push(...resolved.omitted);
+  }
+
+  const total_bytes =
+    materials.reduce((sum, item) => sum + item.bytes, 0) +
+    rule_files.reduce((sum, ruleFile) => sum + ruleFile.bytes, 0);
+  const file_count = materials.length + rule_files.length;
+
+  if (file_count > options.node.effective_policy.input_rules.max_files) {
+    throw new Error(
+      `Resolved ${file_count} context files, exceeding max_files ${options.node.effective_policy.input_rules.max_files}.`
+    );
+  }
+
+  if (total_bytes > options.node.effective_policy.input_rules.max_total_bytes) {
+    throw new Error(
+      `Resolved ${total_bytes} context bytes, exceeding max_total_bytes ${options.node.effective_policy.input_rules.max_total_bytes}.`
+    );
+  }
+
+  const packet: ContextPacket = {
+    execution_id: options.execution_id,
+    compiled_id: options.node.compiled_id,
+    authored_id: options.node.authored_id,
+    repo_alias: options.node.repo,
+    workspace_path: options.workspace_path,
+    materials,
+    rule_files,
+    omitted,
+    totals: {
+      material_count: materials.length,
+      rule_file_count: rule_files.length,
+      file_count,
+      total_bytes
+    }
+  };
+
+  const packet_path = join(options.execution_dir, "context_packet.json");
+  const summary_path = join(options.execution_dir, "context_summary.md");
+  await mkdir(dirname(packet_path), { recursive: true });
+  await writeFile(packet_path, `${JSON.stringify(packet, null, 2)}\n`);
+  await writeFile(summary_path, renderContextSummary(packet));
+
+  return {
+    packet,
+    packet_path,
+    summary_path
+  };
+}

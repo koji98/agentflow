@@ -1,91 +1,257 @@
-import Fastify from 'fastify';
-import fastifyStatic from '@fastify/static';
-import path from 'node:path';
-import fs from 'node:fs';
-import FastifySSEPlugin from 'fastify-sse-v2';
+import { createServer, type IncomingMessage, type Server as NodeHttpServer, type ServerResponse } from "node:http";
+import { existsSync } from "node:fs";
+import { constants } from "node:fs";
+import { access, readFile, stat } from "node:fs/promises";
+import { dirname, extname, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import runsRouter from './routes/runs.ts';
-import fsRouter from './routes/fs.ts';
-import planRouter from './routes/plan.ts';
-import streamRouter from './routes/stream.ts';
+import {
+  resolveLaunchWorkingDirectory,
+  resolveRunsRoot
+} from "../../src/artifacts/paths.js";
+import { createWebAppServer } from "./app.js";
 
-const PORT = Number(process.env.PORT || 3208);
-const HOST = process.env.HOST || '127.0.0.1';
-
-function isLoopbackHost(host: string): boolean {
-  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+function looksLikeRepositoryRoot(candidate: string): boolean {
+  return existsSync(resolve(candidate, "package.json"))
+    && existsSync(resolve(candidate, "web-app", "package.json"))
+    && existsSync(resolve(candidate, "src", "artifacts", "paths.ts"));
 }
 
-const __dirnameShim = path.dirname(new URL(import.meta.url).pathname);
+function resolveRepositoryRoot(serverEntryDirectory: string): string {
+  const candidates = [
+    resolve(serverEntryDirectory, "../.."),
+    resolve(serverEntryDirectory, "../../.."),
+    resolve(serverEntryDirectory, "../../../.."),
+    resolve(serverEntryDirectory, "../../../../..")
+  ];
 
-export async function createServer() {
-  const app = Fastify({ logger: false });
-  // Expose getHandle for routes that need it (SSE tail)
-  (app as any).getHandle = undefined;
-  // fastify-sse-v2 default export is a Fastify plugin; cast guards NodeNext typing edge cases
-  await app.register(FastifySSEPlugin as any);
+  for (const candidate of candidates) {
+    if (looksLikeRepositoryRoot(candidate)) {
+      return candidate;
+    }
+  }
 
-  // Health and version
-  app.get('/api/health', async () => ({ ok: true }));
-  app.get('/api/version', async () => {
-    const webRoot = path.resolve(__dirnameShim, '..');
-    const rootRoot = path.resolve(webRoot, '..');
-    const rootPkgPath = path.join(rootRoot, 'package.json');
-    const webPkgPath = path.join(webRoot, 'package.json');
-    const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, 'utf8'));
-    const webPkg = JSON.parse(fs.readFileSync(webPkgPath, 'utf8'));
-    return { agentflowVersion: rootPkg.version, webAppVersion: webPkg.version };
+  throw new Error(`Unable to resolve the Agentflow repository root from ${serverEntryDirectory}.`);
+}
+
+const repositoryRoot = resolveRepositoryRoot(dirname(fileURLToPath(import.meta.url)));
+const defaultClientDistRoot = resolve(repositoryRoot, "web-app", "dist", "client");
+
+export interface NodeWebServerOptions {
+  port?: number;
+  current_working_directory?: string;
+  runs_root?: string;
+  client_dist_root?: string;
+}
+
+function contentTypeForPath(pathname: string): string {
+  switch (extname(pathname).toLowerCase()) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".js":
+      return "application/javascript; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".ico":
+      return "image/x-icon";
+    case ".txt":
+      return "text/plain; charset=utf-8";
+    case ".map":
+      return "application/json; charset=utf-8";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".woff":
+      return "font/woff";
+    case ".woff2":
+      return "font/woff2";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function resolveClientFilePath(clientDistRoot: string, pathname: string): string | undefined {
+  const candidate = resolve(clientDistRoot, `.${pathname}`);
+
+  return candidate === clientDistRoot || candidate.startsWith(`${clientDistRoot}${sep}`)
+    ? candidate
+    : undefined;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isReadableFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function tryServeStaticFile(
+  response: ServerResponse,
+  filePath: string,
+  contentPath: string
+): Promise<boolean> {
+  if (!(await isReadableFile(filePath))) {
+    return false;
+  }
+
+  response.statusCode = 200;
+  response.setHeader("Content-Type", contentTypeForPath(contentPath));
+  response.end(await readFile(filePath));
+  return true;
+}
+
+async function serveClientApplication(
+  response: ServerResponse,
+  clientDistRoot: string,
+  pathname: string
+): Promise<void> {
+  const directFilePath = resolveClientFilePath(
+    clientDistRoot,
+    pathname === "/" ? "/index.html" : pathname
+  );
+
+  if (
+    directFilePath &&
+    await tryServeStaticFile(
+      response,
+      directFilePath,
+      pathname === "/" ? "/index.html" : pathname
+    )
+  ) {
+    return;
+  }
+
+  const spaFallbackPath = resolve(clientDistRoot, "index.html");
+
+  if (extname(pathname).length === 0 && await tryServeStaticFile(response, spaFallbackPath, "/index.html")) {
+    return;
+  }
+
+  if (await pathExists(spaFallbackPath)) {
+    response.statusCode = 404;
+    response.setHeader("Content-Type", "text/plain; charset=utf-8");
+    response.end(`Static asset not found for ${pathname}.`);
+    return;
+  }
+
+  response.statusCode = 503;
+  response.setHeader("Content-Type", "text/plain; charset=utf-8");
+  response.end("Web client build artifacts are missing. Run npm run build before npm run start --workspace web-app.");
+}
+
+async function handleApiResponse(
+  request: IncomingMessage,
+  response: ServerResponse,
+  apiServer: ReturnType<typeof createWebAppServer>
+): Promise<void> {
+  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  const routed = await apiServer.request(request.method ?? "GET", url);
+
+  response.statusCode = routed.status;
+
+  if (routed.kind === "json") {
+    Object.entries(routed.headers ?? {}).forEach(([name, value]) => {
+      response.setHeader(name, value);
+    });
+    response.end(JSON.stringify(routed.body, null, 2));
+    return;
+  }
+
+  Object.entries(routed.headers ?? {}).forEach(([name, value]) => {
+    response.setHeader(name, value);
+  });
+  response.flushHeaders();
+
+  const abortController = new AbortController();
+  request.on("close", () => abortController.abort());
+
+  try {
+    await routed.stream(
+      {
+        write(event, payload) {
+          response.write(`event: ${event}\n`);
+          response.write(`data: ${JSON.stringify(payload)}\n\n`);
+        },
+        close() {
+          if (!response.writableEnded) {
+            response.end();
+          }
+        }
+      },
+      abortController.signal
+    );
+  } catch {
+    if (!response.writableEnded) {
+      response.end();
+    }
+  }
+}
+
+export function createNodeWebServer(options: NodeWebServerOptions = {}): NodeHttpServer {
+  const clientDistRoot = options.client_dist_root ?? defaultClientDistRoot;
+  const currentWorkingDirectory = resolveLaunchWorkingDirectory({
+    ...(options.current_working_directory
+      ? { currentWorkingDirectory: options.current_working_directory }
+      : {}),
+    environment: process.env
+  });
+  const apiServer = createWebAppServer({
+    current_working_directory: currentWorkingDirectory,
+    runs_root: options.runs_root ?? resolveRunsRoot({
+      currentWorkingDirectory,
+      environment: process.env
+    })
   });
 
-  await app.register(runsRouter, { prefix: '/api/runs' });
-  await app.register(fsRouter, { prefix: '/api/fs' });
-  await app.register(planRouter, { prefix: '/api/plan' });
-  await app.register(streamRouter, { prefix: '/api/stream' });
+  return createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
-  // Static assets (prod build only)
-  // Serve the built client from client/dist (vite root is client/)
-  const staticDir = path.resolve(__dirnameShim, '..', 'client', 'dist');
-  if (fs.existsSync(staticDir)) {
-    await app.register(fastifyStatic, { root: staticDir, prefix: '/' });
-    // SPA fallback
-    app.setNotFoundHandler((req, reply) => {
-      if (req.raw.method === 'GET' && req.raw.headers.accept?.includes('text/html')) {
-        try {
-          const html = fs.readFileSync(path.join(staticDir, 'index.html'), 'utf8');
-          reply.header('Content-Type', 'text/html').send(html);
-          return;
-        } catch {}
-      }
-      reply.code(404).send({ error: 'not_found' });
-    });
-  } else {
-    app.get('/', async () => ({ ok: true, message: 'Dev mode. Use Vite on :5173.' }));
-  }
-
-  return app;
-}
-
-async function main() {
-  const app = await createServer();
-  if (process.argv.includes('--build-check')) return;
-  if (!isLoopbackHost(HOST) && process.env.AGENTFLOW_WEB_ALLOW_REMOTE !== '1') {
-    throw new Error('Refusing to bind agentflow web server to a non-loopback host without AGENTFLOW_WEB_ALLOW_REMOTE=1.');
-  }
-  try {
-    await app.listen({ host: HOST, port: PORT });
-  } catch (err) {
-    if ((err as any).code === 'EADDRINUSE' && process.env.VITEST) {
-      // In tests, avoid hard exit when address already in use.
+    if (url.pathname === "/health" || url.pathname.startsWith("/api/")) {
+      await handleApiResponse(request, response, apiServer);
       return;
     }
-    throw err;
-  }
-  // eslint-disable-next-line no-console
-  console.log();
+
+    await serveClientApplication(response, clientDistRoot, url.pathname);
+  });
 }
 
-main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error(err);
-  if (!process.env.VITEST) process.exit(1);
-});
+export function startWebAppServer(options: NodeWebServerOptions = {}): NodeHttpServer {
+  const port = Number(options.port ?? process.env.PORT ?? 4178);
+  const server = createNodeWebServer(options);
+
+  server.listen(port, () => {
+    process.stdout.write(`Agentflow web monitor listening on http://localhost:${port}\n`);
+  });
+
+  return server;
+}
+
+function isMainModule(importMetaUrl: string): boolean {
+  const entryPath = process.argv[1];
+
+  if (!entryPath) {
+    return false;
+  }
+
+  return pathToFileURL(resolve(entryPath)).href === importMetaUrl;
+}
+
+if (isMainModule(import.meta.url)) {
+  startWebAppServer();
+}

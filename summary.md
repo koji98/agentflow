@@ -1,4 +1,0 @@
-- Managed runs no longer look active, cancelable, or non-resumable after the bridge-owned child has already exited just because `run_state.json` still shows stale live markers. `/resolve`, `/state`, and cancel or resume preflight now all honor managed-process exit first.
-- The monitor also no longer duplicates decision-trace entries when it bootstraps from a tail-only `state.decisionTrace` and later receives a snapshot rewrite from SSE.
-- Coverage is tighter in both the real command-resume path and client trace-state reducers.
-- Residual risks are unchanged: unmanaged external runs remain non-cancellable, and a first historical open can still miss full trace history if the trace file is unreadable before any stable cache exists.

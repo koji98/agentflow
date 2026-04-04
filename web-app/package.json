@@ -3,50 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Browser run monitor for agentflow with a local Fastify bridge.",
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,magenta \"tsx server/index.ts\" \"vite\"",
-    "build": "vite build && tsx server/index.ts --build-check",
-    "start": "NODE_ENV=production tsx server/index.ts",
-    "test": "vitest run --reporter=dot",
-    "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "tsx server/index.ts",
+    "dev:client": "vite",
+    "build:server": "tsc -p tsconfig.server.build.json",
+    "build": "tsc --noEmit -p tsconfig.json && npm run build:server && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/server-build/web-app/server/index.js"
   },
   "dependencies": {
-    "@fastify/static": "^7.0.4",
-    "@mantine/charts": "^7.17.8",
-    "@mantine/core": "^7.17.8",
-    "@mantine/hooks": "^7.17.8",
-    "@mantine/notifications": "^7.17.8",
-    "@tabler/icons-react": "^3.31.0",
-    "@types/dagre": "^0.7.54",
-    "dagre": "^0.8.5",
-    "fastify": "^4.28.1",
-    "fastify-sse-v2": "^4.1.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-markdown": "^10.1.0",
-    "react-router-dom": "^6.26.2",
-    "reactflow": "^11.10.2",
-    "recharts": "^2.13.3",
-    "remark-gfm": "^4.0.1",
-    "zod": "^3.23.8"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.0.0",
-    "@testing-library/user-event": "^14.6.1",
-    "@types/node": "^22.10.1",
-    "@types/react": "^18.2.73",
-    "@types/react-dom": "^18.2.22",
-    "@types/supertest": "^2.0.16",
-    "@vitejs/plugin-react": "^4.2.1",
-    "concurrently": "^9.1.0",
-    "happy-dom": "^20.8.9",
-    "jsdom": "^29.0.1",
-    "supertest": "^7.0.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "vite": "^5.4.9",
-    "vitest": "^1.6.0"
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
   }
 }

@@ -1,32 +1,19 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "types": [
-      "node",
-      "react",
-      "react-dom"
-    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "jsx": "react-jsx",
-    "baseUrl": ".",
-    "esModuleInterop": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "lib": [
-      "ES2022",
-      "DOM"
-    ]
+    "skipLibCheck": true,
+    "types": ["vite/client", "node"]
   },
-  "include": [
-    "server/**/*.ts",
-    "client/src/**/*.ts",
-    "client/src/**/*.tsx",
-    "shared/**/*.ts",
-    "tests/**/*.ts",
-    "tests/**/*.tsx"
-  ]
+  "include": ["client/**/*.ts", "client/**/*.tsx", "server/**/*.ts", "shared/**/*.ts"]
 }
+

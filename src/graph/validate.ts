@@ -1,0 +1,378 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+import type {
+  AuthoredGraphDocument,
+  AuthoredGraphNode,
+  AuthoredGraphSummary,
+  ContainerGraphNode,
+  ContextReference,
+  ExecutableGraphNode,
+  InputItem
+} from "./authored.js";
+import { normalizeAuthoredGraphDocument } from "./normalize.js";
+import type { LoweredManagedNode } from "./normalize.js";
+import type { GraphDiagnostic } from "./schema.js";
+
+export type ValidationDiagnostic = GraphDiagnostic;
+
+export interface LoadedGraphDocument {
+  document?: AuthoredGraphDocument;
+  diagnostics: ValidationDiagnostic[];
+  absolute_path: string;
+  lowered_managed_nodes: LoweredManagedNode[];
+}
+
+interface NodeMetadata {
+  node: AuthoredGraphNode;
+  path: string;
+  parent_scope_ids: string[];
+  nearest_repeat_id?: string;
+}
+
+function isExecutableNode(node: AuthoredGraphNode): node is ExecutableGraphNode {
+  return node.type === "agent" || node.type === "exec" || node.type === "check";
+}
+
+function visitNodes(
+  node: AuthoredGraphNode,
+  visit: (node: AuthoredGraphNode, metadata: NodeMetadata) => void,
+  path: string,
+  parent_scope_ids: string[] = [],
+  nearest_repeat_id?: string
+): void {
+  const metadata: NodeMetadata = {
+    node,
+    path,
+    parent_scope_ids,
+    ...(nearest_repeat_id ? { nearest_repeat_id } : {})
+  };
+
+  visit(node, metadata);
+
+  if (node.type === "sequence" || node.type === "parallel") {
+    node.steps.forEach((child, index) =>
+      visitNodes(child, visit, `${path}.steps[${index}]`, [...parent_scope_ids, node.id], nearest_repeat_id)
+    );
+    return;
+  }
+
+  if (node.type === "repeat") {
+    visitNodes(
+      node.body,
+      visit,
+      `${path}.body`,
+      [...parent_scope_ids, node.id],
+      node.id
+    );
+  }
+}
+
+function collectDescendantNodes(root: AuthoredGraphNode): AuthoredGraphNode[] {
+  const descendants: AuthoredGraphNode[] = [];
+  visitNodes(
+    root,
+    (node) => {
+      descendants.push(node);
+    },
+    "$"
+  );
+  return descendants;
+}
+
+function readQualifiedRepoAlias(pathValue: string): string | undefined {
+  const separatorIndex = pathValue.indexOf(":");
+
+  if (separatorIndex <= 0) {
+    return undefined;
+  }
+
+  return pathValue.slice(0, separatorIndex);
+}
+
+function validateInputPath(
+  input: InputItem,
+  path: string,
+  repoAliases: Set<string>,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  if (input.kind === "text") {
+    return;
+  }
+
+  const repoAlias = readQualifiedRepoAlias(input.path);
+  if (repoAlias && !repoAliases.has(repoAlias)) {
+    diagnostics.push({
+      path,
+      message: `Unknown repo alias "${repoAlias}" in input path "${input.path}".`
+    });
+  }
+}
+
+function validateContextReference(
+  reference: ContextReference,
+  path: string,
+  currentNodeId: string,
+  nodeIndex: Map<string, NodeMetadata>,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  const targetMetadata = nodeIndex.get(reference.node);
+
+  if (!targetMetadata) {
+    diagnostics.push({
+      path: `${path}.node`,
+      message: `context_from references unknown node "${reference.node}".`
+    });
+    return;
+  }
+
+  if (!isExecutableNode(targetMetadata.node)) {
+    diagnostics.push({
+      path: `${path}.node`,
+      message: `context_from references "${reference.node}", but only executable nodes can provide context.`
+    });
+    return;
+  }
+
+  if (reference.node === currentNodeId) {
+    diagnostics.push({
+      path: `${path}.node`,
+      message: "context_from cannot reference the current node."
+    });
+  }
+
+  if (reference.include === "output") {
+    const declaredOutputs = new Set(
+      (targetMetadata.node.outputs ?? []).map((output) => output.name)
+    );
+
+    if (!reference.output || !declaredOutputs.has(reference.output)) {
+      diagnostics.push({
+        path: `${path}.output`,
+        message: `context_from.output must reference a declared output on node "${reference.node}".`
+      });
+    }
+  }
+}
+
+function validateNormalizedDocument(document: AuthoredGraphDocument): ValidationDiagnostic[] {
+  const diagnostics: ValidationDiagnostic[] = [];
+  const repoAliases = new Set(Object.keys(document.repos));
+  const repoCount = repoAliases.size;
+  const seenNodeIds = new Set<string>();
+  const nodeIndex = new Map<string, NodeMetadata>();
+
+  visitNodes(document.graph, (node, metadata) => {
+    if (seenNodeIds.has(node.id)) {
+      diagnostics.push({
+        path: `${metadata.path}.id`,
+        message: `Node id "${node.id}" is duplicated.`
+      });
+    } else {
+      seenNodeIds.add(node.id);
+      nodeIndex.set(node.id, metadata);
+    }
+
+    if (isExecutableNode(node)) {
+      if (repoCount > 1 && !node.repo) {
+        diagnostics.push({
+          path: `${metadata.path}.repo`,
+          message: "Executable nodes must declare repo when multiple repos exist."
+        });
+      }
+
+      if (node.repo && !repoAliases.has(node.repo)) {
+        diagnostics.push({
+          path: `${metadata.path}.repo`,
+          message: `Unknown repo alias "${node.repo}".`
+        });
+      }
+
+      if (node.profile && !document.profiles?.[node.profile]) {
+        diagnostics.push({
+          path: `${metadata.path}.profile`,
+          message: `Node references unknown profile "${node.profile}".`
+        });
+      }
+
+      (node.inputs ?? []).forEach((input, index) => {
+        validateInputPath(input, `${metadata.path}.inputs[${index}].path`, repoAliases, diagnostics);
+      });
+
+      const declaredOutputs = new Set<string>();
+      (node.outputs ?? []).forEach((output, index) => {
+        if (declaredOutputs.has(output.name)) {
+          diagnostics.push({
+            path: `${metadata.path}.outputs[${index}].name`,
+            message: `Output name "${output.name}" is duplicated on node "${node.id}".`
+          });
+          return;
+        }
+
+        declaredOutputs.add(output.name);
+      });
+    }
+  }, "$.graph");
+
+  visitNodes(document.graph, (node, metadata) => {
+    if (node.type === "repeat") {
+      const descendants = collectDescendantNodes(node.body);
+      const untilTarget = descendants.find((descendant) => descendant.id === node.until.node);
+
+      if (!untilTarget) {
+        diagnostics.push({
+          path: `${metadata.path}.until.node`,
+          message: `repeat.until.node "${node.until.node}" must reference a descendant node.`
+        });
+      } else if (untilTarget.type !== "check") {
+        diagnostics.push({
+          path: `${metadata.path}.until.node`,
+          message: `repeat.until.node "${node.until.node}" must reference a descendant check node.`
+        });
+      }
+    }
+
+    if (isExecutableNode(node)) {
+      (node.context_from ?? []).forEach((reference, index) => {
+        validateContextReference(
+          reference,
+          `${metadata.path}.context_from[${index}]`,
+          node.id,
+          nodeIndex,
+          diagnostics
+        );
+      });
+    }
+  }, "$.graph");
+
+  return diagnostics;
+}
+
+export async function loadAuthoredGraphDocument(
+  currentWorkingDirectory: string,
+  graphPath: string
+): Promise<LoadedGraphDocument> {
+  const absolute_path = resolve(currentWorkingDirectory, graphPath);
+
+  try {
+    const fileContents = await readFile(absolute_path, "utf8");
+    const parsed = JSON.parse(fileContents) as unknown;
+    const normalized = normalizeAuthoredGraphDocument(parsed);
+    const diagnostics = [
+      ...normalized.diagnostics,
+      ...(normalized.document ? validateNormalizedDocument(normalized.document) : [])
+    ];
+
+    if (!normalized.document || diagnostics.length > 0) {
+      return {
+        diagnostics,
+        absolute_path,
+        lowered_managed_nodes: normalized.lowered_managed_nodes
+      };
+    }
+
+    return {
+      document: normalized.document,
+      diagnostics: [],
+      absolute_path,
+      lowered_managed_nodes: normalized.lowered_managed_nodes
+    };
+  } catch (error) {
+    return {
+      absolute_path,
+      lowered_managed_nodes: [],
+      diagnostics: [
+        {
+          path: graphPath,
+          message: error instanceof Error ? error.message : "Failed to read graph file."
+        }
+      ]
+    };
+  }
+}
+
+export function validateAuthoredGraphDocument(value: unknown): ValidationDiagnostic[] {
+  const normalized = normalizeAuthoredGraphDocument(value);
+
+  return [
+    ...normalized.diagnostics,
+    ...(normalized.document ? validateNormalizedDocument(normalized.document) : [])
+  ];
+}
+
+export function summarizeAuthoredGraph(document: AuthoredGraphDocument): AuthoredGraphSummary {
+  const node_kind_counts: AuthoredGraphSummary["node_kind_counts"] = {
+    agent: 0,
+    exec: 0,
+    check: 0,
+    sequence: 0,
+    parallel: 0,
+    repeat: 0
+  };
+
+  let node_count = 0;
+  let executable_node_count = 0;
+  let container_node_count = 0;
+  let repeat_count = 0;
+
+  visitNodes(
+    document.graph,
+    (node) => {
+      node_count += 1;
+      node_kind_counts[node.type] += 1;
+
+      if (isExecutableNode(node)) {
+        executable_node_count += 1;
+        return;
+      }
+
+      container_node_count += 1;
+
+      if (node.type === "repeat") {
+        repeat_count += 1;
+      }
+    },
+    "$.graph"
+  );
+
+  return {
+    graph_id: document.graph_id,
+    node_count,
+    executable_node_count,
+    container_node_count,
+    profile_count: Object.keys(document.profiles ?? {}).length,
+    repo_count: Object.keys(document.repos).length,
+    repeat_count,
+    node_kind_counts
+  };
+}
+
+export function collectExecutableNodes(root: ContainerGraphNode): Array<{
+  node: ExecutableGraphNode;
+  scope_stack: string[];
+  nearest_repeat_id?: string;
+}> {
+  const executableNodes: Array<{
+    node: ExecutableGraphNode;
+    scope_stack: string[];
+    nearest_repeat_id?: string;
+  }> = [];
+
+  visitNodes(
+    root,
+    (node, metadata) => {
+      if (!isExecutableNode(node)) {
+        return;
+      }
+
+      executableNodes.push({
+        node,
+        scope_stack: metadata.parent_scope_ids,
+        ...(metadata.nearest_repeat_id ? { nearest_repeat_id: metadata.nearest_repeat_id } : {})
+      });
+    },
+    "$.graph"
+  );
+
+  return executableNodes;
+}
