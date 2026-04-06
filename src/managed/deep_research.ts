@@ -184,7 +184,11 @@ function buildFinalSynthesisPrompt(config: DeepResearchWorkflowConfig): string {
     ...(config.audience ? [`Audience: ${config.audience}`] : []),
     "",
     "Use the reduced summaries, track briefs, and contradiction scan in context.",
+    "Before writing, derive a coverage checklist from the upstream research so you can preserve the strongest findings from every major problem cluster rather than over-focusing on one dominant narrative.",
     "The report should preserve the strongest findings, acknowledge uncertainty, and reference the track structure when useful.",
+    "Every high-signal issue from the upstream research must end up in one of these places: the explicit issue inventory, the recommended fix order, or the preserved open questions and uncertainties.",
+    "Do not drop concrete user-facing access findings, guest or denied-state behavior, or cache or invalidation risks just because contract or admin architecture issues appear more central.",
+    "Preserve contradictions and unresolved questions as first-class report content, not as optional side notes.",
     "",
     "Deliverable contract:",
     ...formatDeliverable(config.deliverable),
@@ -200,7 +204,8 @@ function buildFinalCritiquePrompt(config: DeepResearchWorkflowConfig): string {
     `Question: ${config.question}`,
     `Objective: ${config.objective}`,
     "",
-    "Decide whether the report is complete, balanced, and sufficiently grounded in the gathered research."
+    "Use the final report and the upstream track briefs, contradiction scan, and reduced summaries in context.",
+    "Decide whether the report is complete, balanced, and sufficiently grounded in the gathered research rather than merely internally coherent."
   ].join("\n");
 }
 
@@ -212,7 +217,7 @@ function buildFinalCritiqueRubric(config: DeepResearchWorkflowConfig): string {
 
   return [
     sectionRequirement,
-    "Fail if major contradictions are ignored, if the strongest uncertainties are omitted, or if the report reads like a shallow summary of a single track."
+    "Fail if major contradictions are ignored, if the strongest uncertainties are omitted, if high-signal issue clusters from the upstream research are dropped, or if the report reads like a shallow summary of a single track or one dominant narrative."
   ].join(" ");
 }
 
@@ -526,7 +531,25 @@ export function buildDeepResearchWorkflow(config: DeepResearchWorkflowConfig): S
           node: config.id,
           include: "output",
           output: "research_report"
-        }
+        },
+        {
+          node: trackGeneratorId,
+          include: "output",
+          output: "track_briefs"
+        },
+        {
+          node: contradictionId,
+          include: "output",
+          output: "contradictions",
+          optional: true
+        },
+        ...reductionSources.map(
+          (reference): ContextReference => ({
+            node: reference.node,
+            include: "output",
+            output: reference.output
+          })
+        )
       ],
       outputs: [
         {

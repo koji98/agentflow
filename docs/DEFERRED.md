@@ -14,11 +14,22 @@ Additional deferred areas:
 
 - container or VM workspace backends
 - arbitrary plugin systems
-- graph editing in the web UI
+- interactive graph editing surfaces
 - background orchestration services
 - resumable control-plane loops
+- human-in-the-loop checkpoint mode that can pause at configured workflow gates, accept operator input, and resume the live run in place without restarting the full graph
 - delivery automation beyond a minimal run summary
 - branch, commit, or pull-request orchestration features
+
+## Harness And Workflow Revisit Ideas
+
+These are not part of the current release. Keep them deferred until the supported local-first executor and monitor surface is stable enough for a deliberate follow-on pass.
+
+- add an explicit execution-contract gate between planning and workspace-write implementation in `execute_spec`, so the workflow confirms what "done" means before code changes start
+- add a read-only evaluator or reviewer gate inside `execute_spec` repair flow, so the workflow can catch spec drift or weak fixes before relying only on terminal `review_change`
+- promote managed-workflow handoffs to structured machine-readable artifacts first, with prose artifacts as operator-facing renderings rather than the only contract
+- treat managed workflows as first-class workflow groups in runtime projection and future inspection surfaces, so operators can inspect workflow phases directly instead of reasoning from lowered primitive nodes alone
+- keep repository agent instructions and canonical docs aligned, because stale harness guidance degrades long-running workflow quality even when runtime behavior is correct
 
 ## Guardrails
 

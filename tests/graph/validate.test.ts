@@ -162,4 +162,79 @@ describe("graph validation", () => {
       ])
     );
   });
+
+  it("rejects input paths and cwd values that escape the repo or workspace root", () => {
+    const diagnostics = validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "invalid-path-boundaries",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "reader",
+            prompt: "Read files.",
+            inputs: [
+              {
+                kind: "file",
+                path: "../secret.txt"
+              },
+              {
+                kind: "glob",
+                path: "main:../../**/*.ts"
+              }
+            ]
+          },
+          {
+            type: "exec",
+            id: "escape_exec",
+            command: "pwd",
+            cwd: "../outside"
+          },
+          {
+            type: "check",
+            id: "escape_check",
+            check_kind: "deterministic",
+            command: "pwd",
+            cwd: "main:../outside"
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].inputs[0].path",
+          message: 'Input path "../secret.txt" must stay within the selected repo root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].inputs[1].path",
+          message: 'Input path "main:../../**/*.ts" must stay within the selected repo root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].cwd",
+          message: 'cwd "../outside" must stay within the node workspace root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[2].cwd",
+          message: 'cwd "main:../outside" must stay within the node workspace root.'
+        })
+      ])
+    );
+  });
 });

@@ -42,6 +42,7 @@ export class ArtifactWriter {
     graph_id: string;
     launch_profile: string;
     workspace_backend: ExecutionManifest["workspace_backend"];
+    graph_path?: string;
     status: RuntimeStateSnapshot["status"];
     started_at: string;
     ended_at?: string;
@@ -51,6 +52,7 @@ export class ArtifactWriter {
       graph_id: options.graph_id,
       launch_profile: options.launch_profile,
       workspace_backend: options.workspace_backend,
+      ...(options.graph_path ? { graph_path: options.graph_path } : {}),
       status: options.status,
       started_at: options.started_at,
       ...(options.ended_at ? { ended_at: options.ended_at } : {}),

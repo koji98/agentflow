@@ -533,11 +533,21 @@ function validateCompiledContextReferences(
         return;
       }
 
+      const allTargetsArePriorIterationReferences =
+        reference.iteration !== undefined &&
+        targetCompiledIds.every((targetCompiledId) => {
+          const targetNode = context.compiled_node_by_id.get(targetCompiledId);
+
+          return (
+            targetNode?.repeat_scope_id !== undefined &&
+            targetNode.repeat_scope_id === node.repeat_scope_id
+          );
+        });
       const orderedTargetIds = targetCompiledIds.filter((targetCompiledId) =>
         isReachable(forwardAdjacency, targetCompiledId, node.compiled_id)
       );
 
-      if (orderedTargetIds.length !== targetCompiledIds.length) {
+      if (!allTargetsArePriorIterationReferences && orderedTargetIds.length !== targetCompiledIds.length) {
         context.diagnostics.push({
           path: `${path}.context_from[${index}].node`,
           message: `context_from node "${reference.node}" is not guaranteed to execute before "${node.authored_id}".`

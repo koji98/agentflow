@@ -7,9 +7,6 @@
   "engines": {
     "node": ">=20.7.0"
   },
-  "workspaces": [
-    "web-app"
-  ],
   "bin": {
     "agentflow": "./dist/cli/index.js"
   },
@@ -21,20 +18,15 @@
     "run": "tsx src/cli/index.ts run",
     "validate": "tsx src/cli/index.ts validate",
     "compile": "tsx src/cli/index.ts compile",
-    "ui": "tsx src/cli/index.ts ui",
     "graph-help": "tsx src/cli/index.ts graph-help",
     "control": "tsx src/cli/index.ts control",
     "resume": "tsx src/cli/index.ts resume",
-    "web:dev": "npm run dev --workspace web-app",
-    "web:build": "npm run build --workspace web-app",
-    "web:start": "npm run start --workspace web-app",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
-    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace web-app",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:coverage": "node scripts/test-coverage.mjs",
-    "test:browser": "node scripts/test-browser.mjs",
-    "build": "tsc -p tsconfig.json && npm run build --workspace web-app",
+    "build": "tsc -p tsconfig.json",
     "validate:smoke": "node scripts/validate-smoke.mjs",
     "validate:confidence": "node scripts/validate-confidence.mjs",
     "validate:real-harness": "node scripts/validate-real-harness.mjs"
@@ -42,7 +34,6 @@
   "devDependencies": {
     "@vitest/coverage-v8": "^2.1.8",
     "@types/node": "^22.10.2",
-    "playwright": "^1.51.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

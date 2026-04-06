@@ -1,6 +1,7 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
+import { resolveSubpathWithinRoot } from "../../path_rules.js";
 import type { ContextReference, InputItem } from "../../graph/authored.js";
 import type { CompiledExecutableNode, CompiledGraph } from "../../graph/compiled.js";
 import type { AttemptRegistry, AttemptSelector, RuntimeNodeAttempt } from "../attempts.js";
@@ -265,7 +266,11 @@ async function materializeInputItem(
       throw new Error(`Unknown repo alias "${repo_alias}" while resolving input.`);
     }
 
-    const sourcePath = resolve(repoRoot, repo_relative_path);
+    const sourcePath = resolveSubpathWithinRoot(
+      repoRoot,
+      repo_relative_path,
+      `Input path "${input.path}"`
+    );
     const contents = await readFile(sourcePath);
     const destinationPath = join(materialsRoot, basename(repo_relative_path));
     const materialized = await materializeBytes(contents, destinationPath, maxBytesPerItem);

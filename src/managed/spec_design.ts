@@ -131,6 +131,15 @@ function buildImplementationReadinessLines(config: SpecDesignWorkflowConfig): st
   ];
 }
 
+function buildBlockerClosureLines(): string[] {
+  return [
+    "When blocker feedback exists, treat it as a closure checklist rather than general inspiration.",
+    "For every carried blocker, either resolve it with an explicit repo-fit decision or move it into risks/open_questions with a concrete defer rationale.",
+    "When a blocker names specific routes, hooks, components, tests, or live entry points, add those exact surfaces to the file plan and define the replacement owner, adapter, or guard instead of saying 'update remaining consumers'.",
+    "When a blocker concerns UX or validation, specify the exact action matrix, mobile/collapse behavior, static checks, scanned paths, allowed exceptions, failure modes, and test or command ownership needed to make the plan executable."
+  ];
+}
+
 function buildClarifyPrompt(config: SpecDesignWorkflowConfig): string {
   return [
     "Clarify the problem and rewrite it into a concrete design brief.",
@@ -266,6 +275,8 @@ function buildRevisionPrompt(config: SpecDesignWorkflowConfig): string {
     `Goal: ${config.goal}`,
     "",
     "Use the initial draft, the repository findings, the synthesized constraints, and the tradeoff recommendation.",
+    "If prior iteration feedback is present in context, treat the merged critique and the failed quality-check result as mandatory revision input.",
+    ...buildBlockerClosureLines(),
     ...buildImplementationReadinessLines(config),
     "Write a concrete revised spec that resolves ambiguity instead of deferring key policy, migration, boundary, or validation decisions.",
     "Write `spec-revision.md` to the output directory."
@@ -282,6 +293,9 @@ function buildCritiquePrompt(role: string, config: SpecDesignWorkflowConfig): st
     ...formatList("Decision drivers", config.decision_drivers),
     "",
     "Focus on concrete weaknesses, missing details, and reasons the design may fail in this repository.",
+    "Only raise blockers that remain unresolved in the current draft.",
+    "Each blocker must name the missing decision, the affected repo surface, and the exact revision, file-plan addition, or validation contract needed to close it.",
+    "Prefer exact file paths, hooks, route names, and test commands over generic concerns.",
     `Write \`critique-${role}.md\` to the output directory.`
   ].join("\n");
 }
@@ -294,6 +308,7 @@ function buildMergeCritiquesPrompt(config: SpecDesignWorkflowConfig): string {
     `Goal: ${config.goal}`,
     "",
     "De-duplicate overlap, preserve high-signal criticism, and clearly separate blockers from improvements.",
+    "For each blocker, include the missing decision, why it blocks execution, the exact repo surfaces, the spec change required, the file-plan entries required, and the validation that must catch regressions.",
     "Write `critique-merged.md` to the output directory."
   ].join("\n");
 }
@@ -305,8 +320,10 @@ function buildQualityCheckPrompt(config: SpecDesignWorkflowConfig): string {
     `Problem: ${config.problem}`,
     `Goal: ${config.goal}`,
     "",
-    "Use the revised spec, merged critiques, and tradeoff recommendation in context.",
-    "Judge it as the direct input contract for execute_spec: an implementer should not need to invent missing migration, operational, validation, or boundary decisions."
+    "Use the revised spec, merged critiques, tradeoff recommendation, and current-state notes in context.",
+    "Judge it as the direct input contract for execute_spec: an implementer should not need to invent missing migration, operational, validation, repo-fit ownership, or boundary decisions.",
+    "Fail only on unresolved blockers that still require implementers to infer repo surfaces, file ownership, actionability rules, rollout semantics, or validation mechanics.",
+    "For each issue, identify the missing decision, the affected repo surface, and the absent file-plan or validation detail."
   ].join("\n");
 }
 
@@ -318,6 +335,7 @@ function buildQualityCheckRubric(config: SpecDesignWorkflowConfig): string {
 
   return [
     sectionRequirement,
+    "Pass only if carried blockers are closed by explicit repo-fit ownership, concrete file coverage, and named validation or test ownership.",
     "Fail if the spec is missing implementation consequences, ignores repository conventions, lacks acceptance criteria, leaves migration or compatibility unresolved, omits concrete file or ownership boundaries, or lacks explicit risks and open questions when those affect execution."
   ].join(" ");
 }
@@ -390,7 +408,6 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
       id: clarifyId,
       label: "Clarify Design Problem",
       ...shared,
-      ...(config.inputs ? { inputs: config.inputs } : {}),
       ...(config.context_from ? { context_from: config.context_from } : {}),
       outputs: [
         {
@@ -407,6 +424,7 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
       id: inspectId,
       label: "Inspect Repository",
       ...shared,
+      ...(config.inputs ? { inputs: config.inputs } : {}),
       context_from: [
         {
           node: clarifyId,
@@ -671,6 +689,16 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
         output: "spec_revision"
       },
       {
+        node: inspectId,
+        include: "output",
+        output: "current_state"
+      },
+      {
+        node: synthesizeId,
+        include: "output",
+        output: "constraints_brief"
+      },
+      {
         node: compareId,
         include: "output",
         output: "tradeoff_matrix"
@@ -710,6 +738,20 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
             node: compareId,
             include: "output",
             output: "tradeoff_matrix"
+          },
+          {
+            node: mergeId,
+            include: "output",
+            output: "critique_merged",
+            iteration: "latest_failed",
+            optional: true
+          },
+          {
+            node: qualityCheckId,
+            include: "output",
+            output: "quality_check",
+            iteration: "latest_failed",
+            optional: true
           }
         ],
         outputs: [
@@ -767,6 +809,16 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
             node: mergeId,
             include: "output",
             output: "critique_merged"
+          },
+          {
+            node: inspectId,
+            include: "output",
+            output: "current_state"
+          },
+          {
+            node: synthesizeId,
+            include: "output",
+            output: "constraints_brief"
           },
           {
             node: compareId,

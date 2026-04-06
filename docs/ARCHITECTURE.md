@@ -11,7 +11,7 @@ Agentflow has six runtime subsystems and one deferred control-plane stub.
 3. `runtime/context`: resolve node inputs and prior artifacts into a bounded context packet
 4. `runtime/harness`: execute `agent` nodes and AI `check` nodes through CLI-backed harness adapters
 5. `runtime/checks`: execute deterministic `check` nodes and normalize AI evaluator results
-6. `artifacts`: persist run files, append events, and project a stable read model for the UI
+6. `artifacts`: persist run files, append events, and project a stable read model for inspection tooling
 
 ### Deferred stub
 
@@ -66,13 +66,12 @@ The authored graph is the operator-facing source document. It is nested, readabl
 - `repos.<alias>.path` is resolved relative to the authored graph file location.
 - `defaults.launch_profile` selects the run launch profile when the operator does not specify one.
 - `defaults.workspace_backend` selects the run workspace backend when the operator does not specify one.
-- The run root is not authored inside the graph. It is launch-time configuration owned by the CLI or web server and resolved from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
+- The run root is not authored inside the graph. It is launch-time configuration owned by the CLI and resolved from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
 
 ### Multi-repo ownership
 
 - The runs root defaults to `<launch-cwd>/.agentflow/runs/`; each run root lives under `<runs-root>/<run_id>/`.
-- The CLI and web monitor use the same rule: prefer an absolute `AGENTFLOW_RUNS_ROOT`, otherwise fall back to the command launch directory.
-- For `npm run start --workspace web-app` and `npm run dev --workspace web-app`, the packaged web server preserves the operator shell's launch directory via `INIT_CWD` so the default fallback matches CLI launches from the same shell location.
+- CLI commands use the same rule: prefer an absolute `AGENTFLOW_RUNS_ROOT`, otherwise fall back to the command launch directory.
 - The run root is the only owner of run artifacts, events, and projected state.
 - Each repo alias resolves to both a source path and an effective workspace path for the current run.
 - Cross-repo reads are allowed only through explicit repo-qualified `inputs` or run-artifact references in `context_from`.
@@ -147,6 +146,8 @@ Optional node-specific fields:
 - `args`
 - `cwd`
 - `env`
+
+`cwd`, when present, resolves relative to the node workspace and must stay within that workspace root.
 
 `exec` does not support `allow_failure` in this release. Soft-failure behavior must be expressed with explicit `check` or `repeat` structure.
 
@@ -269,6 +270,7 @@ Rules:
 
 - Unqualified file and glob paths resolve against the node repo.
 - Repo-qualified paths use `<repo_alias>:<relative_path>`.
+- File and glob paths must stay within the selected repo root.
 - `glob.max_files` may not exceed the effective `input_rules.max_files`.
 - `text.name` is required and stable inside the materialized context packet.
 
@@ -398,8 +400,8 @@ Launch resolution happens before node policy resolution.
 
 | Setting | Resolution order |
 | --- | --- |
-| `launch_profile` | explicit CLI or UI selection -> graph `defaults.launch_profile` -> `"default"` if present -> validation error |
-| `workspace_backend` | explicit CLI or UI selection -> graph `defaults.workspace_backend` -> runtime built-in `worktree` |
+| `launch_profile` | explicit CLI selection -> graph `defaults.launch_profile` -> `"default"` if present -> validation error |
+| `workspace_backend` | explicit CLI selection -> graph `defaults.workspace_backend` -> runtime built-in `worktree` |
 
 `workspace_backend` is run-scoped. The compiler writes the same resolved backend to every node manifest entry.
 
@@ -556,13 +558,13 @@ Repeat scopes additionally record:
 
 ## Runtime Core
 
-The runtime core is a scheduler plus a state store. It knows nothing about React components or harness-specific CLI flags.
+The runtime core is a scheduler plus a state store. It knows nothing about presentation layers or harness-specific CLI flags.
 
 Implementation notes for this release:
 
 - `runtime/session` owns the run-level snapshot, manifest, node-status map, and repeat-scope state.
 - `runtime/attempts` owns execution identity and per-node attempt history separately from authored graph identity.
-- `runtime/events` owns the append-only event envelope shared by runtime, artifacts, and the monitor.
+- `runtime/events` owns the append-only event envelope shared by runtime, artifacts, and inspection tooling.
 
 ### Scheduler responsibilities
 
@@ -582,7 +584,7 @@ Every executable node terminates with exactly one runtime outcome:
 - `passed`
 - `failed`
 
-UI-only non-running states:
+Non-running states visible in projected state:
 
 - `pending`
 - `ready`
@@ -608,7 +610,7 @@ Rules:
   - currently running executions become `canceled`
   - not-yet-started nodes become `skipped`
   - the run status becomes `canceled`
-  - in this release, cancellation enters through the CLI launch process or a caller-provided `AbortSignal`; the web monitor only reflects the durable canceled state
+  - in this release, cancellation enters through the CLI launch process or a caller-provided `AbortSignal`; durable artifacts capture the canceled state
 
 ### State projection rules
 
@@ -619,7 +621,7 @@ The state store must be able to answer:
 - active executions
 - attempt history per compiled node
 - active repeat iteration per repeat scope
-- aggregate counts used by CLI summaries and the web monitor
+- aggregate counts used by CLI summaries and projected inspection output
 
 ## Context Boundary
 
@@ -851,7 +853,7 @@ Run artifacts live under the run root:
 
 ## Event Model
 
-Events are the contract between runtime, artifacts, and the monitor.
+Events are the contract between runtime, artifacts, and inspection tooling.
 
 ### Event envelope
 
@@ -887,11 +889,11 @@ Every event record contains:
 | `run.canceled` | `reason` |
 | `run.completed` | `outcome`, `duration_ms` |
 
-Log lines are not required to be replayable through the event stream in this release. The monitor reads logs from `stdout.log` and `stderr.log`.
+Log lines are not required to be replayable through the event stream in this release. Inspection tooling reads logs from `stdout.log` and `stderr.log`.
 
-## UI Read Model Boundary
+## Artifact Read Model Boundary
 
-The web server must not parse raw run directories ad hoc on every request. `artifacts/projection` owns the derived read model.
+Inspection tooling must not parse raw run directories ad hoc. `artifacts/projection` owns the derived read model.
 
 ### Read-model contract
 
@@ -914,18 +916,16 @@ The projected state must answer:
 - active executions
 - latest execution summary per compiled node
 - repeat scope iteration state
-- artifact index for hashed node and execution directories
+- artifact index with clear node and execution directory records plus reverse hashed-directory lookup
 
-### Live-update contract
+### Incremental-read contract
 
 The release backend supports:
 
 - snapshot reads from `state.json`
 - incremental event reads with `after_seq`
-- optional SSE transport for the same append-only event stream
-- polling fallback when SSE is unavailable
 
-The UI boots from `state.json`, then tails events after `snapshot_seq`. If live transport is unavailable, the UI labels the monitor as non-live and continues with polling.
+Inspection tooling should start from `state.json`, then read new events after `snapshot_seq`.
 
 ## Minimal Controller Stub
 

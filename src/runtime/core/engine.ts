@@ -1,5 +1,6 @@
 import { basename, join, resolve } from "node:path";
 
+import { resolveSubpathWithinRoot } from "../../path_rules.js";
 import type { AuthoredGraphDocument } from "../../graph/authored.js";
 import type {
   CompiledAgentNode,
@@ -96,6 +97,7 @@ export interface RunCompiledGraphOptions {
   run_root: string;
   compiled_graph: CompiledGraph;
   repo_sources: Record<string, string>;
+  graph_path?: string;
   authored_graph?: AuthoredGraphDocument;
   compile_diagnostics?: GraphDiagnostic[];
   executors?: RuntimeExecutorRegistry;
@@ -368,6 +370,7 @@ function buildRunRecord(session: RuntimeSession, runOwner: RunOwnerRecord) {
     graph_id: session.graph.graph_id,
     launch_profile: session.graph.launch.launch_profile,
     workspace_backend: session.graph.launch.workspace_backend,
+    ...(session.graph_path ? { graph_path: session.graph_path } : {}),
     status: session.status,
     started_at: session.started_at,
     ...(session.ended_at ? { ended_at: session.ended_at } : {}),
@@ -612,13 +615,32 @@ function canDispatchReadyNode(
   });
 }
 
+function resolveNodeWorkingDirectory(
+  workspacePath: string,
+  cwd: string | undefined
+): string {
+  if (!cwd) {
+    return workspacePath;
+  }
+
+  if (cwd.includes(":")) {
+    throw new Error(`cwd "${cwd}" must be a relative path that stays within its repo or workspace root.`);
+  }
+
+  return resolveSubpathWithinRoot(
+    workspacePath,
+    cwd,
+    `cwd "${cwd}"`
+  );
+}
+
 async function defaultExecExecutor(
   context: RuntimeNodeExecutorContext<CompiledExecNode>
 ): Promise<RuntimeNodeExecutionResult> {
   const processResult = await runLocalProcess({
     command: context.node.command,
     args: context.node.args,
-    cwd: context.node.cwd ? resolve(context.workspace_path, context.node.cwd) : context.workspace_path,
+    cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
     env: context.node.env,
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal
@@ -650,7 +672,7 @@ async function defaultCheckExecutor(
     const result = await runDeterministicCheck({
       command: context.node.command ?? "",
       args: context.node.args ?? [],
-      cwd: context.node.cwd ? resolve(context.workspace_path, context.node.cwd) : context.workspace_path,
+      cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
       env: undefined,
       timeout_sec: context.node.effective_policy.timeout_sec,
       pass_if: context.node.pass_if,
@@ -1505,6 +1527,7 @@ function buildInitializeArtifactsOptions(
   return {
     run_id: session.run_id,
     graph: options.compiled_graph,
+    ...(options.graph_path ? { graph_path: options.graph_path } : {}),
     ...(options.authored_graph ? { authored_graph: options.authored_graph } : {}),
     manifest: session.manifest,
     compile_diagnostics: options.compile_diagnostics ?? [],
@@ -1534,7 +1557,8 @@ export async function runCompiledGraph(
     options.run_root,
     options.compiled_graph,
     createAttemptRegistry(),
-    predictedBindings
+    predictedBindings,
+    options.graph_path
   );
   const events: RuntimeEventEnvelope[] = [];
   const topology = buildSchedulerTopology(options.compiled_graph);

@@ -10,7 +10,6 @@ describe("validate:smoke contract", () => {
       "docs/DEFERRED.md",
       "docs/ARCHITECTURE.md",
       "docs/OPERATIONS.md",
-      "docs/UI_MODEL.md",
       "docs/MANAGED_WORKFLOWS.md",
       "docs/SPEC_DESIGN_WORKFLOW.md",
       "docs/EXECUTE_SPEC_WORKFLOW.md",
@@ -25,13 +24,13 @@ describe("validate:smoke contract", () => {
       builtCliRelativePath: "dist/cli/index.js",
       fixtureGraphRelativePath: "tests/graph/fixtures/repeat.graph.json",
       fixtureGraphId: "repeat-graph",
-      fixtureCommands: ["validate", "compile", "ui"],
+      fixtureCommands: ["validate", "compile"],
       runHarnessAdapters: ["codex-cli", "cursor-cli"],
       runWorkspaceBackends: ["inplace", "worktree"]
     });
     expect(scriptModule.alphaResidualRisks).toEqual([
       "measured coverage floors are not part of validate:smoke",
-      "browser behavior is not part of validate:smoke",
+      "manual run-artifact inspection is not part of validate:smoke",
       "real Codex or Cursor installs are not exercised by validate:smoke",
       "abrupt packaged-CLI death or host restart recovery beyond the deterministic suite remains unproven"
     ]);

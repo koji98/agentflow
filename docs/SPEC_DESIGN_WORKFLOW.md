@@ -88,8 +88,8 @@ Optional workflow fields:
     "operator ergonomics"
   ],
   "scope": {
-    "paths": ["src/**", "docs/**", "web-app/**"],
-    "areas": ["graph", "runtime", "ui"]
+    "paths": ["src/**", "docs/**", "tests/**", "scripts/**"],
+    "areas": ["graph", "runtime", "artifacts"]
   },
   "research_policy": {
     "repo_first": true,

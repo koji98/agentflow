@@ -36,6 +36,12 @@ describe("spec design managed workflow", () => {
             goal: "Design a real managed workflow model.",
             constraints: ["Keep primitive nodes stable."],
             decision_drivers: ["clarity", "reliability"],
+            inputs: [
+              {
+                kind: "file",
+                path: "src/**"
+              }
+            ],
             scope: {
               paths: ["src/**", "docs/**"],
               areas: ["graph", "runtime"]
@@ -122,20 +128,89 @@ describe("spec design managed workflow", () => {
     }
 
     const reviseNode = revisionLoop.body.steps[0];
+    const critiquePanel = revisionLoop.body.steps[1];
     const qualityCheck = revisionLoop.body.steps.at(-1);
+    const inspectNode = workflow.steps[1];
 
     if (!reviseNode || reviseNode.type !== "agent") {
       throw new Error("Expected revise step to be an agent.");
+    }
+
+    if (!critiquePanel || critiquePanel.type !== "parallel") {
+      throw new Error("Expected critique panel to be parallel.");
     }
 
     if (!qualityCheck || qualityCheck.type !== "check") {
       throw new Error("Expected quality check to be a check node.");
     }
 
+    if (!inspectNode || inspectNode.type !== "agent") {
+      throw new Error("Expected inspect repo step to be an agent.");
+    }
+
     expect(reviseNode.prompt).toContain("implementation-ready design spec draft");
+    expect(reviseNode.prompt).toContain("If prior iteration feedback is present in context");
+    expect(reviseNode.prompt).toContain("closure checklist rather than general inspiration");
     expect(reviseNode.prompt).toContain("Do not leave repo-specific UI boundaries");
+    expect(workflow.steps[0]).not.toHaveProperty("inputs");
+    expect(inspectNode).toHaveProperty("inputs");
+    expect(reviseNode.context_from).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          node: "managed_nodes_spec__managed__spec_design__merge_critiques",
+          include: "output",
+          output: "critique_merged",
+          iteration: "latest_failed",
+          optional: true
+        }),
+        expect.objectContaining({
+          node: "managed_nodes_spec__managed__spec_design__quality_check",
+          include: "output",
+          output: "quality_check",
+          iteration: "latest_failed",
+          optional: true
+        })
+      ])
+    );
+    const critiqueNode = critiquePanel.steps[0];
+
+    if (!critiqueNode || critiqueNode.type !== "agent") {
+      throw new Error("Expected critique panel entries to be agents.");
+    }
+
+    expect(critiqueNode.prompt).toContain("Only raise blockers that remain unresolved");
+    expect(critiqueNode.context_from).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          node: "managed_nodes_spec__managed__spec_design__inspect_repo",
+          include: "output",
+          output: "current_state"
+        }),
+        expect.objectContaining({
+          node: "managed_nodes_spec__managed__spec_design__synthesize_constraints",
+          include: "output",
+          output: "constraints_brief"
+        })
+      ])
+    );
     expect(qualityCheck.prompt).toContain("direct input contract for execute_spec");
+    expect(qualityCheck.prompt).toContain("current-state notes in context");
+    expect(qualityCheck.context_from).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          node: "managed_nodes_spec__managed__spec_design__inspect_repo",
+          include: "output",
+          output: "current_state"
+        }),
+        expect.objectContaining({
+          node: "managed_nodes_spec__managed__spec_design__synthesize_constraints",
+          include: "output",
+          output: "constraints_brief"
+        })
+      ])
+    );
     expect(qualityCheck.rubric).toContain("migration or compatibility unresolved");
+    expect(qualityCheck.rubric).toContain("carried blockers are closed");
     expect(workflow.steps.at(-1)).toEqual(
       expect.objectContaining({
         id: "managed_nodes_spec",

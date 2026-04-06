@@ -1,12 +1,9 @@
-import { stat } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 
 import {
   createRunRootPath,
   resolveRunArtifactPaths
 } from "../../artifacts/paths.js";
-import { createMonitorHandoff } from "../monitor_handoff.js";
-import type { AuthoredGraphDocument } from "../../graph/authored.js";
 import { compileAuthoredGraph } from "../../graph/compile.js";
 import { resolveLaunchConfig } from "../../graph/profiles.js";
 import { workspaceBackends } from "../../graph/schema.js";
@@ -17,62 +14,13 @@ import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import {
   createGraphCliInvocation,
   createGraphPathResolution,
+  createResumeCliInvocation,
   createRunsRootDetails,
   renderCommandUsageError,
   runCancellationText
 } from "../command_support.js";
 import { createRuntimeProgressReporter } from "../progress.js";
-
-async function resolveRepoSources(
-  absoluteGraphPath: string,
-  document: AuthoredGraphDocument
-): Promise<{
-  repo_sources?: Record<string, string>;
-  diagnostics: Array<{
-    path: string;
-    message: string;
-  }>;
-}> {
-  const graphDirectory = dirname(absoluteGraphPath);
-  const repo_sources: Record<string, string> = {};
-  const diagnostics: Array<{
-    path: string;
-    message: string;
-  }> = [];
-
-  for (const [repoAlias, repoDefinition] of Object.entries(document.repos)) {
-    const absoluteRepoPath = resolve(graphDirectory, repoDefinition.path);
-
-    try {
-      const entry = await stat(absoluteRepoPath);
-
-      if (!entry.isDirectory()) {
-        diagnostics.push({
-          path: `$.repos.${repoAlias}.path`,
-          message: `Resolved repo path is not a directory: ${absoluteRepoPath}`
-        });
-        continue;
-      }
-
-      repo_sources[repoAlias] = absoluteRepoPath;
-    } catch (error) {
-      diagnostics.push({
-        path: `$.repos.${repoAlias}.path`,
-        message:
-          error instanceof Error
-            ? `Repo path could not be resolved: ${absoluteRepoPath} (${error.message})`
-            : `Repo path could not be resolved: ${absoluteRepoPath}`
-      });
-    }
-  }
-
-  return diagnostics.length > 0
-    ? { diagnostics }
-    : {
-        repo_sources,
-        diagnostics
-      };
-}
+import { resolveRepoSources } from "../repo_sources.js";
 
 export const runCommand = {
   name: "run",
@@ -238,6 +186,7 @@ export const runCommand = {
       }),
       compiled_graph: compilation.compiled_graph!,
       repo_sources: repoResolution.repo_sources,
+      graph_path: loaded.absolute_path,
       authored_graph: loaded.document,
       compile_diagnostics: compilation.diagnostics,
       harnesses: {
@@ -249,16 +198,12 @@ export const runCommand = {
     const artifactPaths = resolveRunArtifactPaths(run.run_root);
     const runsRoot = dirname(run.run_root);
     const runsRootDetails = createRunsRootDetails(currentWorkingDirectory, process.env);
-    const monitor = createMonitorHandoff({
-      runsRoot,
-      runId: run.run_id
-    });
     const runMessage =
       run.outcome === "passed"
-        ? "Run completed and durable artifacts are ready for the graph-native monitor."
+        ? "Run completed and durable artifacts are ready."
         : run.outcome === "canceled"
-          ? "Run canceled. Durable artifacts captured the terminal Canceled state for the graph-native monitor."
-          : "Run failed. Durable artifacts captured the terminal failure state for the graph-native monitor.";
+          ? "Run canceled. Durable artifacts captured the terminal Canceled state."
+          : "Run failed. Durable artifacts captured the terminal failure state.";
 
     return {
       exitCode: run.outcome === "passed" ? 0 : 1,
@@ -294,20 +239,17 @@ export const runCommand = {
           events_file: artifactPaths.events_file,
           summary_file: artifactPaths.summary_file
         },
-        monitor,
         cancel_note: runCancellationText,
         next_steps: {
-          open_monitor: monitor.monitor_route,
-          start_monitor: monitor.start_command,
-          dev_monitor: monitor.dev_command,
           validate: createGraphCliInvocation("validate", {
             graphPath: loaded.absolute_path,
             launch
           }),
-          ui: createGraphCliInvocation("ui", {
+          rerun: createGraphCliInvocation("run", {
             graphPath: loaded.absolute_path,
             launch
-          })
+          }),
+          resume: createResumeCliInvocation(run.run_root)
         },
         latest_run_state: run.state
       }

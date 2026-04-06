@@ -1,4 +1,8 @@
-import type { CompiledGraph, CompiledRepeatScope } from "../graph/compiled.js";
+import type {
+  CompiledExecutableNode,
+  CompiledGraph,
+  CompiledRepeatScope
+} from "../graph/compiled.js";
 import type { RuntimeEventEnvelope } from "./events.js";
 import {
   createAttemptRegistry,
@@ -34,6 +38,194 @@ function buildLatestExecutionSummary(attempt: RuntimeNodeAttempt): LatestExecuti
   };
 }
 
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sortJson(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, sortJson((value as Record<string, unknown>)[key])])
+    );
+  }
+
+  return value;
+}
+
+function fingerprintCompiledNode(node: CompiledExecutableNode): string {
+  const shared = {
+    kind: node.kind,
+    repo: node.repo,
+    deps: node.deps,
+    effective_policy: node.effective_policy,
+    inputs: node.inputs,
+    context_from: node.context_from,
+    declared_outputs: node.declared_outputs,
+    ...(node.lowered_from ? { lowered_from: node.lowered_from } : {})
+  };
+
+  if (node.kind === "agent") {
+    return JSON.stringify(sortJson({
+      ...shared,
+      prompt: node.prompt
+    }));
+  }
+
+  if (node.kind === "exec") {
+    return JSON.stringify(sortJson({
+      ...shared,
+      command: node.command,
+      args: node.args,
+      ...(node.cwd ? { cwd: node.cwd } : {}),
+      ...(node.env ? { env: node.env } : {})
+    }));
+  }
+
+  return JSON.stringify(sortJson({
+    ...shared,
+    check_kind: node.check_kind,
+    ...(node.command ? { command: node.command } : {}),
+    ...(node.args ? { args: node.args } : {}),
+    ...(node.cwd ? { cwd: node.cwd } : {}),
+    ...(node.pass_if ? { pass_if: node.pass_if } : {}),
+    ...(node.prompt ? { prompt: node.prompt } : {}),
+    ...(node.rubric ? { rubric: node.rubric } : {})
+  }));
+}
+
+function fingerprintRepeatScope(scope: CompiledRepeatScope): string {
+  return JSON.stringify(sortJson({
+    authored_id: scope.authored_id,
+    kind: scope.kind,
+    parent_scope_id: scope.parent_scope_id,
+    entry_node_ids: scope.entry_node_ids,
+    exit_node_ids: scope.exit_node_ids,
+    compiled_node_ids: scope.compiled_node_ids,
+    max_attempts: scope.max_attempts,
+    until_compiled_id: scope.until_compiled_id,
+    body_entry_node_ids: scope.body_entry_node_ids,
+    body_exit_node_ids: scope.body_exit_node_ids
+  }));
+}
+
+function collectInvalidatedCompiledIds(options: {
+  prior_graph: CompiledGraph;
+  graph: CompiledGraph;
+  prior_state: RuntimeStateSnapshot;
+}): {
+  invalidated_compiled_ids: Set<string>;
+  restarted_repeat_scope_ids: Set<string>;
+} {
+  const priorNodesById = new Map(
+    options.prior_graph.nodes.map((node) => [node.compiled_id, node])
+  );
+  const priorRepeatScopesById = new Map(
+    options.prior_graph.scopes
+      .filter((scope): scope is CompiledRepeatScope => scope.kind === "repeat")
+      .map((scope) => [scope.scope_id, scope])
+  );
+  const repeatScopes = options.graph.scopes.filter(
+    (scope): scope is CompiledRepeatScope => scope.kind === "repeat"
+  );
+  const invalidated_compiled_ids = new Set<string>();
+  const restarted_repeat_scope_ids = new Set<string>();
+
+  const restartRepeatScope = (scope: CompiledRepeatScope): boolean => {
+    if (restarted_repeat_scope_ids.has(scope.scope_id)) {
+      return false;
+    }
+
+    restarted_repeat_scope_ids.add(scope.scope_id);
+
+    for (const compiledId of scope.compiled_node_ids) {
+      invalidated_compiled_ids.add(compiledId);
+    }
+
+    return true;
+  };
+
+  for (const node of options.graph.nodes) {
+    const priorNode = priorNodesById.get(node.compiled_id);
+
+    if (!priorNode || fingerprintCompiledNode(priorNode) !== fingerprintCompiledNode(node)) {
+      invalidated_compiled_ids.add(node.compiled_id);
+    }
+  }
+
+  for (const scope of repeatScopes) {
+    const priorScope = priorRepeatScopesById.get(scope.scope_id);
+    const priorStatus = options.prior_state.repeat_scopes[scope.scope_id]?.status;
+    const hasIncompletePriorNodeState = scope.compiled_node_ids.some(
+      (compiledId) => options.prior_state.node_statuses[compiledId] !== "passed"
+    );
+    const changed =
+      !priorScope ||
+      fingerprintRepeatScope(priorScope) !== fingerprintRepeatScope(scope);
+
+    if (changed || priorStatus !== "passed" || hasIncompletePriorNodeState) {
+      restartRepeatScope(scope);
+    }
+  }
+
+  const adjacency = new Map<string, string[]>();
+
+  for (const node of options.graph.nodes) {
+    adjacency.set(node.compiled_id, []);
+  }
+
+  for (const edge of options.graph.edges) {
+    if (edge.kind === "repeat-back") {
+      continue;
+    }
+
+    adjacency.get(edge.from)?.push(edge.to);
+  }
+
+  const queue = [...invalidated_compiled_ids];
+
+  while (queue.length > 0) {
+    const next = queue.shift();
+
+    if (!next) {
+      continue;
+    }
+
+    for (const downstreamId of adjacency.get(next) ?? []) {
+      if (invalidated_compiled_ids.has(downstreamId)) {
+        continue;
+      }
+
+      invalidated_compiled_ids.add(downstreamId);
+      queue.push(downstreamId);
+    }
+
+    for (const scope of repeatScopes) {
+      if (!scope.compiled_node_ids.includes(next)) {
+        continue;
+      }
+
+      if (!restartRepeatScope(scope)) {
+        continue;
+      }
+
+      for (const compiledId of scope.compiled_node_ids) {
+        if (compiledId === next) {
+          continue;
+        }
+
+        queue.push(compiledId);
+      }
+    }
+  }
+
+  return {
+    invalidated_compiled_ids,
+    restarted_repeat_scope_ids
+  };
+}
+
 function collectMaxAttemptIndexes(
   attempts: RuntimeNodeAttempt[]
 ): Map<string, number> {
@@ -51,6 +243,7 @@ function collectMaxAttemptIndexes(
 }
 
 function buildResumeAttemptRegistry(options: {
+  prior_graph: CompiledGraph;
   graph: CompiledGraph;
   prior_state: RuntimeStateSnapshot;
   attempts: RuntimeNodeAttempt[];
@@ -69,12 +262,14 @@ function buildResumeAttemptRegistry(options: {
     attempts_by_compiled_id.set(attempt.compiled_id, current);
   }
 
-  const restarted_repeat_scope_ids = new Set(
-    options.graph.scopes
-      .filter((scope): scope is CompiledRepeatScope => scope.kind === "repeat")
-      .map((scope) => scope.scope_id)
-      .filter((scopeId) => options.prior_state.repeat_scopes[scopeId]?.status !== "passed")
-  );
+  const {
+    invalidated_compiled_ids,
+    restarted_repeat_scope_ids
+  } = collectInvalidatedCompiledIds({
+    prior_graph: options.prior_graph,
+    graph: options.graph,
+    prior_state: options.prior_state
+  });
 
   const preserved_compiled_ids = new Set<string>();
 
@@ -87,6 +282,10 @@ function buildResumeAttemptRegistry(options: {
     }
 
     if (options.prior_state.node_statuses[node.compiled_id] !== "passed") {
+      continue;
+    }
+
+    if (invalidated_compiled_ids.has(node.compiled_id)) {
       continue;
     }
 
@@ -109,6 +308,8 @@ function buildResumeAttemptRegistry(options: {
 
 export function createResumedRuntimeSession(options: {
   run_root: string;
+  graph_path?: string;
+  prior_graph: CompiledGraph;
   graph: CompiledGraph;
   manifest: ExecutionManifest;
   prior_state: RuntimeStateSnapshot;
@@ -125,6 +326,7 @@ export function createResumedRuntimeSession(options: {
     preserved_compiled_ids,
     restarted_repeat_scope_ids
   } = buildResumeAttemptRegistry({
+    prior_graph: options.prior_graph,
     graph: options.graph,
     prior_state: options.prior_state,
     attempts: options.attempts
@@ -135,7 +337,8 @@ export function createResumedRuntimeSession(options: {
     options.run_root,
     options.graph,
     registry,
-    options.manifest.repo_workspaces
+    options.manifest.repo_workspaces,
+    options.graph_path
   );
 
   session.manifest = options.manifest;

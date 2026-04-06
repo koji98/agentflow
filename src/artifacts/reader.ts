@@ -15,6 +15,7 @@ export interface RunRecord extends RunOwnerRecord {
   graph_id: string;
   launch_profile: string;
   workspace_backend: ExecutionManifest["workspace_backend"];
+  graph_path?: string;
   status: string;
   started_at: string;
   ended_at?: string;

@@ -10,12 +10,11 @@ const commandTimeoutMs = 15 * 60 * 1000;
 
 export const confidenceCommandChecks = [
   { name: "smoke gate", script: "validate:smoke" },
-  { name: "coverage policy", script: "test:coverage" },
-  { name: "browser smoke", script: "test:browser" }
+  { name: "coverage policy", script: "test:coverage" }
 ];
 
 export const confidenceResidualRisks = [
-  "browser proof remains limited to a completed Chromium smoke rather than live active-run updates or multi-browser behavior",
+  "operator artifact inspection remains unproven beyond deterministic file and JSON assertions",
   "real harness behavior stays unproven unless validate:real-harness is also run",
   "abrupt packaged-CLI death and reopen behavior remains unproven end to end",
   "machine-specific git, filesystem, auth, and repo-topology variation remains only partially represented"
@@ -168,13 +167,6 @@ async function main() {
       command: `npm run ${confidenceCommandChecks[1].script} -- --json`,
       status: "skipped",
       reason: "validate:smoke failed, so the coverage policy did not run."
-    });
-    checks.push({
-      name: confidenceCommandChecks[2].name,
-      script: confidenceCommandChecks[2].script,
-      command: `npm run ${confidenceCommandChecks[2].script} -- --json`,
-      status: "skipped",
-      reason: "validate:smoke failed, so the browser smoke checks did not run."
     });
   } else {
     for (const check of confidenceCommandChecks.slice(1)) {

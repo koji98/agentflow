@@ -11,9 +11,9 @@ export const graphPathRuleText =
 export const repoPathRuleText =
   "Repo paths in $.repos.*.path resolve relative to the graph file directory.";
 export const runsRootContractText =
-  `CLI and web monitor runs roots resolve from an absolute ${runsRootEnvironmentVariable} when set; otherwise they default to <launch-cwd>/.agentflow/runs.`;
+  `CLI commands resolve runs roots from an absolute ${runsRootEnvironmentVariable} when set; otherwise they default to <launch-cwd>/.agentflow/runs.`;
 export const runCancellationText =
-  "Press Ctrl-C in the terminal running agentflow run to cancel. The runtime waits for cleanup and the monitor reflects the durable Canceled state from artifacts.";
+  "Press Ctrl-C in the terminal running agentflow run to cancel. The runtime waits for cleanup and durable artifacts capture the terminal Canceled state.";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -72,7 +72,7 @@ export function createRunsRootDetails(
 }
 
 export function createGraphCliInvocation(
-  commandName: "validate" | "compile" | "run" | "ui",
+  commandName: "validate" | "compile" | "run",
   options: {
     graphPath: string;
     launch?: LaunchResolution;
@@ -99,4 +99,8 @@ export function createGraphCliInvocation(
   }
 
   return args.join(" ");
+}
+
+export function createResumeCliInvocation(runRoot: string): string {
+  return ["agentflow", "resume", "--run-root", shellQuote(runRoot)].join(" ");
 }

@@ -181,8 +181,8 @@ Optional workflow fields:
     "node": "managed_nodes_spec"
   },
   "scope": {
-    "paths": ["src/**", "docs/**", "tests/**", "web-app/**"],
-    "areas": ["graph", "runtime", "ui"]
+    "paths": ["src/**", "docs/**", "tests/**", "scripts/**"],
+    "areas": ["graph", "runtime", "artifacts"]
   },
   "execution_policy": {
     "max_repair_rounds": 2

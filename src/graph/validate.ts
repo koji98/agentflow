@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { isRelativeSubpath } from "../path_rules.js";
 import type {
   AuthoredGraphDocument,
   AuthoredGraphNode,
@@ -90,6 +91,11 @@ function readQualifiedRepoAlias(pathValue: string): string | undefined {
   return pathValue.slice(0, separatorIndex);
 }
 
+function readQualifiedRepoPath(pathValue: string): string {
+  const separatorIndex = pathValue.indexOf(":");
+  return separatorIndex <= 0 ? pathValue : pathValue.slice(separatorIndex + 1);
+}
+
 function validateInputPath(
   input: InputItem,
   path: string,
@@ -105,6 +111,30 @@ function validateInputPath(
     diagnostics.push({
       path,
       message: `Unknown repo alias "${repoAlias}" in input path "${input.path}".`
+    });
+  }
+
+  if (!isRelativeSubpath(readQualifiedRepoPath(input.path))) {
+    diagnostics.push({
+      path,
+      message: `Input path "${input.path}" must stay within the selected repo root.`
+    });
+  }
+}
+
+function validateNodeCwd(
+  cwd: string | undefined,
+  path: string,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  if (cwd === undefined) {
+    return;
+  }
+
+  if (cwd.includes(":") || !isRelativeSubpath(cwd)) {
+    diagnostics.push({
+      path,
+      message: `cwd "${cwd}" must stay within the node workspace root.`
     });
   }
 }
@@ -198,6 +228,10 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
       (node.inputs ?? []).forEach((input, index) => {
         validateInputPath(input, `${metadata.path}.inputs[${index}].path`, repoAliases, diagnostics);
       });
+
+      if (node.type === "exec" || (node.type === "check" && node.check_kind === "deterministic")) {
+        validateNodeCwd(node.cwd, `${metadata.path}.cwd`, diagnostics);
+      }
 
       const declaredOutputs = new Set<string>();
       (node.outputs ?? []).forEach((output, index) => {

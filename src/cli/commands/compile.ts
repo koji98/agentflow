@@ -20,7 +20,7 @@ export const compileCommand = {
   optionNames: ["graph", "profile", "workspace-backend", "help"] as const,
   helpNotes: [
     "--graph resolves from the launch shell current working directory before the compiler resolves repo paths from the graph file directory.",
-    "Use ui --graph to inspect the same compiled graph in the launchpad, or run when you want durable artifacts."
+    "Use run when you want durable artifacts written for the same resolved launch settings."
   ] as const,
   async run(options: Record<string, string | boolean | undefined>, currentWorkingDirectory: string) {
     const graphPath = typeof options.graph === "string" ? options.graph : undefined;
@@ -135,10 +135,6 @@ export const compileCommand = {
             launch
           }),
           run: createGraphCliInvocation("run", {
-            graphPath: loaded.absolute_path,
-            launch
-          }),
-          ui: createGraphCliInvocation("ui", {
             graphPath: loaded.absolute_path,
             launch
           }),

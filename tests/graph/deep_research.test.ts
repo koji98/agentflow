@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
+import type { AgentNode, CheckNode } from "../../src/graph/authored.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 
@@ -262,6 +263,98 @@ describe("deep research managed workflow", () => {
 
     expect(workflow.steps.map((step) => step.id)).not.toContain(
       "market_scan__managed__deep_research__final_critique"
+    );
+  });
+
+  it("grounds final synthesis and critique in balanced upstream coverage", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "deep-research-balanced-coverage",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          sandbox: "read-only"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "deep_research",
+            id: "market_scan",
+            question: "How should Agentflow design deep research?",
+            objective: "Produce a design recommendation for the first managed workflow.",
+            orchestration: {
+              track_count: 4,
+              max_parallel_tracks: 2,
+              summary_fan_in: 2,
+              final_critique: true
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+
+    const root = normalized.document?.graph;
+
+    if (!root || root.type !== "sequence") {
+      throw new Error("Expected normalized graph root to be a sequence.");
+    }
+
+    const workflow = root.steps[0];
+
+    if (!workflow || workflow.type !== "sequence") {
+      throw new Error("Expected deep_research to lower into a sequence workflow.");
+    }
+
+    const finalResearchNode = workflow.steps.find(
+      (step): step is AgentNode => step.type === "agent" && step.id === "market_scan"
+    );
+    const critiqueNode = workflow.steps.find(
+      (step): step is CheckNode =>
+        step.type === "check" && step.id === "market_scan__managed__deep_research__final_critique"
+    );
+
+    expect(finalResearchNode?.prompt).toContain("coverage checklist");
+    expect(finalResearchNode?.prompt).toContain("Every high-signal issue from the upstream research");
+    expect(finalResearchNode?.prompt).toContain("Preserve contradictions and unresolved questions");
+    expect(critiqueNode?.prompt).toContain("upstream track briefs, contradiction scan, and reduced summaries");
+    expect(critiqueNode?.rubric).toContain("high-signal issue clusters from the upstream research are dropped");
+    expect(critiqueNode?.context_from).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          node: "market_scan",
+          include: "output",
+          output: "research_report"
+        }),
+        expect.objectContaining({
+          node: "market_scan__managed__deep_research__generate_tracks",
+          include: "output",
+          output: "track_briefs"
+        }),
+        expect.objectContaining({
+          node: "market_scan__managed__deep_research__contradiction_scan",
+          include: "output",
+          output: "contradictions",
+          optional: true
+        }),
+        expect.objectContaining({
+          node: "market_scan__managed__deep_research__reduce_r2_g1",
+          include: "output",
+          output: "reduce_summary_r2_g1"
+        })
+      ])
     );
   });
 });

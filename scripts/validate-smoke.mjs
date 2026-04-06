@@ -13,7 +13,7 @@ const commandTimeoutMs = 10 * 60 * 1000;
 const builtCliRelativePath = "dist/cli/index.js";
 const fixtureGraphRelativePath = "tests/graph/fixtures/repeat.graph.json";
 const fixtureGraphId = "repeat-graph";
-const builtCliFixtureCommands = ["validate", "compile", "ui"];
+const builtCliFixtureCommands = ["validate", "compile"];
 const builtCliRunHarnessAdapters = ["codex-cli", "cursor-cli"];
 const builtCliRunWorkspaceBackends = ["inplace", "worktree"];
 
@@ -23,7 +23,6 @@ export const canonicalDocs = [
   "docs/DEFERRED.md",
   "docs/ARCHITECTURE.md",
   "docs/OPERATIONS.md",
-  "docs/UI_MODEL.md",
   "docs/MANAGED_WORKFLOWS.md",
   "docs/SPEC_DESIGN_WORKFLOW.md",
   "docs/EXECUTE_SPEC_WORKFLOW.md",
@@ -47,7 +46,7 @@ export const builtCliSmokeContract = {
 
 export const alphaResidualRisks = [
   "measured coverage floors are not part of validate:smoke",
-  "browser behavior is not part of validate:smoke",
+  "manual run-artifact inspection is not part of validate:smoke",
   "real Codex or Cursor installs are not exercised by validate:smoke",
   "abrupt packaged-CLI death or host restart recovery beyond the deterministic suite remains unproven"
 ];
@@ -431,42 +430,6 @@ async function checkBuiltCliSmoke() {
     }
   }
 
-  const uiResult = runCommand(
-    process.execPath,
-    [builtCliPath, "ui", "--graph", fixtureGraphRelativePath],
-    "built CLI ui"
-  );
-
-  if (!uiResult.passed) {
-    smokeFailures.push(uiResult.reason);
-  } else {
-    try {
-      const payload = expectRecord(parseJsonOutput("built CLI ui", uiResult.stdout), "ui payload");
-
-      if (payload.command !== "ui") {
-        throw new Error("ui payload.command must equal \"ui\".");
-      }
-
-      if (payload.status !== "ready") {
-        throw new Error("ui payload.status must equal \"ready\".");
-      }
-
-      const inspectUrl = expectString(payload.inspect_url, "ui payload.inspect_url");
-
-      if (!inspectUrl.includes(encodeURIComponent(fixtureGraphPath)) || !inspectUrl.includes("compiled=1")) {
-        throw new Error("ui payload.inspect_url must reference the compiled fixture inspection route.");
-      }
-
-      const preload = expectRecord(payload.preload, "ui payload.preload");
-
-      if (expectNumber(preload.compiled_node_count, "ui payload.preload.compiled_node_count") < 1) {
-        throw new Error("ui payload.preload.compiled_node_count must be at least 1.");
-      }
-    } catch (error) {
-      smokeFailures.push(error instanceof Error ? error.message : String(error));
-    }
-  }
-
   for (const harnessKind of builtCliRunHarnessAdapters) {
     for (const workspaceBackend of builtCliRunWorkspaceBackends) {
       const fixture = await createRunSmokeFixture(harnessKind, workspaceBackend);
@@ -551,18 +514,6 @@ async function checkBuiltCliSmoke() {
             artifacts.summary_file,
             `run payload.artifacts.summary_file (${harnessKind}, ${workspaceBackend})`
           );
-          const monitor = expectRecord(
-            payload.monitor,
-            `run payload.monitor (${harnessKind}, ${workspaceBackend})`
-          );
-          const startCommand = expectString(
-            monitor.start_command,
-            `run payload.monitor.start_command (${harnessKind}, ${workspaceBackend})`
-          );
-
-          if (!startCommand.includes(fixture.runsRoot)) {
-            throw new Error(`run payload.monitor.start_command must include ${fixture.runsRoot} for ${harnessKind}/${workspaceBackend}.`);
-          }
 
           if (!(await pathExists(runFile))) {
             throw new Error(`run artifact file is missing for ${harnessKind}/${workspaceBackend}: ${runFile}`);
@@ -635,7 +586,6 @@ async function checkBuiltCliSmoke() {
         commands_run: [
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
           `node ${builtCliRelativePath} compile --graph ${fixtureGraphRelativePath}`,
-          `node ${builtCliRelativePath} ui --graph ${fixtureGraphRelativePath}`,
           ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
             builtCliRunWorkspaceBackends.map((workspaceBackend) =>
               `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`
@@ -653,15 +603,14 @@ async function checkBuiltCliSmoke() {
       `Built CLI ${builtCliFixtureCommands.join(", ")} commands passed against ${fixtureGraphRelativePath}, ` +
       `and built CLI run passed through ${builtCliRunHarnessAdapters.join(" and ")} smoke fixtures across ${builtCliRunWorkspaceBackends.join(" and ")} workspace backends.`,
     details: {
-      built_cli: builtCliRelativePath,
-      fixture_graph: fixtureGraphRelativePath,
-      commands_run: [
-        `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
-        `node ${builtCliRelativePath} compile --graph ${fixtureGraphRelativePath}`,
-        `node ${builtCliRelativePath} ui --graph ${fixtureGraphRelativePath}`,
-        ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
-          builtCliRunWorkspaceBackends.map((workspaceBackend) =>
-            `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`
+        built_cli: builtCliRelativePath,
+        fixture_graph: fixtureGraphRelativePath,
+        commands_run: [
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
+          `node ${builtCliRelativePath} compile --graph ${fixtureGraphRelativePath}`,
+          ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
+            builtCliRunWorkspaceBackends.map((workspaceBackend) =>
+              `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`
           )
         )
       ]

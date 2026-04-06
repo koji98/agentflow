@@ -2,7 +2,7 @@
 
 ## Build Now
 
-The current release is a runnable local-first graph executor with a graph-native CLI and web monitor.
+The current release is a runnable local-first graph executor with a graph-native CLI and durable run artifacts.
 
 Required product surface:
 
@@ -10,15 +10,15 @@ Required product surface:
 - graph validation without execution
 - graph compilation with authored and compiled inspection payloads
 - run execution against one or more local git repositories
+- run resume from failed or canceled run roots
 - workspace backends: `inplace` and `worktree`
 - executable node kinds: `agent`, `exec`, `check`
 - authored container kinds: `sequence`, `parallel`, `repeat`
 - profile resolution
 - Codex CLI and Cursor CLI harness adapters
 - deterministic checks and AI checks
-- durable run artifacts, append-only events, and projected state
-- CLI commands for `validate`, `compile`, `run`, and `ui`
-- web launchpad, graph inspection, live monitor, and node inspection
+- durable run artifacts, append-only events, and projected inspection state
+- CLI commands for `graph-help`, `validate`, `compile`, `run`, and `resume`
 
 ## Required Behavior
 
@@ -57,25 +57,24 @@ Required product surface:
 - run cursor-backed read-only agent flows in proposal mode rather than forced-write mode
 - require structured evaluator output for AI checks
 
-### Monitor
+### Inspection
 
-- show authored graph before launch
-- show compiled graph before and after launch
-- show runtime overlay for a run
-- show node detail with executions, inputs, checks, artifacts, and events
-- support live updates from state snapshot plus incremental events
+- show authored and compiled graph details before launch through CLI output
+- emit enough durable artifacts to inspect a historical run from the filesystem alone
+- keep node-level logs, artifacts, diagnostics, and events addressable from the run root
+- support projected inspection state derived from durable artifacts without requiring a live controller
 
 ## Release Acceptance Criteria
 
 The release is complete only when all of the following are true:
 
 1. A graph can be validated from the CLI without launching a run.
-2. A graph can be compiled from the CLI and inspected in the web UI.
+2. A graph can be compiled from the CLI and inspected from the emitted contract.
 3. A multi-step graph with `repeat` can run locally end to end.
 4. Both supported harness adapters can execute at least one `agent` node.
 5. Deterministic and AI checks both produce inspectable results.
-6. The web monitor can open a historical run from artifacts alone.
-7. Automated tests cover compiler semantics, repeat execution, context resolution, harness adapters, artifact projection, and core web contracts.
+6. A historical run can be inspected from durable artifacts alone.
+7. Automated tests cover compiler semantics, repeat execution, context resolution, harness adapters, artifact projection, and CLI contracts.
 
 ## Out of Scope
 
@@ -85,7 +84,7 @@ Do not build these now:
 - automatic controller loops
 - remote workspace backends
 - generalized plugin APIs
-- editing graphs from the web UI
-- resumability beyond reopening completed or failed runs from artifacts
+- interactive graph editing surfaces
+- resumability beyond `resume` plus reopening completed or failed runs from artifacts
 
 `DEFERRED.md` is authoritative for the full deferred list.

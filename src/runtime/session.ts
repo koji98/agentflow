@@ -109,12 +109,25 @@ export interface RuntimeStateSnapshot {
   artifact_index: {
     run_root: string;
     nodes_dir: string;
-    node_dirs_by_compiled_id: Record<string, string>;
-    node_hashes_by_compiled_id: Record<string, string>;
-    compiled_id_by_node_hash: Record<string, string>;
-    execution_dirs_by_execution_id: Record<string, string>;
-    execution_hashes_by_execution_id: Record<string, string>;
-    execution_id_by_execution_hash: Record<string, string>;
+    nodes_by_compiled_id: Record<string, {
+      authored_id: string;
+      kind: CompiledExecutableNode["kind"];
+      label: string;
+      directory_name: string;
+      directory_path: string;
+    }>;
+    compiled_id_by_directory_name: Record<string, string>;
+    executions_by_id: Record<string, {
+      compiled_id: string;
+      authored_id: string;
+      kind: CompiledExecutableNode["kind"];
+      directory_name: string;
+      directory_path: string;
+      attempt_index: number;
+      repeat_scope_id?: string;
+      iteration_index?: number;
+    }>;
+    execution_id_by_directory_name: Record<string, string>;
   };
   started_at: string;
   ended_at?: string;
@@ -123,6 +136,7 @@ export interface RuntimeStateSnapshot {
 export interface RuntimeSession {
   run_id: string;
   run_root: string;
+  graph_path?: string;
   graph: CompiledGraph;
   manifest: ExecutionManifest;
   status: RuntimeRunStatus;
@@ -185,7 +199,8 @@ export function createRuntimeSession(
   runRoot: string,
   graph: CompiledGraph,
   attempts: AttemptRegistry,
-  repoWorkspaces: Record<string, WorkspaceBinding>
+  repoWorkspaces: Record<string, WorkspaceBinding>,
+  graphPath?: string
 ): RuntimeSession {
   const started_at = new Date().toISOString();
   const repeat_scopes = new Map<string, RepeatScopeState>(
@@ -208,6 +223,7 @@ export function createRuntimeSession(
   return {
     run_id: runId,
     run_root: runRoot,
+    ...(graphPath ? { graph_path: graphPath } : {}),
     graph,
     manifest: buildExecutionManifest(runId, graph, repoWorkspaces),
     status: "pending",
@@ -306,23 +322,44 @@ export function completeRepeatIteration(
 export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeStateSnapshot {
   const snapshot_seq = Math.max(0, session.next_event_seq - 1);
   const runPaths = resolveRunArtifactPaths(session.run_root);
-  const node_dirs_by_compiled_id = Object.fromEntries(
-    session.graph.nodes.map((node) => [node.compiled_id, resolveNodeArtifactDirectory(session.run_root, node.compiled_id)])
+  const nodes_by_compiled_id = Object.fromEntries(
+    session.graph.nodes.map((node) => {
+      const directory_name = resolveNodeArtifactDirectoryName(node.compiled_id);
+      return [
+        node.compiled_id,
+        {
+          authored_id: node.authored_id,
+          kind: node.kind,
+          label: node.label ?? node.authored_id,
+          directory_name,
+          directory_path: resolveNodeArtifactDirectory(session.run_root, node.compiled_id)
+        }
+      ];
+    })
   );
-  const node_hashes_by_compiled_id = Object.fromEntries(
-    session.graph.nodes.map((node) => [node.compiled_id, resolveNodeArtifactDirectoryName(node.compiled_id)])
-  );
-  const compiled_id_by_node_hash = Object.fromEntries(
+  const compiled_id_by_directory_name = Object.fromEntries(
     session.graph.nodes.map((node) => [resolveNodeArtifactDirectoryName(node.compiled_id), node.compiled_id])
   );
   const attempts = [...session.attempts.by_compiled_id.values()].flat();
-  const execution_dirs_by_execution_id = Object.fromEntries(
-    attempts.map((attempt) => [attempt.execution_id, attempt.execution_dir])
+  const executions_by_id = Object.fromEntries(
+    attempts.map((attempt) => {
+      const directory_name = resolveExecutionDirectoryName(attempt.execution_id);
+      return [
+        attempt.execution_id,
+        {
+          compiled_id: attempt.compiled_id,
+          authored_id: attempt.authored_id,
+          kind: attempt.kind,
+          directory_name,
+          directory_path: attempt.execution_dir,
+          attempt_index: attempt.attempt_index,
+          ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
+          ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {})
+        }
+      ];
+    })
   );
-  const execution_hashes_by_execution_id = Object.fromEntries(
-    attempts.map((attempt) => [attempt.execution_id, resolveExecutionDirectoryName(attempt.execution_id)])
-  );
-  const execution_id_by_execution_hash = Object.fromEntries(
+  const execution_id_by_directory_name = Object.fromEntries(
     attempts.map((attempt) => [resolveExecutionDirectoryName(attempt.execution_id), attempt.execution_id])
   );
 
@@ -341,12 +378,10 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     artifact_index: {
       run_root: session.run_root,
       nodes_dir: runPaths.nodes_dir,
-      node_dirs_by_compiled_id,
-      node_hashes_by_compiled_id,
-      compiled_id_by_node_hash,
-      execution_dirs_by_execution_id,
-      execution_hashes_by_execution_id,
-      execution_id_by_execution_hash
+      nodes_by_compiled_id,
+      compiled_id_by_directory_name,
+      executions_by_id,
+      execution_id_by_directory_name
     },
     started_at: session.started_at,
     ...(session.ended_at ? { ended_at: session.ended_at } : {})

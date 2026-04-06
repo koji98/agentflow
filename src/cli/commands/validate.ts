@@ -20,7 +20,7 @@ export const validateCommand = {
   optionNames: ["graph", "profile", "workspace-backend", "help"] as const,
   helpNotes: [
     "--graph validation resolves from the launch shell current working directory.",
-    "Use compile next when you want the full compiled graph contract, or ui --graph to preload graph inspection."
+    "Use compile next when you want the full compiled graph contract, or run when you want durable artifacts."
   ] as const,
   async run(options: Record<string, string | boolean | undefined>, currentWorkingDirectory: string) {
     const graphPath = typeof options.graph === "string" ? options.graph : undefined;
@@ -141,10 +141,6 @@ export const validateCommand = {
             launch
           }),
           run: createGraphCliInvocation("run", {
-            graphPath: loaded.absolute_path,
-            launch
-          }),
-          ui: createGraphCliInvocation("ui", {
             graphPath: loaded.absolute_path,
             launch
           }),

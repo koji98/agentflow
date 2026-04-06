@@ -25,7 +25,6 @@ import { managedWorkflowDescriptors } from "../managed/index.js";
 import { compileCommand } from "./commands/compile.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
-import { uiCommand } from "./commands/ui.js";
 import { validateCommand } from "./commands/validate.js";
 
 interface GraphCliCommandResult {
@@ -49,7 +48,7 @@ interface GraphCliCommand {
 }
 
 const optionDescriptions: Record<string, string> = {
-  graph: "--graph <path>               Authored graph document to validate, compile, run, or preload for UI.",
+  graph: "--graph <path>               Authored graph document to validate, compile, or run.",
   profile: "--profile <name>             Launch profile override.",
   "workspace-backend":
     "--workspace-backend <name>   Run-scoped workspace backend override.",
@@ -129,7 +128,7 @@ function renderGraphHelp(): string {
     "1. agentflow validate --graph agentflow.graph.json",
     "2. agentflow compile --graph agentflow.graph.json",
     "3. agentflow run --graph agentflow.graph.json",
-    "4. agentflow ui --graph agentflow.graph.json"
+    "4. inspect summary.md, state.json, and compiled_graph.json under the emitted run root"
   ].join("\n");
 }
 
@@ -216,7 +215,6 @@ const commandRegistry = {
   compile: compileCommand,
   run: runCommand,
   resume: resumeCommand,
-  ui: uiCommand,
   "graph-help": graphHelpCommand,
   control: controlCommand
 } as const satisfies Record<string, GraphCliCommand>;
@@ -244,8 +242,7 @@ function renderMainHelp(): string {
     "  2. validate: check the authored graph plus launch settings without running it",
     "  3. compile: inspect the compiled graph contract before execution",
     "  4. run: execute the compiled graph and write durable artifacts under the run root",
-    "  5. resume: continue a failed or canceled run root without redoing passed work",
-    "  6. ui: point the launchpad or monitor at the same runs root",
+    "  5. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work",
     "",
     "Examples:",
     "  agentflow graph-help",
@@ -253,7 +250,6 @@ function renderMainHelp(): string {
     "  agentflow compile --graph agentflow.graph.json",
     "  agentflow run --graph agentflow.graph.json --workspace-backend worktree",
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
-    "  agentflow ui --graph agentflow.graph.json",
     "  agentflow control --mission mission.json",
     "",
     "Path rules:",
@@ -262,7 +258,7 @@ function renderMainHelp(): string {
     "",
     "Runs root contract:",
     `  ${runsRootContractText}`,
-    `  Override CLI and web monitor with ${runsRootEnvironmentVariable}=/absolute/path`,
+    `  Override the default runs root with ${runsRootEnvironmentVariable}=/absolute/path`,
     "",
     "Use `agentflow <command> --help` for command-specific options."
   ].join("\n");

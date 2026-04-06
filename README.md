@@ -2,7 +2,7 @@
 
 Agentflow is a local-first execution engine for coding graphs.
 
-You write a graph JSON file, Agentflow validates it, compiles it into an executable graph, runs it against one or more local repositories, and stores durable artifacts that the web monitor can inspect later.
+You write a graph JSON file, Agentflow validates it, compiles it into an executable graph, runs it against one or more local repositories, and stores durable artifacts for later inspection.
 
 The intended workflow is:
 
@@ -10,23 +10,22 @@ The intended workflow is:
 2. validate it
 3. compile it
 4. run it
-5. inspect it in the web UI
+5. inspect the emitted artifacts
 
 ## What Agentflow Does
 
-- Graph-native CLI: `validate`, `compile`, `run`, `ui`, `graph-help`
+- Graph-native CLI: `validate`, `compile`, `run`, `resume`, `graph-help`
 - Executable node kinds: `agent`, `exec`, `check`
 - Container node kinds: `sequence`, `parallel`, `repeat`
 - Managed workflows: `deep_research`, `spec_design`, `execute_spec`, `review_change`
 - Harness adapters: `codex-cli`, `cursor-cli`
 - Workspace backends: `inplace`, `worktree`
 - Durable run artifacts under a shared runs root
-- Web launchpad and run monitor backed by those artifacts
+- CLI-readable compiled contracts, summaries, logs, and run state under those artifacts
 
 ## What Agentflow Does Not Do
 
 - It does not execute authored containers directly. The runtime executes compiled graphs only.
-- It does not launch runs from the browser. Run launch and cancellation are CLI-owned.
 - It does not provide a generalized tool plugin system yet.
 - It does not support remote devboxes or native non-CLI harnesses in this release.
 
@@ -76,19 +75,6 @@ Run it:
 
 ```bash
 npm run run -- --graph .tmp/feature-showcase.json
-```
-
-Open the web monitor:
-
-```bash
-npm run web:dev
-```
-
-If you want the built web app instead of the dev server:
-
-```bash
-npm run build
-npm run web:start
 ```
 
 ## Included Example Graphs
@@ -434,10 +420,8 @@ Every run writes durable artifacts under a runs root.
 
 Resolution rules:
 
-- If `AGENTFLOW_RUNS_ROOT` is set, it must be an absolute path and both CLI and web use it.
+- If `AGENTFLOW_RUNS_ROOT` is set, it must be an absolute path and CLI commands use it.
 - Otherwise Agentflow uses `<launch-cwd>/.agentflow/runs`.
-
-This matters when the CLI and the web monitor are started from different directories. Reuse the exact runs-root handoff emitted by `run` or `ui`.
 
 ## Minimal Graph
 
@@ -538,7 +522,7 @@ Cancel behavior:
 
 - Press `Ctrl-C` in the terminal that launched the run.
 - The runtime performs cleanup and writes durable canceled state.
-- The web monitor reflects that state from artifacts.
+- `summary.md`, `state.json`, and `events.jsonl` reflect that state from artifacts.
 
 ### `resume`
 
@@ -550,51 +534,15 @@ npm run resume -- --run-root ./.agentflow/runs/<run-id>
 
 Resume behavior:
 
-- preserves nodes whose latest durable outcome is `passed`
+- recompiles from the original graph path with the current Agentflow build
+- preserves only nodes whose latest durable outcome is `passed` and whose compiled execution contract is unchanged
 - restarts failed, canceled, blocked, skipped, and pending nodes
-- restarts failed repeat scopes from iteration 1
+- restarts repeat scopes from iteration 1 when they were unfinished or their compiled contract changed
 - appends new events and attempts into the same run root
 
 Like `run`, `resume` prints live graph progress to `stderr` and keeps its final structured result on `stdout`.
 
-This is meant for infrastructure or runtime interruptions where you do not want to redo already-passed work.
-
-### `ui`
-
-Prepares graph inspection and monitor handoff information for the web UI.
-
-```bash
-npm run ui -- --graph ./agentflow.graph.json
-```
-
-This does not launch a run. It helps the CLI and web monitor agree on graph path and runs root.
-
-## Web UI
-
-Start the development server:
-
-```bash
-npm run web:dev
-```
-
-Or build and start the packaged server:
-
-```bash
-npm run build
-npm run web:start
-```
-
-What the web UI does:
-
-- launchpad for graph selection and inspection
-- authored graph and compiled graph inspection
-- run monitor backed by durable artifacts
-- timeline, logs, artifacts, and node inspection
-
-What it does not do:
-
-- it does not start runs
-- it does not cancel runs directly
+This is meant for interrupted or failed runs where you want to keep unchanged passed work while still picking up graph or workflow fixes.
 
 ## Inputs, Context, and Outputs
 
@@ -670,7 +618,6 @@ npm run validate:confidence
 This adds:
 
 - coverage policy enforcement
-- packaged browser smoke
 
 ### Real harness smoke
 
@@ -691,7 +638,6 @@ npm run validate -- --graph .tmp/feature-showcase.json
 npm run compile -- --graph .tmp/feature-showcase.json
 npm run run -- --graph .tmp/feature-showcase.json
 npm run resume -- --run-root ./.agentflow/runs/<run-id>
-npm run web:dev
 ```
 
 ## Where To Read Next
@@ -699,6 +645,6 @@ npm run web:dev
 You should not need anything else to get started. If you want deeper detail after that:
 
 - [SCOPE.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/SCOPE.md): supported product surface
-- [ARCHITECTURE.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/ARCHITECTURE.md): compiler, runtime, artifacts, and UI contracts
+- [ARCHITECTURE.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/ARCHITECTURE.md): compiler, runtime, and artifact contracts
 - [OPERATIONS.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/OPERATIONS.md): runs-root behavior, lifecycle, cleanup, and operator runbook
 - [MANAGED_WORKFLOWS.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/MANAGED_WORKFLOWS.md): managed workflow model and shipped workflow nodes

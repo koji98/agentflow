@@ -51,7 +51,6 @@ describe("graph CLI", () => {
     expect(result.stdout).toContain("compile");
     expect(result.stdout).toContain("run");
     expect(result.stdout).toContain("resume");
-    expect(result.stdout).toContain("ui");
     expect(result.stdout).toContain("graph-help");
     expect(result.stdout).toContain("control");
     expect(result.stdout).toContain("Local workflow:");
@@ -192,13 +191,9 @@ describe("graph CLI", () => {
     expect(payload.runs_root_contract).toContain("AGENTFLOW_RUNS_ROOT");
     expect(payload.run_root).toBe(join(payload.runs_root, payload.run_id));
     expect(payload.counts.passed).toBe(2);
-    expect(payload.monitor.runs_root).toBe(payload.runs_root);
-    expect(payload.monitor.start_command).toContain("AGENTFLOW_RUNS_ROOT=");
-    expect(payload.monitor.start_command).toContain(payload.runs_root);
-    expect(payload.monitor.monitor_route).toContain(`/runs/${payload.run_id}`);
     expect(payload.cancel_note).toContain("Ctrl-C");
-    expect(payload.next_steps.open_monitor).toBe(payload.monitor.monitor_route);
-    expect(payload.next_steps.start_monitor).toBe(payload.monitor.start_command);
+    expect(payload.next_steps.rerun).toContain("agentflow run --graph");
+    expect(payload.next_steps.resume).toContain("agentflow resume --run-root");
     expect(state.status).toBe("passed");
     expect(await readFile(join(repoDir, "marker.txt"), "utf8")).toBe("ok\n");
     expect(progressOutput).toContain('agentflow: compiled graph "cli-run-graph" with 2 executable nodes');
@@ -274,9 +269,6 @@ describe("graph CLI", () => {
       expect(payload.runs_root_source).toBe("environment");
       expect(payload.runs_root_input).toBe(runsRoot);
       expect(payload.run_root).toBe(join(runsRoot, payload.run_id));
-      expect(payload.monitor.runs_root).toBe(runsRoot);
-      expect(payload.monitor.start_command).toContain(runsRoot);
-      expect(payload.monitor.dev_command).toContain(runsRoot);
       expect(payload.artifacts.run_file).toBe(join(payload.run_root, "run.json"));
       expect(await readFile(join(repoDir, "marker.txt"), "utf8")).toBe("ok\n");
     } finally {
@@ -364,11 +356,15 @@ describe("graph CLI", () => {
     const firstStderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const firstRun = await executeCli(["run", "--graph", graphPath], tempRoot);
     const firstPayload = JSON.parse(firstRun.stdout);
+    const firstRunRecord = JSON.parse(
+      await readFile(join(firstPayload.run_root, "run.json"), "utf8")
+    ) as { graph_path?: string };
     const firstProgress = firstStderrSpy.mock.calls.map(([chunk]) => String(chunk)).join("");
 
     expect(firstRun.exitCode).toBe(1);
     expect(firstPayload.command).toBe("run");
     expect(firstPayload.status).toBe("failed");
+    expect(firstRunRecord.graph_path).toBe(graphPath);
     expect(firstProgress).toContain('agentflow: compiled graph "cli-resume-graph" with 3 executable nodes');
     expect(firstProgress).toContain("[0/3] start exec write_seed · repo=main");
     expect(firstProgress).toContain("[1/3] passed exec write_seed");
@@ -434,29 +430,437 @@ describe("graph CLI", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("rejects a relative AGENTFLOW_RUNS_ROOT override before UI handoff", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-ui-runs-root-"));
-    const previousRunsRoot = process.env.AGENTFLOW_RUNS_ROOT;
+  it("recompiles the original graph on resume and invalidates changed passed work", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-recompile-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
 
-    try {
-      process.env.AGENTFLOW_RUNS_ROOT = "relative-runs";
+    const writeGraph = async (seedValue: string) => {
+      await writeFile(
+        graphPath,
+        `${JSON.stringify(
+          {
+            version: "1",
+            graph_id: "cli-resume-recompile",
+            repos: {
+              main: {
+                path: "./repo"
+              }
+            },
+            defaults: {
+              launch_profile: "default",
+              workspace_backend: "inplace"
+            },
+            profiles: {
+              default: {}
+            },
+            graph: {
+              type: "sequence",
+              id: "root",
+              steps: [
+                {
+                  type: "exec",
+                  id: "write_seed",
+                  repo: "main",
+                  command: "node",
+                  args: [
+                    "-e",
+                    `require('node:fs').writeFileSync('seed.txt', '${seedValue}\\n')`
+                  ]
+                },
+                {
+                  type: "check",
+                  id: "gate_resume",
+                  repo: "main",
+                  check_kind: "deterministic",
+                  command: "node",
+                  args: [
+                    "-e",
+                    "const fs=require('node:fs'); const passed=fs.existsSync('resume-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                  ],
+                  pass_if: {
+                    json_path: "$.passed",
+                    equals: true
+                  }
+                },
+                {
+                  type: "exec",
+                  id: "after_resume",
+                  repo: "main",
+                  command: "node",
+                  args: [
+                    "-e",
+                    "const fs=require('node:fs'); const seed=fs.readFileSync('seed.txt','utf8'); fs.writeFileSync('done.txt', seed);"
+                  ]
+                }
+              ]
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+    };
 
-      const result = await executeCli(["ui"], tempRoot);
-      const payload = JSON.parse(result.stdout);
+    await writeGraph("seed-v1");
 
-      expect(result.exitCode).toBe(1);
-      expect(payload.command).toBe("ui");
-      expect(payload.status).toBe("failed");
-      expect(payload.message).toContain("AGENTFLOW_RUNS_ROOT must be an absolute path");
-    } finally {
-      if (previousRunsRoot === undefined) {
-        delete process.env.AGENTFLOW_RUNS_ROOT;
-      } else {
-        process.env.AGENTFLOW_RUNS_ROOT = previousRunsRoot;
+    const firstRun = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const firstPayload = JSON.parse(firstRun.stdout);
+
+    expect(firstRun.exitCode).toBe(1);
+    expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-v1\n");
+
+    await writeGraph("seed-v2");
+    await writeFile(join(repoDir, "resume-ok.txt"), "ok\n");
+
+    const resumedRun = await executeCli(["resume", "--run-root", firstPayload.run_root], tempRoot);
+    const resumedPayload = JSON.parse(resumedRun.stdout);
+    const attempts = await readRunExecutionAttempts(firstPayload.run_root);
+
+    expect(resumedRun.exitCode).toBe(0);
+    expect(resumedPayload.status).toBe("passed");
+    expect(resumedPayload.preserved_node_count).toBe(0);
+    expect(resumedPayload.restarted_node_count).toBe(3);
+    expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-v2\n");
+    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-v2\n");
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("restarts a passed repeat scope when resume invalidation reaches it from upstream changes", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-repeat-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const writeGraph = async (seedValue: string) => {
+      await writeFile(
+        graphPath,
+        `${JSON.stringify(
+          {
+            version: "1",
+            graph_id: "cli-resume-repeat",
+            repos: {
+              main: {
+                path: "./repo"
+              }
+            },
+            defaults: {
+              launch_profile: "default",
+              workspace_backend: "inplace"
+            },
+            profiles: {
+              default: {}
+            },
+            graph: {
+              type: "sequence",
+              id: "root",
+              steps: [
+                {
+                  type: "exec",
+                  id: "write_seed",
+                  repo: "main",
+                  command: "node",
+                  args: [
+                    "-e",
+                    `require('node:fs').writeFileSync('seed.txt', '${seedValue}\\n')`
+                  ]
+                },
+                {
+                  type: "repeat",
+                  id: "retry",
+                  max_attempts: 2,
+                  body: {
+                    type: "sequence",
+                    id: "body",
+                    steps: [
+                      {
+                        type: "exec",
+                        id: "prepare_loop_output",
+                        repo: "main",
+                        command: "node",
+                        args: [
+                          "-e",
+                          "const fs=require('node:fs'); fs.writeFileSync('loop.txt', fs.readFileSync('seed.txt', 'utf8'));"
+                        ]
+                      },
+                      {
+                        type: "check",
+                        id: "verify_loop",
+                        repo: "main",
+                        check_kind: "deterministic",
+                        command: "node",
+                        args: [
+                          "-e",
+                          "const fs=require('node:fs'); const passed=fs.existsSync('loop.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                        ],
+                        pass_if: {
+                          json_path: "$.passed",
+                          equals: true
+                        }
+                      }
+                    ]
+                  },
+                  until: {
+                    node: "verify_loop"
+                  }
+                },
+                {
+                  type: "check",
+                  id: "gate_resume",
+                  repo: "main",
+                  check_kind: "deterministic",
+                  command: "node",
+                  args: [
+                    "-e",
+                    "const fs=require('node:fs'); const passed=fs.existsSync('resume-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                  ],
+                  pass_if: {
+                    json_path: "$.passed",
+                    equals: true
+                  }
+                },
+                {
+                  type: "exec",
+                  id: "finalize",
+                  repo: "main",
+                  command: "node",
+                  args: [
+                    "-e",
+                    "const fs=require('node:fs'); fs.writeFileSync('done.txt', fs.readFileSync('loop.txt', 'utf8'));"
+                  ]
+                }
+              ]
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+    };
+
+    await writeGraph("seed-v1");
+
+    const firstRun = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const firstPayload = JSON.parse(firstRun.stdout);
+
+    expect(firstRun.exitCode).toBe(1);
+    expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-v1\n");
+    expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-v1\n");
+
+    await writeGraph("seed-v2");
+    await writeFile(join(repoDir, "resume-ok.txt"), "ok\n");
+
+    const resumedRun = await executeCli(["resume", "--run-root", firstPayload.run_root], tempRoot);
+    const resumedPayload = JSON.parse(resumedRun.stdout);
+    const resumedState = JSON.parse(
+      await readFile(join(firstPayload.run_root, "state.json"), "utf8")
+    ) as { status: string; counts: { passed: number }; repeat_scopes: Record<string, { status: string; latest_iteration_index: number }> };
+    const attempts = await readRunExecutionAttempts(firstPayload.run_root);
+
+    expect(resumedRun.exitCode).toBe(0);
+    expect(resumedPayload.status).toBe("passed");
+    expect(resumedPayload.preserved_node_count).toBe(0);
+    expect(resumedPayload.restarted_node_count).toBe(5);
+    expect(resumedState.status).toBe("passed");
+    expect(resumedState.counts.passed).toBe(5);
+    expect(resumedState.repeat_scopes.scope__root__retry.status).toBe("passed");
+    expect(resumedState.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(1);
+    expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-v2\n");
+    expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-v2\n");
+    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-v2\n");
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("repairs a passed repeat scope whose stored node statuses became inconsistent before resume", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-repeat-repair-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-resume-repeat-repair",
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {}
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "write_seed",
+                repo: "main",
+                command: "node",
+                args: [
+                  "-e",
+                  "require('node:fs').writeFileSync('seed.txt', 'seed-v1\\n')"
+                ]
+              },
+              {
+                type: "repeat",
+                id: "retry",
+                max_attempts: 2,
+                body: {
+                  type: "sequence",
+                  id: "body",
+                  steps: [
+                    {
+                      type: "exec",
+                      id: "prepare_loop_output",
+                      repo: "main",
+                      command: "node",
+                      args: [
+                        "-e",
+                        "const fs=require('node:fs'); fs.writeFileSync('loop.txt', fs.readFileSync('seed.txt', 'utf8'));"
+                      ]
+                    },
+                    {
+                      type: "check",
+                      id: "verify_loop",
+                      repo: "main",
+                      check_kind: "deterministic",
+                      command: "node",
+                      args: [
+                        "-e",
+                        "const fs=require('node:fs'); const passed=fs.existsSync('loop.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                      ],
+                      pass_if: {
+                        json_path: "$.passed",
+                        equals: true
+                      }
+                    }
+                  ]
+                },
+                until: {
+                  node: "verify_loop"
+                }
+              },
+              {
+                type: "check",
+                id: "gate_resume",
+                repo: "main",
+                check_kind: "deterministic",
+                command: "node",
+                args: [
+                  "-e",
+                  "const fs=require('node:fs'); const passed=fs.existsSync('resume-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                ],
+                pass_if: {
+                  json_path: "$.passed",
+                  equals: true
+                }
+              },
+              {
+                type: "exec",
+                id: "finalize",
+                repo: "main",
+                command: "node",
+                args: [
+                  "-e",
+                  "const fs=require('node:fs'); fs.writeFileSync('done.txt', fs.readFileSync('loop.txt', 'utf8'));"
+                ]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const firstRun = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const firstPayload = JSON.parse(firstRun.stdout);
+    const statePath = join(firstPayload.run_root, "state.json");
+    const mutatedState = JSON.parse(await readFile(statePath, "utf8")) as {
+      counts: Record<string, number>;
+      node_statuses: Record<string, string>;
+      repeat_scopes: Record<string, { status: string }>;
+    };
+
+    expect(firstRun.exitCode).toBe(1);
+    expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-v1\n");
+
+    for (const compiledId of Object.keys(mutatedState.node_statuses)) {
+      if (compiledId.includes("__prepare_loop_output") || compiledId.includes("__verify_loop")) {
+        mutatedState.node_statuses[compiledId] = "blocked";
       }
-
-      await rm(tempRoot, { recursive: true, force: true });
     }
+
+    mutatedState.repeat_scopes.scope__root__retry.status = "passed";
+    mutatedState.counts = Object.values(mutatedState.node_statuses).reduce(
+      (counts, status) => {
+        counts.total += 1;
+        counts[status] = (counts[status] ?? 0) + 1;
+        return counts;
+      },
+      {
+        total: 0,
+        pending: 0,
+        ready: 0,
+        running: 0,
+        passed: 0,
+        failed: 0,
+        blocked: 0,
+        canceled: 0,
+        skipped: 0
+      } as Record<string, number>
+    );
+
+    await writeFile(statePath, `${JSON.stringify(mutatedState, null, 2)}\n`);
+    await writeFile(join(repoDir, "seed.txt"), "seed-v2\n");
+    await writeFile(join(repoDir, "resume-ok.txt"), "ok\n");
+
+    const resumedRun = await executeCli(["resume", "--run-root", firstPayload.run_root], tempRoot);
+    const resumedPayload = JSON.parse(resumedRun.stdout);
+    const resumedState = JSON.parse(await readFile(statePath, "utf8")) as {
+      status: string;
+      repeat_scopes: Record<string, { status: string; latest_iteration_index: number }>;
+    };
+    const attempts = await readRunExecutionAttempts(firstPayload.run_root);
+
+    expect(resumedRun.exitCode).toBe(0);
+    expect(resumedPayload.status).toBe("passed");
+    expect(resumedPayload.preserved_node_count).toBe(1);
+    expect(resumedPayload.restarted_node_count).toBe(4);
+    expect(resumedState.status).toBe("passed");
+    expect(resumedState.repeat_scopes.scope__root__retry.status).toBe("passed");
+    expect(resumedState.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(1);
+    expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-v2\n");
+    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-v2\n");
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
+
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("rejects a relative AGENTFLOW_RUNS_ROOT override before launching a run", async () => {
@@ -621,54 +1025,6 @@ describe("graph CLI", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("prepares UI preload metadata for a specific graph", async () => {
-    const graphPath = fileURLToPath(
-      new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
-    );
-    const result = await executeCli(["ui", "--graph", graphPath]);
-    const payload = JSON.parse(result.stdout);
-
-    expect(result.exitCode).toBe(0);
-    expect(payload.command).toBe("ui");
-    expect(payload.status).toBe("ready");
-    expect(payload.message).toContain("UI preload is ready");
-    expect(payload.path_resolution.graph_path).toBe(graphPath);
-    expect(payload.inspect_url).toContain(encodeURIComponent(graphPath));
-    expect(payload.inspect_url).toContain("compiled=1");
-    expect(payload.runs_root_contract).toContain("AGENTFLOW_RUNS_ROOT");
-    expect(payload.dev_note).toContain("proxies /api plus /health");
-    expect(payload.preload.compiled_node_count).toBe(7);
-    expect(payload.next_steps.open_inspect).toBe(payload.inspect_url);
-    expect(payload.next_steps.run).toContain("agentflow run --graph");
-  });
-
-  it("returns launchpad metadata when ui is requested without a graph", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-ui-"));
-
-    try {
-      const result = await executeCli(["ui"], tempRoot);
-      const payload = JSON.parse(result.stdout);
-
-      expect(result.exitCode).toBe(0);
-      expect(payload.command).toBe("ui");
-      expect(payload.status).toBe("ready");
-      expect(payload.message).toContain("UI handoff is ready");
-      expect(payload.runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
-      expect(payload.runs_root_env).toBe("AGENTFLOW_RUNS_ROOT");
-      expect(payload.runs_root_source).toBe("launch-cwd-default");
-      expect(payload.runs_root_contract).toContain("AGENTFLOW_RUNS_ROOT");
-      expect(payload.launchpad_url).toContain("http://127.0.0.1:4178/");
-      expect(payload.inspect_route).toContain("/graphs/inspect");
-      expect(payload.inspect_route).toContain("compiled=1");
-      expect(payload.dev_note).toContain("http://127.0.0.1:4179");
-      expect(payload.runs_root_note).toContain("AGENTFLOW_RUNS_ROOT");
-      expect(payload.note).toContain("Pass --graph");
-      expect(payload.next_steps.graph_help).toBe("agentflow graph-help");
-    } finally {
-      await rm(tempRoot, { recursive: true, force: true });
-    }
-  });
-
   it("fails loudly when a repo path resolves to a file instead of a directory", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-repo-path-file-"));
     const repoFile = join(tempRoot, "repo.txt");
@@ -800,7 +1156,7 @@ describe("graph CLI", () => {
   it("renders command help and rejects unexpected positionals or options", async () => {
     const help = await executeCli(["run", "--help"]);
     const positional = await executeCli(["validate", "--graph", "agentflow.graph.json", "extra"]);
-    const unexpectedOption = await executeCli(["ui", "--label", "oops"]);
+    const unexpectedOption = await executeCli(["compile", "--label", "oops"]);
 
     expect(help.exitCode).toBe(0);
     expect(help.stdout).toContain("Usage: agentflow run --graph");
@@ -815,14 +1171,13 @@ describe("graph CLI", () => {
 
     expect(unexpectedOption.exitCode).toBe(2);
     expect(unexpectedOption.stdout).toContain("Unexpected option(s): --label");
-    expect(unexpectedOption.stdout).toContain("Try: agentflow ui --help");
+    expect(unexpectedOption.stdout).toContain("Try: agentflow compile --help");
   });
 
   it("supports explicit help entrypoints and mission-specific control usage errors", async () => {
     const mainHelp = await executeCli(["--help"]);
     const validateHelp = await executeCli(["validate", "-h"]);
     const compileHelp = await executeCli(["compile", "--help"]);
-    const uiHelp = await executeCli(["ui", "-h"]);
     const controlHelp = await executeCli(["control", "--help"]);
     const missingMission = await executeCli(["control"]);
 
@@ -836,12 +1191,7 @@ describe("graph CLI", () => {
 
     expect(compileHelp.exitCode).toBe(0);
     expect(compileHelp.stdout).toContain("compile: Resolve launch settings and emit the compiled graph contract.");
-    expect(compileHelp.stdout).toContain("Use ui --graph");
-
-    expect(uiHelp.exitCode).toBe(0);
-    expect(uiHelp.stdout).toContain("ui: Prepare the graph-native launchpad or inspect a specific graph for UI preload.");
-    expect(uiHelp.stdout).toContain("AGENTFLOW_RUNS_ROOT");
-    expect(uiHelp.stdout).toContain("different working directories");
+    expect(compileHelp.stdout).toContain("Use run when you want durable artifacts");
 
     expect(controlHelp.exitCode).toBe(0);
     expect(controlHelp.stdout).toContain("control: Reserved controller stub");
@@ -856,13 +1206,13 @@ describe("graph CLI", () => {
 
   it("returns usage errors for missing required options and unknown commands", async () => {
     const missingGraph = await executeCli(["run"]);
-    const unknownCommand = await executeCli(["plan-help"]);
+    const unknownCommand = await executeCli(["ui"]);
 
     expect(missingGraph.exitCode).toBe(2);
     expect(missingGraph.stdout).toContain("Missing required option: --graph");
     expect(missingGraph.stdout).toContain("Try: agentflow run --help");
     expect(missingGraph.stdout).toContain("Graph contract: agentflow graph-help");
     expect(unknownCommand.exitCode).toBe(2);
-    expect(unknownCommand.stdout).toContain("Unknown command: plan-help");
+    expect(unknownCommand.stdout).toContain("Unknown command: ui");
   });
 });

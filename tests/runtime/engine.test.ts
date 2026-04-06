@@ -263,14 +263,15 @@ describe("runtime engine", () => {
     expect(maxParallel).toBe(2);
     expect(run.state.status).toBe("passed");
     expect(run.state.artifact_index.run_root).toBe(runRoot);
-    expect(run.state.artifact_index.node_dirs_by_compiled_id.root__setup).toContain("/nodes/node-");
+    expect(run.state.artifact_index.nodes_by_compiled_id.root__setup.directory_name).toContain("node-");
+    expect(run.state.artifact_index.nodes_by_compiled_id.root__setup.directory_path).toContain("/nodes/node-");
     expect(
-      run.state.artifact_index.compiled_id_by_node_hash[
-        run.state.artifact_index.node_hashes_by_compiled_id.root__setup
+      run.state.artifact_index.compiled_id_by_directory_name[
+        run.state.artifact_index.nodes_by_compiled_id.root__setup.directory_name
       ]
     ).toBe("root__setup");
     expect(
-      run.state.artifact_index.execution_dirs_by_execution_id[run.attempts[0]!.execution_id]
+      run.state.artifact_index.executions_by_id[run.attempts[0]!.execution_id].directory_path
     ).toBe(run.attempts[0]!.execution_dir);
     expect(run.state.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(2);
     expect(run.state.repeat_scopes.scope__root__retry.status).toBe("passed");
@@ -389,6 +390,131 @@ describe("runtime engine", () => {
     expect(JSON.parse(await readFile(consumerAttempt!.result_path!, "utf8"))).toEqual({
       error: 'Required context artifact is missing for "source".'
     });
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("fails when a file input escapes the repo root at runtime", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-input-escape-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(join(tempRoot, "secret.txt"), "outside\n");
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-input-escape",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "reader",
+            prompt: "Read the input.",
+            inputs: [
+              {
+                kind: "file",
+                path: "../secret.txt"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        agent: async () => ({
+          status: "passed",
+          outcome: "passed",
+          result: {},
+          stdout: "",
+          stderr: ""
+        })
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.attempts[0]?.status).toBe("failed");
+    expect(run.attempts[0]?.metadata.error).toContain(
+      'Input path "../secret.txt" must be a relative path that stays within its repo or workspace root.'
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("fails when exec cwd escapes the workspace root", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-cwd-escape-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-cwd-escape",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "escape",
+            command: "pwd",
+            cwd: "../outside"
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.attempts[0]?.status).toBe("failed");
+    expect(run.attempts[0]?.metadata.error).toContain(
+      'cwd "../outside" must be a relative path that stays within its repo or workspace root.'
+    );
 
     await rm(tempRoot, { recursive: true, force: true });
   });
