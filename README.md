@@ -1,43 +1,27 @@
 # Agentflow
 
-Agentflow is a local-first execution engine for coding graphs.
+Agentflow is a graph-native execution engine for coding work.
 
-It is for cases where you want a coding workflow to be explicit, reviewable, and reproducible instead of hidden inside an opaque prompt loop. You author a graph JSON document that declares repos, profiles, nodes, context flow, and outputs. Agentflow validates that authored graph, compiles it into a flat executable graph, runs it against one or more local repositories, and writes durable artifacts for inspection or resume.
+It lets you describe a task as an explicit graph of agents, commands, checks, loops, and managed workflows across local repositories. Agentflow validates that graph, compiles it into an executable runtime plan, runs it with local workspaces and harnesses, and leaves durable artifacts behind so the run can be inspected or resumed.
 
-The important boundary is simple: authors write an ergonomic nested graph, but the runtime executes compiled primitive nodes only.
+The key boundary is simple: you author readable control flow, but the runtime executes compiled primitive nodes only.
 
 ```mermaid
-flowchart TD
-    subgraph authored["Authored graph"]
-        start["sequence"]
-        inspect["agent"]
-        fanout["parallel"]
-        execNode["exec"]
-        aiCheck["check"]
-        merge["fan-in sequence"]
-        loop["repeat"]
-        revise["agent"]
-        gate["checkpoint or check"]
-        workflow["managed workflow"]
-
-        start --> inspect --> fanout
-        fanout --> execNode
-        fanout --> aiCheck
-        execNode --> merge
-        aiCheck --> merge
-        merge --> loop
-        loop --> revise --> gate --> loop
-        start --> workflow
-    end
-
-    authored --> compile["Compile and lower"]
-    workflow --> lowered["Generated primitive subgraph"]
-    lowered --> compile
-    compile --> runtime["Compiled graph: flat primitive nodes, edges, and repeat scopes"]
-    runtime --> artifacts["Durable artifacts: logs, outputs, summary, state"]
+flowchart LR
+    seq["sequence"] --> inspect["agent inspect repo"]
+    inspect --> fanout["parallel fan-out"]
+    fanout --> execNode["exec run command"]
+    fanout --> checkNode["check validate result"]
+    execNode --> fanin["fan-in handoff"]
+    checkNode --> fanin
+    fanin --> loop["repeat repair loop"]
+    loop --> revise["agent revise"]
+    revise --> gate["check or checkpoint gate"]
+    gate --> artifacts["outputs and artifacts"]
+    managed["managed workflow"] -. lowers into primitive subgraph .-> fanin
 ```
 
-The point is not just that Agentflow has several node kinds. It is that those node kinds compose into deliberate coding graphs: inspect, fan out, fan in, validate, repair, and hand off work with explicit structure.
+The point is not just that Agentflow has several node kinds. It is that those node kinds compose into deliberate graphs for coding work: inspect, fan out, fan in, validate, repair, and hand off with explicit structure.
 
 ## Why Agentflow
 
