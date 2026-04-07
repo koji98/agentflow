@@ -93,15 +93,15 @@ npm run validate:real-harness
 Use the CLI in this order:
 
 ```bash
-npm run graph-help
-npm run validate -- --graph ./agentflow.graph.json
-npm run compile -- --graph ./agentflow.graph.json
-npm run run -- --graph ./agentflow.graph.json
+agentflow graph-help
+agentflow validate --graph ./agentflow.graph.json
+agentflow compile --graph ./agentflow.graph.json
+agentflow run --graph ./agentflow.graph.json
 ```
 
 Recommended local loop while developing Agentflow:
 
-1. Run `npm run help` or `npm run help -- <command> --help` before changing CLI behavior.
+1. Run `agentflow --help` or `agentflow <command> --help` before changing CLI behavior.
 2. Use `npm run validate:smoke` after changes that affect operator-facing contracts or docs.
 3. Use `npm run validate:confidence` before handoff when you need measured deterministic coverage proof in addition to the release replacement gate.
 4. Use `npm run validate:real-harness` only when you want additive smoke proof against locally installed Codex or Cursor binaries; it skips cleanly when neither harness is configured or detected and does not change the deterministic gates. Codex smoke pins `reasoning_effort=medium` by default when the graph leaves it unspecified, so local Codex config does not silently change the result.
@@ -132,9 +132,9 @@ Each supported command is JSON-first and returns explicit next-step hints.
 For help:
 
 ```bash
-npm run help
-npm run help -- run --help
-npm run help -- resume --help
+agentflow --help
+agentflow run --help
+agentflow resume --help
 ```
 
 ## Common Failure Modes

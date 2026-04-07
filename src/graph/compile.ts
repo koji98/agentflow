@@ -113,11 +113,13 @@ function resolveCheckFields(
   node: CheckNode,
   nodePolicyResolution: ReturnType<typeof resolveNodePolicy>
 ): Pick<CompiledExecutableNode, never> & {
+  env?: CheckNode["env"];
   pass_if?: CheckNode["pass_if"];
   rubric?: string;
 } {
   if (node.check_kind === "deterministic") {
     return {
+      ...(node.env ? { env: node.env } : {}),
       pass_if:
         node.pass_if ??
         nodePolicyResolution.node_profile?.deterministic_check_defaults?.pass_if ??
@@ -209,6 +211,7 @@ function compileExecutableNode(
       ...(node.command ? { command: node.command } : {}),
       ...(node.args ? { args: node.args } : {}),
       ...(node.cwd ? { cwd: node.cwd } : {}),
+      ...(resolvedCheckFields.env ? { env: resolvedCheckFields.env } : {}),
       ...(resolvedCheckFields.pass_if ? { pass_if: resolvedCheckFields.pass_if } : {}),
       ...(node.prompt ? { prompt: node.prompt } : {}),
       ...(resolvedCheckFields.rubric ? { rubric: resolvedCheckFields.rubric } : {})

@@ -675,7 +675,7 @@ async function defaultCheckExecutor(
       command: context.node.command ?? "",
       args: context.node.args ?? [],
       cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
-      env: undefined,
+      env: context.node.env,
       timeout_sec: context.node.effective_policy.timeout_sec,
       pass_if: context.node.pass_if,
       signal: context.signal

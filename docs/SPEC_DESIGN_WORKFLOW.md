@@ -1,8 +1,8 @@
 # `spec_design` Workflow
 
-This document defines the authored contract and compiled behavior for the current first-version `spec_design` managed workflow.
+This document defines the authored contract and compiled behavior for the `spec_design` managed workflow.
 
-It is implemented now as a generated primitive subgraph lowered during graph normalization.
+`spec_design` compiles into a generated primitive subgraph during graph normalization.
 
 ## Purpose
 
@@ -65,7 +65,7 @@ Optional workflow fields:
 - `deliverable`
 - `orchestration`
 
-## Proposed Schema
+## Example Authored Schema
 
 ```json
 {
@@ -206,7 +206,7 @@ Examples of invalid web-fallback behavior:
 - using external patterns to override explicit local conventions
 - broad unfocused browsing instead of targeted gap-filling
 
-## Planned Compiled Workflow
+## Compiled Workflow
 
 `spec_design` should compile into an internal primitive workflow shaped roughly like this:
 
@@ -397,7 +397,7 @@ It should not stop at generic brainstorming.
 
 ## Implementation Notes
 
-When this is implemented, the safest path is the same one used for `deep_research`:
+The implementation path should match the same lowering pattern used for `deep_research`:
 
 - parse structured `spec_design` fields in the graph normalizer
 - lower the node into a generated primitive subgraph

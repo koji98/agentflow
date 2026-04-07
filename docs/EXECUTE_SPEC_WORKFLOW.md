@@ -1,8 +1,8 @@
 # `execute_spec` Workflow
 
-This document defines the authored contract and current first-version compiled behavior for the implemented `execute_spec` managed workflow.
+This document defines the authored contract and compiled behavior for the `execute_spec` managed workflow.
 
-It is implemented now as a generated primitive subgraph lowered during graph normalization.
+`execute_spec` compiles into a generated primitive subgraph during graph normalization.
 
 ## Purpose
 
@@ -167,7 +167,7 @@ Optional workflow fields:
 - `implementation_research`
 - `delivery`
 
-## Proposed Schema
+## Example Authored Schema
 
 ```json
 {
@@ -191,7 +191,7 @@ Optional workflow fields:
     "commands": [
       "npm run typecheck",
       "npm test",
-      "npm run validate -- --graph .tmp/feature-showcase.json"
+      "agentflow validate --graph .tmp/feature-showcase.json"
     ],
     "required": true
   },
@@ -278,7 +278,7 @@ Controls which final handoff artifacts should be written.
 
 Before changing code, `execute_spec` should decide whether the spec is executable.
 
-In the current implementation this is an AI check node.
+This is implemented as an AI check node.
 
 It consumes the spec packet and produces the standard AI check `result.json` artifact with:
 
@@ -318,7 +318,7 @@ Implementation is where parallelism becomes fragile fastest:
 - multiple agents making implementation decisions drift from the spec
 - integration overhead grows faster than the benefit for local code changes
 
-So the first-version workflow intentionally keeps one writing agent and uses the repair loop, not parallel implementers, as the stabilization mechanism.
+So this workflow keeps one writing agent and uses the repair loop, not parallel implementers, as the stabilization mechanism.
 
 ### Narrow implementation research
 
@@ -335,7 +335,7 @@ This must stay subordinate to:
 - the spec
 - the repository
 
-## Current Compiled Workflow
+## Compiled Workflow
 
 `execute_spec` should compile into an internal primitive workflow shaped roughly like this:
 

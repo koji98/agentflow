@@ -175,6 +175,7 @@ Deterministic check fields:
 - `command`
 - optional `args`
 - optional `cwd`
+- optional `env`
 - optional `pass_if`
 
 Supported release `pass_if` forms:

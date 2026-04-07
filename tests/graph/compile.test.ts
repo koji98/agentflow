@@ -374,7 +374,10 @@ describe("graph compilation", () => {
             type: "check",
             id: "local_gate",
             check_kind: "deterministic",
-            command: "npm"
+            command: "npm",
+            env: {
+              ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
+            }
           },
           {
             type: "check",
@@ -403,6 +406,9 @@ describe("graph compilation", () => {
       expect.objectContaining({
         kind: "check",
         check_kind: "deterministic",
+        env: {
+          ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
+        },
         pass_if: {
           exit_code: 3
         }

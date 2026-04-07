@@ -1,6 +1,6 @@
 # Managed Workflows
 
-Agentflow currently runs primitive executable nodes:
+Agentflow supports primitive executable nodes:
 
 - `agent`
 - `exec`
@@ -12,14 +12,14 @@ and primitive control-flow containers:
 - `parallel`
 - `repeat`
 
-The real managed-workflow direction is:
+Agentflow also supports these managed workflow kinds:
 
 - `deep_research`
 - `spec_design`
 - `execute_spec`
 - `review_change`
 
-These are intended to become true compiled subgraphs with built-in orchestration, prompts, artifacts, and UI phases. All four are implemented now.
+These compile into generated primitive subgraphs with built-in orchestration, prompts, artifacts, and workflow phases.
 
 ## Design Rule
 
@@ -41,7 +41,7 @@ A managed workflow is system-authored.
 Purpose:
 - Clarify a research ask, decompose it, run multiple investigators, reconcile conflicts, and synthesize a final report.
 
-Planned phases:
+Compiled workflow phases:
 - clarify
 - plan
 - investigate
@@ -49,19 +49,19 @@ Planned phases:
 - council
 - deliver
 
-Expected orchestration:
+Workflow orchestration:
 - planner
 - parallel workers
 - synthesis council
 - validation
 
-Current status:
-- implemented authored node
-- implemented normalizer expansion into a generated primitive subgraph
-- implemented track fan-out and summary-tree reduction
+Key contract details:
+- authored managed node
+- generated primitive subgraph expansion during normalization
+- track fan-out and summary-tree reduction
 - optional final critique gate
 
-Current authored fields:
+Authored fields:
 - `question`
 - `objective`
 - optional `audience`
@@ -79,7 +79,7 @@ Current authored fields:
 Purpose:
 - Turn an idea or problem into an implementation-ready architecture or design spec.
 
-Planned phases:
+Compiled workflow phases:
 - clarify
 - inspect
 - assess information gap
@@ -92,7 +92,7 @@ Planned phases:
 - revise
 - finalize
 
-Expected orchestration:
+Workflow orchestration:
 - planner
 - repo-first inspection
 - targeted web fallback when repo context is insufficient
@@ -101,25 +101,25 @@ Expected orchestration:
 - validation
 
 Concrete contract:
-- see [SPEC_DESIGN_WORKFLOW.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/SPEC_DESIGN_WORKFLOW.md)
+- see [`SPEC_DESIGN_WORKFLOW.md`](SPEC_DESIGN_WORKFLOW.md)
 
 Design rule:
 - repo-first, not repo-only
 - the workflow should inspect the repository first, then use targeted web research only if the repository does not contain enough information to support a strong design
 
-Current status:
-- implemented authored node
-- implemented normalizer expansion into a generated primitive subgraph
-- implemented repo inspection, information-gap assessment, and targeted external research fan-out
-- implemented parallel option generation
-- implemented bounded revision loop with critique panel and quality check
+Key contract details:
+- authored managed node
+- generated primitive subgraph expansion during normalization
+- repo inspection, information-gap assessment, and targeted external research fan-out
+- parallel option generation
+- bounded revision loop with critique panel and quality check
 
 ### `execute_spec`
 
 Purpose:
 - Execute an existing spec by planning work, applying changes, validating them, and repairing failures.
 
-Planned phases:
+Compiled workflow phases:
 - clarify
 - plan
 - implement
@@ -127,21 +127,21 @@ Planned phases:
 - repair
 - handoff
 
-Expected orchestration:
+Workflow orchestration:
 - planner
 - single-writer implementation
 - deterministic validation
 - repair loop
 
 Concrete contract:
-- see [EXECUTE_SPEC_WORKFLOW.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/EXECUTE_SPEC_WORKFLOW.md)
+- see [`EXECUTE_SPEC_WORKFLOW.md`](EXECUTE_SPEC_WORKFLOW.md)
 
 Design rule:
 - spec-driven, not idea-driven
 - the workflow must require a structured `spec_source`
 - it should implement an existing design, not invent one during execution
 
-Current contract highlights:
+Contract highlights:
 - required structured `spec_source`
 - supports `managed_node` sources for `spec_design -> execute_spec`
 - supports `artifact_bundle` sources for hand-written or external specs
@@ -149,40 +149,40 @@ Current contract highlights:
 - single-writer implementation path
 - deterministic validation plus bounded repair loop
 
-Current status:
-- implemented authored node
-- implemented normalizer expansion into a generated primitive subgraph
-- implemented structured `spec_source` parsing for managed-node and artifact-bundle sources
-- implemented spec-readiness AI gate
-- implemented single-writer implementation path with bounded repair loop
-- implemented deterministic validation gate and final handoff outputs
+Key contract details:
+- authored managed node
+- generated primitive subgraph expansion during normalization
+- structured `spec_source` parsing for managed-node and artifact-bundle sources
+- spec-readiness AI gate
+- single-writer implementation path with bounded repair loop
+- deterministic validation gate and final handoff outputs
 
 ### `review_change`
 
 Purpose:
 - Review a diff or artifact with multiple reviewer passes, merge findings, normalize severity, and publish a final review.
 
-Planned phases:
+Compiled workflow phases:
 - prepare
 - reviewers
 - merge
 - normalize
 - deliver
 
-Expected orchestration:
+Workflow orchestration:
 - parallel reviewers
 - council merge
 - validation
 
 Concrete contract:
-- see [REVIEW_CHANGE_WORKFLOW.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/REVIEW_CHANGE_WORKFLOW.md)
+- see [`REVIEW_CHANGE_WORKFLOW.md`](REVIEW_CHANGE_WORKFLOW.md)
 
 Design rule:
 - findings-driven, not commentary-driven
 - the workflow must require a structured `review_source`
 - it should prioritize concrete bugs, regressions, and missing tests over low-value style commentary
 
-Current contract highlights:
+Contract highlights:
 - required structured `review_source`
 - supports `managed_node` sources for `execute_spec -> review_change`
 - supports `artifact_bundle` sources for file-based review bundles
@@ -190,22 +190,22 @@ Current contract highlights:
 - merged machine-readable findings plus normalization gate
 - final prose and JSON review outputs
 
-Current status:
-- implemented authored node
-- implemented normalizer expansion into a generated primitive subgraph
-- implemented structured `review_source` parsing for managed-node and artifact-bundle sources
-- implemented reviewer panel, merge step, normalization AI gate, and final review outputs
+Key contract details:
+- authored managed node
+- generated primitive subgraph expansion during normalization
+- structured `review_source` parsing for managed-node and artifact-bundle sources
+- reviewer panel, merge step, normalization AI gate, and final review outputs
 
-## Current Status
+## Implementation Surface
 
-What exists now:
+Shipped in this release:
 - canonical managed-workflow kinds in `src/graph/schema.ts`
 - a managed-workflow registry in `src/managed/registry.ts`
-- implemented `deep_research` authored node support and graph expansion
-- implemented `spec_design` authored node support and graph expansion
-- implemented `execute_spec` authored node support and graph expansion
-- implemented `review_change` authored node support and graph expansion
-- CLI help and docs that describe the target model
+- `deep_research` authored node support and graph expansion
+- `spec_design` authored node support and graph expansion
+- `execute_spec` authored node support and graph expansion
+- `review_change` authored node support and graph expansion
+- CLI help and docs that describe the shipped workflow surface
 
-What is deferred:
+Deferred:
 - runtime and UI treatment of managed workflows as collapsible, inspectable workflow groups

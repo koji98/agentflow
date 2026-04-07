@@ -97,6 +97,7 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     ...(node.command ? { command: node.command } : {}),
     ...(node.args ? { args: node.args } : {}),
     ...(node.cwd ? { cwd: node.cwd } : {}),
+    ...(node.env ? { env: node.env } : {}),
     ...(node.pass_if ? { pass_if: node.pass_if } : {}),
     ...(node.prompt ? { prompt: node.prompt } : {}),
     ...(node.rubric ? { rubric: node.rubric } : {})

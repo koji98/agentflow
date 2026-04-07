@@ -257,6 +257,9 @@ describe("graph validation", () => {
             check_kind: "ai",
             prompt: "Evaluate the change.",
             command: "npm",
+            env: {
+              SHOULD_NOT_EXIST: "true"
+            },
             pass_if: {
               exit_code: 0
             }
@@ -277,6 +280,10 @@ describe("graph validation", () => {
         }),
         expect.objectContaining({
           path: "$.graph.steps[1].command",
+          message: expect.stringContaining("does not apply to AI checks")
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].env",
           message: expect.stringContaining("does not apply to AI checks")
         }),
         expect.objectContaining({

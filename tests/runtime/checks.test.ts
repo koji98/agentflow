@@ -281,4 +281,23 @@ describe("runtime checks", () => {
     expect(result.force_killed).toBe(true);
     expect(result.summary).toBe("Deterministic check timed out.");
   });
+
+  it("passes inline env through deterministic checks", async () => {
+    const result = await runDeterministicCheck({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write(process.env.AGENTFLOW_CHECK_ENV ?? '')"],
+      cwd: process.cwd(),
+      env: {
+        AGENTFLOW_CHECK_ENV: "expected-value"
+      },
+      timeout_sec: 30,
+      pass_if: {
+        exit_code: 0
+      },
+      signal: undefined
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.stdout).toBe("expected-value");
+  });
 });

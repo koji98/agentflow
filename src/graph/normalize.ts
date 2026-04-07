@@ -1022,6 +1022,7 @@ function normalizeCheckNode(
       "command",
       "args",
       "cwd",
+      "env",
       "pass_if",
       "prompt",
       "rubric",
@@ -1038,6 +1039,7 @@ function normalizeCheckNode(
   const command = readOptionalString(record.command, `${path}.command`, diagnostics);
   const args = readStringArray(record.args, `${path}.args`, diagnostics);
   const cwd = readOptionalString(record.cwd, `${path}.cwd`, diagnostics);
+  const env = readStringRecord(record.env, `${path}.env`, diagnostics);
   const pass_if = normalizePassIf(record.pass_if, `${path}.pass_if`, diagnostics);
   const prompt = readOptionalString(record.prompt, `${path}.prompt`, diagnostics);
   const rubric = readOptionalString(record.rubric, `${path}.rubric`, diagnostics);
@@ -1065,7 +1067,7 @@ function normalizeCheckNode(
   }
 
   if (check_kind === "ai") {
-    for (const field of ["command", "args", "cwd", "pass_if"] as const) {
+    for (const field of ["command", "args", "cwd", "env", "pass_if"] as const) {
       if (record[field] !== undefined) {
         diagnostics.push({
           path: `${path}.${field}`,
@@ -1096,6 +1098,7 @@ function normalizeCheckNode(
     ...(check_kind === "deterministic" && command ? { command } : {}),
     ...(check_kind === "deterministic" && args ? { args } : {}),
     ...(check_kind === "deterministic" && cwd ? { cwd } : {}),
+    ...(check_kind === "deterministic" && env ? { env } : {}),
     ...(check_kind === "deterministic" && pass_if ? { pass_if } : {}),
     ...(check_kind === "ai" && prompt ? { prompt } : {}),
     ...(check_kind === "ai" && rubric ? { rubric } : {}),

@@ -49,48 +49,50 @@ Optional but useful:
 npm run setup:link
 ```
 
-That lets you use `agentflow ...` directly from the shell. Without linking, use the `npm run ...` commands shown below.
+That lets you use `agentflow ...` directly from the shell.
+
+If you are working from source without linking, use the corresponding `npm run ... -- ...` wrapper commands instead. The docs below use the installed CLI form by default.
 
 ## 2-Minute Quick Start
 
 Inspect the graph contract:
 
 ```bash
-npm run graph-help
+agentflow graph-help
 ```
 
 Validate the included showcase graph:
 
 ```bash
-npm run validate -- --graph .tmp/feature-showcase.json
+agentflow validate --graph .tmp/feature-showcase.json
 ```
 
 Compile it:
 
 ```bash
-npm run compile -- --graph .tmp/feature-showcase.json
+agentflow compile --graph .tmp/feature-showcase.json
 ```
 
 Run it:
 
 ```bash
-npm run run -- --graph .tmp/feature-showcase.json
+agentflow run --graph .tmp/feature-showcase.json
 ```
 
 ## Included Example Graphs
 
-- [`.tmp/fake-plan.json`](/Users/chidiudeze/Documents/GitHub/agentflow/.tmp/fake-plan.json)
+- [`.tmp/fake-plan.json`](.tmp/fake-plan.json)
   Small read-only sample with primitive `agent` and deterministic `check` nodes.
-- [`.tmp/feature-showcase.json`](/Users/chidiudeze/Documents/GitHub/agentflow/.tmp/feature-showcase.json)
+- [`.tmp/feature-showcase.json`](.tmp/feature-showcase.json)
   Broader sample that demonstrates profiles, `sequence`, `parallel`, `repeat`, primitive `agent`, `exec`, deterministic `check`, AI `check`, inputs, context flow, and outputs.
-- [`.tmp/deep-research-showcase.json`](/Users/chidiudeze/Documents/GitHub/agentflow/.tmp/deep-research-showcase.json)
-  Managed workflow sample showing the implemented `deep_research` node plus a downstream handoff node that consumes the synthesized result.
-- [`.tmp/spec-design-showcase.json`](/Users/chidiudeze/Documents/GitHub/agentflow/.tmp/spec-design-showcase.json)
-  Managed workflow sample showing the implemented `spec_design` node plus a downstream handoff node that consumes the published design spec.
-- [`.tmp/execute-spec-showcase.json`](/Users/chidiudeze/Documents/GitHub/agentflow/.tmp/execute-spec-showcase.json)
-  Managed workflow sample showing the implemented `spec_design -> execute_spec` path plus a downstream handoff node that consumes the published implementation handoff.
-- [`.tmp/review-change-showcase.json`](/Users/chidiudeze/Documents/GitHub/agentflow/.tmp/review-change-showcase.json)
-  Managed workflow sample showing the implemented `execute_spec -> review_change` path plus a downstream handoff node that consumes the final published review.
+- [`.tmp/deep-research-showcase.json`](.tmp/deep-research-showcase.json)
+  Managed workflow sample showing `deep_research` plus a downstream handoff node that consumes the synthesized result.
+- [`.tmp/spec-design-showcase.json`](.tmp/spec-design-showcase.json)
+  Managed workflow sample showing `spec_design` plus a downstream handoff node that consumes the published design spec.
+- [`.tmp/execute-spec-showcase.json`](.tmp/execute-spec-showcase.json)
+  Managed workflow sample showing the `spec_design -> execute_spec` path plus a downstream handoff node that consumes the published implementation handoff.
+- [`.tmp/review-change-showcase.json`](.tmp/review-change-showcase.json)
+  Managed workflow sample showing the `execute_spec -> review_change` path plus a downstream handoff node that consumes the final published review.
 
 Important path rule:
 
@@ -150,269 +152,32 @@ Container node kinds:
 - `parallel`
 - `repeat`
 
-Managed workflow direction:
+Managed workflow kinds:
 
 - `deep_research`
 - `spec_design`
 - `execute_spec`
 - `review_change`
 
-`deep_research`, `spec_design`, `execute_spec`, and `review_change` are implemented now as structured managed workflows that lower into generated primitive subgraphs. Start with [docs/MANAGED_WORKFLOWS.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/MANAGED_WORKFLOWS.md). The concrete contracts for the implementation and review stages are documented in [docs/EXECUTE_SPEC_WORKFLOW.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/EXECUTE_SPEC_WORKFLOW.md) and [docs/REVIEW_CHANGE_WORKFLOW.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/REVIEW_CHANGE_WORKFLOW.md).
+`deep_research`, `spec_design`, `execute_spec`, and `review_change` are structured managed workflows that compile into generated primitive subgraphs. Start with [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md). The workflow-specific contracts live in [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md), [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md), and [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md).
 
-### `deep_research`
+Managed workflow summary:
 
-`deep_research` is the first real managed workflow node.
+- `deep_research`
+  Clarifies a research question, fans out investigators, reconciles contradictions, and publishes a final report.
+- `spec_design`
+  Turns a problem statement into an implementation-ready design spec using repo-first inspection and targeted fallback research.
+- `execute_spec`
+  Executes a structured spec source through planning, implementation, validation, and bounded repair.
+- `review_change`
+  Reviews a structured change source with a multi-reviewer panel and publishes merged findings.
 
-Required fields:
+For workflow fields, authored examples, and compiled phases:
 
-- `type: "deep_research"`
-- `id`
-- `question`
-- `objective`
-
-Optional fields:
-
-- `label`
-- `repo`
-- `profile`
-- `inputs`
-- `context_from`
-- `outputs`
-- `timeout_sec`
-- `audience`
-- `sources`
-- `deliverable`
-- `orchestration`
-
-Current structured sub-objects:
-
-- `sources`
-  - `web`
-  - `files`
-  - `apps`
-  - `allow_domains`
-  - `deny_domains`
-- `deliverable`
-  - `format`
-  - `citations`
-  - `sections`
-- `orchestration`
-  - `track_count`
-  - `max_parallel_tracks`
-  - `summary_fan_in`
-  - `final_critique`
-
-What it does today:
-
-1. clarifies the research brief
-2. plans the work
-3. generates track briefs
-4. fans out parallel research workers
-5. scans for contradictions
-6. reduces track summaries through a summary tree
-7. synthesizes the final report
-8. optionally critiques the final report
-
-The original `deep_research` node id becomes the final synthesis node in the lowered workflow, so downstream nodes can reference it normally through `context_from`.
-
-### `spec_design`
-
-`spec_design` is the second real managed workflow node.
-
-Required fields:
-
-- `type: "spec_design"`
-- `id`
-- `problem`
-- `goal`
-
-Optional fields:
-
-- `label`
-- `repo`
-- `profile`
-- `inputs`
-- `context_from`
-- `outputs`
-- `timeout_sec`
-- `audience`
-- `constraints`
-- `decision_drivers`
-- `scope`
-- `research_policy`
-- `deliverable`
-- `orchestration`
-
-Current structured sub-objects:
-
-- `scope`
-  - `paths`
-  - `areas`
-- `research_policy`
-  - `repo_first`
-  - `allow_web_fallback`
-  - `web_triggers`
-  - `allow_domains`
-  - `max_external_research_tasks`
-- `deliverable`
-  - `format`
-  - `sections`
-- `orchestration`
-  - `option_count`
-  - `max_parallel_options`
-  - `critique_roles`
-  - `revision_rounds`
-
-What it does today:
-
-1. clarifies the problem
-2. inspects the repository
-3. assesses whether repo context is sufficient
-4. optionally fans out targeted external research tasks
-5. synthesizes the design constraints
-6. generates parallel design options
-7. compares tradeoffs
-8. drafts the initial spec
-9. runs a bounded critique-and-quality revision loop
-10. publishes the final design spec and supporting outputs
-
-The original `spec_design` node id becomes the final published spec node in the lowered workflow, so downstream nodes can reference it normally through `context_from`.
-
-### `execute_spec`
-
-`execute_spec` is the third implemented managed workflow node.
-
-It is implemented now as a structured managed workflow that lowers into a generated primitive subgraph. The fuller contract and design notes live in [EXECUTE_SPEC_WORKFLOW.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/EXECUTE_SPEC_WORKFLOW.md).
-
-The key design choice is that `execute_spec` should require a structured `spec_source`, not a vague prompt.
-
-Required fields:
-
-- `type: "execute_spec"`
-- `id`
-- `spec_source`
-
-Optional fields:
-
-- `label`
-- `repo`
-- `profile`
-- `inputs`
-- `context_from`
-- `outputs`
-- `timeout_sec`
-- `objective`
-- `scope`
-- `execution_policy`
-- `validation`
-- `implementation_research`
-- `delivery`
-
-Current structured sub-objects:
-
-- `spec_source`
-  - `kind: "managed_node"` with `node`
-  - `kind: "artifact_bundle"` with `design_spec` and optional supporting references
-- `scope`
-  - `paths`
-  - `areas`
-- `execution_policy`
-  - `max_repair_rounds`
-- `validation`
-  - `commands`
-  - `required`
-- `implementation_research`
-  - `allow_official_docs_fallback`
-  - `allow_domains`
-  - `max_external_lookup_tasks`
-- `delivery`
-  - `write_change_summary`
-  - `write_validation_results`
-  - `write_residual_risks`
-  - `write_files_touched`
-  - `write_implementation_plan`
-
-Supported `spec_source` modes:
-
-- `managed_node`
-  - use a prior managed node, usually `spec_design`
-- `artifact_bundle`
-  - use file-based or external spec artifacts
-
-What it does today:
-
-1. ingest the spec packet
-2. assess whether the spec is executable
-3. inspect the repo for execution context
-4. optionally do narrow implementation research
-5. plan execution
-6. implement the spec with a single writer
-7. run a bounded stabilize-and-validate repair loop
-8. publish the final handoff
-
-The original `execute_spec` node id becomes the final published handoff node in the lowered workflow, so downstream nodes can reference it normally through `context_from`.
-
-### `review_change`
-
-`review_change` is the fourth implemented managed workflow node.
-
-It is implemented now as a structured managed workflow that lowers into a generated primitive subgraph. The fuller contract lives in [REVIEW_CHANGE_WORKFLOW.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/REVIEW_CHANGE_WORKFLOW.md).
-
-Required fields:
-
-- `type: "review_change"`
-- `id`
-- `review_source`
-
-Optional fields:
-
-- `label`
-- `repo`
-- `profile`
-- `inputs`
-- `context_from`
-- `outputs`
-- `timeout_sec`
-- `scope`
-- `criteria`
-- `orchestration`
-- `delivery`
-
-Current structured sub-objects:
-
-- `review_source`
-  - `kind: "managed_node"` with `node`
-  - `kind: "artifact_bundle"` with `diff`, `summary`, `validation_results`, `files_touched`, and `additional_context`
-- `scope`
-  - `paths`
-  - `areas`
-- `criteria`
-  - `focus`
-  - `require_file_references`
-- `orchestration`
-  - `reviewer_roles`
-  - `max_parallel_reviewers`
-- `delivery`
-  - `write_review_report`
-  - `write_findings_json`
-  - `write_findings_markdown`
-
-Supported `review_source` modes:
-
-- `managed_node`
-  - use a prior managed node, usually `execute_spec`
-- `artifact_bundle`
-  - use file-based or external review inputs
-
-What it does today:
-
-1. prepares a review packet from the review source and repo state
-2. fans out parallel role-based reviewers
-3. merges reviewer findings
-4. runs a normalization AI gate over the merged result
-5. publishes the final prose and machine-readable review
-
-The original `review_change` node id becomes the final published review node in the lowered workflow, so downstream nodes can reference it normally through `context_from`.
+- [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md)
+- [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md)
+- [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md)
+- [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md)
 
 ### Runs root
 
@@ -476,7 +241,7 @@ Resolution rules:
 Prints the current graph contract and a minimal example.
 
 ```bash
-npm run graph-help
+agentflow graph-help
 ```
 
 ### `validate`
@@ -484,7 +249,7 @@ npm run graph-help
 Validates and compiles a graph without running it.
 
 ```bash
-npm run validate -- --graph ./agentflow.graph.json
+agentflow validate --graph ./agentflow.graph.json
 ```
 
 Use this first whenever you author or change a graph.
@@ -494,7 +259,7 @@ Use this first whenever you author or change a graph.
 Shows the compiled graph contract that the runtime will actually execute.
 
 ```bash
-npm run compile -- --graph ./agentflow.graph.json
+agentflow compile --graph ./agentflow.graph.json
 ```
 
 Use this when you want to inspect lowered managed nodes, resolved profiles, compiled ids, repeat wiring, and dependency edges.
@@ -504,14 +269,14 @@ Use this when you want to inspect lowered managed nodes, resolved profiles, comp
 Compiles and executes the graph and writes a new run root with artifacts.
 
 ```bash
-npm run run -- --graph ./agentflow.graph.json
+agentflow run --graph ./agentflow.graph.json
 ```
 
 Useful flags:
 
 ```bash
-npm run run -- --graph ./agentflow.graph.json --workspace-backend worktree
-npm run run -- --graph ./agentflow.graph.json --profile default --label demo
+agentflow run --graph ./agentflow.graph.json --workspace-backend worktree
+agentflow run --graph ./agentflow.graph.json --profile default --label demo
 ```
 
 During a run, `agent` and AI `check` nodes append live harness output into each execution's `stdout.log` and `stderr.log` under the run root. The final completed logs still remain the authoritative artifact.
@@ -529,7 +294,7 @@ Cancel behavior:
 Resumes a failed or canceled run root in place.
 
 ```bash
-npm run resume -- --run-root ./.agentflow/runs/<run-id>
+agentflow resume --run-root ./.agentflow/runs/<run-id>
 ```
 
 Resume behavior:
@@ -590,8 +355,8 @@ Use these in increasing order of proof.
 ### Basic graph checks
 
 ```bash
-npm run validate -- --graph .tmp/fake-plan.json
-npm run compile -- --graph .tmp/feature-showcase.json
+agentflow validate --graph .tmp/fake-plan.json
+agentflow compile --graph .tmp/feature-showcase.json
 ```
 
 ### Package-level smoke gate
@@ -633,18 +398,19 @@ If you only want the commands most people need first:
 
 ```bash
 npm install
-npm run graph-help
-npm run validate -- --graph .tmp/feature-showcase.json
-npm run compile -- --graph .tmp/feature-showcase.json
-npm run run -- --graph .tmp/feature-showcase.json
-npm run resume -- --run-root ./.agentflow/runs/<run-id>
+npm run setup:link
+agentflow graph-help
+agentflow validate --graph .tmp/feature-showcase.json
+agentflow compile --graph .tmp/feature-showcase.json
+agentflow run --graph .tmp/feature-showcase.json
+agentflow resume --run-root ./.agentflow/runs/<run-id>
 ```
 
 ## Where To Read Next
 
 You should not need anything else to get started. If you want deeper detail after that:
 
-- [SCOPE.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/SCOPE.md): supported product surface
-- [ARCHITECTURE.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/ARCHITECTURE.md): compiler, runtime, and artifact contracts
-- [OPERATIONS.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/OPERATIONS.md): runs-root behavior, lifecycle, cleanup, and operator runbook
-- [MANAGED_WORKFLOWS.md](/Users/chidiudeze/Documents/GitHub/agentflow/docs/MANAGED_WORKFLOWS.md): managed workflow model and shipped workflow nodes
+- [`docs/SCOPE.md`](docs/SCOPE.md): supported product surface
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): compiler, runtime, and artifact contracts
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md): runs-root behavior, lifecycle, cleanup, and operator runbook
+- [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md): managed workflow model and shipped workflow nodes

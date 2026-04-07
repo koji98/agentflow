@@ -1,8 +1,8 @@
 # `review_change` Workflow
 
-This document defines the authored contract and current first-version compiled behavior for the implemented `review_change` managed workflow.
+This document defines the authored contract and compiled behavior for the `review_change` managed workflow.
 
-It is implemented now as a generated primitive subgraph lowered during graph normalization.
+`review_change` compiles into a generated primitive subgraph during graph normalization.
 
 ## Purpose
 
@@ -156,7 +156,7 @@ Optional workflow fields:
 - `orchestration`
 - `delivery`
 
-## Current Schema
+## Example Authored Schema
 
 ```json
 {
@@ -222,7 +222,7 @@ Current fields:
 - `write_findings_json`
 - `write_findings_markdown`
 
-## Current Compiled Workflow
+## Compiled Workflow
 
 `review_change` compiles into an internal primitive workflow shaped like this:
 
@@ -259,7 +259,7 @@ Each reviewer writes:
 - `findings-<role>.md`
 - `findings-<role>.json`
 
-The current reviewer JSON schema is:
+Reviewer JSON schema:
 
 ```json
 {

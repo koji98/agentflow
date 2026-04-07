@@ -128,6 +128,7 @@ export interface CheckNode extends BaseExecutableNode {
   command?: string;
   args?: string[];
   cwd?: string;
+  env?: Record<string, string>;
   pass_if?: DeterministicPassIf;
   prompt?: string;
   rubric?: string;
