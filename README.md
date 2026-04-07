@@ -121,6 +121,22 @@ See also: [`docs/examples/graphs/README.md`](docs/examples/graphs/README.md)
 - [`docs/examples/graphs/review-change-showcase.json`](docs/examples/graphs/review-change-showcase.json)
   Managed workflow sample showing the `execute_spec -> review_change` path plus a downstream handoff node that consumes the final published review.
 
+## Packaged Skills
+
+This repo also ships installable agent skills under [`skills/`](skills/README.md) in a `skills.sh` compatible layout.
+
+Included skills:
+
+- [`agentflow-graph-authoring`](skills/agentflow-graph-authoring/SKILL.md)
+- [`agentflow-managed-workflows`](skills/agentflow-managed-workflows/SKILL.md)
+- [`agentflow-run-debugging`](skills/agentflow-run-debugging/SKILL.md)
+
+Once the repo is published, supporting agents can install the package with:
+
+```bash
+npx skills add <owner/repo>
+```
+
 Important path rule:
 
 - `--graph` resolves from the shell current working directory.

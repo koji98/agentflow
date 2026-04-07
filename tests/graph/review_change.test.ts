@@ -72,7 +72,7 @@ function buildDocument(steps) {
 }
 
 describe("review change managed workflow", () => {
-  it("lowers to the v2 review workflow with review planning, reviewer fanout, merge, and calibration", () => {
+  it("lowers to the review workflow with review planning, reviewer fanout, merge, and calibration", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument([
         buildReviewStep({

@@ -623,7 +623,7 @@ describe("graph CLI", () => {
     expect(firstRun.exitCode).toBe(1);
     expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-v1\n");
 
-    await writeGraph("seed-v2");
+    await writeGraph("seed-updated");
     await writeFile(join(repoDir, "resume-ok.txt"), "ok\n");
 
     const resumedRun = await executeCli(["resume", "--run-root", firstPayload.run_root], tempRoot);
@@ -634,8 +634,8 @@ describe("graph CLI", () => {
     expect(resumedPayload.status).toBe("passed");
     expect(resumedPayload.preserved_node_count).toBe(0);
     expect(resumedPayload.restarted_node_count).toBe(3);
-    expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-v2\n");
-    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-v2\n");
+    expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-updated\n");
+    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
@@ -765,7 +765,7 @@ describe("graph CLI", () => {
     expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-v1\n");
     expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-v1\n");
 
-    await writeGraph("seed-v2");
+    await writeGraph("seed-updated");
     await writeFile(join(repoDir, "resume-ok.txt"), "ok\n");
 
     const resumedRun = await executeCli(["resume", "--run-root", firstPayload.run_root], tempRoot);
@@ -783,9 +783,9 @@ describe("graph CLI", () => {
     expect(resumedState.counts.passed).toBe(5);
     expect(resumedState.repeat_scopes.scope__root__retry.status).toBe("passed");
     expect(resumedState.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(1);
-    expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-v2\n");
-    expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-v2\n");
-    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-v2\n");
+    expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-updated\n");
+    expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-updated\n");
+    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
@@ -945,7 +945,7 @@ describe("graph CLI", () => {
     );
 
     await writeFile(statePath, `${JSON.stringify(mutatedState, null, 2)}\n`);
-    await writeFile(join(repoDir, "seed.txt"), "seed-v2\n");
+    await writeFile(join(repoDir, "seed.txt"), "seed-updated\n");
     await writeFile(join(repoDir, "resume-ok.txt"), "ok\n");
 
     const resumedRun = await executeCli(["resume", "--run-root", firstPayload.run_root], tempRoot);
@@ -963,8 +963,8 @@ describe("graph CLI", () => {
     expect(resumedState.status).toBe("passed");
     expect(resumedState.repeat_scopes.scope__root__retry.status).toBe("passed");
     expect(resumedState.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(1);
-    expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-v2\n");
-    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-v2\n");
+    expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-updated\n");
+    expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);

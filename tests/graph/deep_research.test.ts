@@ -66,7 +66,7 @@ function buildDocument(stepOverrides = {}) {
 }
 
 describe("deep research managed workflow", () => {
-  it("lowers to the v2 research workflow with optional plan approval and first-class research artifacts", () => {
+  it("lowers to the research workflow with optional plan approval and first-class research artifacts", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument({
         approval_policy: {

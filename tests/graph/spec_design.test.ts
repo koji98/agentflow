@@ -68,7 +68,7 @@ function buildDocument(stepOverrides = {}) {
 }
 
 describe("spec design managed workflow", () => {
-  it("lowers to the v2 repo-first design workflow with optional direction approval and an autonomous revision loop", () => {
+  it("lowers to the repo-first design workflow with optional direction approval and an autonomous revision loop", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument({
         approval_policy: {

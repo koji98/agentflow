@@ -168,7 +168,7 @@ describe("runtime resume", () => {
       }
     });
 
-    await writeFile(join(fixture.repoDir, "watched.txt"), "v2\n");
+    await writeFile(join(fixture.repoDir, "watched.txt"), "updated\n");
 
     const resumed = await buildResumedSession(fixture);
 
@@ -370,7 +370,7 @@ describe("runtime resume", () => {
       }
     });
 
-    await writeFile(join(fixture.repoDir, "AGENTS.md"), "v2\n");
+    await writeFile(join(fixture.repoDir, "AGENTS.md"), "updated\n");
 
     const resumed = await buildResumedSession(fixture);
 
@@ -418,7 +418,7 @@ describe("runtime resume", () => {
       }
     });
 
-    await writeFile(join(fixture.repoDir, ".cursor", "rules", "review.mdc"), "v2\n");
+    await writeFile(join(fixture.repoDir, ".cursor", "rules", "review.mdc"), "updated\n");
 
     const resumed = await buildResumedSession(fixture);
 

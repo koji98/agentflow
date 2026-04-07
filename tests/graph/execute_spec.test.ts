@@ -99,7 +99,7 @@ function buildDocument(steps) {
 }
 
 describe("execute spec managed workflow", () => {
-  it("lowers to the v2 single-writer execution workflow with optional plan approval and a bounded repair loop", () => {
+  it("lowers to the single-writer execution workflow with optional plan approval and a bounded repair loop", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument([
         buildExecuteStep({
