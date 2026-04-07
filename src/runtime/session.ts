@@ -1,11 +1,5 @@
 import type { CompiledExecutableNode, CompiledGraph, CompiledRepeatScope } from "../graph/compiled.js";
 import type { WorkspaceBackend } from "../graph/schema.js";
-import {
-  resolveExecutionDirectoryName,
-  resolveNodeArtifactDirectory,
-  resolveNodeArtifactDirectoryName,
-  resolveRunArtifactPaths
-} from "../artifacts/paths.js";
 import type { AttemptRegistry, RuntimeNodeAttempt } from "./attempts.js";
 
 export type RuntimeNodeStatus =
@@ -106,29 +100,6 @@ export interface RuntimeStateSnapshot {
   active_executions: Record<string, ActiveExecutionSummary>;
   latest_execution_by_compiled_id: Record<string, LatestExecutionSummary>;
   repeat_scopes: Record<string, RepeatScopeState>;
-  artifact_index: {
-    run_root: string;
-    nodes_dir: string;
-    nodes_by_compiled_id: Record<string, {
-      authored_id: string;
-      kind: CompiledExecutableNode["kind"];
-      label: string;
-      directory_name: string;
-      directory_path: string;
-    }>;
-    compiled_id_by_directory_name: Record<string, string>;
-    executions_by_id: Record<string, {
-      compiled_id: string;
-      authored_id: string;
-      kind: CompiledExecutableNode["kind"];
-      directory_name: string;
-      directory_path: string;
-      attempt_index: number;
-      repeat_scope_id?: string;
-      iteration_index?: number;
-    }>;
-    execution_id_by_directory_name: Record<string, string>;
-  };
   started_at: string;
   ended_at?: string;
 }
@@ -321,47 +292,6 @@ export function completeRepeatIteration(
 
 export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeStateSnapshot {
   const snapshot_seq = Math.max(0, session.next_event_seq - 1);
-  const runPaths = resolveRunArtifactPaths(session.run_root);
-  const nodes_by_compiled_id = Object.fromEntries(
-    session.graph.nodes.map((node) => {
-      const directory_name = resolveNodeArtifactDirectoryName(node.compiled_id);
-      return [
-        node.compiled_id,
-        {
-          authored_id: node.authored_id,
-          kind: node.kind,
-          label: node.label ?? node.authored_id,
-          directory_name,
-          directory_path: resolveNodeArtifactDirectory(session.run_root, node.compiled_id)
-        }
-      ];
-    })
-  );
-  const compiled_id_by_directory_name = Object.fromEntries(
-    session.graph.nodes.map((node) => [resolveNodeArtifactDirectoryName(node.compiled_id), node.compiled_id])
-  );
-  const attempts = [...session.attempts.by_compiled_id.values()].flat();
-  const executions_by_id = Object.fromEntries(
-    attempts.map((attempt) => {
-      const directory_name = resolveExecutionDirectoryName(attempt.execution_id);
-      return [
-        attempt.execution_id,
-        {
-          compiled_id: attempt.compiled_id,
-          authored_id: attempt.authored_id,
-          kind: attempt.kind,
-          directory_name,
-          directory_path: attempt.execution_dir,
-          attempt_index: attempt.attempt_index,
-          ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
-          ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {})
-        }
-      ];
-    })
-  );
-  const execution_id_by_directory_name = Object.fromEntries(
-    attempts.map((attempt) => [resolveExecutionDirectoryName(attempt.execution_id), attempt.execution_id])
-  );
 
   return {
     run_id: session.run_id,
@@ -375,14 +305,6 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     active_executions: Object.fromEntries(session.active_executions),
     latest_execution_by_compiled_id: Object.fromEntries(session.latest_execution_by_compiled_id),
     repeat_scopes: Object.fromEntries(session.repeat_scopes),
-    artifact_index: {
-      run_root: session.run_root,
-      nodes_dir: runPaths.nodes_dir,
-      nodes_by_compiled_id,
-      compiled_id_by_directory_name,
-      executions_by_id,
-      execution_id_by_directory_name
-    },
     started_at: session.started_at,
     ...(session.ended_at ? { ended_at: session.ended_at } : {})
   };

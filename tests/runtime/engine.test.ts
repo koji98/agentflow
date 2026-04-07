@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -62,6 +62,15 @@ async function waitFor(
   }
 
   throw new Error(`Condition not met within ${timeout_ms}ms.`);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 describe("runtime engine", () => {
@@ -262,17 +271,13 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("passed");
     expect(maxParallel).toBe(2);
     expect(run.state.status).toBe("passed");
-    expect(run.state.artifact_index.run_root).toBe(runRoot);
-    expect(run.state.artifact_index.nodes_by_compiled_id.root__setup.directory_name).toContain("node-");
-    expect(run.state.artifact_index.nodes_by_compiled_id.root__setup.directory_path).toContain("/nodes/node-");
-    expect(
-      run.state.artifact_index.compiled_id_by_directory_name[
-        run.state.artifact_index.nodes_by_compiled_id.root__setup.directory_name
-      ]
-    ).toBe("root__setup");
-    expect(
-      run.state.artifact_index.executions_by_id[run.attempts[0]!.execution_id].directory_path
-    ).toBe(run.attempts[0]!.execution_dir);
+    expect(run.attempts[0]?.execution_dir).toBe(
+      resolveNodeExecutionDirectory(
+        runRoot,
+        run.attempts[0]!.compiled_id,
+        run.attempts[0]!.execution_id
+      )
+    );
     expect(run.state.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(2);
     expect(run.state.repeat_scopes.scope__root__retry.status).toBe("passed");
     expect(
@@ -301,7 +306,107 @@ describe("runtime engine", () => {
         ended_at: expect.any(String)
       })
     );
+    expect(JSON.parse(await readFile(join(runRoot, "execution_manifest.json"), "utf8"))).toEqual(
+      expect.objectContaining({
+        run_id: run.run_id,
+        repo_workspaces: {
+          main: expect.objectContaining({
+            repo_alias: "main",
+            source_path: repoDir,
+            workspace_path: repoDir,
+            backend: "inplace"
+          })
+        }
+      })
+    );
+    expect(await pathExists(join(runRoot, "repos"))).toBe(false);
+    await Promise.all(
+      run.attempts.map(async (attempt) => {
+        expect(await pathExists(join(attempt.execution_dir, "artifacts"))).toBe(false);
+      })
+    );
     expect(await readFile(join(runRoot, "summary.md"), "utf8")).toContain("- Status: `passed`");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("creates artifacts only when workspace outputs are materialized", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-workspace-output-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-workspace-output",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "produce-report",
+            command: "placeholder",
+            outputs: [
+              {
+                name: "report",
+                from: "workspace",
+                path: "reports/report.md",
+                required: true
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async ({ workspace_path, node }) => {
+          await mkdir(join(workspace_path, "reports"), { recursive: true });
+          await writeFile(join(workspace_path, "reports", "report.md"), `report for ${node.authored_id}\n`);
+          return {
+            status: "passed",
+            outcome: "passed",
+            result: {
+              node: node.authored_id
+            },
+            stdout: "",
+            stderr: ""
+          };
+        }
+      }
+    });
+
+    const attempt = run.attempts[0];
+    const copiedArtifactPath = join(attempt!.execution_dir, "artifacts", "reports", "report.md");
+
+    expect(run.outcome).toBe("passed");
+    expect(attempt?.output_artifacts).toEqual({
+      report: copiedArtifactPath
+    });
+    expect(await pathExists(join(attempt!.execution_dir, "artifacts"))).toBe(true);
+    expect(await readFile(copiedArtifactPath, "utf8")).toBe("report for produce-report\n");
 
     await rm(tempRoot, { recursive: true, force: true });
   });

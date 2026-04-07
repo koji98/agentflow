@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -58,6 +58,15 @@ function compileGraph(document: AuthoredGraphDocument) {
 
 async function writeJson(filePath: string, payload: unknown): Promise<void> {
   await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function countNodeStatuses(nodeStatuses: Record<string, string>) {
@@ -361,6 +370,16 @@ describe("artifacts projection", () => {
     const fixture = await createFixtureRun();
 
     try {
+      const state = await readRunState(fixture.runRoot);
+
+      expect("artifact_index" in state).toBe(false);
+      expect(await pathExists(join(fixture.runRoot, "repos"))).toBe(false);
+      await Promise.all(
+        fixture.run.attempts.map(async (attempt) => {
+          expect(await pathExists(join(attempt.execution_dir, "artifacts"))).toBe(false);
+        })
+      );
+
       const runs = await listProjectedRuns(fixture.runsRoot);
       expect(runs).toHaveLength(1);
       expect(runs[0]?.status).toBe("Passed");

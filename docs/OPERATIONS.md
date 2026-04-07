@@ -48,7 +48,6 @@ Expected durable artifacts under the run root:
 - `state.json`
 - `events.jsonl`
 - `summary.md`
-- `repos/`
 - `workspaces/`
 - `nodes/`
 
@@ -59,7 +58,8 @@ Lifecycle rules that matter operationally:
 - `validate` and `compile` never create a run root.
 - `run` creates the run root before execution so preflight failures still leave inspectable artifacts.
 - `summary.md`, `run.json`, `state.json`, and `events.jsonl` are expected to agree on the terminal outcome.
-- `state.json` includes an `artifact_index` block with clear node and execution directory records plus reverse lookups for hashed directory names.
+- `execution_manifest.json` is the single durable source of repo workspace bindings and compiled execution policy.
+- `state.json` is runtime state only; it does not persist a filesystem index of node or execution directories.
 
 Cleanup and reconciliation rules:
 
@@ -77,6 +77,8 @@ What the operator should expect:
 - A canceled run is canceled from the terminal that launched `run` with `Ctrl-C`.
 - `run` and `resume` print live graph progress to `stderr` while the final structured JSON result stays on `stdout`, so shell pipelines can still consume the command result without parsing progress noise.
 - The `workspaces/` directory is an implementation detail of the run and is not preserved as a long-lived checkout contract after worktree cleanup.
+- Node and execution directories under `nodes/` use hashed names on disk.
+- Execution-root runtime files live directly in each execution directory; `artifacts/` appears only when workspace outputs are materialized there.
 
 ## Recommended Dev Workflow
 

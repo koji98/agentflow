@@ -122,7 +122,6 @@ export interface RunArtifactPaths {
   state_file: string;
   events_file: string;
   summary_file: string;
-  repos_dir: string;
   workspaces_dir: string;
   nodes_dir: string;
 }
@@ -138,14 +137,9 @@ export function resolveRunArtifactPaths(runRoot: string): RunArtifactPaths {
     state_file: join(runRoot, "state.json"),
     events_file: join(runRoot, "events.jsonl"),
     summary_file: join(runRoot, "summary.md"),
-    repos_dir: join(runRoot, "repos"),
     workspaces_dir: join(runRoot, "workspaces"),
     nodes_dir: join(runRoot, "nodes")
   };
-}
-
-export function resolveRepoManifestPath(runRoot: string, repoAlias: string): string {
-  return join(resolveRunArtifactPaths(runRoot).repos_dir, `${sanitizePathSegment(repoAlias)}.json`);
 }
 
 export function resolveNodeExecutionDirectory(

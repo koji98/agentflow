@@ -837,27 +837,26 @@ Run artifacts live under the run root:
   state.json
   events.jsonl
   summary.md
-  repos/
-    <repo_alias>.json
   workspaces/
     <repo_alias>/
   nodes/
-    <compiled_id>/
+    node-<hash>/
       executions/
-        <execution_id>/
+        exec-<hash>/
           execution.json
           context_packet.json
           context_summary.md
           stdout.log
           stderr.log
           result.json
-          artifacts/
+          artifacts/   # present only when workspace outputs are copied here
 ```
 
 `<runs-root>` resolves from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
 
 ### Artifact rules
 
+- run-root records and execution-root records are runtime bookkeeping; `artifacts/` is reserved for produced outputs
 - `authored_graph.json` is the exact launched graph snapshot
 - `compiled_graph.json` is the runtime truth
 - `execution_manifest.json` freezes effective policy and workspace mapping
@@ -866,7 +865,10 @@ Run artifacts live under the run root:
 - `state.json` is the latest projected read model
 - `events.jsonl` is append-only and authoritative for history
 - `summary.md` is written for every terminal run, including preflight failure with zero node executions
+- node and execution directories use stable hashed names on disk, not literal `compiled_id` or `execution_id` values
 - execution directories are immutable once closed except for final summary writes
+- execution-root files are always written directly in the execution directory: `execution.json`, `context_packet.json`, `context_summary.md`, `stdout.log`, `stderr.log`, and `result.json`
+- `artifacts/` is optional and exists only when Agentflow materializes declared workspace outputs there
 - `workspaces/` is durable only for an active `worktree` run. Once the run reaches a terminal state or workspace init rolls back, the manifest still records the historical path, but the worktree directory itself may already be gone
 - projection reads may repair stale `pending` or `running` artifacts into a terminal failed state when the recorded runtime owner fingerprint no longer matches a live local process or when a terminal run record or terminal event proves the durable state drifted
 

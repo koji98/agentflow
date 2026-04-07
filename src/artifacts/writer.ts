@@ -6,7 +6,6 @@ import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js
 import type { GraphDiagnostic } from "../graph/schema.js";
 import {
   resolveNodeExecutionDirectory,
-  resolveRepoManifestPath,
   resolveRunArtifactPaths
 } from "./paths.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
@@ -71,7 +70,6 @@ export class ArtifactWriter {
     state: RuntimeStateSnapshot;
   } & RunOwnerRecord): Promise<void> {
     await mkdir(this.run_root, { recursive: true });
-    await mkdir(this.paths.repos_dir, { recursive: true });
     await mkdir(this.paths.workspaces_dir, { recursive: true });
     await mkdir(this.paths.nodes_dir, { recursive: true });
 
@@ -101,12 +99,6 @@ export class ArtifactWriter {
     } catch {
       await writeText(this.paths.events_file, "");
     }
-
-    await Promise.all(
-      Object.entries(options.manifest.repo_workspaces).map(([repoAlias, binding]) =>
-        writeJson(resolveRepoManifestPath(this.run_root, repoAlias), binding)
-      )
-    );
   }
 
   async appendEvent(event: RuntimeEventEnvelope): Promise<void> {
@@ -136,16 +128,12 @@ export class ArtifactWriter {
     stdout_log_path: string;
     stderr_log_path: string;
     result_path: string;
-    artifacts_dir: string;
   }> {
     const executionDir = attempt.execution_dir;
     const executionJsonPath = join(executionDir, "execution.json");
     const stdoutLogPath = join(executionDir, "stdout.log");
     const stderrLogPath = join(executionDir, "stderr.log");
     const resultPath = join(executionDir, "result.json");
-    const artifactsDir = join(executionDir, "artifacts");
-
-    await mkdir(artifactsDir, { recursive: true });
     await writeJson(executionJsonPath, {
       execution_id: attempt.execution_id,
       compiled_id: attempt.compiled_id,
@@ -167,8 +155,7 @@ export class ArtifactWriter {
       execution_json_path: executionJsonPath,
       stdout_log_path: stdoutLogPath,
       stderr_log_path: stderrLogPath,
-      result_path: resultPath,
-      artifacts_dir: artifactsDir
+      result_path: resultPath
     };
   }
 
