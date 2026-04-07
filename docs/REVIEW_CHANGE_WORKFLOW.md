@@ -26,12 +26,23 @@ The intended lifecycle is:
 ```mermaid
 flowchart TD
     prepare["prepare_review_packet"]
-    reviewers["parallel_reviewer_panel"]
     merge["merge_findings"]
     normalize["normalize_findings"]
     publish["publish_review"]
 
-    prepare --> reviewers --> merge --> normalize --> publish
+    subgraph reviewers["parallel_reviewer_panel"]
+        r1["correctness_reviewer"]
+        r2["regression_reviewer"]
+        r3["test_coverage_reviewer"]
+    end
+
+    prepare --> r1
+    prepare --> r2
+    prepare --> r3
+    r1 --> merge
+    r2 --> merge
+    r3 --> merge
+    merge --> normalize --> publish
 ```
 
 ## Core Principle

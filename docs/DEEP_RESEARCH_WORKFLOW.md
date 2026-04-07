@@ -28,16 +28,51 @@ flowchart TD
     clarify["clarify"]
     plan["plan"]
     tracks["generate_tracks"]
-    fanout["parallel track_fanout"]
     contradictions["contradiction_scan"]
-    reduce["summary reduction rounds"]
     synth["final_synthesis"]
     critique{"final_critique?"}
     finalCritique["final_critique"]
+    done["publish final report"]
 
-    clarify --> plan --> tracks --> fanout --> contradictions --> reduce --> synth --> critique
+    subgraph fanout["parallel track_fanout"]
+        t1["track_01"]
+        t2["track_02"]
+        t3["track_03"]
+        tN["track_N"]
+    end
+
+    subgraph reduce1["parallel reduce_round_1"]
+        r11["reduce_r1_g1"]
+        r12["reduce_r1_g2"]
+    end
+
+    subgraph reduce2["parallel reduce_round_2"]
+        r21["reduce_r2_g1"]
+    end
+
+    clarify --> plan --> tracks
+    tracks --> t1
+    tracks --> t2
+    tracks --> t3
+    tracks --> tN
+
+    t1 --> contradictions
+    t2 --> contradictions
+    t3 --> contradictions
+    tN --> contradictions
+
+    t1 --> r11
+    t2 --> r11
+    t3 --> r12
+    tN --> r12
+
+    r11 --> r21
+    r12 --> r21
+    contradictions --> synth
+    r21 --> synth
+    synth --> critique
     critique -->|yes| finalCritique
-    critique -->|no| done["publish final report"]
+    critique -->|no| done
     finalCritique --> done
 ```
 
@@ -192,6 +227,13 @@ Validation rules:
 
 - `summary_fan_in` must be at least `2`
 - `max_parallel_tracks` is capped to `track_count`
+
+Practical meaning:
+
+- `track_count` controls the logical research breadth
+- `max_parallel_tracks` is only a runtime concurrency cap
+- `max_parallel_tracks` does not change how many track briefs are generated or how many summaries must be synthesized; it only limits how many track workers may run at once
+- most users can leave `max_parallel_tracks` at its default unless they need to control local concurrency, model budget, or provider rate pressure
 
 ## Compiled Workflow
 

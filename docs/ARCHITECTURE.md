@@ -659,7 +659,6 @@ The state store must be able to answer:
 
 - static `inputs`
 - upstream `context_from` references
-- repo instruction files discovered from the workspace root
 - repo metadata and workspace paths
 - effective `input_rules`
 
@@ -675,18 +674,12 @@ Context resolution produces:
 - `execution_id`
 - target repo alias and workspace path
 - one entry per materialized input
-- one entry per attached repo rule file
 - original source descriptor for each entry
 - materialized file path inside the execution directory
 - byte counts and truncation flags
 - omitted optional items
 
-Repo rule-file discovery is intentionally lean in this release:
-
-- `AGENTS.md`
-- `CLAUDE.md`
-- `.cursorrules`
-- files under `.cursor/rules/`
+Agentflow does not duplicate repository instruction files into the context packet. Harness-native instruction discovery stays with the harness itself.
 
 The release does not implement retrieval, embeddings, ranking, or semantic search. Input resolution is explicit file and artifact materialization only.
 

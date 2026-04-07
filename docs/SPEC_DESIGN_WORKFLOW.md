@@ -27,20 +27,55 @@ flowchart TD
     clarify["clarify_problem"]
     inspect["inspect_repo"]
     gap{"repo context sufficient?"}
-    research["parallel_external_research"]
     constraints["synthesize_constraints"]
-    options["parallel_option_generation"]
     tradeoffs["compare_tradeoffs"]
     draft["draft_spec"]
-    critique["parallel_critique_panel"]
     merge["merge_critiques"]
-    revise["repeat revision loop"]
+    revise{"revise again?"}
+    reviseNode["revise_spec"]
     finalize["finalize_spec"]
 
+    subgraph research["parallel_external_research"]
+        er1["research_track_1"]
+        er2["research_track_2"]
+    end
+
+    subgraph options["parallel_option_generation"]
+        o1["option_1"]
+        o2["option_2"]
+        oN["option_N"]
+    end
+
+    subgraph critique["parallel_critique_panel"]
+        c1["architecture"]
+        c2["product"]
+        c3["operations"]
+    end
+
     clarify --> inspect --> gap
-    gap -->|no| research --> constraints
     gap -->|yes| constraints
-    constraints --> options --> tradeoffs --> draft --> critique --> merge --> revise --> finalize
+    gap -->|no| er1
+    gap -->|no| er2
+    er1 --> constraints
+    er2 --> constraints
+
+    constraints --> o1
+    constraints --> o2
+    constraints --> oN
+    o1 --> tradeoffs
+    o2 --> tradeoffs
+    oN --> tradeoffs
+
+    tradeoffs --> draft
+    draft --> c1
+    draft --> c2
+    draft --> c3
+    c1 --> merge
+    c2 --> merge
+    c3 --> merge
+    merge --> revise
+    revise -->|yes| reviseNode --> draft
+    revise -->|no| finalize
 ```
 
 ## Core Principle

@@ -158,11 +158,9 @@ describe("checkpoint CLI helpers", () => {
             truncated: false
           }
         ],
-        rule_files: [],
         omitted: [],
         totals: {
           material_count: 1,
-          rule_file_count: 0,
           file_count: 1,
           total_bytes: 300
         }
@@ -260,11 +258,9 @@ describe("checkpoint CLI helpers", () => {
             truncated: false
           }
         ],
-        rule_files: [],
         omitted: [],
         totals: {
           material_count: 1,
-          rule_file_count: 0,
           file_count: 1,
           total_bytes: 6
         }

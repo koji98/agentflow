@@ -176,7 +176,9 @@ export function buildAiCheckPrompt(options: {
     "",
     "## Context",
     `- Context packet: ${options.context_packet_path}`,
-    "- Review the context packet and any attached rule files before deciding.",
+    "- Review the context packet before deciding.",
+    "- Use the context summary to identify omitted or truncated materials before making a judgment.",
+    "- Treat any project instructions the harness loads automatically from the repository as the default local contract, unless the evaluation task explicitly changes them or a higher-priority instruction overrides them.",
     "- This is a read-only evaluation.",
     ...(options.rubric
       ? [

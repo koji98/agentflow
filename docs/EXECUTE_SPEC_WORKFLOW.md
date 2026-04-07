@@ -36,13 +36,20 @@ flowchart TD
     implResearch["targeted_implementation_research"]
     plan["plan_execution"]
     implement["implement_spec"]
-    repair["repeat repair loop"]
+    validate{"validation_gate passed?"}
+    repairBudget{"repair budget left?"}
+    repair["stabilize_implementation"]
     publish["publish_handoff"]
+    fail["stop with failed validation"]
 
     ingest --> readiness --> inspect --> research
     research -->|yes| implResearch --> plan
     research -->|no| plan
-    plan --> implement --> repair --> publish
+    plan --> implement --> validate
+    validate -->|yes| publish
+    validate -->|no| repairBudget
+    repairBudget -->|yes| repair --> validate
+    repairBudget -->|no| fail
 ```
 
 ## Core Principle

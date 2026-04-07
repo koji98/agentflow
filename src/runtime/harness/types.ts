@@ -130,9 +130,10 @@ export function deriveContextSummaryPath(contextPacketPath: string): string {
 
 export function renderHarnessPrompt(invocation: AgentInvocation): string {
   return [
+    "## Agentflow Task",
     invocation.prompt,
     "",
-    "## Agentflow Runtime Context",
+    "## Runtime Context",
     `- Run ID: ${invocation.runId}`,
     `- Execution ID: ${invocation.executionId}`,
     `- Repo alias: ${invocation.repoAlias}`,
@@ -142,8 +143,15 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     `- Context summary: ${deriveContextSummaryPath(invocation.contextPacketPath)}`,
     `- Output directory: ${invocation.outputDir}`,
     "",
-    "Review the context packet and any attached rule files before acting.",
-    "Write any attempt-local artifacts to the output directory when the node declares them.",
-    "Follow any output-format requirements stated in the node prompt."
+    "## Working Contract",
+    "- Read the context packet first. Use the context summary to understand what materials are available.",
+    "- If the context summary reports omitted or truncated items, treat the available context as partial and avoid overconfident assumptions.",
+    "- Treat any project instructions the harness loads automatically from the repository as the default local contract, unless the task explicitly changes them or a higher-priority instruction overrides them.",
+    "- Keep changes scoped to the requested task. Do not redesign the system unless the task explicitly requires it.",
+    "- Make the smallest correct change that satisfies the task. If the task changes a repository convention, update that convention intentionally and coherently within the requested scope.",
+    "- If the task or context names validation steps, run the relevant checks when feasible and report the results.",
+    "- If blocked by missing context, failing commands, or conflicting instructions, explain the blocker clearly instead of guessing.",
+    "- Write declared attempt-local artifacts to the output directory.",
+    "- Follow any explicit output-format requirements stated in the node prompt."
   ].join("\n");
 }

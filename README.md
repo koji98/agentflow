@@ -4,6 +4,15 @@ Agentflow is a local-first execution engine for coding graphs.
 
 You write a graph JSON file, Agentflow validates it, compiles it into an executable graph, runs it against one or more local repositories, and stores durable artifacts for later inspection.
 
+```mermaid
+flowchart LR
+    authored["Author graph JSON"] --> validate["Validate contract"]
+    validate --> compile["Compile to executable graph"]
+    compile --> run["Run against local repos"]
+    run --> artifacts["Write durable artifacts"]
+    artifacts --> inspect["Inspect or resume later"]
+```
+
 The intended workflow is:
 
 1. author a graph

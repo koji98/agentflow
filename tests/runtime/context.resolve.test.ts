@@ -118,25 +118,15 @@ describe("context resolution", () => {
     });
 
     expect(resolved.packet.materials).toHaveLength(3);
-    expect(resolved.packet.rule_files).toHaveLength(2);
     expect(resolved.packet.omitted).toEqual([]);
     expect(resolved.packet.totals).toEqual({
       material_count: 3,
-      rule_file_count: 2,
-      file_count: 5,
+      file_count: 3,
       total_bytes: expect.any(Number)
     });
     expect(await readFile(resolved.summary_path, "utf8")).toContain("Materialized items");
-    expect(await readFile(resolved.summary_path, "utf8")).toContain("Rule files");
-    const packet = JSON.parse(await readFile(resolved.packet_path, "utf8")) as {
-      rule_files: Array<{
-        rule_kind: string;
-      }>;
-    };
-    expect(packet.rule_files.map((ruleFile) => ruleFile.rule_kind)).toEqual([
-      "agents",
-      "cursor-rule"
-    ]);
+    expect(await readFile(resolved.summary_path, "utf8")).toContain("Truncated items");
+    expect(await readFile(resolved.summary_path, "utf8")).not.toContain("Rule files");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -207,7 +197,6 @@ describe("context resolution", () => {
     });
 
     expect(resolved.packet.materials).toEqual([]);
-    expect(resolved.packet.rule_files).toEqual([]);
     expect(resolved.packet.omitted).toEqual([
       {
         key: "context_1",
@@ -378,9 +367,93 @@ describe("context resolution", () => {
     });
 
     expect(resolved.packet.materials).toHaveLength(2);
-    expect(resolved.packet.rule_files).toEqual([]);
     expect(await readFile(resolved.packet.materials[0]!.materialized_path, "utf8")).toBe("iteration 2 latest\n");
     expect(await readFile(resolved.packet.materials[1]!.materialized_path, "utf8")).toBe("iteration 2 attempt 2\n");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("marks truncated materials clearly in the packet and summary", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-truncation-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(
+      join(repoDir, "large-note.md"),
+      [
+        "# Large note",
+        "",
+        "Line one should survive.",
+        "Line two should survive.",
+        "Line three should be cut off because the file is too large for the configured byte limit."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "context-truncation",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "file",
+                path: "large-note.md"
+              }
+            ]
+          }
+        ]
+      }
+    });
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
+    consumerNode.effective_policy.input_rules.max_bytes_per_item = 120;
+
+    const resolved = await resolveExecutionContext({
+      compiled_graph: compilation.compiled_graph!,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toHaveLength(1);
+    expect(resolved.packet.materials[0]?.truncated).toBe(true);
+
+    const materialized = await readFile(resolved.packet.materials[0]!.materialized_path, "utf8");
+    const summary = await readFile(resolved.summary_path, "utf8");
+
+    expect(materialized).toContain("Line one should survive.");
+    expect(materialized).toContain("[Truncated by Agentflow. Read the original file for full context.]");
+    expect(summary).toContain("- Truncated items: `1`");
+    expect(summary).toContain("bytes, truncated");
 
     await rm(tempRoot, { recursive: true, force: true });
   });

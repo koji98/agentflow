@@ -16,15 +16,6 @@ export interface ContextPacketOmittedItem {
   optional: boolean;
 }
 
-export interface ContextPacketRuleFile {
-  key: string;
-  rule_kind: "agents" | "claude" | "cursor-legacy" | "cursor-rule";
-  source_path: string;
-  materialized_path: string;
-  bytes: number;
-  truncated: boolean;
-}
-
 export interface ContextPacket {
   execution_id: string;
   compiled_id: string;
@@ -32,11 +23,9 @@ export interface ContextPacket {
   repo_alias: string;
   workspace_path: string;
   materials: ContextPacketMaterializedItem[];
-  rule_files: ContextPacketRuleFile[];
   omitted: ContextPacketOmittedItem[];
   totals: {
     material_count: number;
-    rule_file_count: number;
     file_count: number;
     total_bytes: number;
   };

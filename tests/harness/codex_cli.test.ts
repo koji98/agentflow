@@ -228,6 +228,10 @@ describe("codex cli harness", () => {
       expect(prompt).toContain("Context packet");
       expect(prompt).toContain(join(executionDir, "context_packet.json"));
       expect(prompt).toContain("Output directory");
+      expect(prompt).toContain("## Working Contract");
+      expect(prompt).toContain("default local contract");
+      expect(prompt).toContain("higher-priority instruction overrides them");
+      expect(prompt).toContain("If the context summary reports omitted or truncated items");
       expect(result.outputJson).toEqual({
         passed: true,
         summary: "codex ok"

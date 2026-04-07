@@ -26,12 +26,37 @@ These compile into generated primitive subgraphs with built-in orchestration, pr
 
 ```mermaid
 flowchart LR
-    research["deep_research"]
-    design["spec_design"]
-    execute["execute_spec"]
-    review["review_change"]
+    subgraph research["deep_research"]
+        dr1["clarify"]
+        dr2["fan-out tracks"]
+        dr3["fan-in synthesis"]
+        dr1 --> dr2 --> dr3
+    end
 
-    research --> design --> execute --> review
+    subgraph design["spec_design"]
+        sd1["inspect"]
+        sd2["fan-out options"]
+        sd3["fan-in critique"]
+        sd1 --> sd2 --> sd3
+    end
+
+    subgraph execute["execute_spec"]
+        es1["ingest"]
+        es2["implement"]
+        es3["validate and repair loop"]
+        es1 --> es2 --> es3
+    end
+
+    subgraph review["review_change"]
+        rc1["prepare"]
+        rc2["fan-out reviewers"]
+        rc3["fan-in findings"]
+        rc1 --> rc2 --> rc3
+    end
+
+    dr3 --> sd1
+    sd3 --> es1
+    es3 --> rc1
 ```
 
 ## Design Rule
@@ -86,6 +111,9 @@ Authored fields:
 - optional `orchestration.max_parallel_tracks`
 - optional `orchestration.summary_fan_in`
 - optional `orchestration.final_critique`
+
+Authoring note:
+- `orchestration.max_parallel_tracks` is an advanced runtime concurrency cap, not a research-breadth control. `track_count` defines how many logical tracks exist; `max_parallel_tracks` only limits how many workers may run at the same time.
 
 Concrete contract:
 - see [`DEEP_RESEARCH_WORKFLOW.md`](DEEP_RESEARCH_WORKFLOW.md)

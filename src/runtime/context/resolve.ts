@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
@@ -9,8 +9,7 @@ import { listAttemptsForCompiledNode, selectAttempt } from "../attempts.js";
 import type {
   ContextPacket,
   ContextPacketMaterializedItem,
-  ContextPacketOmittedItem,
-  ContextPacketRuleFile
+  ContextPacketOmittedItem
 } from "./packet.js";
 
 interface MaterializedPayload {
@@ -27,12 +26,6 @@ export interface ResolveContextOptions {
   workspace_path: string;
   repo_workspaces: Record<string, string>;
   attempts: AttemptRegistry;
-}
-
-interface RuleFileSource {
-  rule_kind: ContextPacketRuleFile["rule_kind"];
-  source_path: string;
-  relative_path: string;
 }
 
 function normalizeRelativePath(value: string): string {
@@ -72,15 +65,6 @@ async function walkFiles(rootPath: string, currentPath = rootPath): Promise<stri
   return files;
 }
 
-async function pathExists(pathValue: string): Promise<boolean> {
-  try {
-    await access(pathValue);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function materializeBytes(
   contents: string | Buffer,
   destinationPath: string,
@@ -89,7 +73,7 @@ async function materializeBytes(
   await mkdir(dirname(destinationPath), { recursive: true });
   const buffer = Buffer.isBuffer(contents) ? contents : Buffer.from(contents);
   const truncatedBuffer =
-    buffer.byteLength > maxBytesPerItem ? buffer.subarray(0, maxBytesPerItem) : buffer;
+    buffer.byteLength > maxBytesPerItem ? truncateMaterializedBuffer(buffer, maxBytesPerItem) : buffer;
   await writeFile(destinationPath, truncatedBuffer);
 
   return {
@@ -97,6 +81,83 @@ async function materializeBytes(
     truncated: truncatedBuffer.byteLength !== buffer.byteLength,
     file_path: destinationPath
   };
+}
+
+const truncatedTextNotice =
+  "[Truncated by Agentflow. Read the original file for full context.]\n";
+
+function tryDecodeUtf8(buffer: Buffer): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    return undefined;
+  }
+}
+
+function sliceTextToByteLimit(text: string, maxBytes: number): string {
+  let low = 0;
+  let high = text.length;
+
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const candidate = text.slice(0, mid);
+
+    if (Buffer.byteLength(candidate, "utf8") <= maxBytes) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return text.slice(0, low);
+}
+
+function truncateTextBuffer(buffer: Buffer, maxBytes: number): Buffer | undefined {
+  const decoded = tryDecodeUtf8(buffer);
+
+  if (decoded === undefined) {
+    return undefined;
+  }
+
+  const noticeBytes = Buffer.byteLength(truncatedTextNotice, "utf8");
+
+  if (maxBytes <= noticeBytes + 1) {
+    return undefined;
+  }
+
+  const availableBytes = maxBytes - noticeBytes;
+  const lines = decoded.split(/(?<=\n)/u);
+  let selected = "";
+  let usedBytes = 0;
+
+  for (const line of lines) {
+    const lineBytes = Buffer.byteLength(line, "utf8");
+
+    if (usedBytes + lineBytes > availableBytes) {
+      const remainingBytes = availableBytes - usedBytes;
+
+      if (remainingBytes > 0) {
+        selected += sliceTextToByteLimit(line, remainingBytes);
+      }
+
+      break;
+    }
+
+    selected += line;
+    usedBytes += lineBytes;
+  }
+
+  if (selected.length === 0) {
+    selected = sliceTextToByteLimit(decoded, availableBytes);
+  }
+
+  const trimmed = selected.replace(/\s+$/u, "");
+  const prefix = trimmed.length > 0 ? `${trimmed}\n\n` : "";
+  return Buffer.from(`${prefix}${truncatedTextNotice}`, "utf8");
+}
+
+function truncateMaterializedBuffer(buffer: Buffer, maxBytes: number): Buffer {
+  return truncateTextBuffer(buffer, maxBytes) ?? buffer.subarray(0, maxBytes);
 }
 
 function splitQualifiedPath(
@@ -168,87 +229,6 @@ function selectAttemptsForReference(
 
   const selected = selectAttempt(filteredByIteration, attemptSelector);
   return selected ? [selected] : [];
-}
-
-async function discoverRuleFileSources(workspacePath: string): Promise<RuleFileSource[]> {
-  const discovered: RuleFileSource[] = [];
-
-  const staticRuleFiles: Array<{
-    relative_path: string;
-    rule_kind: RuleFileSource["rule_kind"];
-  }> = [
-    {
-      relative_path: "AGENTS.md",
-      rule_kind: "agents"
-    },
-    {
-      relative_path: "CLAUDE.md",
-      rule_kind: "claude"
-    },
-    {
-      relative_path: ".cursorrules",
-      rule_kind: "cursor-legacy"
-    }
-  ];
-
-  for (const ruleFile of staticRuleFiles) {
-    const sourcePath = join(workspacePath, ruleFile.relative_path);
-
-    if (await pathExists(sourcePath)) {
-      discovered.push({
-        rule_kind: ruleFile.rule_kind,
-        source_path: sourcePath,
-        relative_path: ruleFile.relative_path
-      });
-    }
-  }
-
-  const cursorRulesRoot = join(workspacePath, ".cursor", "rules");
-
-  if (!(await pathExists(cursorRulesRoot))) {
-    return discovered;
-  }
-
-  const rulePaths = (await walkFiles(cursorRulesRoot)).sort((left, right) => left.localeCompare(right));
-
-  for (const rulePath of rulePaths) {
-    discovered.push({
-      rule_kind: "cursor-rule",
-      source_path: rulePath,
-      relative_path: normalizeRelativePath(relative(workspacePath, rulePath))
-    });
-  }
-
-  return discovered;
-}
-
-async function materializeRuleFiles(
-  options: ResolveContextOptions,
-  maxBytesPerItem: number
-): Promise<ContextPacketRuleFile[]> {
-  const ruleSources = await discoverRuleFileSources(options.workspace_path);
-
-  return Promise.all(
-    ruleSources.map(async (ruleSource, index) => {
-      const contents = await readFile(ruleSource.source_path);
-      const destinationPath = join(
-        options.execution_dir,
-        "context_materialized",
-        "rules",
-        ...normalizeRelativePath(ruleSource.relative_path).split("/")
-      );
-      const materialized = await materializeBytes(contents, destinationPath, maxBytesPerItem);
-
-      return {
-        key: `rule_${index + 1}`,
-        rule_kind: ruleSource.rule_kind,
-        source_path: ruleSource.source_path,
-        materialized_path: destinationPath,
-        bytes: materialized.bytes,
-        truncated: materialized.truncated
-      };
-    })
-  );
 }
 
 async function materializeInputItem(
@@ -429,6 +409,7 @@ async function materializeContextReference(
 }
 
 function renderContextSummary(packet: ContextPacket): string {
+  const truncatedCount = packet.materials.filter((item) => item.truncated).length;
   const lines = [
     `# Context Summary: ${packet.execution_id}`,
     "",
@@ -436,9 +417,10 @@ function renderContextSummary(packet: ContextPacket): string {
     `- Repo: \`${packet.repo_alias}\``,
     `- Workspace: \`${packet.workspace_path}\``,
     `- Materialized items: \`${packet.totals.material_count}\``,
-    `- Rule files: \`${packet.totals.rule_file_count}\``,
     `- Total files: \`${packet.totals.file_count}\``,
     `- Total bytes: \`${packet.totals.total_bytes}\``,
+    `- Truncated items: \`${truncatedCount}\``,
+    `- Omitted optional items: \`${packet.omitted.length}\``,
     ""
   ];
 
@@ -446,18 +428,8 @@ function renderContextSummary(packet: ContextPacket): string {
     lines.push("## Materials", "");
 
     for (const item of packet.materials) {
-      lines.push(`- \`${item.key}\` -> \`${item.materialized_path}\` (${item.bytes} bytes)`);
-    }
-
-    lines.push("");
-  }
-
-  if (packet.rule_files.length > 0) {
-    lines.push("## Rule Files", "");
-
-    for (const ruleFile of packet.rule_files) {
       lines.push(
-        `- \`${ruleFile.key}\` -> \`${ruleFile.materialized_path}\` (${ruleFile.rule_kind}, ${ruleFile.bytes} bytes)`
+        `- \`${item.key}\` -> \`${item.materialized_path}\` (${item.bytes} bytes${item.truncated ? ", truncated" : ""})`
       );
     }
 
@@ -483,10 +455,6 @@ export async function resolveExecutionContext(
   summary_path: string;
 }> {
   const materials: ContextPacketMaterializedItem[] = [];
-  const rule_files = await materializeRuleFiles(
-    options,
-    options.node.effective_policy.input_rules.max_bytes_per_item
-  );
   const omitted: ContextPacketOmittedItem[] = [];
 
   for (const [index, input] of (options.node.inputs ?? []).entries()) {
@@ -512,9 +480,8 @@ export async function resolveExecutionContext(
   }
 
   const total_bytes =
-    materials.reduce((sum, item) => sum + item.bytes, 0) +
-    rule_files.reduce((sum, ruleFile) => sum + ruleFile.bytes, 0);
-  const file_count = materials.length + rule_files.length;
+    materials.reduce((sum, item) => sum + item.bytes, 0);
+  const file_count = materials.length;
 
   if (file_count > options.node.effective_policy.input_rules.max_files) {
     throw new Error(
@@ -535,11 +502,9 @@ export async function resolveExecutionContext(
     repo_alias: options.node.repo,
     workspace_path: options.workspace_path,
     materials,
-    rule_files,
     omitted,
     totals: {
       material_count: materials.length,
-      rule_file_count: rule_files.length,
       file_count,
       total_bytes
     }
