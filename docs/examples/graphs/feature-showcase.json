@@ -19,7 +19,6 @@
       "sandbox": "read-only",
       "timeout_sec": 900,
       "input_rules": {
-        "max_files": 12,
         "max_total_bytes": 393216,
         "max_bytes_per_item": 131072
       }
@@ -31,7 +30,6 @@
       "sandbox": "read-only",
       "timeout_sec": 1200,
       "input_rules": {
-        "max_files": 16,
         "max_total_bytes": 524288,
         "max_bytes_per_item": 131072
       }

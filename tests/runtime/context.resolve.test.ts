@@ -457,4 +457,155 @@ describe("context resolution", () => {
 
     await rm(tempRoot, { recursive: true, force: true });
   });
+
+  it("does not fail solely because many small files are materialized", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-many-files-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+
+    for (const [index, contents] of ["one", "two", "three", "four", "five"].entries()) {
+      await writeFile(join(repoDir, `note-${index + 1}.md`), `${contents}\n`, "utf8");
+    }
+
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "context-many-small-files",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          input_rules: {
+            max_total_bytes: 1024,
+            max_bytes_per_item: 256
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "glob",
+                path: "*.md"
+              }
+            ]
+          }
+        ]
+      }
+    });
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
+
+    const resolved = await resolveExecutionContext({
+      compiled_graph: compilation.compiled_graph!,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toHaveLength(5);
+    expect(resolved.packet.totals).toEqual({
+      material_count: 5,
+      file_count: 5,
+      total_bytes: expect.any(Number)
+    });
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("fails when resolved context exceeds max_total_bytes", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-byte-budget-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, "first.txt"), "abcdefghij", "utf8");
+    await writeFile(join(repoDir, "second.txt"), "klmnopqrst", "utf8");
+
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "context-byte-budget",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          input_rules: {
+            max_total_bytes: 12,
+            max_bytes_per_item: 32
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "file",
+                path: "first.txt"
+              },
+              {
+                kind: "file",
+                path: "second.txt"
+              }
+            ]
+          }
+        ]
+      }
+    });
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
+
+    await expect(
+      resolveExecutionContext({
+        compiled_graph: compilation.compiled_graph!,
+        node: consumerNode,
+        execution_id: "exec__consumer__attempt_1",
+        execution_dir: join(tempRoot, "consumer"),
+        workspace_path: repoDir,
+        repo_workspaces: {
+          main: repoDir
+        },
+        attempts: createAttemptRegistry()
+      })
+    ).rejects.toThrow("Resolved 20 context bytes, exceeding max_total_bytes 12.");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
 });

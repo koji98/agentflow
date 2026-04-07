@@ -483,12 +483,6 @@ export async function resolveExecutionContext(
     materials.reduce((sum, item) => sum + item.bytes, 0);
   const file_count = materials.length;
 
-  if (file_count > options.node.effective_policy.input_rules.max_files) {
-    throw new Error(
-      `Resolved ${file_count} context files, exceeding max_files ${options.node.effective_policy.input_rules.max_files}.`
-    );
-  }
-
   if (total_bytes > options.node.effective_policy.input_rules.max_total_bytes) {
     throw new Error(
       `Resolved ${total_bytes} context bytes, exceeding max_total_bytes ${options.node.effective_policy.input_rules.max_total_bytes}.`

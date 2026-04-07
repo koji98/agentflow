@@ -29,7 +29,6 @@ function createCompiledGraph(): CompiledGraph {
           sandbox: "read-only",
           timeout_sec: 60,
           input_rules: {
-            max_files: 16,
             max_total_bytes: 65536,
             max_bytes_per_item: 8192
           }
@@ -56,7 +55,6 @@ function createCompiledGraph(): CompiledGraph {
           sandbox: "read-only",
           timeout_sec: 60,
           input_rules: {
-            max_files: 16,
             max_total_bytes: 65536,
             max_bytes_per_item: 8192
           }

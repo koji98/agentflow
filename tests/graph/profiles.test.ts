@@ -109,7 +109,6 @@ describe("graph profile resolution", () => {
           harness: "codex-cli",
           timeout_sec: 900,
           input_rules: {
-            max_files: 12,
             max_total_bytes: 262144
           }
         },
@@ -142,7 +141,6 @@ describe("graph profile resolution", () => {
       workspace_backend: "inplace",
       timeout_sec: 15,
       input_rules: {
-        max_files: 12,
         max_total_bytes: 65536,
         max_bytes_per_item: 2048
       }

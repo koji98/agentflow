@@ -449,7 +449,6 @@ describe("graph compilation", () => {
           sandbox: "workspace-write",
           timeout_sec: 900,
           input_rules: {
-            max_files: 12,
             max_total_bytes: 131072,
             max_bytes_per_item: 32768
           }
@@ -460,7 +459,6 @@ describe("graph compilation", () => {
           sandbox: "read-only",
           timeout_sec: 120,
           input_rules: {
-            max_files: 4,
             max_total_bytes: 65536,
             max_bytes_per_item: 16384
           }
@@ -526,7 +524,6 @@ describe("graph compilation", () => {
             sandbox: "read-only",
             timeout_sec: 120,
             input_rules: {
-              max_files: 4,
               max_total_bytes: 65536,
               max_bytes_per_item: 16384
             }
@@ -539,7 +536,6 @@ describe("graph compilation", () => {
             workspace_backend: "inplace",
             timeout_sec: 900,
             input_rules: {
-              max_files: 12,
               max_total_bytes: 131072,
               max_bytes_per_item: 32768
             }
@@ -726,60 +722,4 @@ describe("graph compilation", () => {
     );
   });
 
-  it("rejects glob inputs that exceed the effective input max_files policy", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "glob-policy-mismatch",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          input_rules: {
-            max_files: 2
-          }
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "exec",
-            id: "collect",
-            command: "placeholder",
-            inputs: [
-              {
-                kind: "glob",
-                path: "src/**/*.ts",
-                max_files: 3
-              }
-            ]
-          }
-        ]
-      }
-    });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.steps[0].inputs",
-          message: "glob.max_files 3 exceeds effective input_rules.max_files 2."
-        })
-      ])
-    );
-  });
 });

@@ -326,11 +326,18 @@ function normalizeInputRules(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["max_files", "max_total_bytes", "max_bytes_per_item"],
+    ["max_total_bytes", "max_bytes_per_item"],
     diagnostics
   );
 
-  const max_files = readPositiveInteger(record.max_files, `${path}.max_files`, diagnostics);
+  if (record.max_files !== undefined) {
+    diagnostics.push({
+      path: `${path}.max_files`,
+      message:
+        "input_rules.max_files is no longer supported. Use input_rules.max_total_bytes for global context budgets and glob.max_files to cap specific globs."
+    });
+  }
+
   const max_total_bytes = readPositiveInteger(
     record.max_total_bytes,
     `${path}.max_total_bytes`,
@@ -343,7 +350,6 @@ function normalizeInputRules(
   );
 
   return {
-    ...(max_files !== undefined ? { max_files } : {}),
     ...(max_total_bytes !== undefined ? { max_total_bytes } : {}),
     ...(max_bytes_per_item !== undefined ? { max_bytes_per_item } : {})
   };

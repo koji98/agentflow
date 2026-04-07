@@ -15,7 +15,6 @@ export interface RepoDefinition {
 }
 
 export interface InputRules {
-  max_files?: number;
   max_total_bytes?: number;
   max_bytes_per_item?: number;
 }

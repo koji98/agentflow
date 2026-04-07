@@ -521,20 +521,6 @@ function validateCompiledContextReferences(
   });
 
   compiledGraph.nodes.forEach((node) => {
-    node.inputs.forEach((input) => {
-      if (input.kind !== "glob" || input.max_files === undefined) {
-        return;
-      }
-
-      if (input.max_files > node.effective_policy.input_rules.max_files) {
-        const path = context.authored_paths.get(node.authored_id) ?? `$.graph.${node.authored_id}`;
-        context.diagnostics.push({
-          path: `${path}.inputs`,
-          message: `glob.max_files ${input.max_files} exceeds effective input_rules.max_files ${node.effective_policy.input_rules.max_files}.`
-        });
-      }
-    });
-
     const references = [
       ...node.context_from.map((reference, index) => ({
         reference,

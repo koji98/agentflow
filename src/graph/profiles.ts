@@ -15,7 +15,6 @@ import type {
 import { workspaceBackends } from "./schema.js";
 
 export interface EffectiveInputRules {
-  max_files: number;
   max_total_bytes: number;
   max_bytes_per_item: number;
 }
@@ -44,7 +43,6 @@ export interface LaunchOverrides {
 }
 
 export const builtInInputRules: EffectiveInputRules = {
-  max_files: 64,
   max_total_bytes: 524288,
   max_bytes_per_item: 131072
 };
@@ -55,7 +53,6 @@ export const builtInCodexReasoningEffort: ReasoningEffort = "medium";
 function mergeInputRules(...rules: Array<InputRules | undefined>): EffectiveInputRules {
   return rules.reduce<EffectiveInputRules>(
     (current, next) => ({
-      max_files: next?.max_files ?? current.max_files,
       max_total_bytes: next?.max_total_bytes ?? current.max_total_bytes,
       max_bytes_per_item: next?.max_bytes_per_item ?? current.max_bytes_per_item
     }),

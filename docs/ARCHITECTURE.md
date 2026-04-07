@@ -46,7 +46,6 @@ The authored graph is the operator-facing source document. It is nested, readabl
       "sandbox": "workspace-write",
       "timeout_sec": 1800,
       "input_rules": {
-        "max_files": 64,
         "max_total_bytes": 524288,
         "max_bytes_per_item": 131072
       }
@@ -299,7 +298,7 @@ Rules:
 - Unqualified file and glob paths resolve against the node repo.
 - Repo-qualified paths use `<repo_alias>:<relative_path>`.
 - File and glob paths must stay within the selected repo root.
-- `glob.max_files` may not exceed the effective `input_rules.max_files`.
+- `glob.max_files` is a local cap for that glob only.
 - `text.name` is required and stable inside the materialized context packet.
 
 ### `context_from`
@@ -457,17 +456,15 @@ Inline or profile fields that do not apply to a node kind are rejected at compil
 
 Supported release `input_rules` fields:
 
-- `max_files`
 - `max_total_bytes`
 - `max_bytes_per_item`
 
 Built-in defaults:
 
-- `max_files: 64`
 - `max_total_bytes: 524288`
 - `max_bytes_per_item: 131072`
 
-The runtime enforces these limits during context packet materialization.
+The runtime enforces these byte limits during context packet materialization. If you need to bound a broad file pattern, use `glob.max_files` on that specific input instead of a graph-wide file-count budget.
 
 ## Compiler Contract
 
