@@ -79,16 +79,17 @@ The authored graph is the operator-facing source document. It is nested, readabl
 
 ### Node kinds
 
-Authoring supports six node kinds:
+Authoring supports seven node kinds:
 
 - `agent`
 - `exec`
 - `check`
+- `checkpoint`
 - `sequence`
 - `parallel`
 - `repeat`
 
-Only `agent`, `exec`, and `check` are executable runtime nodes.
+Only `agent`, `exec`, `check`, and `checkpoint` are executable runtime nodes.
 
 Managed-workflow authoring supports:
 
@@ -200,6 +201,32 @@ AI checks must return structured JSON:
 }
 ```
 
+### `checkpoint`
+
+Required fields:
+
+- `type: "checkpoint"`
+- `id`
+- `prompt`
+- `review_from`
+
+Optional shared fields:
+
+- `label`
+- `repo`
+- `profile`
+- `inputs`
+- `context_from`
+- `timeout_sec`
+
+Rules:
+
+- `checkpoint` is only valid inside a `repeat.body` in this release.
+- `review_from` must reference an upstream `context_from.include = "output"` artifact.
+- authored `outputs` are not allowed on checkpoint nodes.
+- the runtime exposes one automatic checkpoint output named `operator_feedback` from `operator-feedback.md`.
+- checkpoint execution requires an interactive terminal because the operator must choose `pass`, `deny`, or `abort`.
+
 ### `sequence`
 
 Required fields:
@@ -245,7 +272,7 @@ Required fields:
 Rules:
 
 - `body` must compile to a single entry region and a single exit region.
-- `until.node` must reference a descendant `check` node inside `body`.
+- `until.node` must reference a descendant `check` or `checkpoint` node inside `body`.
 - on `until.node -> passed`, the runtime exits the repeat scope.
 - on `until.node -> failed` and attempts remain, the runtime follows the explicit repeat back-edge.
 - on `until.node -> failed` and attempts are exhausted, the repeat scope produces terminal failure for the run.

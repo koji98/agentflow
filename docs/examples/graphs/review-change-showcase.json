@@ -1,0 +1,189 @@
+{
+  "version": "1",
+  "graph_id": "review-change-showcase",
+  "repos": {
+    "main": {
+      "path": "../../.."
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "worktree"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 1200,
+      "input_rules": {
+        "max_files": 16,
+        "max_total_bytes": 524288,
+        "max_bytes_per_item": 131072
+      }
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "spec_design",
+        "id": "managed_nodes_spec",
+        "repo": "main",
+        "profile": "default",
+        "problem": "Agentflow needs true managed workflows instead of thin aliases.",
+        "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+        "inputs": [
+          {
+            "kind": "file",
+            "path": "README.md"
+          },
+          {
+            "kind": "file",
+            "path": "docs/MANAGED_WORKFLOWS.md"
+          },
+          {
+            "kind": "file",
+            "path": "docs/REVIEW_CHANGE_WORKFLOW.md"
+          }
+        ],
+        "constraints": [
+          "Keep primitive graph nodes stable.",
+          "Managed workflows must compile into primitive subgraphs.",
+          "The review workflow should publish machine-readable findings."
+        ],
+        "decision_drivers": [
+          "clarity",
+          "reliability",
+          "review quality"
+        ],
+        "scope": {
+          "paths": [
+            "src/**",
+            "docs/**",
+            "tests/**"
+          ],
+          "areas": [
+            "graph",
+            "managed workflows",
+            "docs"
+          ]
+        },
+        "research_policy": {
+          "allow_web_fallback": false,
+          "max_external_research_tasks": 0
+        },
+        "orchestration": {
+          "option_count": 2,
+          "max_parallel_options": 2,
+          "critique_roles": [
+            "architecture",
+            "implementation"
+          ],
+          "revision_rounds": 2
+        }
+      },
+      {
+        "type": "execute_spec",
+        "id": "implement_managed_nodes",
+        "repo": "main",
+        "profile": "default",
+        "objective": "Implement the managed workflow model described by the upstream spec.",
+        "spec_source": {
+          "kind": "managed_node",
+          "node": "managed_nodes_spec"
+        },
+        "scope": {
+          "paths": [
+            "src/**",
+            "docs/**",
+            "tests/**"
+          ],
+          "areas": [
+            "graph",
+            "managed workflows",
+            "docs"
+          ]
+        },
+        "execution_policy": {
+          "max_repair_rounds": 2
+        },
+        "validation": {
+          "commands": [
+            "npm run typecheck",
+            "npm test"
+          ],
+          "required": true
+        }
+      },
+      {
+        "type": "review_change",
+        "id": "review_managed_nodes",
+        "repo": "main",
+        "profile": "default",
+        "review_source": {
+          "kind": "managed_node",
+          "node": "implement_managed_nodes"
+        },
+        "scope": {
+          "paths": [
+            "src/**",
+            "docs/**",
+            "tests/**"
+          ],
+          "areas": [
+            "graph",
+            "managed workflows",
+            "docs"
+          ]
+        },
+        "criteria": {
+          "focus": [
+            "correctness",
+            "missing_tests",
+            "maintainability"
+          ],
+          "require_file_references": true
+        },
+        "orchestration": {
+          "reviewer_roles": [
+            "correctness",
+            "testing",
+            "maintainability"
+          ],
+          "max_parallel_reviewers": 3
+        },
+        "delivery": {
+          "write_review_report": true,
+          "write_findings_json": true,
+          "write_findings_markdown": true
+        }
+      },
+      {
+        "type": "agent",
+        "id": "handoff",
+        "repo": "main",
+        "profile": "default",
+        "prompt": "Summarize the final review for an implementer. Focus on the highest-priority findings, their likely impact, and any validation or residual-risk context from upstream stages.",
+        "context_from": [
+          {
+            "node": "review_managed_nodes",
+            "include": "summary"
+          },
+          {
+            "node": "review_managed_nodes",
+            "include": "output",
+            "output": "review_report"
+          },
+          {
+            "node": "review_managed_nodes",
+            "include": "output",
+            "output": "findings"
+          }
+        ]
+      }
+    ]
+  }
+}

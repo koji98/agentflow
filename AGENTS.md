@@ -10,9 +10,10 @@ This repository is the current Agentflow workspace. Prefer the repository docs a
 4. `docs/OPERATIONS.md`
 5. `docs/ARCHITECTURE.md`
 6. `docs/MANAGED_WORKFLOWS.md`
-7. `docs/SPEC_DESIGN_WORKFLOW.md`
-8. `docs/EXECUTE_SPEC_WORKFLOW.md`
-9. `docs/REVIEW_CHANGE_WORKFLOW.md`
+7. `docs/DEEP_RESEARCH_WORKFLOW.md`
+8. `docs/SPEC_DESIGN_WORKFLOW.md`
+9. `docs/EXECUTE_SPEC_WORKFLOW.md`
+10. `docs/REVIEW_CHANGE_WORKFLOW.md`
 
 ## Canonical Surface
 

@@ -21,6 +21,19 @@ The intended lifecycle is:
 
 `review_change` should also work without `execute_spec` when the user already has a diff, summary, or validation bundle to review.
 
+## Workflow Shape
+
+```mermaid
+flowchart TD
+    prepare["prepare_review_packet"]
+    reviewers["parallel_reviewer_panel"]
+    merge["merge_findings"]
+    normalize["normalize_findings"]
+    publish["publish_review"]
+
+    prepare --> reviewers --> merge --> normalize --> publish
+```
+
 ## Core Principle
 
 `review_change` is findings-driven, not commentary-driven.
@@ -353,7 +366,7 @@ Expanded view should expose:
 2. `review_change` lowers into a generated primitive subgraph in `src/managed`
 3. the original authored node id maps to the final published review node
 4. graph-level tests cover lowering, artifact-bundle source mapping, and downstream dependency behavior
-5. the showcase graph under `.tmp/` demonstrates the `execute_spec -> review_change` path
+5. the showcase graph under `docs/examples/graphs/` demonstrates the `execute_spec -> review_change` path
 
 ## Summary
 

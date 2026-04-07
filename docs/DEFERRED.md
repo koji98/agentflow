@@ -17,7 +17,7 @@ Additional deferred areas:
 - interactive graph editing surfaces
 - background orchestration services
 - resumable control-plane loops
-- human-in-the-loop checkpoint mode that can pause at configured workflow gates, accept operator input, and resume the live run in place without restarting the full graph
+- generalized human-in-the-loop control flow beyond the shipped repeat-scoped `checkpoint` node, including arbitrary workflow pauses, richer operator UIs, and resume semantics outside the current execution contract
 - delivery automation beyond a minimal run summary
 - branch, commit, or pull-request orchestration features
 

@@ -12,7 +12,7 @@ Required product surface:
 - run execution against one or more local git repositories
 - run resume from failed or canceled run roots
 - workspace backends: `inplace` and `worktree`
-- executable node kinds: `agent`, `exec`, `check`
+- executable node kinds: `agent`, `exec`, `check`, `checkpoint`
 - authored container kinds: `sequence`, `parallel`, `repeat`
 - profile resolution
 - Codex CLI and Cursor CLI harness adapters
@@ -34,7 +34,7 @@ Required product surface:
 ### Runtime
 
 - execute compiled graphs only
-- schedule `agent`, `exec`, and `check`
+- schedule `agent`, `exec`, `check`, and `checkpoint`
 - enforce `parallel.max_concurrency`
 - track repeat iterations explicitly
 - stop on terminal failure and cancel other active executions
@@ -80,7 +80,7 @@ The release is complete only when all of the following are true:
 
 Do not build these now:
 
-- new node kinds beyond `agent`, `exec`, `check`, `sequence`, `parallel`, `repeat`
+- new node kinds beyond `agent`, `exec`, `check`, `checkpoint`, `sequence`, `parallel`, `repeat`
 - automatic controller loops
 - remote workspace backends
 - generalized plugin APIs

@@ -25,6 +25,26 @@ The intended lifecycle is:
 
 `execute_spec` should also work without `spec_design` when the user already has a strong spec.
 
+## Workflow Shape
+
+```mermaid
+flowchart TD
+    ingest["ingest_spec"]
+    readiness["assess_spec_readiness"]
+    inspect["inspect_repo_for_execution"]
+    research{"implementation research needed?"}
+    implResearch["targeted_implementation_research"]
+    plan["plan_execution"]
+    implement["implement_spec"]
+    repair["repeat repair loop"]
+    publish["publish_handoff"]
+
+    ingest --> readiness --> inspect --> research
+    research -->|yes| implResearch --> plan
+    research -->|no| plan
+    plan --> implement --> repair --> publish
+```
+
 ## Core Principle
 
 `execute_spec` is spec-driven, not idea-driven.
@@ -191,7 +211,7 @@ Optional workflow fields:
     "commands": [
       "npm run typecheck",
       "npm test",
-      "agentflow validate --graph .tmp/feature-showcase.json"
+      "agentflow validate --graph docs/examples/graphs/feature-showcase.json"
     ],
     "required": true
   },
@@ -498,7 +518,7 @@ Implementation notes:
 2. `execute_spec` lowers into a generated primitive subgraph in `src/managed`
 3. the original authored node id maps to the final published handoff node
 4. graph-level tests cover lowering, artifact-bundle source mapping, and downstream dependency behavior
-5. the showcase graph under `.tmp/` demonstrates the `spec_design -> execute_spec` path
+5. the showcase graph under `docs/examples/graphs/` demonstrates the `spec_design -> execute_spec` path
 
 ## Summary
 

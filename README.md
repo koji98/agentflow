@@ -15,7 +15,7 @@ The intended workflow is:
 ## What Agentflow Does
 
 - Graph-native CLI: `validate`, `compile`, `run`, `resume`, `graph-help`
-- Executable node kinds: `agent`, `exec`, `check`
+- Executable node kinds: `agent`, `exec`, `check`, `checkpoint`
 - Container node kinds: `sequence`, `parallel`, `repeat`
 - Managed workflows: `deep_research`, `spec_design`, `execute_spec`, `review_change`
 - Harness adapters: `codex-cli`, `cursor-cli`
@@ -64,34 +64,36 @@ agentflow graph-help
 Validate the included showcase graph:
 
 ```bash
-agentflow validate --graph .tmp/feature-showcase.json
+agentflow validate --graph docs/examples/graphs/feature-showcase.json
 ```
 
 Compile it:
 
 ```bash
-agentflow compile --graph .tmp/feature-showcase.json
+agentflow compile --graph docs/examples/graphs/feature-showcase.json
 ```
 
 Run it:
 
 ```bash
-agentflow run --graph .tmp/feature-showcase.json
+agentflow run --graph docs/examples/graphs/feature-showcase.json
 ```
 
 ## Included Example Graphs
 
-- [`.tmp/fake-plan.json`](.tmp/fake-plan.json)
+See also: [`docs/examples/graphs/README.md`](docs/examples/graphs/README.md)
+
+- [`docs/examples/graphs/fake-plan.json`](docs/examples/graphs/fake-plan.json)
   Small read-only sample with primitive `agent` and deterministic `check` nodes.
-- [`.tmp/feature-showcase.json`](.tmp/feature-showcase.json)
+- [`docs/examples/graphs/feature-showcase.json`](docs/examples/graphs/feature-showcase.json)
   Broader sample that demonstrates profiles, `sequence`, `parallel`, `repeat`, primitive `agent`, `exec`, deterministic `check`, AI `check`, inputs, context flow, and outputs.
-- [`.tmp/deep-research-showcase.json`](.tmp/deep-research-showcase.json)
+- [`docs/examples/graphs/deep-research-showcase.json`](docs/examples/graphs/deep-research-showcase.json)
   Managed workflow sample showing `deep_research` plus a downstream handoff node that consumes the synthesized result.
-- [`.tmp/spec-design-showcase.json`](.tmp/spec-design-showcase.json)
+- [`docs/examples/graphs/spec-design-showcase.json`](docs/examples/graphs/spec-design-showcase.json)
   Managed workflow sample showing `spec_design` plus a downstream handoff node that consumes the published design spec.
-- [`.tmp/execute-spec-showcase.json`](.tmp/execute-spec-showcase.json)
+- [`docs/examples/graphs/execute-spec-showcase.json`](docs/examples/graphs/execute-spec-showcase.json)
   Managed workflow sample showing the `spec_design -> execute_spec` path plus a downstream handoff node that consumes the published implementation handoff.
-- [`.tmp/review-change-showcase.json`](.tmp/review-change-showcase.json)
+- [`docs/examples/graphs/review-change-showcase.json`](docs/examples/graphs/review-change-showcase.json)
   Managed workflow sample showing the `execute_spec -> review_change` path plus a downstream handoff node that consumes the final published review.
 
 Important path rule:
@@ -99,7 +101,7 @@ Important path rule:
 - `--graph` resolves from the shell current working directory.
 - `$.repos.*.path` resolves relative to the graph file directory.
 
-That is why the sample graphs under `.tmp/` use `"path": ".."` for the main repo.
+That is why the sample graphs under `docs/examples/graphs/` use `"path": "../../.."` for the main repo.
 
 ## Mental Model
 
@@ -145,6 +147,7 @@ Executable node kinds:
 - `agent`
 - `exec`
 - `check`
+- `checkpoint`
 
 Container node kinds:
 
@@ -159,7 +162,7 @@ Managed workflow kinds:
 - `execute_spec`
 - `review_change`
 
-`deep_research`, `spec_design`, `execute_spec`, and `review_change` are structured managed workflows that compile into generated primitive subgraphs. Start with [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md). The workflow-specific contracts live in [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md), [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md), and [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md).
+`deep_research`, `spec_design`, `execute_spec`, and `review_change` are structured managed workflows that compile into generated primitive subgraphs. Start with [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md). The workflow-specific contracts live in [`docs/DEEP_RESEARCH_WORKFLOW.md`](docs/DEEP_RESEARCH_WORKFLOW.md), [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md), [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md), and [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md).
 
 Managed workflow summary:
 
@@ -175,9 +178,18 @@ Managed workflow summary:
 For workflow fields, authored examples, and compiled phases:
 
 - [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md)
+- [`docs/DEEP_RESEARCH_WORKFLOW.md`](docs/DEEP_RESEARCH_WORKFLOW.md)
 - [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md)
 - [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md)
 - [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md)
+
+Authoring contract references:
+
+- Primitive nodes, shared executable fields, containers, `inputs`, `context_from`, and `outputs`: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- `deep_research`: [`docs/DEEP_RESEARCH_WORKFLOW.md`](docs/DEEP_RESEARCH_WORKFLOW.md)
+- `spec_design`: [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md)
+- `execute_spec`: [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md)
+- `review_change`: [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md)
 
 ### Runs root
 
@@ -355,8 +367,8 @@ Use these in increasing order of proof.
 ### Basic graph checks
 
 ```bash
-agentflow validate --graph .tmp/fake-plan.json
-agentflow compile --graph .tmp/feature-showcase.json
+agentflow validate --graph docs/examples/graphs/fake-plan.json
+agentflow compile --graph docs/examples/graphs/feature-showcase.json
 ```
 
 ### Package-level smoke gate
@@ -400,9 +412,9 @@ If you only want the commands most people need first:
 npm install
 npm run setup:link
 agentflow graph-help
-agentflow validate --graph .tmp/feature-showcase.json
-agentflow compile --graph .tmp/feature-showcase.json
-agentflow run --graph .tmp/feature-showcase.json
+agentflow validate --graph docs/examples/graphs/feature-showcase.json
+agentflow compile --graph docs/examples/graphs/feature-showcase.json
+agentflow run --graph docs/examples/graphs/feature-showcase.json
 agentflow resume --run-root ./.agentflow/runs/<run-id>
 ```
 

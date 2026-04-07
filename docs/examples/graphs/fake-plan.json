@@ -1,0 +1,85 @@
+{
+  "version": "1",
+  "graph_id": "fake-plan-demo",
+  "repos": {
+    "main": {
+      "path": "../../..",
+      "default_branch": "main"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "inplace"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "model": "gpt-5.4-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 900,
+      "input_rules": {
+        "max_files": 8,
+        "max_total_bytes": 262144,
+        "max_bytes_per_item": 131072
+      }
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "inspect_repo",
+        "repo": "main",
+        "prompt": "Inspect this repository and summarize what it does, the main CLI commands a developer would use first, and any obvious operator-facing constraints. Do not modify files.",
+        "inputs": [
+          {
+            "kind": "file",
+            "path": "README.md"
+          },
+          {
+            "kind": "file",
+            "path": "package.json"
+          },
+          {
+            "kind": "file",
+            "path": "docs/SCOPE.md"
+          }
+        ]
+      },
+      {
+        "type": "check",
+        "id": "verify_package_contract",
+        "repo": "main",
+        "check_kind": "deterministic",
+        "command": "node",
+        "args": [
+          "-e",
+          "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const workspaces=Array.isArray(pkg.workspaces)?pkg.workspaces:[]; const passed=pkg.name==='agentflow' && workspaces.includes('web-app'); console.log(JSON.stringify({passed, package_name: pkg.name, workspace_count: workspaces.length}, null, 2));"
+        ],
+        "pass_if": {
+          "json_path": "$.passed",
+          "equals": true
+        }
+      },
+      {
+        "type": "agent",
+        "id": "summarize_findings",
+        "repo": "main",
+        "prompt": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing. Do not modify files.",
+        "context_from": [
+          {
+            "node": "inspect_repo",
+            "include": "summary"
+          },
+          {
+            "node": "verify_package_contract",
+            "include": "result"
+          }
+        ]
+      }
+    ]
+  }
+}

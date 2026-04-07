@@ -193,6 +193,19 @@ Checks:
 - remember that `validate` and `compile` do not require those binaries, and `npm run validate:smoke` injects temporary mock binaries instead of depending on real installs
 - use `npm run validate:real-harness -- --harness codex-cli` or `cursor-cli` for an additive real-install smoke; it reports `skipped` instead of failing when the selected binary is unavailable
 
+### Checkpoint graphs without an interactive terminal
+
+Symptoms:
+
+- run preflight fails for a graph that includes `checkpoint`
+- diagnostics mention interactive TTY support or missing checkpoint executor
+
+Checks:
+
+- launch `run` or `resume` from an interactive terminal
+- remember that `checkpoint` is only supported inside `repeat` bodies
+- make sure the checkpoint `review_from` reference resolves to an upstream output artifact
+
 ### Artifacts are not where you expect
 
 Symptoms:

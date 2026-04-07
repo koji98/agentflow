@@ -1,0 +1,98 @@
+{
+  "version": "1",
+  "graph_id": "deep-research-showcase",
+  "repos": {
+    "main": {
+      "path": "../../..",
+      "default_branch": "main"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "worktree"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 1200,
+      "input_rules": {
+        "max_files": 16,
+        "max_total_bytes": 524288,
+        "max_bytes_per_item": 131072
+      }
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "deep_research",
+        "id": "managed_workflows_research",
+        "repo": "main",
+        "profile": "default",
+        "question": "What should Agentflow's first managed workflows be and how should deep research be orchestrated?",
+        "objective": "Produce a design recommendation for Agentflow's managed workflow roadmap.",
+        "audience": "engineering",
+        "inputs": [
+          {
+            "kind": "file",
+            "path": "README.md"
+          },
+          {
+            "kind": "file",
+            "path": "docs/MANAGED_WORKFLOWS.md"
+          }
+        ],
+        "sources": {
+          "web": true,
+          "files": true,
+          "allow_domains": [
+            "openai.com",
+            "help.openai.com",
+            "developers.openai.com",
+            "google.com",
+            "anthropic.com",
+            "perplexity.ai"
+          ]
+        },
+        "deliverable": {
+          "format": "report",
+          "citations": "inline",
+          "sections": [
+            "patterns",
+            "proposed managed workflows",
+            "deep research design",
+            "recommendation"
+          ]
+        },
+        "orchestration": {
+          "track_count": 4,
+          "max_parallel_tracks": 2,
+          "summary_fan_in": 2
+        }
+      },
+      {
+        "type": "agent",
+        "id": "handoff",
+        "repo": "main",
+        "profile": "default",
+        "prompt": "Summarize the deep research result for a human operator. Mention the question, the recommended managed workflows, and the command a user should run next to inspect the graph.",
+        "context_from": [
+          {
+            "node": "managed_workflows_research",
+            "include": "summary"
+          },
+          {
+            "node": "managed_workflows_research",
+            "include": "output",
+            "output": "research_report"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -5,6 +5,7 @@ Agentflow supports primitive executable nodes:
 - `agent`
 - `exec`
 - `check`
+- `checkpoint`
 
 and primitive control-flow containers:
 
@@ -20,6 +21,18 @@ Agentflow also supports these managed workflow kinds:
 - `review_change`
 
 These compile into generated primitive subgraphs with built-in orchestration, prompts, artifacts, and workflow phases.
+
+## Workflow Relationships
+
+```mermaid
+flowchart LR
+    research["deep_research"]
+    design["spec_design"]
+    execute["execute_spec"]
+    review["review_change"]
+
+    research --> design --> execute --> review
+```
 
 ## Design Rule
 
@@ -73,6 +86,9 @@ Authored fields:
 - optional `orchestration.max_parallel_tracks`
 - optional `orchestration.summary_fan_in`
 - optional `orchestration.final_critique`
+
+Concrete contract:
+- see [`DEEP_RESEARCH_WORKFLOW.md`](DEEP_RESEARCH_WORKFLOW.md)
 
 ### `spec_design`
 

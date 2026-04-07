@@ -24,6 +24,7 @@ export const canonicalDocs = [
   "docs/ARCHITECTURE.md",
   "docs/OPERATIONS.md",
   "docs/MANAGED_WORKFLOWS.md",
+  "docs/DEEP_RESEARCH_WORKFLOW.md",
   "docs/SPEC_DESIGN_WORKFLOW.md",
   "docs/EXECUTE_SPEC_WORKFLOW.md",
   "docs/REVIEW_CHANGE_WORKFLOW.md"

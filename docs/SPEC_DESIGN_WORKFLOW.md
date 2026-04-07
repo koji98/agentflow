@@ -20,6 +20,29 @@ The intended lifecycle is:
 3. `execute_spec` implements the chosen design
 4. `review_change` critiques the resulting implementation
 
+## Workflow Shape
+
+```mermaid
+flowchart TD
+    clarify["clarify_problem"]
+    inspect["inspect_repo"]
+    gap{"repo context sufficient?"}
+    research["parallel_external_research"]
+    constraints["synthesize_constraints"]
+    options["parallel_option_generation"]
+    tradeoffs["compare_tradeoffs"]
+    draft["draft_spec"]
+    critique["parallel_critique_panel"]
+    merge["merge_critiques"]
+    revise["repeat revision loop"]
+    finalize["finalize_spec"]
+
+    clarify --> inspect --> gap
+    gap -->|no| research --> constraints
+    gap -->|yes| constraints
+    constraints --> options --> tradeoffs --> draft --> critique --> merge --> revise --> finalize
+```
+
 ## Core Principle
 
 `spec_design` is repo-first, not repo-only.
