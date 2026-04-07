@@ -1,7 +1,6 @@
 import type {
   AgentNode,
   BaseExecutableNode,
-  CheckNode,
   ContextReference,
   FileInput,
   InputItem,
@@ -9,6 +8,23 @@ import type {
   ParallelNode,
   SequenceNode
 } from "../graph/authored.js";
+import {
+  appendOutput,
+  attemptOutput,
+  body,
+  listOrFallback,
+  managedId,
+  maxConcurrency,
+  renderPrompt,
+  section,
+  sharedNodeBase,
+  type ManagedWorkflowRuntime,
+  workflowBriefOutput,
+  workflowEventsOutput,
+  workflowPlanJsonOutput,
+  workflowPlanMarkdownOutput,
+  workflowStatusOutput
+} from "./foundation.js";
 
 export interface ReviewChangeScope {
   paths?: string[];
@@ -37,39 +53,52 @@ export interface ReviewChangeArtifactBundleSource {
   kind: "artifact_bundle";
   diff?: ReviewChangeSourceRef;
   summary?: ReviewChangeSourceRef;
-  validation_results?: ReviewChangeSourceRef;
+  validation_ledger?: ReviewChangeSourceRef;
   files_touched?: ReviewChangeSourceRef;
   additional_context?: ReviewChangeSourceRef[];
 }
 
 export type ReviewChangeSource = ReviewChangeManagedNodeSource | ReviewChangeArtifactBundleSource;
 
-export interface ReviewChangeCriteria {
-  focus: string[];
-  require_file_references: boolean;
+export interface ReviewChangeBrief {
+  review_goal?: string;
+  focus?: string[];
+  audience?: string;
+  scope?: ReviewChangeScope;
 }
 
-export interface ReviewChangeOrchestration {
-  reviewer_roles: string[];
-  max_parallel_reviewers: number;
+export interface ReviewChangeContextPolicy {
+  include_surrounding_code?: boolean;
+  include_tests?: boolean;
+  include_docs?: boolean;
+  include_validation?: boolean;
+}
+
+export interface ReviewChangeStrategy {
+  reviewer_profiles?: string[];
+  severity_policy?: "balanced" | "conservative" | "strict";
+  include_surrounding_context?: boolean;
+  false_positive_challenge?: boolean;
+  require_file_references?: boolean;
 }
 
 export interface ReviewChangeDelivery {
-  write_review_report: boolean;
-  write_findings_json: boolean;
-  write_findings_markdown: boolean;
+  write_review_summary?: boolean;
+  write_raw_findings?: boolean;
+  write_calibrated_findings?: boolean;
 }
 
 export interface ReviewChangeWorkflowConfig extends BaseExecutableNode {
+  brief: ReviewChangeBrief;
   review_source: ReviewChangeSource;
-  scope: ReviewChangeScope;
-  criteria: ReviewChangeCriteria;
-  orchestration: ReviewChangeOrchestration;
+  context_policy: ReviewChangeContextPolicy;
+  strategy: ReviewChangeStrategy;
   delivery: ReviewChangeDelivery;
+  runtime?: ManagedWorkflowRuntime;
 }
 
-function managedId(rootId: string, suffix: string): string {
-  return `${rootId}__managed__review_change__${suffix}`;
+function workflowNodeId(rootId: string, suffix: string): string {
+  return managedId(rootId, "review_change", suffix);
 }
 
 function slugValue(value: string): string {
@@ -80,30 +109,11 @@ function slugValue(value: string): string {
     .replace(/^_+|_+$/g, "") || "reviewer";
 }
 
-function sharedNodeBase(config: ReviewChangeWorkflowConfig): Pick<
-  AgentNode,
-  "repo" | "profile" | "timeout_sec"
-> {
-  return {
-    ...(config.repo ? { repo: config.repo } : {}),
-    ...(config.profile ? { profile: config.profile } : {}),
-    ...(config.timeout_sec !== undefined ? { timeout_sec: config.timeout_sec } : {})
-  };
-}
-
-function appendOutput(outputs: OutputDefinition[], output: OutputDefinition): OutputDefinition[] {
-  return outputs.some((item) => item.name === output.name) ? outputs : [...outputs, output];
-}
-
-function formatList(title: string, values: string[]): string[] {
-  if (values.length === 0) {
-    return [`${title}: none specified`];
+function formatScope(scope: ReviewChangeScope | undefined): string[] {
+  if (!scope) {
+    return ["Scope: infer the most relevant repository surfaces from the review source and packet."];
   }
 
-  return [title, ...values.map((value) => `- ${value}`)];
-}
-
-function formatScope(scope: ReviewChangeScope): string[] {
   const lines: string[] = [];
 
   if (scope.paths && scope.paths.length > 0) {
@@ -116,13 +126,35 @@ function formatScope(scope: ReviewChangeScope): string[] {
     lines.push(...scope.areas.map((area) => `- ${area}`));
   }
 
-  return lines.length > 0 ? lines : ["Scope: infer the most relevant surfaces from the review source and repository state."];
+  return lines.length > 0 ? lines : ["Scope: infer the most relevant repository surfaces from the review source and packet."];
 }
 
-function formatCriteria(criteria: ReviewChangeCriteria): string[] {
+function formatBrief(brief: ReviewChangeBrief): string[] {
   return [
-    ...formatList("Review focus", criteria.focus),
-    `Require file references when possible: ${criteria.require_file_references ? "yes" : "no"}`
+    `Review goal: ${brief.review_goal ?? "Find the highest-signal defects and risks in the change."}`,
+    ...(brief.audience ? [`Audience: ${brief.audience}`] : []),
+    ...listOrFallback("Review focus", brief.focus ?? [], "infer from the change and repository context"),
+    "",
+    ...formatScope(brief.scope)
+  ].filter((line) => line.length > 0);
+}
+
+function formatContextPolicy(policy: ReviewChangeContextPolicy): string[] {
+  return [
+    `- Include surrounding code: ${policy.include_surrounding_code ? "yes" : "no"}`,
+    `- Include tests: ${policy.include_tests ? "yes" : "no"}`,
+    `- Include docs: ${policy.include_docs ? "yes" : "no"}`,
+    `- Include validation context: ${policy.include_validation === false ? "no" : "yes"}`
+  ];
+}
+
+function formatStrategy(strategy: ReviewChangeStrategy): string[] {
+  return [
+    `- Reviewer profiles: ${(strategy.reviewer_profiles ?? ["correctness", "testing", "maintainability"]).join(", ")}`,
+    `- Severity policy: ${strategy.severity_policy ?? "balanced"}`,
+    `- Include surrounding context: ${strategy.include_surrounding_context ? "yes" : "no"}`,
+    `- False positive challenge: ${strategy.false_positive_challenge ? "enabled" : "disabled"}`,
+    `- Require file references when possible: ${strategy.require_file_references === false ? "no" : "yes"}`
   ];
 }
 
@@ -137,7 +169,7 @@ function formatReviewSource(source: ReviewChangeSource): string[] {
     return [
       "- Source kind: managed_node",
       `- Source node: ${source.node}`,
-      "- Expected outputs when available: change_summary, validation_results, residual_risks, files_touched, implementation_plan"
+      "- Expected outputs when available: handoff, validation_ledger, repair_log, execution_plan, file_plan, mutation_boundary"
     ];
   }
 
@@ -145,15 +177,10 @@ function formatReviewSource(source: ReviewChangeSource): string[] {
     "- Source kind: artifact_bundle",
     ...(source.diff ? [`- diff: ${formatSourceRef(source.diff)}`] : []),
     ...(source.summary ? [`- summary: ${formatSourceRef(source.summary)}`] : []),
-    ...(source.validation_results
-      ? [`- validation_results: ${formatSourceRef(source.validation_results)}`]
-      : []),
+    ...(source.validation_ledger ? [`- validation_ledger: ${formatSourceRef(source.validation_ledger)}`] : []),
     ...(source.files_touched ? [`- files_touched: ${formatSourceRef(source.files_touched)}`] : []),
     ...(source.additional_context && source.additional_context.length > 0
-      ? [
-          "- additional_context:",
-          ...source.additional_context.map((reference) => `  - ${formatSourceRef(reference)}`)
-        ]
+      ? ["- additional_context:", ...source.additional_context.map((reference) => `  - ${formatSourceRef(reference)}`)]
       : [])
   ];
 }
@@ -197,80 +224,55 @@ function resolveReviewSourceMaterials(source: ReviewChangeSource): {
         {
           node: source.node,
           include: "output",
-          output: "change_summary",
+          output: "handoff",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "validation_results",
+          output: "validation_ledger",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "residual_risks",
+          output: "repair_log",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "files_touched",
+          output: "execution_plan",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "implementation_plan",
+          output: "file_plan",
+          optional: true
+        },
+        {
+          node: source.node,
+          include: "output",
+          output: "mutation_boundary",
           optional: true
         }
       ]
     };
   }
 
-  const references: Array<{
-    reference: ReviewChangeSourceRef;
-    optional: boolean;
-  }> = [
-    ...(source.diff
-      ? [
-          {
-            reference: source.diff,
-            optional: false
-          }
-        ]
-      : []),
-    ...(source.summary
-      ? [
-          {
-            reference: source.summary,
-            optional: false
-          }
-        ]
-      : []),
-    ...(source.validation_results
-      ? [
-          {
-            reference: source.validation_results,
-            optional: true
-          }
-        ]
-      : []),
-    ...(source.files_touched
-      ? [
-          {
-            reference: source.files_touched,
-            optional: true
-          }
-        ]
-      : []),
+  const refs: Array<{ reference: ReviewChangeSourceRef; optional: boolean }> = [
+    ...(source.diff ? [{ reference: source.diff, optional: false }] : []),
+    ...(source.summary ? [{ reference: source.summary, optional: false }] : []),
+    ...(source.validation_ledger ? [{ reference: source.validation_ledger, optional: true }] : []),
+    ...(source.files_touched ? [{ reference: source.files_touched, optional: true }] : []),
     ...(source.additional_context ?? []).map((reference) => ({
       reference,
       optional: true
     }))
   ];
 
-  return references.reduce(
+  return refs.reduce(
     (accumulator, item) => {
       const input = sourceRefToInput(item.reference);
       const context = sourceRefToContext(item.reference, item.optional);
@@ -293,159 +295,161 @@ function resolveReviewSourceMaterials(source: ReviewChangeSource): {
 }
 
 function roleGuidance(role: string): string {
-  const normalized = slugValue(role);
-
-  switch (normalized) {
+  switch (slugValue(role)) {
     case "correctness":
-      return "Prioritize logic bugs, incorrect assumptions, behavioral regressions, and broken invariants.";
+      return "Prioritize logic bugs, behavioral regressions, and broken invariants.";
     case "testing":
-      return "Prioritize missing tests, weak validation, flaky coverage, and cases the current checks may miss.";
+      return "Prioritize missing tests, weak validation, and gaps in verification.";
     case "maintainability":
-      return "Prioritize complexity, readability problems, brittle implementation choices, and documentation mismatches.";
+      return "Prioritize brittle implementation choices, hidden coupling, and long-term maintenance risk.";
     case "security":
-      return "Prioritize trust boundaries, input validation, permission issues, and unsafe operational behavior.";
+      return "Prioritize trust boundaries, permissions, and unsafe operational behavior.";
     case "performance":
-      return "Prioritize obviously risky inefficiencies, wasteful loops, and scalability regressions.";
+      return "Prioritize obviously risky inefficiencies or scaling regressions.";
     default:
       return `Focus on the risks most relevant to the ${role} review perspective.`;
   }
 }
 
 function buildPreparePrompt(config: ReviewChangeWorkflowConfig): string {
-  return [
-    "Prepare the review packet for this change review.",
-    "",
-    "Review source:",
-    ...formatReviewSource(config.review_source),
-    "",
-    ...formatCriteria(config.criteria),
-    "",
-    ...formatScope(config.scope),
-    "",
-    "Inspect the repository state and the review-source materials.",
-    "Write `review-packet.md` to the output directory.",
-    "The packet must summarize the target change, likely affected surfaces, current validation state, risk hotspots, and what each reviewer should inspect."
-  ].join("\n");
+  return renderPrompt([
+    body("Prepare the structured review packet for this change review."),
+    section("Objective", formatBrief(config.brief)),
+    section("Allowed Sources and Tools", [
+      ...formatContextPolicy(config.context_policy),
+      "",
+      ...formatReviewSource(config.review_source)
+    ]),
+    section("Output Contract", [
+      "Write `review-packet.json` and `workflow-brief.md` to the output directory."
+    ]),
+    section("Quality Bar", [
+      "The packet must summarize the target change, affected surfaces, validation state, and evidence each reviewer should inspect."
+    ])
+  ]);
+}
+
+function buildPlanPrompt(config: ReviewChangeWorkflowConfig): string {
+  return renderPrompt([
+    body("Turn the review packet into an explicit review plan."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the review packet in context."
+    ]),
+    section("Allowed Sources and Tools", [
+      ...formatContextPolicy(config.context_policy),
+      "",
+      ...formatStrategy(config.strategy)
+    ]),
+    section("Output Contract", [
+      "Write `workflow-plan.md` and `workflow-plan.json` to the output directory.",
+      "Use this JSON schema exactly for `workflow-plan.json`:",
+      '{"reviewer_profiles":["..."],"focus_areas":["..."],"evidence_expectations":["..."],"high_risk_surfaces":["..."]}'
+    ])
+  ]);
 }
 
 function buildReviewerPrompt(role: string, config: ReviewChangeWorkflowConfig): string {
   const slug = slugValue(role);
 
-  return [
-    `Review the change from the ${role} perspective.`,
-    "",
-    roleGuidance(role),
-    "",
-    ...formatCriteria(config.criteria),
-    "",
-    ...formatScope(config.scope),
-    "",
-    "Use the review packet in context and inspect the repository itself as needed.",
-    "Focus on high-signal findings only. Prefer concrete bugs, risks, regressions, and missing tests over style nits.",
-    "Write these artifacts to the output directory:",
-    `- \`findings-${slug}.md\``,
-    `- \`findings-${slug}.json\``,
-    "",
-    "Use this exact JSON schema:",
-    '{"summary":"short summary","findings":[{"title":"...","priority":2,"file":"relative/path.ts","start_line":1,"end_line":1,"body":"...","category":"correctness","confidence":0.8}]}',
-    "If there are no material findings, return an empty findings array."
-  ].join("\n");
+  return renderPrompt([
+    body(`Review the change from the ${role} perspective.`),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the review packet and workflow plan in context.",
+      roleGuidance(role)
+    ]),
+    section("Allowed Sources and Tools", [
+      ...formatContextPolicy(config.context_policy),
+      "",
+      ...formatStrategy(config.strategy)
+    ]),
+    section("Quality Bar", [
+      "Focus on high-signal findings only. Prefer concrete bugs, regressions, and missing tests over style commentary.",
+      "If a finding is speculative, explain the uncertainty."
+    ]),
+    section("Output Contract", [
+      `Write \`findings-${slug}.json\` to the output directory.`,
+      "Use this exact JSON schema:",
+      '{"summary":"short summary","findings":[{"title":"...","priority":2,"file":"relative/path.ts","start_line":1,"end_line":1,"body":"...","category":"correctness","confidence":0.8}]}',
+      "If there are no material findings, return an empty findings array."
+    ])
+  ]);
 }
 
-function buildMergePrompt(config: ReviewChangeWorkflowConfig): string {
-  return [
-    "Merge the reviewer outputs into one final findings set.",
-    "",
-    ...formatCriteria(config.criteria),
-    "",
-    "De-duplicate overlap, preserve the strongest findings, and normalize priority based on actual risk.",
-    "Write these artifacts to the output directory:",
-    "- `merged-findings.md`",
-    "- `merged-findings.json`",
-    "",
-    "Use the same JSON schema the reviewers used."
-  ].join("\n");
+function buildRawFindingsPrompt(): string {
+  return renderPrompt([
+    body("Aggregate the reviewer outputs into one raw findings set."),
+    section("Quality Bar", [
+      "Preserve reviewer intent and evidence before deduplication or severity calibration."
+    ]),
+    section("Output Contract", [
+      "Write `raw-findings.json` to the output directory."
+    ])
+  ]);
 }
 
-function buildNormalizePrompt(config: ReviewChangeWorkflowConfig): string {
-  return [
-    "Review whether the merged findings are ready to publish as the final review result.",
-    "",
-    ...formatCriteria(config.criteria),
-    "",
-    "Use the review packet and merged findings in context."
-  ].join("\n");
+function buildMergePrompt(): string {
+  return renderPrompt([
+    body("Merge the raw reviewer findings into one deduplicated findings set."),
+    section("Quality Bar", [
+      "De-duplicate overlap, preserve the strongest finding wording, and keep traceability back to source evidence."
+    ]),
+    section("Output Contract", [
+      "Write `merged-findings.json` to the output directory."
+    ])
+  ]);
 }
 
-function buildNormalizeRubric(config: ReviewChangeWorkflowConfig): string {
-  const focusRequirement =
-    config.criteria.focus.length > 0
-      ? `Pass only if the merged findings cover the important risks in these focus areas when applicable: ${config.criteria.focus.join(", ")}.`
-      : "Pass only if the merged findings cover the important risks in the reviewed change.";
-  const fileReferenceRequirement = config.criteria.require_file_references
-    ? "Fail if concrete findings omit file references where they were reasonably available."
-    : "File references are preferred but not mandatory.";
-
-  return [
-    focusRequirement,
-    "Pass only if findings are non-duplicative, actionable, and severity-calibrated.",
-    fileReferenceRequirement,
-    "Fail if the result is dominated by low-value style commentary or if major correctness/testing risks are missing."
-  ].join(" ");
+function buildCalibratePrompt(config: ReviewChangeWorkflowConfig): string {
+  return renderPrompt([
+    body("Calibrate the merged findings for severity, confidence, and false positives."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the review packet, workflow plan, and merged findings in context."
+    ]),
+    section("Allowed Sources and Tools", formatStrategy(config.strategy)),
+    section("Quality Bar", [
+      `Apply the ${config.strategy.severity_policy ?? "balanced"} severity policy consistently.`,
+      ...(config.strategy.false_positive_challenge
+        ? ["Actively challenge weak, speculative, or duplicate findings before keeping them."]
+        : []),
+      ...(config.strategy.require_file_references === false
+        ? ["File references are preferred but not mandatory when the evidence is clearly scoped."]
+        : ["Concrete findings should include file references when reasonably available."])
+    ]),
+    section("Output Contract", [
+      "Write `calibrated-findings.json` to the output directory."
+    ])
+  ]);
 }
 
 function buildFinalizePrompt(outputs: OutputDefinition[]): string {
-  const writesFindingsJson = outputs.some((output) => output.name === "findings");
-  const writesFindingsMarkdown = outputs.some((output) => output.name === "findings_markdown");
-
-  return [
-    "Publish the final review report and final findings artifacts.",
-    "",
-    "Use the review packet, merged findings, and normalization result in context.",
-    "The final review should be concise, findings-first, and explicit about any residual uncertainty.",
-    ...(writesFindingsJson
-      ? [
-          "If you write `findings.json`, preserve the exact reviewer findings schema used by `merged-findings.json`.",
-          "Do not invent a new JSON shape for the final findings artifact."
-        ]
-      : []),
-    ...(writesFindingsMarkdown
-      ? [
-          "If you write `findings.md`, keep it aligned with the final JSON findings set rather than introducing new findings."
-        ]
-      : []),
-    "",
-    "Write these artifacts to the output directory:",
-    ...outputs.map((output) => `- \`${output.path}\``)
-  ].join("\n");
-}
-
-function buildReviewerOutputs(role: string): OutputDefinition[] {
-  const slug = slugValue(role);
-
-  return [
-    {
-      name: `findings_${slug}_markdown`,
-      from: "attempt",
-      path: `findings-${slug}.md`,
-      required: true
-    },
-    {
-      name: `findings_${slug}_json`,
-      from: "attempt",
-      path: `findings-${slug}.json`,
-      required: true
-    }
-  ];
+  return renderPrompt([
+    body("Publish the final review summary and workflow status artifacts."),
+    section("Current Context", [
+      "Use the review packet, workflow plan, merged findings, and calibrated findings in context."
+    ]),
+    section("Output Contract", outputs.map((output) => `- \`${output.path}\``)),
+    section("Quality Bar", [
+      "The final review should be concise, findings-first, and aligned with the calibrated findings set."
+    ])
+  ]);
 }
 
 export function buildReviewChangeWorkflow(config: ReviewChangeWorkflowConfig): SequenceNode {
   const shared = sharedNodeBase(config);
-  const workflowId = managedId(config.id, "workflow");
-  const prepareId = managedId(config.id, "prepare_review_packet");
-  const reviewersId = managedId(config.id, "reviewer_panel");
-  const mergeId = managedId(config.id, "merge_findings");
-  const normalizeId = managedId(config.id, "normalize_findings");
+  const workflowId = workflowNodeId(config.id, "workflow");
+  const reviewerProfiles = config.strategy.reviewer_profiles ?? ["correctness", "testing", "maintainability"];
+  const concurrency = maxConcurrency(config.runtime, reviewerProfiles.length);
+
+  const prepareId = workflowNodeId(config.id, "prepare_review_packet");
+  const planId = workflowNodeId(config.id, "plan_review");
+  const reviewerPanelId = workflowNodeId(config.id, "reviewer_panel");
+  const rawId = workflowNodeId(config.id, "aggregate_raw_findings");
+  const mergeId = workflowNodeId(config.id, "merge_findings");
+  const calibrateId = workflowNodeId(config.id, "calibrate_findings");
+
   const sourceMaterials = resolveReviewSourceMaterials(config.review_source);
 
   const steps: SequenceNode["steps"] = [
@@ -455,33 +459,18 @@ export function buildReviewChangeWorkflow(config: ReviewChangeWorkflowConfig): S
       label: "Prepare Review Packet",
       ...shared,
       sandbox: "read-only",
-      inputs: [
-        ...(config.inputs ?? []),
-        ...sourceMaterials.inputs
-      ],
-      context_from: [
-        ...(config.context_from ?? []),
-        ...sourceMaterials.context_from
-      ],
+      inputs: [...(config.inputs ?? []), ...sourceMaterials.inputs],
+      context_from: [...(config.context_from ?? []), ...sourceMaterials.context_from],
       outputs: [
-        {
-          name: "review_packet",
-          from: "attempt",
-          path: "review-packet.md",
-          required: true
-        }
+        attemptOutput("review_packet", "review-packet.json", true),
+        workflowBriefOutput()
       ],
       prompt: buildPreparePrompt(config)
-    }
-  ];
-
-  const reviewerNodes: AgentNode[] = config.orchestration.reviewer_roles.map((role) => {
-    const slug = slugValue(role);
-
-    return {
+    },
+    {
       type: "agent",
-      id: managedId(config.id, `reviewer_${slug}`),
-      label: `${role} Reviewer`,
+      id: planId,
+      label: "Plan Review",
       ...shared,
       sandbox: "read-only",
       context_from: [
@@ -491,75 +480,65 @@ export function buildReviewChangeWorkflow(config: ReviewChangeWorkflowConfig): S
           output: "review_packet"
         }
       ],
-      outputs: buildReviewerOutputs(role),
-      prompt: buildReviewerPrompt(role, config)
-    };
-  });
-
-  steps.push({
-    type: "parallel",
-    id: reviewersId,
-    label: "Reviewer Panel",
-    max_concurrency: config.orchestration.max_parallel_reviewers,
-    steps: reviewerNodes
-  } satisfies ParallelNode);
-
-  const mergeContext: ContextReference[] = [
+      outputs: [
+        workflowPlanMarkdownOutput(),
+        workflowPlanJsonOutput()
+      ],
+      prompt: buildPlanPrompt(config)
+    },
     {
-      node: prepareId,
-      include: "output",
-      output: "review_packet"
-    }
-  ];
-
-  for (const role of config.orchestration.reviewer_roles) {
-    const slug = slugValue(role);
-    const reviewerId = managedId(config.id, `reviewer_${slug}`);
-
-    mergeContext.push(
-      {
-        node: reviewerId,
-        include: "output",
-        output: `findings_${slug}_markdown`
-      },
-      {
-        node: reviewerId,
-        include: "output",
-        output: `findings_${slug}_json`
-      }
-    );
-  }
-
-  steps.push(
+      type: "parallel",
+      id: reviewerPanelId,
+      label: "Reviewer Panel",
+      max_concurrency: concurrency,
+      steps: reviewerProfiles.map((profile): AgentNode => ({
+        type: "agent",
+        id: workflowNodeId(config.id, `reviewer_${slugValue(profile)}`),
+        label: `${profile} Reviewer`,
+        ...shared,
+        sandbox: "read-only",
+        context_from: [
+          {
+            node: prepareId,
+            include: "output",
+            output: "review_packet"
+          },
+          {
+            node: planId,
+            include: "output",
+            output: "workflow_plan_json"
+          }
+        ],
+        outputs: [
+          attemptOutput(`findings_${slugValue(profile)}`, `findings-${slugValue(profile)}.json`, true)
+        ],
+        prompt: buildReviewerPrompt(profile, config)
+      }))
+    } satisfies ParallelNode,
+    {
+      type: "agent",
+      id: rawId,
+      label: "Aggregate Raw Findings",
+      ...shared,
+      sandbox: "read-only",
+      context_from: reviewerProfiles.map(
+        (profile): ContextReference => ({
+          node: workflowNodeId(config.id, `reviewer_${slugValue(profile)}`),
+          include: "output",
+          output: `findings_${slugValue(profile)}`
+        })
+      ),
+      outputs: [
+        attemptOutput("raw_findings", "raw-findings.json", true)
+      ],
+      prompt: buildRawFindingsPrompt()
+    },
     {
       type: "agent",
       id: mergeId,
       label: "Merge Findings",
       ...shared,
       sandbox: "read-only",
-      context_from: mergeContext,
-      outputs: [
-        {
-          name: "merged_findings_markdown",
-          from: "attempt",
-          path: "merged-findings.md",
-          required: true
-        },
-        {
-          name: "merged_findings_json",
-          from: "attempt",
-          path: "merged-findings.json",
-          required: true
-        }
-      ],
-      prompt: buildMergePrompt(config)
-    },
-    {
-      type: "check",
-      id: normalizeId,
-      label: "Normalize Findings",
-      ...shared,
-      check_kind: "ai",
       context_from: [
         {
           node: prepareId,
@@ -567,57 +546,63 @@ export function buildReviewChangeWorkflow(config: ReviewChangeWorkflowConfig): S
           output: "review_packet"
         },
         {
-          node: mergeId,
+          node: rawId,
           include: "output",
-          output: "merged_findings_markdown"
+          output: "raw_findings"
+        }
+      ],
+      outputs: [
+        attemptOutput("merged_findings", "merged-findings.json", true)
+      ],
+      prompt: buildMergePrompt()
+    },
+    {
+      type: "agent",
+      id: calibrateId,
+      label: "Calibrate Findings",
+      ...shared,
+      sandbox: "read-only",
+      context_from: [
+        {
+          node: prepareId,
+          include: "output",
+          output: "review_packet"
+        },
+        {
+          node: planId,
+          include: "output",
+          output: "workflow_plan_json"
         },
         {
           node: mergeId,
           include: "output",
-          output: "merged_findings_json"
+          output: "merged_findings"
         }
       ],
       outputs: [
-        {
-          name: "normalization_result",
-          from: "attempt",
-          path: "result.json",
-          required: true
-        }
+        attemptOutput("calibrated_findings", "calibrated-findings.json", true)
       ],
-      prompt: buildNormalizePrompt(config),
-      rubric: buildNormalizeRubric(config)
+      prompt: buildCalibratePrompt(config)
     }
-  );
+  ];
 
   let finalOutputs: OutputDefinition[] = config.outputs && config.outputs.length > 0 ? config.outputs : [];
 
-  if (config.delivery.write_review_report) {
-    finalOutputs = appendOutput(finalOutputs, {
-      name: "review_report",
-      from: "attempt",
-      path: "review.md",
-      required: true
-    });
+  if (config.delivery.write_review_summary !== false) {
+    finalOutputs = appendOutput(finalOutputs, attemptOutput("review_summary", "review-summary.md", true));
   }
 
-  if (config.delivery.write_findings_json) {
-    finalOutputs = appendOutput(finalOutputs, {
-      name: "findings",
-      from: "attempt",
-      path: "findings.json",
-      required: true
-    });
+  if (config.delivery.write_raw_findings !== false) {
+    finalOutputs = appendOutput(finalOutputs, attemptOutput("raw_findings", "raw-findings.json", true));
   }
 
-  if (config.delivery.write_findings_markdown) {
-    finalOutputs = appendOutput(finalOutputs, {
-      name: "findings_markdown",
-      from: "attempt",
-      path: "findings.md",
-      required: false
-    });
+  if (config.delivery.write_calibrated_findings !== false) {
+    finalOutputs = appendOutput(finalOutputs, attemptOutput("calibrated_findings", "calibrated-findings.json", true));
   }
+
+  finalOutputs = appendOutput(finalOutputs, attemptOutput("merged_findings", "merged-findings.json", true));
+  finalOutputs = appendOutput(finalOutputs, workflowStatusOutput());
+  finalOutputs = appendOutput(finalOutputs, workflowEventsOutput());
 
   steps.push({
     type: "agent",
@@ -632,18 +617,24 @@ export function buildReviewChangeWorkflow(config: ReviewChangeWorkflowConfig): S
         output: "review_packet"
       },
       {
-        node: mergeId,
+        node: planId,
         include: "output",
-        output: "merged_findings_markdown"
+        output: "workflow_plan_json"
+      },
+      {
+        node: rawId,
+        include: "output",
+        output: "raw_findings"
       },
       {
         node: mergeId,
         include: "output",
-        output: "merged_findings_json"
+        output: "merged_findings"
       },
       {
-        node: normalizeId,
-        include: "result"
+        node: calibrateId,
+        include: "output",
+        output: "calibrated_findings"
       }
     ],
     outputs: finalOutputs,

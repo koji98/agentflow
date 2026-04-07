@@ -21,13 +21,13 @@ Included examples:
 - `feature-showcase.json`
   Broader primitive-graph example covering profiles, `parallel`, `repeat`, deterministic checks, AI checks, and context flow.
 - `deep-research-showcase.json`
-  Managed workflow example showing `deep_research` plus a downstream handoff.
+  Managed workflow example showing `deep_research` with the shared `brief/context_policy/approval_policy/strategy/delivery` contract plus a downstream handoff.
 - `spec-design-showcase.json`
   Managed workflow example showing `spec_design` plus a downstream handoff.
 - `execute-spec-showcase.json`
-  Managed workflow example showing the `spec_design -> execute_spec` path.
+  Managed workflow example showing the `spec_design -> execute_spec` path with autonomous-by-default execution planning.
 - `review-change-showcase.json`
-  Managed workflow example showing the `execute_spec -> review_change` path.
+  Managed workflow example showing the `execute_spec -> review_change` path with structured review packets and calibrated findings.
 
 Run any example from the repository root with:
 

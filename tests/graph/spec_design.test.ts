@@ -4,69 +4,93 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 
-describe("spec design managed workflow", () => {
-  it("lowers spec_design into a generated repo-first workflow with external research and revision loop", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "spec-design-lowering",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "spec_design",
-            id: "managed_nodes_spec",
-            repo: "main",
-            profile: "default",
-            problem: "Managed aliases are too thin.",
-            goal: "Design a real managed workflow model.",
+function buildDocument(stepOverrides = {}) {
+  return {
+    version: "1",
+    graph_id: "spec-design-test",
+    repos: {
+      main: {
+        path: "."
+      }
+    },
+    defaults: {
+      launch_profile: "default"
+    },
+    profiles: {
+      default: {
+        harness: "codex-cli",
+        sandbox: "read-only"
+      }
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "spec_design",
+          id: "managed_nodes_spec",
+          repo: "main",
+          profile: "default",
+          brief: {
+            problem: "Managed workflows need a clearer authored contract.",
+            goal: "Produce an implementation-ready managed workflow model.",
+            audience: "engineering",
             constraints: ["Keep primitive nodes stable."],
-            decision_drivers: ["clarity", "reliability"],
-            inputs: [
-              {
-                kind: "file",
-                path: "src/**"
-              }
-            ],
+            decision_drivers: ["clarity", "maintainability"],
             scope: {
               paths: ["src/**", "docs/**"],
-              areas: ["graph", "runtime"]
-            },
-            research_policy: {
-              allow_web_fallback: true,
-              max_external_research_tasks: 2
-            },
-            orchestration: {
-              option_count: 3,
-              max_parallel_options: 2,
-              critique_roles: ["architecture", "implementation"],
-              revision_rounds: 2
+              areas: ["graph", "managed workflows"]
             }
-          }
-        ]
-      }
-    });
+          },
+          context_policy: {
+            repo_first: true,
+            allow_web_fallback: true,
+            web_triggers: ["missing product pattern"],
+            allow_domains: ["openai.com", "developers.openai.com"]
+          },
+          approval_policy: {
+            require_direction_approval: false
+          },
+          strategy: {
+            alternatives: 3,
+            critique_profiles: ["architecture", "implementation"],
+            max_revision_cycles: 2
+          },
+          delivery: {
+            format: "design_spec",
+            sections: ["problem", "architecture", "implementation_readiness"]
+          },
+          ...stepOverrides
+        }
+      ]
+    }
+  };
+}
+
+describe("spec design managed workflow", () => {
+  it("lowers to the v2 repo-first design workflow with optional direction approval and an autonomous revision loop", () => {
+    const normalized = normalizeAuthoredGraphDocument(
+      buildDocument({
+        approval_policy: {
+          require_direction_approval: true
+        },
+        runtime: {
+          max_concurrency: 2
+        },
+        strategy: {
+          alternatives: 3,
+          critique_profiles: ["architecture", "implementation"],
+          max_revision_cycles: 3
+        }
+      })
+    );
 
     expect(normalized.diagnostics).toEqual([]);
     expect(normalized.lowered_managed_nodes).toEqual([
       {
         authored_id: "managed_nodes_spec",
         managed_kind: "spec_design",
-        lowered_to: "agent"
+        lowered_to: "sequence"
       }
     ]);
 
@@ -82,24 +106,23 @@ describe("spec design managed workflow", () => {
       throw new Error("Expected spec_design to lower into a sequence workflow.");
     }
 
-    expect(workflow.id).toBe("managed_nodes_spec__managed__spec_design__workflow");
     expect(workflow.steps.map((step) => step.id)).toEqual([
-      "managed_nodes_spec__managed__spec_design__clarify",
-      "managed_nodes_spec__managed__spec_design__inspect_repo",
-      "managed_nodes_spec__managed__spec_design__assess_information_gap",
-      "managed_nodes_spec__managed__spec_design__external_research",
-      "managed_nodes_spec__managed__spec_design__synthesize_constraints",
+      "managed_nodes_spec__managed__spec_design__clarify_brief",
+      "managed_nodes_spec__managed__spec_design__inspect_current_state",
+      "managed_nodes_spec__managed__spec_design__identify_information_gaps",
+      "managed_nodes_spec__managed__spec_design__targeted_external_research",
       "managed_nodes_spec__managed__spec_design__generate_options",
-      "managed_nodes_spec__managed__spec_design__compare_tradeoffs",
-      "managed_nodes_spec__managed__spec_design__draft_initial_spec",
+      "managed_nodes_spec__managed__spec_design__direction_loop",
+      "managed_nodes_spec__managed__spec_design__draft_spec",
       "managed_nodes_spec__managed__spec_design__revision_loop",
       "managed_nodes_spec"
     ]);
 
     const externalResearch = workflow.steps[3];
-    const optionFanout = workflow.steps[5];
-    const revisionLoop = workflow.steps[8];
-    const initialDraft = workflow.steps[7];
+    const optionFanout = workflow.steps[4];
+    const directionLoop = workflow.steps[5];
+    const revisionLoop = workflow.steps[7];
+    const finalNode = workflow.steps[8];
 
     if (!externalResearch || externalResearch.type !== "parallel") {
       throw new Error("Expected external research fanout to be parallel.");
@@ -109,197 +132,74 @@ describe("spec design managed workflow", () => {
       throw new Error("Expected option generation to be parallel.");
     }
 
-    if (!revisionLoop || revisionLoop.type !== "repeat") {
-      throw new Error("Expected a repeat-based revision loop.");
+    if (!directionLoop || directionLoop.type !== "repeat") {
+      throw new Error("Expected direction approval to compile as a repeat loop.");
     }
 
-    if (!initialDraft || initialDraft.type !== "agent") {
-      throw new Error("Expected initial draft step to be an agent.");
+    if (!revisionLoop || revisionLoop.type !== "repeat") {
+      throw new Error("Expected revision loop to be repeat-based.");
     }
 
     expect(externalResearch.steps).toHaveLength(2);
     expect(optionFanout.steps).toHaveLength(3);
-    expect(revisionLoop.until.node).toBe("managed_nodes_spec__managed__spec_design__human_review");
-    expect(initialDraft.prompt).toContain("The spec must be implementation-ready and self-contained");
-    expect(initialDraft.prompt).toContain("Required sections:");
+    expect(optionFanout.max_concurrency).toBe(2);
+    expect(directionLoop.until.node).toBe("managed_nodes_spec__managed__spec_design__approve_direction");
+    expect(revisionLoop.max_attempts).toBe(3);
+    expect(revisionLoop.until.node).toBe("managed_nodes_spec__managed__spec_design__quality_review");
 
     if (revisionLoop.body.type !== "sequence") {
       throw new Error("Expected revision loop body to be a sequence.");
     }
 
-    const reviseNode = revisionLoop.body.steps[0];
     const critiquePanel = revisionLoop.body.steps[1];
-    const mergeCritiques = revisionLoop.body.steps[2];
-    const qualityReview = revisionLoop.body.steps[3];
-    const humanReview = revisionLoop.body.steps[4];
-    const inspectNode = workflow.steps[1];
-
-    if (!reviseNode || reviseNode.type !== "agent") {
-      throw new Error("Expected revise step to be an agent.");
-    }
 
     if (!critiquePanel || critiquePanel.type !== "parallel") {
       throw new Error("Expected critique panel to be parallel.");
     }
 
-    if (!mergeCritiques || mergeCritiques.type !== "agent") {
-      throw new Error("Expected merged critiques step to be an agent.");
-    }
-
-    if (!qualityReview || qualityReview.type !== "agent") {
-      throw new Error("Expected quality review to be an agent node.");
-    }
-
-    if (!humanReview || humanReview.type !== "checkpoint") {
-      throw new Error("Expected human review to be a checkpoint node.");
-    }
-
-    if (!inspectNode || inspectNode.type !== "agent") {
-      throw new Error("Expected inspect repo step to be an agent.");
-    }
-
-    expect(reviseNode.prompt).toContain("implementation-ready design spec draft");
-    expect(reviseNode.prompt).toContain("If prior iteration feedback is present in context");
-    expect(reviseNode.prompt).toContain("closure checklist rather than general inspiration");
-    expect(reviseNode.prompt).toContain("Do not leave repo-specific UI boundaries");
-    expect(workflow.steps[0]).not.toHaveProperty("inputs");
-    expect(inspectNode).toHaveProperty("inputs");
-    expect(reviseNode.context_from).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__merge_critiques",
-          include: "output",
-          output: "critique_merged",
-          iteration: "latest_failed",
-          optional: true
-        }),
-        expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__quality_review",
-          include: "output",
-          output: "quality_review",
-          iteration: "latest_failed",
-          optional: true
-        }),
-        expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__human_review",
-          include: "output",
-          output: "operator_feedback",
-          iteration: "latest_failed",
-          optional: true
-        })
-      ])
-    );
-    const critiqueNode = critiquePanel.steps[0];
-
-    if (!critiqueNode || critiqueNode.type !== "agent") {
-      throw new Error("Expected critique panel entries to be agents.");
-    }
-
-    expect(critiqueNode.prompt).toContain("Only raise blockers that remain unresolved");
-    expect(critiqueNode.context_from).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__inspect_repo",
-          include: "output",
-          output: "current_state"
-        }),
-        expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__synthesize_constraints",
-          include: "output",
-          output: "constraints_brief"
-        })
-      ])
-    );
-    expect(qualityReview.prompt).toContain("direct input contract for execute_spec");
-    expect(qualityReview.prompt).toContain("quality-review.json");
-    expect(mergeCritiques.prompt).toContain("Merge the critique outputs into one revision brief.");
-    expect(qualityReview.context_from).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__inspect_repo",
-          include: "output",
-          output: "current_state"
-        }),
-        expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__synthesize_constraints",
-          include: "output",
-          output: "constraints_brief"
-        })
-      ])
-    );
-    expect(humanReview.prompt).toContain("Review the current design spec and the machine quality review");
-    expect(humanReview.review_from).toEqual(
-      expect.objectContaining({
-        node: "managed_nodes_spec__managed__spec_design__revise_spec",
-        include: "output",
-        output: "spec_revision"
-      })
-    );
-    expect(humanReview.context_from).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__quality_review",
-          include: "output",
-          output: "quality_review"
-        })
-      ])
-    );
-    expect(workflow.steps.at(-1)).toEqual(
+    expect(critiquePanel.max_concurrency).toBe(2);
+    expect(finalNode).toEqual(
       expect.objectContaining({
         id: "managed_nodes_spec",
         type: "agent",
         outputs: expect.arrayContaining([
+          expect.objectContaining({ name: "design_spec", path: "design-spec.md" }),
+          expect.objectContaining({ name: "direction_proposal", path: "direction-proposal.md" }),
+          expect.objectContaining({ name: "tradeoff_matrix", path: "tradeoff-matrix.md" }),
+          expect.objectContaining({ name: "decision_log", path: "decision-log.md" }),
           expect.objectContaining({
-            name: "design_spec",
-            path: "design-spec.md"
-          })
+            name: "implementation_readiness",
+            path: "implementation-readiness.md"
+          }),
+          expect.objectContaining({ name: "workflow_status", path: "workflow-status.json" }),
+          expect.objectContaining({ name: "workflow_events", path: "workflow-events.jsonl" })
         ])
       })
     );
   });
 
-  it("compiles spec_design so downstream nodes depend on the final published spec", () => {
+  it("compiles spec_design so downstream nodes depend on the final published design package", () => {
     const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "spec-design-compile",
-      repos: {
-        main: {
-          path: "."
+      ...buildDocument({
+        context_policy: {
+          repo_first: true,
+          allow_web_fallback: false
         }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
+      }),
       graph: {
         type: "sequence",
         id: "root",
         steps: [
-          {
-            type: "spec_design",
-            id: "managed_nodes_spec",
-            problem: "Managed aliases are too thin.",
-            goal: "Design a real managed workflow model.",
-            research_policy: {
-              allow_web_fallback: false,
-              max_external_research_tasks: 0
-            },
-            orchestration: {
-              option_count: 2,
-              max_parallel_options: 2,
-              critique_roles: ["architecture"],
-              revision_rounds: 2
+          buildDocument({
+            context_policy: {
+              repo_first: true,
+              allow_web_fallback: false
             }
-          },
+          }).graph.steps[0],
           {
             type: "agent",
             id: "handoff",
-            prompt: "Summarize the final design spec for an implementer.",
+            prompt: "Summarize the design package for an implementer.",
             context_from: [
               {
                 node: "managed_nodes_spec",
@@ -309,6 +209,11 @@ describe("spec design managed workflow", () => {
                 node: "managed_nodes_spec",
                 include: "output",
                 output: "design_spec"
+              },
+              {
+                node: "managed_nodes_spec",
+                include: "output",
+                output: "implementation_readiness"
               }
             ]
           }
@@ -327,93 +232,23 @@ describe("spec design managed workflow", () => {
     expect(compilation.compiled_graph).toBeDefined();
 
     const compiledGraph = compilation.compiled_graph!;
-    const finalSpecNode = compiledGraph.nodes.find((node) => node.authored_id === "managed_nodes_spec");
+    const finalDesignNode = compiledGraph.nodes.find((node) => node.authored_id === "managed_nodes_spec");
     const handoffNode = compiledGraph.nodes.find((node) => node.authored_id === "handoff");
-    const revisionScope = compiledGraph.scopes.find(
-      (scope) => scope.authored_id === "managed_nodes_spec__managed__spec_design__revision_loop"
-    );
 
     expect(compiledGraph.authored_to_compiled.managed_nodes_spec).toEqual([
       "root__managed_nodes_spec__managed__spec_design__workflow__managed_nodes_spec"
     ]);
-    expect(finalSpecNode).toEqual(
+    expect(finalDesignNode).toEqual(
       expect.objectContaining({
         kind: "agent",
         lowered_from: "spec_design",
         compiled_id: "root__managed_nodes_spec__managed__spec_design__workflow__managed_nodes_spec"
       })
     );
-    expect(revisionScope).toEqual(
-      expect.objectContaining({
-        kind: "repeat",
-        max_attempts: 2
-      })
-    );
     expect(handoffNode).toEqual(
       expect.objectContaining({
         deps: ["root__managed_nodes_spec__managed__spec_design__workflow__managed_nodes_spec"]
       })
-    );
-  });
-
-  it("omits external research fanout when repo context is required to stay local", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "spec-design-local-only",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "spec_design",
-            id: "managed_nodes_spec",
-            problem: "Managed aliases are too thin.",
-            goal: "Design a real managed workflow model.",
-            research_policy: {
-              allow_web_fallback: false,
-              max_external_research_tasks: 0
-            },
-            orchestration: {
-              option_count: 2,
-              max_parallel_options: 2,
-              critique_roles: ["architecture"],
-              revision_rounds: 1
-            }
-          }
-        ]
-      }
-    });
-
-    expect(normalized.diagnostics).toEqual([]);
-
-    const root = normalized.document?.graph;
-
-    if (!root || root.type !== "sequence") {
-      throw new Error("Expected normalized graph root to be a sequence.");
-    }
-
-    const workflow = root.steps[0];
-
-    if (!workflow || workflow.type !== "sequence") {
-      throw new Error("Expected spec_design to lower into a sequence workflow.");
-    }
-
-    expect(workflow.steps.map((step) => step.id)).not.toContain(
-      "managed_nodes_spec__managed__spec_design__external_research"
     );
   });
 });

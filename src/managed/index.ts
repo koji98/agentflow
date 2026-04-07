@@ -12,6 +12,10 @@ export {
   buildReviewChangeWorkflow
 } from "./review_change.js";
 export type {
+  ManagedWorkflowRuntime,
+  PromptSection
+} from "./foundation.js";
+export type {
   ManagedWorkflowDescriptor,
   ManagedWorkflowOrchestrationDescriptor,
   ManagedWorkflowPhaseDescriptor,
@@ -19,42 +23,49 @@ export type {
   ManagedWorkflowRegistry
 } from "./types.js";
 export type {
-  DeepResearchDeliverable,
-  DeepResearchOrchestration,
-  DeepResearchSourcePolicy,
+  DeepResearchApprovalPolicy,
+  DeepResearchBrief,
+  DeepResearchContextPolicy,
+  DeepResearchDelivery,
+  DeepResearchStrategy,
   DeepResearchWorkflowConfig
 } from "./deep_research.js";
 export type {
-  SpecDesignDeliverable,
-  SpecDesignOrchestration,
-  SpecDesignResearchPolicy,
+  SpecDesignApprovalPolicy,
+  SpecDesignBrief,
+  SpecDesignContextPolicy,
+  SpecDesignDelivery,
   SpecDesignScope,
+  SpecDesignStrategy,
   SpecDesignWorkflowConfig
 } from "./spec_design.js";
 export type {
+  ExecuteSpecApprovalPolicy,
   ExecuteSpecArtifactBundleSource,
+  ExecuteSpecBrief,
+  ExecuteSpecContextPolicy,
   ExecuteSpecDelivery,
-  ExecuteSpecExecutionPolicy,
   ExecuteSpecFileSourceRef,
-  ExecuteSpecImplementationResearch,
   ExecuteSpecManagedNodeSource,
   ExecuteSpecManagedOutputSourceRef,
   ExecuteSpecScope,
   ExecuteSpecSource,
   ExecuteSpecSourceRef,
+  ExecuteSpecStrategy,
   ExecuteSpecValidation,
   ExecuteSpecWorkflowConfig
 } from "./execute_spec.js";
 export type {
   ReviewChangeArtifactBundleSource,
-  ReviewChangeCriteria,
+  ReviewChangeBrief,
+  ReviewChangeContextPolicy,
   ReviewChangeDelivery,
   ReviewChangeFileSourceRef,
   ReviewChangeManagedNodeSource,
   ReviewChangeManagedOutputSourceRef,
-  ReviewChangeOrchestration,
   ReviewChangeScope,
   ReviewChangeSource,
   ReviewChangeSourceRef,
+  ReviewChangeStrategy,
   ReviewChangeWorkflowConfig
 } from "./review_change.js";

@@ -1,56 +1,42 @@
 # Managed Workflows
 
-Agentflow supports primitive executable nodes:
+Agentflow has three authoring categories:
 
-- `agent`
-- `exec`
-- `check`
-- `checkpoint`
+- Primitive executable nodes: `agent`, `exec`, `check`, `checkpoint`
+- Primitive control-flow containers: `sequence`, `parallel`, `repeat`
+- Managed workflows: `deep_research`, `spec_design`, `execute_spec`, `review_change`
 
-and primitive control-flow containers:
-
-- `sequence`
-- `parallel`
-- `repeat`
-
-Agentflow also supports these managed workflow kinds:
-
-- `deep_research`
-- `spec_design`
-- `execute_spec`
-- `review_change`
-
-These compile into generated primitive subgraphs with built-in orchestration, prompts, artifacts, and workflow phases.
+Managed workflows are authored shortcuts. They compile into generated primitive subgraphs. They do not introduce a separate runtime model.
 
 ## Workflow Relationships
 
 ```mermaid
 flowchart LR
     subgraph research["deep_research"]
-        dr1["clarify"]
-        dr2["fan-out tracks"]
-        dr3["fan-in synthesis"]
+        dr1["brief and plan"]
+        dr2["parallel investigation"]
+        dr3["consolidate and publish"]
         dr1 --> dr2 --> dr3
     end
 
     subgraph design["spec_design"]
-        sd1["inspect"]
-        sd2["fan-out options"]
-        sd3["fan-in critique"]
+        sd1["repo inspection"]
+        sd2["parallel options"]
+        sd3["direction and revision"]
         sd1 --> sd2 --> sd3
     end
 
     subgraph execute["execute_spec"]
-        es1["ingest"]
-        es2["implement"]
-        es3["validate and repair loop"]
+        es1["ingest and plan"]
+        es2["single-writer implementation"]
+        es3["validation and repair"]
         es1 --> es2 --> es3
     end
 
     subgraph review["review_change"]
-        rc1["prepare"]
-        rc2["fan-out reviewers"]
-        rc3["fan-in findings"]
+        rc1["prepare and plan"]
+        rc2["parallel reviewers"]
+        rc3["merge and calibrate"]
         rc1 --> rc2 --> rc3
     end
 
@@ -59,197 +45,176 @@ flowchart LR
     es3 --> rc1
 ```
 
-## Design Rule
+## Shared Managed Contract
 
-A primitive node is user-prompted.
+Every managed workflow uses the same top-level shape:
 
-- The graph author writes the exact `prompt`.
-- The runtime executes one primitive step.
+- `brief`
+  User intent, audience, scope, and success bar.
+- `context_policy`
+  Which sources and context classes the workflow may use.
+- `approval_policy`
+  Whether the workflow should insert explicit checkpoint gates.
+- `strategy`
+  Workflow-specific intent and quality knobs.
+- `delivery`
+  Final artifact shape and delivery controls.
+- `runtime`
+  Optional advanced execution tuning such as `max_concurrency`.
 
-A managed workflow is system-authored.
+Common execution fields are still available:
 
-- The graph author supplies structured intent and constraints.
-- Agentflow expands that into an internal subgraph of primitive nodes.
-- The runtime executes the compiled subgraph.
+- `label`
+- `repo`
+- `profile`
+- `inputs`
+- `context_from`
+- `outputs`
+- `timeout_sec`
 
-## Managed Workflow Inventory
+## Design Rules
+
+- Managed workflows are autonomous by default.
+- A managed workflow only pauses for operator approval if its `approval_policy` explicitly enables a checkpoint.
+- Workflow contracts should describe intent, quality, and outputs, not scheduler math.
+- Runtime concurrency belongs in `runtime`, not in workflow semantics.
+
+## Workflow Inventory
 
 ### `deep_research`
 
 Purpose:
-- Clarify a research ask, decompose it, run multiple investigators, reconcile conflicts, and synthesize a final report.
+- Clarify a research question, build a research plan, investigate in parallel, preserve contradictions, and publish a sourced report.
 
-Compiled workflow phases:
-- clarify
-- plan
-- investigate
-- reconcile
-- council
-- deliver
+Key authored fields:
+- `brief.question`
+- `brief.objective`
+- optional `brief.audience`
+- optional `brief.scope_cues`
+- optional `brief.success_bar`
+- `context_policy.web`
+- `context_policy.files`
+- `context_policy.apps`
+- optional `approval_policy.require_plan_approval`
+- `strategy.depth`
+- `strategy.coverage_mode`
+- `strategy.followup_passes`
+- `strategy.final_critique`
+- `delivery.format`
+- `delivery.citation_style`
+- optional `delivery.sections`
 
-Workflow orchestration:
-- planner
-- parallel workers
-- synthesis council
-- validation
+Important behavior:
+- Research breadth is derived from `strategy.depth`.
+- `runtime.max_concurrency` only caps execution concurrency.
+- Plan approval is opt-in.
 
-Key contract details:
-- authored managed node
-- generated primitive subgraph expansion during normalization
-- track fan-out and summary-tree reduction
-- optional final critique gate
-
-Authored fields:
-- `question`
-- `objective`
-- optional `audience`
-- optional `inputs`
-- optional `context_from`
-- optional `sources`
-- optional `deliverable`
-- optional `orchestration.track_count`
-- optional `orchestration.max_parallel_tracks`
-- optional `orchestration.summary_fan_in`
-- optional `orchestration.final_critique`
-
-Authoring note:
-- `orchestration.max_parallel_tracks` is an advanced runtime concurrency cap, not a research-breadth control. `track_count` defines how many logical tracks exist; `max_parallel_tracks` only limits how many workers may run at the same time.
-
-Concrete contract:
-- see [`DEEP_RESEARCH_WORKFLOW.md`](DEEP_RESEARCH_WORKFLOW.md)
+Reference:
+- [`DEEP_RESEARCH_WORKFLOW.md`](DEEP_RESEARCH_WORKFLOW.md)
 
 ### `spec_design`
 
 Purpose:
-- Turn an idea or problem into an implementation-ready architecture or design spec.
+- Turn a repo-grounded problem statement into an implementation-ready design package.
 
-Compiled workflow phases:
-- clarify
-- inspect
-- assess information gap
-- optional targeted external research
-- synthesize constraints
-- explore
-- tradeoffs
-- draft
-- critique
-- revise
-- finalize
+Key authored fields:
+- `brief.problem`
+- `brief.goal`
+- optional `brief.audience`
+- optional `brief.constraints`
+- optional `brief.decision_drivers`
+- optional `brief.scope`
+- `context_policy.repo_first`
+- `context_policy.allow_web_fallback`
+- optional `context_policy.web_triggers`
+- optional `approval_policy.require_direction_approval`
+- `strategy.alternatives`
+- `strategy.critique_profiles`
+- `strategy.max_revision_cycles`
+- `delivery.format`
+- optional `delivery.sections`
 
-Workflow orchestration:
-- planner
-- repo-first inspection
-- targeted web fallback when repo context is insufficient
-- parallel option exploration
-- critique council
-- validation
+Important behavior:
+- Repo inspection is first-class.
+- External research is targeted and conditional.
+- Direction approval is opt-in.
+- Revision stays autonomous unless the graph author explicitly asks for a checkpoint elsewhere.
 
-Concrete contract:
-- see [`SPEC_DESIGN_WORKFLOW.md`](SPEC_DESIGN_WORKFLOW.md)
-
-Design rule:
-- repo-first, not repo-only
-- the workflow should inspect the repository first, then use targeted web research only if the repository does not contain enough information to support a strong design
-
-Key contract details:
-- authored managed node
-- generated primitive subgraph expansion during normalization
-- repo inspection, information-gap assessment, and targeted external research fan-out
-- parallel option generation
-- bounded revision loop with critique panel and quality check
+Reference:
+- [`SPEC_DESIGN_WORKFLOW.md`](SPEC_DESIGN_WORKFLOW.md)
 
 ### `execute_spec`
 
 Purpose:
-- Execute an existing spec by planning work, applying changes, validating them, and repairing failures.
+- Turn a structured spec source into a validated code change with a single writer.
 
-Compiled workflow phases:
-- clarify
-- plan
-- implement
-- validate
-- repair
-- handoff
+Key authored fields:
+- optional `brief.objective`
+- optional `brief.scope`
+- `spec_source`
+- `context_policy.allow_official_docs_fallback`
+- optional `approval_policy.require_execution_plan_approval`
+- `strategy.single_writer`
+- `strategy.allow_readonly_recon`
+- `strategy.max_repair_cycles`
+- `validation.commands`
+- optional `validation.required`
+- `delivery.write_handoff`
+- `delivery.write_validation_ledger`
+- `delivery.write_repair_log`
 
-Workflow orchestration:
-- planner
-- single-writer implementation
-- deterministic validation
-- repair loop
+Important behavior:
+- `execute_spec` is single-writer only in this release.
+- The execution plan checkpoint is opt-in.
+- Validation and repair are first-class runtime phases.
 
-Concrete contract:
-- see [`EXECUTE_SPEC_WORKFLOW.md`](EXECUTE_SPEC_WORKFLOW.md)
-
-Design rule:
-- spec-driven, not idea-driven
-- the workflow must require a structured `spec_source`
-- it should implement an existing design, not invent one during execution
-
-Contract highlights:
-- required structured `spec_source`
-- supports `managed_node` sources for `spec_design -> execute_spec`
-- supports `artifact_bundle` sources for hand-written or external specs
-- spec-readiness gate before implementation begins
-- single-writer implementation path
-- deterministic validation plus bounded repair loop
-
-Key contract details:
-- authored managed node
-- generated primitive subgraph expansion during normalization
-- structured `spec_source` parsing for managed-node and artifact-bundle sources
-- spec-readiness AI gate
-- single-writer implementation path with bounded repair loop
-- deterministic validation gate and final handoff outputs
+Reference:
+- [`EXECUTE_SPEC_WORKFLOW.md`](EXECUTE_SPEC_WORKFLOW.md)
 
 ### `review_change`
 
 Purpose:
-- Review a diff or artifact with multiple reviewer passes, merge findings, normalize severity, and publish a final review.
+- Turn a diff, handoff, or review bundle into a calibrated findings package.
 
-Compiled workflow phases:
-- prepare
-- reviewers
-- merge
-- normalize
-- deliver
+Key authored fields:
+- optional `brief.review_goal`
+- optional `brief.focus`
+- optional `brief.audience`
+- optional `brief.scope`
+- `review_source`
+- `context_policy.include_surrounding_code`
+- `context_policy.include_tests`
+- `context_policy.include_docs`
+- `context_policy.include_validation`
+- `strategy.reviewer_profiles`
+- `strategy.severity_policy`
+- `strategy.include_surrounding_context`
+- `strategy.false_positive_challenge`
+- `strategy.require_file_references`
+- `delivery.write_review_summary`
+- `delivery.write_raw_findings`
+- `delivery.write_calibrated_findings`
 
-Workflow orchestration:
-- parallel reviewers
-- council merge
-- validation
+Important behavior:
+- `review_change` is read-only and does not use approval checkpoints by default.
+- Reviewer fan-out is role-based.
+- Findings are aggregated, merged, and calibrated before publication.
 
-Concrete contract:
-- see [`REVIEW_CHANGE_WORKFLOW.md`](REVIEW_CHANGE_WORKFLOW.md)
-
-Design rule:
-- findings-driven, not commentary-driven
-- the workflow must require a structured `review_source`
-- it should prioritize concrete bugs, regressions, and missing tests over low-value style commentary
-
-Contract highlights:
-- required structured `review_source`
-- supports `managed_node` sources for `execute_spec -> review_change`
-- supports `artifact_bundle` sources for file-based review bundles
-- parallel role-based reviewer panel
-- merged machine-readable findings plus normalization gate
-- final prose and JSON review outputs
-
-Key contract details:
-- authored managed node
-- generated primitive subgraph expansion during normalization
-- structured `review_source` parsing for managed-node and artifact-bundle sources
-- reviewer panel, merge step, normalization AI gate, and final review outputs
+Reference:
+- [`REVIEW_CHANGE_WORKFLOW.md`](REVIEW_CHANGE_WORKFLOW.md)
 
 ## Implementation Surface
 
 Shipped in this release:
+
 - canonical managed-workflow kinds in `src/graph/schema.ts`
-- a managed-workflow registry in `src/managed/registry.ts`
-- `deep_research` authored node support and graph expansion
-- `spec_design` authored node support and graph expansion
-- `execute_spec` authored node support and graph expansion
-- `review_change` authored node support and graph expansion
-- CLI help and docs that describe the shipped workflow surface
+- managed workflow builders in `src/managed/`
+- normalization support that lowers managed workflows into primitive subgraphs
+- registry metadata in `src/managed/registry.ts`
+- committed example graphs in [`docs/examples/graphs/`](examples/graphs/README.md)
 
 Deferred:
-- runtime and UI treatment of managed workflows as collapsible, inspectable workflow groups
+
+- UI-native collapsed managed-workflow visualization
+- remote or controller-driven workflow orchestration
+- a second runtime model beyond compiled primitive execution

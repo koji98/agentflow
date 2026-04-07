@@ -1,98 +1,65 @@
 # `spec_design` Workflow
 
-This document defines the authored contract and compiled behavior for the `spec_design` managed workflow.
+`spec_design` turns a repo-grounded problem statement into an implementation-ready design package.
 
-`spec_design` compiles into a generated primitive subgraph during graph normalization.
-
-## Purpose
-
-`spec_design` turns an idea, problem, or product direction into an implementation-ready design spec.
-
-It should sit between:
-
-- `deep_research`
-- `execute_spec`
-
-The intended lifecycle is:
-
-1. `deep_research` figures out what is true
-2. `spec_design` decides what should be built
-3. `execute_spec` implements the chosen design
-4. `review_change` critiques the resulting implementation
+It is autonomous by default. It only pauses for operator input when `approval_policy.require_direction_approval` is enabled.
 
 ## Workflow Shape
 
 ```mermaid
 flowchart TD
-    clarify["clarify_problem"]
-    inspect["inspect_repo"]
-    gap{"repo context sufficient?"}
-    constraints["synthesize_constraints"]
-    tradeoffs["compare_tradeoffs"]
-    draft["draft_spec"]
-    merge["merge_critiques"]
-    revise{"revise again?"}
-    reviseNode["revise_spec"]
-    finalize["finalize_spec"]
+    brief["clarify_brief"]
+    inspect["inspect_current_state"]
+    gaps["identify_information_gaps"]
+    external{"allow web fallback?"}
 
-    subgraph research["parallel_external_research"]
-        er1["research_track_1"]
-        er2["research_track_2"]
+    subgraph ext["parallel targeted_external_research"]
+        er1["external_research_01"]
+        er2["external_research_02"]
     end
 
-    subgraph options["parallel_option_generation"]
-        o1["option_1"]
-        o2["option_2"]
+    subgraph options["parallel generate_options"]
+        o1["option_01"]
+        o2["option_02"]
         oN["option_N"]
     end
 
-    subgraph critique["parallel_critique_panel"]
-        c1["architecture"]
-        c2["product"]
-        c3["operations"]
+    direction{"require direction approval?"}
+    directionOnce["propose_direction"]
+
+    subgraph directionLoop["direction_loop"]
+        d1["propose_direction"]
+        d2["approve_direction"]
+        d1 --> d2
     end
 
-    clarify --> inspect --> gap
-    gap -->|yes| constraints
-    gap -->|no| er1
-    gap -->|no| er2
-    er1 --> constraints
-    er2 --> constraints
+    draft["draft_spec"]
 
-    constraints --> o1
-    constraints --> o2
-    constraints --> oN
-    o1 --> tradeoffs
-    o2 --> tradeoffs
-    oN --> tradeoffs
+    subgraph revision["revision_loop"]
+        r1["revise_spec"]
 
-    tradeoffs --> draft
-    draft --> c1
-    draft --> c2
-    draft --> c3
-    c1 --> merge
-    c2 --> merge
-    c3 --> merge
-    merge --> revise
-    revise -->|yes| reviseNode --> draft
-    revise -->|no| finalize
+        subgraph critique["parallel critique_panel"]
+            c1["critique_architecture"]
+            c2["critique_implementation"]
+            cN["critique_*"]
+        end
+
+        r2["merge_critiques"]
+        r3["quality_review"]
+
+        r1 --> critique --> r2 --> r3
+    end
+
+    publish["publish design package"]
+
+    brief --> inspect --> gaps --> external
+    external -->|no| options
+    external -->|yes| ext --> options
+    options --> direction
+    direction -->|no| directionOnce --> draft
+    direction -->|yes| directionLoop --> draft
+    draft --> revision --> publish
 ```
-
-## Core Principle
-
-`spec_design` is repo-first, not repo-only.
-
-That means:
-
-- start with the repository
-- inspect local code, docs, tests, architecture notes, and conventions
-- if the repository is insufficient for a strong design, escalate to targeted web research
-- external research fills gaps; it does not override repository conventions
-
-This prevents two common failures:
-
-- weak design because the repo does not contain enough context
-- generic design because the system jumps to the web too early and ignores the codebase
 
 ## Authored Contract
 
@@ -100,10 +67,9 @@ Required fields:
 
 - `type: "spec_design"`
 - `id`
-- `problem`
-- `goal`
+- `brief`
 
-Optional common execution fields:
+Shared execution fields are optional:
 
 - `label`
 - `repo`
@@ -113,351 +79,141 @@ Optional common execution fields:
 - `outputs`
 - `timeout_sec`
 
-Optional workflow fields:
+Workflow fields:
 
-- `audience`
-- `constraints`
-- `decision_drivers`
-- `scope`
-- `research_policy`
-- `deliverable`
-- `orchestration`
+- `context_policy`
+- `approval_policy`
+- `strategy`
+- `delivery`
+- `runtime`
 
-## Example Authored Schema
+## Example
 
 ```json
 {
   "type": "spec_design",
   "id": "managed_nodes_spec",
-  "repo": "main",
-  "profile": "default",
-  "problem": "Agentflow's managed aliases are too thin and do not encode real workflows.",
-  "goal": "Design a true managed-workflow model for Agentflow.",
-  "audience": "engineering",
-  "constraints": [
-    "Keep primitive graph nodes stable.",
-    "Managed workflows must compile into primitive subgraphs.",
-    "The UI must support collapsed and expanded managed workflow views."
-  ],
-  "decision_drivers": [
-    "clarity",
-    "reliability",
-    "extensibility",
-    "operator ergonomics"
-  ],
-  "scope": {
-    "paths": ["src/**", "docs/**", "tests/**", "scripts/**"],
-    "areas": ["graph", "runtime", "artifacts"]
+  "brief": {
+    "problem": "Agentflow needs true managed workflows instead of thin aliases.",
+    "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+    "audience": "engineering",
+    "constraints": [
+      "Keep primitive graph nodes stable.",
+      "Managed workflows must compile into primitive subgraphs."
+    ],
+    "decision_drivers": ["clarity", "reliability", "operator ergonomics"],
+    "scope": {
+      "paths": ["src/**", "docs/**", "tests/**"],
+      "areas": ["graph", "managed workflows", "docs"]
+    }
   },
-  "research_policy": {
+  "context_policy": {
     "repo_first": true,
     "allow_web_fallback": true,
-    "web_triggers": [
-      "missing_pattern",
-      "missing_domain_context",
-      "missing_library_guidance",
-      "missing_product_reference"
-    ],
-    "allow_domains": [
-      "openai.com",
-      "help.openai.com",
-      "developers.openai.com",
-      "react.dev"
-    ],
-    "max_external_research_tasks": 3
+    "web_triggers": ["missing pattern", "missing domain context"],
+    "allow_domains": ["openai.com", "developers.openai.com"]
   },
-  "deliverable": {
+  "approval_policy": {
+    "require_direction_approval": false
+  },
+  "strategy": {
+    "alternatives": 3,
+    "critique_profiles": ["architecture", "implementation", "ux"],
+    "max_revision_cycles": 2
+  },
+  "delivery": {
     "format": "design_spec",
-    "sections": [
-      "problem",
-      "current_state",
-      "requirements",
-      "options",
-      "recommendation",
-      "architecture",
-      "file_plan",
-      "acceptance_criteria",
-      "risks",
-      "open_questions"
-    ]
+    "sections": ["problem", "recommendation", "architecture", "implementation_readiness"]
   },
-  "orchestration": {
-    "option_count": 3,
-    "max_parallel_options": 3,
-    "critique_roles": ["architecture", "implementation", "ux"],
-    "revision_rounds": 2
+  "runtime": {
+    "max_concurrency": 2
   }
 }
 ```
 
-## Field Semantics
+## Field Notes
 
-### `problem`
+### `brief`
 
-The current issue, gap, or opportunity being addressed.
+`brief` defines the design problem:
 
-This should describe the problem in outcome terms, not implementation terms.
+- `problem`
+- `goal`
+- optional `audience`
+- optional `constraints`
+- optional `decision_drivers`
+- optional `scope`
 
-### `goal`
+### `context_policy`
 
-The end state the design should achieve.
+Controls repo-first and web-fallback behavior:
 
-### `constraints`
+- `repo_first`
+- `allow_web_fallback`
+- optional `web_triggers`
+- optional `allow_domains`
 
-Non-negotiable rules or boundaries that the design must respect.
+### `approval_policy`
 
-### `decision_drivers`
+`require_direction_approval` inserts a checkpoint loop around the chosen direction. If it is `false`, the workflow selects a direction and continues autonomously.
 
-The criteria used to judge options.
+### `strategy`
 
-Examples:
+Intent-level knobs only:
 
-- clarity
-- reliability
-- extensibility
-- implementation cost
-- operator ergonomics
+- `alternatives`
+- `critique_profiles`
+- `max_revision_cycles`
 
-### `scope`
+### `delivery`
 
-Repository areas or product areas the design should inspect or affect.
+Defines the final package shape:
 
-### `research_policy`
+- `format`
+- optional `sections`
 
-Controls how `spec_design` uses repo context and when it may use the web.
+### `runtime`
 
-Required behavior:
+Advanced execution tuning:
 
-- inspect repo first
-- assess whether information is sufficient
-- only perform external research if there is a real gap
+- `max_concurrency`
 
-### `deliverable`
+This caps option generation and critique fan-out. It does not define how many directions the workflow should consider semantically.
 
-Defines the final design-spec structure.
+## Produced Artifacts
 
-### `orchestration`
+Shared planning and status artifacts:
 
-Controls the internal workflow size:
+- `workflow-brief.md`
+- `workflow-plan.md`
+- `workflow-plan.json`
+- `workflow-status.json`
+- `workflow-events.jsonl`
 
-- how many options to generate
-- how many options can be explored in parallel
-- which critique roles to use
-- how many revision rounds are allowed
-
-## Repo-First With Targeted Web Fallback
-
-The workflow should explicitly decide whether repo context is sufficient before doing external research.
-
-That decision point is critical.
-
-Examples of valid web-fallback triggers:
-
-- the repo does not show enough precedent for the pattern being designed
-- the repo lacks current library or framework guidance
-- the design depends on external product behavior or competitive patterns
-- the problem requires domain context that does not exist locally
-
-Examples of invalid web-fallback behavior:
-
-- browsing the web before checking the repo
-- using external patterns to override explicit local conventions
-- broad unfocused browsing instead of targeted gap-filling
-
-## Compiled Workflow
-
-`spec_design` should compile into an internal primitive workflow shaped roughly like this:
-
-1. `clarify_problem`
-2. `inspect_repo`
-3. `assess_information_gap`
-4. optional `parallel_external_research`
-5. `synthesize_constraints`
-6. `parallel_option_generation`
-7. `compare_tradeoffs`
-8. `draft_spec`
-9. `parallel_critique_panel`
-10. `merge_critiques`
-11. `repeat` revision loop
-12. `finalize_spec`
-
-### Phase Details
-
-#### `clarify_problem`
-
-Restate the problem, goal, audience, constraints, and decision drivers as a design brief.
-
-Artifact:
+Design-specific artifacts:
 
 - `design-brief.md`
-
-#### `inspect_repo`
-
-Inspect the repository for:
-
-- existing conventions
-- relevant modules
-- architecture constraints
-- code patterns
-- docs/tests/operational assumptions
-
-Artifact:
-
 - `current-state.md`
-
-#### `assess_information_gap`
-
-Decide whether the repository provides enough context for a strong design.
-
-Artifact:
-
-- `information-gap.json`
-
-This should answer:
-
-- is repo context sufficient?
-- which gaps remain?
-- what external research is needed?
-
-#### `parallel_external_research`
-
-Only runs if `assess_information_gap` says it is needed.
-
-This is not broad research. It is targeted gap-filling.
-
-Artifacts:
-
-- `external-findings-01.md`
-- `external-findings-02.md`
-- `external-findings-03.md`
-
-#### `synthesize_constraints`
-
-Merge repository constraints and any external findings into one design constraint brief.
-
-Artifact:
-
-- `constraints-brief.md`
-
-#### `parallel_option_generation`
-
-Generate `N` distinct design options.
-
-The options must be materially different, not paraphrases.
-
-Artifacts:
-
-- `option-01.md`
-- `option-02.md`
-- `option-03.md`
-
-#### `compare_tradeoffs`
-
-Compare the options against:
-
-- constraints
-- decision drivers
-- implementation feasibility
-- repo fit
-
-Artifacts:
-
+- `information-gaps.md`
+- optional `external-findings.md`
+- `direction-proposal.md`
 - `tradeoff-matrix.md`
-- `recommendation.md`
-
-#### `draft_spec`
-
-Write the first full design spec.
-
-Artifacts:
-
 - `spec-draft.md`
-- `file-plan.md`
-- `acceptance-criteria.md`
-
-#### `parallel_critique_panel`
-
-Run named critique roles in parallel.
-
-Default roles:
-
-- architecture
-- implementation
-- ux
-
-Artifacts:
-
-- `critique-architecture.md`
-- `critique-implementation.md`
-- `critique-ux.md`
-
-#### `merge_critiques`
-
-Merge critique findings into a single revision brief.
-
-Artifact:
-
-- `critique-merged.md`
-
-#### `repeat` revision loop
-
-Revise the draft and run a quality check until:
-
-- the spec is concrete enough
-- the revision rounds are exhausted
-
-Artifacts:
-
 - `spec-revision.md`
-- `quality-check.json`
-
-#### `finalize_spec`
-
-Publish the final implementation-ready spec.
-
-Artifacts:
-
+- `critique-*.md`
+- `critique-merged.md`
+- `quality-review.json`
 - `design-spec.md`
-- `open-questions.md`
-- `risks.md`
+- `decision-log.md`
+- `implementation-readiness.md`
 
-## Downstream Contract
+Optional approval artifact:
 
-Like `deep_research`, the original authored node id should become the final published node in the lowered workflow.
+- `result.json` from `approve_direction`
 
-That means downstream nodes can reference the managed node normally through `context_from`.
+## Default Behavior
 
-Recommended default final output names:
-
-- `design_spec`
-- `file_plan`
-- `acceptance_criteria`
-- `open_questions`
-- `risks`
-
-## Output Expectations
-
-The final `design_spec` should be implementation-ready.
-
-That means it should include:
-
-- a crisp problem statement
-- current-state findings
-- clear requirements
-- distinct options with tradeoffs
-- one recommended direction
-- architecture and graph/runtime/UI implications
-- file-level implementation plan
-- acceptance criteria
-- risks and open questions
-
-It should not stop at generic brainstorming.
-
-## Implementation Notes
-
-The implementation path should match the same lowering pattern used for `deep_research`:
-
-- parse structured `spec_design` fields in the graph normalizer
-- lower the node into a generated primitive subgraph
-- preserve the original authored id for the final synthesized output node
-- reuse the existing compiler/runtime instead of adding a separate execution path
+- Direction approval is off by default.
+- Repo-first inspection is on by default.
+- External research only appears when `allow_web_fallback` is enabled.
+- Revision stays autonomous and ends on the quality review check.

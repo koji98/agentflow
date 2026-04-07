@@ -9,6 +9,22 @@ import type {
   RepeatNode,
   SequenceNode
 } from "../graph/authored.js";
+import {
+  appendOutput,
+  attemptOutput,
+  body,
+  listOrFallback,
+  managedId,
+  renderPrompt,
+  section,
+  sharedNodeBase,
+  type ManagedWorkflowRuntime,
+  workflowBriefOutput,
+  workflowEventsOutput,
+  workflowPlanJsonOutput,
+  workflowPlanMarkdownOutput,
+  workflowStatusOutput
+} from "./foundation.js";
 
 export interface ExecuteSpecScope {
   paths?: string[];
@@ -36,75 +52,65 @@ export type ExecuteSpecSourceRef = ExecuteSpecFileSourceRef | ExecuteSpecManaged
 export interface ExecuteSpecArtifactBundleSource {
   kind: "artifact_bundle";
   design_spec: ExecuteSpecSourceRef;
-  file_plan?: ExecuteSpecSourceRef;
-  acceptance_criteria?: ExecuteSpecSourceRef;
-  risks?: ExecuteSpecSourceRef;
-  open_questions?: ExecuteSpecSourceRef;
+  direction_proposal?: ExecuteSpecSourceRef;
+  tradeoff_matrix?: ExecuteSpecSourceRef;
+  decision_log?: ExecuteSpecSourceRef;
+  implementation_readiness?: ExecuteSpecSourceRef;
 }
 
 export type ExecuteSpecSource = ExecuteSpecManagedNodeSource | ExecuteSpecArtifactBundleSource;
 
-export interface ExecuteSpecExecutionPolicy {
-  max_repair_rounds: number;
+export interface ExecuteSpecBrief {
+  objective?: string;
+  scope?: ExecuteSpecScope;
+}
+
+export interface ExecuteSpecContextPolicy {
+  allow_official_docs_fallback?: boolean;
+  allow_domains?: string[];
+}
+
+export interface ExecuteSpecApprovalPolicy {
+  require_execution_plan_approval?: boolean;
+}
+
+export interface ExecuteSpecStrategy {
+  single_writer?: boolean;
+  allow_readonly_recon?: boolean;
+  max_repair_cycles?: number;
 }
 
 export interface ExecuteSpecValidation {
   commands: string[];
-  required: boolean;
-}
-
-export interface ExecuteSpecImplementationResearch {
-  allow_official_docs_fallback: boolean;
-  allow_domains?: string[];
-  max_external_lookup_tasks: number;
+  required?: boolean;
 }
 
 export interface ExecuteSpecDelivery {
-  write_change_summary: boolean;
-  write_validation_results: boolean;
-  write_residual_risks: boolean;
-  write_files_touched: boolean;
-  write_implementation_plan: boolean;
+  write_handoff?: boolean;
+  write_validation_ledger?: boolean;
+  write_repair_log?: boolean;
 }
 
 export interface ExecuteSpecWorkflowConfig extends BaseExecutableNode {
-  objective?: string;
+  brief: ExecuteSpecBrief;
   spec_source: ExecuteSpecSource;
-  scope: ExecuteSpecScope;
-  execution_policy: ExecuteSpecExecutionPolicy;
+  context_policy: ExecuteSpecContextPolicy;
+  approval_policy: ExecuteSpecApprovalPolicy;
+  strategy: ExecuteSpecStrategy;
   validation: ExecuteSpecValidation;
-  implementation_research: ExecuteSpecImplementationResearch;
   delivery: ExecuteSpecDelivery;
+  runtime?: ManagedWorkflowRuntime;
 }
 
-function managedId(rootId: string, suffix: string): string {
-  return `${rootId}__managed__execute_spec__${suffix}`;
+function workflowNodeId(rootId: string, suffix: string): string {
+  return managedId(rootId, "execute_spec", suffix);
 }
 
-function sharedNodeBase(config: ExecuteSpecWorkflowConfig): Pick<
-  AgentNode,
-  "repo" | "profile" | "timeout_sec"
-> {
-  return {
-    ...(config.repo ? { repo: config.repo } : {}),
-    ...(config.profile ? { profile: config.profile } : {}),
-    ...(config.timeout_sec !== undefined ? { timeout_sec: config.timeout_sec } : {})
-  };
-}
-
-function appendOutput(outputs: OutputDefinition[], output: OutputDefinition): OutputDefinition[] {
-  return outputs.some((item) => item.name === output.name) ? outputs : [...outputs, output];
-}
-
-function formatList(title: string, values: string[]): string[] {
-  if (values.length === 0) {
-    return [`${title}: none specified`];
+function formatScope(scope: ExecuteSpecScope | undefined): string[] {
+  if (!scope) {
+    return ["Scope: infer the most relevant repository surfaces from the spec and execution goal."];
   }
 
-  return [title, ...values.map((value) => `- ${value}`)];
-}
-
-function formatScope(scope: ExecuteSpecScope): string[] {
   const lines: string[] = [];
 
   if (scope.paths && scope.paths.length > 0) {
@@ -117,29 +123,38 @@ function formatScope(scope: ExecuteSpecScope): string[] {
     lines.push(...scope.areas.map((area) => `- ${area}`));
   }
 
-  return lines.length > 0
-    ? lines
-    : ["Scope: infer the most relevant repository surfaces from the spec and the objective."];
+  return lines.length > 0 ? lines : ["Scope: infer the most relevant repository surfaces from the spec and execution goal."];
 }
 
-function formatValidation(config: ExecuteSpecWorkflowConfig): string[] {
+function formatBrief(brief: ExecuteSpecBrief): string[] {
   return [
-    `- Required gate: ${config.validation.required ? "yes" : "no"}`,
-    ...config.validation.commands.map((command, index) => `- Command ${index + 1}: ${command}`)
+    `Objective: ${brief.objective ?? "Implement the supplied spec faithfully."}`,
+    ...formatScope(brief.scope)
   ];
 }
 
-function formatImplementationResearch(policy: ExecuteSpecImplementationResearch): string[] {
-  const lines = [
+function formatContextPolicy(policy: ExecuteSpecContextPolicy): string[] {
+  return [
     `- Allow official-doc fallback: ${policy.allow_official_docs_fallback ? "yes" : "no"}`,
-    `- Max external lookup tasks: ${policy.max_external_lookup_tasks}`
+    ...(policy.allow_domains && policy.allow_domains.length > 0
+      ? [`- Allowed domains: ${policy.allow_domains.join(", ")}`]
+      : [])
   ];
+}
 
-  if (policy.allow_domains && policy.allow_domains.length > 0) {
-    lines.push(`- Allowed domains: ${policy.allow_domains.join(", ")}`);
-  }
+function formatStrategy(strategy: ExecuteSpecStrategy): string[] {
+  return [
+    `- Single writer: ${strategy.single_writer === false ? "no (requested)" : "yes"}`,
+    `- Allow read-only reconnaissance: ${strategy.allow_readonly_recon ? "yes" : "no"}`,
+    `- Max repair cycles: ${strategy.max_repair_cycles ?? 2}`
+  ];
+}
 
-  return lines;
+function formatValidation(validation: ExecuteSpecValidation): string[] {
+  return [
+    `- Validation required: ${validation.required === false ? "no" : "yes"}`,
+    ...validation.commands.map((command, index) => `- Command ${index + 1}: ${command}`)
+  ];
 }
 
 function formatSourceRef(reference: ExecuteSpecSourceRef): string {
@@ -151,21 +166,21 @@ function formatSourceRef(reference: ExecuteSpecSourceRef): string {
 function formatSpecSource(source: ExecuteSpecSource): string[] {
   if (source.kind === "managed_node") {
     return [
-      `- Source kind: managed_node`,
+      "- Source kind: managed_node",
       `- Source node: ${source.node}`,
-      "- Expected outputs: design_spec, file_plan, acceptance_criteria, risks, open_questions"
+      "- Expected outputs when available: design_spec, direction_proposal, tradeoff_matrix, decision_log, implementation_readiness"
     ];
   }
 
   return [
     "- Source kind: artifact_bundle",
     `- design_spec: ${formatSourceRef(source.design_spec)}`,
-    ...(source.file_plan ? [`- file_plan: ${formatSourceRef(source.file_plan)}`] : []),
-    ...(source.acceptance_criteria
-      ? [`- acceptance_criteria: ${formatSourceRef(source.acceptance_criteria)}`]
-      : []),
-    ...(source.risks ? [`- risks: ${formatSourceRef(source.risks)}`] : []),
-    ...(source.open_questions ? [`- open_questions: ${formatSourceRef(source.open_questions)}`] : [])
+    ...(source.direction_proposal ? [`- direction_proposal: ${formatSourceRef(source.direction_proposal)}`] : []),
+    ...(source.tradeoff_matrix ? [`- tradeoff_matrix: ${formatSourceRef(source.tradeoff_matrix)}`] : []),
+    ...(source.decision_log ? [`- decision_log: ${formatSourceRef(source.decision_log)}`] : []),
+    ...(source.implementation_readiness
+      ? [`- implementation_readiness: ${formatSourceRef(source.implementation_readiness)}`]
+      : [])
   ];
 }
 
@@ -213,74 +228,43 @@ function resolveSpecSourceMaterials(source: ExecuteSpecSource): {
         {
           node: source.node,
           include: "output",
-          output: "file_plan",
+          output: "direction_proposal",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "acceptance_criteria",
+          output: "tradeoff_matrix",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "risks",
+          output: "decision_log",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "open_questions",
+          output: "implementation_readiness",
           optional: true
         }
       ]
     };
   }
 
-  const references: Array<{
-    reference: ExecuteSpecSourceRef;
-    optional: boolean;
-  }> = [
+  const refs: Array<{ reference: ExecuteSpecSourceRef; optional: boolean }> = [
     {
       reference: source.design_spec,
       optional: false
     },
-    ...(source.file_plan
-      ? [
-          {
-            reference: source.file_plan,
-            optional: true
-          }
-        ]
-      : []),
-    ...(source.acceptance_criteria
-      ? [
-          {
-            reference: source.acceptance_criteria,
-            optional: true
-          }
-        ]
-      : []),
-    ...(source.risks
-      ? [
-          {
-            reference: source.risks,
-            optional: true
-          }
-        ]
-      : []),
-    ...(source.open_questions
-      ? [
-          {
-            reference: source.open_questions,
-            optional: true
-          }
-        ]
-      : [])
+    ...(source.direction_proposal ? [{ reference: source.direction_proposal, optional: true }] : []),
+    ...(source.tradeoff_matrix ? [{ reference: source.tradeoff_matrix, optional: true }] : []),
+    ...(source.decision_log ? [{ reference: source.decision_log, optional: true }] : []),
+    ...(source.implementation_readiness ? [{ reference: source.implementation_readiness, optional: true }] : [])
   ];
 
-  return references.reduce(
+  return refs.reduce(
     (accumulator, item) => {
       const input = sourceRefToInput(item.reference);
       const context = sourceRefToContext(item.reference, item.optional);
@@ -326,145 +310,167 @@ function buildValidationGateScript(commands: string[]): string {
   return lines.join("\n");
 }
 
-function buildIngestSpecPrompt(config: ExecuteSpecWorkflowConfig): string {
-  return [
-    "Resolve the structured spec source into one execution packet.",
-    "",
-    `Objective: ${config.objective ?? "Implement the supplied spec faithfully."}`,
-    "",
-    "Spec source:",
-    ...formatSpecSource(config.spec_source),
-    "",
-    ...formatScope(config.scope),
-    "",
-    "Write `spec-packet.md` to the output directory.",
-    "The packet must consolidate the executable requirements, intended behavior, affected surfaces, acceptance criteria, risks, open questions, and any missing supporting artifacts.",
-    "Clearly separate explicit requirements from repo-grounded inference."
-  ].join("\n");
+function buildIngestPrompt(config: ExecuteSpecWorkflowConfig): string {
+  return renderPrompt([
+    body("Ingest the spec source and normalize it into one execution packet."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Resolve the spec source artifacts and separate explicit requirements from repo-grounded inference."
+    ]),
+    section("Allowed Sources and Tools", [
+      ...formatContextPolicy(config.context_policy),
+      "",
+      ...formatSpecSource(config.spec_source)
+    ]),
+    section("Output Contract", [
+      "Write `spec-packet.json` and `workflow-brief.md` to the output directory."
+    ]),
+    section("Quality Bar", [
+      "The packet must consolidate behavior, affected surfaces, risks, open questions, and validation expectations into an execution-ready source of truth."
+    ])
+  ]);
 }
 
-function buildSpecReadinessPrompt(config: ExecuteSpecWorkflowConfig): string {
-  return [
-    "Review whether the spec packet is ready to execute without inventing new design decisions.",
-    "",
-    `Objective: ${config.objective ?? "Implement the supplied spec faithfully."}`,
-    "",
-    "Use the spec packet in context."
-  ].join("\n");
+function buildReadinessPrompt(config: ExecuteSpecWorkflowConfig): string {
+  return renderPrompt([
+    body("Review whether the spec packet is ready to execute without inventing new design decisions."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the spec packet in context."
+    ]),
+    section("Quality Bar", [
+      "Pass only when the intended behavior and affected surfaces are concrete enough to implement safely."
+    ])
+  ]);
 }
 
-function buildSpecReadinessRubric(config: ExecuteSpecWorkflowConfig): string {
+function buildReadinessRubric(config: ExecuteSpecWorkflowConfig): string {
   return [
     "Pass only if the spec packet defines the target behavior clearly enough to implement without redesigning the system.",
-    "Pass if missing supporting artifacts can be safely compensated for through repo conventions and the design intent remains clear.",
     `Consider these validation expectations: ${config.validation.commands.join("; ")}.`,
-    "Fail if essential behavior is ambiguous, acceptance criteria are not testable enough, the affected surface is too unclear, or unresolved questions would force architectural guessing."
+    "Fail if essential behavior is ambiguous, acceptance criteria are too weak, or unresolved questions would force architectural guessing."
   ].join(" ");
 }
 
-function buildInspectRepoPrompt(config: ExecuteSpecWorkflowConfig): string {
-  return [
-    "Inspect the repository before implementation and extract the execution context.",
-    "",
-    `Objective: ${config.objective ?? "Implement the supplied spec faithfully."}`,
-    "",
-    ...formatScope(config.scope),
-    "",
-    "Use the spec packet and spec readiness result in context.",
-    "Focus on existing modules, conventions, relevant files, likely impact areas, tests, and operational constraints.",
-    "Write `execution-context.md` to the output directory."
-  ].join("\n");
-}
-
-function buildImplementationResearchPrompt(config: ExecuteSpecWorkflowConfig): string {
-  return [
-    "Perform narrow implementation research only if the repo and spec leave critical implementation details unresolved.",
-    "",
-    `Objective: ${config.objective ?? "Implement the supplied spec faithfully."}`,
-    "",
-    ...formatImplementationResearch(config.implementation_research),
-    "",
-    "Prefer official documentation and stay within the allowed domains when they are declared.",
-    "Do not redesign the system or broaden the scope.",
-    "If no external lookup is needed, write a short note explaining that repo and spec context were sufficient.",
-    "Write `implementation-findings.md` to the output directory."
-  ].join("\n");
+function buildReconPrompt(config: ExecuteSpecWorkflowConfig): string {
+  return renderPrompt([
+    body("Run read-only reconnaissance on the repository before mutating code."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the spec packet and readiness result in context."
+    ]),
+    section("Quality Bar", [
+      "Identify likely impact areas, file boundaries, conventions, tests, and operational constraints."
+    ]),
+    section("Output Contract", [
+      "Write `recon-notes.md` to the output directory."
+    ])
+  ]);
 }
 
 function buildPlanPrompt(config: ExecuteSpecWorkflowConfig): string {
-  return [
-    "Turn the spec packet into a concrete implementation plan.",
-    "",
-    `Objective: ${config.objective ?? "Implement the supplied spec faithfully."}`,
-    "",
-    ...formatValidation(config),
-    "",
-    ...formatScope(config.scope),
-    "",
-    "Use the spec packet, the spec readiness result, the execution context, and any implementation findings in context.",
-    "Because this workflow is single-writer, produce an ordered implementation plan rather than parallel work packets.",
-    "Write `implementation-plan.md` to the output directory."
-  ].join("\n");
+  return renderPrompt([
+    body("Turn the execution packet into a concrete implementation plan."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the spec packet, readiness result, and any reconnaissance notes in context."
+    ]),
+    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
+    section("Quality Bar", [
+      "Because this workflow is single-writer, produce an ordered implementation plan rather than parallel work packets.",
+      "Make mutation boundaries, validation plan, and file ownership explicit."
+    ]),
+    section("Output Contract", [
+      "Write `execution-plan.md`, `file-plan.md`, `mutation-boundary.md`, `validation-plan.md`, `workflow-plan.md`, and `workflow-plan.json` to the output directory.",
+      "Use this JSON schema exactly for `workflow-plan.json`:",
+      '{"ordered_steps":["..."],"mutation_boundary":["..."],"validation_plan":["..."],"known_risks":["..."]}'
+    ])
+  ]);
+}
+
+function buildPlanCheckpointPrompt(): string {
+  return renderPrompt([
+    body("Review the execution plan before any mutating implementation begins."),
+    section("Quality Bar", [
+      "Pass when the execution plan, file plan, mutation boundary, and validation plan are concrete enough to implement safely.",
+      "Deny when mutation scope or validation ownership still needs clarification."
+    ]),
+    section("Blocker and Escalation Rules", [
+      "When denying, explain the concrete correction needed before code changes start."
+    ])
+  ]);
 }
 
 function buildImplementPrompt(config: ExecuteSpecWorkflowConfig): string {
-  return [
-    "Implement the spec in the repository.",
-    "",
-    `Objective: ${config.objective ?? "Implement the supplied spec faithfully."}`,
-    "",
-    ...formatValidation(config),
-    "",
-    "Use the spec packet, spec readiness result, execution context, implementation findings, and implementation plan in context.",
-    "Follow repository conventions. Do not redesign the system. Keep changes within the declared scope unless the spec packet proves a small extension is necessary.",
-    "Write `implementation-notes.md` to the output directory."
-  ].join("\n");
+  return renderPrompt([
+    body("Implement the spec in the repository."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the spec packet, execution plan, file plan, and mutation boundary in context."
+    ]),
+    section("Quality Bar", [
+      "Follow repository conventions and keep changes within the declared mutation boundary unless the packet proves a small extension is necessary.",
+      "Do not redesign the system during execution."
+    ]),
+    section("Output Contract", [
+      "Write `implementation-notes.md` to the output directory."
+    ]),
+    section("Allowed Sources and Tools", [
+      ...formatContextPolicy(config.context_policy),
+      "",
+      ...formatValidation(config.validation)
+    ])
+  ]);
 }
 
-function buildStabilizePrompt(config: ExecuteSpecWorkflowConfig): string {
-  return [
-    "Stabilize the current implementation against the spec and validation contract.",
-    "",
-    `Objective: ${config.objective ?? "Implement the supplied spec faithfully."}`,
-    "",
-    ...formatValidation(config),
-    "",
-    "Use the current workspace, the spec packet, the execution context, the implementation plan, and prior implementation notes in context.",
-    "Run or inspect the validation commands yourself when useful, then make only the smallest changes needed to satisfy the spec and the validation gate.",
-    "Write `stabilization-notes.md` to the output directory."
-  ].join("\n");
+function buildRepairPrompt(config: ExecuteSpecWorkflowConfig): string {
+  return renderPrompt([
+    body("Stabilize the current implementation against the concrete validation failures."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the spec packet, execution plan, mutation boundary, implementation notes, and latest failed validation result in context."
+    ]),
+    section("Quality Bar", [
+      "Make only the smallest changes needed to satisfy the spec and the validation gate.",
+      "Do not broaden the scope during repair."
+    ]),
+    section("Output Contract", [
+      "Write `repair-notes.md` to the output directory."
+    ]),
+    section("Allowed Sources and Tools", formatValidation(config.validation))
+  ]);
 }
 
 function buildFinalizePrompt(config: ExecuteSpecWorkflowConfig, outputs: OutputDefinition[]): string {
-  const artifactLines = outputs.map((output) => `- \`${output.path}\``);
-
-  return [
-    "Publish the final implementation handoff.",
-    "",
-    `Objective: ${config.objective ?? "Implement the supplied spec faithfully."}`,
-    "",
-    "Use the spec packet, spec readiness result, execution context, implementation plan, implementation notes, latest passed stabilization notes, and latest passed validation result in context.",
-    "Summarize what changed, what validation proved, and what risks or follow-up work remain.",
-    "",
-    "Write these artifacts to the output directory:",
-    ...artifactLines
-  ].join("\n");
+  return renderPrompt([
+    body("Publish the final execution handoff and workflow status artifacts."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the spec packet, latest plan artifacts, implementation notes, latest passed validation result, and latest passed repair notes in context."
+    ]),
+    section("Output Contract", outputs.map((output) => `- \`${output.path}\``)),
+    section("Quality Bar", [
+      "Summarize what changed, what validation proved, and what residual risks remain without inventing new design decisions."
+    ])
+  ]);
 }
 
 export function buildExecuteSpecWorkflow(config: ExecuteSpecWorkflowConfig): SequenceNode {
   const shared = sharedNodeBase(config);
-  const workflowId = managedId(config.id, "workflow");
+  const workflowId = workflowNodeId(config.id, "workflow");
 
-  const ingestId = managedId(config.id, "ingest_spec");
-  const readinessId = managedId(config.id, "assess_spec_readiness");
-  const inspectId = managedId(config.id, "inspect_repo_for_execution");
-  const researchId = managedId(config.id, "targeted_implementation_research");
-  const planId = managedId(config.id, "plan_execution");
-  const implementId = managedId(config.id, "implement_spec");
-  const stabilizationLoopId = managedId(config.id, "stabilization_loop");
-  const stabilizationBodyId = managedId(config.id, "stabilization_body");
-  const stabilizeId = managedId(config.id, "stabilize_implementation");
-  const validationId = managedId(config.id, "validation_gate");
+  const ingestId = workflowNodeId(config.id, "ingest_spec");
+  const readinessId = workflowNodeId(config.id, "assess_spec_readiness");
+  const reconId = workflowNodeId(config.id, "read_only_recon");
+  const planId = workflowNodeId(config.id, "plan_execution");
+  const planCheckpointId = workflowNodeId(config.id, "approve_execution_plan");
+  const planLoopId = workflowNodeId(config.id, "plan_approval_loop");
+  const planBodyId = workflowNodeId(config.id, "plan_approval_body");
+  const implementId = workflowNodeId(config.id, "implement_spec");
+  const repairLoopId = workflowNodeId(config.id, "repair_loop");
+  const repairBodyId = workflowNodeId(config.id, "repair_body");
+  const repairId = workflowNodeId(config.id, "repair_implementation");
+  const validationId = workflowNodeId(config.id, "validation_gate");
 
   const sourceMaterials = resolveSpecSourceMaterials(config.spec_source);
 
@@ -474,24 +480,13 @@ export function buildExecuteSpecWorkflow(config: ExecuteSpecWorkflowConfig): Seq
       id: ingestId,
       label: "Ingest Spec",
       ...shared,
-      sandbox: "read-only",
-      inputs: [
-        ...(config.inputs ?? []),
-        ...sourceMaterials.inputs
-      ],
-      context_from: [
-        ...(config.context_from ?? []),
-        ...sourceMaterials.context_from
-      ],
+      inputs: [...(config.inputs ?? []), ...sourceMaterials.inputs],
+      context_from: [...(config.context_from ?? []), ...sourceMaterials.context_from],
       outputs: [
-        {
-          name: "spec_packet",
-          from: "attempt",
-          path: "spec-packet.md",
-          required: true
-        }
+        attemptOutput("spec_packet", "spec-packet.json", true),
+        workflowBriefOutput()
       ],
-      prompt: buildIngestSpecPrompt(config)
+      prompt: buildIngestPrompt(config)
     },
     {
       type: "check",
@@ -507,53 +502,18 @@ export function buildExecuteSpecWorkflow(config: ExecuteSpecWorkflowConfig): Seq
         }
       ],
       outputs: [
-        {
-          name: "spec_readiness",
-          from: "attempt",
-          path: "result.json",
-          required: true
-        }
+        attemptOutput("spec_readiness", "result.json", true)
       ],
-      prompt: buildSpecReadinessPrompt(config),
-      rubric: buildSpecReadinessRubric(config)
-    },
-    {
-      type: "agent",
-      id: inspectId,
-      label: "Inspect Repo For Execution",
-      ...shared,
-      sandbox: "read-only",
-      context_from: [
-        {
-          node: ingestId,
-          include: "output",
-          output: "spec_packet"
-        },
-        {
-          node: readinessId,
-          include: "result"
-        }
-      ],
-      outputs: [
-        {
-          name: "execution_context",
-          from: "attempt",
-          path: "execution-context.md",
-          required: true
-        }
-      ],
-      prompt: buildInspectRepoPrompt(config)
+      prompt: buildReadinessPrompt(config),
+      rubric: buildReadinessRubric(config)
     }
   ];
 
-  if (
-    config.implementation_research.allow_official_docs_fallback &&
-    config.implementation_research.max_external_lookup_tasks > 0
-  ) {
+  if (config.strategy.allow_readonly_recon) {
     steps.push({
       type: "agent",
-      id: researchId,
-      label: "Targeted Implementation Research",
+      id: reconId,
+      label: "Read-only Reconnaissance",
       ...shared,
       sandbox: "read-only",
       context_from: [
@@ -565,304 +525,283 @@ export function buildExecuteSpecWorkflow(config: ExecuteSpecWorkflowConfig): Seq
         {
           node: readinessId,
           include: "result"
-        },
-        {
-          node: inspectId,
-          include: "output",
-          output: "execution_context"
         }
       ],
       outputs: [
-        {
-          name: "implementation_findings",
-          from: "attempt",
-          path: "implementation-findings.md",
-          required: false
-        }
+        attemptOutput("recon_notes", "recon-notes.md", true)
       ],
-      prompt: buildImplementationResearchPrompt(config)
+      prompt: buildReconPrompt(config)
     });
   }
 
-  steps.push(
+  const planContext: ContextReference[] = [
     {
+      node: ingestId,
+      include: "output",
+      output: "spec_packet"
+    },
+    {
+      node: readinessId,
+      include: "result"
+    },
+    ...(config.strategy.allow_readonly_recon
+      ? [
+          {
+            node: reconId,
+            include: "output",
+            output: "recon_notes"
+          } satisfies ContextReference
+        ]
+      : [])
+  ];
+
+  if (config.approval_policy.require_execution_plan_approval) {
+    steps.push({
+      type: "repeat",
+      id: planLoopId,
+      label: "Execution Plan Approval Loop",
+      max_attempts: 3,
+      body: {
+        type: "sequence",
+        id: planBodyId,
+        label: "Execution Plan Approval Body",
+        steps: [
+          {
+            type: "agent",
+            id: planId,
+            label: "Plan Execution",
+            ...shared,
+            sandbox: "read-only",
+            context_from: [
+              ...planContext,
+              {
+                node: planCheckpointId,
+                include: "output",
+                output: "operator_feedback",
+                iteration: "latest_failed",
+                optional: true
+              }
+            ],
+            outputs: [
+              attemptOutput("execution_plan", "execution-plan.md", true),
+              attemptOutput("file_plan", "file-plan.md", true),
+              attemptOutput("mutation_boundary", "mutation-boundary.md", true),
+              attemptOutput("validation_plan", "validation-plan.md", true),
+              workflowPlanMarkdownOutput(),
+              workflowPlanJsonOutput()
+            ],
+            prompt: buildPlanPrompt(config)
+          },
+          {
+            type: "checkpoint",
+            id: planCheckpointId,
+            label: "Approve Execution Plan",
+            ...shared,
+            context_from: [
+              {
+                node: planId,
+                include: "output",
+                output: "file_plan"
+              },
+              {
+                node: planId,
+                include: "output",
+                output: "validation_plan"
+              }
+            ],
+            review_from: {
+              node: planId,
+              include: "output",
+              output: "execution_plan"
+            },
+            prompt: buildPlanCheckpointPrompt()
+          }
+        ]
+      },
+      until: {
+        node: planCheckpointId
+      }
+    } satisfies RepeatNode);
+  } else {
+    steps.push({
       type: "agent",
       id: planId,
       label: "Plan Execution",
       ...shared,
       sandbox: "read-only",
-      context_from: [
-        {
-          node: ingestId,
-          include: "output",
-          output: "spec_packet"
-        },
-        {
-          node: readinessId,
-          include: "result"
-        },
-        {
-          node: inspectId,
-          include: "output",
-          output: "execution_context"
-        },
-        ...(config.implementation_research.allow_official_docs_fallback &&
-        config.implementation_research.max_external_lookup_tasks > 0
-          ? [
-              {
-                node: researchId,
-                include: "output",
-                output: "implementation_findings",
-                optional: true
-              } satisfies ContextReference
-            ]
-          : [])
-      ],
+      context_from: planContext,
       outputs: [
-        {
-          name: "implementation_plan",
-          from: "attempt",
-          path: "implementation-plan.md",
-          required: true
-        }
+        attemptOutput("execution_plan", "execution-plan.md", true),
+        attemptOutput("file_plan", "file-plan.md", true),
+        attemptOutput("mutation_boundary", "mutation-boundary.md", true),
+        attemptOutput("validation_plan", "validation-plan.md", true),
+        workflowPlanMarkdownOutput(),
+        workflowPlanJsonOutput()
       ],
       prompt: buildPlanPrompt(config)
+    });
+  }
+
+  const latestPlanRefs: ContextReference[] = [
+    {
+      node: planId,
+      include: "output",
+      output: "execution_plan",
+      ...(config.approval_policy.require_execution_plan_approval ? { iteration: "latest_passed" as const } : {})
     },
     {
-      type: "agent",
-      id: implementId,
-      label: "Implement Spec",
-      ...shared,
-      sandbox: "workspace-write",
-      context_from: [
-        {
-          node: ingestId,
-          include: "output",
-          output: "spec_packet"
-        },
-        {
-          node: readinessId,
-          include: "result"
-        },
-        {
-          node: inspectId,
-          include: "output",
-          output: "execution_context"
-        },
-        {
-          node: planId,
-          include: "output",
-          output: "implementation_plan"
-        },
-        ...(config.implementation_research.allow_official_docs_fallback &&
-        config.implementation_research.max_external_lookup_tasks > 0
-          ? [
-              {
-                node: researchId,
-                include: "output",
-                output: "implementation_findings",
-                optional: true
-              } satisfies ContextReference
-            ]
-          : [])
-      ],
-      outputs: [
-        {
-          name: "implementation_notes",
-          from: "attempt",
-          path: "implementation-notes.md",
-          required: true
-        }
-      ],
-      prompt: buildImplementPrompt(config)
+      node: planId,
+      include: "output",
+      output: "file_plan",
+      ...(config.approval_policy.require_execution_plan_approval ? { iteration: "latest_passed" as const } : {})
+    },
+    {
+      node: planId,
+      include: "output",
+      output: "mutation_boundary",
+      ...(config.approval_policy.require_execution_plan_approval ? { iteration: "latest_passed" as const } : {})
+    },
+    {
+      node: planId,
+      include: "output",
+      output: "validation_plan",
+      ...(config.approval_policy.require_execution_plan_approval ? { iteration: "latest_passed" as const } : {})
     }
-  );
+  ];
 
-  const stabilizationBody: SequenceNode = {
-    type: "sequence",
-    id: stabilizationBodyId,
-    label: "Stabilization Body",
-    steps: [
+  steps.push({
+    type: "agent",
+    id: implementId,
+    label: "Implement Spec",
+    ...shared,
+    sandbox: "workspace-write",
+    context_from: [
       {
-        type: "agent",
-        id: stabilizeId,
-        label: "Stabilize Implementation",
-        ...shared,
-        sandbox: "workspace-write",
-        context_from: [
-          {
-            node: ingestId,
-            include: "output",
-            output: "spec_packet"
-          },
-          {
-            node: readinessId,
-            include: "result"
-          },
-          {
-            node: inspectId,
-            include: "output",
-            output: "execution_context"
-          },
-          {
-            node: planId,
-            include: "output",
-            output: "implementation_plan"
-          },
-          {
-            node: implementId,
-            include: "output",
-            output: "implementation_notes"
-          },
-          ...(config.implementation_research.allow_official_docs_fallback &&
-          config.implementation_research.max_external_lookup_tasks > 0
-            ? [
-                {
-                  node: researchId,
-                  include: "output",
-                  output: "implementation_findings",
-                  optional: true
-                } satisfies ContextReference
-              ]
-            : [])
-        ],
-        outputs: [
-          {
-            name: "stabilization_notes",
-            from: "attempt",
-            path: "stabilization-notes.md",
-            required: true
-          }
-        ],
-        prompt: buildStabilizePrompt(config)
+        node: ingestId,
+        include: "output",
+        output: "spec_packet"
       },
-      {
-        type: "check",
-        id: validationId,
-        label: "Validation Gate",
-        ...shared,
-        check_kind: "deterministic",
-        command: "sh",
-        args: [
-          "-lc",
-          buildValidationGateScript(config.validation.commands)
-        ],
-        pass_if: {
-          exit_code: 0
-        }
-      }
-    ]
-  };
+      ...latestPlanRefs
+    ],
+    outputs: [
+      attemptOutput("implementation_notes", "implementation-notes.md", true)
+    ],
+    prompt: buildImplementPrompt(config)
+  });
 
-  const stabilizationLoop: RepeatNode = {
+  steps.push({
     type: "repeat",
-    id: stabilizationLoopId,
+    id: repairLoopId,
     label: "Repair Loop",
-    max_attempts: config.execution_policy.max_repair_rounds,
-    body: stabilizationBody,
+    max_attempts: config.strategy.max_repair_cycles ?? 2,
+    body: {
+      type: "sequence",
+      id: repairBodyId,
+      label: "Repair Body",
+      steps: [
+        {
+          type: "agent",
+          id: repairId,
+          label: "Repair Implementation",
+          ...shared,
+          sandbox: "workspace-write",
+          context_from: [
+            {
+              node: ingestId,
+              include: "output",
+              output: "spec_packet"
+            },
+            ...latestPlanRefs,
+            {
+              node: implementId,
+              include: "output",
+              output: "implementation_notes"
+            },
+            {
+              node: validationId,
+              include: "result",
+              iteration: "latest_failed",
+              optional: true
+            }
+          ],
+          outputs: [
+            attemptOutput("repair_notes", "repair-notes.md", true)
+          ],
+          prompt: buildRepairPrompt(config)
+        },
+        {
+          type: "check",
+          id: validationId,
+          label: "Validation Gate",
+          ...shared,
+          check_kind: "deterministic",
+          command: "sh",
+          args: ["-lc", buildValidationGateScript(config.validation.commands)],
+          pass_if: {
+            exit_code: 0
+          }
+        }
+      ]
+    },
     until: {
       node: validationId
     }
-  };
+  } satisfies RepeatNode);
 
-  const finalOutputs: OutputDefinition[] = config.outputs && config.outputs.length > 0 ? config.outputs : [];
+  let finalOutputs: OutputDefinition[] = config.outputs && config.outputs.length > 0 ? config.outputs : [];
 
-  let publishedOutputs = finalOutputs;
-
-  if (config.delivery.write_validation_results) {
-    publishedOutputs = appendOutput(publishedOutputs, {
-      name: "validation_results",
-      from: "attempt",
-      path: "validation-results.md",
-      required: false
-    });
+  if (config.delivery.write_handoff !== false) {
+    finalOutputs = appendOutput(finalOutputs, attemptOutput("handoff", "handoff.md", true));
   }
 
-  if (config.delivery.write_residual_risks) {
-    publishedOutputs = appendOutput(publishedOutputs, {
-      name: "residual_risks",
-      from: "attempt",
-      path: "residual-risks.md",
-      required: false
-    });
+  if (config.delivery.write_validation_ledger !== false) {
+    finalOutputs = appendOutput(finalOutputs, attemptOutput("validation_ledger", "validation-ledger.json", true));
   }
 
-  if (config.delivery.write_files_touched) {
-    publishedOutputs = appendOutput(publishedOutputs, {
-      name: "files_touched",
-      from: "attempt",
-      path: "files-touched.md",
-      required: false
-    });
+  if (config.delivery.write_repair_log !== false) {
+    finalOutputs = appendOutput(finalOutputs, attemptOutput("repair_log", "repair-log.md", true));
   }
 
-  if (config.delivery.write_implementation_plan) {
-    publishedOutputs = appendOutput(publishedOutputs, {
-      name: "implementation_plan",
-      from: "attempt",
-      path: "implementation-plan.md",
-      required: false
-    });
-  }
+  finalOutputs = appendOutput(finalOutputs, attemptOutput("execution_plan", "execution-plan.md", true));
+  finalOutputs = appendOutput(finalOutputs, attemptOutput("file_plan", "file-plan.md", true));
+  finalOutputs = appendOutput(finalOutputs, attemptOutput("mutation_boundary", "mutation-boundary.md", true));
+  finalOutputs = appendOutput(finalOutputs, attemptOutput("validation_plan", "validation-plan.md", true));
+  finalOutputs = appendOutput(finalOutputs, workflowStatusOutput());
+  finalOutputs = appendOutput(finalOutputs, workflowEventsOutput());
 
-  if (config.delivery.write_change_summary) {
-    publishedOutputs = appendOutput(publishedOutputs, {
-      name: "change_summary",
-      from: "attempt",
-      path: "change-summary.md",
-      required: true
-    });
-  }
-
-  steps.push(
-    stabilizationLoop,
-    {
-      type: "agent",
-      id: config.id,
-      ...(config.label ? { label: config.label } : { label: "Publish Implementation Handoff" }),
-      ...shared,
-      sandbox: "read-only",
-      context_from: [
-        {
-          node: ingestId,
-          include: "output",
-          output: "spec_packet"
-        },
-        {
-          node: readinessId,
-          include: "result"
-        },
-        {
-          node: inspectId,
-          include: "output",
-          output: "execution_context"
-        },
-        {
-          node: planId,
-          include: "output",
-          output: "implementation_plan"
-        },
-        {
-          node: implementId,
-          include: "output",
-          output: "implementation_notes"
-        },
-        {
-          node: stabilizeId,
-          include: "output",
-          output: "stabilization_notes",
-          iteration: "latest_passed"
-        },
-        {
-          node: validationId,
-          include: "result",
-          iteration: "latest_passed"
-        }
-      ],
-      outputs: publishedOutputs,
-      prompt: buildFinalizePrompt(config, publishedOutputs)
-    }
-  );
+  steps.push({
+    type: "agent",
+    id: config.id,
+    ...(config.label ? { label: config.label } : { label: "Publish Execution Handoff" }),
+    ...shared,
+    sandbox: "read-only",
+    context_from: [
+      {
+        node: ingestId,
+        include: "output",
+        output: "spec_packet"
+      },
+      ...latestPlanRefs,
+      {
+        node: implementId,
+        include: "output",
+        output: "implementation_notes"
+      },
+      {
+        node: repairId,
+        include: "output",
+        output: "repair_notes",
+        iteration: "latest_passed"
+      },
+      {
+        node: validationId,
+        include: "result",
+        iteration: "latest_passed"
+      }
+    ],
+    outputs: finalOutputs,
+    prompt: buildFinalizePrompt(config, finalOutputs)
+  });
 
   return {
     type: "sequence",

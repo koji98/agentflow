@@ -34,9 +34,19 @@
         "id": "managed_workflows_research",
         "repo": "main",
         "profile": "default",
-        "question": "What should Agentflow's first managed workflows be and how should deep research be orchestrated?",
-        "objective": "Produce a design recommendation for Agentflow's managed workflow roadmap.",
-        "audience": "engineering",
+        "brief": {
+          "question": "What should Agentflow's first managed workflows be and how should deep research behave?",
+          "objective": "Produce a grounded recommendation for Agentflow's managed workflow roadmap.",
+          "audience": "engineering",
+          "scope_cues": [
+            "managed workflow contracts",
+            "compiled subgraph behavior"
+          ],
+          "success_bar": [
+            "capture competing agent patterns",
+            "preserve uncertainty and contradictions"
+          ]
+        },
         "inputs": [
           {
             "kind": "file",
@@ -47,9 +57,10 @@
             "path": "docs/MANAGED_WORKFLOWS.md"
           }
         ],
-        "sources": {
+        "context_policy": {
           "web": true,
           "files": true,
+          "apps": false,
           "allow_domains": [
             "openai.com",
             "help.openai.com",
@@ -59,9 +70,18 @@
             "perplexity.ai"
           ]
         },
-        "deliverable": {
+        "approval_policy": {
+          "require_plan_approval": false
+        },
+        "strategy": {
+          "depth": "standard",
+          "coverage_mode": "balanced",
+          "followup_passes": 1,
+          "final_critique": true
+        },
+        "delivery": {
           "format": "report",
-          "citations": "inline",
+          "citation_style": "inline",
           "sections": [
             "patterns",
             "proposed managed workflows",
@@ -69,10 +89,8 @@
             "recommendation"
           ]
         },
-        "orchestration": {
-          "track_count": 4,
-          "max_parallel_tracks": 2,
-          "summary_fan_in": 2
+        "runtime": {
+          "max_concurrency": 2
         }
       },
       {
@@ -89,7 +107,7 @@
           {
             "node": "managed_workflows_research",
             "include": "output",
-            "output": "research_report"
+            "output": "final_report"
           }
         ]
       }

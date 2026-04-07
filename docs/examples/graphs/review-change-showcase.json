@@ -33,8 +33,32 @@
         "id": "managed_nodes_spec",
         "repo": "main",
         "profile": "default",
-        "problem": "Agentflow needs true managed workflows instead of thin aliases.",
-        "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+        "brief": {
+          "problem": "Agentflow needs true managed workflows instead of thin aliases.",
+          "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+          "constraints": [
+            "Keep primitive graph nodes stable.",
+            "Managed workflows must compile into primitive subgraphs.",
+            "The review workflow should publish machine-readable findings."
+          ],
+          "decision_drivers": [
+            "clarity",
+            "reliability",
+            "review quality"
+          ],
+          "scope": {
+            "paths": [
+              "src/**",
+              "docs/**",
+              "tests/**"
+            ],
+            "areas": [
+              "graph",
+              "managed workflows",
+              "docs"
+            ]
+          }
+        },
         "inputs": [
           {
             "kind": "file",
@@ -49,40 +73,20 @@
             "path": "docs/REVIEW_CHANGE_WORKFLOW.md"
           }
         ],
-        "constraints": [
-          "Keep primitive graph nodes stable.",
-          "Managed workflows must compile into primitive subgraphs.",
-          "The review workflow should publish machine-readable findings."
-        ],
-        "decision_drivers": [
-          "clarity",
-          "reliability",
-          "review quality"
-        ],
-        "scope": {
-          "paths": [
-            "src/**",
-            "docs/**",
-            "tests/**"
-          ],
-          "areas": [
-            "graph",
-            "managed workflows",
-            "docs"
-          ]
+        "context_policy": {
+          "repo_first": true,
+          "allow_web_fallback": false
         },
-        "research_policy": {
-          "allow_web_fallback": false,
-          "max_external_research_tasks": 0
+        "approval_policy": {
+          "require_direction_approval": false
         },
-        "orchestration": {
-          "option_count": 2,
-          "max_parallel_options": 2,
-          "critique_roles": [
+        "strategy": {
+          "alternatives": 2,
+          "critique_profiles": [
             "architecture",
             "implementation"
           ],
-          "revision_rounds": 2
+          "max_revision_cycles": 2
         }
       },
       {
@@ -90,25 +94,35 @@
         "id": "implement_managed_nodes",
         "repo": "main",
         "profile": "default",
-        "objective": "Implement the managed workflow model described by the upstream spec.",
+        "brief": {
+          "objective": "Implement the managed workflow model described by the upstream spec.",
+          "scope": {
+            "paths": [
+              "src/**",
+              "docs/**",
+              "tests/**"
+            ],
+            "areas": [
+              "graph",
+              "managed workflows",
+              "docs"
+            ]
+          }
+        },
         "spec_source": {
           "kind": "managed_node",
           "node": "managed_nodes_spec"
         },
-        "scope": {
-          "paths": [
-            "src/**",
-            "docs/**",
-            "tests/**"
-          ],
-          "areas": [
-            "graph",
-            "managed workflows",
-            "docs"
-          ]
+        "context_policy": {
+          "allow_official_docs_fallback": true
         },
-        "execution_policy": {
-          "max_repair_rounds": 2
+        "approval_policy": {
+          "require_execution_plan_approval": false
+        },
+        "strategy": {
+          "single_writer": true,
+          "allow_readonly_recon": true,
+          "max_repair_cycles": 2
         },
         "validation": {
           "commands": [
@@ -116,6 +130,11 @@
             "npm test"
           ],
           "required": true
+        },
+        "delivery": {
+          "write_handoff": true,
+          "write_validation_ledger": true,
+          "write_repair_log": true
         }
       },
       {
@@ -127,38 +146,50 @@
           "kind": "managed_node",
           "node": "implement_managed_nodes"
         },
-        "scope": {
-          "paths": [
-            "src/**",
-            "docs/**",
-            "tests/**"
-          ],
-          "areas": [
-            "graph",
-            "managed workflows",
-            "docs"
-          ]
-        },
-        "criteria": {
+        "brief": {
+          "review_goal": "Review the implementation for high-signal defects and missing tests.",
           "focus": [
-            "correctness",
-            "missing_tests",
-            "maintainability"
-          ],
-          "require_file_references": true
-        },
-        "orchestration": {
-          "reviewer_roles": [
             "correctness",
             "testing",
             "maintainability"
           ],
-          "max_parallel_reviewers": 3
+          "scope": {
+            "paths": [
+              "src/**",
+              "docs/**",
+              "tests/**"
+            ],
+            "areas": [
+              "graph",
+              "managed workflows",
+              "docs"
+            ]
+          }
+        },
+        "context_policy": {
+          "include_surrounding_code": true,
+          "include_tests": true,
+          "include_docs": true,
+          "include_validation": true
+        },
+        "strategy": {
+          "reviewer_profiles": [
+            "correctness",
+            "testing",
+            "maintainability"
+          ],
+          "severity_policy": "balanced",
+          "include_surrounding_context": true,
+          "false_positive_challenge": true,
+          "require_file_references": true
         },
         "delivery": {
-          "write_review_report": true,
-          "write_findings_json": true,
-          "write_findings_markdown": true
+          "write_review_summary": true,
+          "write_raw_findings": true,
+          "write_calibrated_findings": true
+        },
+        "runtime": {
+          "max_concurrency": 2
         }
       },
       {
@@ -175,12 +206,12 @@
           {
             "node": "review_managed_nodes",
             "include": "output",
-            "output": "review_report"
+            "output": "review_summary"
           },
           {
             "node": "review_managed_nodes",
             "include": "output",
-            "output": "findings"
+            "output": "calibrated_findings"
           }
         ]
       }

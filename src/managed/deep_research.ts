@@ -5,524 +5,696 @@ import type {
   ContextReference,
   OutputDefinition,
   ParallelNode,
+  RepeatNode,
   SequenceNode
 } from "../graph/authored.js";
+import {
+  appendOutput,
+  attemptOutput,
+  body,
+  managedId,
+  maxConcurrency,
+  renderPrompt,
+  section,
+  sharedNodeBase,
+  type ManagedWorkflowRuntime,
+  workflowBriefOutput,
+  workflowEventsOutput,
+  workflowPlanJsonOutput,
+  workflowPlanMarkdownOutput,
+  workflowStatusOutput
+} from "./foundation.js";
 
-export interface DeepResearchSourcePolicy {
+export interface DeepResearchBrief {
+  question: string;
+  objective: string;
+  audience?: string;
+  scope_cues?: string[];
+  success_bar?: string[];
+}
+
+export interface DeepResearchContextPolicy {
   web?: boolean;
   files?: boolean;
   apps?: boolean;
   allow_domains?: string[];
   deny_domains?: string[];
+  preferred_sources?: string[];
 }
 
-export interface DeepResearchDeliverable {
+export interface DeepResearchApprovalPolicy {
+  require_plan_approval?: boolean;
+}
+
+export interface DeepResearchStrategy {
+  depth?: "shallow" | "standard" | "deep";
+  coverage_mode?: "breadth" | "balanced" | "depth_first";
+  followup_passes?: number;
+  final_critique?: boolean;
+}
+
+export interface DeepResearchDelivery {
   format?: string;
-  citations?: string;
+  citation_style?: string;
   sections?: string[];
 }
 
-export interface DeepResearchOrchestration {
-  track_count: number;
-  max_parallel_tracks: number;
-  summary_fan_in: number;
-  final_critique: boolean;
+export interface DeepResearchWorkflowConfig extends BaseExecutableNode {
+  brief: DeepResearchBrief;
+  context_policy: DeepResearchContextPolicy;
+  approval_policy: DeepResearchApprovalPolicy;
+  strategy: DeepResearchStrategy;
+  delivery: DeepResearchDelivery;
+  runtime?: ManagedWorkflowRuntime;
 }
 
-export interface DeepResearchWorkflowConfig extends BaseExecutableNode {
-  question: string;
-  objective: string;
-  audience?: string;
-  sources: DeepResearchSourcePolicy;
-  deliverable: DeepResearchDeliverable;
-  orchestration: DeepResearchOrchestration;
+function workflowNodeId(rootId: string, suffix: string): string {
+  return managedId(rootId, "deep_research", suffix);
 }
 
 function zeroPad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-function managedId(rootId: string, suffix: string): string {
-  return `${rootId}__managed__deep_research__${suffix}`;
-}
-
-function sharedNodeBase(config: DeepResearchWorkflowConfig): Pick<
-  AgentNode,
-  "repo" | "profile" | "timeout_sec"
-> {
-  return {
-    ...(config.repo ? { repo: config.repo } : {}),
-    ...(config.profile ? { profile: config.profile } : {}),
-    ...(config.timeout_sec !== undefined ? { timeout_sec: config.timeout_sec } : {})
-  };
-}
-
-function formatSourcePolicy(sources: DeepResearchSourcePolicy): string[] {
-  const lines = [
-    `- Web research: ${sources.web === false ? "disabled" : "enabled"}`,
-    `- Local file research: ${sources.files === false ? "disabled" : "enabled"}`,
-    `- App or connector research: ${sources.apps ? "enabled" : "disabled"}`
-  ];
-
-  if (sources.allow_domains && sources.allow_domains.length > 0) {
-    lines.push(`- Prefer or limit to domains: ${sources.allow_domains.join(", ")}`);
+function depthTrackCount(depth: DeepResearchStrategy["depth"]): number {
+  switch (depth) {
+    case "shallow":
+      return 3;
+    case "deep":
+      return 7;
+    default:
+      return 5;
   }
-
-  if (sources.deny_domains && sources.deny_domains.length > 0) {
-    lines.push(`- Avoid domains: ${sources.deny_domains.join(", ")}`);
-  }
-
-  return lines;
 }
 
-function formatDeliverable(deliverable: DeepResearchDeliverable): string[] {
-  const lines = [
-    `- Format: ${deliverable.format ?? "report"}`,
-    `- Citations: ${deliverable.citations ?? "inline"}`
-  ];
-
-  if (deliverable.sections && deliverable.sections.length > 0) {
-    lines.push(`- Required sections: ${deliverable.sections.join(", ")}`);
-  }
-
-  return lines;
-}
-
-function buildClarifyPrompt(config: DeepResearchWorkflowConfig): string {
+function formatContextPolicy(policy: DeepResearchContextPolicy): string[] {
   return [
-    "Clarify and rewrite the research ask into a concrete brief.",
-    "",
-    `Question: ${config.question}`,
-    `Objective: ${config.objective}`,
-    ...(config.audience ? [`Audience: ${config.audience}`] : []),
-    "",
-    "Research constraints:",
-    ...formatSourcePolicy(config.sources),
-    "",
-    "Deliverable contract:",
-    ...formatDeliverable(config.deliverable),
-    "",
-    "Write `clarified-brief.md` to the output directory.",
-    "The brief must restate the goal, assumptions, scope boundaries, evaluation criteria, and the evidence bar for a strong final report."
-  ].join("\n");
+    `- Web research: ${policy.web === false ? "disabled" : "enabled"}`,
+    `- Local file research: ${policy.files === false ? "disabled" : "enabled"}`,
+    `- App or connector research: ${policy.apps ? "enabled" : "disabled"}`,
+    ...(policy.allow_domains && policy.allow_domains.length > 0
+      ? [`- Allowed domains: ${policy.allow_domains.join(", ")}`]
+      : []),
+    ...(policy.deny_domains && policy.deny_domains.length > 0
+      ? [`- Denied domains: ${policy.deny_domains.join(", ")}`]
+      : []),
+    ...(policy.preferred_sources && policy.preferred_sources.length > 0
+      ? [`- Preferred source types: ${policy.preferred_sources.join(", ")}`]
+      : [])
+  ];
 }
 
-function buildPlanPrompt(config: DeepResearchWorkflowConfig): string {
+function formatStrategy(strategy: DeepResearchStrategy): string[] {
   return [
-    "Create the research plan for this deep research run.",
-    "",
-    `Question: ${config.question}`,
-    `Objective: ${config.objective}`,
-    "",
-    `Target track count: ${config.orchestration.track_count}`,
-    `Summary tree fan-in: ${config.orchestration.summary_fan_in}`,
-    "",
-    "Use the clarified brief in context to identify the key dimensions, tensions, and subquestions that the parallel tracks must cover.",
-    "Write `research-plan.md` to the output directory."
-  ].join("\n");
+    `- Depth: ${strategy.depth ?? "standard"}`,
+    `- Coverage mode: ${strategy.coverage_mode ?? "balanced"}`,
+    `- Follow-up passes: ${strategy.followup_passes ?? 1}`,
+    `- Final critique: ${strategy.final_critique ? "enabled" : "disabled"}`
+  ];
+}
+
+function formatDelivery(delivery: DeepResearchDelivery): string[] {
+  return [
+    `- Format: ${delivery.format ?? "report"}`,
+    `- Citation style: ${delivery.citation_style ?? "inline"}`,
+    ...(delivery.sections && delivery.sections.length > 0
+      ? [`- Required sections: ${delivery.sections.join(", ")}`]
+      : [])
+  ];
+}
+
+function formatBrief(brief: DeepResearchBrief): string[] {
+  return [
+    `Question: ${brief.question}`,
+    `Objective: ${brief.objective}`,
+    ...(brief.audience ? [`Audience: ${brief.audience}`] : []),
+    ...(brief.scope_cues && brief.scope_cues.length > 0
+      ? ["Scope cues:", ...brief.scope_cues.map((cue) => `- ${cue}`)]
+      : []),
+    ...(brief.success_bar && brief.success_bar.length > 0
+      ? ["Success bar:", ...brief.success_bar.map((item) => `- ${item}`)]
+      : [])
+  ];
+}
+
+function buildBriefPrompt(config: DeepResearchWorkflowConfig): string {
+  return renderPrompt([
+    body("Rewrite the research ask into a concrete, execution-ready research brief."),
+    section("Objective", formatBrief(config.brief)),
+    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
+    section("Quality Bar", [
+      "Define what a strong final report must prove.",
+      "Make uncertainty, contradiction handling, and evidence quality explicit."
+    ]),
+    section("Output Contract", [
+      "Write `research-brief.md` and `workflow-brief.md` to the output directory.",
+      "`workflow-brief.md` should be the compact operator-facing version of the longer research brief."
+    ])
+  ]);
+}
+
+function buildPlanPrompt(config: DeepResearchWorkflowConfig, trackCount: number): string {
+  return renderPrompt([
+    body("Build the research plan that will drive the investigation."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      `Target investigation tracks: ${trackCount}`,
+      "Use the research brief in context."
+    ]),
+    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
+    section("Quality Bar", [
+      "Define distinct research dimensions that collectively cover the question.",
+      "Set explicit success criteria, source expectations, and unresolved-risk thresholds."
+    ]),
+    section("Output Contract", [
+      "Write `research-plan.md`, `research-plan.json`, `workflow-plan.md`, and `workflow-plan.json` to the output directory.",
+      "Use this JSON schema exactly for `research-plan.json` and `workflow-plan.json`:",
+      '{"tracks":[{"track_id":"track-01","title":"...","focus":"...","questions":["..."],"success_criteria":["..."],"source_priorities":["..."]}],"coverage_checks":["..."],"open_risks":["..."]}'
+    ]),
+    section("Blocker and Escalation Rules", [
+      "Do not produce scheduler advice or runtime tuning.",
+      "The plan should describe research intent, coverage, and evidence requirements only."
+    ])
+  ]);
+}
+
+function buildPlanCheckpointPrompt(): string {
+  return renderPrompt([
+    body("Review the proposed research plan before the workflow fans out into investigation."),
+    section("Quality Bar", [
+      "Pass when the plan covers the main dimensions of the question, has clear evidence expectations, and does not waste work on redundant tracks.",
+      "Deny when the plan misses key dimensions, over-focuses one narrative, or needs scope correction."
+    ]),
+    section("Blocker and Escalation Rules", [
+      "When denying, describe the exact missing dimension, evidence bar, or scope correction needed."
+    ])
+  ]);
 }
 
 function buildTrackPrompt(config: DeepResearchWorkflowConfig): string {
-  return [
-    "Generate the parallel research track briefs.",
-    "",
-    `Track count: ${config.orchestration.track_count}`,
-    "",
-    "Use the clarified brief and research plan in context.",
-    "Write `track-briefs.json` to the output directory using this exact schema:",
-    '[{"track_id":"track-01","title":"...","focus":"...","angle":"...","questions":["..."],"suggested_sources":["..."],"success_criteria":["..."]}]',
-    "",
-    "The tracks must be meaningfully different, collectively cover the full problem, and minimize redundant investigation."
-  ].join("\n");
+  return renderPrompt([
+    body("Derive the concrete investigation briefs from the approved research plan."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the research brief and latest approved research plan in context."
+    ]),
+    section("Output Contract", [
+      "Write `track-briefs.json` to the output directory.",
+      "Use this exact schema:",
+      '[{"track_id":"track-01","title":"...","focus":"...","questions":["..."],"success_criteria":["..."],"source_priorities":["..."]}]'
+    ])
+  ]);
 }
 
-function buildWorkerPrompt(config: DeepResearchWorkflowConfig, trackIndex: number): string {
+function buildWorkerPrompt(config: DeepResearchWorkflowConfig, trackIndex: number, phaseLabel: string): string {
   const trackNumber = zeroPad(trackIndex + 1);
 
-  return [
-    `You are deep research worker ${trackNumber} of ${zeroPad(config.orchestration.track_count)}.`,
-    "",
-    `Question: ${config.question}`,
-    `Objective: ${config.objective}`,
-    "",
-    "Read the `track-briefs.json` artifact in context and use the brief whose `track_id` matches your worker number.",
-    "Investigate that track thoroughly and maximize unique coverage rather than repeating other tracks.",
-    "",
-    "Write these artifacts to the output directory:",
-    "- `track-report.md`: full findings, evidence, and nuanced observations",
-    "- `track-summary.md`: a bounded summary for reducers",
-    "- `sources.json`: machine-readable source ledger",
-    "",
-    "Preserve uncertainty, disagreements, and source quality notes."
-  ].join("\n");
+  return renderPrompt([
+    body(`Investigate ${phaseLabel} research worker ${trackNumber}.`),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Read the relevant track brief in context and execute only that investigative slice.",
+      "Maximize unique coverage rather than repeating other workers."
+    ]),
+    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
+    section("Quality Bar", [
+      "Preserve uncertainty, note source quality, and keep evidence traceable.",
+      "Do not flatten disagreements into premature conclusions."
+    ]),
+    section("Output Contract", [
+      "Write `track-report.md`, `track-summary.md`, and `sources.json` to the output directory."
+    ])
+  ]);
 }
 
 function buildContradictionPrompt(): string {
-  return [
-    "Review the track summaries and identify contradictions, unresolved questions, overlap, and missing angles.",
-    "",
-    "Write `contradictions.md` to the output directory.",
-    "Do not collapse disagreements away. Call them out explicitly so the final synthesis can address them."
-  ].join("\n");
+  return renderPrompt([
+    body("Scan the investigation summaries for contradictions, overlap, evidence gaps, and missing angles."),
+    section("Output Contract", [
+      "Write `contradictions.md` to the output directory."
+    ]),
+    section("Quality Bar", [
+      "Keep contradictions explicit so follow-up passes and final synthesis can address them directly."
+    ])
+  ]);
 }
 
-function buildReducerPrompt(roundIndex: number, groupIndex: number): string {
-  return [
-    `Reduce the provided summaries into reducer summary round ${roundIndex + 1}, group ${groupIndex + 1}.`,
-    "",
-    "Write `reduce-summary.md` to the output directory.",
-    "Keep the important findings, preserve conflicts, retain source-quality caveats, and reduce length enough for the next summarization layer."
-  ].join("\n");
+function buildFollowupPlanPrompt(passIndex: number): string {
+  return renderPrompt([
+    body(`Plan follow-up research pass ${passIndex + 1}.`),
+    section("Current Context", [
+      "Use the approved research plan, track briefs, contradictions, and prior findings in context."
+    ]),
+    section("Output Contract", [
+      `Write \`followup-plan-pass-${zeroPad(passIndex + 1)}.json\` to the output directory.`,
+      "Use this exact schema:",
+      '[{"track_id":"track-01","focus":"...","questions":["..."],"why_now":"..."}]'
+    ]),
+    section("Quality Bar", [
+      "Focus only on unresolved evidence gaps, not broad rework of already-covered material."
+    ])
+  ]);
 }
 
-function buildFinalSynthesisPrompt(config: DeepResearchWorkflowConfig): string {
-  return [
-    "Produce the final deep research report.",
-    "",
-    `Question: ${config.question}`,
-    `Objective: ${config.objective}`,
-    ...(config.audience ? [`Audience: ${config.audience}`] : []),
-    "",
-    "Use the reduced summaries, track briefs, and contradiction scan in context.",
-    "Before writing, derive a coverage checklist from the upstream research so you can preserve the strongest findings from every major problem cluster rather than over-focusing on one dominant narrative.",
-    "The report should preserve the strongest findings, acknowledge uncertainty, and reference the track structure when useful.",
-    "Every high-signal issue from the upstream research must end up in one of these places: the explicit issue inventory, the recommended fix order, or the preserved open questions and uncertainties.",
-    "Do not drop concrete user-facing access findings, guest or denied-state behavior, or cache or invalidation risks just because contract or admin architecture issues appear more central.",
-    "Preserve contradictions and unresolved questions as first-class report content, not as optional side notes.",
-    "",
-    "Deliverable contract:",
-    ...formatDeliverable(config.deliverable),
-    "",
-    "Write `final-report.md` to the output directory unless the node declares a different report artifact."
-  ].join("\n");
+function buildConsolidatePrompt(config: DeepResearchWorkflowConfig): string {
+  return renderPrompt([
+    body("Consolidate the investigation artifacts into machine-readable interim findings, provenance, and uncertainty outputs."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use track summaries, track source ledgers, contradiction notes, and any follow-up artifacts in context."
+    ]),
+    section("Output Contract", [
+      "Write `interim-findings.jsonl`, `source-ledger.json`, and `uncertainties.md` to the output directory."
+    ]),
+    section("Quality Bar", [
+      "Every high-signal finding should remain traceable to evidence.",
+      "Uncertainty should be explicit, not relegated to optional side notes."
+    ]),
+    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy))
+  ]);
+}
+
+function buildFinalPrompt(config: DeepResearchWorkflowConfig): string {
+  return renderPrompt([
+    body("Publish the final deep research report and workflow status artifacts."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the research brief, latest approved plan, interim findings, source ledger, and uncertainty register in context."
+    ]),
+    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
+    section("Output Contract", [
+      "Write `final-report.md`, `source-ledger.json`, `uncertainties.md`, `interim-findings.jsonl`, `workflow-status.json`, and `workflow-events.jsonl` to the output directory.",
+      ...formatDelivery(config.delivery)
+    ]),
+    section("Quality Bar", [
+      "Preserve contradictions and unresolved questions as first-class content.",
+      "The final report must not read like a shallow summary of one dominant track."
+    ])
+  ]);
 }
 
 function buildFinalCritiquePrompt(config: DeepResearchWorkflowConfig): string {
-  return [
-    "Review the final deep research report.",
-    "",
-    `Question: ${config.question}`,
-    `Objective: ${config.objective}`,
-    "",
-    "Use the final report and the upstream track briefs, contradiction scan, and reduced summaries in context.",
-    "Decide whether the report is complete, balanced, and sufficiently grounded in the gathered research rather than merely internally coherent."
-  ].join("\n");
+  return renderPrompt([
+    body("Review whether the final research report is complete, balanced, and grounded in the gathered evidence."),
+    section("Objective", formatBrief(config.brief)),
+    section("Current Context", [
+      "Use the final report, source ledger, uncertainties, and workflow plan in context."
+    ])
+  ]);
 }
 
 function buildFinalCritiqueRubric(config: DeepResearchWorkflowConfig): string {
   const sectionRequirement =
-    config.deliverable.sections && config.deliverable.sections.length > 0
-      ? `Pass only if the report covers: ${config.deliverable.sections.join(", ")}.`
+    config.delivery.sections && config.delivery.sections.length > 0
+      ? `Pass only if the report covers: ${config.delivery.sections.join(", ")}.`
       : "Pass only if the report covers the main problem, analysis, and recommendation clearly.";
 
   return [
     sectionRequirement,
-    "Fail if major contradictions are ignored, if the strongest uncertainties are omitted, if high-signal issue clusters from the upstream research are dropped, or if the report reads like a shallow summary of a single track or one dominant narrative."
+    "Fail if major contradictions are dropped, if evidence provenance is weak, or if the strongest uncertainties are missing."
   ].join(" ");
 }
 
-function appendOutput(
-  outputs: OutputDefinition[],
-  output: OutputDefinition
-): OutputDefinition[] {
-  return outputs.some((item) => item.name === output.name) ? outputs : [...outputs, output];
-}
-
 function buildWorkerOutputs(trackIndex: number): OutputDefinition[] {
-  const index = zeroPad(trackIndex + 1);
+  const suffix = zeroPad(trackIndex + 1);
 
   return [
-    {
-      name: `track_report_${index}`,
-      from: "attempt",
-      path: "track-report.md",
-      required: false
-    },
-    {
-      name: `track_summary_${index}`,
-      from: "attempt",
-      path: "track-summary.md",
-      required: true
-    },
-    {
-      name: `track_sources_${index}`,
-      from: "attempt",
-      path: "sources.json",
-      required: false
-    }
+    attemptOutput(`track_report_${suffix}`, "track-report.md", true),
+    attemptOutput(`track_summary_${suffix}`, "track-summary.md", true),
+    attemptOutput(`track_sources_${suffix}`, "sources.json", true)
   ];
 }
 
-function chunkReferences<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
+function buildFollowupOutputs(passIndex: number, trackIndex: number): OutputDefinition[] {
+  const passSuffix = zeroPad(passIndex + 1);
+  const trackSuffix = zeroPad(trackIndex + 1);
 
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-
-  return chunks;
+  return [
+    attemptOutput(`followup_report_${passSuffix}_${trackSuffix}`, "track-report.md", true),
+    attemptOutput(`followup_summary_${passSuffix}_${trackSuffix}`, "track-summary.md", true),
+    attemptOutput(`followup_sources_${passSuffix}_${trackSuffix}`, "sources.json", true)
+  ];
 }
-
-type ReducibleReference = {
-  node: string;
-  output: string;
-};
 
 export function buildDeepResearchWorkflow(config: DeepResearchWorkflowConfig): SequenceNode {
   const shared = sharedNodeBase(config);
-  const workflowId = managedId(config.id, "workflow");
+  const workflowId = workflowNodeId(config.id, "workflow");
+  const trackCount = depthTrackCount(config.strategy.depth);
+  const concurrency = maxConcurrency(config.runtime, trackCount);
 
-  const clarifyId = managedId(config.id, "clarify");
-  const planId = managedId(config.id, "plan");
-  const trackGeneratorId = managedId(config.id, "generate_tracks");
-  const trackParallelId = managedId(config.id, "track_fanout");
-  const contradictionId = managedId(config.id, "contradiction_scan");
+  const briefId = workflowNodeId(config.id, "clarify_brief");
+  const planId = workflowNodeId(config.id, "plan_research");
+  const planCheckpointId = workflowNodeId(config.id, "approve_research_plan");
+  const planningLoopId = workflowNodeId(config.id, "planning_loop");
+  const planningBodyId = workflowNodeId(config.id, "planning_body");
+  const trackId = workflowNodeId(config.id, "derive_tracks");
+  const trackFanoutId = workflowNodeId(config.id, "investigation_fanout");
+  const contradictionId = workflowNodeId(config.id, "scan_contradictions");
+  const consolidateId = workflowNodeId(config.id, "consolidate_findings");
 
-  const clarifyNode: AgentNode = {
-    type: "agent",
-    id: clarifyId,
-    label: "Clarify Research Goal",
-    ...shared,
-    ...(config.inputs ? { inputs: config.inputs } : {}),
-    ...(config.context_from ? { context_from: config.context_from } : {}),
-    outputs: [
-      {
-        name: "clarified_brief",
-        from: "attempt",
-        path: "clarified-brief.md",
-        required: true
-      }
-    ],
-    prompt: buildClarifyPrompt(config)
-  };
+  const steps: SequenceNode["steps"] = [
+    {
+      type: "agent",
+      id: briefId,
+      label: "Clarify Research Brief",
+      ...shared,
+      ...(config.inputs ? { inputs: config.inputs } : {}),
+      ...(config.context_from ? { context_from: config.context_from } : {}),
+      outputs: [
+        attemptOutput("research_brief", "research-brief.md", true),
+        workflowBriefOutput()
+      ],
+      prompt: buildBriefPrompt(config)
+    }
+  ];
 
-  const planNode: AgentNode = {
-    type: "agent",
-    id: planId,
-    label: "Plan Research",
-    ...shared,
-    context_from: [
-      {
-        node: clarifyId,
-        include: "output",
-        output: "clarified_brief"
-      }
-    ],
-    outputs: [
-      {
-        name: "research_plan",
-        from: "attempt",
-        path: "research-plan.md",
-        required: true
-      }
-    ],
-    prompt: buildPlanPrompt(config)
-  };
+  const planContextFrom: ContextReference[] = [
+    {
+      node: briefId,
+      include: "output",
+      output: "research_brief"
+    }
+  ];
 
-  const trackGeneratorNode: AgentNode = {
-    type: "agent",
-    id: trackGeneratorId,
-    label: "Generate Research Tracks",
-    ...shared,
-    context_from: [
-      {
-        node: clarifyId,
-        include: "output",
-        output: "clarified_brief"
-      },
-      {
-        node: planId,
-        include: "output",
-        output: "research_plan"
-      }
-    ],
-    outputs: [
-      {
-        name: "track_briefs",
-        from: "attempt",
-        path: "track-briefs.json",
-        required: true
-      }
-    ],
-    prompt: buildTrackPrompt(config)
-  };
-
-  const trackWorkers: AgentNode[] = Array.from({ length: config.orchestration.track_count }, (_, trackIndex) => ({
-    type: "agent",
-    id: managedId(config.id, `track_${zeroPad(trackIndex + 1)}`),
-    label: `Research Track ${zeroPad(trackIndex + 1)}`,
-    ...shared,
-    context_from: [
-      {
-        node: trackGeneratorId,
-        include: "output",
-        output: "track_briefs"
-      },
-      {
-        node: planId,
-        include: "output",
-        output: "research_plan"
-      },
-      {
-        node: clarifyId,
-        include: "output",
-        output: "clarified_brief"
-      }
-    ],
-    outputs: buildWorkerOutputs(trackIndex),
-    prompt: buildWorkerPrompt(config, trackIndex)
-  }));
-
-  const trackParallelNode: ParallelNode = {
-    type: "parallel",
-    id: trackParallelId,
-    label: "Parallel Research Tracks",
-    max_concurrency: config.orchestration.max_parallel_tracks,
-    steps: trackWorkers
-  };
-
-  const trackSummaryReferences: ReducibleReference[] = trackWorkers.map((worker, trackIndex) => ({
-    node: worker.id,
-    output: `track_summary_${zeroPad(trackIndex + 1)}`
-  }));
-
-  const contradictionNode: AgentNode = {
-    type: "agent",
-    id: contradictionId,
-    label: "Scan Contradictions",
-    ...shared,
-    context_from: trackSummaryReferences.map(
-      (reference): ContextReference => ({
-        node: reference.node,
-        include: "output",
-        output: reference.output
-      })
-    ),
-    outputs: [
-      {
-        name: "contradictions",
-        from: "attempt",
-        path: "contradictions.md",
-        required: false
-      }
-    ],
-    prompt: buildContradictionPrompt()
-  };
-
-  const reductionSteps: Array<ParallelNode | AgentNode> = [];
-  let reductionSources = [...trackSummaryReferences];
-  let roundIndex = 0;
-
-  while (reductionSources.length > 1) {
-    const groups = chunkReferences(reductionSources, config.orchestration.summary_fan_in);
-    const reducerNodes: AgentNode[] = groups.map((group, groupIndex) => {
-      const reduceId = managedId(config.id, `reduce_r${roundIndex + 1}_g${groupIndex + 1}`);
-      const reduceOutputName = `reduce_summary_r${roundIndex + 1}_g${groupIndex + 1}`;
-
-      return {
-        type: "agent",
-        id: reduceId,
-        label: `Reduce Round ${roundIndex + 1} Group ${groupIndex + 1}`,
-        ...shared,
-        context_from: group.map(
-          (reference): ContextReference => ({
-            node: reference.node,
-            include: "output",
-            output: reference.output
-          })
-        ),
-        outputs: [
+  if (config.approval_policy.require_plan_approval) {
+    const planningLoop: RepeatNode = {
+      type: "repeat",
+      id: planningLoopId,
+      label: "Research Plan Approval Loop",
+      max_attempts: 3,
+      body: {
+        type: "sequence",
+        id: planningBodyId,
+        label: "Research Plan Approval Body",
+        steps: [
           {
-            name: reduceOutputName,
-            from: "attempt",
-            path: "reduce-summary.md",
-            required: true
+            type: "agent",
+            id: planId,
+            label: "Draft Research Plan",
+            ...shared,
+            context_from: [
+              ...planContextFrom,
+              {
+                node: planCheckpointId,
+                include: "output",
+                output: "operator_feedback",
+                iteration: "latest_failed",
+                optional: true
+              }
+            ],
+            outputs: [
+              attemptOutput("research_plan_markdown", "research-plan.md", true),
+              attemptOutput("research_plan_json", "research-plan.json", true),
+              workflowPlanMarkdownOutput(),
+              workflowPlanJsonOutput()
+            ],
+            prompt: buildPlanPrompt(config, trackCount)
+          },
+          {
+            type: "checkpoint",
+            id: planCheckpointId,
+            label: "Approve Research Plan",
+            ...shared,
+            context_from: [
+              {
+                node: planId,
+                include: "output",
+                output: "research_plan_json"
+              }
+            ],
+            review_from: {
+              node: planId,
+              include: "output",
+              output: "research_plan_markdown"
+            },
+            prompt: buildPlanCheckpointPrompt()
           }
-        ],
-        prompt: buildReducerPrompt(roundIndex, groupIndex)
-      };
-    });
+        ]
+      },
+      until: {
+        node: planCheckpointId
+      }
+    };
 
-    reductionSteps.push({
-      type: "parallel",
-      id: managedId(config.id, `reduce_round_${roundIndex + 1}`),
-      label: `Summary Reduction Round ${roundIndex + 1}`,
-      max_concurrency: Math.min(groups.length, config.orchestration.max_parallel_tracks),
-      steps: reducerNodes
+    steps.push(planningLoop);
+  } else {
+    steps.push({
+      type: "agent",
+      id: planId,
+      label: "Plan Research",
+      ...shared,
+      context_from: planContextFrom,
+      outputs: [
+        attemptOutput("research_plan_markdown", "research-plan.md", true),
+        attemptOutput("research_plan_json", "research-plan.json", true),
+        workflowPlanMarkdownOutput(),
+        workflowPlanJsonOutput()
+      ],
+      prompt: buildPlanPrompt(config, trackCount)
     });
-
-    reductionSources = reducerNodes.map((node, groupIndex) => ({
-      node: node.id,
-      output: `reduce_summary_r${roundIndex + 1}_g${groupIndex + 1}`
-    }));
-    roundIndex += 1;
   }
+
+  const latestPlanRef = {
+    node: planId,
+    include: "output" as const,
+    output: "research_plan_markdown",
+    ...(config.approval_policy.require_plan_approval ? { iteration: "latest_passed" as const } : {})
+  };
+
+  const latestPlanJsonRef = {
+    node: planId,
+    include: "output" as const,
+    output: "research_plan_json",
+    ...(config.approval_policy.require_plan_approval ? { iteration: "latest_passed" as const } : {})
+  };
+
+  steps.push(
+    {
+      type: "agent",
+      id: trackId,
+      label: "Derive Investigation Tracks",
+      ...shared,
+      context_from: [
+        {
+          node: briefId,
+          include: "output",
+          output: "research_brief"
+        },
+        latestPlanJsonRef
+      ],
+      outputs: [
+        attemptOutput("track_briefs", "track-briefs.json", true)
+      ],
+      prompt: buildTrackPrompt(config)
+    },
+    {
+      type: "parallel",
+      id: trackFanoutId,
+      label: "Investigate In Parallel",
+      max_concurrency: concurrency,
+      steps: Array.from({ length: trackCount }, (_, index): AgentNode => ({
+        type: "agent",
+        id: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
+        label: `Investigation Track ${zeroPad(index + 1)}`,
+        ...shared,
+        context_from: [
+          {
+            node: trackId,
+            include: "output",
+            output: "track_briefs"
+          },
+          {
+            node: briefId,
+            include: "output",
+            output: "research_brief"
+          },
+          latestPlanRef
+        ],
+        outputs: buildWorkerOutputs(index),
+        prompt: buildWorkerPrompt(config, index, "initial")
+      }))
+    },
+    {
+      type: "agent",
+      id: contradictionId,
+      label: "Scan Contradictions",
+      ...shared,
+      context_from: Array.from({ length: trackCount }, (_, index): ContextReference => ({
+        node: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
+        include: "output",
+        output: `track_summary_${zeroPad(index + 1)}`
+      })),
+      outputs: [
+        attemptOutput("contradictions", "contradictions.md", true)
+      ],
+      prompt: buildContradictionPrompt()
+    }
+  );
+
+  const consolidationContext: ContextReference[] = [
+    latestPlanJsonRef,
+    {
+      node: contradictionId,
+      include: "output",
+      output: "contradictions"
+    },
+    ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
+      node: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
+      include: "output",
+      output: `track_summary_${zeroPad(index + 1)}`
+    })),
+    ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
+      node: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
+      include: "output",
+      output: `track_sources_${zeroPad(index + 1)}`
+    }))
+  ];
+
+  for (let passIndex = 0; passIndex < (config.strategy.followup_passes ?? 1); passIndex += 1) {
+    const followupPlanId = workflowNodeId(config.id, `followup_plan_${zeroPad(passIndex + 1)}`);
+    const followupFanoutId = workflowNodeId(config.id, `followup_fanout_${zeroPad(passIndex + 1)}`);
+
+    steps.push(
+      {
+        type: "agent",
+        id: followupPlanId,
+        label: `Plan Follow-up Pass ${zeroPad(passIndex + 1)}`,
+        ...shared,
+        context_from: [
+          latestPlanJsonRef,
+          {
+            node: contradictionId,
+            include: "output",
+            output: "contradictions"
+          },
+          ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
+            node: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
+            include: "output",
+            output: `track_summary_${zeroPad(index + 1)}`
+          }))
+        ],
+        outputs: [
+          attemptOutput(`followup_plan_${zeroPad(passIndex + 1)}`, `followup-plan-pass-${zeroPad(passIndex + 1)}.json`, true)
+        ],
+        prompt: buildFollowupPlanPrompt(passIndex)
+      },
+      {
+        type: "parallel",
+        id: followupFanoutId,
+        label: `Follow-up Pass ${zeroPad(passIndex + 1)}`,
+        max_concurrency: concurrency,
+        steps: Array.from({ length: trackCount }, (_, index): AgentNode => ({
+          type: "agent",
+          id: workflowNodeId(config.id, `followup_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`),
+          label: `Follow-up ${zeroPad(passIndex + 1)} Track ${zeroPad(index + 1)}`,
+          ...shared,
+          context_from: [
+            {
+              node: followupPlanId,
+              include: "output",
+              output: `followup_plan_${zeroPad(passIndex + 1)}`
+            },
+            {
+              node: briefId,
+              include: "output",
+              output: "research_brief"
+            }
+          ],
+          outputs: buildFollowupOutputs(passIndex, index),
+          prompt: buildWorkerPrompt(config, index, `follow-up pass ${zeroPad(passIndex + 1)}`)
+        }))
+      }
+    );
+
+    consolidationContext.push({
+      node: followupPlanId,
+      include: "output",
+      output: `followup_plan_${zeroPad(passIndex + 1)}`
+    });
+
+    consolidationContext.push(
+      ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
+        node: workflowNodeId(config.id, `followup_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`),
+        include: "output",
+        output: `followup_summary_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`
+      }))
+    );
+    consolidationContext.push(
+      ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
+        node: workflowNodeId(config.id, `followup_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`),
+        include: "output",
+        output: `followup_sources_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`
+      }))
+    );
+  }
+
+  steps.push({
+    type: "agent",
+    id: consolidateId,
+    label: "Consolidate Findings",
+    ...shared,
+    context_from: consolidationContext,
+    outputs: [
+      attemptOutput("interim_findings", "interim-findings.jsonl", true),
+      attemptOutput("source_ledger", "source-ledger.json", true),
+      attemptOutput("uncertainties", "uncertainties.md", true)
+    ],
+    prompt: buildConsolidatePrompt(config)
+  });
 
   const finalOutputs: OutputDefinition[] =
     config.outputs && config.outputs.length > 0
       ? config.outputs
       : [
-          {
-            name: "research_report",
-            from: "attempt",
-            path: "final-report.md",
-            required: false
-          }
+          attemptOutput("final_report", "final-report.md", true)
         ];
 
-  const finalSynthesisNode: AgentNode = {
+  const publishedOutputs = [
+    ...finalOutputs,
+    attemptOutput("source_ledger", "source-ledger.json", true),
+    attemptOutput("uncertainties", "uncertainties.md", true),
+    attemptOutput("interim_findings", "interim-findings.jsonl", true),
+    workflowStatusOutput(),
+    workflowEventsOutput()
+  ].reduce(appendOutput, [] as OutputDefinition[]);
+
+  steps.push({
     type: "agent",
     id: config.id,
-    ...(config.label ? { label: config.label } : { label: "Final Deep Research Report" }),
+    ...(config.label ? { label: config.label } : { label: "Publish Research Report" }),
     ...shared,
     context_from: [
       {
-        node: trackGeneratorId,
+        node: briefId,
         include: "output",
-        output: "track_briefs"
+        output: "research_brief"
+      },
+      latestPlanRef,
+      latestPlanJsonRef,
+      {
+        node: consolidateId,
+        include: "output",
+        output: "interim_findings"
       },
       {
-        node: planId,
+        node: consolidateId,
         include: "output",
-        output: "research_plan"
+        output: "source_ledger"
       },
       {
-        node: contradictionId,
+        node: consolidateId,
         include: "output",
-        output: "contradictions",
-        optional: true
-      },
-      ...reductionSources.map(
-        (reference): ContextReference => ({
-          node: reference.node,
-          include: "output",
-          output: reference.output
-        })
-      )
+        output: "uncertainties"
+      }
     ],
-    outputs: appendOutput(finalOutputs, {
-      name: "research_report",
-      from: "attempt",
-      path: "final-report.md",
-      required: false
-    }),
-    prompt: buildFinalSynthesisPrompt(config)
-  };
+    outputs: publishedOutputs,
+    prompt: buildFinalPrompt(config)
+  });
 
-  const steps: SequenceNode["steps"] = [
-    clarifyNode,
-    planNode,
-    trackGeneratorNode,
-    trackParallelNode,
-    contradictionNode,
-    ...reductionSteps,
-    finalSynthesisNode
-  ];
-
-  if (config.orchestration.final_critique) {
-    const critiqueNode: CheckNode = {
+  if (config.strategy.final_critique) {
+    steps.push({
       type: "check",
-      id: managedId(config.id, "final_critique"),
+      id: workflowNodeId(config.id, "final_critique"),
       label: "Critique Final Report",
       ...shared,
       check_kind: "ai",
@@ -530,40 +702,26 @@ export function buildDeepResearchWorkflow(config: DeepResearchWorkflowConfig): S
         {
           node: config.id,
           include: "output",
-          output: "research_report"
+          output: "final_report"
         },
         {
-          node: trackGeneratorId,
+          node: config.id,
           include: "output",
-          output: "track_briefs"
+          output: "source_ledger"
         },
         {
-          node: contradictionId,
+          node: config.id,
           include: "output",
-          output: "contradictions",
-          optional: true
+          output: "uncertainties"
         },
-        ...reductionSources.map(
-          (reference): ContextReference => ({
-            node: reference.node,
-            include: "output",
-            output: reference.output
-          })
-        )
+        latestPlanRef
       ],
       outputs: [
-        {
-          name: "final_critique",
-          from: "attempt",
-          path: "result.json",
-          required: true
-        }
+        attemptOutput("final_critique", "result.json", true)
       ],
       prompt: buildFinalCritiquePrompt(config),
       rubric: buildFinalCritiqueRubric(config)
-    };
-
-    steps.push(critiqueNode);
+    } satisfies CheckNode);
   }
 
   return {

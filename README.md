@@ -177,16 +177,27 @@ Only primitive executable nodes run directly. Containers compile into control-fl
 
 `deep_research`, `spec_design`, `execute_spec`, and `review_change` are structured managed workflows that compile into generated primitive subgraphs. Start with [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md). The workflow-specific contracts live in [`docs/DEEP_RESEARCH_WORKFLOW.md`](docs/DEEP_RESEARCH_WORKFLOW.md), [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md), [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md), and [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md).
 
+All managed workflows share the same top-level shape:
+
+- `brief`
+- `context_policy`
+- `approval_policy`
+- `strategy`
+- `delivery`
+- optional `runtime`
+
+They are autonomous by default. A managed workflow only pauses for operator input when its `approval_policy` explicitly enables a checkpoint.
+
 Managed workflow summary:
 
 - `deep_research`
-  Clarifies a research question, fans out investigators, reconciles contradictions, and publishes a final report.
+  Plans and runs research, consolidates evidence, and publishes a sourced final report.
 - `spec_design`
-  Turns a problem statement into an implementation-ready design spec using repo-first inspection and targeted fallback research.
+  Turns a repo-grounded problem statement into an implementation-ready design package.
 - `execute_spec`
-  Executes a structured spec source through planning, implementation, validation, and bounded repair.
+  Executes a structured spec source through planning, single-writer implementation, validation, and bounded repair.
 - `review_change`
-  Reviews a structured change source with a multi-reviewer panel and publishes merged findings.
+  Reviews a structured change source with a reviewer panel and publishes calibrated findings.
 
 For workflow fields, authored examples, and compiled phases:
 

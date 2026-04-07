@@ -44,40 +44,48 @@ import type {
 } from "./schema.js";
 import {
   buildDeepResearchWorkflow,
-  type DeepResearchDeliverable,
-  type DeepResearchOrchestration,
-  type DeepResearchSourcePolicy
+  type DeepResearchApprovalPolicy,
+  type DeepResearchBrief,
+  type DeepResearchContextPolicy,
+  type DeepResearchDelivery,
+  type DeepResearchStrategy
 } from "../managed/deep_research.js";
 import {
   buildSpecDesignWorkflow,
-  type SpecDesignDeliverable,
-  type SpecDesignOrchestration,
-  type SpecDesignResearchPolicy,
-  type SpecDesignScope
+  type SpecDesignApprovalPolicy,
+  type SpecDesignBrief,
+  type SpecDesignContextPolicy,
+  type SpecDesignDelivery,
+  type SpecDesignScope,
+  type SpecDesignStrategy
 } from "../managed/spec_design.js";
 import {
   buildExecuteSpecWorkflow,
+  type ExecuteSpecApprovalPolicy,
   type ExecuteSpecArtifactBundleSource,
+  type ExecuteSpecBrief,
+  type ExecuteSpecContextPolicy,
   type ExecuteSpecDelivery,
-  type ExecuteSpecExecutionPolicy,
-  type ExecuteSpecImplementationResearch,
   type ExecuteSpecManagedNodeSource,
   type ExecuteSpecScope,
   type ExecuteSpecSource,
   type ExecuteSpecSourceRef,
+  type ExecuteSpecStrategy,
   type ExecuteSpecValidation
 } from "../managed/execute_spec.js";
 import {
   buildReviewChangeWorkflow,
   type ReviewChangeArtifactBundleSource,
-  type ReviewChangeCriteria,
+  type ReviewChangeBrief,
+  type ReviewChangeContextPolicy,
   type ReviewChangeDelivery,
   type ReviewChangeManagedNodeSource,
-  type ReviewChangeOrchestration,
   type ReviewChangeScope,
   type ReviewChangeSource,
-  type ReviewChangeSourceRef
+  type ReviewChangeSourceRef,
+  type ReviewChangeStrategy
 } from "../managed/review_change.js";
+import type { ManagedWorkflowRuntime } from "../managed/foundation.js";
 
 export interface LoweredManagedNode {
   authored_id: string;
@@ -1286,11 +1294,75 @@ function normalizeRepeatNode(
   };
 }
 
-function normalizeDeepResearchSources(
+function normalizeManagedRuntime(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): DeepResearchSourcePolicy {
+): ManagedWorkflowRuntime {
+  if (value === undefined) {
+    return {};
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "managed workflow runtime must be an object."
+    });
+    return {};
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["max_concurrency"], diagnostics);
+
+  const max_concurrency = readPositiveInteger(record.max_concurrency, `${path}.max_concurrency`, diagnostics);
+
+  return {
+    ...(max_concurrency !== undefined ? { max_concurrency } : {})
+  };
+}
+
+function normalizeDeepResearchBrief(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): DeepResearchBrief | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "deep_research.brief must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["question", "objective", "audience", "scope_cues", "success_bar"], diagnostics);
+
+  const question = readRequiredString(record.question, `${path}.question`, diagnostics);
+  const objective = readRequiredString(record.objective, `${path}.objective`, diagnostics);
+  const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
+  const scope_cues = readStringArray(record.scope_cues, `${path}.scope_cues`, diagnostics);
+  const success_bar = readStringArray(record.success_bar, `${path}.success_bar`, diagnostics);
+
+  if (!question || !objective) {
+    return undefined;
+  }
+
+  return {
+    question,
+    objective,
+    ...(audience ? { audience } : {}),
+    ...(scope_cues && scope_cues.length > 0 ? { scope_cues } : {}),
+    ...(success_bar && success_bar.length > 0 ? { success_bar } : {})
+  };
+}
+
+function normalizeDeepResearchContextPolicy(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): DeepResearchContextPolicy {
   if (value === undefined) {
     return {
       web: true,
@@ -1304,7 +1376,7 @@ function normalizeDeepResearchSources(
   if (!record) {
     diagnostics.push({
       path,
-      message: "deep_research.sources must be an object."
+      message: "deep_research.context_policy must be an object."
     });
     return {
       web: true,
@@ -1316,7 +1388,7 @@ function normalizeDeepResearchSources(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["web", "files", "apps", "allow_domains", "deny_domains"],
+    ["web", "files", "apps", "allow_domains", "deny_domains", "preferred_sources"],
     diagnostics
   );
 
@@ -1325,25 +1397,26 @@ function normalizeDeepResearchSources(
   const apps = readBoolean(record.apps, `${path}.apps`, diagnostics);
   const allow_domains = readStringArray(record.allow_domains, `${path}.allow_domains`, diagnostics);
   const deny_domains = readStringArray(record.deny_domains, `${path}.deny_domains`, diagnostics);
+  const preferred_sources = readStringArray(record.preferred_sources, `${path}.preferred_sources`, diagnostics);
 
   return {
     ...(web !== undefined ? { web } : { web: true }),
     ...(files !== undefined ? { files } : { files: true }),
     ...(apps !== undefined ? { apps } : { apps: false }),
     ...(allow_domains && allow_domains.length > 0 ? { allow_domains } : {}),
-    ...(deny_domains && deny_domains.length > 0 ? { deny_domains } : {})
+    ...(deny_domains && deny_domains.length > 0 ? { deny_domains } : {}),
+    ...(preferred_sources && preferred_sources.length > 0 ? { preferred_sources } : {})
   };
 }
 
-function normalizeDeepResearchDeliverable(
+function normalizeDeepResearchApprovalPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): DeepResearchDeliverable {
+): DeepResearchApprovalPolicy {
   if (value === undefined) {
     return {
-      format: "report",
-      citations: "inline"
+      require_plan_approval: false
     };
   }
 
@@ -1352,82 +1425,101 @@ function normalizeDeepResearchDeliverable(
   if (!record) {
     diagnostics.push({
       path,
-      message: "deep_research.deliverable must be an object."
+      message: "deep_research.approval_policy must be an object."
     });
     return {
-      format: "report",
-      citations: "inline"
+      require_plan_approval: false
     };
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["format", "citations", "sections"], diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["require_plan_approval"], diagnostics);
+
+  return {
+    require_plan_approval:
+      readBoolean(record.require_plan_approval, `${path}.require_plan_approval`, diagnostics) ?? false
+  };
+}
+
+function normalizeDeepResearchStrategy(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): DeepResearchStrategy {
+  if (value === undefined) {
+    return {
+      depth: "standard",
+      coverage_mode: "balanced",
+      followup_passes: 1,
+      final_critique: false
+    };
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "deep_research.strategy must be an object."
+    });
+    return {
+      depth: "standard",
+      coverage_mode: "balanced",
+      followup_passes: 1,
+      final_critique: false
+    };
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["depth", "coverage_mode", "followup_passes", "final_critique"], diagnostics);
+
+  return {
+    depth: readEnumValue(record.depth, `${path}.depth`, ["shallow", "standard", "deep"] as const, diagnostics) ?? "standard",
+    coverage_mode:
+      readEnumValue(
+        record.coverage_mode,
+        `${path}.coverage_mode`,
+        ["breadth", "balanced", "depth_first"] as const,
+        diagnostics
+      ) ?? "balanced",
+    followup_passes: readPositiveInteger(record.followup_passes, `${path}.followup_passes`, diagnostics, { minimum: 0 }) ?? 1,
+    final_critique: readBoolean(record.final_critique, `${path}.final_critique`, diagnostics) ?? false
+  };
+}
+
+function normalizeDeepResearchDelivery(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): DeepResearchDelivery {
+  if (value === undefined) {
+    return {
+      format: "report",
+      citation_style: "inline"
+    };
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "deep_research.delivery must be an object."
+    });
+    return {
+      format: "report",
+      citation_style: "inline"
+    };
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["format", "citation_style", "sections"], diagnostics);
 
   const format = readOptionalString(record.format, `${path}.format`, diagnostics);
-  const citations = readOptionalString(record.citations, `${path}.citations`, diagnostics);
+  const citation_style = readOptionalString(record.citation_style, `${path}.citation_style`, diagnostics);
   const sections = readStringArray(record.sections, `${path}.sections`, diagnostics);
 
   return {
     ...(format ? { format } : { format: "report" }),
-    ...(citations ? { citations } : { citations: "inline" }),
+    ...(citation_style ? { citation_style } : { citation_style: "inline" }),
     ...(sections && sections.length > 0 ? { sections } : {})
-  };
-}
-
-function normalizeDeepResearchOrchestration(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): DeepResearchOrchestration {
-  if (value === undefined) {
-    return {
-      track_count: 6,
-      max_parallel_tracks: 6,
-      summary_fan_in: 3,
-      final_critique: false
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "deep_research.orchestration must be an object."
-    });
-    return {
-      track_count: 6,
-      max_parallel_tracks: 6,
-      summary_fan_in: 3,
-      final_critique: false
-    };
-  }
-
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["track_count", "max_parallel_tracks", "summary_fan_in", "final_critique"],
-    diagnostics
-  );
-
-  const track_count = readPositiveInteger(record.track_count, `${path}.track_count`, diagnostics) ?? 6;
-  const max_parallel_tracks =
-    readPositiveInteger(record.max_parallel_tracks, `${path}.max_parallel_tracks`, diagnostics) ?? track_count;
-  const summary_fan_in =
-    readPositiveInteger(record.summary_fan_in, `${path}.summary_fan_in`, diagnostics) ?? 3;
-  const final_critique = readBoolean(record.final_critique, `${path}.final_critique`, diagnostics) ?? false;
-
-  if (summary_fan_in < 2) {
-    diagnostics.push({
-      path: `${path}.summary_fan_in`,
-      message: "deep_research.orchestration.summary_fan_in must be at least 2."
-    });
-  }
-
-  return {
-    track_count,
-    max_parallel_tracks: Math.min(max_parallel_tracks, track_count),
-    summary_fan_in: Math.max(summary_fan_in, 2),
-    final_critique
   };
 }
 
@@ -1450,46 +1542,42 @@ function normalizeDeepResearchNode(
       "context_from",
       "outputs",
       "timeout_sec",
-      "question",
-      "objective",
-      "audience",
-      "sources",
-      "deliverable",
-      "orchestration"
+      "brief",
+      "context_policy",
+      "approval_policy",
+      "strategy",
+      "delivery",
+      "runtime"
     ],
     diagnostics
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const question = readRequiredString(record.question, `${path}.question`, diagnostics);
-  const objective = readRequiredString(record.objective, `${path}.objective`, diagnostics);
-  const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
-  const sources = normalizeDeepResearchSources(record.sources, `${path}.sources`, diagnostics);
-  const deliverable = normalizeDeepResearchDeliverable(record.deliverable, `${path}.deliverable`, diagnostics);
-  const orchestration = normalizeDeepResearchOrchestration(
-    record.orchestration,
-    `${path}.orchestration`,
-    diagnostics
-  );
+  const brief = normalizeDeepResearchBrief(record.brief, `${path}.brief`, diagnostics);
+  const context_policy = normalizeDeepResearchContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
+  const approval_policy = normalizeDeepResearchApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
+  const strategy = normalizeDeepResearchStrategy(record.strategy, `${path}.strategy`, diagnostics);
+  const delivery = normalizeDeepResearchDelivery(record.delivery, `${path}.delivery`, diagnostics);
+  const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (!base || !question || !objective) {
+  if (!base || !brief) {
     return undefined;
   }
 
   loweredManagedNodes.push({
     authored_id: base.id,
     managed_kind: "deep_research",
-    lowered_to: "agent"
+    lowered_to: "sequence"
   });
 
   return buildDeepResearchWorkflow({
     ...base,
-    question,
-    objective,
-    ...(audience ? { audience } : {}),
-    sources,
-    deliverable,
-    orchestration
+    brief,
+    context_policy,
+    approval_policy,
+    strategy,
+    delivery,
+    runtime
   });
 }
 
@@ -1523,16 +1611,58 @@ function normalizeSpecDesignScope(
   };
 }
 
-function normalizeSpecDesignResearchPolicy(
+function normalizeSpecDesignBrief(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SpecDesignResearchPolicy {
+): SpecDesignBrief | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "spec_design.brief must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["problem", "goal", "audience", "constraints", "decision_drivers", "scope"],
+    diagnostics
+  );
+
+  const problem = readRequiredString(record.problem, `${path}.problem`, diagnostics);
+  const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
+  const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
+  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
+  const decision_drivers = readStringArray(record.decision_drivers, `${path}.decision_drivers`, diagnostics);
+  const scope = normalizeSpecDesignScope(record.scope, `${path}.scope`, diagnostics);
+
+  if (!problem || !goal) {
+    return undefined;
+  }
+
+  return {
+    problem,
+    goal,
+    ...(audience ? { audience } : {}),
+    ...(constraints && constraints.length > 0 ? { constraints } : {}),
+    ...(decision_drivers && decision_drivers.length > 0 ? { decision_drivers } : {}),
+    ...(scope.paths || scope.areas ? { scope } : {})
+  };
+}
+
+function normalizeSpecDesignContextPolicy(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): SpecDesignContextPolicy {
   if (value === undefined) {
     return {
       repo_first: true,
-      allow_web_fallback: true,
-      max_external_research_tasks: 3
+      allow_web_fallback: true
     };
   }
 
@@ -1541,52 +1671,106 @@ function normalizeSpecDesignResearchPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "spec_design.research_policy must be an object."
+      message: "spec_design.context_policy must be an object."
     });
     return {
       repo_first: true,
-      allow_web_fallback: true,
-      max_external_research_tasks: 3
+      allow_web_fallback: true
     };
   }
 
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["repo_first", "allow_web_fallback", "web_triggers", "allow_domains", "max_external_research_tasks"],
-    diagnostics
-  );
+  pushUnknownKeyDiagnostics(record, path, ["repo_first", "allow_web_fallback", "web_triggers", "allow_domains"], diagnostics);
 
   const repo_first = readBoolean(record.repo_first, `${path}.repo_first`, diagnostics);
-  const allow_web_fallback = readBoolean(
-    record.allow_web_fallback,
-    `${path}.allow_web_fallback`,
-    diagnostics
-  );
+  const allow_web_fallback = readBoolean(record.allow_web_fallback, `${path}.allow_web_fallback`, diagnostics);
   const web_triggers = readStringArray(record.web_triggers, `${path}.web_triggers`, diagnostics);
   const allow_domains = readStringArray(record.allow_domains, `${path}.allow_domains`, diagnostics);
-  const max_external_research_tasks =
-    readPositiveInteger(
-      record.max_external_research_tasks,
-      `${path}.max_external_research_tasks`,
-      diagnostics,
-      { minimum: 0 }
-    ) ?? 3;
 
   return {
     repo_first: repo_first ?? true,
     allow_web_fallback: allow_web_fallback ?? true,
     ...(web_triggers && web_triggers.length > 0 ? { web_triggers } : {}),
-    ...(allow_domains && allow_domains.length > 0 ? { allow_domains } : {}),
-    max_external_research_tasks
+    ...(allow_domains && allow_domains.length > 0 ? { allow_domains } : {})
   };
 }
 
-function normalizeSpecDesignDeliverable(
+function normalizeSpecDesignApprovalPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SpecDesignDeliverable {
+): SpecDesignApprovalPolicy {
+  if (value === undefined) {
+    return {
+      require_direction_approval: false
+    };
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "spec_design.approval_policy must be an object."
+    });
+    return {
+      require_direction_approval: false
+    };
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["require_direction_approval"], diagnostics);
+
+  return {
+    require_direction_approval:
+      readBoolean(record.require_direction_approval, `${path}.require_direction_approval`, diagnostics) ?? false
+  };
+}
+
+function normalizeSpecDesignStrategy(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): SpecDesignStrategy {
+  if (value === undefined) {
+    return {
+      alternatives: 3,
+      critique_profiles: ["architecture", "implementation", "ux"],
+      max_revision_cycles: 2
+    };
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "spec_design.strategy must be an object."
+    });
+    return {
+      alternatives: 3,
+      critique_profiles: ["architecture", "implementation", "ux"],
+      max_revision_cycles: 2
+    };
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["alternatives", "critique_profiles", "max_revision_cycles"], diagnostics);
+
+  const alternatives = readPositiveInteger(record.alternatives, `${path}.alternatives`, diagnostics) ?? 3;
+  const critique_profiles = readStringArray(record.critique_profiles, `${path}.critique_profiles`, diagnostics);
+  const max_revision_cycles = readPositiveInteger(record.max_revision_cycles, `${path}.max_revision_cycles`, diagnostics) ?? 2;
+
+  return {
+    alternatives,
+    critique_profiles:
+      critique_profiles && critique_profiles.length > 0 ? critique_profiles : ["architecture", "implementation", "ux"],
+    max_revision_cycles
+  };
+}
+
+function normalizeSpecDesignDelivery(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): SpecDesignDelivery {
   if (value === undefined) {
     return {
       format: "design_spec"
@@ -1598,7 +1782,7 @@ function normalizeSpecDesignDeliverable(
   if (!record) {
     diagnostics.push({
       path,
-      message: "spec_design.deliverable must be an object."
+      message: "spec_design.delivery must be an object."
     });
     return {
       format: "design_spec"
@@ -1613,58 +1797,6 @@ function normalizeSpecDesignDeliverable(
   return {
     ...(format ? { format } : { format: "design_spec" }),
     ...(sections && sections.length > 0 ? { sections } : {})
-  };
-}
-
-function normalizeSpecDesignOrchestration(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): SpecDesignOrchestration {
-  if (value === undefined) {
-    return {
-      option_count: 3,
-      max_parallel_options: 3,
-      critique_roles: ["architecture", "implementation", "ux"],
-      revision_rounds: 2
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "spec_design.orchestration must be an object."
-    });
-    return {
-      option_count: 3,
-      max_parallel_options: 3,
-      critique_roles: ["architecture", "implementation", "ux"],
-      revision_rounds: 2
-    };
-  }
-
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["option_count", "max_parallel_options", "critique_roles", "revision_rounds"],
-    diagnostics
-  );
-
-  const option_count = readPositiveInteger(record.option_count, `${path}.option_count`, diagnostics) ?? 3;
-  const max_parallel_options =
-    readPositiveInteger(record.max_parallel_options, `${path}.max_parallel_options`, diagnostics) ?? option_count;
-  const critique_roles = readStringArray(record.critique_roles, `${path}.critique_roles`, diagnostics);
-  const revision_rounds =
-    readPositiveInteger(record.revision_rounds, `${path}.revision_rounds`, diagnostics) ?? 2;
-
-  return {
-    option_count,
-    max_parallel_options: Math.min(max_parallel_options, option_count),
-    critique_roles:
-      critique_roles && critique_roles.length > 0 ? critique_roles : ["architecture", "implementation", "ux"],
-    revision_rounds
   };
 }
 
@@ -1687,60 +1819,42 @@ function normalizeSpecDesignNode(
       "context_from",
       "outputs",
       "timeout_sec",
-      "problem",
-      "goal",
-      "audience",
-      "constraints",
-      "decision_drivers",
-      "scope",
-      "research_policy",
-      "deliverable",
-      "orchestration"
+      "brief",
+      "context_policy",
+      "approval_policy",
+      "strategy",
+      "delivery",
+      "runtime"
     ],
     diagnostics
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const problem = readRequiredString(record.problem, `${path}.problem`, diagnostics);
-  const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
-  const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
-  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics) ?? [];
-  const decision_drivers =
-    readStringArray(record.decision_drivers, `${path}.decision_drivers`, diagnostics) ?? [];
-  const scope = normalizeSpecDesignScope(record.scope, `${path}.scope`, diagnostics);
-  const research_policy = normalizeSpecDesignResearchPolicy(
-    record.research_policy,
-    `${path}.research_policy`,
-    diagnostics
-  );
-  const deliverable = normalizeSpecDesignDeliverable(record.deliverable, `${path}.deliverable`, diagnostics);
-  const orchestration = normalizeSpecDesignOrchestration(
-    record.orchestration,
-    `${path}.orchestration`,
-    diagnostics
-  );
+  const brief = normalizeSpecDesignBrief(record.brief, `${path}.brief`, diagnostics);
+  const context_policy = normalizeSpecDesignContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
+  const approval_policy = normalizeSpecDesignApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
+  const strategy = normalizeSpecDesignStrategy(record.strategy, `${path}.strategy`, diagnostics);
+  const delivery = normalizeSpecDesignDelivery(record.delivery, `${path}.delivery`, diagnostics);
+  const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (!base || !problem || !goal) {
+  if (!base || !brief) {
     return undefined;
   }
 
   loweredManagedNodes.push({
     authored_id: base.id,
     managed_kind: "spec_design",
-    lowered_to: "agent"
+    lowered_to: "sequence"
   });
 
   return buildSpecDesignWorkflow({
     ...base,
-    problem,
-    goal,
-    ...(audience ? { audience } : {}),
-    constraints,
-    decision_drivers,
-    scope,
-    research_policy,
-    deliverable,
-    orchestration
+    brief,
+    context_policy,
+    approval_policy,
+    strategy,
+    delivery,
+    runtime
   });
 }
 
@@ -1771,6 +1885,36 @@ function normalizeExecuteSpecScope(
   return {
     ...(paths && paths.length > 0 ? { paths } : {}),
     ...(areas && areas.length > 0 ? { areas } : {})
+  };
+}
+
+function normalizeExecuteSpecBrief(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ExecuteSpecBrief {
+  if (value === undefined) {
+    return {};
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "execute_spec.brief must be an object."
+    });
+    return {};
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["objective", "scope"], diagnostics);
+
+  const objective = readOptionalString(record.objective, `${path}.objective`, diagnostics);
+  const scope = normalizeExecuteSpecScope(record.scope, `${path}.scope`, diagnostics);
+
+  return {
+    ...(objective ? { objective } : {}),
+    ...(scope.paths || scope.areas ? { scope } : {})
   };
 }
 
@@ -1871,7 +2015,7 @@ function normalizeExecuteSpecSource(
     pushUnknownKeyDiagnostics(
       record,
       path,
-      ["kind", "design_spec", "file_plan", "acceptance_criteria", "risks", "open_questions"],
+      ["kind", "design_spec", "direction_proposal", "tradeoff_matrix", "decision_log", "implementation_readiness"],
       diagnostics
     );
 
@@ -1880,21 +2024,21 @@ function normalizeExecuteSpecSource(
       `${path}.design_spec`,
       diagnostics
     );
-    const file_plan = record.file_plan
-      ? normalizeExecuteSpecSourceRef(record.file_plan, `${path}.file_plan`, diagnostics)
+    const direction_proposal = record.direction_proposal
+      ? normalizeExecuteSpecSourceRef(record.direction_proposal, `${path}.direction_proposal`, diagnostics)
       : undefined;
-    const acceptance_criteria = record.acceptance_criteria
+    const tradeoff_matrix = record.tradeoff_matrix
+      ? normalizeExecuteSpecSourceRef(record.tradeoff_matrix, `${path}.tradeoff_matrix`, diagnostics)
+      : undefined;
+    const decision_log = record.decision_log
+      ? normalizeExecuteSpecSourceRef(record.decision_log, `${path}.decision_log`, diagnostics)
+      : undefined;
+    const implementation_readiness = record.implementation_readiness
       ? normalizeExecuteSpecSourceRef(
-          record.acceptance_criteria,
-          `${path}.acceptance_criteria`,
+          record.implementation_readiness,
+          `${path}.implementation_readiness`,
           diagnostics
         )
-      : undefined;
-    const risks = record.risks
-      ? normalizeExecuteSpecSourceRef(record.risks, `${path}.risks`, diagnostics)
-      : undefined;
-    const open_questions = record.open_questions
-      ? normalizeExecuteSpecSourceRef(record.open_questions, `${path}.open_questions`, diagnostics)
       : undefined;
 
     if (!design_spec) {
@@ -1904,10 +2048,10 @@ function normalizeExecuteSpecSource(
     return {
       kind: "artifact_bundle",
       design_spec,
-      ...(file_plan ? { file_plan } : {}),
-      ...(acceptance_criteria ? { acceptance_criteria } : {}),
-      ...(risks ? { risks } : {}),
-      ...(open_questions ? { open_questions } : {})
+      ...(direction_proposal ? { direction_proposal } : {}),
+      ...(tradeoff_matrix ? { tradeoff_matrix } : {}),
+      ...(decision_log ? { decision_log } : {}),
+      ...(implementation_readiness ? { implementation_readiness } : {})
     } satisfies ExecuteSpecArtifactBundleSource;
   }
 
@@ -1918,14 +2062,14 @@ function normalizeExecuteSpecSource(
   return undefined;
 }
 
-function normalizeExecuteSpecExecutionPolicy(
+function normalizeExecuteSpecContextPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ExecuteSpecExecutionPolicy {
+): ExecuteSpecContextPolicy {
   if (value === undefined) {
     return {
-      max_repair_rounds: 2
+      allow_official_docs_fallback: true
     };
   }
 
@@ -1934,18 +2078,114 @@ function normalizeExecuteSpecExecutionPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "execute_spec.execution_policy must be an object."
+      message: "execute_spec.context_policy must be an object."
     });
     return {
-      max_repair_rounds: 2
+      allow_official_docs_fallback: true
     };
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["max_repair_rounds"], diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["allow_official_docs_fallback", "allow_domains"], diagnostics);
+
+  const allow_domains = readStringArray(record.allow_domains, `${path}.allow_domains`, diagnostics);
 
   return {
-    max_repair_rounds:
-      readPositiveInteger(record.max_repair_rounds, `${path}.max_repair_rounds`, diagnostics) ?? 2
+    allow_official_docs_fallback:
+      readBoolean(
+        record.allow_official_docs_fallback,
+        `${path}.allow_official_docs_fallback`,
+        diagnostics
+      ) ?? true,
+    ...(allow_domains && allow_domains.length > 0 ? { allow_domains } : {})
+  };
+}
+
+function normalizeExecuteSpecApprovalPolicy(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ExecuteSpecApprovalPolicy {
+  if (value === undefined) {
+    return {
+      require_execution_plan_approval: false
+    };
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "execute_spec.approval_policy must be an object."
+    });
+    return {
+      require_execution_plan_approval: false
+    };
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["require_execution_plan_approval"], diagnostics);
+
+  return {
+    require_execution_plan_approval:
+      readBoolean(
+        record.require_execution_plan_approval,
+        `${path}.require_execution_plan_approval`,
+        diagnostics
+      ) ?? false
+  };
+}
+
+function normalizeExecuteSpecStrategy(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ExecuteSpecStrategy {
+  if (value === undefined) {
+    return {
+      single_writer: true,
+      allow_readonly_recon: true,
+      max_repair_cycles: 2
+    };
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "execute_spec.strategy must be an object."
+    });
+    return {
+      single_writer: true,
+      allow_readonly_recon: true,
+      max_repair_cycles: 2
+    };
+  }
+
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["single_writer", "allow_readonly_recon", "max_repair_cycles"],
+    diagnostics
+  );
+
+  const single_writer = readBoolean(record.single_writer, `${path}.single_writer`, diagnostics) ?? true;
+  const allow_readonly_recon =
+    readBoolean(record.allow_readonly_recon, `${path}.allow_readonly_recon`, diagnostics) ?? true;
+  const max_repair_cycles =
+    readPositiveInteger(record.max_repair_cycles, `${path}.max_repair_cycles`, diagnostics) ?? 2;
+
+  if (single_writer === false) {
+    diagnostics.push({
+      path: `${path}.single_writer`,
+      message: "execute_spec currently supports only single_writer = true; the workflow will still compile as a single-writer executor."
+    });
+  }
+
+  return {
+    single_writer: true,
+    allow_readonly_recon,
+    max_repair_cycles
   };
 }
 
@@ -1984,60 +2224,6 @@ function normalizeExecuteSpecValidation(
   };
 }
 
-function normalizeExecuteSpecImplementationResearch(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): ExecuteSpecImplementationResearch {
-  if (value === undefined) {
-    return {
-      allow_official_docs_fallback: true,
-      max_external_lookup_tasks: 2
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "execute_spec.implementation_research must be an object."
-    });
-    return {
-      allow_official_docs_fallback: true,
-      max_external_lookup_tasks: 2
-    };
-  }
-
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["allow_official_docs_fallback", "allow_domains", "max_external_lookup_tasks"],
-    diagnostics
-  );
-
-  const allow_official_docs_fallback =
-    readBoolean(
-      record.allow_official_docs_fallback,
-      `${path}.allow_official_docs_fallback`,
-      diagnostics
-    ) ?? true;
-  const allow_domains = readStringArray(record.allow_domains, `${path}.allow_domains`, diagnostics);
-  const max_external_lookup_tasks =
-    readPositiveInteger(
-      record.max_external_lookup_tasks,
-      `${path}.max_external_lookup_tasks`,
-      diagnostics,
-      { minimum: 0 }
-    ) ?? 2;
-
-  return {
-    allow_official_docs_fallback,
-    ...(allow_domains && allow_domains.length > 0 ? { allow_domains } : {}),
-    max_external_lookup_tasks
-  };
-}
-
 function normalizeExecuteSpecDelivery(
   value: unknown,
   path: string,
@@ -2045,62 +2231,34 @@ function normalizeExecuteSpecDelivery(
 ): ExecuteSpecDelivery {
   if (value === undefined) {
     return {
-      write_change_summary: true,
-      write_validation_results: true,
-      write_residual_risks: true,
-      write_files_touched: true,
-      write_implementation_plan: true
+      write_handoff: true,
+      write_validation_ledger: true,
+      write_repair_log: true
     };
   }
 
-  const record = asRecord(value);
+  const typed = asRecord(value);
 
-  if (!record) {
+  if (!typed) {
     diagnostics.push({
       path,
       message: "execute_spec.delivery must be an object."
     });
     return {
-      write_change_summary: true,
-      write_validation_results: true,
-      write_residual_risks: true,
-      write_files_touched: true,
-      write_implementation_plan: true
+      write_handoff: true,
+      write_validation_ledger: true,
+      write_repair_log: true
     };
   }
 
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    [
-      "write_change_summary",
-      "write_validation_results",
-      "write_residual_risks",
-      "write_files_touched",
-      "write_implementation_plan"
-    ],
-    diagnostics
-  );
+  pushUnknownKeyDiagnostics(typed, path, ["write_handoff", "write_validation_ledger", "write_repair_log"], diagnostics);
 
   return {
-    write_change_summary:
-      readBoolean(record.write_change_summary, `${path}.write_change_summary`, diagnostics) ?? true,
-    write_validation_results:
-      readBoolean(
-        record.write_validation_results,
-        `${path}.write_validation_results`,
-        diagnostics
-      ) ?? true,
-    write_residual_risks:
-      readBoolean(record.write_residual_risks, `${path}.write_residual_risks`, diagnostics) ?? true,
-    write_files_touched:
-      readBoolean(record.write_files_touched, `${path}.write_files_touched`, diagnostics) ?? true,
-    write_implementation_plan:
-      readBoolean(
-        record.write_implementation_plan,
-        `${path}.write_implementation_plan`,
-        diagnostics
-      ) ?? true
+    write_handoff: readBoolean(typed.write_handoff, `${path}.write_handoff`, diagnostics) ?? true,
+    write_validation_ledger:
+      readBoolean(typed.write_validation_ledger, `${path}.write_validation_ledger`, diagnostics) ?? true,
+    write_repair_log:
+      readBoolean(typed.write_repair_log, `${path}.write_repair_log`, diagnostics) ?? true
   };
 }
 
@@ -2123,54 +2281,32 @@ function normalizeExecuteSpecNode(
       "context_from",
       "outputs",
       "timeout_sec",
-      "objective",
+      "brief",
       "spec_source",
-      "scope",
-      "execution_policy",
+      "context_policy",
+      "approval_policy",
+      "strategy",
       "validation",
-      "implementation_research",
-      "delivery"
+      "delivery",
+      "runtime"
     ],
     diagnostics
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const objective = readOptionalString(record.objective, `${path}.objective`, diagnostics);
+  const brief = normalizeExecuteSpecBrief(record.brief, `${path}.brief`, diagnostics);
   const spec_source = normalizeExecuteSpecSource(record.spec_source, `${path}.spec_source`, diagnostics);
-  const scope = normalizeExecuteSpecScope(record.scope, `${path}.scope`, diagnostics);
-  const execution_policy = normalizeExecuteSpecExecutionPolicy(
-    record.execution_policy,
-    `${path}.execution_policy`,
-    diagnostics
-  );
+  const context_policy = normalizeExecuteSpecContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
+  const approval_policy = normalizeExecuteSpecApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
+  const strategy = normalizeExecuteSpecStrategy(record.strategy, `${path}.strategy`, diagnostics);
   const validation = normalizeExecuteSpecValidation(record.validation, `${path}.validation`, diagnostics);
-  const implementation_research = normalizeExecuteSpecImplementationResearch(
-    record.implementation_research,
-    `${path}.implementation_research`,
-    diagnostics
-  );
   const delivery = normalizeExecuteSpecDelivery(record.delivery, `${path}.delivery`, diagnostics);
+  const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
   if (validation.commands.length === 0) {
     diagnostics.push({
       path: `${path}.validation.commands`,
       message: "execute_spec.validation.commands must include at least one command."
-    });
-  }
-
-  const hasCustomOutputs = Array.isArray(base?.outputs) && base.outputs.length > 0;
-  const publishesManagedArtifacts =
-    delivery.write_change_summary ||
-    delivery.write_validation_results ||
-    delivery.write_residual_risks ||
-    delivery.write_files_touched ||
-    delivery.write_implementation_plan;
-
-  if (!hasCustomOutputs && !publishesManagedArtifacts) {
-    diagnostics.push({
-      path,
-      message:
-        "execute_spec must publish at least one final artifact via delivery flags or explicit outputs."
     });
   }
 
@@ -2181,18 +2317,19 @@ function normalizeExecuteSpecNode(
   loweredManagedNodes.push({
     authored_id: base.id,
     managed_kind: "execute_spec",
-    lowered_to: "agent"
+    lowered_to: "sequence"
   });
 
   return buildExecuteSpecWorkflow({
     ...base,
-    ...(objective ? { objective } : {}),
+    brief,
     spec_source,
-    scope,
-    execution_policy,
+    context_policy,
+    approval_policy,
+    strategy,
     validation,
-    implementation_research,
-    delivery
+    delivery,
+    runtime
   });
 }
 
@@ -2223,6 +2360,40 @@ function normalizeReviewChangeScope(
   return {
     ...(paths && paths.length > 0 ? { paths } : {}),
     ...(areas && areas.length > 0 ? { areas } : {})
+  };
+}
+
+function normalizeReviewChangeBrief(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ReviewChangeBrief {
+  if (value === undefined) {
+    return {};
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "review_change.brief must be an object."
+    });
+    return {};
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["review_goal", "focus", "audience", "scope"], diagnostics);
+
+  const review_goal = readOptionalString(record.review_goal, `${path}.review_goal`, diagnostics);
+  const focus = readStringArray(record.focus, `${path}.focus`, diagnostics);
+  const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
+  const scope = normalizeReviewChangeScope(record.scope, `${path}.scope`, diagnostics);
+
+  return {
+    ...(review_goal ? { review_goal } : {}),
+    ...(focus && focus.length > 0 ? { focus } : {}),
+    ...(audience ? { audience } : {}),
+    ...(scope.paths || scope.areas ? { scope } : {})
   };
 }
 
@@ -2323,7 +2494,7 @@ function normalizeReviewChangeSource(
     pushUnknownKeyDiagnostics(
       record,
       path,
-      ["kind", "diff", "summary", "validation_results", "files_touched", "additional_context"],
+      ["kind", "diff", "summary", "validation_ledger", "files_touched", "additional_context"],
       diagnostics
     );
 
@@ -2333,8 +2504,8 @@ function normalizeReviewChangeSource(
     const summary = record.summary
       ? normalizeReviewChangeSourceRef(record.summary, `${path}.summary`, diagnostics)
       : undefined;
-    const validation_results = record.validation_results
-      ? normalizeReviewChangeSourceRef(record.validation_results, `${path}.validation_results`, diagnostics)
+    const validation_ledger = record.validation_ledger
+      ? normalizeReviewChangeSourceRef(record.validation_ledger, `${path}.validation_ledger`, diagnostics)
       : undefined;
     const files_touched = record.files_touched
       ? normalizeReviewChangeSourceRef(record.files_touched, `${path}.files_touched`, diagnostics)
@@ -2368,7 +2539,7 @@ function normalizeReviewChangeSource(
       kind: "artifact_bundle",
       ...(diff ? { diff } : {}),
       ...(summary ? { summary } : {}),
-      ...(validation_results ? { validation_results } : {}),
+      ...(validation_ledger ? { validation_ledger } : {}),
       ...(files_touched ? { files_touched } : {}),
       ...(additional_context && additional_context.length > 0 ? { additional_context } : {})
     } satisfies ReviewChangeArtifactBundleSource;
@@ -2381,15 +2552,17 @@ function normalizeReviewChangeSource(
   return undefined;
 }
 
-function normalizeReviewChangeCriteria(
+function normalizeReviewChangeContextPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeCriteria {
+): ReviewChangeContextPolicy {
   if (value === undefined) {
     return {
-      focus: ["correctness", "regressions", "missing_tests", "maintainability"],
-      require_file_references: true
+      include_surrounding_code: true,
+      include_tests: true,
+      include_docs: false,
+      include_validation: true
     };
   }
 
@@ -2398,37 +2571,45 @@ function normalizeReviewChangeCriteria(
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change.criteria must be an object."
+      message: "review_change.context_policy must be an object."
     });
     return {
-      focus: ["correctness", "regressions", "missing_tests", "maintainability"],
-      require_file_references: true
+      include_surrounding_code: true,
+      include_tests: true,
+      include_docs: false,
+      include_validation: true
     };
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["focus", "require_file_references"], diagnostics);
-  const focus = readStringArray(record.focus, `${path}.focus`, diagnostics);
-  const require_file_references =
-    readBoolean(record.require_file_references, `${path}.require_file_references`, diagnostics) ?? true;
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["include_surrounding_code", "include_tests", "include_docs", "include_validation"],
+    diagnostics
+  );
 
   return {
-    focus:
-      focus && focus.length > 0
-        ? focus
-        : ["correctness", "regressions", "missing_tests", "maintainability"],
-    require_file_references
+    include_surrounding_code:
+      readBoolean(record.include_surrounding_code, `${path}.include_surrounding_code`, diagnostics) ?? true,
+    include_tests: readBoolean(record.include_tests, `${path}.include_tests`, diagnostics) ?? true,
+    include_docs: readBoolean(record.include_docs, `${path}.include_docs`, diagnostics) ?? false,
+    include_validation:
+      readBoolean(record.include_validation, `${path}.include_validation`, diagnostics) ?? true
   };
 }
 
-function normalizeReviewChangeOrchestration(
+function normalizeReviewChangeStrategy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeOrchestration {
+): ReviewChangeStrategy {
   if (value === undefined) {
     return {
-      reviewer_roles: ["correctness", "testing", "maintainability"],
-      max_parallel_reviewers: 3
+      reviewer_profiles: ["correctness", "testing", "maintainability"],
+      severity_policy: "balanced",
+      include_surrounding_context: false,
+      false_positive_challenge: true,
+      require_file_references: true
     };
   }
 
@@ -2437,27 +2618,47 @@ function normalizeReviewChangeOrchestration(
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change.orchestration must be an object."
+      message: "review_change.strategy must be an object."
     });
     return {
-      reviewer_roles: ["correctness", "testing", "maintainability"],
-      max_parallel_reviewers: 3
+      reviewer_profiles: ["correctness", "testing", "maintainability"],
+      severity_policy: "balanced",
+      include_surrounding_context: false,
+      false_positive_challenge: true,
+      require_file_references: true
     };
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["reviewer_roles", "max_parallel_reviewers"], diagnostics);
-  const reviewer_roles = readStringArray(record.reviewer_roles, `${path}.reviewer_roles`, diagnostics);
-  const normalizedRoles =
-    reviewer_roles && reviewer_roles.length > 0
-      ? reviewer_roles
-      : ["correctness", "testing", "maintainability"];
-  const max_parallel_reviewers =
-    readPositiveInteger(record.max_parallel_reviewers, `${path}.max_parallel_reviewers`, diagnostics) ??
-    normalizedRoles.length;
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    [
+      "reviewer_profiles",
+      "severity_policy",
+      "include_surrounding_context",
+      "false_positive_challenge",
+      "require_file_references"
+    ],
+    diagnostics
+  );
+
+  const reviewer_profiles = readStringArray(record.reviewer_profiles, `${path}.reviewer_profiles`, diagnostics);
+  const severity_policy =
+    readEnumValue(record.severity_policy, `${path}.severity_policy`, ["balanced", "conservative", "strict"] as const, diagnostics) ??
+    "balanced";
 
   return {
-    reviewer_roles: normalizedRoles,
-    max_parallel_reviewers: Math.min(max_parallel_reviewers, normalizedRoles.length)
+    reviewer_profiles:
+      reviewer_profiles && reviewer_profiles.length > 0
+        ? reviewer_profiles
+        : ["correctness", "testing", "maintainability"],
+    severity_policy,
+    include_surrounding_context:
+      readBoolean(record.include_surrounding_context, `${path}.include_surrounding_context`, diagnostics) ?? false,
+    false_positive_challenge:
+      readBoolean(record.false_positive_challenge, `${path}.false_positive_challenge`, diagnostics) ?? true,
+    require_file_references:
+      readBoolean(record.require_file_references, `${path}.require_file_references`, diagnostics) ?? true
   };
 }
 
@@ -2468,9 +2669,9 @@ function normalizeReviewChangeDelivery(
 ): ReviewChangeDelivery {
   if (value === undefined) {
     return {
-      write_review_report: true,
-      write_findings_json: true,
-      write_findings_markdown: true
+      write_review_summary: true,
+      write_raw_findings: true,
+      write_calibrated_findings: true
     };
   }
 
@@ -2482,26 +2683,26 @@ function normalizeReviewChangeDelivery(
       message: "review_change.delivery must be an object."
     });
     return {
-      write_review_report: true,
-      write_findings_json: true,
-      write_findings_markdown: true
+      write_review_summary: true,
+      write_raw_findings: true,
+      write_calibrated_findings: true
     };
   }
 
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["write_review_report", "write_findings_json", "write_findings_markdown"],
+    ["write_review_summary", "write_raw_findings", "write_calibrated_findings"],
     diagnostics
   );
 
   return {
-    write_review_report:
-      readBoolean(record.write_review_report, `${path}.write_review_report`, diagnostics) ?? true,
-    write_findings_json:
-      readBoolean(record.write_findings_json, `${path}.write_findings_json`, diagnostics) ?? true,
-    write_findings_markdown:
-      readBoolean(record.write_findings_markdown, `${path}.write_findings_markdown`, diagnostics) ?? true
+    write_review_summary:
+      readBoolean(record.write_review_summary, `${path}.write_review_summary`, diagnostics) ?? true,
+    write_raw_findings:
+      readBoolean(record.write_raw_findings, `${path}.write_raw_findings`, diagnostics) ?? true,
+    write_calibrated_findings:
+      readBoolean(record.write_calibrated_findings, `${path}.write_calibrated_findings`, diagnostics) ?? true
   };
 }
 
@@ -2524,43 +2725,31 @@ function normalizeReviewChangeNode(
       "context_from",
       "outputs",
       "timeout_sec",
+      "brief",
       "review_source",
-      "scope",
-      "criteria",
-      "orchestration",
-      "delivery"
+      "context_policy",
+      "strategy",
+      "delivery",
+      "runtime"
     ],
     diagnostics
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
+  const brief = normalizeReviewChangeBrief(record.brief, `${path}.brief`, diagnostics);
   const review_source = normalizeReviewChangeSource(
     record.review_source,
     `${path}.review_source`,
     diagnostics
   );
-  const scope = normalizeReviewChangeScope(record.scope, `${path}.scope`, diagnostics);
-  const criteria = normalizeReviewChangeCriteria(record.criteria, `${path}.criteria`, diagnostics);
-  const orchestration = normalizeReviewChangeOrchestration(
-    record.orchestration,
-    `${path}.orchestration`,
+  const context_policy = normalizeReviewChangeContextPolicy(
+    record.context_policy,
+    `${path}.context_policy`,
     diagnostics
   );
+  const strategy = normalizeReviewChangeStrategy(record.strategy, `${path}.strategy`, diagnostics);
   const delivery = normalizeReviewChangeDelivery(record.delivery, `${path}.delivery`, diagnostics);
-
-  const hasCustomOutputs = Array.isArray(base?.outputs) && base.outputs.length > 0;
-  const publishesManagedArtifacts =
-    delivery.write_review_report ||
-    delivery.write_findings_json ||
-    delivery.write_findings_markdown;
-
-  if (!hasCustomOutputs && !publishesManagedArtifacts) {
-    diagnostics.push({
-      path,
-      message:
-        "review_change must publish at least one final artifact via delivery flags or explicit outputs."
-    });
-  }
+  const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
   if (!base || !review_source) {
     return undefined;
@@ -2569,16 +2758,17 @@ function normalizeReviewChangeNode(
   loweredManagedNodes.push({
     authored_id: base.id,
     managed_kind: "review_change",
-    lowered_to: "agent"
+    lowered_to: "sequence"
   });
 
   return buildReviewChangeWorkflow({
     ...base,
+    brief,
     review_source,
-    scope,
-    criteria,
-    orchestration,
-    delivery
+    context_policy,
+    strategy,
+    delivery,
+    runtime
   });
 }
 

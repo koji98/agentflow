@@ -1,29 +1,8 @@
 # `execute_spec` Workflow
 
-This document defines the authored contract and compiled behavior for the `execute_spec` managed workflow.
+`execute_spec` turns a structured spec source into a validated code change with a single writer.
 
-`execute_spec` compiles into a generated primitive subgraph during graph normalization.
-
-## Purpose
-
-`execute_spec` turns an implementation-ready spec into a validated code change.
-
-It should sit after:
-
-- `spec_design`
-
-and before:
-
-- `review_change`
-
-The intended lifecycle is:
-
-1. `deep_research` figures out what is true
-2. `spec_design` decides what should be built
-3. `execute_spec` implements the chosen design
-4. `review_change` critiques the resulting implementation
-
-`execute_spec` should also work without `spec_design` when the user already has a strong spec.
+It is autonomous by default. It only pauses for operator input when `approval_policy.require_execution_plan_approval` is enabled.
 
 ## Workflow Shape
 
@@ -31,141 +10,34 @@ The intended lifecycle is:
 flowchart TD
     ingest["ingest_spec"]
     readiness["assess_spec_readiness"]
-    inspect["inspect_repo_for_execution"]
-    research{"implementation research needed?"}
-    implResearch["targeted_implementation_research"]
-    plan["plan_execution"]
+    recon{"allow read-only recon?"}
+    reconNode["read_only_recon"]
+    plan{"require execution plan approval?"}
+    planOnce["plan_execution"]
+
+    subgraph planLoop["plan_approval_loop"]
+        p1["plan_execution"]
+        p2["approve_execution_plan"]
+        p1 --> p2
+    end
+
     implement["implement_spec"]
-    validate{"validation_gate passed?"}
-    repairBudget{"repair budget left?"}
-    repair["stabilize_implementation"]
-    publish["publish_handoff"]
-    fail["stop with failed validation"]
 
-    ingest --> readiness --> inspect --> research
-    research -->|yes| implResearch --> plan
-    research -->|no| plan
-    plan --> implement --> validate
-    validate -->|yes| publish
-    validate -->|no| repairBudget
-    repairBudget -->|yes| repair --> validate
-    repairBudget -->|no| fail
+    subgraph repair["repair_loop"]
+        r1["repair_implementation"]
+        r2["validation_gate"]
+        r1 --> r2
+    end
+
+    publish["publish handoff"]
+
+    ingest --> readiness --> recon
+    recon -->|no| plan
+    recon -->|yes| reconNode --> plan
+    plan -->|no| planOnce --> implement
+    plan -->|yes| planLoop --> implement
+    implement --> repair --> publish
 ```
-
-## Core Principle
-
-`execute_spec` is spec-driven, not idea-driven.
-
-That means:
-
-- it requires a structured spec source
-- it should implement an existing design, not invent one
-- it may resolve small local ambiguities from repo conventions
-- it should not silently redesign the system when the spec is incomplete
-
-If the spec is too weak to execute safely, the workflow should fail the spec-readiness gate rather than guessing.
-
-## Structured `spec_source`
-
-`execute_spec` should require a `spec_source` object instead of a loose prompt.
-
-That object defines where the implementation contract comes from.
-
-### Supported source modes
-
-#### `managed_node`
-
-Use this when the source is a prior managed workflow node, usually `spec_design`.
-
-```json
-{
-  "spec_source": {
-    "kind": "managed_node",
-    "node": "managed_nodes_spec"
-  }
-}
-```
-
-Expected behavior:
-
-- resolve `design_spec` from the referenced node
-- also load these supporting outputs when available:
-  - `file_plan`
-  - `acceptance_criteria`
-  - `risks`
-  - `open_questions`
-
-This is the default path for:
-
-- `spec_design -> execute_spec`
-
-#### `artifact_bundle`
-
-Use this when the spec already exists in files or other outputs.
-
-```json
-{
-  "spec_source": {
-    "kind": "artifact_bundle",
-    "design_spec": {
-      "kind": "file",
-      "path": "docs/managed-workflows-spec.md"
-    },
-    "file_plan": {
-      "kind": "file",
-      "path": "docs/managed-workflows-file-plan.md"
-    },
-    "acceptance_criteria": {
-      "kind": "file",
-      "path": "docs/managed-workflows-acceptance.md"
-    }
-  }
-}
-```
-
-This is the standalone path for:
-
-- hand-written design docs
-- imported planning artifacts
-- specs produced outside Agentflow
-
-### Source reference schema
-
-Each reference in an `artifact_bundle` should use one of these forms:
-
-#### File reference
-
-```json
-{
-  "kind": "file",
-  "path": "docs/spec.md"
-}
-```
-
-#### Managed output reference
-
-```json
-{
-  "kind": "managed_output",
-  "node": "managed_nodes_spec",
-  "output": "design_spec"
-}
-```
-
-### Required `spec_source` content
-
-At minimum, `execute_spec` must resolve:
-
-- `design_spec`
-
-Strongly recommended supporting artifacts:
-
-- `file_plan`
-- `acceptance_criteria`
-- `risks`
-- `open_questions`
-
-The workflow should still run if only `design_spec` exists, but it should mark missing supporting artifacts as risk factors during the completeness gate.
 
 ## Authored Contract
 
@@ -174,8 +46,9 @@ Required fields:
 - `type: "execute_spec"`
 - `id`
 - `spec_source`
+- `validation`
 
-Optional common execution fields:
+Shared execution fields are optional:
 
 - `label`
 - `repo`
@@ -185,358 +58,181 @@ Optional common execution fields:
 - `outputs`
 - `timeout_sec`
 
-Optional workflow fields:
+Workflow fields:
 
-- `objective`
-- `scope`
-- `execution_policy`
-- `validation`
-- `implementation_research`
+- `brief`
+- `context_policy`
+- `approval_policy`
+- `strategy`
 - `delivery`
+- `runtime`
 
-## Example Authored Schema
+## Example
 
 ```json
 {
   "type": "execute_spec",
   "id": "implement_managed_nodes",
-  "repo": "main",
-  "profile": "default",
-  "objective": "Implement the first managed workflow nodes in Agentflow.",
+  "brief": {
+    "objective": "Implement the managed workflow model described by the upstream spec.",
+    "scope": {
+      "paths": ["src/**", "docs/**", "tests/**"],
+      "areas": ["graph", "managed workflows", "docs"]
+    }
+  },
   "spec_source": {
     "kind": "managed_node",
     "node": "managed_nodes_spec"
   },
-  "scope": {
-    "paths": ["src/**", "docs/**", "tests/**", "scripts/**"],
-    "areas": ["graph", "runtime", "artifacts"]
+  "context_policy": {
+    "allow_official_docs_fallback": true,
+    "allow_domains": ["developers.openai.com"]
   },
-  "execution_policy": {
-    "max_repair_rounds": 2
+  "approval_policy": {
+    "require_execution_plan_approval": false
+  },
+  "strategy": {
+    "single_writer": true,
+    "allow_readonly_recon": true,
+    "max_repair_cycles": 2
   },
   "validation": {
-    "commands": [
-      "npm run typecheck",
-      "npm test",
-      "agentflow validate --graph docs/examples/graphs/feature-showcase.json"
-    ],
+    "commands": ["npm run typecheck", "npm test"],
     "required": true
   },
-  "implementation_research": {
-    "allow_official_docs_fallback": true,
-    "allow_domains": ["developers.openai.com", "react.dev"],
-    "max_external_lookup_tasks": 2
-  },
   "delivery": {
-    "write_change_summary": true,
-    "write_residual_risks": true,
-    "write_validation_results": true
+    "write_handoff": true,
+    "write_validation_ledger": true,
+    "write_repair_log": true
   }
 }
 ```
 
-## Field Semantics
+## `spec_source`
 
-### `objective`
+### `managed_node`
 
-A short execution goal for the implementation run.
+Use a prior managed workflow node, usually `spec_design`:
 
-This is not the spec itself. It is a concise statement of what this execution run is trying to achieve.
+```json
+{
+  "kind": "managed_node",
+  "node": "managed_nodes_spec"
+}
+```
 
-### `spec_source`
+When available, `execute_spec` will consume:
 
-The required source-of-truth contract for implementation.
+- `design_spec`
+- `direction_proposal`
+- `tradeoff_matrix`
+- `decision_log`
+- `implementation_readiness`
 
-This is the most important field in the workflow.
+### `artifact_bundle`
 
-`execute_spec` should not proceed without a resolvable spec source.
+Use files or prior managed outputs directly:
 
-### `scope`
+```json
+{
+  "kind": "artifact_bundle",
+  "design_spec": { "kind": "file", "path": "docs/spec.md" },
+  "tradeoff_matrix": { "kind": "file", "path": "docs/tradeoff-matrix.md" },
+  "decision_log": { "kind": "managed_output", "node": "upstream_plan", "output": "decision_log" }
+}
+```
 
-Repository paths or system areas the execution should expect to touch.
+Supported bundle keys:
 
-This should help the planner:
+- `design_spec`
+- optional `direction_proposal`
+- optional `tradeoff_matrix`
+- optional `decision_log`
+- optional `implementation_readiness`
 
-- focus implementation
-- detect likely impact areas
-- avoid wandering outside the spec
+Reference kinds:
 
-### `execution_policy`
+- `{ "kind": "file", "path": "..." }`
+- `{ "kind": "managed_output", "node": "...", "output": "..." }`
 
-Controls how many repair rounds the workflow may attempt after the initial implementation step.
+## Field Notes
 
-Recommended fields:
+### `brief`
 
-- `max_repair_rounds`
+`brief` adds execution framing:
+
+- optional `objective`
+- optional `scope`
+
+### `context_policy`
+
+Controls narrow implementation-time lookup policy:
+
+- `allow_official_docs_fallback`
+- optional `allow_domains`
+
+### `approval_policy`
+
+`require_execution_plan_approval` inserts a checkpoint loop around the execution plan. If it is `false`, the workflow plans once and continues autonomously.
+
+### `strategy`
+
+Execution intent only:
+
+- `single_writer`
+- `allow_readonly_recon`
+- `max_repair_cycles`
+
+In this release, `single_writer` must stay `true`.
 
 ### `validation`
 
-Defines the deterministic checks that must pass before the workflow succeeds.
-
-Recommended fields:
+Required deterministic validation contract:
 
 - `commands`
-- `required`
-
-### `implementation_research`
-
-Controls narrow external lookups during implementation.
-
-This should be much tighter than `spec_design` web fallback.
-
-Allowed use:
-
-- official framework or library docs
-- API or behavior lookup needed to implement the spec
-
-Not allowed:
-
-- rethinking the architecture
-- broad competitor or product research
-- replacing the spec with a new design direction
+- optional `required`
 
 ### `delivery`
 
-Controls which final handoff artifacts should be written.
+Final publication controls:
 
-## Behavior Rules
+- `write_handoff`
+- `write_validation_ledger`
+- `write_repair_log`
 
-### Spec completeness gate
+## Produced Artifacts
 
-Before changing code, `execute_spec` should decide whether the spec is executable.
+Shared planning and status artifacts:
 
-This is implemented as an AI check node.
+- `workflow-brief.md`
+- `workflow-plan.md`
+- `workflow-plan.json`
+- `workflow-status.json`
+- `workflow-events.jsonl`
 
-It consumes the spec packet and produces the standard AI check `result.json` artifact with:
+Execution-specific artifacts:
 
-- `passed`
-- optional `score`
-- `summary`
-- `issues`
-
-Common reasons for readiness failure:
-
-- the spec does not define the target behavior clearly enough
-- acceptance criteria are missing and cannot be inferred safely
-- the file plan or affected surface is too unclear
-- the spec contains unresolved contradictions
-
-### Repo grounding
-
-Even when the spec is clear, the workflow should inspect the repo before implementation.
-
-It should extract:
-
-- local conventions
-- relevant existing modules
-- likely touched files
-- test surfaces
-- operational constraints
-
-This keeps implementation aligned with the actual codebase.
-
-### Single-writer execution
-
-`execute_spec` should stay single-writer.
-
-Implementation is where parallelism becomes fragile fastest:
-
-- multiple agents editing the same subsystem collide
-- multiple agents making implementation decisions drift from the spec
-- integration overhead grows faster than the benefit for local code changes
-
-So this workflow keeps one writing agent and uses the repair loop, not parallel implementers, as the stabilization mechanism.
-
-### Narrow implementation research
-
-`execute_spec` may do targeted external lookup only when blocked on implementation details.
-
-Examples:
-
-- framework syntax
-- official API contract
-- library behavior required to satisfy the spec
-
-This must stay subordinate to:
-
-- the spec
-- the repository
-
-## Compiled Workflow
-
-`execute_spec` should compile into an internal primitive workflow shaped roughly like this:
-
-1. `ingest_spec`
-2. `assess_spec_readiness`
-3. `inspect_repo_for_execution`
-4. optional `targeted_implementation_research`
-5. `plan_execution`
-6. `implement_spec`
-7. `repeat` repair loop
-8. `publish_handoff`
-
-## Phase Details
-
-### `ingest_spec`
-
-Resolve and normalize the structured spec source into an execution packet.
-
-Artifacts:
-
-- `spec-packet.md`
-
-This should consolidate:
-
-- design spec
-- file plan
-- acceptance criteria
-- risks
-- open questions
-
-### `assess_spec_readiness`
-
-Determine whether the spec is executable.
-
-Artifacts:
-
-- `result.json`
-
-This follows the standard AI check result contract and should fail when the spec would force design guessing during implementation.
-
-### `inspect_repo_for_execution`
-
-Inspect the relevant repo surface before implementation begins.
-
-Artifacts:
-
-- `execution-context.md`
-
-This should identify:
-
-- affected modules
-- local conventions
-- candidate files to change
-- test surfaces
-- integration risks
-
-### `targeted_implementation_research`
-
-Optional narrow external lookup for missing implementation details.
-
-Artifacts:
-
-- `implementation-findings.md`
-
-### `plan_execution`
-
-Turn the spec packet into a concrete implementation plan.
-
-Artifacts:
-
-- `implementation-plan.md`
-
-The plan should answer:
-
-- what changes need to happen
-- where those changes live
-- what validation should prove correctness
-
-### `implement_spec`
-
-Apply the code changes from the implementation plan.
-
-Artifacts:
-
+- `spec-packet.json`
+- `recon-notes.md`
+- `execution-plan.md`
+- `file-plan.md`
+- `mutation-boundary.md`
+- `validation-plan.md`
 - `implementation-notes.md`
+- `repair-notes.md`
+- `handoff.md`
+- `validation-ledger.json`
+- `repair-log.md`
 
-This node should operate in workspace-write mode and stay aligned to:
+Approval and validation artifacts:
 
-- the spec packet
-- repo conventions
-- the implementation plan
+- `result.json` from `approve_execution_plan`
+- `result.json` from `assess_spec_readiness`
+- deterministic validation result from `validation_gate`
 
-### `repeat` repair loop
+## Default Behavior
 
-If validation fails, attempt bounded repairs.
-
-The loop body is:
-
-1. `stabilize_implementation`
-2. `validation_gate`
-
-`stabilize_implementation` is a workspace-write agent node that:
-
-- reviews the current workspace against the spec
-- runs or inspects the validation commands when useful
-- makes only targeted fixes
-
-`validation_gate` is one deterministic check node that runs the authored validation commands and fails the loop iteration if any command fails.
-
-This loop is capped by `execution_policy.max_repair_rounds`.
-
-### `publish_handoff`
-
-Produce the final implementation handoff.
-
-Artifacts:
-
-- `change-summary.md`
-- `validation-results.md`
-- `residual-risks.md`
-- `files-touched.md`
-
-## Output Contract
-
-At minimum, the final published node should expose:
-
-- `change_summary`
-- `validation_results`
-- `residual_risks`
-
-Recommended additional outputs:
-
-- `files_touched`
-- `implementation_plan`
-
-## UI Implications
-
-Collapsed managed-node view should show:
-
-- spec readiness
-- repo grounding status
-- implementation status
-- validation status
-- repair attempts
-- final outcome
-
-Expanded view should expose:
-
-- spec packet
-- implementation plan
-- implementation notes
-- validation and repair history
-- final handoff artifacts
-
-## Recommended Implementation Order
-
-Implementation notes:
-
-1. authored node parsing lives in the normalizer
-2. `execute_spec` lowers into a generated primitive subgraph in `src/managed`
-3. the original authored node id maps to the final published handoff node
-4. graph-level tests cover lowering, artifact-bundle source mapping, and downstream dependency behavior
-5. the showcase graph under `docs/examples/graphs/` demonstrates the `spec_design -> execute_spec` path
-
-## Summary
-
-`execute_spec` should not be a vague “write code” node.
-
-It should be a spec-execution workflow with:
-
-- a required structured `spec_source`
-- a spec-readiness gate
-- repo-grounded implementation planning
-- single-writer implementation
-- deterministic validation
-- bounded repair
-- explicit handoff artifacts
+- Execution-plan approval is off by default.
+- Read-only recon is on by default.
+- Repair is bounded by `strategy.max_repair_cycles`.
+- Final publication includes workflow status and workflow events.

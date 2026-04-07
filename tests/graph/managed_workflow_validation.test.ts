@@ -2,192 +2,165 @@ import { describe, expect, it } from "vitest";
 
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 
+function buildEnvelope(step) {
+  return {
+    version: "1",
+    graph_id: "managed-validation",
+    repos: {
+      main: {
+        path: "."
+      }
+    },
+    defaults: {
+      launch_profile: "default"
+    },
+    profiles: {
+      default: {
+        harness: "codex-cli",
+        sandbox: "read-only"
+      }
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [step]
+    }
+  };
+}
+
 describe("managed workflow normalization edges", () => {
   it("falls back through deep_research optional objects while surfacing diagnostics", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "deep-research-validation-edges",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "deep_research",
-            id: "market_scan",
-            question: "How should Agentflow design deep research?",
-            objective: "Produce a design recommendation.",
-            sources: "bad",
-            deliverable: "bad",
-            orchestration: {
-              track_count: 2,
-              max_parallel_tracks: 5,
-              summary_fan_in: 1
-            }
-          }
-        ]
-      }
-    });
+    const normalized = normalizeAuthoredGraphDocument(
+      buildEnvelope({
+        type: "deep_research",
+        id: "market_scan",
+        brief: {
+          question: "How should Agentflow design deep research?",
+          objective: "Produce a design recommendation."
+        },
+        context_policy: "bad",
+        approval_policy: "bad",
+        strategy: "bad",
+        delivery: "bad",
+        runtime: "bad"
+      })
+    );
 
     expect(normalized.document).toBeUndefined();
     expect(normalized.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "$.graph.steps[0].sources",
-          message: "deep_research.sources must be an object."
+          path: "$.graph.steps[0].context_policy",
+          message: "deep_research.context_policy must be an object."
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].deliverable",
-          message: "deep_research.deliverable must be an object."
+          path: "$.graph.steps[0].approval_policy",
+          message: "deep_research.approval_policy must be an object."
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].orchestration.summary_fan_in",
-          message: "deep_research.orchestration.summary_fan_in must be at least 2."
+          path: "$.graph.steps[0].strategy",
+          message: "deep_research.strategy must be an object."
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].delivery",
+          message: "deep_research.delivery must be an object."
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].runtime",
+          message: "managed workflow runtime must be an object."
         })
       ])
     );
   });
 
   it("falls back through spec_design optional objects while surfacing diagnostics", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "spec-design-validation-edges",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "spec_design",
-            id: "managed_nodes_spec",
-            problem: "Managed aliases are too thin.",
-            goal: "Design a real managed workflow model.",
-            scope: "bad",
-            research_policy: "bad",
-            deliverable: "bad",
-            orchestration: "bad"
-          }
-        ]
-      }
-    });
+    const normalized = normalizeAuthoredGraphDocument(
+      buildEnvelope({
+        type: "spec_design",
+        id: "managed_nodes_spec",
+        brief: {
+          problem: "Managed workflows are too thin.",
+          goal: "Design a real workflow model.",
+          scope: "bad"
+        },
+        context_policy: "bad",
+        approval_policy: "bad",
+        strategy: "bad",
+        delivery: "bad"
+      })
+    );
 
     expect(normalized.document).toBeUndefined();
     expect(normalized.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "$.graph.steps[0].scope",
+          path: "$.graph.steps[0].brief.scope",
           message: "spec_design.scope must be an object."
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].research_policy",
-          message: "spec_design.research_policy must be an object."
+          path: "$.graph.steps[0].context_policy",
+          message: "spec_design.context_policy must be an object."
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].deliverable",
-          message: "spec_design.deliverable must be an object."
+          path: "$.graph.steps[0].approval_policy",
+          message: "spec_design.approval_policy must be an object."
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].orchestration",
-          message: "spec_design.orchestration must be an object."
+          path: "$.graph.steps[0].strategy",
+          message: "spec_design.strategy must be an object."
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].delivery",
+          message: "spec_design.delivery must be an object."
         })
       ])
     );
   });
 
-  it("surfaces execute_spec validation and optional-object diagnostics while still lowering the node", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "execute-spec-validation-edges",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "execute_spec",
-            id: "implement_from_bundle",
-            spec_source: {
-              kind: "artifact_bundle",
-              design_spec: {
-                kind: "file",
-                path: "docs/spec.md"
-              }
-            },
-            scope: "bad",
-            execution_policy: "bad",
-            validation: "bad",
-            implementation_research: "bad",
-            delivery: "bad"
+  it("surfaces execute_spec strategy and delivery diagnostics while still lowering the node", () => {
+    const normalized = normalizeAuthoredGraphDocument(
+      buildEnvelope({
+        type: "execute_spec",
+        id: "implement_from_bundle",
+        brief: {
+          objective: "Implement the supplied spec."
+        },
+        spec_source: {
+          kind: "artifact_bundle",
+          design_spec: {
+            kind: "file",
+            path: "docs/spec.md"
           }
-        ]
-      }
-    });
+        },
+        context_policy: {
+          allow_official_docs_fallback: true
+        },
+        approval_policy: {
+          require_execution_plan_approval: false
+        },
+        strategy: {
+          single_writer: false,
+          allow_readonly_recon: true,
+          max_repair_cycles: 2
+        },
+        validation: {
+          commands: ["npm test"]
+        },
+        delivery: {
+          write_handoff: false,
+          write_validation_ledger: false,
+          write_repair_log: false
+        }
+      })
+    );
 
     expect(normalized.document).toBeUndefined();
     expect(normalized.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "$.graph.steps[0].scope",
-          message: "execute_spec.scope must be an object."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].execution_policy",
-          message: "execute_spec.execution_policy must be an object."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].validation",
-          message: "execute_spec.validation must be an object."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].implementation_research",
-          message: "execute_spec.implementation_research must be an object."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].delivery",
-          message: "execute_spec.delivery must be an object."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].validation.commands",
-          message: "execute_spec.validation.commands must include at least one command."
+          path: "$.graph.steps[0].strategy.single_writer",
+          message:
+            "execute_spec currently supports only single_writer = true; the workflow will still compile as a single-writer executor."
         })
       ])
     );
@@ -195,22 +168,25 @@ describe("managed workflow normalization edges", () => {
 
   it("rejects invalid execute_spec source kinds and source reference kinds", () => {
     const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "execute-spec-invalid-source-kinds",
-      repos: {
-        main: {
-          path: "."
+      ...buildEnvelope({
+        type: "execute_spec",
+        id: "bad_kind",
+        brief: {
+          objective: "Implement the supplied spec."
+        },
+        spec_source: {
+          kind: "unsupported"
+        },
+        context_policy: {},
+        approval_policy: {},
+        strategy: {},
+        validation: {
+          commands: ["npm test"]
+        },
+        delivery: {
+          write_handoff: true
         }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
+      }),
       graph: {
         type: "sequence",
         id: "root",
@@ -218,24 +194,42 @@ describe("managed workflow normalization edges", () => {
           {
             type: "execute_spec",
             id: "bad_kind",
+            brief: {
+              objective: "Implement the supplied spec."
+            },
             spec_source: {
               kind: "unsupported"
             },
+            context_policy: {},
+            approval_policy: {},
+            strategy: {},
             validation: {
               commands: ["npm test"]
+            },
+            delivery: {
+              write_handoff: true
             }
           },
           {
             type: "execute_spec",
             id: "bad_ref",
+            brief: {
+              objective: "Implement the supplied spec."
+            },
             spec_source: {
               kind: "artifact_bundle",
               design_spec: {
                 kind: "unsupported"
               }
             },
+            context_policy: {},
+            approval_policy: {},
+            strategy: {},
             validation: {
               commands: ["npm test"]
+            },
+            delivery: {
+              write_handoff: true
             }
           }
         ]
@@ -257,51 +251,27 @@ describe("managed workflow normalization edges", () => {
     );
   });
 
-  it("surfaces review_change source and optional-object diagnostics", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "review-change-validation-edges",
-      repos: {
-        main: {
-          path: "."
+  it("surfaces review_change source and delivery diagnostics", () => {
+    const normalized = normalizeAuthoredGraphDocument(
+      buildEnvelope({
+        type: "review_change",
+        id: "review_bundle",
+        review_source: {
+          kind: "artifact_bundle",
+          additional_context: "bad"
+        },
+        brief: {
+          review_goal: "Review the change."
+        },
+        context_policy: "bad",
+        strategy: "bad",
+        delivery: {
+          write_review_summary: false,
+          write_raw_findings: false,
+          write_calibrated_findings: false
         }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "review_change",
-            id: "review_bundle",
-            review_source: {
-              kind: "artifact_bundle",
-              additional_context: "bad"
-            },
-            scope: "bad",
-            criteria: "bad",
-            orchestration: "bad",
-            delivery: "bad",
-            outputs: [
-              {
-                name: "custom_review",
-                from: "attempt",
-                path: "custom-review.md",
-                required: true
-              }
-            ]
-          }
-        ]
-      }
-    });
+      })
+    );
 
     expect(normalized.document).toBeUndefined();
     expect(normalized.diagnostics).toEqual(
@@ -316,94 +286,12 @@ describe("managed workflow normalization edges", () => {
             "review_change.review_source artifact_bundle must include at least one of diff, summary, or additional_context."
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].scope",
-          message: "review_change.scope must be an object."
+          path: "$.graph.steps[0].context_policy",
+          message: "review_change.context_policy must be an object."
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].criteria",
-          message: "review_change.criteria must be an object."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].orchestration",
-          message: "review_change.orchestration must be an object."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].delivery",
-          message: "review_change.delivery must be an object."
-        })
-      ])
-    );
-  });
-
-  it("rejects invalid review_change source kinds and source reference kinds", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "review-change-invalid-source-kinds",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          sandbox: "read-only"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "review_change",
-            id: "bad_kind",
-            review_source: {
-              kind: "unsupported"
-            },
-            outputs: [
-              {
-                name: "custom_review",
-                from: "attempt",
-                path: "custom-review.md",
-                required: true
-              }
-            ]
-          },
-          {
-            type: "review_change",
-            id: "bad_ref",
-            review_source: {
-              kind: "artifact_bundle",
-              summary: {
-                kind: "unsupported"
-              }
-            },
-            outputs: [
-              {
-                name: "custom_review",
-                from: "attempt",
-                path: "custom-review.md",
-                required: true
-              }
-            ]
-          }
-        ]
-      }
-    });
-
-    expect(normalized.document).toBeUndefined();
-    expect(normalized.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.steps[0].review_source.kind",
-          message: 'review_change.review_source.kind must be "managed_node" or "artifact_bundle".'
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[1].review_source.summary.kind",
-          message: 'review_change source reference kind must be "file" or "managed_output".'
+          path: "$.graph.steps[0].strategy",
+          message: "review_change.strategy must be an object."
         })
       ])
     );

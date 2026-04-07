@@ -33,8 +33,32 @@
         "id": "managed_nodes_spec",
         "repo": "main",
         "profile": "default",
-        "problem": "Agentflow needs true managed workflows instead of thin aliases.",
-        "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+        "brief": {
+          "problem": "Agentflow needs true managed workflows instead of thin aliases.",
+          "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+          "constraints": [
+            "Keep primitive graph nodes stable.",
+            "Managed workflows must compile into primitive subgraphs.",
+            "The README should remain enough to get started."
+          ],
+          "decision_drivers": [
+            "clarity",
+            "reliability",
+            "operator ergonomics"
+          ],
+          "scope": {
+            "paths": [
+              "src/**",
+              "docs/**",
+              "tests/**"
+            ],
+            "areas": [
+              "graph",
+              "managed workflows",
+              "docs"
+            ]
+          }
+        },
         "inputs": [
           {
             "kind": "file",
@@ -49,33 +73,22 @@
             "path": "docs/EXECUTE_SPEC_WORKFLOW.md"
           }
         ],
-        "constraints": [
-          "Keep primitive graph nodes stable.",
-          "Managed workflows must compile into primitive subgraphs.",
-          "The README should remain enough to get started."
-        ],
-        "decision_drivers": [
-          "clarity",
-          "reliability",
-          "operator ergonomics"
-        ],
-        "scope": {
-          "paths": [
-            "src/**",
-            "docs/**",
-            "tests/**"
+        "context_policy": {
+          "repo_first": true,
+          "allow_web_fallback": false
+        },
+        "approval_policy": {
+          "require_direction_approval": false
+        },
+        "strategy": {
+          "alternatives": 2,
+          "critique_profiles": [
+            "architecture",
+            "implementation"
           ],
-          "areas": [
-            "graph",
-            "managed workflows",
-            "docs"
-          ]
+          "max_revision_cycles": 2
         },
-        "research_policy": {
-          "allow_web_fallback": false,
-          "max_external_research_tasks": 0
-        },
-        "deliverable": {
+        "delivery": {
           "sections": [
             "problem",
             "requirements",
@@ -86,15 +99,6 @@
             "risks",
             "open_questions"
           ]
-        },
-        "orchestration": {
-          "option_count": 2,
-          "max_parallel_options": 2,
-          "critique_roles": [
-            "architecture",
-            "implementation"
-          ],
-          "revision_rounds": 2
         }
       },
       {
@@ -102,25 +106,39 @@
         "id": "implement_managed_nodes",
         "repo": "main",
         "profile": "default",
-        "objective": "Implement the managed workflow model described by the upstream spec.",
+        "brief": {
+          "objective": "Implement the managed workflow model described by the upstream spec.",
+          "scope": {
+            "paths": [
+              "src/**",
+              "docs/**",
+              "tests/**"
+            ],
+            "areas": [
+              "graph",
+              "managed workflows",
+              "docs"
+            ]
+          }
+        },
         "spec_source": {
           "kind": "managed_node",
           "node": "managed_nodes_spec"
         },
-        "scope": {
-          "paths": [
-            "src/**",
-            "docs/**",
-            "tests/**"
-          ],
-          "areas": [
-            "graph",
-            "managed workflows",
-            "docs"
+        "context_policy": {
+          "allow_official_docs_fallback": true,
+          "allow_domains": [
+            "developers.openai.com",
+            "react.dev"
           ]
         },
-        "execution_policy": {
-          "max_repair_rounds": 2
+        "approval_policy": {
+          "require_execution_plan_approval": false
+        },
+        "strategy": {
+          "single_writer": true,
+          "allow_readonly_recon": true,
+          "max_repair_cycles": 2
         },
         "validation": {
           "commands": [
@@ -129,20 +147,10 @@
           ],
           "required": true
         },
-        "implementation_research": {
-          "allow_official_docs_fallback": true,
-          "allow_domains": [
-            "developers.openai.com",
-            "react.dev"
-          ],
-          "max_external_lookup_tasks": 1
-        },
         "delivery": {
-          "write_change_summary": true,
-          "write_validation_results": true,
-          "write_residual_risks": true,
-          "write_files_touched": true,
-          "write_implementation_plan": true
+          "write_handoff": true,
+          "write_validation_ledger": true,
+          "write_repair_log": true
         }
       },
       {
@@ -159,18 +167,12 @@
           {
             "node": "implement_managed_nodes",
             "include": "output",
-            "output": "change_summary"
+            "output": "handoff"
           },
           {
             "node": "implement_managed_nodes",
             "include": "output",
-            "output": "validation_results"
-          },
-          {
-            "node": "implement_managed_nodes",
-            "include": "output",
-            "output": "residual_risks",
-            "optional": true
+            "output": "validation_ledger"
           }
         ]
       }

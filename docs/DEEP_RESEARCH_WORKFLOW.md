@@ -1,91 +1,64 @@
 # `deep_research` Workflow
 
-This document defines the authored contract and compiled behavior for the `deep_research` managed workflow.
+`deep_research` turns a research question into a sourced report with explicit plan artifacts, provenance, interim findings, and uncertainty tracking.
 
-`deep_research` compiles into a generated primitive subgraph during graph normalization.
-
-## Purpose
-
-`deep_research` turns a research question into a grounded synthesized report with explicit coverage, contradictions, and source tracking.
-
-It typically sits before:
-
-- `spec_design`
-
-but it can also run as a standalone research workflow when the final deliverable is analysis rather than implementation.
-
-The usual lifecycle is:
-
-1. `deep_research` determines what is true
-2. `spec_design` decides what should be built
-3. `execute_spec` implements the chosen design
-4. `review_change` critiques the resulting implementation
+It is autonomous by default. It only pauses for operator input when `approval_policy.require_plan_approval` is enabled.
 
 ## Workflow Shape
 
 ```mermaid
 flowchart TD
-    clarify["clarify"]
-    plan["plan"]
-    tracks["generate_tracks"]
-    contradictions["contradiction_scan"]
-    synth["final_synthesis"]
-    critique{"final_critique?"}
-    finalCritique["final_critique"]
-    done["publish final report"]
+    brief["clarify_brief"]
+    plan{"require plan approval?"}
+    planOnce["plan_research"]
 
-    subgraph fanout["parallel track_fanout"]
+    subgraph planLoop["planning_loop"]
+        p1["plan_research"]
+        p2["approve_research_plan"]
+        p1 --> p2
+    end
+
+    tracks["derive_tracks"]
+
+    subgraph investigate["parallel investigation_fanout"]
         t1["track_01"]
         t2["track_02"]
-        t3["track_03"]
         tN["track_N"]
     end
 
-    subgraph reduce1["parallel reduce_round_1"]
-        r11["reduce_r1_g1"]
-        r12["reduce_r1_g2"]
+    contradictions["scan_contradictions"]
+    followupPlan["followup_plan_*"]
+
+    subgraph followups["parallel followup_fanout_*"]
+        f1["followup_01"]
+        f2["followup_02"]
+        fN["followup_N"]
     end
 
-    subgraph reduce2["parallel reduce_round_2"]
-        r21["reduce_r2_g1"]
-    end
+    consolidate["consolidate_findings"]
+    publish["publish final report"]
+    critique{"final critique?"}
+    finalCritique["final_critique"]
 
-    clarify --> plan --> tracks
+    brief --> plan
+    plan -->|no| planOnce --> tracks
+    plan -->|yes| planLoop --> tracks
     tracks --> t1
     tracks --> t2
-    tracks --> t3
     tracks --> tN
-
     t1 --> contradictions
     t2 --> contradictions
-    t3 --> contradictions
     tN --> contradictions
-
-    t1 --> r11
-    t2 --> r11
-    t3 --> r12
-    tN --> r12
-
-    r11 --> r21
-    r12 --> r21
-    contradictions --> synth
-    r21 --> synth
-    synth --> critique
+    contradictions --> followupPlan --> f1
+    followupPlan --> f2
+    followupPlan --> fN
+    f1 --> consolidate
+    f2 --> consolidate
+    fN --> consolidate
+    contradictions --> consolidate
+    consolidate --> publish --> critique
     critique -->|yes| finalCritique
-    critique -->|no| done
-    finalCritique --> done
 ```
-
-## Core Principle
-
-`deep_research` is coverage-driven, not single-thread-summary driven.
-
-That means:
-
-- it should decompose the question into multiple distinct research tracks
-- it should preserve disagreements and uncertainty instead of collapsing them away early
-- it should reduce parallel findings through explicit synthesis steps
-- it should produce a final report that is grounded in the full track set rather than one dominant narrative
 
 ## Authored Contract
 
@@ -93,10 +66,9 @@ Required fields:
 
 - `type: "deep_research"`
 - `id`
-- `question`
-- `objective`
+- `brief`
 
-Optional common execution fields:
+Shared execution fields are optional:
 
 - `label`
 - `repo`
@@ -106,291 +78,135 @@ Optional common execution fields:
 - `outputs`
 - `timeout_sec`
 
-Optional workflow fields:
+Workflow fields:
 
-- `audience`
-- `sources`
-- `deliverable`
-- `orchestration`
+- `context_policy`
+- `approval_policy`
+- `strategy`
+- `delivery`
+- `runtime`
 
-## Example Authored Schema
+## Example
 
 ```json
 {
   "type": "deep_research",
   "id": "managed_workflows_research",
-  "repo": "main",
-  "profile": "default",
-  "question": "What is the cleanest long-term contract shape for Agentflow managed workflows?",
-  "objective": "Produce a grounded recommendation for the shipped managed workflow surface and its next design steps.",
-  "audience": "engineering",
-  "sources": {
+  "brief": {
+    "question": "What should Agentflow's first managed workflows be?",
+    "objective": "Produce a grounded recommendation for Agentflow's managed workflow roadmap.",
+    "audience": "engineering",
+    "scope_cues": ["managed workflow contracts", "compiled subgraphs"],
+    "success_bar": ["preserve uncertainty", "capture competing patterns"]
+  },
+  "context_policy": {
     "web": true,
     "files": true,
     "apps": false,
-    "allow_domains": ["openai.com", "developers.openai.com"],
-    "deny_domains": ["reddit.com"]
+    "allow_domains": ["openai.com", "developers.openai.com", "perplexity.ai"]
   },
-  "deliverable": {
-    "format": "report",
-    "citations": "inline",
-    "sections": [
-      "question",
-      "current_state",
-      "findings",
-      "recommendation",
-      "risks",
-      "open_questions"
-    ]
+  "approval_policy": {
+    "require_plan_approval": false
   },
-  "orchestration": {
-    "track_count": 4,
-    "max_parallel_tracks": 3,
-    "summary_fan_in": 2,
+  "strategy": {
+    "depth": "standard",
+    "coverage_mode": "balanced",
+    "followup_passes": 1,
     "final_critique": true
+  },
+  "delivery": {
+    "format": "report",
+    "citation_style": "inline",
+    "sections": ["patterns", "recommendation", "uncertainties"]
+  },
+  "runtime": {
+    "max_concurrency": 2
   }
 }
 ```
 
-## Field Semantics
+## Field Notes
 
-### `question`
+### `brief`
 
-The research question being investigated.
+`brief` expresses research intent:
 
-This should be framed in terms of the unknown that needs to be resolved, not the workflow steps to execute.
+- `question`
+- `objective`
+- optional `audience`
+- optional `scope_cues`
+- optional `success_bar`
 
-### `objective`
+### `context_policy`
 
-The decision or outcome the research is meant to support.
-
-This clarifies why the question matters and what the final report should enable.
-
-### `audience`
-
-The primary reader for the final report.
-
-This influences framing and depth, but it does not change the requirement to preserve grounded evidence.
-
-### `sources`
-
-Controls where research is allowed to come from.
-
-Supported fields:
+Controls allowed research surfaces:
 
 - `web`
 - `files`
 - `apps`
-- `allow_domains`
-- `deny_domains`
+- optional `allow_domains`
+- optional `deny_domains`
+- optional `preferred_sources`
 
-Default behavior:
+### `approval_policy`
 
-- `web: true`
-- `files: true`
-- `apps: false`
+`require_plan_approval` inserts a checkpoint loop around the research plan. If it is `false`, the plan runs once and the workflow continues autonomously.
 
-### `deliverable`
+### `strategy`
 
-Controls the final report shape.
+Intent-level knobs only:
 
-Supported fields:
-
-- `format`
-- `citations`
-- `sections`
-
-Default behavior:
-
-- `format: "report"`
-- `citations: "inline"`
-
-### `orchestration`
-
-Controls the workflow size and synthesis shape.
-
-Supported fields:
-
-- `track_count`
-- `max_parallel_tracks`
-- `summary_fan_in`
+- `depth`
+- `coverage_mode`
+- `followup_passes`
 - `final_critique`
 
-Default behavior:
+### `delivery`
 
-- `track_count: 6`
-- `max_parallel_tracks: 6`
-- `summary_fan_in: 3`
-- `final_critique: false`
+Defines final report expectations:
 
-Validation rules:
+- `format`
+- `citation_style`
+- optional `sections`
 
-- `summary_fan_in` must be at least `2`
-- `max_parallel_tracks` is capped to `track_count`
+### `runtime`
 
-Practical meaning:
+Advanced execution tuning:
 
-- `track_count` controls the logical research breadth
-- `max_parallel_tracks` is only a runtime concurrency cap
-- `max_parallel_tracks` does not change how many track briefs are generated or how many summaries must be synthesized; it only limits how many track workers may run at once
-- most users can leave `max_parallel_tracks` at its default unless they need to control local concurrency, model budget, or provider rate pressure
+- `max_concurrency`
 
-## Compiled Workflow
+This caps parallel execution. It does not define research breadth.
 
-`deep_research` compiles into an internal primitive workflow shaped like this:
+## Produced Artifacts
 
-1. `clarify`
-2. `plan`
-3. `generate_tracks`
-4. `parallel track_fanout`
-5. `contradiction_scan`
-6. one or more `summary reduction` rounds
-7. `final_synthesis`
-8. optional `final_critique`
+Core planning and status artifacts:
 
-## Phase Details
+- `workflow-brief.md`
+- `workflow-plan.md`
+- `workflow-plan.json`
+- `workflow-status.json`
+- `workflow-events.jsonl`
 
-### `clarify`
+Research-specific artifacts:
 
-Rewrite the research ask into a concrete brief.
-
-Artifact:
-
-- `clarified-brief.md`
-
-The brief should restate:
-
-- the question
-- the objective
-- scope boundaries
-- assumptions
-- evaluation criteria
-- evidence expectations
-
-### `plan`
-
-Create the research plan from the clarified brief.
-
-Artifact:
-
+- `research-brief.md`
 - `research-plan.md`
-
-This should identify the major dimensions and subquestions that the track set must cover.
-
-### `generate_tracks`
-
-Generate the parallel research track briefs.
-
-Artifact:
-
+- `research-plan.json`
 - `track-briefs.json`
-
-Each track brief should include:
-
-- a stable `track_id`
-- a title
-- a focus
-- an angle
-- concrete questions
-- suggested sources
-- success criteria
-
-### `parallel track_fanout`
-
-Run one worker per research track in parallel.
-
-Artifacts per worker:
-
-- `track-report.md`
-- `track-summary.md`
-- `sources.json`
-
-Each worker should maximize unique coverage rather than repeating other tracks.
-
-### `contradiction_scan`
-
-Review the track summaries for contradictions, overlap, unresolved questions, and missing angles.
-
-Artifact:
-
 - `contradictions.md`
-
-### `summary reduction` rounds
-
-Reduce the track summaries into progressively smaller synthesis inputs.
-
-Artifact per reducer:
-
-- `reduce-summary.md`
-
-The reduction tree is controlled by `orchestration.summary_fan_in`.
-
-### `final_synthesis`
-
-Produce the final research report.
-
-Artifact:
-
+- `interim-findings.jsonl`
+- `source-ledger.json`
+- `uncertainties.md`
 - `final-report.md`
 
-The final report should:
+Optional approval or critique artifacts:
 
-- preserve the strongest findings from every major problem cluster
-- retain contradictions and uncertainty
-- keep source-quality caveats visible
-- satisfy the deliverable section contract when one is provided
+- `result.json` from `approve_research_plan`
+- `result.json` from `final_critique`
 
-### `final_critique`
+## Default Behavior
 
-Optional AI quality gate over the final report.
-
-Artifact:
-
-- `result.json`
-
-This gate should fail if:
-
-- major contradictions were dropped
-- important uncertainties disappeared
-- the report misses required sections
-- the synthesis over-focuses on one track and loses overall coverage
-
-## Output Contract
-
-The final published node should expose:
-
-- `research_report`
-
-Optional additional outputs may be authored by the caller through standard `outputs`.
-
-When no explicit outputs are authored, the workflow still writes `final-report.md` and exposes it as `research_report`.
-
-## UI Implications
-
-Collapsed managed-node view should show:
-
-- clarification status
-- planning status
-- track fan-out progress
-- reduction progress
-- final synthesis status
-- optional critique status
-
-Expanded view should expose:
-
-- clarified brief
-- research plan
-- track briefs
-- worker summaries
-- contradiction scan
-- reduction artifacts
-- final report
-- optional critique result
-
-## Implementation Notes
-
-1. authored node parsing lives in the normalizer
-2. `deep_research` lowers into a generated primitive subgraph in `src/managed`
-3. the original authored node id maps to the final synthesis node
-4. graph-level tests should cover fan-out, reduction rounds, optional final critique, and downstream dependency behavior
-5. the showcase graph under `docs/examples/graphs/` should demonstrate downstream consumption of the final report
+- Plan approval is off by default.
+- Final critique is off by default.
+- Research breadth is derived from `strategy.depth`.
+- Follow-up passes default to `1`.
