@@ -63,8 +63,8 @@ The authored graph is the operator-facing source document. It is nested, readabl
 
 - `graph_id` is stable across runs and unique within the operator's working set.
 - `repos.<alias>.path` is resolved relative to the authored graph file location.
-- `defaults.launch_profile` selects the run launch profile when the operator does not specify one.
-- `defaults.workspace_backend` selects the run workspace backend when the operator does not specify one.
+- `defaults.launch_profile` selects the run launch profile.
+- `defaults.workspace_backend` selects the run workspace backend.
 - The run root is not authored inside the graph. It is launch-time configuration owned by the CLI and resolved from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
 
 ### Multi-repo ownership
@@ -298,6 +298,8 @@ Rules:
 - Unqualified file and glob paths resolve against the node repo.
 - Repo-qualified paths use `<repo_alias>:<relative_path>`.
 - File and glob paths must stay within the selected repo root.
+- In git repos, `glob` enumeration uses tracked plus untracked non-ignored files from `git ls-files -co --exclude-standard`.
+- Outside git repos, `glob` enumeration falls back to a sorted recursive filesystem walk.
 - `glob.max_files` is a local cap for that glob only.
 - `text.name` is required and stable inside the materialized context packet.
 
@@ -427,8 +429,8 @@ Launch resolution happens before node policy resolution.
 
 | Setting | Resolution order |
 | --- | --- |
-| `launch_profile` | explicit CLI selection -> graph `defaults.launch_profile` -> `"default"` if present -> validation error |
-| `workspace_backend` | explicit CLI selection -> graph `defaults.workspace_backend` -> runtime built-in `worktree` |
+| `launch_profile` | graph `defaults.launch_profile` -> `"default"` if present -> validation error |
+| `workspace_backend` | graph `defaults.workspace_backend` -> runtime built-in `worktree` |
 
 `workspace_backend` is run-scoped. The compiler writes the same resolved backend to every node manifest entry.
 
@@ -464,7 +466,7 @@ Built-in defaults:
 - `max_total_bytes: 524288`
 - `max_bytes_per_item: 131072`
 
-The runtime enforces these byte limits during context packet materialization. If you need to bound a broad file pattern, use `glob.max_files` on that specific input instead of a graph-wide file-count budget.
+The runtime enforces these byte limits during context packet materialization. If you need to bound a broad file pattern, use `glob.max_files` on that specific input instead of relying on a graph-wide file-count budget.
 
 ## Compiler Contract
 
@@ -665,6 +667,7 @@ Context resolution produces:
 
 - `context_packet.json`
 - `context_summary.md`
+- `context_provenance.json`
 
 `context_packet.json` must include:
 
@@ -676,9 +679,32 @@ Context resolution produces:
 - byte counts and truncation flags
 - omitted optional items
 
+`context_provenance.json` must include:
+
+- digests for explicit file inputs
+- sorted glob match sets plus per-file digests
+- harness instruction digests for `agent`, AI `check`, and `checkpoint` nodes
+
 Agentflow does not duplicate repository instruction files into the context packet. Harness-native instruction discovery stays with the harness itself.
 
+Context materialization is incremental. The runtime enforces `max_total_bytes` while it materializes items and fails as soon as the next item would overflow the byte budget.
+
 The release does not implement retrieval, embeddings, ranking, or semantic search. Input resolution is explicit file and artifact materialization only.
+
+## Resume Preservation
+
+`resume` preserves durable passed work only when two boundaries still match:
+
+1. the recompiled executable contract
+2. the node's resolved context provenance
+
+Provenance-aware preservation means:
+
+- explicit file-input content changes invalidate preservation
+- glob content changes or glob match-set changes invalidate preservation
+- root harness instruction files such as `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, and `.cursor/rules/**` invalidate harnessed nodes when they change
+- unrelated repo changes do not invalidate nodes whose provenance is unchanged
+- runs created before `context_provenance.json` existed are not preserved; those nodes restart
 
 ## Harness Abstraction
 
@@ -836,6 +862,7 @@ Run artifacts live under the run root:
           execution.json
           context_packet.json
           context_summary.md
+          context_provenance.json
           stdout.log
           stderr.log
           result.json
@@ -857,7 +884,7 @@ Run artifacts live under the run root:
 - `summary.md` is written for every terminal run, including preflight failure with zero node executions
 - node and execution directories use stable hashed names on disk, not literal `compiled_id` or `execution_id` values
 - execution directories are immutable once closed except for final summary writes
-- execution-root files are always written directly in the execution directory: `execution.json`, `context_packet.json`, `context_summary.md`, `stdout.log`, `stderr.log`, and `result.json`
+- execution-root files are always written directly in the execution directory: `execution.json`, `context_packet.json`, `context_summary.md`, `context_provenance.json`, `stdout.log`, `stderr.log`, and `result.json`
 - `artifacts/` is optional and exists only when Agentflow materializes declared workspace outputs there
 - `workspaces/` is durable only for an active `worktree` run. Once the run reaches a terminal state or workspace init rolls back, the manifest still records the historical path, but the worktree directory itself may already be gone
 - projection reads may repair stale `pending` or `running` artifacts into a terminal failed state when the recorded runtime owner fingerprint no longer matches a live local process or when a terminal run record or terminal event proves the durable state drifted

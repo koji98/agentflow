@@ -87,15 +87,7 @@ describe("graph CLI", () => {
     const graphPath = fileURLToPath(
       new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
     );
-    const result = await executeCli([
-      "validate",
-      "--graph",
-      graphPath,
-      "--profile",
-      "default",
-      "--workspace-backend",
-      "worktree"
-    ]);
+    const result = await executeCli(["validate", "--graph", graphPath]);
     const payload = JSON.parse(result.stdout);
 
     expect(result.exitCode).toBe(0);
@@ -1213,37 +1205,73 @@ describe("graph CLI", () => {
     }
   });
 
-  it("surfaces launch override diagnostics from CLI arguments", async () => {
-    const graphPath = fileURLToPath(
-      new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
+  it("surfaces missing authored launch settings from the graph itself", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-launch-settings-"));
+    const graphPath = join(tempRoot, "invalid-launch.graph.json");
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "invalid-launch-settings",
+          repos: {
+            main: {
+              path: "."
+            }
+          },
+          defaults: {
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            review: {}
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "noop",
+                command: "placeholder"
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
     );
-    const invalidProfile = await executeCli(["compile", "--graph", graphPath, "--profile", "missing"]);
-    const invalidBackend = await executeCli(["validate", "--graph", graphPath, "--workspace-backend", "remote"]);
-    const invalidProfilePayload = JSON.parse(invalidProfile.stdout);
-    const invalidBackendPayload = JSON.parse(invalidBackend.stdout);
 
-    expect(invalidProfile.exitCode).toBe(1);
-    expect(invalidProfilePayload.command).toBe("compile");
-    expect(invalidProfilePayload.message).toContain("Launch settings could not be resolved");
-    expect(invalidProfilePayload.available_profiles).toContain("default");
-    expect(invalidProfilePayload.diagnostics).toEqual(
+    const invalidCompile = await executeCli(["compile", "--graph", graphPath], tempRoot);
+    const invalidValidate = await executeCli(["validate", "--graph", graphPath], tempRoot);
+    const invalidCompilePayload = JSON.parse(invalidCompile.stdout);
+    const invalidValidatePayload = JSON.parse(invalidValidate.stdout);
+
+    expect(invalidCompile.exitCode).toBe(1);
+    expect(invalidCompilePayload.command).toBe("compile");
+    expect(invalidCompilePayload.message).toContain("Launch settings could not be resolved from the graph");
+    expect(invalidCompilePayload.available_profiles).toContain("review");
+    expect(invalidCompilePayload.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          message: expect.stringContaining('Unknown launch profile "missing"')
+          message: expect.stringContaining("No launch profile could be resolved")
         })
       ])
     );
 
-    expect(invalidBackend.exitCode).toBe(1);
-    expect(invalidBackendPayload.command).toBe("validate");
-    expect(invalidBackendPayload.supported_workspace_backends).toContain("worktree");
-    expect(invalidBackendPayload.diagnostics).toEqual(
+    expect(invalidValidate.exitCode).toBe(1);
+    expect(invalidValidatePayload.command).toBe("validate");
+    expect(invalidValidatePayload.message).toContain("Launch settings could not be resolved from the graph");
+    expect(invalidValidatePayload.supported_workspace_backends).toContain("worktree");
+    expect(invalidValidatePayload.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          message: expect.stringContaining('Unsupported workspace backend "remote"')
+          message: expect.stringContaining("No launch profile could be resolved")
         })
       ])
     );
+
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("prints graph help and exposes the deferred control stub", async () => {
@@ -1276,10 +1304,12 @@ describe("graph CLI", () => {
     const help = await executeCli(["run", "--help"]);
     const positional = await executeCli(["validate", "--graph", "agentflow.graph.json", "extra"]);
     const unexpectedOption = await executeCli(["compile", "--label", "oops"]);
+    const removedLaunchOptions = await executeCli(["run", "--graph", "agentflow.graph.json", "--profile", "default"]);
 
     expect(help.exitCode).toBe(0);
     expect(help.stdout).toContain("Usage: agentflow run --graph");
-    expect(help.stdout).toContain("--workspace-backend <name>");
+    expect(help.stdout).not.toContain("--workspace-backend <name>");
+    expect(help.stdout).not.toContain("--profile <name>");
     expect(help.stdout).toContain("Examples:");
     expect(help.stdout).toContain("Press Ctrl-C");
 
@@ -1291,6 +1321,10 @@ describe("graph CLI", () => {
     expect(unexpectedOption.exitCode).toBe(2);
     expect(unexpectedOption.stdout).toContain("Unexpected option(s): --label");
     expect(unexpectedOption.stdout).toContain("Try: agentflow compile --help");
+
+    expect(removedLaunchOptions.exitCode).toBe(2);
+    expect(removedLaunchOptions.stdout).toContain("Unexpected option(s): --profile");
+    expect(removedLaunchOptions.stdout).toContain("Try: agentflow run --help");
   });
 
   it("supports explicit help entrypoints and mission-specific control usage errors", async () => {

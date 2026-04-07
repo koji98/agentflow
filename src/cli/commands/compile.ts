@@ -11,13 +11,11 @@ import {
 export const compileCommand = {
   name: "compile",
   summary: "Resolve launch settings and emit the compiled graph contract.",
-  usage:
-    "agentflow compile --graph <path/to/agentflow.graph.json> [--profile <launch_profile>] [--workspace-backend <inplace|worktree>]",
+  usage: "agentflow compile --graph <path/to/agentflow.graph.json>",
   examples: [
-    "agentflow compile --graph ./agentflow.graph.json",
-    "agentflow compile --graph ./agentflow.graph.json --workspace-backend worktree"
+    "agentflow compile --graph ./agentflow.graph.json"
   ] as const,
-  optionNames: ["graph", "profile", "workspace-backend", "help"] as const,
+  optionNames: ["graph", "help"] as const,
   helpNotes: [
     "--graph resolves from the launch shell current working directory before the compiler resolves repo paths from the graph file directory.",
     "Use run when you want durable artifacts written for the same resolved launch settings."
@@ -61,12 +59,7 @@ export const compileCommand = {
       };
     }
 
-    const launch = resolveLaunchConfig(loaded.document, {
-      ...(typeof options.profile === "string" ? { launchProfile: options.profile } : {}),
-      ...(typeof options["workspace-backend"] === "string"
-        ? { workspaceBackend: options["workspace-backend"] }
-        : {})
-    });
+    const launch = resolveLaunchConfig(loaded.document);
 
     if (launch.diagnostics.length > 0) {
       return {
@@ -74,7 +67,7 @@ export const compileCommand = {
         output: {
           command: "compile",
           status: "failed",
-          message: "Launch settings could not be resolved for compilation.",
+          message: "Launch settings could not be resolved from the graph for compilation.",
           graph_path: loaded.absolute_path,
           path_resolution: pathResolution,
           available_profiles: Object.keys(loaded.document.profiles ?? {}),
@@ -131,12 +124,10 @@ export const compileCommand = {
         compiled_graph: compilation.compiled_graph,
         next_steps: {
           validate: createGraphCliInvocation("validate", {
-            graphPath: loaded.absolute_path,
-            launch
+            graphPath: loaded.absolute_path
           }),
           run: createGraphCliInvocation("run", {
-            graphPath: loaded.absolute_path,
-            launch
+            graphPath: loaded.absolute_path
           }),
           graph_help: "agentflow graph-help"
         }

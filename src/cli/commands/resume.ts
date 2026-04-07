@@ -85,7 +85,7 @@ export const resumeCommand = {
   optionNames: ["run-root", "help"] as const,
   helpNotes: [
     "Resume recompiles from the original graph path using the current Agentflow build.",
-    "Only passed nodes whose compiled execution contract is unchanged are preserved.",
+    "Only passed nodes whose compiled contract and resolved context provenance still match are preserved.",
     "Repeat scopes restart from iteration 1 when they were unfinished or their compiled contract changed."
   ] as const,
   async run(
@@ -257,12 +257,10 @@ export const resumeCommand = {
           next_steps: {
             graph_help: "agentflow graph-help",
             validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             }),
             compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             })
           },
           diagnostics: compilation.diagnostics,
@@ -304,12 +302,10 @@ export const resumeCommand = {
           path_resolution: pathResolution,
           next_steps: {
             validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             }),
             compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             })
           },
           diagnostics: repoResolution.diagnostics
@@ -345,13 +341,14 @@ export const resumeCommand = {
 
     const compiled_graph = compilation.compiled_graph!;
     const repo_sources = repoResolution.repo_sources;
+    const workspace = await resumeWorkspaceFromManifest(execution_manifest);
 
     const {
       session,
       previous_status,
       preserved_node_count,
       restarted_node_count
-    } = createResumedRuntimeSession({
+    } = await createResumedRuntimeSession({
       run_root,
       graph_path: loaded.absolute_path,
       prior_graph: prior_compiled_graph,
@@ -362,7 +359,6 @@ export const resumeCommand = {
       events
     });
 
-    const workspace = await resumeWorkspaceFromManifest(execution_manifest);
     const progress = createRuntimeProgressReporter(compiled_graph);
     const resumed = await resumeCompiledGraph({
       on_event: (event) => {
@@ -426,8 +422,7 @@ export const resumeCommand = {
         cancel_note: runCancellationText,
         next_steps: {
           validate: createGraphCliInvocation("validate", {
-            graphPath: loaded.absolute_path,
-            launch
+            graphPath: loaded.absolute_path
           }),
           resume: createResumeCliInvocation(run_root)
         },

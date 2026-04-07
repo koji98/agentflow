@@ -29,13 +29,12 @@ import { resolveRepoSources } from "../repo_sources.js";
 export const runCommand = {
   name: "run",
   summary: "Compile and execute a graph run with durable artifacts.",
-  usage:
-    "agentflow run --graph <path/to/agentflow.graph.json> [--profile <launch_profile>] [--workspace-backend <inplace|worktree>] [--label <run_label>]",
+  usage: "agentflow run --graph <path/to/agentflow.graph.json> [--label <run_label>]",
   examples: [
-    "agentflow run --graph ./agentflow.graph.json --workspace-backend worktree",
+    "agentflow run --graph ./agentflow.graph.json",
     "AGENTFLOW_RUNS_ROOT=/absolute/path/to/.agentflow/runs agentflow run --graph ./agentflow.graph.json"
   ] as const,
-  optionNames: ["graph", "profile", "workspace-backend", "label", "help"] as const,
+  optionNames: ["graph", "label", "help"] as const,
   helpNotes: [
     "Runs default to <launch-cwd>/.agentflow/runs/<run-id> unless AGENTFLOW_RUNS_ROOT is set to an absolute path.",
     "Press Ctrl-C in the launching terminal to cancel. The runtime waits for cleanup and durable artifacts capture the terminal Canceled state.",
@@ -87,12 +86,7 @@ export const runCommand = {
       };
     }
 
-    const launch = resolveLaunchConfig(loaded.document, {
-      ...(typeof options.profile === "string" ? { launchProfile: options.profile } : {}),
-      ...(typeof options["workspace-backend"] === "string"
-        ? { workspaceBackend: options["workspace-backend"] }
-        : {})
-    });
+    const launch = resolveLaunchConfig(loaded.document);
 
     if (launch.diagnostics.length > 0) {
       return {
@@ -100,7 +94,7 @@ export const runCommand = {
         output: {
           command: "run",
           status: "failed",
-          message: "Launch settings could not be resolved before execution.",
+          message: "Launch settings could not be resolved from the graph before execution.",
           graph_path: loaded.absolute_path,
           path_resolution: pathResolution,
           available_profiles: Object.keys(loaded.document.profiles ?? {}),
@@ -136,12 +130,10 @@ export const runCommand = {
           path_resolution: pathResolution,
           next_steps: {
             validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             }),
             compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             }),
             graph_help: "agentflow graph-help"
           },
@@ -165,12 +157,10 @@ export const runCommand = {
           diagnostics: checkpointDiagnostics,
           next_steps: {
             validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             }),
             compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             })
           }
         }
@@ -190,12 +180,10 @@ export const runCommand = {
           path_resolution: pathResolution,
           next_steps: {
             validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             }),
             compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             })
           },
           diagnostics: repoResolution.diagnostics
@@ -275,12 +263,10 @@ export const runCommand = {
         cancel_note: runCancellationText,
         next_steps: {
           validate: createGraphCliInvocation("validate", {
-            graphPath: loaded.absolute_path,
-            launch
+            graphPath: loaded.absolute_path
           }),
           rerun: createGraphCliInvocation("run", {
-            graphPath: loaded.absolute_path,
-            launch
+            graphPath: loaded.absolute_path
           }),
           resume: createResumeCliInvocation(run.run_root)
         },

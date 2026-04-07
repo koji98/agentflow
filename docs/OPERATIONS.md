@@ -68,7 +68,8 @@ Cleanup and reconciliation rules:
 - On `passed`, `failed`, and `canceled` outcomes, the runtime cleans up worktree registrations before finalizing terminal artifacts.
 - If worktree initialization fails partway through, already-created worktrees are rolled back before the run is marked failed.
 - If worktree cleanup itself fails, the run is forced to terminal `failed` and the cleanup error is recorded in the terminal reason.
-- `agentflow resume --run-root <run-root>` recompiles the original graph path with the current Agentflow build, preserves only passed nodes whose compiled contract is unchanged, restarts everything else, and recreates missing worktree paths when the original failed run already cleaned them up.
+- `agentflow resume --run-root <run-root>` recompiles the original graph path with the current Agentflow build, preserves only passed nodes whose compiled contract and resolved context provenance are unchanged, restarts everything else, and recreates missing worktree paths when the original failed run already cleaned them up.
+- Older runs that do not have `context_provenance.json` restart their passed nodes instead of being preserved.
 - When inspection tooling reopens stale `pending` or `running` artifacts, projection reconciles them from durable state or from a recorded local runtime owner fingerprint that no longer matches a live process on this host instead of leaving them live forever.
 
 What the operator should expect:
@@ -78,7 +79,8 @@ What the operator should expect:
 - `run` and `resume` print live graph progress to `stderr` while the final structured JSON result stays on `stdout`, so shell pipelines can still consume the command result without parsing progress noise.
 - The `workspaces/` directory is an implementation detail of the run and is not preserved as a long-lived checkout contract after worktree cleanup.
 - Node and execution directories under `nodes/` use hashed names on disk.
-- Execution-root runtime files live directly in each execution directory; `artifacts/` appears only when workspace outputs are materialized there.
+- Execution-root runtime files live directly in each execution directory and include `context_provenance.json`; `artifacts/` appears only when workspace outputs are materialized there.
+- In git repos, `glob` inputs resolve against tracked plus untracked non-ignored files from `git ls-files -co --exclude-standard`; outside git repos they fall back to a sorted filesystem walk.
 
 ## Recommended Dev Workflow
 
@@ -129,7 +131,7 @@ Each supported command is JSON-first and returns explicit next-step hints.
 - `validate`: validates authoring plus launch settings and returns `path_resolution`, launch data, compiled summary, and next-step commands.
 - `compile`: returns the compiled graph contract for inspection plus the same path and next-step metadata.
 - `run`: executes the compiled graph, writes durable artifacts, and returns `runs_root`, `run_root`, artifact paths, rerun or resume commands, and the cancellation note.
-- `resume`: recompiles a failed or canceled run root and resumes from durable state when the compiled contract still matches preserved work.
+- `resume`: recompiles a failed or canceled run root and resumes from durable state when both the compiled contract and the resolved context provenance still match preserved work.
 
 For help:
 
@@ -156,7 +158,7 @@ Checks:
 - verify each `repos.*.path` from the graph file directory, not from the launch shell
 - run `validate` before `run`
 
-### Launch override failures
+### Launch setting failures
 
 Symptoms:
 
@@ -165,8 +167,8 @@ Symptoms:
 
 Checks:
 
-- confirm `--profile` matches a declared profile
-- use only `inplace` or `worktree` for `--workspace-backend`
+- confirm `defaults.launch_profile` points at a declared profile
+- use only `inplace` or `worktree` in `defaults.workspace_backend`
 - run `graph-help` if the authored contract is unclear
 
 ### Worktree preflight failures

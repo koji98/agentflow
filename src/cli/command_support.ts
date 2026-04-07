@@ -4,7 +4,6 @@ import {
   resolveRunsRoot,
   runsRootEnvironmentVariable
 } from "../artifacts/paths.js";
-import type { LaunchResolution } from "../graph/profiles.js";
 
 export const graphPathRuleText =
   "--graph resolves relative to the launch shell current working directory.";
@@ -75,7 +74,6 @@ export function createGraphCliInvocation(
   commandName: "validate" | "compile" | "run",
   options: {
     graphPath: string;
-    launch?: LaunchResolution;
     label?: string;
   }
 ): string {
@@ -85,14 +83,6 @@ export function createGraphCliInvocation(
     "--graph",
     shellQuote(options.graphPath)
   ];
-
-  if (options.launch?.launch_profile) {
-    args.push("--profile", shellQuote(options.launch.launch_profile));
-  }
-
-  if (options.launch?.workspace_backend) {
-    args.push("--workspace-backend", shellQuote(options.launch.workspace_backend));
-  }
 
   if (options.label) {
     args.push("--label", shellQuote(options.label));

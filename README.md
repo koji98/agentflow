@@ -308,11 +308,11 @@ Compiles and executes the graph and writes a new run root with artifacts.
 agentflow run --graph ./agentflow.graph.json
 ```
 
-Useful flags:
+Useful forms:
 
 ```bash
-agentflow run --graph ./agentflow.graph.json --workspace-backend worktree
-agentflow run --graph ./agentflow.graph.json --profile default --label demo
+agentflow run --graph ./agentflow.graph.json
+agentflow run --graph ./agentflow.graph.json --label demo
 ```
 
 During a run, `agent` and AI `check` nodes append live harness output into each execution's `stdout.log` and `stderr.log` under the run root. The final completed logs still remain the authoritative artifact.
@@ -336,9 +336,10 @@ agentflow resume --run-root ./.agentflow/runs/<run-id>
 Resume behavior:
 
 - recompiles from the original graph path with the current Agentflow build
-- preserves only nodes whose latest durable outcome is `passed` and whose compiled execution contract is unchanged
+- preserves only nodes whose latest durable outcome is `passed`, whose compiled contract is unchanged, and whose resolved context provenance still matches
 - restarts failed, canceled, blocked, skipped, and pending nodes
 - restarts repeat scopes from iteration 1 when they were unfinished or their compiled contract changed
+- restarts older passed nodes from runs that do not have `context_provenance.json`
 - appends new events and attempts into the same run root
 
 Like `run`, `resume` prints live graph progress to `stderr` and keeps its final structured result on `stdout`.
@@ -352,6 +353,12 @@ Supported input kinds:
 - `file`
 - `glob`
 - `text`
+
+Input resolution rules:
+
+- `glob` uses tracked plus untracked non-ignored files in git repos
+- non-git repos fall back to a sorted filesystem walk
+- `glob.max_files` is a local cap applied after deterministic sorting
 
 Context can be pulled from earlier nodes with `context_from`.
 

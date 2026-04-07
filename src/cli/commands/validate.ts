@@ -11,13 +11,11 @@ import {
 export const validateCommand = {
   name: "validate",
   summary: "Validate and compile an authored graph without launching a run.",
-  usage:
-    "agentflow validate --graph <path/to/agentflow.graph.json> [--profile <launch_profile>] [--workspace-backend <inplace|worktree>]",
+  usage: "agentflow validate --graph <path/to/agentflow.graph.json>",
   examples: [
-    "agentflow validate --graph ./agentflow.graph.json",
-    "agentflow validate --graph ./agentflow.graph.json --profile default"
+    "agentflow validate --graph ./agentflow.graph.json"
   ] as const,
-  optionNames: ["graph", "profile", "workspace-backend", "help"] as const,
+  optionNames: ["graph", "help"] as const,
   helpNotes: [
     "--graph validation resolves from the launch shell current working directory.",
     "Use compile next when you want the full compiled graph contract, or run when you want durable artifacts."
@@ -61,12 +59,7 @@ export const validateCommand = {
       };
     }
 
-    const launch = resolveLaunchConfig(loaded.document, {
-      ...(typeof options.profile === "string" ? { launchProfile: options.profile } : {}),
-      ...(typeof options["workspace-backend"] === "string"
-        ? { workspaceBackend: options["workspace-backend"] }
-        : {})
-    });
+    const launch = resolveLaunchConfig(loaded.document);
 
     if (launch.diagnostics.length > 0) {
       return {
@@ -74,7 +67,7 @@ export const validateCommand = {
         output: {
           command: "validate",
           status: "failed",
-          message: "Launch settings could not be resolved for validation.",
+          message: "Launch settings could not be resolved from the graph for validation.",
           graph_path: loaded.absolute_path,
           path_resolution: pathResolution,
           available_profiles: Object.keys(loaded.document.profiles ?? {}),
@@ -108,8 +101,7 @@ export const validateCommand = {
           next_steps: {
             graph_help: "agentflow graph-help",
             inspect_compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path,
-              launch
+              graphPath: loaded.absolute_path
             })
           },
           diagnostics: compilation.diagnostics,
@@ -137,12 +129,10 @@ export const validateCommand = {
         },
         next_steps: {
           compile: createGraphCliInvocation("compile", {
-            graphPath: loaded.absolute_path,
-            launch
+            graphPath: loaded.absolute_path
           }),
           run: createGraphCliInvocation("run", {
-            graphPath: loaded.absolute_path,
-            launch
+            graphPath: loaded.absolute_path
           }),
           graph_help: "agentflow graph-help"
         }

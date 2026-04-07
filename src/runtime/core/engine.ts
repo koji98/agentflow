@@ -852,7 +852,8 @@ async function executeNode(
 
     executionPaths = await writer.writeExecutionStart(attempt, {
       packet_path: context.packet_path,
-      summary_path: context.summary_path
+      summary_path: context.summary_path,
+      provenance_path: context.provenance_path
     });
     logSink = createStreamingLogSink(writer, executionPaths);
 
@@ -976,6 +977,7 @@ async function executeNode(
       result_path: executionPaths.result_path,
       context_packet_path: context.packet_path,
       context_summary_path: context.summary_path,
+      context_provenance_path: context.provenance_path,
       output_artifacts,
       ...(result.metadata ? { metadata: result.metadata } : {})
     });

@@ -21,6 +21,7 @@ export interface RuntimeNodeAttempt {
   result_path?: string;
   context_packet_path?: string;
   context_summary_path?: string;
+  context_provenance_path?: string;
   output_artifacts: Record<string, string>;
   metadata: Record<string, unknown>;
 }
@@ -112,6 +113,7 @@ export function closeNodeAttempt(
     result_path?: string;
     context_packet_path?: string;
     context_summary_path?: string;
+    context_provenance_path?: string;
     output_artifacts?: Record<string, string>;
     metadata?: Record<string, unknown>;
   }
@@ -151,6 +153,10 @@ export function closeNodeAttempt(
 
   if (update.context_summary_path) {
     attempt.context_summary_path = update.context_summary_path;
+  }
+
+  if (update.context_provenance_path) {
+    attempt.context_provenance_path = update.context_provenance_path;
   }
 
   if (update.output_artifacts) {

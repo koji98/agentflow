@@ -49,9 +49,6 @@ interface GraphCliCommand {
 
 const optionDescriptions: Record<string, string> = {
   graph: "--graph <path>               Authored graph document to validate, compile, or run.",
-  profile: "--profile <name>             Launch profile override.",
-  "workspace-backend":
-    "--workspace-backend <name>   Run-scoped workspace backend override.",
   label: "--label <run_label>          Optional run label appended to the generated run root.",
   "run-root": "--run-root <path>            Existing run root to resume.",
   mission: "--mission <path>             Mission state file reserved for the deferred controller surface.",
@@ -115,7 +112,8 @@ function renderGraphHelp(): string {
     "- sequence, parallel, and repeat are authoring containers, not executable runtime nodes.",
     "- deep_research, spec_design, execute_spec, and review_change are implemented as managed workflows that lower into generated primitive subgraphs.",
     "- repeat.until.node must target a descendant check or checkpoint node.",
-    "- profile selection is launch-scoped by default and may be overridden per executable node.",
+    "- launch profile and workspace backend come from graph defaults in this release.",
+    "- executable nodes may still select node-level profiles inside the authored graph.",
     "- agent and ai check nodes require a resolved harness; deterministic checks do not.",
     `- ${graphPathRuleText}`,
     `- ${repoPathRuleText}`,
@@ -248,7 +246,7 @@ function renderMainHelp(): string {
     "  agentflow graph-help",
     "  agentflow validate --graph agentflow.graph.json",
     "  agentflow compile --graph agentflow.graph.json",
-    "  agentflow run --graph agentflow.graph.json --workspace-backend worktree",
+    "  agentflow run --graph agentflow.graph.json",
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
     "  agentflow control --mission mission.json",
     "",

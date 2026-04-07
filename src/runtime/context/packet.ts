@@ -30,3 +30,43 @@ export interface ContextPacket {
     total_bytes: number;
   };
 }
+
+export interface ContextDigestEntry {
+  path: string;
+  digest: string;
+}
+
+export interface ContextFileInputProvenance {
+  kind: "file";
+  key: string;
+  repo_alias: string;
+  path: string;
+  digest: string;
+}
+
+export interface ContextGlobInputProvenance {
+  kind: "glob";
+  key: string;
+  repo_alias: string;
+  pattern: string;
+  files: ContextDigestEntry[];
+  digest: string;
+}
+
+export type ContextInputProvenance =
+  | ContextFileInputProvenance
+  | ContextGlobInputProvenance;
+
+export interface ContextHarnessInstructionProvenance {
+  repo_alias: string;
+  files: ContextDigestEntry[];
+  digest: string;
+}
+
+export interface ContextProvenance {
+  compiled_id: string;
+  authored_id: string;
+  repo_alias: string;
+  inputs: ContextInputProvenance[];
+  harness_instructions?: ContextHarnessInstructionProvenance;
+}
