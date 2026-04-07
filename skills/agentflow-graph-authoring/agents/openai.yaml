@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentflow Graph Authoring"
+  short_description: "Design robust Agentflow graphs"
+  default_prompt: "Use $agentflow-graph-authoring to turn this request into a robust Agentflow graph with the right node kinds, context flow, outputs, validation boundaries, and CLI-valid contract."

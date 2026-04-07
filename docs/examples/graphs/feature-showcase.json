@@ -1,0 +1,267 @@
+{
+  "version": "1",
+  "graph_id": "feature-showcase",
+  "repos": {
+    "main": {
+      "path": "../../..",
+      "default_branch": "main"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "worktree"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 900,
+      "input_rules": {
+        "max_total_bytes": 393216,
+        "max_bytes_per_item": 131072
+      }
+    },
+    "analysis": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "high",
+      "sandbox": "read-only",
+      "timeout_sec": 1200,
+      "input_rules": {
+        "max_total_bytes": 524288,
+        "max_bytes_per_item": 131072
+      }
+    },
+    "review": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 900,
+      "ai_check_defaults": {
+        "model": "gpt-5-codex",
+        "reasoning_effort": "medium"
+      }
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "survey_repo",
+        "repo": "main",
+        "profile": "analysis",
+        "prompt": "Inspect this repository and summarize the product shape, the main CLI workflow, and any operator-facing constraints. Do not modify files.",
+        "inputs": [
+          {
+            "kind": "file",
+            "path": "README.md"
+          },
+          {
+            "kind": "glob",
+            "path": "docs/*.md",
+            "max_files": 4
+          },
+          {
+            "kind": "text",
+            "name": "demo_goal",
+            "text": "Produce a feature showcase run that stays read-only and easy to inspect."
+          }
+        ],
+        "outputs": [
+          {
+            "name": "survey_notes",
+            "from": "attempt",
+            "path": "survey-notes.md",
+            "required": false
+          }
+        ]
+      },
+      {
+        "type": "parallel",
+        "id": "preflight",
+        "max_concurrency": 2,
+        "steps": [
+          {
+            "type": "exec",
+            "id": "print_package_summary",
+            "repo": "main",
+            "command": "node",
+            "args": [
+              "-e",
+              "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); console.log(JSON.stringify({name: pkg.name, scripts: Object.keys(pkg.scripts).slice(0, 8)}, null, 2));"
+            ]
+          },
+          {
+            "type": "check",
+            "id": "verify_package_contract",
+            "repo": "main",
+            "check_kind": "deterministic",
+            "command": "node",
+            "args": [
+              "-e",
+              "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); const passed=pkg.name==='agentflow' && typeof pkg.scripts?.validate==='string' && typeof pkg.scripts?.compile==='string' && typeof pkg.scripts?.run==='string'; console.log(JSON.stringify({passed, package_name: pkg.name, has_validate: typeof pkg.scripts?.validate==='string', has_compile: typeof pkg.scripts?.compile==='string', has_run: typeof pkg.scripts?.run==='string'}, null, 2));"
+            ],
+            "pass_if": {
+              "json_path": "$.passed",
+              "equals": true
+            },
+            "outputs": [
+              {
+                "name": "package_contract",
+                "from": "attempt",
+                "path": "result.json",
+                "required": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "agent",
+        "id": "synthesize_constraints",
+        "repo": "main",
+        "profile": "analysis",
+        "prompt": "Using the repository survey and package contract output, write a concise set of constraints and observations that a human operator should know before running a graph in this repository. Do not modify files.",
+        "context_from": [
+          {
+            "node": "survey_repo",
+            "include": "summary"
+          },
+          {
+            "node": "verify_package_contract",
+            "include": "output",
+            "output": "package_contract"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "constraints_brief",
+            "from": "attempt",
+            "path": "constraints-brief.md",
+            "required": false
+          }
+        ]
+      },
+      {
+        "type": "repeat",
+        "id": "quality_loop",
+        "max_attempts": 2,
+        "body": {
+          "type": "sequence",
+          "id": "quality_body",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "draft_walkthrough",
+              "repo": "main",
+              "profile": "analysis",
+              "prompt": "Draft a concise operator walkthrough for this repository that explains how to validate, compile, run, and inspect a graph. Keep it read-only and do not modify files.",
+              "context_from": [
+                {
+                  "node": "synthesize_constraints",
+                  "include": "summary"
+                },
+                {
+                  "node": "survey_repo",
+                  "include": "summary"
+                }
+              ],
+              "outputs": [
+                {
+                  "name": "walkthrough_draft",
+                  "from": "attempt",
+                  "path": "walkthrough-draft.md",
+                  "required": false
+                }
+              ]
+            },
+            {
+              "type": "agent",
+              "id": "tighten_walkthrough",
+              "repo": "main",
+              "profile": "review",
+              "prompt": "Review the drafted walkthrough, tighten weak spots, and make sure it clearly explains the CLI order, the role of the web UI, and the read-only nature of this showcase. Do not modify files.",
+              "context_from": [
+                {
+                  "node": "draft_walkthrough",
+                  "include": "summary"
+                },
+                {
+                  "node": "verify_package_contract",
+                  "include": "result"
+                }
+              ],
+              "outputs": [
+                {
+                  "name": "walkthrough_final",
+                  "from": "attempt",
+                  "path": "walkthrough-final.md",
+                  "required": false
+                }
+              ]
+            },
+            {
+              "type": "check",
+              "id": "review_walkthrough",
+              "repo": "main",
+              "profile": "review",
+              "check_kind": "ai",
+              "prompt": "Review the current walkthrough and decide whether it is clear, concrete, and sufficient for a developer to validate, compile, run, and inspect a graph in this repository.",
+              "rubric": "Pass only if the walkthrough clearly mentions validate, compile, run, and ui or web monitor flow, accurately describes the repository as local-first, and does not claim the showcase edits files. Fail if any of those are missing or misleading.",
+              "context_from": [
+                {
+                  "node": "tighten_walkthrough",
+                  "include": "summary"
+                },
+                {
+                  "node": "synthesize_constraints",
+                  "include": "summary"
+                }
+              ],
+              "outputs": [
+                {
+                  "name": "review_report",
+                  "from": "attempt",
+                  "path": "result.json",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        },
+        "until": {
+          "node": "review_walkthrough"
+        }
+      },
+      {
+        "type": "agent",
+        "id": "final_handoff",
+        "repo": "main",
+        "profile": "default",
+        "prompt": "Produce a final handoff that explains what this showcase run demonstrated. Mention the graph version, the node kinds used, the profile strategy, the deterministic package contract check, the AI walkthrough review, and the final commands a user would run next. Do not modify files.",
+        "context_from": [
+          {
+            "node": "survey_repo",
+            "include": "summary"
+          },
+          {
+            "node": "verify_package_contract",
+            "include": "output",
+            "output": "package_contract"
+          },
+          {
+            "node": "review_walkthrough",
+            "include": "output",
+            "output": "review_report",
+            "iteration": "latest_passed"
+          }
+        ]
+      }
+    ]
+  }
+}

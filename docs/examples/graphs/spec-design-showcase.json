@@ -1,0 +1,139 @@
+{
+  "version": "1",
+  "graph_id": "spec-design-showcase",
+  "repos": {
+    "main": {
+      "path": "../../..",
+      "default_branch": "main"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "worktree"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 1200,
+      "input_rules": {
+        "max_total_bytes": 524288,
+        "max_bytes_per_item": 131072
+      }
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "spec_design",
+        "id": "managed_nodes_spec",
+        "repo": "main",
+        "profile": "default",
+        "brief": {
+          "problem": "Agentflow needs true managed workflows instead of thin aliases.",
+          "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+          "audience": "engineering",
+          "constraints": [
+            "Keep primitive graph nodes stable.",
+            "Managed workflows must compile into primitive subgraphs.",
+            "The UI must eventually support collapsed and expanded managed workflow views."
+          ],
+          "decision_drivers": [
+            "clarity",
+            "reliability",
+            "extensibility",
+            "operator ergonomics"
+          ],
+          "scope": {
+            "paths": ["src/**", "docs/**", "web-app/**"],
+            "areas": ["graph", "runtime", "ui"]
+          }
+        },
+        "inputs": [
+          {
+            "kind": "file",
+            "path": "README.md"
+          },
+          {
+            "kind": "file",
+            "path": "docs/MANAGED_WORKFLOWS.md"
+          },
+          {
+            "kind": "file",
+            "path": "docs/SPEC_DESIGN_WORKFLOW.md"
+          }
+        ],
+        "context_policy": {
+          "repo_first": true,
+          "allow_web_fallback": true,
+          "web_triggers": [
+            "missing_pattern",
+            "missing_domain_context",
+            "missing_library_guidance",
+            "missing_product_reference"
+          ],
+          "allow_domains": [
+            "openai.com",
+            "help.openai.com",
+            "developers.openai.com",
+            "react.dev"
+          ]
+        },
+        "approval_policy": {
+          "require_direction_approval": false
+        },
+        "strategy": {
+          "alternatives": 3,
+          "critique_profiles": ["architecture", "implementation", "ux"],
+          "max_revision_cycles": 2
+        },
+        "delivery": {
+          "format": "design_spec",
+          "sections": [
+            "problem",
+            "current_state",
+            "requirements",
+            "options",
+            "recommendation",
+            "architecture",
+            "file_plan",
+            "acceptance_criteria",
+            "risks",
+            "open_questions"
+          ]
+        },
+        "runtime": {
+          "max_concurrency": 2
+        }
+      },
+      {
+        "type": "agent",
+        "id": "handoff",
+        "repo": "main",
+        "profile": "default",
+        "prompt": "Summarize the final design spec for a human operator. Mention the problem, the recommendation, and the outputs a follow-on execute_spec workflow would likely consume.",
+        "context_from": [
+          {
+            "node": "managed_nodes_spec",
+            "include": "summary"
+          },
+          {
+            "node": "managed_nodes_spec",
+            "include": "output",
+            "output": "design_spec"
+          },
+          {
+            "node": "managed_nodes_spec",
+            "include": "output",
+            "output": "implementation_readiness",
+            "optional": true
+          }
+        ]
+      }
+    ]
+  }
+}

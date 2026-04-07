@@ -1,0 +1,151 @@
+{
+  "version": "1",
+  "graph_id": "repeat-graph",
+  "repos": {
+    "main": {
+      "path": ".",
+      "default_branch": "main"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "worktree"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "sandbox": "workspace-write",
+      "timeout_sec": 1800,
+      "input_rules": {
+        "max_total_bytes": 524288,
+        "max_bytes_per_item": 131072
+      }
+    },
+    "review": {
+      "harness": "cursor-cli",
+      "sandbox": "read-only",
+      "timeout_sec": 900
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "understand",
+        "repo": "main",
+        "prompt": "Inspect the checkout timeout flow.",
+        "outputs": [
+          {
+            "name": "notes",
+            "from": "attempt",
+            "path": "notes.md",
+            "required": false
+          }
+        ]
+      },
+      {
+        "type": "parallel",
+        "id": "preflight",
+        "max_concurrency": 2,
+        "steps": [
+          {
+            "type": "exec",
+            "id": "lint",
+            "repo": "main",
+            "command": "npm",
+            "args": ["run", "lint"]
+          },
+          {
+            "type": "exec",
+            "id": "typecheck",
+            "repo": "main",
+            "command": "npm",
+            "args": ["run", "typecheck"]
+          }
+        ]
+      },
+      {
+        "type": "repeat",
+        "id": "repair_loop",
+        "max_attempts": 3,
+        "body": {
+          "type": "sequence",
+          "id": "repair_body",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "implement_fix",
+              "repo": "main",
+              "prompt": "Implement the timeout fix.",
+              "inputs": [
+                {
+                  "kind": "glob",
+                  "path": "src/**/*.ts",
+                  "max_files": 4
+                }
+              ],
+              "context_from": [
+                {
+                  "node": "understand",
+                  "include": "summary"
+                }
+              ]
+            },
+            {
+              "type": "agent",
+              "id": "repair_notes",
+              "repo": "main",
+              "profile": "review",
+              "prompt": "Review the fix and tighten any rough edges.",
+              "context_from": [
+                {
+                  "node": "implement_fix",
+                  "include": "summary"
+                }
+              ]
+            },
+            {
+              "type": "check",
+              "id": "verify_fix",
+              "repo": "main",
+              "check_kind": "deterministic",
+              "command": "npm",
+              "args": ["test"],
+              "pass_if": {
+                "exit_code": 0
+              },
+              "outputs": [
+                {
+                  "name": "verification",
+                  "from": "attempt",
+                  "path": "result.json",
+                  "required": true
+                }
+              ]
+            }
+          ]
+        },
+        "until": {
+          "node": "verify_fix"
+        }
+      },
+      {
+        "type": "agent",
+        "id": "handoff",
+        "repo": "main",
+        "prompt": "Summarize the fix and remaining risks.",
+        "context_from": [
+          {
+            "node": "verify_fix",
+            "include": "output",
+            "output": "verification",
+            "iteration": "latest_passed"
+          }
+        ]
+      }
+    ]
+  }
+}

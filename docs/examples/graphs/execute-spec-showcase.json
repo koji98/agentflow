@@ -1,0 +1,180 @@
+{
+  "version": "1",
+  "graph_id": "execute-spec-showcase",
+  "repos": {
+    "main": {
+      "path": "../../.."
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "worktree"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 1200,
+      "input_rules": {
+        "max_total_bytes": 524288,
+        "max_bytes_per_item": 131072
+      }
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "spec_design",
+        "id": "managed_nodes_spec",
+        "repo": "main",
+        "profile": "default",
+        "brief": {
+          "problem": "Agentflow needs true managed workflows instead of thin aliases.",
+          "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+          "constraints": [
+            "Keep primitive graph nodes stable.",
+            "Managed workflows must compile into primitive subgraphs.",
+            "The README should remain enough to get started."
+          ],
+          "decision_drivers": [
+            "clarity",
+            "reliability",
+            "operator ergonomics"
+          ],
+          "scope": {
+            "paths": [
+              "src/**",
+              "docs/**",
+              "tests/**"
+            ],
+            "areas": [
+              "graph",
+              "managed workflows",
+              "docs"
+            ]
+          }
+        },
+        "inputs": [
+          {
+            "kind": "file",
+            "path": "README.md"
+          },
+          {
+            "kind": "file",
+            "path": "docs/MANAGED_WORKFLOWS.md"
+          },
+          {
+            "kind": "file",
+            "path": "docs/EXECUTE_SPEC_WORKFLOW.md"
+          }
+        ],
+        "context_policy": {
+          "repo_first": true,
+          "allow_web_fallback": false
+        },
+        "approval_policy": {
+          "require_direction_approval": false
+        },
+        "strategy": {
+          "alternatives": 2,
+          "critique_profiles": [
+            "architecture",
+            "implementation"
+          ],
+          "max_revision_cycles": 2
+        },
+        "delivery": {
+          "sections": [
+            "problem",
+            "requirements",
+            "recommendation",
+            "architecture",
+            "file_plan",
+            "acceptance_criteria",
+            "risks",
+            "open_questions"
+          ]
+        }
+      },
+      {
+        "type": "execute_spec",
+        "id": "implement_managed_nodes",
+        "repo": "main",
+        "profile": "default",
+        "brief": {
+          "objective": "Implement the managed workflow model described by the upstream spec.",
+          "scope": {
+            "paths": [
+              "src/**",
+              "docs/**",
+              "tests/**"
+            ],
+            "areas": [
+              "graph",
+              "managed workflows",
+              "docs"
+            ]
+          }
+        },
+        "spec_source": {
+          "kind": "managed_node",
+          "node": "managed_nodes_spec"
+        },
+        "context_policy": {
+          "allow_official_docs_fallback": true,
+          "allow_domains": [
+            "developers.openai.com",
+            "react.dev"
+          ]
+        },
+        "approval_policy": {
+          "require_execution_plan_approval": false
+        },
+        "strategy": {
+          "single_writer": true,
+          "allow_readonly_recon": true,
+          "max_repair_cycles": 2
+        },
+        "validation": {
+          "commands": [
+            "npm run typecheck",
+            "npm test"
+          ],
+          "required": true
+        },
+        "delivery": {
+          "write_handoff": true,
+          "write_validation_ledger": true,
+          "write_repair_log": true
+        }
+      },
+      {
+        "type": "agent",
+        "id": "handoff",
+        "repo": "main",
+        "profile": "default",
+        "prompt": "Summarize the final implementation handoff for an operator who needs the outcome, validation status, and residual risks.",
+        "context_from": [
+          {
+            "node": "implement_managed_nodes",
+            "include": "summary"
+          },
+          {
+            "node": "implement_managed_nodes",
+            "include": "output",
+            "output": "handoff"
+          },
+          {
+            "node": "implement_managed_nodes",
+            "include": "output",
+            "output": "validation_ledger"
+          }
+        ]
+      }
+    ]
+  }
+}
