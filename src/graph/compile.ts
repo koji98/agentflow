@@ -46,7 +46,7 @@ interface CompileContext {
 }
 
 function isExecutableNode(node: AuthoredGraphNode): node is ExecutableGraphNode {
-  return node.type === "agent" || node.type === "exec" || node.type === "check";
+  return node.type === "agent" || node.type === "exec" || node.type === "check" || node.type === "checkpoint";
 }
 
 function isAiCheck(node: ExecutableGraphNode): node is CheckNode & { check_kind: "ai" } {
@@ -192,6 +192,13 @@ function compileExecutableNode(
       args: node.args ?? [],
       ...(node.cwd ? { cwd: node.cwd } : {}),
       ...(node.env ? { env: node.env } : {})
+    };
+  } else if (node.type === "checkpoint") {
+    compiledNode = {
+      ...compiledBase,
+      kind: "checkpoint",
+      prompt: node.prompt,
+      review_from: node.review_from
     };
   } else {
     const resolvedCheckFields = resolveCheckFields(node, nodePolicyResolution);
@@ -357,10 +364,10 @@ function compileRepeatNode(
         path: `${path}.until.node`,
         message: `repeat.until.node "${node.until.node}" must resolve inside the repeat body.`
       });
-    } else if (!compiledUntilNode || compiledUntilNode.kind !== "check") {
+    } else if (!compiledUntilNode || (compiledUntilNode.kind !== "check" && compiledUntilNode.kind !== "checkpoint")) {
       context.diagnostics.push({
         path: `${path}.until.node`,
-        message: `repeat.until.node "${node.until.node}" must resolve to a compiled check node.`
+        message: `repeat.until.node "${node.until.node}" must resolve to a compiled check or checkpoint node.`
       });
     }
 
@@ -525,7 +532,22 @@ function validateCompiledContextReferences(
       }
     });
 
-    node.context_from.forEach((reference, index) => {
+    const references = [
+      ...node.context_from.map((reference, index) => ({
+        reference,
+        path_suffix: `context_from[${index}]`
+      })),
+      ...(node.kind === "checkpoint"
+        ? [
+            {
+              reference: node.review_from,
+              path_suffix: "review_from"
+            }
+          ]
+        : [])
+    ];
+
+    references.forEach(({ reference, path_suffix }) => {
       const path = context.authored_paths.get(node.authored_id) ?? `$.graph.${node.authored_id}`;
       const targetCompiledIds = compiledGraph.authored_to_compiled[reference.node] ?? [];
 
@@ -549,8 +571,8 @@ function validateCompiledContextReferences(
 
       if (!allTargetsArePriorIterationReferences && orderedTargetIds.length !== targetCompiledIds.length) {
         context.diagnostics.push({
-          path: `${path}.context_from[${index}].node`,
-          message: `context_from node "${reference.node}" is not guaranteed to execute before "${node.authored_id}".`
+          path: `${path}.${path_suffix}.node`,
+          message: `${path_suffix === "review_from" ? "review_from" : "context_from"} node "${reference.node}" is not guaranteed to execute before "${node.authored_id}".`
         });
       }
 
@@ -563,8 +585,8 @@ function validateCompiledContextReferences(
           reference.iteration === undefined
         ) {
           context.diagnostics.push({
-            path: `${path}.context_from[${index}].iteration`,
-            message: `context_from node "${reference.node}" requires an iteration selector outside repeat scope "${targetNode.repeat_scope_id}".`
+            path: `${path}.${path_suffix}.iteration`,
+            message: `${path_suffix === "review_from" ? "review_from" : "context_from"} node "${reference.node}" requires an iteration selector outside repeat scope "${targetNode.repeat_scope_id}".`
           });
         }
       });

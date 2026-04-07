@@ -119,7 +119,7 @@ describe("spec design managed workflow", () => {
 
     expect(externalResearch.steps).toHaveLength(2);
     expect(optionFanout.steps).toHaveLength(3);
-    expect(revisionLoop.until.node).toBe("managed_nodes_spec__managed__spec_design__quality_check");
+    expect(revisionLoop.until.node).toBe("managed_nodes_spec__managed__spec_design__human_review");
     expect(initialDraft.prompt).toContain("The spec must be implementation-ready and self-contained");
     expect(initialDraft.prompt).toContain("Required sections:");
 
@@ -129,7 +129,9 @@ describe("spec design managed workflow", () => {
 
     const reviseNode = revisionLoop.body.steps[0];
     const critiquePanel = revisionLoop.body.steps[1];
-    const qualityCheck = revisionLoop.body.steps.at(-1);
+    const mergeCritiques = revisionLoop.body.steps[2];
+    const qualityReview = revisionLoop.body.steps[3];
+    const humanReview = revisionLoop.body.steps[4];
     const inspectNode = workflow.steps[1];
 
     if (!reviseNode || reviseNode.type !== "agent") {
@@ -140,8 +142,16 @@ describe("spec design managed workflow", () => {
       throw new Error("Expected critique panel to be parallel.");
     }
 
-    if (!qualityCheck || qualityCheck.type !== "check") {
-      throw new Error("Expected quality check to be a check node.");
+    if (!mergeCritiques || mergeCritiques.type !== "agent") {
+      throw new Error("Expected merged critiques step to be an agent.");
+    }
+
+    if (!qualityReview || qualityReview.type !== "agent") {
+      throw new Error("Expected quality review to be an agent node.");
+    }
+
+    if (!humanReview || humanReview.type !== "checkpoint") {
+      throw new Error("Expected human review to be a checkpoint node.");
     }
 
     if (!inspectNode || inspectNode.type !== "agent") {
@@ -164,9 +174,16 @@ describe("spec design managed workflow", () => {
           optional: true
         }),
         expect.objectContaining({
-          node: "managed_nodes_spec__managed__spec_design__quality_check",
+          node: "managed_nodes_spec__managed__spec_design__quality_review",
           include: "output",
-          output: "quality_check",
+          output: "quality_review",
+          iteration: "latest_failed",
+          optional: true
+        }),
+        expect.objectContaining({
+          node: "managed_nodes_spec__managed__spec_design__human_review",
+          include: "output",
+          output: "operator_feedback",
           iteration: "latest_failed",
           optional: true
         })
@@ -193,9 +210,10 @@ describe("spec design managed workflow", () => {
         })
       ])
     );
-    expect(qualityCheck.prompt).toContain("direct input contract for execute_spec");
-    expect(qualityCheck.prompt).toContain("current-state notes in context");
-    expect(qualityCheck.context_from).toEqual(
+    expect(qualityReview.prompt).toContain("direct input contract for execute_spec");
+    expect(qualityReview.prompt).toContain("quality-review.json");
+    expect(mergeCritiques.prompt).toContain("Merge the critique outputs into one revision brief.");
+    expect(qualityReview.context_from).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           node: "managed_nodes_spec__managed__spec_design__inspect_repo",
@@ -209,8 +227,23 @@ describe("spec design managed workflow", () => {
         })
       ])
     );
-    expect(qualityCheck.rubric).toContain("migration or compatibility unresolved");
-    expect(qualityCheck.rubric).toContain("carried blockers are closed");
+    expect(humanReview.prompt).toContain("Review the current design spec and the machine quality review");
+    expect(humanReview.review_from).toEqual(
+      expect.objectContaining({
+        node: "managed_nodes_spec__managed__spec_design__revise_spec",
+        include: "output",
+        output: "spec_revision"
+      })
+    );
+    expect(humanReview.context_from).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          node: "managed_nodes_spec__managed__spec_design__quality_review",
+          include: "output",
+          output: "quality_review"
+        })
+      ])
+    );
     expect(workflow.steps.at(-1)).toEqual(
       expect.objectContaining({
         id: "managed_nodes_spec",

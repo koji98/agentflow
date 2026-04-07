@@ -941,6 +941,99 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("fails preflight before execution when a checkpoint node has no executor", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-checkpoint-preflight-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-preflight-checkpoint",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "exec",
+                  id: "draft",
+                  command: "placeholder",
+                  outputs: [
+                    {
+                      name: "draft_spec",
+                      from: "attempt",
+                      path: "draft.md",
+                      required: true
+                    }
+                  ]
+                },
+                {
+                  type: "checkpoint",
+                  id: "review",
+                  prompt: "Review the draft.",
+                  review_from: {
+                    node: "draft",
+                    include: "output",
+                    output: "draft_spec"
+                  }
+                }
+              ]
+            },
+            until: {
+              node: "review"
+            }
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.attempts).toEqual([]);
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run.preflight_failed",
+          payload: expect.objectContaining({
+            message: expect.stringContaining('has no checkpoint executor')
+          })
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("records AI harness launch errors as failed check evaluations", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-ai-check-failure-"));
     const repoDir = join(tempRoot, "repo");

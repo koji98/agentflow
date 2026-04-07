@@ -1,7 +1,6 @@
 import type {
   AgentNode,
   BaseExecutableNode,
-  CheckNode,
   ContextReference,
   OutputDefinition,
   ParallelNode,
@@ -313,7 +312,7 @@ function buildMergeCritiquesPrompt(config: SpecDesignWorkflowConfig): string {
   ].join("\n");
 }
 
-function buildQualityCheckPrompt(config: SpecDesignWorkflowConfig): string {
+function buildQualityReviewPrompt(config: SpecDesignWorkflowConfig): string {
   return [
     "Review whether the current design spec is implementation-ready.",
     "",
@@ -322,22 +321,36 @@ function buildQualityCheckPrompt(config: SpecDesignWorkflowConfig): string {
     "",
     "Use the revised spec, merged critiques, tradeoff recommendation, and current-state notes in context.",
     "Judge it as the direct input contract for execute_spec: an implementer should not need to invent missing migration, operational, validation, repo-fit ownership, or boundary decisions.",
-    "Fail only on unresolved blockers that still require implementers to infer repo surfaces, file ownership, actionability rules, rollout semantics, or validation mechanics.",
-    "For each issue, identify the missing decision, the affected repo surface, and the absent file-plan or validation detail."
+    "Treat this as an evaluator, not a gate. Always write `quality-review.json` to the output directory using this exact schema:",
+    '{"passed":true,"summary":"...","blockers":[{"title":"...","missing_decision":"...","repo_surface":"...","spec_change":"...","file_plan_detail":"...","validation_detail":"..."}],"improvements":["..."]}',
+    "Set `passed` to false only when unresolved blockers still require implementers to infer repo surfaces, file ownership, actionability rules, rollout semantics, or validation mechanics.",
+    "For each blocker, identify the missing decision, the affected repo surface, and the absent file-plan or validation detail."
   ].join("\n");
 }
 
-function buildQualityCheckRubric(config: SpecDesignWorkflowConfig): string {
+function buildQualityReviewExpectations(config: SpecDesignWorkflowConfig): string {
   const sectionRequirement =
     config.deliverable.sections && config.deliverable.sections.length > 0
-      ? `Pass only if the spec covers: ${config.deliverable.sections.join(", ")}.`
-      : "Pass only if the spec covers the problem, requirements, recommendation, implementation plan, risks, and open questions.";
+      ? `A ready spec covers: ${config.deliverable.sections.join(", ")}.`
+      : "A ready spec covers the problem, requirements, recommendation, implementation plan, risks, and open questions.";
 
   return [
     sectionRequirement,
-    "Pass only if carried blockers are closed by explicit repo-fit ownership, concrete file coverage, and named validation or test ownership.",
-    "Fail if the spec is missing implementation consequences, ignores repository conventions, lacks acceptance criteria, leaves migration or compatibility unresolved, omits concrete file or ownership boundaries, or lacks explicit risks and open questions when those affect execution."
+    "Mark blockers when carried blockers are not closed by explicit repo-fit ownership, concrete file coverage, and named validation or test ownership.",
+    "Mark blockers when the spec misses implementation consequences, ignores repository conventions, lacks acceptance criteria, leaves migration or compatibility unresolved, omits concrete file or ownership boundaries, or lacks explicit risks and open questions when those affect execution."
   ].join(" ");
+}
+
+function buildHumanReviewPrompt(config: SpecDesignWorkflowConfig): string {
+  return [
+    "Review the current design spec and the machine quality review.",
+    "",
+    `Problem: ${config.problem}`,
+    `Goal: ${config.goal}`,
+    "",
+    "Pass only when the spec is ready to drive execute_spec without inventing missing implementation details.",
+    "Deny when another revision round is required. When denying, explain the concrete improvements needed."
+  ].join("\n");
 }
 
 function buildFinalizePrompt(config: SpecDesignWorkflowConfig): string {
@@ -400,7 +413,8 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
   const reviseId = managedId(config.id, "revise_spec");
   const critiquePanelId = managedId(config.id, "critique_panel");
   const mergeId = managedId(config.id, "merge_critiques");
-  const qualityCheckId = managedId(config.id, "quality_check");
+  const qualityReviewId = managedId(config.id, "quality_review");
+  const humanReviewId = managedId(config.id, "human_review");
 
   const steps: SequenceNode["steps"] = [
     {
@@ -747,9 +761,16 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
             optional: true
           },
           {
-            node: qualityCheckId,
+            node: qualityReviewId,
             include: "output",
-            output: "quality_check",
+            output: "quality_review",
+            iteration: "latest_failed",
+            optional: true
+          },
+          {
+            node: humanReviewId,
+            include: "output",
+            output: "operator_feedback",
             iteration: "latest_failed",
             optional: true
           }
@@ -794,11 +815,10 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
         prompt: buildMergeCritiquesPrompt(config)
       },
       {
-        type: "check",
-        id: qualityCheckId,
-        label: "Quality Check",
+        type: "agent",
+        id: qualityReviewId,
+        label: "Quality Review",
         ...shared,
-        check_kind: "ai",
         context_from: [
           {
             node: reviseId,
@@ -828,14 +848,37 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
         ],
         outputs: [
           {
-            name: "quality_check",
+            name: "quality_review",
             from: "attempt",
-            path: "result.json",
+            path: "quality-review.json",
             required: true
           }
         ],
-        prompt: buildQualityCheckPrompt(config),
-        rubric: buildQualityCheckRubric(config)
+        prompt: [buildQualityReviewPrompt(config), "", buildQualityReviewExpectations(config)].join("\n")
+      },
+      {
+        type: "checkpoint",
+        id: humanReviewId,
+        label: "Human Review",
+        ...shared,
+        context_from: [
+          {
+            node: qualityReviewId,
+            include: "output",
+            output: "quality_review"
+          },
+          {
+            node: mergeId,
+            include: "output",
+            output: "critique_merged"
+          }
+        ],
+        review_from: {
+          node: reviseId,
+          include: "output",
+          output: "spec_revision"
+        },
+        prompt: buildHumanReviewPrompt(config)
       }
     ]
   };
@@ -847,7 +890,7 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
     max_attempts: config.orchestration.revision_rounds,
     body: revisionBody,
     until: {
-      node: qualityCheckId
+      node: humanReviewId
     }
   };
 

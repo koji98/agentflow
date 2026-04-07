@@ -5,6 +5,7 @@ import type {
   AuthoredGraphNode,
   BaseExecutableNode,
   CheckNode,
+  CheckpointNode,
   ContainerGraphNode,
   ContextReference,
   DeterministicCheckDefaults,
@@ -89,6 +90,13 @@ export interface NormalizedGraphDocument {
   diagnostics: GraphDiagnostic[];
   lowered_managed_nodes: LoweredManagedNode[];
 }
+
+const checkpointOperatorFeedbackOutput: OutputDefinition = {
+  name: "operator_feedback",
+  from: "attempt",
+  path: "operator-feedback.md",
+  required: false
+};
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -851,8 +859,12 @@ function normalizeOutputs(
 function normalizeExecutableBase(
   record: Record<string, unknown>,
   path: string,
-  diagnostics: GraphDiagnostic[]
+  diagnostics: GraphDiagnostic[],
+  options: {
+    allow_outputs?: boolean;
+  } = {}
 ): BaseExecutableNode | undefined {
+  const allow_outputs = options.allow_outputs ?? true;
   const id = readRequiredString(record.id, `${path}.id`, diagnostics);
   const label = readOptionalString(record.label, `${path}.label`, diagnostics);
   const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
@@ -863,8 +875,17 @@ function normalizeExecutableBase(
     `${path}.context_from`,
     diagnostics
   );
-  const outputs = normalizeOutputs(record.outputs, `${path}.outputs`, diagnostics);
+  const outputs = allow_outputs
+    ? normalizeOutputs(record.outputs, `${path}.outputs`, diagnostics)
+    : undefined;
   const timeout_sec = readPositiveInteger(record.timeout_sec, `${path}.timeout_sec`, diagnostics);
+
+  if (!allow_outputs && record.outputs !== undefined) {
+    diagnostics.push({
+      path: `${path}.outputs`,
+      message: 'Field "outputs" does not apply to checkpoint nodes.'
+    });
+  }
 
   if (!id) {
     return undefined;
@@ -1080,6 +1101,53 @@ function normalizeCheckNode(
     ...(check_kind === "ai" && rubric ? { rubric } : {}),
     ...(check_kind === "ai" && model ? { model } : {}),
     ...(check_kind === "ai" && reasoning_effort ? { reasoning_effort } : {})
+  };
+}
+
+function normalizeCheckpointNode(
+  record: Record<string, unknown>,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): CheckpointNode | undefined {
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    [
+      "type",
+      "id",
+      "label",
+      "repo",
+      "profile",
+      "inputs",
+      "context_from",
+      "outputs",
+      "timeout_sec",
+      "prompt",
+      "review_from"
+    ],
+    diagnostics
+  );
+
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_outputs: false
+  });
+  const prompt = readRequiredString(record.prompt, `${path}.prompt`, diagnostics);
+  const review_from = normalizeContextReference(
+    record.review_from,
+    `${path}.review_from`,
+    diagnostics
+  );
+
+  if (!base || !prompt || !review_from) {
+    return undefined;
+  }
+
+  return {
+    type: "checkpoint",
+    ...base,
+    outputs: [...(base.outputs ?? []), checkpointOperatorFeedbackOutput],
+    prompt,
+    review_from
   };
 }
 
@@ -2543,6 +2611,10 @@ export function normalizeGraphNode(
 
   if (type === "check") {
     return normalizeCheckNode(record, path, diagnostics);
+  }
+
+  if (type === "checkpoint") {
+    return normalizeCheckpointNode(record, path, diagnostics);
   }
 
   if (type === "sequence") {

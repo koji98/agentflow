@@ -23,7 +23,7 @@ Additional deferred areas:
 
 ## Harness And Workflow Revisit Ideas
 
-These are not part of the current release. Keep them deferred until the supported local-first executor and monitor surface is stable enough for a deliberate follow-on pass.
+These are not part of the current release. Keep them deferred until the supported local-first executor and inspection surface is stable enough for a deliberate follow-on pass.
 
 - add an explicit execution-contract gate between planning and workspace-write implementation in `execute_spec`, so the workflow confirms what "done" means before code changes start
 - add a read-only evaluator or reviewer gate inside `execute_spec` repair flow, so the workflow can catch spec drift or weak fixes before relying only on terminal `review_change`

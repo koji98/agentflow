@@ -119,7 +119,7 @@ export async function isRecordedRunOwnerActive(
   const liveStartedAt = await readProcessStartedAt(owner.owner_pid);
 
   if (!liveStartedAt) {
-    return undefined;
+    return false;
   }
 
   return liveStartedAt === owner.owner_started_at;

@@ -21,6 +21,10 @@ import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import { createResumedRuntimeSession } from "../../runtime/resume.js";
 import { resumeWorkspaceFromManifest } from "../../runtime/workspace/resume.js";
 import {
+  collectCheckpointTerminalDiagnostics,
+  createInteractiveCheckpointExecutor
+} from "../checkpoint.js";
+import {
   createGraphCliInvocation,
   createGraphPathResolution,
   createResumeCliInvocation,
@@ -267,6 +271,24 @@ export const resumeCommand = {
       };
     }
 
+    const checkpointDiagnostics = collectCheckpointTerminalDiagnostics(compilation.compiled_graph!);
+
+    if (checkpointDiagnostics.length > 0) {
+      return {
+        exitCode: 1,
+        output: {
+          command: "resume",
+          status: "failed",
+          message: "Checkpoint graphs require an interactive terminal before resume can start.",
+          run_root,
+          run_id: runRecord.run_id,
+          graph_path: loaded.absolute_path,
+          path_resolution: pathResolution,
+          diagnostics: checkpointDiagnostics
+        }
+      };
+    }
+
     const repoResolution = await resolveRepoSources(loaded.absolute_path, loaded.document);
 
     if (!repoResolution.repo_sources) {
@@ -355,6 +377,9 @@ export const resumeCommand = {
       harnesses: {
         "codex-cli": createCodexCliHarness(),
         "cursor-cli": createCursorCliHarness()
+      },
+      executors: {
+        checkpoint: createInteractiveCheckpointExecutor()
       },
       resumed_session: session,
       prior_events: events,

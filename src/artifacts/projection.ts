@@ -3,7 +3,12 @@ import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 
 import type { AuthoredGraphDocument } from "../graph/authored.js";
-import type { CompiledCheckNode, CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js";
+import type {
+  CompiledCheckNode,
+  CompiledCheckpointNode,
+  CompiledExecutableNode,
+  CompiledGraph
+} from "../graph/compiled.js";
 import type { GraphOutcome } from "../graph/schema.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
 import type { RuntimeEventEnvelope } from "../runtime/events.js";
@@ -156,6 +161,7 @@ export interface ProjectedNodeDefinition {
   env?: Record<string, string>;
   check_kind?: CompiledCheckNode["check_kind"];
   rubric?: string;
+  review_from?: CompiledCheckpointNode["review_from"];
 }
 
 export interface ProjectedNodeDetail {
@@ -298,6 +304,10 @@ function buildNodeBadge(
 
   if (node.kind === "check") {
     return node.check_kind;
+  }
+
+  if (node.kind === "checkpoint") {
+    return "checkpoint";
   }
 
   return basename(node.command);
@@ -756,6 +766,17 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
       args: node.args,
       ...(node.cwd ? { cwd: node.cwd } : {}),
       ...(node.env ? { env: node.env } : {})
+    };
+  }
+
+  if (node.kind === "checkpoint") {
+    return {
+      inputs: node.inputs,
+      context_from: node.context_from,
+      declared_outputs: node.declared_outputs,
+      ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
+      prompt: node.prompt,
+      review_from: node.review_from
     };
   }
 

@@ -5,6 +5,7 @@ import type { AuthoredGraphDocument } from "../../graph/authored.js";
 import type {
   CompiledAgentNode,
   CompiledCheckNode,
+  CompiledCheckpointNode,
   CompiledExecNode,
   CompiledExecutableNode,
   CompiledGraph
@@ -91,6 +92,7 @@ export interface RuntimeExecutorRegistry {
   agent?: RuntimeNodeExecutor<CompiledAgentNode>;
   exec?: RuntimeNodeExecutor<CompiledExecNode>;
   check?: RuntimeNodeExecutor<CompiledCheckNode>;
+  checkpoint?: RuntimeNodeExecutor<CompiledCheckpointNode>;
 }
 
 export interface RunCompiledGraphOptions {
@@ -907,6 +909,23 @@ async function executeNode(
             },
             options.harnesses ?? {}
           );
+    } else if (node.kind === "checkpoint") {
+      if (!options.executors?.checkpoint) {
+        throw new Error(`Checkpoint "${node.compiled_id}" requires a checkpoint executor.`);
+      }
+
+      result = await options.executors.checkpoint({
+        run_id: session.run_id,
+        node,
+        attempt,
+        workspace_path: workspace.workspace_path,
+        execution_dir: attempt.execution_dir,
+        context_packet_path: context.packet_path,
+        context_summary_path: context.summary_path,
+        signal,
+        on_stdout_chunk: logSink.on_stdout_chunk,
+        on_stderr_chunk: logSink.on_stderr_chunk
+      });
     } else {
       result = options.executors?.agent
         ? await options.executors.agent({
@@ -1369,6 +1388,19 @@ async function executeRunLoop(
     }
 
     if (result.status === "canceled") {
+      if (session.status === "running") {
+        session.status = "canceled";
+        await markPendingNodesSkipped(
+          session,
+          writer,
+          runOwner,
+          events,
+          options.on_event,
+          "operator_cancel"
+        );
+        cancelActiveExecutions(activeExecutions);
+      }
+
       await emitEvent(session, writer, runOwner, events, options.on_event, "node.canceled", {
         reason: session.status === "failed" ? "terminal_failure" : "operator_cancel"
       }, {
@@ -1506,6 +1538,10 @@ function collectPreflightDiagnostics(
         diagnostics.push(...(harnesses[harnessName]!.preflight?.() ?? []));
         checkedHarnesses.add(harnessName);
       }
+    }
+
+    if (node.kind === "checkpoint" && !executors?.checkpoint) {
+      diagnostics.push(`Checkpoint node "${node.compiled_id}" has no checkpoint executor.`);
     }
   }
 

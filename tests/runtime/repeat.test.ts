@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -148,6 +148,349 @@ describe("runtime repeat", () => {
     expect(run.state.node_statuses.root__finalize).toBe("blocked");
     expect(run.attempts.filter((attempt) => attempt.authored_id === "verify")).toHaveLength(2);
     expect(run.events.at(-1)?.type).toBe("run.completed");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("reruns a checkpoint-driven repeat loop and resolves latest_failed context from the failed iteration", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-repeat-checkpoint-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "repeat-checkpoint",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "agent",
+                  id: "revise",
+                  prompt: "Revise the spec.",
+                  context_from: [
+                    {
+                      node: "merge_feedback",
+                      include: "output",
+                      output: "critique_merged",
+                      iteration: "latest_failed",
+                      optional: true
+                    },
+                    {
+                      node: "quality_review",
+                      include: "output",
+                      output: "quality_review",
+                      iteration: "latest_failed",
+                      optional: true
+                    },
+                    {
+                      node: "human_review",
+                      include: "output",
+                      output: "operator_feedback",
+                      iteration: "latest_failed",
+                      optional: true
+                    }
+                  ],
+                  outputs: [
+                    {
+                      name: "spec_revision",
+                      from: "attempt",
+                      path: "spec-revision.md",
+                      required: true
+                    }
+                  ]
+                },
+                {
+                  type: "agent",
+                  id: "merge_feedback",
+                  prompt: "Merge feedback.",
+                  outputs: [
+                    {
+                      name: "critique_merged",
+                      from: "attempt",
+                      path: "critique-merged.md",
+                      required: true
+                    }
+                  ]
+                },
+                {
+                  type: "agent",
+                  id: "quality_review",
+                  prompt: "Evaluate the revision.",
+                  outputs: [
+                    {
+                      name: "quality_review",
+                      from: "attempt",
+                      path: "quality-review.json",
+                      required: true
+                    }
+                  ]
+                },
+                {
+                  type: "checkpoint",
+                  id: "human_review",
+                  prompt: "Review the spec revision.",
+                  review_from: {
+                    node: "revise",
+                    include: "output",
+                    output: "spec_revision"
+                  },
+                  context_from: [
+                    {
+                      node: "quality_review",
+                      include: "output",
+                      output: "quality_review"
+                    }
+                  ]
+                }
+              ]
+            },
+            until: {
+              node: "human_review"
+            }
+          }
+        ]
+      }
+    });
+
+    let sawFailedIterationContext = false;
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        agent: async ({ node, attempt, context_packet_path, execution_dir }) => {
+          if (node.authored_id === "revise" && attempt.iteration_index === 2) {
+            const packet = JSON.parse(await readFile(context_packet_path, "utf8")) as {
+              materials: Array<{ materialized_path: string }>;
+            };
+            const basenames = packet.materials.map((item) => item.materialized_path.split("/").at(-1));
+            sawFailedIterationContext =
+              basenames.includes("critique-merged.md") &&
+              basenames.includes("quality-review.json") &&
+              basenames.includes("operator-feedback.md");
+          }
+
+          if (node.authored_id === "revise") {
+            await writeFile(
+              join(execution_dir, "spec-revision.md"),
+              `revision ${attempt.iteration_index ?? 1}\n`
+            );
+          }
+
+          if (node.authored_id === "merge_feedback") {
+            await writeFile(join(execution_dir, "critique-merged.md"), "close the blockers\n");
+          }
+
+          if (node.authored_id === "quality_review") {
+            await writeFile(
+              join(execution_dir, "quality-review.json"),
+              JSON.stringify({
+                passed: attempt.iteration_index === 2,
+                summary: attempt.iteration_index === 2 ? "ready" : "needs revision"
+              })
+            );
+          }
+
+          return {
+            status: "passed",
+            outcome: "passed",
+            result: {
+              node: node.authored_id
+            },
+            stdout: "",
+            stderr: ""
+          };
+        },
+        checkpoint: async ({ attempt, execution_dir }) => {
+          if (attempt.iteration_index === 1) {
+            await writeFile(
+              join(execution_dir, "operator-feedback.md"),
+              "Add a rollback section and clarify ownership.\n"
+            );
+            return {
+              status: "failed",
+              outcome: "failed",
+              result: {
+                checkpoint_decision: "deny"
+              },
+              stdout: undefined,
+              stderr: undefined,
+              metadata: {
+                checkpoint_decision: "deny"
+              }
+            };
+          }
+
+          return {
+            status: "passed",
+            outcome: "passed",
+            result: {
+              checkpoint_decision: "pass"
+            },
+            stdout: undefined,
+            stderr: undefined,
+            metadata: {
+              checkpoint_decision: "pass"
+            }
+          };
+        }
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(run.state.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(2);
+    expect(run.attempts.filter((attempt) => attempt.authored_id === "human_review")).toHaveLength(2);
+    expect(sawFailedIterationContext).toBe(true);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("cancels the run when a checkpoint aborts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-repeat-checkpoint-cancel-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "repeat-checkpoint-cancel",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "agent",
+                  id: "draft",
+                  prompt: "Draft the artifact.",
+                  outputs: [
+                    {
+                      name: "draft_spec",
+                      from: "attempt",
+                      path: "draft.md",
+                      required: true
+                    }
+                  ]
+                },
+                {
+                  type: "checkpoint",
+                  id: "review",
+                  prompt: "Review the draft.",
+                  review_from: {
+                    node: "draft",
+                    include: "output",
+                    output: "draft_spec"
+                  }
+                }
+              ]
+            },
+            until: {
+              node: "review"
+            }
+          },
+          {
+            type: "exec",
+            id: "after",
+            command: "placeholder"
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        agent: async ({ execution_dir }) => {
+          await writeFile(join(execution_dir, "draft.md"), "draft\n");
+          return {
+            status: "passed",
+            outcome: "passed",
+            result: {},
+            stdout: "",
+            stderr: ""
+          };
+        },
+        checkpoint: async () => ({
+          status: "canceled",
+          result: {
+            checkpoint_decision: "abort"
+          },
+          stdout: undefined,
+          stderr: undefined,
+          metadata: {
+            checkpoint_decision: "abort"
+          }
+        }),
+        exec: async () => ({
+          status: "passed",
+          outcome: "passed",
+          result: {},
+          stdout: "",
+          stderr: ""
+        })
+      }
+    });
+
+    expect(run.outcome).toBe("canceled");
+    expect(run.state.status).toBe("canceled");
+    expect(run.state.node_statuses.root__after).toBe("skipped");
+    expect(run.events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["node.canceled", "run.canceled"])
+    );
 
     await rm(tempRoot, { recursive: true, force: true });
   });

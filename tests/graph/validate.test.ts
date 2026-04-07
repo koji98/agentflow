@@ -37,6 +37,7 @@ describe("graph validation", () => {
         agent: 4,
         exec: 2,
         check: 1,
+        checkpoint: 0,
         sequence: 2,
         parallel: 1,
         repeat: 1
@@ -44,7 +45,72 @@ describe("graph validation", () => {
     });
   });
 
-  it("rejects repeat.until references that do not resolve to descendant checks", () => {
+  it("accepts checkpoint nodes inside repeat bodies and as repeat.until targets", () => {
+    const diagnostics = validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "checkpoint-repeat",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "agent",
+                  id: "draft",
+                  prompt: "Draft the artifact.",
+                  outputs: [
+                    {
+                      name: "draft_spec",
+                      from: "attempt",
+                      path: "draft.md",
+                      required: true
+                    }
+                  ]
+                },
+                {
+                  type: "checkpoint",
+                  id: "review",
+                  prompt: "Review the draft.",
+                  review_from: {
+                    node: "draft",
+                    include: "output",
+                    output: "draft_spec"
+                  }
+                }
+              ]
+            },
+            until: {
+              node: "review"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual([]);
+  });
+
+  it("rejects repeat.until references that do not resolve to descendant checks or checkpoints", () => {
     const diagnostics = validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-repeat",
@@ -92,7 +158,65 @@ describe("graph validation", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.steps[0].until.node",
-          message: expect.stringContaining("descendant check node")
+          message: expect.stringContaining("descendant check or checkpoint node")
+        })
+      ])
+    );
+  });
+
+  it("rejects checkpoint nodes outside repeat bodies", () => {
+    const diagnostics = validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "invalid-checkpoint-placement",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "draft",
+            prompt: "Draft the artifact.",
+            outputs: [
+              {
+                name: "draft_spec",
+                from: "attempt",
+                path: "draft.md",
+                required: true
+              }
+            ]
+          },
+          {
+            type: "checkpoint",
+            id: "review",
+            prompt: "Review the draft.",
+            review_from: {
+              node: "draft",
+              include: "output",
+              output: "draft_spec"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[1]",
+          message: expect.stringContaining("only valid inside a repeat body")
         })
       ])
     );

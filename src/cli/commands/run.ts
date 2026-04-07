@@ -12,6 +12,10 @@ import { runCompiledGraph } from "../../runtime/core/engine.js";
 import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
 import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import {
+  collectCheckpointTerminalDiagnostics,
+  createInteractiveCheckpointExecutor
+} from "../checkpoint.js";
+import {
   createGraphCliInvocation,
   createGraphPathResolution,
   createResumeCliInvocation,
@@ -34,7 +38,7 @@ export const runCommand = {
   optionNames: ["graph", "profile", "workspace-backend", "label", "help"] as const,
   helpNotes: [
     "Runs default to <launch-cwd>/.agentflow/runs/<run-id> unless AGENTFLOW_RUNS_ROOT is set to an absolute path.",
-    "Press Ctrl-C in the launching terminal to cancel. The runtime waits for cleanup and the monitor reflects the durable Canceled state from artifacts.",
+    "Press Ctrl-C in the launching terminal to cancel. The runtime waits for cleanup and durable artifacts capture the terminal Canceled state.",
     "Repo paths inside the graph resolve from the graph file directory even when --graph is passed relative to the launch shell."
   ] as const,
   async run(
@@ -147,6 +151,32 @@ export const runCommand = {
       };
     }
 
+    const checkpointDiagnostics = collectCheckpointTerminalDiagnostics(compilation.compiled_graph!);
+
+    if (checkpointDiagnostics.length > 0) {
+      return {
+        exitCode: 1,
+        output: {
+          command: "run",
+          status: "failed",
+          message: "Checkpoint graphs require an interactive terminal before execution can start.",
+          graph_path: loaded.absolute_path,
+          path_resolution: pathResolution,
+          diagnostics: checkpointDiagnostics,
+          next_steps: {
+            validate: createGraphCliInvocation("validate", {
+              graphPath: loaded.absolute_path,
+              launch
+            }),
+            compile: createGraphCliInvocation("compile", {
+              graphPath: loaded.absolute_path,
+              launch
+            })
+          }
+        }
+      };
+    }
+
     const repoResolution = await resolveRepoSources(loaded.absolute_path, loaded.document);
 
     if (!repoResolution.repo_sources) {
@@ -192,6 +222,9 @@ export const runCommand = {
       harnesses: {
         "codex-cli": createCodexCliHarness(),
         "cursor-cli": createCursorCliHarness()
+      },
+      executors: {
+        checkpoint: createInteractiveCheckpointExecutor()
       },
       ...(signal ? { signal } : {})
     });

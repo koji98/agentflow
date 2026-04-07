@@ -53,7 +53,17 @@ export interface CompiledCheckNode extends CompiledExecutableNodeBase {
   rubric?: string;
 }
 
-export type CompiledExecutableNode = CompiledAgentNode | CompiledExecNode | CompiledCheckNode;
+export interface CompiledCheckpointNode extends CompiledExecutableNodeBase {
+  kind: "checkpoint";
+  prompt: string;
+  review_from: ContextReference;
+}
+
+export type CompiledExecutableNode =
+  | CompiledAgentNode
+  | CompiledExecNode
+  | CompiledCheckNode
+  | CompiledCheckpointNode;
 
 export interface CompiledEdge {
   edge_id: string;

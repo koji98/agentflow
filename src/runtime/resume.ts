@@ -83,6 +83,14 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     }));
   }
 
+  if (node.kind === "checkpoint") {
+    return JSON.stringify(sortJson({
+      ...shared,
+      prompt: node.prompt,
+      review_from: node.review_from
+    }));
+  }
+
   return JSON.stringify(sortJson({
     ...shared,
     check_kind: node.check_kind,

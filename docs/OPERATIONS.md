@@ -230,9 +230,9 @@ Add optional real-harness proof when you need it:
 npm run validate:real-harness
 ```
 
-For active runs, `agent` and AI `check` executions append live harness output directly into the current execution's `stdout.log` and `stderr.log`. The UI tail view reads those files while the run is in progress, and completion still rewrites the final authoritative log contents.
+For active runs, `agent` and AI `check` executions append live harness output directly into the current execution's `stdout.log` and `stderr.log`. Completion still rewrites the final authoritative log contents.
 
-That live harness output is separate from the CLI progress stream. CLI progress is human-oriented terminal status on `stderr`; durable execution logs remain the source of truth for the monitor and artifacts.
+That live harness output is separate from the CLI progress stream. CLI progress is human-oriented terminal status on `stderr`; durable execution logs remain the source of truth in the run artifacts.
 
 Optional machine-local proof is separate:
 
@@ -248,7 +248,6 @@ That command uses the built CLI, runs a one-node smoke only for real harness bin
 What remains unproven unless you test it separately:
 
 - abrupt packaged-CLI death or host restart in the middle of a run
-- live browser behavior while a run is still executing
 - real harness auth, quota, network stability, and prompt quality beyond one-node smoke
 - every machine-specific git, filesystem, and repo-topology variation
 

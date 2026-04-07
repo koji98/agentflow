@@ -135,6 +135,12 @@ export interface CheckNode extends BaseExecutableNode {
   reasoning_effort?: ReasoningEffort;
 }
 
+export interface CheckpointNode extends BaseExecutableNode {
+  type: "checkpoint";
+  prompt: string;
+  review_from: ContextReference;
+}
+
 export interface SequenceNode extends BaseNode {
   type: "sequence";
   steps: AuthoredGraphNode[];
@@ -155,7 +161,7 @@ export interface RepeatNode extends BaseNode {
   };
 }
 
-export type ExecutableGraphNode = AgentNode | ExecNode | CheckNode;
+export type ExecutableGraphNode = AgentNode | ExecNode | CheckNode | CheckpointNode;
 export type ContainerGraphNode = SequenceNode | ParallelNode | RepeatNode;
 export type AuthoredGraphNode = ExecutableGraphNode | ContainerGraphNode;
 

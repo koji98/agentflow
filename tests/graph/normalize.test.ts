@@ -172,7 +172,7 @@ describe("graph normalization", () => {
         expect.objectContaining({
           path: "$.graph.steps[0].type",
           message:
-            "Node type must be one of: agent, exec, check, sequence, parallel, repeat, deep_research, spec_design, execute_spec, review_change."
+            "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, deep_research, spec_design, execute_spec, review_change."
         })
       ])
     );

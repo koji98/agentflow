@@ -86,6 +86,116 @@ describe("graph compilation", () => {
     );
   });
 
+  it("compiles repeat checkpoints into executable nodes with repeat-back edges", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "checkpoint-repeat-compile",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 3,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "agent",
+                  id: "draft",
+                  prompt: "Draft the artifact.",
+                  outputs: [
+                    {
+                      name: "draft_spec",
+                      from: "attempt",
+                      path: "draft.md",
+                      required: true
+                    }
+                  ]
+                },
+                {
+                  type: "checkpoint",
+                  id: "review",
+                  prompt: "Review the draft.",
+                  review_from: {
+                    node: "draft",
+                    include: "output",
+                    output: "draft_spec"
+                  }
+                }
+              ]
+            },
+            until: {
+              node: "review"
+            }
+          }
+        ]
+      }
+    });
+
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+
+    expect(compilation.diagnostics).toEqual([]);
+
+    const compiledGraph = compilation.compiled_graph!;
+    const reviewId = "root__retry__body__review";
+
+    expect(compiledGraph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          compiled_id: reviewId,
+          kind: "checkpoint",
+          review_from: expect.objectContaining({
+            node: "draft",
+            include: "output",
+            output: "draft_spec"
+          })
+        })
+      ])
+    );
+    expect(compiledGraph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: reviewId,
+          to: "root__retry__body__draft",
+          on: "failed",
+          kind: "repeat-back",
+          repeat_scope_id: "scope__root__retry"
+        })
+      ])
+    );
+    expect(compiledGraph.scopes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope_id: "scope__root__retry",
+          kind: "repeat",
+          until_compiled_id: reviewId,
+          body_exit_node_ids: [reviewId]
+        })
+      ])
+    );
+  });
+
   it("requires iteration selectors for references that leave a repeat scope", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",

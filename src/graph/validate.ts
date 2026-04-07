@@ -32,7 +32,7 @@ interface NodeMetadata {
 }
 
 function isExecutableNode(node: AuthoredGraphNode): node is ExecutableGraphNode {
-  return node.type === "agent" || node.type === "exec" || node.type === "check";
+  return node.type === "agent" || node.type === "exec" || node.type === "check" || node.type === "checkpoint";
 }
 
 function visitNodes(
@@ -258,10 +258,10 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
           path: `${metadata.path}.until.node`,
           message: `repeat.until.node "${node.until.node}" must reference a descendant node.`
         });
-      } else if (untilTarget.type !== "check") {
+      } else if (untilTarget.type !== "check" && untilTarget.type !== "checkpoint") {
         diagnostics.push({
           path: `${metadata.path}.until.node`,
-          message: `repeat.until.node "${node.until.node}" must reference a descendant check node.`
+          message: `repeat.until.node "${node.until.node}" must reference a descendant check or checkpoint node.`
         });
       }
     }
@@ -276,6 +276,30 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
           diagnostics
         );
       });
+
+      if (node.type === "checkpoint") {
+        if (!metadata.nearest_repeat_id) {
+          diagnostics.push({
+            path: metadata.path,
+            message: "checkpoint nodes are only valid inside a repeat body in this release."
+          });
+        }
+
+        validateContextReference(
+          node.review_from,
+          `${metadata.path}.review_from`,
+          node.id,
+          nodeIndex,
+          diagnostics
+        );
+
+        if (node.review_from.include !== "output") {
+          diagnostics.push({
+            path: `${metadata.path}.review_from.include`,
+            message: "checkpoint.review_from must reference an upstream output artifact."
+          });
+        }
+      }
     }
   }, "$.graph");
 
@@ -339,6 +363,7 @@ export function summarizeAuthoredGraph(document: AuthoredGraphDocument): Authore
     agent: 0,
     exec: 0,
     check: 0,
+    checkpoint: 0,
     sequence: 0,
     parallel: 0,
     repeat: 0

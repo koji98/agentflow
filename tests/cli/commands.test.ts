@@ -133,7 +133,9 @@ describe("graph CLI", () => {
             workspace_backend: "inplace"
           },
           profiles: {
-            default: {}
+            default: {
+              harness: "codex-cli"
+            }
           },
           graph: {
             type: "sequence",
@@ -207,7 +209,124 @@ describe("graph CLI", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("honors AGENTFLOW_RUNS_ROOT for artifact placement and monitor handoff", async () => {
+  it("fails run preflight for checkpoint graphs without an interactive terminal", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-checkpoint-preflight-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    const originalStdinTty = process.stdin.isTTY;
+    const originalStderrTty = process.stderr.isTTY;
+
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "checkpoint-cli-preflight",
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {
+              harness: "codex-cli"
+            }
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "repeat",
+                id: "retry",
+                max_attempts: 2,
+                body: {
+                  type: "sequence",
+                  id: "body",
+                  steps: [
+                    {
+                      type: "agent",
+                      id: "draft",
+                      repo: "main",
+                      prompt: "Draft the artifact.",
+                      outputs: [
+                        {
+                          name: "draft_spec",
+                          from: "attempt",
+                          path: "draft.md",
+                          required: true
+                        }
+                      ]
+                    },
+                    {
+                      type: "checkpoint",
+                      id: "review",
+                      repo: "main",
+                      prompt: "Review the artifact.",
+                      review_from: {
+                        node: "draft",
+                        include: "output",
+                        output: "draft_spec"
+                      }
+                    }
+                  ]
+                },
+                until: {
+                  node: "review"
+                }
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    try {
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: false,
+        configurable: true
+      });
+      Object.defineProperty(process.stderr, "isTTY", {
+        value: true,
+        configurable: true
+      });
+
+      const result = await executeCli(["run", "--graph", graphPath], tempRoot);
+      const payload = JSON.parse(result.stdout);
+
+      expect(result.exitCode).toBe(1);
+      expect(payload.command).toBe("run");
+      expect(payload.status).toBe("failed");
+      expect(payload.message).toContain("interactive terminal");
+      expect(payload.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining("interactive TTY stdin and stderr")
+          })
+        ])
+      );
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", {
+        value: originalStdinTty,
+        configurable: true
+      });
+      Object.defineProperty(process.stderr, "isTTY", {
+        value: originalStderrTty,
+        configurable: true
+      });
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("honors AGENTFLOW_RUNS_ROOT for artifact placement", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-root-"));
     const launchRoot = join(tempRoot, "launch-shell");
     const repoDir = join(tempRoot, "repo");
@@ -1136,7 +1255,7 @@ describe("graph CLI", () => {
     const controlPayload = JSON.parse(control.stdout);
 
     expect(graphHelp.exitCode).toBe(0);
-    expect(graphHelp.stdout).toContain("Executable node kinds: agent, exec, check");
+    expect(graphHelp.stdout).toContain("Executable node kinds: agent, exec, check, checkpoint");
     expect(graphHelp.stdout).toContain(
       "Managed workflow scaffolds: deep_research, spec_design, execute_spec, review_change"
     );

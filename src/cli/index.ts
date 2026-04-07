@@ -114,7 +114,7 @@ function renderGraphHelp(): string {
     "- The runtime executes compiled graphs only.",
     "- sequence, parallel, and repeat are authoring containers, not executable runtime nodes.",
     "- deep_research, spec_design, execute_spec, and review_change are implemented as managed workflows that lower into generated primitive subgraphs.",
-    "- repeat.until.node must target a descendant check node.",
+    "- repeat.until.node must target a descendant check or checkpoint node.",
     "- profile selection is launch-scoped by default and may be overridden per executable node.",
     "- agent and ai check nodes require a resolved harness; deterministic checks do not.",
     `- ${graphPathRuleText}`,

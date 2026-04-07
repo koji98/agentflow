@@ -123,6 +123,7 @@ function splitQualifiedPath(
 
 function selectAttemptsForReference(
   registry: AttemptRegistry,
+  graph: CompiledGraph,
   compiledIds: string[],
   reference: ContextReference
 ): RuntimeNodeAttempt[] {
@@ -141,10 +142,26 @@ function selectAttemptsForReference(
       : typeof iterationSelector === "number"
         ? attempts.filter((attempt) => attempt.iteration_index === iterationSelector)
         : (() => {
-            const candidate = selectAttempt(
-              attempts.filter((attempt) => attempt.iteration_index !== undefined),
-              iterationSelector
-            );
+            const repeatScopeId = compiledIds
+              .map((compiledId) => graph.nodes.find((node) => node.compiled_id === compiledId)?.repeat_scope_id)
+              .find((scopeId): scopeId is string => scopeId !== undefined);
+            const repeatScope =
+              repeatScopeId === undefined
+                ? undefined
+                : graph.scopes.find(
+                    (scope) => scope.kind === "repeat" && scope.scope_id === repeatScopeId
+                  );
+            const repeatSelectorAttempts =
+              repeatScope?.kind === "repeat"
+                ? listAttemptsForCompiledNode(registry, repeatScope.until_compiled_id).filter(
+                    (attempt) => attempt.iteration_index !== undefined
+                  )
+                : [];
+            const selectorAttempts =
+              repeatSelectorAttempts.length > 0
+                ? repeatSelectorAttempts
+                : attempts.filter((attempt) => attempt.iteration_index !== undefined);
+            const candidate = selectAttempt(selectorAttempts, iterationSelector);
 
             return candidate ? attempts.filter((attempt) => attempt.iteration_index === candidate.iteration_index) : [];
           })();
@@ -328,7 +345,12 @@ async function materializeContextReference(
   omitted: ContextPacketOmittedItem[];
 }> {
   const compiledIds = options.compiled_graph.authored_to_compiled[reference.node] ?? [];
-  const attempts = selectAttemptsForReference(options.attempts, compiledIds, reference);
+  const attempts = selectAttemptsForReference(
+    options.attempts,
+    options.compiled_graph,
+    compiledIds,
+    reference
+  );
 
   if (attempts.length === 0) {
     if (reference.optional) {

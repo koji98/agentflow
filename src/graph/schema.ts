@@ -1,6 +1,6 @@
 export const graphVersion = "1" as const;
 
-export const executableNodeKinds = ["agent", "exec", "check"] as const;
+export const executableNodeKinds = ["agent", "exec", "check", "checkpoint"] as const;
 export const containerNodeKinds = ["sequence", "parallel", "repeat"] as const;
 export const authoredNodeKinds = [...executableNodeKinds, ...containerNodeKinds] as const;
 export const managedWorkflowKinds = ["deep_research", "spec_design", "execute_spec", "review_change"] as const;
