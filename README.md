@@ -1,27 +1,36 @@
 # Agentflow
 
-Agentflow is a graph-native execution engine for coding work.
+Agentflow is a graph-native execution engine for coding tasks.
 
-It lets you describe a task as an explicit graph of agents, commands, checks, loops, and managed workflows across local repositories. Agentflow validates that graph, compiles it into an executable runtime plan, runs it with local workspaces and harnesses, and leaves durable artifacts behind so the run can be inspected or resumed.
+It turns coding work into an explicit executable graph instead of burying the workflow inside one long prompt. A graph can inspect a repository, gather evidence in parallel, merge those findings into a plan, iterate on implementation, and gate completion with automated or operator review. The CLI validates that graph, compiles it into a runtime plan, runs it against local repositories, and leaves durable artifacts behind so the work can be inspected or resumed.
 
 The key boundary is simple: you author readable control flow, but the runtime executes compiled primitive nodes only.
 
 ```mermaid
-flowchart LR
-    seq["sequence"] --> inspect["agent inspect repo"]
-    inspect --> fanout["parallel fan-out"]
-    fanout --> execNode["exec run command"]
-    fanout --> checkNode["check validate result"]
-    execNode --> fanin["fan-in handoff"]
-    checkNode --> fanin
-    fanin --> loop["repeat repair loop"]
-    loop --> revise["agent revise"]
-    revise --> gate["check or checkpoint gate"]
-    gate --> artifacts["outputs and artifacts"]
-    managed["managed workflow"] -. lowers into primitive subgraph .-> fanin
+flowchart TB
+    kickoff["sequence\ntriage coding task"] --> inspect["agent\ninspect repo and choose surfaces"]
+    inspect --> gather["parallel\ngather evidence"]
+    gather --> readCode["agent\ntrace relevant codepaths"]
+    gather --> reproduce["exec\nrun tests, builds, search"]
+    readCode --> plan["agent\nsynthesize findings into a plan"]
+    reproduce --> plan
+
+    subgraph repair["repeat until ready"]
+        direction TB
+        implement["agent\napply revision"] --> validate["exec\nrun targeted validation"]
+        validate --> quality["check\ndeterministic or AI gate"]
+        quality --> review["checkpoint\noperator review when needed"]
+    end
+
+    plan --> implement
+    quality -- fail --> implement
+    review -- revise --> implement
+    review -- pass --> artifacts["artifacts\noutputs, logs, summary"]
 ```
 
-The point is not just that Agentflow has several node kinds. It is that those node kinds compose into deliberate graphs for coding work: inspect, fan out, fan in, validate, repair, and hand off with explicit structure.
+Managed workflows such as `deep_research`, `spec_design`, `execute_spec`, and `review_change` are authored shortcuts that lower into the same kinds of patterns rather than introducing a separate runtime model.
+
+The point is not just that Agentflow has several node kinds. It is that those node kinds compose into deliberate coding graphs: fan out when evidence gathering is independent, fan in when a plan needs synthesis, and use repair loops only where implementation and validation genuinely need iteration.
 
 ## Why Agentflow
 
