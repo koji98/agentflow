@@ -2,41 +2,64 @@
 
 Agentflow is a local-first execution engine for coding graphs.
 
-You write a graph JSON file, Agentflow validates it, compiles it into an executable graph, runs it against one or more local repositories, and stores durable artifacts for later inspection.
+It is for cases where you want a coding workflow to be explicit, reviewable, and reproducible instead of hidden inside an opaque prompt loop. You author a graph JSON document that declares repos, profiles, nodes, context flow, and outputs. Agentflow validates that authored graph, compiles it into a flat executable graph, runs it against one or more local repositories, and writes durable artifacts for inspection or resume.
+
+The important boundary is simple: authors write an ergonomic nested graph, but the runtime executes compiled primitive nodes only.
 
 ```mermaid
-flowchart LR
-    authored["Author graph JSON"] --> validate["Validate contract"]
-    validate --> compile["Compile to executable graph"]
-    compile --> run["Run against local repos"]
-    run --> artifacts["Write durable artifacts"]
-    artifacts --> inspect["Inspect or resume later"]
+flowchart TD
+    subgraph authored["Authored graph"]
+        start["sequence"]
+        inspect["agent"]
+        fanout["parallel"]
+        execNode["exec"]
+        aiCheck["check"]
+        merge["fan-in sequence"]
+        loop["repeat"]
+        revise["agent"]
+        gate["checkpoint or check"]
+        workflow["managed workflow"]
+
+        start --> inspect --> fanout
+        fanout --> execNode
+        fanout --> aiCheck
+        execNode --> merge
+        aiCheck --> merge
+        merge --> loop
+        loop --> revise --> gate --> loop
+        start --> workflow
+    end
+
+    authored --> compile["Compile and lower"]
+    workflow --> lowered["Generated primitive subgraph"]
+    lowered --> compile
+    compile --> runtime["Compiled graph: flat primitive nodes, edges, and repeat scopes"]
+    runtime --> artifacts["Durable artifacts: logs, outputs, summary, state"]
 ```
 
-The intended workflow is:
+The point is not just that Agentflow has several node kinds. It is that those node kinds compose into deliberate coding graphs: inspect, fan out, fan in, validate, repair, and hand off work with explicit structure.
 
-1. author a graph
-2. validate it
-3. compile it
-4. run it
-5. inspect the emitted artifacts
+## Why Agentflow
 
-## What Agentflow Does
+- Author the orchestration as data, not as hidden control flow inside a single agent prompt.
+- Keep execution local-first with explicit repos, workspaces, harnesses, and checks.
+- Compile author-friendly control flow into a runtime contract you can inspect before launch.
+- Preserve a durable run trail with summaries, logs, outputs, events, and projected state.
+- Reuse structured managed workflows when you want higher-level scaffolds without inventing new runtime node kinds.
 
-- Graph-native CLI: `validate`, `compile`, `run`, `resume`, `graph-help`
-- Executable node kinds: `agent`, `exec`, `check`, `checkpoint`
-- Container node kinds: `sequence`, `parallel`, `repeat`
-- Managed workflows: `deep_research`, `spec_design`, `execute_spec`, `review_change`
-- Harness adapters: `codex-cli`, `cursor-cli`
-- Workspace backends: `inplace`, `worktree`
-- Durable run artifacts under a shared runs root
-- CLI-readable compiled contracts, summaries, logs, and run state under those artifacts
+## Node Model
 
-## What Agentflow Does Not Do
+| Category | Kinds | Runtime behavior |
+| --- | --- | --- |
+| Primitive executable nodes | `agent`, `exec`, `check`, `checkpoint` | Executed directly by the runtime |
+| Authoring containers | `sequence`, `parallel`, `repeat` | Authoring-only control flow, compiled into primitive execution edges and scopes |
+| Managed workflows | `deep_research`, `spec_design`, `execute_spec`, `review_change` | Authored as structured intent, lowered into generated primitive subgraphs |
 
-- It does not execute authored containers directly. The runtime executes compiled graphs only.
-- It does not provide a generalized tool plugin system yet.
-- It does not support remote devboxes or native non-CLI harnesses in this release.
+## Release Boundary
+
+- The runtime executes compiled graphs only.
+- Agentflow does not provide a generalized tool plugin system yet.
+- Agentflow does not support remote devboxes or native non-CLI harnesses in this release.
 
 ## Requirements
 
@@ -151,25 +174,13 @@ Profiles do not define graph structure.
 
 ### Node kinds
 
-Executable node kinds:
+Three authoring categories matter:
 
-- `agent`
-- `exec`
-- `check`
-- `checkpoint`
+- Primitive executable nodes: `agent`, `exec`, `check`, `checkpoint`
+- Authoring containers: `sequence`, `parallel`, `repeat`
+- Managed workflows: `deep_research`, `spec_design`, `execute_spec`, `review_change`
 
-Container node kinds:
-
-- `sequence`
-- `parallel`
-- `repeat`
-
-Managed workflow kinds:
-
-- `deep_research`
-- `spec_design`
-- `execute_spec`
-- `review_change`
+Only primitive executable nodes run directly. Containers compile into control-flow edges and scopes, and managed workflows compile into generated primitive subgraphs.
 
 `deep_research`, `spec_design`, `execute_spec`, and `review_change` are structured managed workflows that compile into generated primitive subgraphs. Start with [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md). The workflow-specific contracts live in [`docs/DEEP_RESEARCH_WORKFLOW.md`](docs/DEEP_RESEARCH_WORKFLOW.md), [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md), [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md), and [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md).
 
