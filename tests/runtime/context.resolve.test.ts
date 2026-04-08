@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -12,19 +10,23 @@ import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { closeNodeAttempt, createAttemptRegistry, openNodeAttempt } from "../../src/runtime/attempts.js";
 import { resolveExecutionContext } from "../../src/runtime/context/resolve.js";
 
-const execFileAsync = promisify(execFile);
+function compileGraph(document: Parameters<typeof normalizeAuthoredGraphDocument>[0]) {
+  const normalized = normalizeAuthoredGraphDocument(document);
+  expect(normalized.diagnostics).toEqual([]);
+  const launch = resolveLaunchConfig(normalized.document!);
+  const compilation = compileAuthoredGraph(
+    normalized.document!,
+    launch,
+    normalized.lowered_managed_nodes
+  );
 
-async function initGitRepo(repoDir: string): Promise<void> {
-  await execFileAsync("git", ["init"], { cwd: repoDir });
-  await execFileAsync("git", ["config", "user.email", "agentflow@example.com"], { cwd: repoDir });
-  await execFileAsync("git", ["config", "user.name", "Agentflow Tests"], { cwd: repoDir });
-  await writeFile(join(repoDir, "README.md"), "seed\n");
-  await execFileAsync("git", ["add", "README.md"], { cwd: repoDir });
-  await execFileAsync("git", ["commit", "-m", "init"], { cwd: repoDir });
+  expect(compilation.diagnostics).toEqual([]);
+  expect(compilation.compiled_graph).toBeDefined();
+  return compilation.compiled_graph!;
 }
 
 describe("context resolution", () => {
-  it("materializes static inputs and upstream output references into a context packet", async () => {
+  it("materializes live inputs and upstream output references into a context packet", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-"));
     const repoDir = join(tempRoot, "repo");
     const upstreamDir = join(tempRoot, "upstream");
@@ -38,13 +40,11 @@ describe("context resolution", () => {
     await writeFile(join(upstreamDir, "result.json"), JSON.stringify({ passed: true }));
     await writeFile(join(upstreamDir, "artifact.json"), JSON.stringify({ passed: true }));
 
-    const normalized = normalizeAuthoredGraphDocument({
+    const graph = compileGraph({
       version: "1",
       graph_id: "context-resolution",
       repos: {
-        main: {
-          path: "."
-        }
+        main: { path: "." }
       },
       defaults: {
         launch_profile: "default"
@@ -97,13 +97,7 @@ describe("context resolution", () => {
         ]
       }
     });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-    const graph = compilation.compiled_graph!;
+
     const sourceNode = graph.nodes.find((node) => node.authored_id === "source")!;
     const consumeNode = graph.nodes.find((node) => node.authored_id === "consume")!;
     const attempts = createAttemptRegistry();
@@ -132,14 +126,8 @@ describe("context resolution", () => {
 
     expect(resolved.packet.materials).toHaveLength(3);
     expect(resolved.packet.omitted).toEqual([]);
-    expect(resolved.packet.totals).toEqual({
-      material_count: 3,
-      file_count: 3,
-      total_bytes: expect.any(Number)
-    });
     expect(await readFile(resolved.summary_path, "utf8")).toContain("Materialized items");
-    expect(await readFile(resolved.summary_path, "utf8")).toContain("Truncated items");
-    expect(await readFile(resolved.summary_path, "utf8")).not.toContain("Rule files");
+    expect(await readFile(resolved.summary_path, "utf8")).toContain('requested "src.txt"');
     expect(await readFile(resolved.provenance_path, "utf8")).toContain("\"compiled_id\"");
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -150,13 +138,11 @@ describe("context resolution", () => {
     const repoDir = join(tempRoot, "repo");
     await mkdir(repoDir, { recursive: true });
 
-    const normalized = normalizeAuthoredGraphDocument({
+    const graph = compileGraph({
       version: "1",
       graph_id: "context-optional-missing",
       repos: {
-        main: {
-          path: "."
-        }
+        main: { path: "." }
       },
       defaults: {
         launch_profile: "default"
@@ -190,16 +176,10 @@ describe("context resolution", () => {
         ]
       }
     });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
 
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
     const resolved = await resolveExecutionContext({
-      compiled_graph: compilation.compiled_graph!,
+      compiled_graph: graph,
       node: consumerNode,
       execution_id: "exec__consumer__attempt_1",
       execution_dir: join(tempRoot, "consumer"),
@@ -232,13 +212,11 @@ describe("context resolution", () => {
     const repoDir = join(tempRoot, "repo");
     await mkdir(repoDir, { recursive: true });
 
-    const normalized = normalizeAuthoredGraphDocument({
+    const graph = compileGraph({
       version: "1",
       graph_id: "context-selector-resolution",
       repos: {
-        main: {
-          path: "."
-        }
+        main: { path: "." }
       },
       defaults: {
         launch_profile: "default"
@@ -309,22 +287,11 @@ describe("context resolution", () => {
         ]
       }
     });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-    const graph = compilation.compiled_graph!;
+
     const produceNode = graph.nodes.find((node) => node.authored_id === "produce")!;
     const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
     const attempts = createAttemptRegistry();
-    const repeatScopeId = produceNode.repeat_scope_id;
-
-    if (!repeatScopeId) {
-      throw new Error("Expected repeat-backed producer node to carry a repeat scope.");
-    }
-
+    const repeatScopeId = produceNode.repeat_scope_id!;
     const reportOne = join(tempRoot, "iteration-1-report.md");
     const reportTwoFailed = join(tempRoot, "iteration-2-attempt-2-report.md");
     const reportTwoLatest = join(tempRoot, "iteration-2-latest-report.md");
@@ -339,9 +306,7 @@ describe("context resolution", () => {
     closeNodeAttempt(attempts, firstAttempt.execution_id, {
       status: "passed",
       outcome: "passed",
-      output_artifacts: {
-        report: reportOne
-      }
+      output_artifacts: { report: reportOne }
     });
 
     const secondAttempt = openNodeAttempt(attempts, produceNode, join(tempRoot, "attempt-2"), {
@@ -351,9 +316,7 @@ describe("context resolution", () => {
     closeNodeAttempt(attempts, secondAttempt.execution_id, {
       status: "failed",
       outcome: "failed",
-      output_artifacts: {
-        report: reportTwoFailed
-      }
+      output_artifacts: { report: reportTwoFailed }
     });
 
     const thirdAttempt = openNodeAttempt(attempts, produceNode, join(tempRoot, "attempt-3"), {
@@ -363,9 +326,7 @@ describe("context resolution", () => {
     closeNodeAttempt(attempts, thirdAttempt.execution_id, {
       status: "passed",
       outcome: "passed",
-      output_artifacts: {
-        report: reportTwoLatest
-      }
+      output_artifacts: { report: reportTwoLatest }
     });
 
     const resolved = await resolveExecutionContext({
@@ -403,13 +364,11 @@ describe("context resolution", () => {
       "utf8"
     );
 
-    const normalized = normalizeAuthoredGraphDocument({
+    const graph = compileGraph({
       version: "1",
       graph_id: "context-truncation",
       repos: {
-        main: {
-          path: "."
-        }
+        main: { path: "." }
       },
       defaults: {
         launch_profile: "default"
@@ -437,17 +396,12 @@ describe("context resolution", () => {
         ]
       }
     });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
     consumerNode.effective_policy.input_rules.max_bytes_per_item = 120;
 
     const resolved = await resolveExecutionContext({
-      compiled_graph: compilation.compiled_graph!,
+      compiled_graph: graph,
       node: consumerNode,
       execution_id: "exec__consumer__attempt_1",
       execution_dir: join(tempRoot, "consumer"),
@@ -460,7 +414,6 @@ describe("context resolution", () => {
 
     expect(resolved.packet.materials).toHaveLength(1);
     expect(resolved.packet.materials[0]?.truncated).toBe(true);
-
     const materialized = await readFile(resolved.packet.materials[0]!.materialized_path, "utf8");
     const summary = await readFile(resolved.summary_path, "utf8");
 
@@ -468,6 +421,325 @@ describe("context resolution", () => {
     expect(materialized).toContain("[Truncated by Agentflow. Read the original file for full context.]");
     expect(summary).toContain("- Truncated items: `1`");
     expect(summary).toContain("bytes, truncated");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("omits a missing live file instead of failing resolution", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-missing-file-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-missing-live-file",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "file",
+                path: "watched.txt"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toEqual([]);
+    expect(resolved.packet.omitted).toEqual([
+      {
+        key: "input_1",
+        source: {
+          kind: "file",
+          path: "watched.txt"
+        },
+        reason: 'Requested input file "watched.txt" was not found at execution time.',
+        optional: false
+      }
+    ]);
+    expect(await readFile(resolved.summary_path, "utf8")).toContain('Requested input file "watched.txt" was not found');
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("omits a glob when it matches no files instead of failing resolution", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-empty-glob-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-empty-glob",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "glob",
+                path: "*.md"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toEqual([]);
+    expect(resolved.packet.omitted).toEqual([
+      {
+        key: "input_1",
+        source: {
+          kind: "glob",
+          path: "*.md"
+        },
+        reason: 'Requested input glob "*.md" matched no files after ignore filtering at execution time.',
+        optional: false
+      }
+    ]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("uses sorted filesystem glob resolution and caps matches after sorting", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-fs-glob-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, "z-last.md"), "z-last\n");
+    await writeFile(join(repoDir, "a-first.md"), "a-first\n");
+    await writeFile(join(repoDir, "m-middle.md"), "m-middle\n");
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-fs-glob",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "glob",
+                path: "*.md",
+                max_files: 2
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toHaveLength(2);
+    const materializedContents = await Promise.all(
+      resolved.packet.materials.map((item) => readFile(item.materialized_path, "utf8"))
+    );
+    expect(materializedContents).toEqual(["a-first\n", "m-middle\n"]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("filters glob inputs through root ignore files and hard runtime excludes", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-ignore-glob-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(join(repoDir, "src"), { recursive: true });
+    await mkdir(join(repoDir, "ignored-dir"), { recursive: true });
+    await mkdir(join(repoDir, "node_modules"), { recursive: true });
+    await mkdir(join(repoDir, ".agentflow"), { recursive: true });
+    await writeFile(join(repoDir, ".gitignore"), "ignored-dir/\n");
+    await writeFile(join(repoDir, ".ignore"), "src/extra.md\n");
+    await writeFile(join(repoDir, "src", "keep.md"), "keep\n");
+    await writeFile(join(repoDir, "src", "extra.md"), "extra\n");
+    await writeFile(join(repoDir, "ignored-dir", "nested.md"), "nested\n");
+    await writeFile(join(repoDir, "node_modules", "vendor.md"), "vendor\n");
+    await writeFile(join(repoDir, ".agentflow", "run.md"), "run\n");
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-ignore-glob",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "glob",
+                path: "**/*.md"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toHaveLength(1);
+    expect(await readFile(resolved.packet.materials[0]!.materialized_path, "utf8")).toBe("keep\n");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("lets explicit file inputs bypass ignore filtering", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-ignore-file-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, ".gitignore"), "ignored.md\n");
+    await writeFile(join(repoDir, "ignored.md"), "still available\n");
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-ignore-file",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "file",
+                path: "ignored.md"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toHaveLength(1);
+    expect(await readFile(resolved.packet.materials[0]!.materialized_path, "utf8")).toBe(
+      "still available\n"
+    );
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -481,13 +753,11 @@ describe("context resolution", () => {
       await writeFile(join(repoDir, `note-${index + 1}.md`), `${contents}\n`, "utf8");
     }
 
-    const normalized = normalizeAuthoredGraphDocument({
+    const graph = compileGraph({
       version: "1",
       graph_id: "context-many-small-files",
       repos: {
-        main: {
-          path: "."
-        }
+        main: { path: "." }
       },
       defaults: {
         launch_profile: "default"
@@ -519,16 +789,10 @@ describe("context resolution", () => {
         ]
       }
     });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
 
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
     const resolved = await resolveExecutionContext({
-      compiled_graph: compilation.compiled_graph!,
+      compiled_graph: graph,
       node: consumerNode,
       execution_id: "exec__consumer__attempt_1",
       execution_dir: join(tempRoot, "consumer"),
@@ -549,170 +813,6 @@ describe("context resolution", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("uses deterministic git-backed glob resolution and excludes ignored files", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-git-glob-"));
-    const repoDir = join(tempRoot, "repo");
-    await mkdir(repoDir, { recursive: true });
-    await initGitRepo(repoDir);
-    await writeFile(join(repoDir, ".gitignore"), "ignored.md\n");
-    await writeFile(join(repoDir, "tracked-b.md"), "tracked-b\n");
-    await writeFile(join(repoDir, "tracked-a.md"), "tracked-a\n");
-    await writeFile(join(repoDir, "untracked-c.md"), "untracked-c\n");
-    await writeFile(join(repoDir, "ignored.md"), "ignored\n");
-    await execFileAsync("git", ["add", ".gitignore", "tracked-b.md", "tracked-a.md"], { cwd: repoDir });
-    await execFileAsync("git", ["commit", "-m", "add markdown files"], { cwd: repoDir });
-
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "context-git-glob",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "exec",
-            id: "consumer",
-            command: "placeholder",
-            inputs: [
-              {
-                kind: "glob",
-                path: "*.md"
-              }
-            ]
-          }
-        ]
-      }
-    });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
-
-    const resolved = await resolveExecutionContext({
-      compiled_graph: compilation.compiled_graph!,
-      node: consumerNode,
-      execution_id: "exec__consumer__attempt_1",
-      execution_dir: join(tempRoot, "consumer"),
-      workspace_path: repoDir,
-      repo_workspaces: {
-        main: repoDir
-      },
-      attempts: createAttemptRegistry()
-    });
-
-    expect(resolved.packet.materials).toHaveLength(4);
-    const materializedContents = await Promise.all(
-      resolved.packet.materials.map((item) => readFile(item.materialized_path, "utf8"))
-    );
-    expect(materializedContents).toEqual([
-      "seed\n",
-      "tracked-a\n",
-      "tracked-b\n",
-      "untracked-c\n"
-    ]);
-
-    const provenance = JSON.parse(await readFile(resolved.provenance_path, "utf8")) as {
-      inputs: Array<{ kind: string; files?: Array<{ path: string }> }>;
-    };
-    expect(provenance.inputs[0]?.kind).toBe("glob");
-    expect(provenance.inputs[0]?.files?.map((file) => file.path)).toEqual([
-      "README.md",
-      "tracked-a.md",
-      "tracked-b.md",
-      "untracked-c.md"
-    ]);
-
-    await rm(tempRoot, { recursive: true, force: true });
-  });
-
-  it("uses sorted filesystem fallback for non-git repos and caps glob matches after sorting", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-fs-glob-"));
-    const repoDir = join(tempRoot, "repo");
-    await mkdir(repoDir, { recursive: true });
-    await writeFile(join(repoDir, "z-last.md"), "z-last\n");
-    await writeFile(join(repoDir, "a-first.md"), "a-first\n");
-    await writeFile(join(repoDir, "m-middle.md"), "m-middle\n");
-
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "context-fs-glob",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "exec",
-            id: "consumer",
-            command: "placeholder",
-            inputs: [
-              {
-                kind: "glob",
-                path: "*.md",
-                max_files: 2
-              }
-            ]
-          }
-        ]
-      }
-    });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
-
-    const resolved = await resolveExecutionContext({
-      compiled_graph: compilation.compiled_graph!,
-      node: consumerNode,
-      execution_id: "exec__consumer__attempt_1",
-      execution_dir: join(tempRoot, "consumer"),
-      workspace_path: repoDir,
-      repo_workspaces: {
-        main: repoDir
-      },
-      attempts: createAttemptRegistry()
-    });
-
-    expect(resolved.packet.materials).toHaveLength(2);
-    const materializedContents = await Promise.all(
-      resolved.packet.materials.map((item) => readFile(item.materialized_path, "utf8"))
-    );
-    expect(materializedContents).toEqual(["a-first\n", "m-middle\n"]);
-
-    await rm(tempRoot, { recursive: true, force: true });
-  });
-
   it("fails incrementally when the next item would exceed max_total_bytes", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-byte-budget-"));
     const repoDir = join(tempRoot, "repo");
@@ -720,13 +820,11 @@ describe("context resolution", () => {
     await writeFile(join(repoDir, "first.txt"), "abcdefghij", "utf8");
     await writeFile(join(repoDir, "second.txt"), "klmnopqrst", "utf8");
 
-    const normalized = normalizeAuthoredGraphDocument({
+    const graph = compileGraph({
       version: "1",
       graph_id: "context-byte-budget",
       repos: {
-        main: {
-          path: "."
-        }
+        main: { path: "." }
       },
       defaults: {
         launch_profile: "default"
@@ -762,18 +860,13 @@ describe("context resolution", () => {
         ]
       }
     });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-    const consumerNode = compilation.compiled_graph!.nodes.find((node) => node.authored_id === "consumer")!;
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
     const executionDir = join(tempRoot, "consumer");
 
     await expect(
       resolveExecutionContext({
-        compiled_graph: compilation.compiled_graph!,
+        compiled_graph: graph,
         node: consumerNode,
         execution_id: "exec__consumer__attempt_1",
         execution_dir: executionDir,

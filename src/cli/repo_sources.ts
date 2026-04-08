@@ -2,10 +2,12 @@ import { stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import type { AuthoredGraphDocument } from "../graph/authored.js";
+export { collectReferencedRepoAliases } from "../graph/repo_aliases.js";
 
 export async function resolveRepoSources(
   absoluteGraphPath: string,
-  document: AuthoredGraphDocument
+  document: AuthoredGraphDocument,
+  repoAliases = Object.keys(document.repos)
 ): Promise<{
   repo_sources?: Record<string, string>;
   diagnostics: Array<{
@@ -20,7 +22,17 @@ export async function resolveRepoSources(
     message: string;
   }> = [];
 
-  for (const [repoAlias, repoDefinition] of Object.entries(document.repos)) {
+  for (const repoAlias of repoAliases) {
+    const repoDefinition = document.repos[repoAlias];
+
+    if (!repoDefinition) {
+      diagnostics.push({
+        path: `$.repos.${repoAlias}`,
+        message: `Referenced repo alias "${repoAlias}" is not declared in $.repos.`
+      });
+      continue;
+    }
+
     const absoluteRepoPath = resolve(graphDirectory, repoDefinition.path);
 
     try {

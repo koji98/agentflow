@@ -10,6 +10,7 @@ import type {
   CompiledExecutableNode,
   CompiledGraph
 } from "../../graph/compiled.js";
+import { collectReferencedRepoAliases } from "../../graph/repo_aliases.js";
 import { createRunOwnerRecord, type RunOwnerRecord } from "../../artifacts/owner.js";
 import type { GraphDiagnostic, GraphOutcome, HarnessName } from "../../graph/schema.js";
 import { ArtifactWriter } from "../../artifacts/writer.js";
@@ -150,6 +151,10 @@ interface StreamingLogSink {
   flush: () => Promise<void>;
 }
 
+interface NodeReadinessCache {
+  harnesses: Map<HarnessName, Promise<string[]>>;
+}
+
 function deriveRunId(runRoot: string): string {
   return basename(runRoot);
 }
@@ -204,6 +209,99 @@ function createStreamingLogSink(
       await Promise.all([stdoutPending, stderrPending]);
     }
   };
+}
+
+function createNodeReadinessCache(): NodeReadinessCache {
+  return {
+    harnesses: new Map()
+  };
+}
+
+function filterActiveRepoSources(
+  graph: CompiledGraph,
+  repoSources: Record<string, string>
+): Record<string, string> {
+  const activeAliases = new Set(collectReferencedRepoAliases(graph));
+
+  return Object.fromEntries(
+    Object.entries(repoSources).filter(([repoAlias]) => activeAliases.has(repoAlias))
+  );
+}
+
+async function collectHarnessReadinessDiagnostics(
+  harnessName: HarnessName,
+  harnesses: Partial<Record<HarnessName, HarnessAdapter>> | undefined,
+  cache: NodeReadinessCache
+): Promise<string[]> {
+  const cached = cache.harnesses.get(harnessName);
+
+  if (cached) {
+    return cached;
+  }
+
+  const harness = harnesses?.[harnessName];
+
+  if (!harness) {
+    const diagnostics = Promise.resolve([
+      `Harness adapter "${harnessName}" is unavailable at runtime.`
+    ]);
+    cache.harnesses.set(harnessName, diagnostics);
+    return diagnostics;
+  }
+
+  const diagnostics = Promise.resolve(harness.checkReadiness?.() ?? []);
+  cache.harnesses.set(harnessName, diagnostics);
+  return diagnostics;
+}
+
+async function ensureNodeReadiness(
+  node: CompiledExecutableNode,
+  options: RunCompiledGraphOptions,
+  cache: NodeReadinessCache
+): Promise<void> {
+  if (node.kind === "agent" && !options.executors?.agent) {
+    const harnessName = node.effective_policy.harness;
+
+    if (!harnessName) {
+      throw new Error(`Agent "${node.compiled_id}" requires a resolved harness.`);
+    }
+
+    const diagnostics = await collectHarnessReadinessDiagnostics(
+      harnessName,
+      options.harnesses,
+      cache
+    );
+
+    if (diagnostics.length > 0) {
+      throw new Error(diagnostics.join(" | "));
+    }
+
+    return;
+  }
+
+  if (node.kind === "check" && node.check_kind === "ai" && !options.executors?.check) {
+    const harnessName = node.effective_policy.harness;
+
+    if (!harnessName) {
+      throw new Error(`AI check "${node.compiled_id}" requires a resolved harness.`);
+    }
+
+    const diagnostics = await collectHarnessReadinessDiagnostics(
+      harnessName,
+      options.harnesses,
+      cache
+    );
+
+    if (diagnostics.length > 0) {
+      throw new Error(diagnostics.join(" | "));
+    }
+
+    return;
+  }
+
+  if (node.kind === "checkpoint" && !options.executors?.checkpoint) {
+    throw new Error(`Checkpoint "${node.compiled_id}" requires a checkpoint executor.`);
+  }
 }
 
 async function initializeWorkspace(
@@ -816,7 +914,8 @@ async function executeNode(
   writer: ArtifactWriter,
   node: CompiledExecutableNode,
   attempt: RuntimeNodeAttempt,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  readinessCache: NodeReadinessCache
 ): Promise<{
   node: CompiledExecutableNode;
   attempt: RuntimeNodeAttempt;
@@ -827,15 +926,21 @@ async function executeNode(
   if (!workspace) {
     throw new Error(`Missing workspace binding for repo "${node.repo}".`);
   }
-  const packet_path = join(attempt.execution_dir, "context_packet.json");
-  const summary_path = join(attempt.execution_dir, "context_summary.md");
+  let context:
+    | Awaited<ReturnType<typeof resolveExecutionContext>>
+    | undefined;
   let executionPaths:
     | Awaited<ReturnType<ArtifactWriter["writeExecutionStart"]>>
     | undefined;
   let logSink: StreamingLogSink | undefined;
 
   try {
-    const context = await resolveExecutionContext({
+    executionPaths = await writer.writeExecutionStart(attempt);
+    logSink = createStreamingLogSink(writer, executionPaths);
+
+    await ensureNodeReadiness(node, options, readinessCache);
+
+    context = await resolveExecutionContext({
       compiled_graph: session.graph,
       node,
       execution_id: attempt.execution_id,
@@ -849,13 +954,6 @@ async function executeNode(
       ),
       attempts: session.attempts
     });
-
-    executionPaths = await writer.writeExecutionStart(attempt, {
-      packet_path: context.packet_path,
-      summary_path: context.summary_path,
-      provenance_path: context.provenance_path
-    });
-    logSink = createStreamingLogSink(writer, executionPaths);
 
     let result: RuntimeNodeExecutionResult;
 
@@ -994,14 +1092,6 @@ async function executeNode(
       result
     };
   } catch (error) {
-    if (!executionPaths) {
-      executionPaths = await writer.writeExecutionStart(attempt, {
-        packet_path,
-        summary_path
-      });
-      logSink = createStreamingLogSink(writer, executionPaths);
-    }
-
     if (logSink) {
       await logSink.flush();
     }
@@ -1010,22 +1100,34 @@ async function executeNode(
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
       status: "failed",
       outcome: "failed",
-      stdout_log_path: executionPaths.stdout_log_path,
-      stderr_log_path: executionPaths.stderr_log_path,
-      result_path: executionPaths.result_path,
-      context_packet_path: packet_path,
-      context_summary_path: summary_path,
+      ...(executionPaths
+        ? {
+            stdout_log_path: executionPaths.stdout_log_path,
+            stderr_log_path: executionPaths.stderr_log_path,
+            result_path: executionPaths.result_path
+          }
+        : {}),
+      ...(context
+        ? {
+            context_packet_path: context.packet_path,
+            context_summary_path: context.summary_path,
+            context_provenance_path: context.provenance_path
+          }
+        : {}),
       metadata: {
-        error: message
+        error: message,
+        context_status: context ? "resolved" : "failed"
       }
     });
 
-    await writer.writeExecutionCompletion(completedAttempt, {
-      result: {
-        error: message
-      },
-      stderr: message
-    });
+    if (executionPaths) {
+      await writer.writeExecutionCompletion(completedAttempt, {
+        result: {
+          error: message
+        },
+        stderr: message
+      });
+    }
 
     return {
       node,
@@ -1039,7 +1141,8 @@ async function executeNode(
         stdout: undefined,
         stderr: message,
         metadata: {
-          error: message
+          error: message,
+          context_status: context ? "resolved" : "failed"
         }
       }
     };
@@ -1054,7 +1157,8 @@ async function startReadyNode(
   events: RuntimeEventEnvelope[],
   activeExecutions: Map<string, ActiveExecutionHandle>,
   readyQueue: ReturnType<typeof createReadyQueueState>,
-  topology: SchedulerTopology
+  topology: SchedulerTopology,
+  readinessCache: NodeReadinessCache
 ): Promise<boolean> {
   for (let index = 0; index < readyQueue.queue.length; index += 1) {
     const readyNode = readyQueue.queue[index];
@@ -1094,7 +1198,8 @@ async function startReadyNode(
       writer,
       node,
       attempt,
-      abortControl.signal
+      abortControl.signal,
+      readinessCache
     ).finally(() => {
       abortControl.dispose();
     });
@@ -1259,6 +1364,7 @@ async function executeRunLoop(
 ): Promise<RunCompiledGraphResult> {
   const readyQueue = createReadyQueueState();
   const activeExecutions = new Map<string, ActiveExecutionHandle>();
+  const readinessCache = createNodeReadinessCache();
 
   while (true) {
     if (options.signal?.aborted && session.status !== "canceled") {
@@ -1281,7 +1387,8 @@ async function executeRunLoop(
         events,
         activeExecutions,
         readyQueue,
-        topology
+        topology,
+        readinessCache
       ))
     ) {
       // Keep dispatching while the scheduler can consume ready nodes.
@@ -1506,50 +1613,6 @@ async function executeRunLoop(
   }
 }
 
-function collectPreflightDiagnostics(
-  graph: CompiledGraph,
-  repoSources: Record<string, string>,
-  executors: RuntimeExecutorRegistry | undefined,
-  harnesses: Partial<Record<HarnessName, HarnessAdapter>> | undefined
-): string[] {
-  const diagnostics: string[] = [];
-  const checkedHarnesses = new Set<HarnessName>();
-
-  for (const node of graph.nodes) {
-    if (!(node.repo in repoSources)) {
-      diagnostics.push(`Missing repo source for alias "${node.repo}".`);
-    }
-
-    if (node.kind === "agent" && !executors?.agent) {
-      const harnessName = node.effective_policy.harness;
-
-      if (!harnessName || !harnesses?.[harnessName]) {
-        diagnostics.push(`Agent node "${node.compiled_id}" has no executor or harness adapter.`);
-      } else if (!checkedHarnesses.has(harnessName)) {
-        diagnostics.push(...(harnesses[harnessName]!.preflight?.() ?? []));
-        checkedHarnesses.add(harnessName);
-      }
-    }
-
-    if (node.kind === "check" && node.check_kind === "ai" && !executors?.check) {
-      const harnessName = node.effective_policy.harness;
-
-      if (!harnessName || !harnesses?.[harnessName]) {
-        diagnostics.push(`AI check node "${node.compiled_id}" has no executor or harness adapter.`);
-      } else if (!checkedHarnesses.has(harnessName)) {
-        diagnostics.push(...(harnesses[harnessName]!.preflight?.() ?? []));
-        checkedHarnesses.add(harnessName);
-      }
-    }
-
-    if (node.kind === "checkpoint" && !executors?.checkpoint) {
-      diagnostics.push(`Checkpoint node "${node.compiled_id}" has no checkpoint executor.`);
-    }
-  }
-
-  return diagnostics;
-}
-
 function buildInitializeArtifactsOptions(
   options: RunCompiledGraphOptions,
   session: RuntimeSession,
@@ -1585,10 +1648,11 @@ export async function runCompiledGraph(
 ): Promise<RunCompiledGraphResult> {
   const run_id = deriveRunId(options.run_root);
   const writer = new ArtifactWriter(options.run_root);
+  const activeRepoSources = filterActiveRepoSources(options.compiled_graph, options.repo_sources);
   const predictedBindings = predictWorkspaceBindings(
     options.compiled_graph.launch.workspace_backend,
     options.run_root,
-    options.repo_sources
+    activeRepoSources
   );
   const session = createRuntimeSession(
     run_id,
@@ -1610,37 +1674,11 @@ export async function runCompiledGraph(
     scope_count: options.compiled_graph.scopes.length
   });
 
-  const preflightDiagnostics = collectPreflightDiagnostics(
-    options.compiled_graph,
-    options.repo_sources,
-    options.executors,
-    options.harnesses
-  );
-
-  if (preflightDiagnostics.length > 0) {
-    session.status = "failed";
-    session.ended_at = new Date().toISOString();
-    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
-      reason: "preflight",
-      message: preflightDiagnostics.join(" | ")
-    });
-    const state = await writeTerminalRunSummary(session, writer, events);
-
-    return {
-      run_id,
-      run_root: writer.run_root,
-      outcome: "failed",
-      state,
-      attempts: [],
-      events: await readRunEvents(writer.run_root)
-    };
-  }
-
   try {
     workspace = await initializeWorkspace(
       options.compiled_graph.launch.workspace_backend,
       options.run_root,
-      options.repo_sources
+      activeRepoSources
     );
     session.manifest.repo_workspaces = workspace.repo_workspaces;
   } catch (error) {
@@ -1689,33 +1727,6 @@ export async function resumeCompiledGraph(
   const session = options.resumed_session;
   const events = [...options.prior_events];
   const topology = buildSchedulerTopology(options.compiled_graph);
-
-  const preflightDiagnostics = collectPreflightDiagnostics(
-    options.compiled_graph,
-    options.repo_sources,
-    options.executors,
-    options.harnesses
-  );
-
-  if (preflightDiagnostics.length > 0) {
-    session.status = "failed";
-    session.ended_at = new Date().toISOString();
-    await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
-    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
-      reason: "resume_preflight",
-      message: preflightDiagnostics.join(" | ")
-    });
-    const state = await writeTerminalRunSummary(session, writer, events);
-
-    return {
-      run_id: session.run_id,
-      run_root: writer.run_root,
-      outcome: "failed",
-      state,
-      attempts: flattenAttempts(session),
-      events: await readRunEvents(writer.run_root)
-    };
-  }
 
   session.status = "running";
   delete session.ended_at;

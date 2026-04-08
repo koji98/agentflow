@@ -298,8 +298,7 @@ Rules:
 - Unqualified file and glob paths resolve against the node repo.
 - Repo-qualified paths use `<repo_alias>:<relative_path>`.
 - File and glob paths must stay within the selected repo root.
-- In git repos, `glob` enumeration uses tracked plus untracked non-ignored files from `git ls-files -co --exclude-standard`.
-- Outside git repos, `glob` enumeration falls back to a sorted recursive filesystem walk.
+- `glob` enumeration uses a deterministic sorted recursive filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`.
 - `glob.max_files` is a local cap for that glob only.
 - `text.name` is required and stable inside the materialized context packet.
 
@@ -661,6 +660,8 @@ The state store must be able to answer:
 - repo metadata and workspace paths
 - effective `input_rules`
 
+Authored `inputs` resolve live when each node starts. Agentflow does not snapshot all authored inputs up front for the whole run.
+
 ### Materialization behavior
 
 Context resolution produces:
@@ -676,35 +677,34 @@ Context resolution produces:
 - one entry per materialized input
 - original source descriptor for each entry
 - materialized file path inside the execution directory
+- live-workspace binding metadata when the material came from a resolved file or glob input
 - byte counts and truncation flags
 - omitted optional items
 
 `context_provenance.json` must include:
 
-- digests for explicit file inputs
-- sorted glob match sets plus per-file digests
+- digests for resolved explicit file inputs
+- sorted live glob match sets plus per-file digests
 - harness instruction digests for `agent`, AI `check`, and `checkpoint` nodes
 
 Agentflow does not duplicate repository instruction files into the context packet. Harness-native instruction discovery stays with the harness itself.
 
 Context materialization is incremental. The runtime enforces `max_total_bytes` while it materializes items and fails as soon as the next item would overflow the byte budget.
 
+Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing file or glob inputs are recorded explicitly as omitted context instead of crashing the whole run during preflight.
+
 The release does not implement retrieval, embeddings, ranking, or semantic search. Input resolution is explicit file and artifact materialization only.
 
 ## Resume Preservation
 
-`resume` preserves durable passed work only when two boundaries still match:
+`resume` preserves durable passed work when the recompiled executable contract still matches.
 
-1. the recompiled executable contract
-2. the node's resolved context provenance
+Preservation rules in this release:
 
-Provenance-aware preservation means:
-
-- explicit file-input content changes invalidate preservation
-- glob content changes or glob match-set changes invalidate preservation
-- root harness instruction files such as `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, and `.cursor/rules/**` invalidate harnessed nodes when they change
-- unrelated repo changes do not invalidate nodes whose provenance is unchanged
-- runs created before `context_provenance.json` existed are not preserved; those nodes restart
+- workspace file changes do not invalidate preserved passed nodes
+- harness instruction file changes do not invalidate preserved passed nodes
+- nodes restart when their compiled contract changes
+- repeat scopes restart from iteration 1 when they were unfinished or their compiled contract changed
 
 ## Harness Abstraction
 
@@ -832,12 +832,11 @@ Runs during compilation. It checks:
 
 Runs after successful compilation and before execution. It checks:
 
-- required repos exist
-- required harness binary exists on `PATH` or is provided through `AGENTFLOW_CODEX_CLI_BIN` / `AGENTFLOW_CURSOR_CLI_BIN`
+- required repos exist for the repo aliases the compiled graph actually references
 - workspace backend can initialize
 - run artifact directory is writable
 
-The release does not attempt deep remote auth diagnostics. It fails fast when the harness invocation itself proves unavailable.
+Node-specific readiness is lazy in this release. Missing harness binaries, missing checkpoint executors, and missing interactive TTY support fail the node that reaches that boundary instead of failing the whole graph before execution starts.
 
 ## Artifact Model
 
@@ -884,10 +883,11 @@ Run artifacts live under the run root:
 - `summary.md` is written for every terminal run, including preflight failure with zero node executions
 - node and execution directories use stable hashed names on disk, not literal `compiled_id` or `execution_id` values
 - execution directories are immutable once closed except for final summary writes
-- execution-root files are always written directly in the execution directory: `execution.json`, `context_packet.json`, `context_summary.md`, `context_provenance.json`, `stdout.log`, `stderr.log`, and `result.json`
+- execution-root files are written directly in the execution directory: `execution.json`, `stdout.log`, `stderr.log`, and `result.json` are always present once execution starts; `context_packet.json`, `context_summary.md`, and `context_provenance.json` appear only when context resolution succeeds
 - `artifacts/` is optional and exists only when Agentflow materializes declared workspace outputs there
 - `workspaces/` is durable only for an active `worktree` run. Once the run reaches a terminal state or workspace init rolls back, the manifest still records the historical path, but the worktree directory itself may already be gone
 - projection reads may repair stale `pending` or `running` artifacts into a terminal failed state when the recorded runtime owner fingerprint no longer matches a live local process or when a terminal run record or terminal event proves the durable state drifted
+- authored `file` and `glob` inputs resolve from the live workspace when the node starts; missing files or empty globs are recorded in `context_summary.md` and `context_packet.json` as omitted items
 
 ### Failure and partial-output rules
 
@@ -897,6 +897,7 @@ Run artifacts live under the run root:
 - once `run` passes validation and compilation, the run directory is created before preflight
 - preflight failure writes `run.json`, `authored_graph.json`, `compiled_graph.json`, `execution_manifest.json`, `compile_diagnostics.json`, `state.json`, `events.jsonl`, and `summary.md`
 - canceled runs keep all completed execution directories and final state
+- failed executions never point at nonexistent context artifacts; if context resolution fails before packet materialization, `execution.json` omits those paths
 
 ## Event Model
 

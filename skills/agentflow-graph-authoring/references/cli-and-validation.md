@@ -15,7 +15,7 @@ Use this when authoring, reviewing, or handing off an Agentflow graph.
 - `agentflow run --graph <path> --label <run-label>`
   Same as `run`, with an operator-facing label added to the run id.
 - `agentflow resume --run-root <path/to/run-root>`
-  Recompiles the original graph and preserves only passed work whose compiled contract and resolved context provenance still match.
+  Recompiles the original graph and preserves only passed work whose compiled contract still matches.
 
 Use `agentflow --help` or `agentflow <command> --help` when the command surface is unclear.
 

@@ -206,7 +206,7 @@ describe("graph profile resolution", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.judge_cross.profile",
-          message: expect.stringContaining("AI checks require codex-cli")
+          message: expect.stringContaining('does not support AI checks')
         })
       ])
     );

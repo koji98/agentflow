@@ -108,7 +108,7 @@ Guidelines:
 - prefer summaries by default
 - publish named outputs when downstream nodes need concrete artifacts
 - use repo-qualified paths like `ui:src/App.tsx` only when cross-repo reads are intentional
-- `glob` inputs are resolved deterministically and are git-aware when possible, but broad globs are still a common source of brittle graphs
+- `glob` inputs are resolved deterministically with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`, but broad globs are still a common source of brittle graphs
 
 `outputs` are the explicit downstream artifact contract. Prefer named outputs over hoping a later node will rediscover files from workspace state.
 

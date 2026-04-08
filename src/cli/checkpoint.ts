@@ -236,6 +236,12 @@ export function createInteractiveCheckpointExecutor(
   return async (
     context: RuntimeNodeExecutorContext<CompiledCheckpointNode>
   ): Promise<RuntimeNodeExecutionResult> => {
+    if (streams.stdin.isTTY !== true || streams.stderr.isTTY !== true) {
+      throw new Error(
+        'Checkpoint nodes require interactive TTY stdin and stderr when they reach execution.'
+      );
+    }
+
     const packet = JSON.parse(await readFile(context.context_packet_path, "utf8")) as ContextPacket;
     const reviewMaterial = findReviewMaterial(packet, context.node.review_from);
 

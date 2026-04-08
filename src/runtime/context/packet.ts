@@ -1,5 +1,11 @@
 import type { ContextReference, InputItem } from "../../graph/authored.js";
 
+export interface ContextPacketLiveWorkspaceBinding {
+  kind: "live_workspace_input";
+  requested_path?: string;
+  resolved_path: string;
+}
+
 export interface ContextPacketMaterializedItem {
   key: string;
   kind: "input" | "context";
@@ -7,6 +13,7 @@ export interface ContextPacketMaterializedItem {
   materialized_path: string;
   bytes: number;
   truncated: boolean;
+  binding?: ContextPacketLiveWorkspaceBinding;
 }
 
 export interface ContextPacketOmittedItem {
@@ -36,12 +43,17 @@ export interface ContextDigestEntry {
   digest: string;
 }
 
+export interface ContextResolvedDigestEntry extends ContextDigestEntry {
+  resolved_path: string;
+}
+
 export interface ContextFileInputProvenance {
   kind: "file";
   key: string;
   repo_alias: string;
   path: string;
   digest: string;
+  resolved_path: string;
 }
 
 export interface ContextGlobInputProvenance {
@@ -49,7 +61,7 @@ export interface ContextGlobInputProvenance {
   key: string;
   repo_alias: string;
   pattern: string;
-  files: ContextDigestEntry[];
+  files: ContextResolvedDigestEntry[];
   digest: string;
 }
 

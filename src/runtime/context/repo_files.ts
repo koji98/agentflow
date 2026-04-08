@@ -1,11 +1,46 @@
-import { execFile } from "node:child_process";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
+
+import ignore, { type Ignore } from "ignore";
 
 import { normalizeRelativePath } from "./common.js";
 
-const execFileAsync = promisify(execFile);
+const hardExcludedDirectories = new Set([".git", ".agentflow", "node_modules"]);
+
+async function readIgnoreFile(rootPath: string, fileName: string): Promise<string | undefined> {
+  try {
+    return await readFile(join(rootPath, fileName), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+async function buildIgnoreMatcher(rootPath: string): Promise<Ignore> {
+  const matcher = ignore();
+  matcher.add([
+    ".git",
+    ".git/**",
+    ".agentflow",
+    ".agentflow/**",
+    "node_modules",
+    "node_modules/**"
+  ]);
+
+  const [gitignore, dotIgnore] = await Promise.all([
+    readIgnoreFile(rootPath, ".gitignore"),
+    readIgnoreFile(rootPath, ".ignore")
+  ]);
+
+  if (gitignore) {
+    matcher.add(gitignore);
+  }
+
+  if (dotIgnore) {
+    matcher.add(dotIgnore);
+  }
+
+  return matcher;
+}
 
 export async function walkRelativeFilesSorted(
   rootPath: string,
@@ -18,7 +53,7 @@ export async function walkRelativeFilesSorted(
   const files: string[] = [];
 
   for (const entry of sortedEntries) {
-    if (entry.name === ".git") {
+    if (entry.isDirectory() && hardExcludedDirectories.has(entry.name)) {
       continue;
     }
 
@@ -40,25 +75,6 @@ export async function walkRelativeFilesSorted(
   return files;
 }
 
-async function listGitRepoFiles(repoRoot: string): Promise<string[]> {
-  const { stdout } = await execFileAsync(
-    "git",
-    ["ls-files", "-co", "--exclude-standard", "-z"],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      maxBuffer: 16 * 1024 * 1024
-    }
-  );
-
-  return stdout
-    .split("\0")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .map(normalizeRelativePath)
-    .sort((left, right) => left.localeCompare(right));
-}
-
 export async function listRepoFiles(
   repoRoot: string,
   cache?: Map<string, string[]>
@@ -69,14 +85,11 @@ export async function listRepoFiles(
     return cached;
   }
 
-  let files: string[];
-
-  try {
-    files = await listGitRepoFiles(repoRoot);
-  } catch {
-    files = await walkRelativeFilesSorted(repoRoot);
-  }
-
+  const [allFiles, matcher] = await Promise.all([
+    walkRelativeFilesSorted(repoRoot),
+    buildIgnoreMatcher(repoRoot)
+  ]);
+  const files = allFiles.filter((filePath) => !matcher.ignores(filePath));
   cache?.set(repoRoot, files);
   return files;
 }

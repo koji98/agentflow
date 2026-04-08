@@ -44,6 +44,6 @@ When diagnosing a run, also ask whether the graph was authored cleanly:
 - should that failing command have been a hard `check` or a soft `exec` plus review?
 - were the node boundaries too large to diagnose cleanly?
 - did the graph publish enough artifacts to explain the failure?
-- did resume restart because a real input or instruction file changed, or because the graph design was too broad?
+- did resume restart because the compiled contract changed, or because the graph design was too broad?
 
 Use those answers to improve the graph, not just the run.

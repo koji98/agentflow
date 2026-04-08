@@ -119,7 +119,7 @@ export class ArtifactWriter {
 
   async writeExecutionStart(
     attempt: RuntimeNodeAttempt,
-    context: {
+    context?: {
       packet_path: string;
       summary_path: string;
       provenance_path?: string;
@@ -146,9 +146,9 @@ export class ArtifactWriter {
       ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
       status: attempt.status,
       started_at: attempt.started_at,
-      context_packet_path: context.packet_path,
-      context_summary_path: context.summary_path,
-      ...(context.provenance_path ? { context_provenance_path: context.provenance_path } : {})
+      ...(context?.packet_path ? { context_packet_path: context.packet_path } : {}),
+      ...(context?.summary_path ? { context_summary_path: context.summary_path } : {}),
+      ...(context?.provenance_path ? { context_provenance_path: context.provenance_path } : {})
     });
     await writeText(stdoutLogPath, "");
     await writeText(stderrLogPath, "");

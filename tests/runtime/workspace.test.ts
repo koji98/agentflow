@@ -366,7 +366,7 @@ describe("workspace backends", () => {
     }
   });
 
-  it("rolls back created worktrees when initialization fails partway through", async () => {
+  it("ignores unused broken repo aliases during worktree initialization", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-workspace-rollback-"));
     const repoDir = join(tempRoot, "repo");
     const brokenDir = join(tempRoot, "broken");
@@ -394,11 +394,9 @@ describe("workspace backends", () => {
         }
       });
 
-      expect(run.outcome).toBe("failed");
+      expect(run.outcome).toBe("passed");
       await expectWorktreeCleaned(repoDir, join(runRoot, "workspaces", "main"));
-      expect(await readFile(join(runRoot, "summary.md"), "utf8")).toContain(
-        "not a git repository"
-      );
+      await expect(access(join(runRoot, "workspaces", "broken"))).rejects.toThrow();
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

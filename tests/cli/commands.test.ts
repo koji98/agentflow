@@ -201,8 +201,69 @@ describe("graph CLI", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("fails run preflight for checkpoint graphs without an interactive terminal", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-checkpoint-preflight-"));
+  it("ignores unused broken repo aliases during run resolution", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-unused-repo-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-unused-repo",
+          repos: {
+            main: {
+              path: "./repo"
+            },
+            unused: {
+              path: "./does-not-exist"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {}
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "ok",
+                repo: "main",
+                command: process.execPath,
+                args: [
+                  "-e",
+                  "process.exit(0)"
+                ]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const result = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const payload = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(payload.status).toBe("passed");
+    expect(payload.repo_sources).toEqual({
+      main: repoDir
+    });
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("does not fail launch just because a blocked checkpoint would require an interactive terminal", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-checkpoint-lazy-"));
     const repoDir = join(tempRoot, "repo");
     const graphPath = join(tempRoot, "agentflow.graph.json");
     const originalStdinTty = process.stdin.isTTY;
@@ -235,6 +296,13 @@ describe("graph CLI", () => {
             id: "root",
             steps: [
               {
+                type: "exec",
+                id: "fail_first",
+                repo: "main",
+                command: process.execPath,
+                args: ["-e", "process.exit(1)"]
+              },
+              {
                 type: "repeat",
                 id: "retry",
                 max_attempts: 2,
@@ -243,10 +311,11 @@ describe("graph CLI", () => {
                   id: "body",
                   steps: [
                     {
-                      type: "agent",
+                      type: "exec",
                       id: "draft",
                       repo: "main",
-                      prompt: "Draft the artifact.",
+                      command: process.execPath,
+                      args: ["-e", "process.exit(0)"],
                       outputs: [
                         {
                           name: "draft_spec",
@@ -297,14 +366,9 @@ describe("graph CLI", () => {
       expect(result.exitCode).toBe(1);
       expect(payload.command).toBe("run");
       expect(payload.status).toBe("failed");
-      expect(payload.message).toContain("interactive terminal");
-      expect(payload.diagnostics).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            message: expect.stringContaining("interactive TTY stdin and stderr")
-          })
-        ])
-      );
+      expect(payload.message).toContain("terminal failure state");
+      expect(payload.counts.failed).toBe(1);
+      expect(payload.counts.blocked).toBe(2);
     } finally {
       Object.defineProperty(process.stdin, "isTTY", {
         value: originalStdinTty,

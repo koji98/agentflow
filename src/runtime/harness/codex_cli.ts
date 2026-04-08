@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createProcessTerminationController } from "../process_control.js";
 import {
   collectMissingHarnessBinaryDiagnostics,
@@ -72,7 +73,8 @@ export function createCodexCliHarness(
 
   return {
     kind: "codex-cli",
-    preflight() {
+    capabilities: getHarnessCapabilities("codex-cli")!,
+    checkReadiness() {
       return collectMissingHarnessBinaryDiagnostics(
         "codex-cli",
         binary,

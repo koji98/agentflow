@@ -20,10 +20,7 @@ import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
 import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import { createResumedRuntimeSession } from "../../runtime/resume.js";
 import { resumeWorkspaceFromManifest } from "../../runtime/workspace/resume.js";
-import {
-  collectCheckpointTerminalDiagnostics,
-  createInteractiveCheckpointExecutor
-} from "../checkpoint.js";
+import { createInteractiveCheckpointExecutor } from "../checkpoint.js";
 import {
   createGraphCliInvocation,
   createGraphPathResolution,
@@ -32,7 +29,7 @@ import {
   runCancellationText
 } from "../command_support.js";
 import { createRuntimeProgressReporter } from "../progress.js";
-import { resolveRepoSources } from "../repo_sources.js";
+import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
 
 function compareRepoBindings(
   expected: Record<string, string>,
@@ -85,7 +82,7 @@ export const resumeCommand = {
   optionNames: ["run-root", "help"] as const,
   helpNotes: [
     "Resume recompiles from the original graph path using the current Agentflow build.",
-    "Only passed nodes whose compiled contract and resolved context provenance still match are preserved.",
+    "Only passed nodes whose compiled contract still matches are preserved.",
     "Repeat scopes restart from iteration 1 when they were unfinished or their compiled contract changed."
   ] as const,
   async run(
@@ -269,25 +266,12 @@ export const resumeCommand = {
       };
     }
 
-    const checkpointDiagnostics = collectCheckpointTerminalDiagnostics(compilation.compiled_graph!);
-
-    if (checkpointDiagnostics.length > 0) {
-      return {
-        exitCode: 1,
-        output: {
-          command: "resume",
-          status: "failed",
-          message: "Checkpoint graphs require an interactive terminal before resume can start.",
-          run_root,
-          run_id: runRecord.run_id,
-          graph_path: loaded.absolute_path,
-          path_resolution: pathResolution,
-          diagnostics: checkpointDiagnostics
-        }
-      };
-    }
-
-    const repoResolution = await resolveRepoSources(loaded.absolute_path, loaded.document);
+    const activeRepoAliases = collectReferencedRepoAliases(compilation.compiled_graph!);
+    const repoResolution = await resolveRepoSources(
+      loaded.absolute_path,
+      loaded.document,
+      activeRepoAliases
+    );
 
     if (!repoResolution.repo_sources) {
       return {
@@ -315,7 +299,9 @@ export const resumeCommand = {
 
     const repoBindingDiagnostics = compareRepoBindings(
       Object.fromEntries(
-        Object.entries(execution_manifest.repo_workspaces).map(([repoAlias, binding]) => [
+        Object.entries(execution_manifest.repo_workspaces)
+          .filter(([repoAlias]) => activeRepoAliases.includes(repoAlias))
+          .map(([repoAlias, binding]) => [
           repoAlias,
           binding.source_path
         ])

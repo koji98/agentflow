@@ -11,10 +11,7 @@ import { loadAuthoredGraphDocument, summarizeAuthoredGraph } from "../../graph/v
 import { runCompiledGraph } from "../../runtime/core/engine.js";
 import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
 import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
-import {
-  collectCheckpointTerminalDiagnostics,
-  createInteractiveCheckpointExecutor
-} from "../checkpoint.js";
+import { createInteractiveCheckpointExecutor } from "../checkpoint.js";
 import {
   createGraphCliInvocation,
   createGraphPathResolution,
@@ -24,7 +21,7 @@ import {
   runCancellationText
 } from "../command_support.js";
 import { createRuntimeProgressReporter } from "../progress.js";
-import { resolveRepoSources } from "../repo_sources.js";
+import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
 
 export const runCommand = {
   name: "run",
@@ -143,31 +140,11 @@ export const runCommand = {
       };
     }
 
-    const checkpointDiagnostics = collectCheckpointTerminalDiagnostics(compilation.compiled_graph!);
-
-    if (checkpointDiagnostics.length > 0) {
-      return {
-        exitCode: 1,
-        output: {
-          command: "run",
-          status: "failed",
-          message: "Checkpoint graphs require an interactive terminal before execution can start.",
-          graph_path: loaded.absolute_path,
-          path_resolution: pathResolution,
-          diagnostics: checkpointDiagnostics,
-          next_steps: {
-            validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path
-            }),
-            compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path
-            })
-          }
-        }
-      };
-    }
-
-    const repoResolution = await resolveRepoSources(loaded.absolute_path, loaded.document);
+    const repoResolution = await resolveRepoSources(
+      loaded.absolute_path,
+      loaded.document,
+      collectReferencedRepoAliases(compilation.compiled_graph!)
+    );
 
     if (!repoResolution.repo_sources) {
       return {

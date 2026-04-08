@@ -1,12 +1,8 @@
-import { readFile } from "node:fs/promises";
-
 import type {
   CompiledExecutableNode,
   CompiledGraph,
   CompiledRepeatScope
 } from "../graph/compiled.js";
-import { createContextDiscoveryCache, computeContextProvenance } from "./context/provenance.js";
-import type { ContextProvenance } from "./context/packet.js";
 import type { RuntimeEventEnvelope } from "./events.js";
 import {
   createAttemptRegistry,
@@ -18,8 +14,7 @@ import {
   type ExecutionManifest,
   type LatestExecutionSummary,
   type RuntimeSession,
-  type RuntimeStateSnapshot,
-  type WorkspaceBinding
+  type RuntimeStateSnapshot
 } from "./session.js";
 
 function buildLatestExecutionSummary(attempt: RuntimeNodeAttempt): LatestExecutionSummary {
@@ -124,34 +119,11 @@ function fingerprintRepeatScope(scope: CompiledRepeatScope): string {
   }));
 }
 
-async function readContextProvenance(
-  filePath: string | undefined
-): Promise<ContextProvenance | undefined> {
-  if (!filePath) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(await readFile(filePath, "utf8")) as ContextProvenance;
-  } catch {
-    return undefined;
-  }
-}
-
-function buildRepoWorkspacePaths(
-  repoWorkspaces: Record<string, WorkspaceBinding>
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(repoWorkspaces).map(([repoAlias, binding]) => [repoAlias, binding.workspace_path])
-  );
-}
-
 async function collectInvalidatedCompiledIds(options: {
   prior_graph: CompiledGraph;
   graph: CompiledGraph;
   prior_state: RuntimeStateSnapshot;
   attempts_by_compiled_id: Map<string, RuntimeNodeAttempt[]>;
-  repo_workspaces: Record<string, WorkspaceBinding>;
 }): Promise<{
   invalidated_compiled_ids: Set<string>;
   restarted_repeat_scope_ids: Set<string>;
@@ -169,8 +141,6 @@ async function collectInvalidatedCompiledIds(options: {
   );
   const invalidated_compiled_ids = new Set<string>();
   const restarted_repeat_scope_ids = new Set<string>();
-  const provenanceCache = createContextDiscoveryCache();
-  const repoWorkspacePaths = buildRepoWorkspacePaths(options.repo_workspaces);
 
   const restartRepeatScope = (scope: CompiledRepeatScope): boolean => {
     if (restarted_repeat_scope_ids.has(scope.scope_id)) {
@@ -222,27 +192,6 @@ async function collectInvalidatedCompiledIds(options: {
       continue;
     }
 
-    const priorAttempt = options.attempts_by_compiled_id.get(node.compiled_id)?.at(-1);
-    const priorProvenance = await readContextProvenance(priorAttempt?.context_provenance_path);
-
-    if (!priorProvenance) {
-      invalidated_compiled_ids.add(node.compiled_id);
-      continue;
-    }
-
-    try {
-      const currentProvenance = await computeContextProvenance({
-        node,
-        repo_workspaces: repoWorkspacePaths,
-        cache: provenanceCache
-      });
-
-      if (JSON.stringify(sortJson(priorProvenance)) !== JSON.stringify(sortJson(currentProvenance))) {
-        invalidated_compiled_ids.add(node.compiled_id);
-      }
-    } catch {
-      invalidated_compiled_ids.add(node.compiled_id);
-    }
   }
 
   const adjacency = new Map<string, string[]>();
@@ -323,7 +272,6 @@ async function buildResumeAttemptRegistry(options: {
   graph: CompiledGraph;
   prior_state: RuntimeStateSnapshot;
   attempts: RuntimeNodeAttempt[];
-  repo_workspaces: Record<string, WorkspaceBinding>;
 }): Promise<{
   registry: AttemptRegistry;
   preserved_compiled_ids: Set<string>;
@@ -346,8 +294,7 @@ async function buildResumeAttemptRegistry(options: {
     prior_graph: options.prior_graph,
     graph: options.graph,
     prior_state: options.prior_state,
-    attempts_by_compiled_id,
-    repo_workspaces: options.repo_workspaces
+    attempts_by_compiled_id
   });
 
   const preserved_compiled_ids = new Set<string>();
@@ -408,8 +355,7 @@ export async function createResumedRuntimeSession(options: {
     prior_graph: options.prior_graph,
     graph: options.graph,
     prior_state: options.prior_state,
-    attempts: options.attempts,
-    repo_workspaces: options.manifest.repo_workspaces
+    attempts: options.attempts
   });
 
   const session = createRuntimeSession(

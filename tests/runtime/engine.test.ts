@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AuthoredGraphDocument } from "../../src/graph/authored.js";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
+import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { resolveNodeExecutionDirectory } from "../../src/artifacts/paths.js";
@@ -71,6 +72,22 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function createHarness(
+  kind: HarnessAdapter["kind"],
+  run: HarnessAdapter["run"],
+  overrides: Partial<HarnessAdapter> = {}
+): HarnessAdapter {
+  return {
+    kind,
+    capabilities: getHarnessCapabilities(kind)!,
+    run,
+    async cancel() {
+      return;
+    },
+    ...overrides
+  };
 }
 
 describe("runtime engine", () => {
@@ -561,8 +578,17 @@ describe("runtime engine", () => {
     });
 
     expect(run.outcome).toBe("failed");
-    expect(run.attempts[0]?.status).toBe("failed");
-    expect(run.attempts[0]?.metadata.error).toContain(
+    expect(run.attempts).toHaveLength(1);
+    expect(run.state.node_statuses.root__reader).toBe("failed");
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "node.completed",
+          compiled_id: "root__reader"
+        })
+      ])
+    );
+    expect((run.attempts[0]?.metadata as { error?: string } | undefined)?.error).toContain(
       'Input path "../secret.txt" must be a relative path that stays within its repo or workspace root.'
     );
 
@@ -962,7 +988,7 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("fails preflight before execution when a required harness binary is unavailable", async () => {
+  it("fails a reachable agent when a required harness binary is unavailable", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-preflight-"));
     const repoDir = join(tempRoot, "repo");
     const runRoot = join(tempRoot, "run");
@@ -1013,20 +1039,23 @@ describe("runtime engine", () => {
       }
     });
 
+    const attempt = run.attempts.find((candidate) => candidate.authored_id === "implement");
+
     expect(run.outcome).toBe("failed");
-    expect(run.attempts).toEqual([]);
+    expect(run.attempts).toHaveLength(1);
     expect(run.state.status).toBe("failed");
-    expect(run.events).toEqual(
+    expect(run.events).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: "run.preflight_failed",
-          payload: expect.objectContaining({
-            message: expect.stringContaining(
-              `codex-cli harness binary "${missingBinary}" is unavailable.`
-            )
-          })
+          type: "run.preflight_failed"
         })
       ])
+    );
+    expect(attempt?.metadata).toEqual(
+      expect.objectContaining({
+        error: expect.stringContaining(`codex-cli harness binary "${missingBinary}" is unavailable.`),
+        context_status: "failed"
+      })
     );
     expect(JSON.parse(await readFile(join(runRoot, "run.json"), "utf8"))).toEqual(
       expect.objectContaining({
@@ -1039,14 +1068,13 @@ describe("runtime engine", () => {
       })
     );
     const summary = await readFile(join(runRoot, "summary.md"), "utf8");
-    expect(summary).toContain("## Diagnostics");
     expect(summary).toContain(`codex-cli harness binary "${missingBinary}" is unavailable.`);
-    expect(summary).toContain("No node executions were recorded.");
+    expect(summary).not.toContain("No node executions were recorded.");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("fails preflight before execution when a checkpoint node has no executor", async () => {
+  it("fails a reachable checkpoint when no checkpoint executor is configured", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-checkpoint-preflight-"));
     const repoDir = join(tempRoot, "repo");
     const runRoot = join(tempRoot, "run");
@@ -1120,18 +1148,37 @@ describe("runtime engine", () => {
       compiled_graph: graph,
       repo_sources: {
         main: repoDir
+      },
+      executors: {
+        exec: async ({ execution_dir }) => {
+          await writeFile(join(execution_dir, "draft.md"), "draft\n");
+          return {
+            status: "passed",
+            outcome: "passed",
+            stdout: "",
+            stderr: "",
+            result: { ok: true }
+          };
+        }
       }
     });
 
+    const draftAttempt = run.attempts.find((candidate) => candidate.authored_id === "draft");
+    const reviewAttempt = run.attempts.find((candidate) => candidate.authored_id === "review");
+
     expect(run.outcome).toBe("failed");
-    expect(run.attempts).toEqual([]);
-    expect(run.events).toEqual(
+    expect(draftAttempt?.status).toBe("passed");
+    expect(reviewAttempt?.status).toBe("failed");
+    expect(reviewAttempt?.metadata).toEqual(
+      expect.objectContaining({
+        error: expect.stringContaining("requires a checkpoint executor"),
+        context_status: "failed"
+      })
+    );
+    expect(run.events).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: "run.preflight_failed",
-          payload: expect.objectContaining({
-            message: expect.stringContaining('has no checkpoint executor')
-          })
+          type: "run.preflight_failed"
         })
       ])
     );
@@ -1177,18 +1224,9 @@ describe("runtime engine", () => {
       }
     });
 
-    const failingHarness: HarnessAdapter = {
-      kind: "codex-cli",
-      preflight() {
-        return [];
-      },
-      async run() {
-        throw new Error("spawnSync codex ETIMEDOUT");
-      },
-      async cancel() {
-        return;
-      }
-    };
+    const failingHarness = createHarness("codex-cli", async () => {
+      throw new Error("spawnSync codex ETIMEDOUT");
+    });
 
     const run = await runCompiledGraph({
       run_root: runRoot,
@@ -1269,26 +1307,17 @@ describe("runtime engine", () => {
       }
     });
 
-    const failingHarness: HarnessAdapter = {
-      kind: "codex-cli",
-      preflight() {
-        return [];
-      },
-      async run() {
-        return {
-          status: "failed",
-          exitCode: 1,
-          stdout: '{"passed":true,"score":1,"summary":"ok"}',
-          metadata: {
-            timed_out: true,
-            force_killed: true
-          }
-        };
-      },
-      async cancel() {
-        return;
-      }
-    };
+    const failingHarness = createHarness("codex-cli", async () => {
+      return {
+        status: "failed",
+        exitCode: 1,
+        stdout: '{"passed":true,"score":1,"summary":"ok"}',
+        metadata: {
+          timed_out: true,
+          force_killed: true
+        }
+      };
+    });
 
     const run = await runCompiledGraph({
       run_root: runRoot,
@@ -1379,6 +1408,7 @@ describe("runtime engine", () => {
 
     const harness: HarnessAdapter = {
       kind: "codex-cli",
+      capabilities: getHarnessCapabilities("codex-cli")!,
       async run(invocation) {
         invocation.onStdoutChunk?.("partial output\n");
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 80));
@@ -1419,5 +1449,387 @@ describe("runtime engine", () => {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("does not fail when an upstream node deletes a downstream authored input file", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-live-input-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(join(repoDir, "watched.txt"), "before\n");
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-live-input-omission",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "delete_file",
+            repo: "main",
+            command: "placeholder"
+          },
+          {
+            type: "exec",
+            id: "consume",
+            repo: "main",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "file",
+                path: "watched.txt"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async ({ node, workspace_path, context_packet_path }) => {
+          if (node.authored_id === "delete_file") {
+            await rm(join(workspace_path, "watched.txt"), { force: true });
+            return {
+              status: "passed",
+              outcome: "passed",
+              stdout: "",
+              stderr: "",
+              result: { deleted: true }
+            };
+          }
+
+          const packet = JSON.parse(await readFile(context_packet_path, "utf8")) as {
+            materials: unknown[];
+            omitted: Array<{ key: string; reason: string; optional: boolean }>;
+          };
+          expect(packet.materials).toEqual([]);
+          expect(packet.omitted).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                key: "input_1",
+                reason: 'Requested input file "watched.txt" was not found at execution time.',
+                optional: false
+              })
+            ])
+          );
+
+          return {
+            status: "passed",
+            outcome: "passed",
+            stdout: "",
+            stderr: "",
+            result: { consumed: true }
+          };
+        }
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(run.state.node_statuses.root__consume).toBe("passed");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("does not preflight-fail a blocked node with a bad authored input path", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-blocked-input-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-blocked-input",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "fail_first",
+            repo: "main",
+            command: "placeholder"
+          },
+          {
+            type: "exec",
+            id: "never_runs",
+            repo: "main",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "file",
+                path: "missing.txt"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async ({ node }) => ({
+          status: node.authored_id === "fail_first" ? "failed" : "passed",
+          outcome: node.authored_id === "fail_first" ? "failed" : "passed",
+          stdout: "",
+          stderr: "",
+          result: { node: node.authored_id }
+        })
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.state.node_statuses.root__fail_first).toBe("failed");
+    expect(run.state.node_statuses.root__never_runs).toBe("blocked");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("does not fail a blocked agent node just because its harness is unavailable", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-blocked-harness-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-blocked-harness",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "fail_first",
+            repo: "main",
+            command: "placeholder"
+          },
+          {
+            type: "agent",
+            id: "never_runs",
+            repo: "main",
+            prompt: "Should stay blocked."
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async () => ({
+          status: "failed",
+          outcome: "failed",
+          stdout: "",
+          stderr: "",
+          result: { ok: false }
+        })
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.state.node_statuses.root__fail_first).toBe("failed");
+    expect(run.state.node_statuses.root__never_runs).toBe("blocked");
+    expect(run.attempts.find((attempt) => attempt.authored_id === "never_runs")).toBeUndefined();
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("fails a reachable node lazily when harness readiness fails", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-lazy-readiness-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-lazy-readiness",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            repo: "main",
+            prompt: "Implement the change."
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": createHarness(
+          "codex-cli",
+          async () => ({
+            status: "passed",
+            exitCode: 0
+          }),
+          {
+            checkReadiness() {
+              return ['codex-cli harness binary "missing-codex" is unavailable.'];
+            }
+          }
+        )
+      }
+    });
+
+    const attempt = run.attempts.find((candidate) => candidate.authored_id === "implement");
+    expect(run.outcome).toBe("failed");
+    expect(run.state.node_statuses.root__implement).toBe("failed");
+    expect(attempt?.status).toBe("failed");
+    expect(attempt?.context_packet_path).toBeUndefined();
+    expect(JSON.parse(await readFile(attempt!.result_path!, "utf8"))).toEqual({
+      error: 'codex-cli harness binary "missing-codex" is unavailable.'
+    });
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("does not record nonexistent context artifacts when context resolution fails", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-context-error-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-context-error",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consume",
+            repo: "main",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "file",
+                path: "../escape.txt"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    const attempt = run.attempts.find((candidate) => candidate.authored_id === "consume");
+    const executionRecord = JSON.parse(
+      await readFile(join(attempt!.execution_dir, "execution.json"), "utf8")
+    ) as Record<string, unknown>;
+
+    expect(run.outcome).toBe("failed");
+    expect(attempt?.context_packet_path).toBeUndefined();
+    expect(attempt?.context_summary_path).toBeUndefined();
+    expect(executionRecord.context_packet_path).toBeUndefined();
+    expect(executionRecord.context_summary_path).toBeUndefined();
+    expect(attempt?.metadata).toEqual(
+      expect.objectContaining({
+        context_status: "failed"
+      })
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
   });
 });

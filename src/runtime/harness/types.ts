@@ -1,6 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
+import type { HarnessCapabilities } from "../../graph/harness_capabilities.js";
 import type { ReasoningEffort } from "../../graph/schema.js";
 
 export type HarnessKind = "codex-cli" | "cursor-cli";
@@ -37,7 +38,8 @@ export interface HarnessResult {
 
 export interface HarnessAdapter {
   readonly kind: HarnessKind;
-  preflight?(): string[];
+  readonly capabilities: HarnessCapabilities;
+  checkReadiness?(): Promise<string[]> | string[];
   run(invocation: AgentInvocation): Promise<HarnessResult>;
   cancel(executionId: string): Promise<void>;
 }
@@ -146,6 +148,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "## Working Contract",
     "- Read the context packet first. Use the context summary to understand what materials are available.",
     "- If the context summary reports omitted or truncated items, treat the available context as partial and avoid overconfident assumptions.",
+    "- Treat authored file and glob inputs in the packet as the materials Agentflow could resolve when this node started. If a requested input is omitted, handle that omission explicitly instead of assuming the file still exists.",
     "- Treat any project instructions the harness loads automatically from the repository as the default local contract, unless the task explicitly changes them or a higher-priority instruction overrides them.",
     "- Keep changes scoped to the requested task. Do not redesign the system unless the task explicitly requires it.",
     "- Make the smallest correct change that satisfies the task. If the task changes a repository convention, update that convention intentionally and coherently within the requested scope.",

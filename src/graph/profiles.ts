@@ -12,6 +12,7 @@ import type {
   SandboxMode,
   WorkspaceBackend
 } from "./schema.js";
+import { getHarnessCapabilities } from "./harness_capabilities.js";
 import { workspaceBackends } from "./schema.js";
 
 export interface EffectiveInputRules {
@@ -245,10 +246,10 @@ export function resolveNodePolicy(
       });
     }
 
-    if (isAiCheck(node) && harness === "cursor-cli") {
+    if (isAiCheck(node) && harness && !getHarnessCapabilities(harness)?.supports_ai_check) {
       diagnostics.push({
         path: `$.graph.${node.id}.profile`,
-        message: 'AI checks require codex-cli because cursor-cli does not provide a strict read-only evaluation contract.'
+        message: `AI checks require a harness with a strict read-only evaluation contract. "${harness}" does not support AI checks.`
       });
     }
   }

@@ -88,7 +88,7 @@ setTimeout(() => {
 }
 
 describe("codex cli harness", () => {
-  it("reports preflight availability from the resolved binary path", async () => {
+  it("reports readiness availability from the resolved binary path", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-preflight-"));
     const availableBinary = await createMockCodexBinary(tempRoot);
     const missingBinary = join(tempRoot, "missing-codex");
@@ -97,12 +97,12 @@ describe("codex cli harness", () => {
       expect(
         createCodexCliHarness({
           binary: availableBinary.binary_path
-        }).preflight?.()
+        }).checkReadiness?.()
       ).toEqual([]);
       expect(
         createCodexCliHarness({
           binary: missingBinary
-        }).preflight?.()
+        }).checkReadiness?.()
       ).toEqual([
         `codex-cli harness binary "${missingBinary}" is unavailable. Install it on PATH or set AGENTFLOW_CODEX_CLI_BIN.`
       ]);

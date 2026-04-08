@@ -3,23 +3,21 @@
 `resume` recompiles the original graph and preserves passed work only when:
 
 1. the compiled executable contract still matches
-2. the resolved context provenance still matches
 
 ## What invalidates preservation
+
+- compiled node contract changes
+- repeat scope shape changes
+- unfinished repeat scopes
+
+## What does not invalidate preservation
 
 - explicit file-input content changes
 - glob content changes
 - glob match-set changes
-- harness instruction changes for harnessed nodes:
-  - `AGENTS.md`
-  - `CLAUDE.md`
-  - `.cursorrules`
-  - `.cursor/rules/**`
+- harness instruction changes
+- unrelated repo changes
 
-## What does not invalidate preservation
+## Operator implication
 
-- unrelated repo changes that do not affect the node's explicit inputs or harness instruction provenance
-
-## Older runs
-
-If the prior passed execution does not have `context_provenance.json`, Agentflow restarts that node instead of preserving it.
+If a passed node was preserved unexpectedly, check the recompiled node contract first. In this release, Agentflow does not invalidate preservation from mutable workspace content.

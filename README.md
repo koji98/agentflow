@@ -352,10 +352,10 @@ agentflow resume --run-root ./.agentflow/runs/<run-id>
 Resume behavior:
 
 - recompiles from the original graph path with the current Agentflow build
-- preserves only nodes whose latest durable outcome is `passed`, whose compiled contract is unchanged, and whose resolved context provenance still matches
+- preserves only nodes whose latest durable outcome is `passed` and whose compiled contract is unchanged
 - restarts failed, canceled, blocked, skipped, and pending nodes
 - restarts repeat scopes from iteration 1 when they were unfinished or their compiled contract changed
-- restarts older passed nodes from runs that do not have `context_provenance.json`
+- does not treat live workspace file changes as a resume invalidation boundary
 - appends new events and attempts into the same run root
 
 Like `run`, `resume` prints live graph progress to `stderr` and keeps its final structured result on `stdout`.
@@ -372,8 +372,11 @@ Supported input kinds:
 
 Input resolution rules:
 
-- `glob` uses tracked plus untracked non-ignored files in git repos
-- non-git repos fall back to a sorted filesystem walk
+- authored `file` and `glob` inputs resolve from the live repo workspace when the node starts
+- missing live files and empty globs become explicit omitted context instead of crashing the run
+- path escapes and unknown repo aliases are still hard errors
+- `run` and `resume` only resolve repo aliases the compiled graph actually references
+- `glob` uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`
 - `glob.max_files` is a local cap applied after deterministic sorting
 
 Context can be pulled from earlier nodes with `context_from`.
@@ -405,6 +408,7 @@ This is how later nodes can consume:
 
 - Works for `agent` nodes
 - Read-only agent flows run without `--force`, so they stay in proposal mode
+- Does not support AI `check` nodes in this release
 - AI checks are currently Codex-only because strict read-only evaluator guarantees are enforced there
 
 ## Validation and Confidence

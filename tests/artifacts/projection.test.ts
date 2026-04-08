@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AuthoredGraphDocument } from "../../src/graph/authored.js";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
+import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
@@ -326,9 +327,7 @@ async function createAiTimeoutRun() {
   const { graph } = compileGraph(document);
   const timedOutHarness: HarnessAdapter = {
     kind: "codex-cli",
-    preflight() {
-      return [];
-    },
+    capabilities: getHarnessCapabilities("codex-cli")!,
     async run() {
       return {
         status: "failed",
