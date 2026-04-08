@@ -504,7 +504,7 @@ describe("graph compilation", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.judge.profile",
-          message: expect.stringContaining("AI checks require codex-cli")
+          message: expect.stringContaining('does not support AI checks')
         })
       ])
     );
@@ -612,7 +612,7 @@ describe("graph compilation", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.judge_patch.profile",
-          message: expect.stringContaining("AI checks require codex-cli")
+          message: expect.stringContaining('does not support AI checks')
         })
       ])
     );

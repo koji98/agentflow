@@ -68,19 +68,21 @@ Cleanup and reconciliation rules:
 - On `passed`, `failed`, and `canceled` outcomes, the runtime cleans up worktree registrations before finalizing terminal artifacts.
 - If worktree initialization fails partway through, already-created worktrees are rolled back before the run is marked failed.
 - If worktree cleanup itself fails, the run is forced to terminal `failed` and the cleanup error is recorded in the terminal reason.
-- `agentflow resume --run-root <run-root>` recompiles the original graph path with the current Agentflow build, preserves only passed nodes whose compiled contract and resolved context provenance are unchanged, restarts everything else, and recreates missing worktree paths when the original failed run already cleaned them up.
-- Older runs that do not have `context_provenance.json` restart their passed nodes instead of being preserved.
+- `agentflow resume --run-root <run-root>` recompiles the original graph path with the current Agentflow build, preserves only passed nodes whose compiled contract is unchanged, restarts everything else, and recreates missing worktree paths when the original failed run already cleaned them up.
 - When inspection tooling reopens stale `pending` or `running` artifacts, projection reconciles them from durable state or from a recorded local runtime owner fingerprint that no longer matches a live process on this host instead of leaving them live forever.
 
 What the operator should expect:
 
 - A preflight failure can happen before any node starts and still produce a readable run from artifacts alone.
+- In this release, graph-global preflight is narrow: it is mostly workspace initialization and run-root setup, not node-specific harness or checkpoint readiness.
 - A canceled run is canceled from the terminal that launched `run` with `Ctrl-C`.
 - `run` and `resume` print live graph progress to `stderr` while the final structured JSON result stays on `stdout`, so shell pipelines can still consume the command result without parsing progress noise.
 - The `workspaces/` directory is an implementation detail of the run and is not preserved as a long-lived checkout contract after worktree cleanup.
+- Authored `file` and `glob` inputs resolve live when each node starts. Missing files or empty globs become explicit omitted context instead of run-preflight failure.
 - Node and execution directories under `nodes/` use hashed names on disk.
 - Execution-root runtime files live directly in each execution directory and include `context_provenance.json`; `artifacts/` appears only when workspace outputs are materialized there.
-- In git repos, `glob` inputs resolve against tracked plus untracked non-ignored files from `git ls-files -co --exclude-standard`; outside git repos they fall back to a sorted filesystem walk.
+- `run` and `resume` only resolve repo aliases that the compiled graph actually references; unused declared repos stay inert.
+- `glob` inputs use a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`.
 
 ## Recommended Dev Workflow
 
@@ -121,7 +123,7 @@ Harness policy notes:
 
 - Codex-backed `agent` and AI `check` nodes resolve `reasoning_effort` from the graph when provided and otherwise default to `medium`.
 - Cursor-backed `agent` nodes treat `read-only` as proposal mode by omitting `--force`.
-- AI `check` nodes require `codex-cli`; cursor-backed AI checks fail closed because the release does not treat Cursor as a strict read-only evaluator.
+- AI `check` nodes require a harness that supports strict read-only evaluation; in this release that means `codex-cli`.
 
 ## CLI Entry Points
 
@@ -131,7 +133,7 @@ Each supported command is JSON-first and returns explicit next-step hints.
 - `validate`: validates authoring plus launch settings and returns `path_resolution`, launch data, compiled summary, and next-step commands.
 - `compile`: returns the compiled graph contract for inspection plus the same path and next-step metadata.
 - `run`: executes the compiled graph, writes durable artifacts, and returns `runs_root`, `run_root`, artifact paths, rerun or resume commands, and the cancellation note.
-- `resume`: recompiles a failed or canceled run root and resumes from durable state when both the compiled contract and the resolved context provenance still match preserved work.
+- `resume`: recompiles a failed or canceled run root and resumes from durable state when the compiled contract still matches preserved work.
 
 For help:
 
@@ -188,7 +190,8 @@ Checks:
 
 Symptoms:
 
-- agent or AI-check runs fail during preflight before execution starts
+- a reachable `agent` or AI `check` node fails when it reaches execution
+- the run summary or execution result mentions an unavailable harness binary
 
 Checks:
 
@@ -201,8 +204,8 @@ Checks:
 
 Symptoms:
 
-- run preflight fails for a graph that includes `checkpoint`
-- diagnostics mention interactive TTY support or missing checkpoint executor
+- a reachable `checkpoint` node fails when it reaches execution
+- the execution error mentions interactive TTY support or a missing checkpoint executor
 
 Checks:
 

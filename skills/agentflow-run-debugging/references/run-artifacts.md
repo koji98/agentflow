@@ -26,19 +26,22 @@ Key points:
 Important files:
 
 - `execution.json`
-- `context_packet.json`
-- `context_summary.md`
-- `context_provenance.json`
 - `stdout.log`
 - `stderr.log`
 - `result.json`
 
 `artifacts/` is optional and only exists when workspace outputs are copied there.
 
+Context files appear only when context resolution succeeded:
+
+- `context_packet.json`
+- `context_summary.md`
+- `context_provenance.json`
+
 ## Context behavior
 
 - `context_packet.json` shows what was materialized
 - `context_summary.md` gives the concise operator view
-- `context_provenance.json` records the preservation contract for resume
+- `context_provenance.json` records resolved inputs and harness instruction digests for inspection
 
 Context byte budgets are enforced incrementally during materialization.

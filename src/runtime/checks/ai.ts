@@ -193,9 +193,9 @@ export function buildAiCheckPrompt(options: {
 export async function runAiCheck(
   invocation: RunAiCheckInvocation
 ): Promise<RunAiCheckResult> {
-  if (invocation.harness.kind === "cursor-cli") {
+  if (!invocation.harness.capabilities.supports_ai_check) {
     const message =
-      "AI check harness failed: cursor-cli does not provide a strict read-only evaluation contract. Use codex-cli for AI checks.";
+      `AI check harness failed: ${invocation.harness.kind} does not provide a strict read-only evaluation contract. Use a harness that supports AI checks.`;
 
     return {
       harness_result: {

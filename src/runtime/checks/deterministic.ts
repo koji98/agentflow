@@ -30,6 +30,30 @@ export interface DeterministicCheckResult extends LocalProcessResult {
   summary: string;
 }
 
+function buildLocalProcessEnv(
+  cwd: string,
+  envOverrides: Record<string, string> | undefined
+): Record<string, string> {
+  const baselineKeys =
+    process.platform === "win32"
+      ? ["PATH", "SystemRoot", "ComSpec", "PATHEXT", "USERPROFILE", "TEMP", "TMP"]
+      : ["PATH", "HOME", "SHELL", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TERM"];
+  const env = Object.fromEntries(
+    baselineKeys
+      .map((key) => [key, process.env[key]])
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
+
+  if (process.platform !== "win32") {
+    env.PWD = cwd;
+  }
+
+  return {
+    ...env,
+    ...(envOverrides ?? {})
+  };
+}
+
 function evaluateDeterministicPassIf(
   passIf: DeterministicPassIf | undefined,
   processResult: LocalProcessResult
@@ -70,7 +94,7 @@ export async function runLocalProcess(
   return new Promise<LocalProcessResult>((resolve, reject) => {
     const child = spawn(invocation.command, invocation.args, {
       cwd: invocation.cwd,
-      env: invocation.env ? { ...process.env, ...invocation.env } : process.env,
+      env: buildLocalProcessEnv(invocation.cwd, invocation.env),
       stdio: ["ignore", "pipe", "pipe"]
     });
 

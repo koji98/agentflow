@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AuthoredGraphDocument } from "../../src/graph/authored.js";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
+import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { readExecutionManifest } from "../../src/artifacts/reader.js";
@@ -78,6 +79,7 @@ async function createResumeFixture(options: {
     harnesses: {
       "codex-cli": {
         kind: "codex-cli",
+        capabilities: getHarnessCapabilities("codex-cli")!,
         async run() {
           return {
             status: "passed",
@@ -113,12 +115,13 @@ async function createResumeFixture(options: {
 
 async function buildResumedSession(
   fixture: Awaited<ReturnType<typeof createResumeFixture>>,
+  graph = fixture.graph,
   attempts = fixture.result.attempts
 ) {
   return createResumedRuntimeSession({
     run_root: fixture.runRoot,
     prior_graph: fixture.graph,
-    graph: fixture.graph,
+    graph,
     manifest: fixture.manifest,
     prior_state: fixture.result.state,
     attempts,
@@ -127,15 +130,13 @@ async function buildResumedSession(
 }
 
 describe("runtime resume", () => {
-  it("invalidates a passed node when an explicit file input changes", async () => {
+  it("preserves a passed node when explicit file inputs change after the prior run", async () => {
     const fixture = await createResumeFixture({
       document: {
         version: "1",
         graph_id: "resume-explicit-input",
         repos: {
-          main: {
-            path: "."
-          }
+          main: { path: "." }
         },
         defaults: {
           launch_profile: "default",
@@ -169,58 +170,6 @@ describe("runtime resume", () => {
     });
 
     await writeFile(join(fixture.repoDir, "watched.txt"), "updated\n");
-
-    const resumed = await buildResumedSession(fixture);
-
-    expect(resumed.preserved_node_count).toBe(0);
-    expect(resumed.restarted_node_count).toBe(1);
-
-    await rm(fixture.tempRoot, { recursive: true, force: true });
-  });
-
-  it("does not invalidate a passed node for unrelated repo changes", async () => {
-    const fixture = await createResumeFixture({
-      document: {
-        version: "1",
-        graph_id: "resume-unrelated-change",
-        repos: {
-          main: {
-            path: "."
-          }
-        },
-        defaults: {
-          launch_profile: "default",
-          workspace_backend: "inplace"
-        },
-        profiles: {
-          default: {}
-        },
-        graph: {
-          type: "sequence",
-          id: "root",
-          steps: [
-            {
-              type: "exec",
-              id: "consumer",
-              repo: "main",
-              command: "placeholder",
-              inputs: [
-                {
-                  kind: "file",
-                  path: "watched.txt"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      async setupRepo(repoDir) {
-        await writeFile(join(repoDir, "watched.txt"), "stable\n");
-      }
-    });
-
-    await writeFile(join(fixture.repoDir, "other.txt"), "new file\n");
-
     const resumed = await buildResumedSession(fixture);
 
     expect(resumed.preserved_node_count).toBe(1);
@@ -229,15 +178,13 @@ describe("runtime resume", () => {
     await rm(fixture.tempRoot, { recursive: true, force: true });
   });
 
-  it("invalidates a passed node when a glob-matched file changes", async () => {
+  it("preserves a passed node when glob contents or matches change after the prior run", async () => {
     const fixture = await createResumeFixture({
       document: {
         version: "1",
-        graph_id: "resume-glob-file-change",
+        graph_id: "resume-glob-change",
         repos: {
-          main: {
-            path: "."
-          }
+          main: { path: "." }
         },
         defaults: {
           launch_profile: "default",
@@ -272,123 +219,22 @@ describe("runtime resume", () => {
     });
 
     await writeFile(join(fixture.repoDir, "docs", "a.md"), "alpha-updated\n");
-
-    const resumed = await buildResumedSession(fixture);
-
-    expect(resumed.preserved_node_count).toBe(0);
-    expect(resumed.restarted_node_count).toBe(1);
-
-    await rm(fixture.tempRoot, { recursive: true, force: true });
-  });
-
-  it("invalidates a passed node when a glob match set changes", async () => {
-    const fixture = await createResumeFixture({
-      document: {
-        version: "1",
-        graph_id: "resume-glob-set-change",
-        repos: {
-          main: {
-            path: "."
-          }
-        },
-        defaults: {
-          launch_profile: "default",
-          workspace_backend: "inplace"
-        },
-        profiles: {
-          default: {}
-        },
-        graph: {
-          type: "sequence",
-          id: "root",
-          steps: [
-            {
-              type: "exec",
-              id: "consumer",
-              repo: "main",
-              command: "placeholder",
-              inputs: [
-                {
-                  kind: "glob",
-                  path: "docs/*.md"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      async setupRepo(repoDir) {
-        await mkdir(join(repoDir, "docs"), { recursive: true });
-        await writeFile(join(repoDir, "docs", "a.md"), "alpha\n");
-      }
-    });
-
     await writeFile(join(fixture.repoDir, "docs", "b.md"), "beta\n");
-
     const resumed = await buildResumedSession(fixture);
 
-    expect(resumed.preserved_node_count).toBe(0);
-    expect(resumed.restarted_node_count).toBe(1);
+    expect(resumed.preserved_node_count).toBe(1);
+    expect(resumed.restarted_node_count).toBe(0);
 
     await rm(fixture.tempRoot, { recursive: true, force: true });
   });
 
-  it("invalidates a harnessed node when AGENTS.md changes", async () => {
+  it("preserves a passed harnessed node when repo instruction files change", async () => {
     const fixture = await createResumeFixture({
       document: {
         version: "1",
-        graph_id: "resume-agents-change",
+        graph_id: "resume-instruction-change",
         repos: {
-          main: {
-            path: "."
-          }
-        },
-        defaults: {
-          launch_profile: "default",
-          workspace_backend: "inplace"
-        },
-        profiles: {
-          default: {
-            harness: "codex-cli"
-          }
-        },
-        graph: {
-          type: "sequence",
-          id: "root",
-          steps: [
-            {
-              type: "agent",
-              id: "implement",
-              repo: "main",
-              prompt: "Write nothing."
-            }
-          ]
-        }
-      },
-      async setupRepo(repoDir) {
-        await writeFile(join(repoDir, "AGENTS.md"), "v1\n");
-      }
-    });
-
-    await writeFile(join(fixture.repoDir, "AGENTS.md"), "updated\n");
-
-    const resumed = await buildResumedSession(fixture);
-
-    expect(resumed.preserved_node_count).toBe(0);
-    expect(resumed.restarted_node_count).toBe(1);
-
-    await rm(fixture.tempRoot, { recursive: true, force: true });
-  });
-
-  it("invalidates a harnessed node when .cursor/rules files change", async () => {
-    const fixture = await createResumeFixture({
-      document: {
-        version: "1",
-        graph_id: "resume-cursor-rules-change",
-        repos: {
-          main: {
-            path: "."
-          }
+          main: { path: "." }
         },
         defaults: {
           launch_profile: "default",
@@ -414,29 +260,28 @@ describe("runtime resume", () => {
       },
       async setupRepo(repoDir) {
         await mkdir(join(repoDir, ".cursor", "rules"), { recursive: true });
+        await writeFile(join(repoDir, "AGENTS.md"), "v1\n");
         await writeFile(join(repoDir, ".cursor", "rules", "review.mdc"), "v1\n");
       }
     });
 
+    await writeFile(join(fixture.repoDir, "AGENTS.md"), "updated\n");
     await writeFile(join(fixture.repoDir, ".cursor", "rules", "review.mdc"), "updated\n");
-
     const resumed = await buildResumedSession(fixture);
 
-    expect(resumed.preserved_node_count).toBe(0);
-    expect(resumed.restarted_node_count).toBe(1);
+    expect(resumed.preserved_node_count).toBe(1);
+    expect(resumed.restarted_node_count).toBe(0);
 
     await rm(fixture.tempRoot, { recursive: true, force: true });
   });
 
-  it("restarts passed nodes from older runs that do not have context provenance", async () => {
+  it("preserves passed nodes even when prior attempts are missing context provenance artifacts", async () => {
     const fixture = await createResumeFixture({
       document: {
         version: "1",
         graph_id: "resume-missing-provenance",
         repos: {
-          main: {
-            path: "."
-          }
+          main: { path: "." }
         },
         defaults: {
           launch_profile: "default",
@@ -473,8 +318,73 @@ describe("runtime resume", () => {
       ...attempt,
       context_provenance_path: undefined
     }));
+    const resumed = await buildResumedSession(fixture, fixture.graph, attemptsWithoutProvenance);
 
-    const resumed = await buildResumedSession(fixture, attemptsWithoutProvenance);
+    expect(resumed.preserved_node_count).toBe(1);
+    expect(resumed.restarted_node_count).toBe(0);
+
+    await rm(fixture.tempRoot, { recursive: true, force: true });
+  });
+
+  it("restarts passed nodes when the compiled node contract changes", async () => {
+    const fixture = await createResumeFixture({
+      document: {
+        version: "1",
+        graph_id: "resume-compiled-change",
+        repos: {
+          main: { path: "." }
+        },
+        defaults: {
+          launch_profile: "default",
+          workspace_backend: "inplace"
+        },
+        profiles: {
+          default: {}
+        },
+        graph: {
+          type: "sequence",
+          id: "root",
+          steps: [
+            {
+              type: "exec",
+              id: "consumer",
+              repo: "main",
+              command: "placeholder"
+            }
+          ]
+        }
+      }
+    });
+
+    const changedGraph = compileGraph({
+      version: "1",
+      graph_id: "resume-compiled-change",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            repo: "main",
+            command: "placeholder",
+            args: ["--changed"]
+          }
+        ]
+      }
+    });
+
+    const resumed = await buildResumedSession(fixture, changedGraph);
 
     expect(resumed.preserved_node_count).toBe(0);
     expect(resumed.restarted_node_count).toBe(1);

@@ -172,13 +172,20 @@ describe("checkpoint CLI helpers", () => {
     const adapter = new FakePromptAdapter(["1"]);
     const executor = createInteractiveCheckpointExecutor({
       streams: {
-        stdin: Readable.from([]) as NodeJS.ReadableStream,
-        stderr: new Writable({
-          write(chunk, _encoding, callback) {
-            stderrChunks.push(String(chunk));
-            callback();
+        stdin: Object.assign(Readable.from([]), {
+          isTTY: true
+        }) as NodeJS.ReadableStream,
+        stderr: Object.assign(
+          new Writable({
+            write(chunk, _encoding, callback) {
+              stderrChunks.push(String(chunk));
+              callback();
+            }
+          }),
+          {
+            isTTY: true
           }
-        }) as NodeJS.WritableStream
+        ) as NodeJS.WritableStream
       },
       create_prompt_adapter: () => ({
         write(chunk) {
@@ -272,12 +279,19 @@ describe("checkpoint CLI helpers", () => {
     const adapter = new FakePromptAdapter(["2", "", "Add rollback details", "Define owner", ""]);
     const executor = createInteractiveCheckpointExecutor({
       streams: {
-        stdin: Readable.from([]) as NodeJS.ReadableStream,
-        stderr: new Writable({
-          write(_chunk, _encoding, callback) {
-            callback();
+        stdin: Object.assign(Readable.from([]), {
+          isTTY: true
+        }) as NodeJS.ReadableStream,
+        stderr: Object.assign(
+          new Writable({
+            write(_chunk, _encoding, callback) {
+              callback();
+            }
+          }),
+          {
+            isTTY: true
           }
-        }) as NodeJS.WritableStream
+        ) as NodeJS.WritableStream
       },
       create_prompt_adapter: () => adapter
     });

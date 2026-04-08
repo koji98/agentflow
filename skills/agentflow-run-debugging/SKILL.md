@@ -1,6 +1,6 @@
 ---
 name: agentflow-run-debugging
-description: Inspect, explain, and debug Agentflow runs. Use when a run failed, resumed unexpectedly, or needs artifact-level diagnosis; when tracing state.json, events.jsonl, execution logs, context packets, or context provenance; or when deciding why passed work did or did not preserve on resume.
+description: Inspect, explain, and debug Agentflow runs. Use when a run failed, resumed unexpectedly, or needs artifact-level diagnosis; when tracing state.json, events.jsonl, execution logs, context packets, or execution artifacts; or when deciding why passed work did or did not preserve on resume.
 ---
 
 # Agentflow Run Debugging
@@ -55,20 +55,20 @@ Use the node and execution metadata to inspect:
 Common buckets:
 
 - graph load or compile diagnostics
-- workspace or harness preflight failures
+- workspace initialization failures
+- node-level harness or checkpoint readiness failures
 - deterministic `check` failure
 - harness failure
 - context materialization failure
 - resume invalidation or preservation surprise
 
-4. Explain resume behavior with provenance, not guesses.
+4. Explain resume behavior from compiled contract, not guesses.
 
 Preservation now depends on:
 
 - unchanged compiled contract
-- unchanged resolved context provenance
 
-If `context_provenance.json` is missing from an older passed run, that node restarts.
+Workspace file changes and harness instruction drift do not invalidate preservation in this release.
 
 5. Feed the diagnosis back into graph design.
 
@@ -89,7 +89,8 @@ Decide whether the issue points to:
 ## Guardrails
 
 - Use artifact files as the source of truth.
-- Do not infer preservation from status alone; check provenance-sensitive inputs and harness instruction files.
+- Do not infer preservation from status alone; check whether the compiled contract changed.
 - Remember that node and execution directories use hashed names on disk.
 - `artifacts/` is optional; execution-root runtime files live directly in the execution directory.
+- `context_packet.json`, `context_summary.md`, and `context_provenance.json` only exist when context resolution succeeded.
 - When a run failure suggests graph brittleness, say so explicitly and point to the graph design implication.

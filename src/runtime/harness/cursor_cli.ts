@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 
+import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createProcessTerminationController } from "../process_control.js";
 import {
   collectMissingHarnessBinaryDiagnostics,
@@ -68,7 +69,8 @@ export function createCursorCliHarness(
 
   return {
     kind: "cursor-cli",
-    preflight() {
+    capabilities: getHarnessCapabilities("cursor-cli")!,
+    checkReadiness() {
       return collectMissingHarnessBinaryDiagnostics(
         "cursor-cli",
         binary,

@@ -6,18 +6,29 @@ import type { ContextReference, InputItem } from "../../graph/authored.js";
 import type { CompiledExecutableNode, CompiledGraph } from "../../graph/compiled.js";
 import type { AttemptRegistry, AttemptSelector, RuntimeNodeAttempt } from "../attempts.js";
 import { listAttemptsForCompiledNode, selectAttempt } from "../attempts.js";
-import { globPatternToRegExp, normalizeRelativePath, splitQualifiedPath } from "./common.js";
 import type {
+  ContextFileInputProvenance,
+  ContextGlobInputProvenance,
+  ContextInputProvenance,
   ContextPacket,
   ContextPacketMaterializedItem,
   ContextPacketOmittedItem,
   ContextProvenance
 } from "./packet.js";
 import {
-  computeContextProvenance,
+  aggregateDigest,
+  createDigest
+} from "./digests.js";
+import {
   createContextDiscoveryCache,
+  computeHarnessInstructionProvenance,
   type ContextDiscoveryCache
 } from "./provenance.js";
+import {
+  globPatternToRegExp,
+  normalizeRelativePath,
+  splitQualifiedPath
+} from "./common.js";
 import { listRepoFiles } from "./repo_files.js";
 
 interface PreparedMaterialization {
@@ -247,91 +258,242 @@ function selectAttemptsForReference(
   return selected ? [selected] : [];
 }
 
+async function materializeTextInput(
+  input: InputItem & { kind: "text" },
+  index: number,
+  options: ResolveContextOptions,
+  accumulator: MaterializationAccumulator,
+  maxBytesPerItem: number
+): Promise<void> {
+  const descriptor = describeInput(input, index);
+  const materialized = prepareMaterialization(input.text, maxBytesPerItem);
+
+  await appendMaterializedItem(
+    accumulator,
+    {
+      key: `input_${index + 1}`,
+      kind: "input",
+      source: input,
+      materialized_path: join(
+        options.execution_dir,
+        "context_materialized",
+        `input_${index + 1}`,
+        `${input.name}.txt`
+      ),
+      bytes: materialized.bytes,
+      truncated: materialized.truncated
+    },
+    materialized,
+    descriptor
+  );
+}
+
+async function materializeFileInput(
+  input: InputItem & { kind: "file" },
+  index: number,
+  options: ResolveContextOptions,
+  cache: ContextDiscoveryCache,
+  accumulator: MaterializationAccumulator,
+  inputProvenance: ContextInputProvenance[],
+  maxBytesPerItem: number
+): Promise<void> {
+  const descriptor = describeInput(input, index);
+  const key = `input_${index + 1}`;
+  const { repo_alias, repo_relative_path } = splitQualifiedPath(input.path, options.node.repo);
+  const repoRoot = options.repo_workspaces[repo_alias];
+
+  if (!repoRoot) {
+    throw new Error(`Unknown repo alias "${repo_alias}" while resolving ${descriptor}.`);
+  }
+
+  const normalizedPath = normalizeRelativePath(repo_relative_path);
+  const sourcePath = resolveSubpathWithinRoot(
+    repoRoot,
+    repo_relative_path,
+    `Input path "${input.path}"`
+  );
+
+  let contents: Buffer;
+
+  try {
+    contents = await readFile(sourcePath);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      accumulator.omitted.push({
+        key,
+        source: input,
+        reason: `Requested input file "${input.path}" was not found at execution time.`,
+        optional: false
+      });
+      return;
+    }
+
+    throw error;
+  }
+
+  const materialized = prepareMaterialization(contents, maxBytesPerItem);
+
+  await appendMaterializedItem(
+    accumulator,
+    {
+      key,
+      kind: "input",
+      source: input,
+      materialized_path: join(
+        options.execution_dir,
+        "context_materialized",
+        key,
+        basename(normalizedPath)
+      ),
+      bytes: materialized.bytes,
+      truncated: materialized.truncated,
+      binding: {
+        kind: "live_workspace_input",
+        requested_path: normalizedPath,
+        resolved_path: sourcePath
+      }
+    },
+    materialized,
+    descriptor
+  );
+
+  const digest = createDigest(contents);
+  cache.file_digests.set(sourcePath, digest);
+  inputProvenance.push({
+    kind: "file",
+    key,
+    repo_alias,
+    path: normalizedPath,
+    resolved_path: sourcePath,
+    digest
+  } satisfies ContextFileInputProvenance);
+}
+
+async function materializeGlobInput(
+  input: InputItem & { kind: "glob" },
+  index: number,
+  options: ResolveContextOptions,
+  cache: ContextDiscoveryCache,
+  accumulator: MaterializationAccumulator,
+  inputProvenance: ContextInputProvenance[],
+  maxBytesPerItem: number
+): Promise<void> {
+  const descriptor = describeInput(input, index);
+  const key = `input_${index + 1}`;
+  const { repo_alias, repo_relative_path } = splitQualifiedPath(input.path, options.node.repo);
+  const repoRoot = options.repo_workspaces[repo_alias];
+
+  if (!repoRoot) {
+    throw new Error(`Unknown repo alias "${repo_alias}" while resolving ${descriptor}.`);
+  }
+
+  const normalizedPattern = normalizeRelativePath(repo_relative_path);
+  const matcher = globPatternToRegExp(normalizedPattern);
+  const repoFiles = await listRepoFiles(repoRoot, cache.repo_files);
+  const matchedPaths = repoFiles
+    .filter((filePath) => matcher.test(filePath))
+    .slice(0, input.max_files ?? Number.MAX_SAFE_INTEGER);
+
+  if (matchedPaths.length === 0) {
+    accumulator.omitted.push({
+      key,
+      source: input,
+      reason: `Requested input glob "${input.path}" matched no files after ignore filtering at execution time.`,
+      optional: false
+    });
+    return;
+  }
+
+  const files: ContextGlobInputProvenance["files"] = [];
+
+  for (const [matchIndex, relativePath] of matchedPaths.entries()) {
+    const sourcePath = resolveSubpathWithinRoot(
+      repoRoot,
+      relativePath,
+      `Glob match "${relativePath}" from "${input.path}"`
+    );
+    const contents = await readFile(sourcePath);
+    const digest = createDigest(contents);
+    cache.file_digests.set(sourcePath, digest);
+    const materialized = prepareMaterialization(contents, maxBytesPerItem);
+
+    await appendMaterializedItem(
+      accumulator,
+      {
+        key: `${key}_${matchIndex + 1}`,
+        kind: "input",
+        source: input,
+        materialized_path: join(
+          options.execution_dir,
+          "context_materialized",
+          key,
+          `${matchIndex + 1}-${basename(relativePath)}`
+        ),
+        bytes: materialized.bytes,
+        truncated: materialized.truncated,
+        binding: {
+          kind: "live_workspace_input",
+          requested_path: relativePath,
+          resolved_path: sourcePath
+        }
+      },
+      materialized,
+      `${descriptor} match "${relativePath}"`
+    );
+
+    files.push({
+      path: relativePath,
+      resolved_path: sourcePath,
+      digest
+    });
+  }
+
+  inputProvenance.push({
+    kind: "glob",
+    key,
+    repo_alias,
+    pattern: normalizedPattern,
+    files,
+    digest: aggregateDigest(files)
+  } satisfies ContextGlobInputProvenance);
+}
+
 async function materializeInputItem(
   input: InputItem,
   index: number,
   options: ResolveContextOptions,
   cache: ContextDiscoveryCache,
   accumulator: MaterializationAccumulator,
+  inputProvenance: ContextInputProvenance[],
   maxBytesPerItem: number
 ): Promise<void> {
-  const materialsRoot = join(options.execution_dir, "context_materialized", `input_${index + 1}`);
-  const descriptor = describeInput(input, index);
-
   if (input.kind === "text") {
-    const destinationPath = join(materialsRoot, `${input.name}.txt`);
-    const materialized = prepareMaterialization(input.text, maxBytesPerItem);
-
-    await appendMaterializedItem(
-      accumulator,
-      {
-        key: `input_${index + 1}`,
-        kind: "input",
-        source: input,
-        materialized_path: destinationPath,
-        bytes: materialized.bytes,
-        truncated: materialized.truncated
-      },
-      materialized,
-      descriptor
-    );
+    await materializeTextInput(input, index, options, accumulator, maxBytesPerItem);
     return;
-  }
-
-  const { repo_alias, repo_relative_path } = splitQualifiedPath(input.path, options.node.repo);
-  const repoRoot = options.repo_workspaces[repo_alias];
-
-  if (!repoRoot) {
-    throw new Error(`Unknown repo alias "${repo_alias}" while resolving input.`);
   }
 
   if (input.kind === "file") {
-    const sourcePath = resolveSubpathWithinRoot(
-      repoRoot,
-      repo_relative_path,
-      `Input path "${input.path}"`
-    );
-    const materialized = prepareMaterialization(await readFile(sourcePath), maxBytesPerItem);
-
-    await appendMaterializedItem(
+    await materializeFileInput(
+      input,
+      index,
+      options,
+      cache,
       accumulator,
-      {
-        key: `input_${index + 1}`,
-        kind: "input",
-        source: input,
-        materialized_path: join(materialsRoot, basename(repo_relative_path)),
-        bytes: materialized.bytes,
-        truncated: materialized.truncated
-      },
-      materialized,
-      descriptor
+      inputProvenance,
+      maxBytesPerItem
     );
     return;
   }
 
-  const repoFiles = await listRepoFiles(repoRoot, cache.repo_file_lists);
-  const matcher = globPatternToRegExp(normalizeRelativePath(repo_relative_path));
-  const matchedPaths = repoFiles
-    .filter((filePath) => matcher.test(filePath))
-    .slice(0, input.max_files ?? Number.MAX_SAFE_INTEGER);
-
-  for (const [matchIndex, relativePath] of matchedPaths.entries()) {
-    const materialized = prepareMaterialization(await readFile(join(repoRoot, relativePath)), maxBytesPerItem);
-
-    await appendMaterializedItem(
-      accumulator,
-      {
-        key: `input_${index + 1}_${matchIndex + 1}`,
-        kind: "input",
-        source: input,
-        materialized_path: join(materialsRoot, `${matchIndex + 1}-${basename(relativePath)}`),
-        bytes: materialized.bytes,
-        truncated: materialized.truncated
-      },
-      materialized,
-      `${descriptor} match "${relativePath}"`
-    );
-  }
+  await materializeGlobInput(
+    input,
+    index,
+    options,
+    cache,
+    accumulator,
+    inputProvenance,
+    maxBytesPerItem
+  );
 }
 
 async function materializeContextReference(
@@ -417,6 +579,7 @@ async function materializeContextReference(
 
 function renderContextSummary(packet: ContextPacket): string {
   const truncatedCount = packet.materials.filter((item) => item.truncated).length;
+  const liveInputItems = packet.materials.filter((item) => item.binding?.kind === "live_workspace_input");
   const lines = [
     `# Context Summary: ${packet.execution_id}`,
     "",
@@ -427,7 +590,8 @@ function renderContextSummary(packet: ContextPacket): string {
     `- Total files: \`${packet.totals.file_count}\``,
     `- Total bytes: \`${packet.totals.total_bytes}\``,
     `- Truncated items: \`${truncatedCount}\``,
-    `- Omitted optional items: \`${packet.omitted.length}\``,
+    `- Live workspace inputs: \`${liveInputItems.length}\``,
+    `- Omitted items: \`${packet.omitted.length}\``,
     ""
   ];
 
@@ -435,8 +599,12 @@ function renderContextSummary(packet: ContextPacket): string {
     lines.push("## Materials", "");
 
     for (const item of packet.materials) {
+      const bindingSuffix =
+        item.binding?.kind === "live_workspace_input"
+          ? `, requested "${item.binding.requested_path ?? "inline text"}", resolved "${item.binding.resolved_path}"`
+          : "";
       lines.push(
-        `- \`${item.key}\` -> \`${item.materialized_path}\` (${item.bytes} bytes${item.truncated ? ", truncated" : ""})`
+        `- \`${item.key}\` -> \`${item.materialized_path}\` (${item.bytes} bytes${item.truncated ? ", truncated" : ""}${bindingSuffix})`
       );
     }
 
@@ -464,11 +632,7 @@ export async function resolveExecutionContext(
   provenance_path: string;
 }> {
   const cache = createContextDiscoveryCache();
-  const provenance = await computeContextProvenance({
-    node: options.node,
-    repo_workspaces: options.repo_workspaces,
-    cache
-  });
+  const inputProvenance: ContextInputProvenance[] = [];
   const accumulator: MaterializationAccumulator = {
     materials: [],
     omitted: [],
@@ -483,6 +647,7 @@ export async function resolveExecutionContext(
       options,
       cache,
       accumulator,
+      inputProvenance,
       options.node.effective_policy.input_rules.max_bytes_per_item
     );
   }
@@ -496,6 +661,19 @@ export async function resolveExecutionContext(
       options.node.effective_policy.input_rules.max_bytes_per_item
     );
   }
+
+  const harness_instructions = await computeHarnessInstructionProvenance({
+    node: options.node,
+    repo_workspaces: options.repo_workspaces,
+    cache
+  });
+  const provenance: ContextProvenance = {
+    compiled_id: options.node.compiled_id,
+    authored_id: options.node.authored_id,
+    repo_alias: options.node.repo,
+    inputs: inputProvenance,
+    ...(harness_instructions ? { harness_instructions } : {})
+  };
 
   const packet: ContextPacket = {
     execution_id: options.execution_id,

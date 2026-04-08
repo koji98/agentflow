@@ -1,18 +1,14 @@
-import { createHash } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { InputItem } from "../../graph/authored.js";
 import type { CompiledExecutableNode } from "../../graph/compiled.js";
-import { resolveSubpathWithinRoot } from "../../path_rules.js";
-import { globPatternToRegExp, normalizeRelativePath, splitQualifiedPath } from "./common.js";
-import { listRepoFiles, walkRelativeFilesSorted } from "./repo_files.js";
+import { normalizeRelativePath } from "./common.js";
+import { aggregateDigest, digestFile } from "./digests.js";
 import type {
   ContextDigestEntry,
-  ContextHarnessInstructionProvenance,
-  ContextInputProvenance,
-  ContextProvenance
+  ContextHarnessInstructionProvenance
 } from "./packet.js";
+import { walkRelativeFilesSorted } from "./repo_files.js";
 
 interface CachedHarnessInstructionSet {
   files: ContextDigestEntry[];
@@ -20,38 +16,9 @@ interface CachedHarnessInstructionSet {
 }
 
 export interface ContextDiscoveryCache {
-  repo_file_lists: Map<string, string[]>;
   file_digests: Map<string, string>;
   harness_instruction_sets: Map<string, CachedHarnessInstructionSet | undefined>;
-}
-
-export interface ComputeContextProvenanceOptions {
-  node: CompiledExecutableNode;
-  repo_workspaces: Record<string, string>;
-  cache?: ContextDiscoveryCache;
-}
-
-function createDigest(contents: Buffer | string): string {
-  return createHash("sha256").update(contents).digest("hex");
-}
-
-function aggregateDigest(entries: ContextDigestEntry[]): string {
-  return createDigest(entries.map((entry) => `${entry.path}:${entry.digest}`).join("\n"));
-}
-
-async function digestFile(
-  sourcePath: string,
-  cache: ContextDiscoveryCache
-): Promise<string> {
-  const cached = cache.file_digests.get(sourcePath);
-
-  if (cached) {
-    return cached;
-  }
-
-  const digest = createDigest(await readFile(sourcePath));
-  cache.file_digests.set(sourcePath, digest);
-  return digest;
+  repo_files: Map<string, string[]>;
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -85,7 +52,7 @@ async function collectHarnessInstructionFiles(
 
     files.push({
       path: normalizeRelativePath(relativePath),
-      digest: await digestFile(absolutePath, cache)
+      digest: await digestFile(absolutePath, cache.file_digests)
     });
   }
 
@@ -98,7 +65,7 @@ async function collectHarnessInstructionFiles(
       const repoRelativePath = normalizeRelativePath(join(".cursor", "rules", relativePath));
       files.push({
         path: repoRelativePath,
-        digest: await digestFile(join(cursorRulesRoot, relativePath), cache)
+        digest: await digestFile(join(cursorRulesRoot, relativePath), cache.file_digests)
       });
     }
   }
@@ -125,99 +92,38 @@ function usesHarnessInstructions(node: CompiledExecutableNode): boolean {
 
 export function createContextDiscoveryCache(): ContextDiscoveryCache {
   return {
-    repo_file_lists: new Map(),
     file_digests: new Map(),
-    harness_instruction_sets: new Map()
+    harness_instruction_sets: new Map(),
+    repo_files: new Map()
   };
 }
 
-export async function computeContextProvenance(
-  options: ComputeContextProvenanceOptions
-): Promise<ContextProvenance> {
+export async function computeHarnessInstructionProvenance(options: {
+  node: CompiledExecutableNode;
+  repo_workspaces: Record<string, string>;
+  cache?: ContextDiscoveryCache;
+}): Promise<ContextHarnessInstructionProvenance | undefined> {
   const cache = options.cache ?? createContextDiscoveryCache();
-  const inputs: ContextInputProvenance[] = [];
 
-  for (const [index, input] of (options.node.inputs ?? []).entries()) {
-    if (input.kind === "text") {
-      continue;
-    }
-
-    const key = `input_${index + 1}`;
-    const { repo_alias, repo_relative_path } = splitQualifiedPath(input.path, options.node.repo);
-    const repoRoot = options.repo_workspaces[repo_alias];
-
-    if (!repoRoot) {
-      throw new Error(`Unknown repo alias "${repo_alias}" while resolving input provenance.`);
-    }
-
-    if (input.kind === "file") {
-      const sourcePath = resolveSubpathWithinRoot(
-        repoRoot,
-        repo_relative_path,
-        `Input path "${input.path}"`
-      );
-
-      inputs.push({
-        kind: "file",
-        key,
-        repo_alias,
-        path: normalizeRelativePath(repo_relative_path),
-        digest: await digestFile(sourcePath, cache)
-      });
-      continue;
-    }
-
-    const repoFiles = await listRepoFiles(repoRoot, cache.repo_file_lists);
-    const matcher = globPatternToRegExp(normalizeRelativePath(repo_relative_path));
-    const matchedPaths = repoFiles
-      .filter((filePath) => matcher.test(filePath))
-      .slice(0, input.max_files ?? Number.MAX_SAFE_INTEGER);
-    const files: ContextDigestEntry[] = [];
-
-    for (const relativePath of matchedPaths) {
-      files.push({
-        path: relativePath,
-        digest: await digestFile(join(repoRoot, relativePath), cache)
-      });
-    }
-
-    inputs.push({
-      kind: "glob",
-      key,
-      repo_alias,
-      pattern: normalizeRelativePath(repo_relative_path),
-      files,
-      digest: aggregateDigest(files)
-    });
+  if (!usesHarnessInstructions(options.node)) {
+    return undefined;
   }
 
-  let harness_instructions: ContextHarnessInstructionProvenance | undefined;
+  const repoRoot = options.repo_workspaces[options.node.repo];
 
-  if (usesHarnessInstructions(options.node)) {
-    const repoRoot = options.repo_workspaces[options.node.repo];
+  if (!repoRoot) {
+    throw new Error(
+      `Unknown repo alias "${options.node.repo}" while resolving harness instruction provenance.`
+    );
+  }
 
-    if (!repoRoot) {
-      throw new Error(
-        `Unknown repo alias "${options.node.repo}" while resolving harness instruction provenance.`
-      );
-    }
+  const instructionSet = await collectHarnessInstructionFiles(repoRoot, cache);
 
-    const instructionSet = await collectHarnessInstructionFiles(repoRoot, cache);
-
-    if (instructionSet) {
-      harness_instructions = {
+  return instructionSet
+    ? {
         repo_alias: options.node.repo,
         files: instructionSet.files,
         digest: instructionSet.digest
-      };
-    }
-  }
-
-  return {
-    compiled_id: options.node.compiled_id,
-    authored_id: options.node.authored_id,
-    repo_alias: options.node.repo,
-    inputs,
-    ...(harness_instructions ? { harness_instructions } : {})
-  };
+      }
+    : undefined;
 }

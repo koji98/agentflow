@@ -52,7 +52,7 @@ setTimeout(() => {
 }
 
 describe("cursor cli harness", () => {
-  it("reports preflight availability from the resolved binary path", async () => {
+  it("reports readiness availability from the resolved binary path", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-preflight-"));
     const availableBinary = await createMockCursorBinary(tempRoot);
     const missingBinary = join(tempRoot, "missing-agent");
@@ -61,12 +61,12 @@ describe("cursor cli harness", () => {
       expect(
         createCursorCliHarness({
           binary: availableBinary.binary_path
-        }).preflight?.()
+        }).checkReadiness?.()
       ).toEqual([]);
       expect(
         createCursorCliHarness({
           binary: missingBinary
-        }).preflight?.()
+        }).checkReadiness?.()
       ).toEqual([
         `cursor-cli harness binary "${missingBinary}" is unavailable. Install it on PATH or set AGENTFLOW_CURSOR_CLI_BIN.`
       ]);
