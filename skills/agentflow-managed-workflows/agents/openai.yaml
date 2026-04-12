@@ -1,4 +1,4 @@
 interface:
-  display_name: "Agentflow Managed Workflows"
-  short_description: "Author deep_research, spec_design, execute_spec, and review_change"
-  default_prompt: "Use $agentflow-managed-workflows to choose the right managed workflow, fill its contract cleanly, define delivery artifacts, and design any downstream handoff."
+  display_name: "Agentflow Managed Patterns"
+  short_description: "Author pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, and pattern_review_change"
+  default_prompt: "Use $agentflow-managed-workflows to choose the right managed pattern, fill its pattern-specific contract cleanly, use delivery or approval only where supported, and design the downstream handoff."

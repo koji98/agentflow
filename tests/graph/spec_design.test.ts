@@ -27,19 +27,19 @@ function buildDocument(stepOverrides = {}) {
       id: "root",
       steps: [
         {
-          type: "spec_design",
+          type: "pattern_spec_design",
           id: "managed_nodes_spec",
           repo: "main",
           profile: "default",
           brief: {
-            problem: "Managed workflows need a clearer authored contract.",
-            goal: "Produce an implementation-ready managed workflow model.",
+            problem: "Managed patterns need a clearer authored contract.",
+            goal: "Produce an implementation-ready managed pattern model.",
             audience: "engineering",
             constraints: ["Keep primitive nodes stable."],
             decision_drivers: ["clarity", "maintainability"],
             scope: {
               paths: ["src/**", "docs/**"],
-              areas: ["graph", "managed workflows"]
+              areas: ["graph", "managed patterns"]
             }
           },
           context_policy: {
@@ -67,8 +67,8 @@ function buildDocument(stepOverrides = {}) {
   };
 }
 
-describe("spec design managed workflow", () => {
-  it("lowers to the repo-first design workflow with optional direction approval and an autonomous revision loop", () => {
+describe("spec design managed pattern", () => {
+  it("lowers to the repo-first design pattern with optional direction approval and a fixed design package", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument({
         approval_policy: {
@@ -89,7 +89,7 @@ describe("spec design managed workflow", () => {
     expect(normalized.lowered_managed_nodes).toEqual([
       {
         authored_id: "managed_nodes_spec",
-        managed_kind: "spec_design",
+        managed_kind: "pattern_spec_design",
         lowered_to: "sequence"
       }
     ]);
@@ -103,18 +103,18 @@ describe("spec design managed workflow", () => {
     const workflow = root.steps[0];
 
     if (!workflow || workflow.type !== "sequence") {
-      throw new Error("Expected spec_design to lower into a sequence workflow.");
+      throw new Error("Expected pattern_spec_design to lower into a sequence workflow.");
     }
 
     expect(workflow.steps.map((step) => step.id)).toEqual([
-      "managed_nodes_spec__managed__spec_design__clarify_brief",
-      "managed_nodes_spec__managed__spec_design__inspect_current_state",
-      "managed_nodes_spec__managed__spec_design__identify_information_gaps",
-      "managed_nodes_spec__managed__spec_design__targeted_external_research",
-      "managed_nodes_spec__managed__spec_design__generate_options",
-      "managed_nodes_spec__managed__spec_design__direction_loop",
-      "managed_nodes_spec__managed__spec_design__draft_spec",
-      "managed_nodes_spec__managed__spec_design__revision_loop",
+      "managed_nodes_spec__managed__pattern_spec_design__clarify_brief",
+      "managed_nodes_spec__managed__pattern_spec_design__inspect_current_state",
+      "managed_nodes_spec__managed__pattern_spec_design__identify_information_gaps",
+      "managed_nodes_spec__managed__pattern_spec_design__targeted_external_research",
+      "managed_nodes_spec__managed__pattern_spec_design__generate_options",
+      "managed_nodes_spec__managed__pattern_spec_design__direction_loop",
+      "managed_nodes_spec__managed__pattern_spec_design__draft_spec",
+      "managed_nodes_spec__managed__pattern_spec_design__revision_loop",
       "managed_nodes_spec"
     ]);
 
@@ -143,9 +143,9 @@ describe("spec design managed workflow", () => {
     expect(externalResearch.steps).toHaveLength(2);
     expect(optionFanout.steps).toHaveLength(3);
     expect(optionFanout.max_concurrency).toBe(2);
-    expect(directionLoop.until.node).toBe("managed_nodes_spec__managed__spec_design__approve_direction");
+    expect(directionLoop.until.node).toBe("managed_nodes_spec__managed__pattern_spec_design__approve_direction");
     expect(revisionLoop.max_attempts).toBe(3);
-    expect(revisionLoop.until.node).toBe("managed_nodes_spec__managed__spec_design__quality_review");
+    expect(revisionLoop.until.node).toBe("managed_nodes_spec__managed__pattern_spec_design__quality_review");
 
     if (revisionLoop.body.type !== "sequence") {
       throw new Error("Expected revision loop body to be a sequence.");
@@ -164,6 +164,7 @@ describe("spec design managed workflow", () => {
         type: "agent",
         outputs: expect.arrayContaining([
           expect.objectContaining({ name: "design_spec", path: "design-spec.md" }),
+          expect.objectContaining({ name: "design_packet", path: "design-packet.json" }),
           expect.objectContaining({ name: "direction_proposal", path: "direction-proposal.md" }),
           expect.objectContaining({ name: "tradeoff_matrix", path: "tradeoff-matrix.md" }),
           expect.objectContaining({ name: "decision_log", path: "decision-log.md" }),
@@ -171,14 +172,14 @@ describe("spec design managed workflow", () => {
             name: "implementation_readiness",
             path: "implementation-readiness.md"
           }),
-          expect.objectContaining({ name: "workflow_status", path: "workflow-status.json" }),
-          expect.objectContaining({ name: "workflow_events", path: "workflow-events.jsonl" })
+          expect.objectContaining({ name: "critique_merged", path: "critique-merged.md" }),
+          expect.objectContaining({ name: "quality_review", path: "quality-review.json" })
         ])
       })
     );
   });
 
-  it("compiles spec_design so downstream nodes depend on the final published design package", () => {
+  it("compiles pattern_spec_design so downstream nodes depend on the final published design package", () => {
     const normalized = normalizeAuthoredGraphDocument({
       ...buildDocument({
         context_policy: {
@@ -236,18 +237,18 @@ describe("spec design managed workflow", () => {
     const handoffNode = compiledGraph.nodes.find((node) => node.authored_id === "handoff");
 
     expect(compiledGraph.authored_to_compiled.managed_nodes_spec).toEqual([
-      "root__managed_nodes_spec__managed__spec_design__workflow__managed_nodes_spec"
+      "root__managed_nodes_spec__managed__pattern_spec_design__workflow__managed_nodes_spec"
     ]);
     expect(finalDesignNode).toEqual(
       expect.objectContaining({
         kind: "agent",
-        lowered_from: "spec_design",
-        compiled_id: "root__managed_nodes_spec__managed__spec_design__workflow__managed_nodes_spec"
+        lowered_from: "pattern_spec_design",
+        compiled_id: "root__managed_nodes_spec__managed__pattern_spec_design__workflow__managed_nodes_spec"
       })
     );
     expect(handoffNode).toEqual(
       expect.objectContaining({
-        deps: ["root__managed_nodes_spec__managed__spec_design__workflow__managed_nodes_spec"]
+        deps: ["root__managed_nodes_spec__managed__pattern_spec_design__workflow__managed_nodes_spec"]
       })
     );
   });

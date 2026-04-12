@@ -2,6 +2,11 @@ import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { RuntimeEventEnvelope } from "../events.js";
 import type { RuntimeStateSnapshot } from "../session.js";
 
+export interface RunDiagnostic {
+  label: string;
+  summary: string;
+}
+
 function formatCounts(state: RuntimeStateSnapshot): string {
   const { counts } = state;
   return [
@@ -28,6 +33,12 @@ function readEventSummary(event: RuntimeEventEnvelope): string | undefined {
         : payload.passed === false
           ? "Check failed."
           : undefined;
+    case "verification.recorded":
+      return payload.passed === false && typeof payload.summary === "string"
+        ? payload.summary
+        : payload.passed === false
+          ? "Soft verification failed."
+          : undefined;
     case "run.canceled":
       return typeof payload.reason === "string" ? `Run canceled: ${payload.reason}` : "Run canceled.";
     case "run.completed":
@@ -39,17 +50,37 @@ function readEventSummary(event: RuntimeEventEnvelope): string | undefined {
   }
 }
 
-function collectDiagnostics(
+function formatSoftVerificationCounts(state: RuntimeStateSnapshot): string {
+  return [
+    `passed=${state.soft_verification_counts.passed}`,
+    `failed=${state.soft_verification_counts.failed}`
+  ].join(" ");
+}
+
+export function collectRunDiagnostics(
   attempts: RuntimeNodeAttempt[],
-  events: RuntimeEventEnvelope[]
-): string[] {
-  const diagnostics: string[] = [];
+  events: RuntimeEventEnvelope[],
+  state?: RuntimeStateSnapshot
+): RunDiagnostic[] {
+  if (state?.status === "passed" && state.evidence_status === "clean") {
+    return [];
+  }
+
+  const diagnostics: RunDiagnostic[] = [];
   const seen = new Set<string>();
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
 
     if (!event) {
+      continue;
+    }
+
+    if (
+      state?.status === "passed"
+      && state.evidence_status === "warnings"
+      && event.type !== "verification.recorded"
+    ) {
       continue;
     }
 
@@ -60,18 +91,22 @@ function collectDiagnostics(
     }
 
     const label = event.compiled_id ?? event.type;
-    const line = `- \`${label}\`: ${summary}`;
+    const key = `${label}\u0000${summary}`;
 
-    if (seen.has(line)) {
+    if (seen.has(key)) {
       continue;
     }
 
-    diagnostics.push(line);
-    seen.add(line);
+    diagnostics.push({ label, summary });
+    seen.add(key);
 
     if (diagnostics.length >= 4) {
       break;
     }
+  }
+
+  if (state?.status === "passed") {
+    return diagnostics;
   }
 
   for (const attempt of [...attempts].reverse()) {
@@ -84,14 +119,15 @@ function collectDiagnostics(
       continue;
     }
 
-    const line = `- \`${attempt.compiled_id}\`: ${error}`;
+    const label = attempt.authored_id;
+    const key = `${label}\u0000${error}`;
 
-    if (seen.has(line)) {
+    if (seen.has(key)) {
       continue;
     }
 
-    diagnostics.push(line);
-    seen.add(line);
+    diagnostics.push({ label, summary: error });
+    seen.add(key);
 
     if (diagnostics.length >= 4) {
       break;
@@ -99,6 +135,19 @@ function collectDiagnostics(
   }
 
   return diagnostics;
+}
+
+export function formatRunDiagnostic(diagnostic: RunDiagnostic): string {
+  return `- \`${diagnostic.label}\`: ${diagnostic.summary}`;
+}
+
+export function selectPrimaryRunDiagnostic(
+  attempts: RuntimeNodeAttempt[],
+  events: RuntimeEventEnvelope[],
+  state?: RuntimeStateSnapshot
+): RunDiagnostic | undefined {
+  const diagnostics = collectRunDiagnostics(attempts, events, state);
+  return diagnostics.find((diagnostic) => !diagnostic.label.startsWith("run.")) ?? diagnostics[0];
 }
 
 export function renderRunSummary(
@@ -110,16 +159,30 @@ export function renderRunSummary(
     `# Run Summary: ${state.run_id}`,
     "",
     `- Graph: \`${state.graph_id}\``,
-    `- Status: \`${state.status}\``,
+    `- Control-flow status: \`${state.status}\``,
+    `- Evidence status: \`${state.evidence_status}\``,
     `- Workspace backend: \`${state.workspace_backend}\``,
     `- Snapshot seq: \`${state.snapshot_seq}\``,
     `- Counts: \`${formatCounts(state)}\``,
+    `- Soft verification counts: \`${formatSoftVerificationCounts(state)}\``,
     ""
   ];
-  const diagnostics = collectDiagnostics(attempts, events);
+  const diagnostics = collectRunDiagnostics(attempts, events, state);
 
   if (diagnostics.length > 0) {
-    lines.push("## Diagnostics", "", ...diagnostics, "");
+    lines.push("## Diagnostics", "", ...diagnostics.map(formatRunDiagnostic), "");
+  }
+
+  if (state.failed_soft_verifications.length > 0) {
+    lines.push("## Failed Soft Verifications", "");
+
+    for (const verification of state.failed_soft_verifications) {
+      lines.push(
+        `- \`${verification.authored_id}\`: ${verification.summary}`
+      );
+    }
+
+    lines.push("");
   }
 
   if (attempts.length === 0) {
@@ -130,10 +193,23 @@ export function renderRunSummary(
   lines.push("## Latest Executions", "");
 
   for (const attempt of attempts) {
+    const verification =
+      attempt.metadata.verification
+      && typeof attempt.metadata.verification === "object"
+      && attempt.metadata.verification !== null
+        ? attempt.metadata.verification as {
+            passed?: boolean;
+          }
+        : undefined;
+
     lines.push(
       `- \`${attempt.compiled_id}\` -> \`${attempt.status}\` (attempt=${attempt.attempt_index}${
         attempt.iteration_index !== undefined ? `, iteration=${attempt.iteration_index}` : ""
-      })`
+      })${
+        verification
+          ? ` · evidence=${verification.passed === false ? "failed" : "passed"}`
+          : ""
+      }`
     );
   }
 

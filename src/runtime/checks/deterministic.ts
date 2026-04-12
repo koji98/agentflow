@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 
 import type { DeterministicPassIf } from "../../graph/authored.js";
 import { createProcessTerminationController } from "../process_control.js";
@@ -7,6 +9,7 @@ export interface LocalProcessInvocation {
   command: string;
   args: string[];
   cwd: string;
+  env_files?: string[];
   env: Record<string, string> | undefined;
   timeout_sec: number;
   signal: AbortSignal | undefined;
@@ -30,10 +33,11 @@ export interface DeterministicCheckResult extends LocalProcessResult {
   summary: string;
 }
 
-function buildLocalProcessEnv(
+async function buildLocalProcessEnv(
   cwd: string,
+  envFilePaths: string[] | undefined,
   envOverrides: Record<string, string> | undefined
-): Record<string, string> {
+): Promise<Record<string, string>> {
   const baselineKeys =
     process.platform === "win32"
       ? ["PATH", "SystemRoot", "ComSpec", "PATHEXT", "USERPROFILE", "TEMP", "TMP"]
@@ -48,10 +52,94 @@ function buildLocalProcessEnv(
     env.PWD = cwd;
   }
 
+  const envFileValues = await loadEnvFiles(cwd, envFilePaths);
+
   return {
     ...env,
+    ...envFileValues,
     ...(envOverrides ?? {})
   };
+}
+
+function stripWrappingQuotes(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+
+  return value;
+}
+
+function stripTrailingComment(value: string): string {
+  let quote: "'" | '"' | undefined;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+
+    if (quote) {
+      if (character === quote && value[index - 1] !== "\\") {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+
+    if (character === "#" && (index === 0 || /\s/u.test(value[index - 1] ?? ""))) {
+      return value.slice(0, index).trimEnd();
+    }
+  }
+
+  return value;
+}
+
+function parseEnvFile(contents: string): Record<string, string> {
+  const parsed: Record<string, string> = {};
+
+  contents.split(/\r?\n/u).forEach((rawLine) => {
+    const trimmedLine = rawLine.trim();
+
+    if (!trimmedLine || trimmedLine.startsWith("#")) {
+      return;
+    }
+
+    const line = trimmedLine.startsWith("export ")
+      ? trimmedLine.slice("export ".length).trimStart()
+      : trimmedLine;
+    const equalsIndex = line.indexOf("=");
+
+    if (equalsIndex <= 0) {
+      return;
+    }
+
+    const key = line.slice(0, equalsIndex).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)) {
+      return;
+    }
+
+    parsed[key] = stripWrappingQuotes(stripTrailingComment(line.slice(equalsIndex + 1).trim()));
+  });
+
+  return parsed;
+}
+
+async function loadEnvFiles(
+  cwd: string,
+  envFilePaths: string[] | undefined
+): Promise<Record<string, string>> {
+  const merged: Record<string, string> = {};
+
+  for (const envFilePath of envFilePaths ?? []) {
+    const absolutePath = isAbsolute(envFilePath) ? envFilePath : resolve(cwd, envFilePath);
+    Object.assign(merged, parseEnvFile(await readFile(absolutePath, "utf8")));
+  }
+
+  return merged;
 }
 
 function evaluateDeterministicPassIf(
@@ -91,10 +179,12 @@ function evaluateDeterministicPassIf(
 export async function runLocalProcess(
   invocation: LocalProcessInvocation
 ): Promise<LocalProcessResult> {
+  const env = await buildLocalProcessEnv(invocation.cwd, invocation.env_files, invocation.env);
+
   return new Promise<LocalProcessResult>((resolve, reject) => {
     const child = spawn(invocation.command, invocation.args, {
       cwd: invocation.cwd,
-      env: buildLocalProcessEnv(invocation.cwd, invocation.env),
+      env,
       stdio: ["ignore", "pipe", "pipe"]
     });
 

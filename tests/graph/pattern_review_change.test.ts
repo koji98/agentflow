@@ -6,7 +6,7 @@ import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 
 function buildReviewStep(stepOverrides = {}) {
   return {
-    type: "review_change",
+    type: "pattern_review_change",
     id: "review_managed_nodes",
     repo: "main",
     profile: "default",
@@ -20,7 +20,7 @@ function buildReviewStep(stepOverrides = {}) {
       audience: "engineering",
       scope: {
         paths: ["src/**", "docs/**", "tests/**"],
-        areas: ["graph", "managed workflows"]
+        areas: ["graph", "managed patterns"]
       }
     },
     context_policy: {
@@ -37,9 +37,8 @@ function buildReviewStep(stepOverrides = {}) {
       require_file_references: true
     },
     delivery: {
-      write_review_summary: true,
-      write_raw_findings: true,
-      write_calibrated_findings: true
+      format: "review_summary",
+      sections: ["findings", "severity_summary", "recommended_actions"]
     },
     ...stepOverrides
   };
@@ -48,7 +47,7 @@ function buildReviewStep(stepOverrides = {}) {
 function buildDocument(steps) {
   return {
     version: "1",
-    graph_id: "review-change-test",
+    graph_id: "pattern-review-change-test",
     repos: {
       main: {
         path: "."
@@ -71,8 +70,8 @@ function buildDocument(steps) {
   };
 }
 
-describe("review change managed workflow", () => {
-  it("lowers to the review workflow with review planning, reviewer fanout, merge, and calibration", () => {
+describe("pattern review change", () => {
+  it("lowers to the review pattern with review planning, reviewer fanout, merge, and calibration", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument([
         buildReviewStep({
@@ -87,7 +86,7 @@ describe("review change managed workflow", () => {
     expect(normalized.lowered_managed_nodes).toEqual([
       {
         authored_id: "review_managed_nodes",
-        managed_kind: "review_change",
+        managed_kind: "pattern_review_change",
         lowered_to: "sequence"
       }
     ]);
@@ -101,16 +100,16 @@ describe("review change managed workflow", () => {
     const workflow = root.steps[0];
 
     if (!workflow || workflow.type !== "sequence") {
-      throw new Error("Expected review_change to lower into a sequence workflow.");
+      throw new Error("Expected pattern_review_change to lower into a sequence workflow.");
     }
 
     expect(workflow.steps.map((step) => step.id)).toEqual([
-      "review_managed_nodes__managed__review_change__prepare_review_packet",
-      "review_managed_nodes__managed__review_change__plan_review",
-      "review_managed_nodes__managed__review_change__reviewer_panel",
-      "review_managed_nodes__managed__review_change__aggregate_raw_findings",
-      "review_managed_nodes__managed__review_change__merge_findings",
-      "review_managed_nodes__managed__review_change__calibrate_findings",
+      "review_managed_nodes__managed__pattern_review_change__prepare_review_packet",
+      "review_managed_nodes__managed__pattern_review_change__plan_review",
+      "review_managed_nodes__managed__pattern_review_change__reviewer_panel",
+      "review_managed_nodes__managed__pattern_review_change__aggregate_raw_findings",
+      "review_managed_nodes__managed__pattern_review_change__merge_findings",
+      "review_managed_nodes__managed__pattern_review_change__calibrate_findings",
       "review_managed_nodes"
     ]);
 
@@ -129,14 +128,10 @@ describe("review change managed workflow", () => {
         type: "agent",
         outputs: expect.arrayContaining([
           expect.objectContaining({ name: "review_summary", path: "review-summary.md" }),
+          expect.objectContaining({ name: "review_bundle", path: "review-bundle.json" }),
           expect.objectContaining({ name: "raw_findings", path: "raw-findings.json" }),
-          expect.objectContaining({
-            name: "calibrated_findings",
-            path: "calibrated-findings.json"
-          }),
           expect.objectContaining({ name: "merged_findings", path: "merged-findings.json" }),
-          expect.objectContaining({ name: "workflow_status", path: "workflow-status.json" }),
-          expect.objectContaining({ name: "workflow_events", path: "workflow-events.jsonl" })
+          expect.objectContaining({ name: "calibrated_findings", path: "calibrated-findings.json" })
         ])
       })
     );
@@ -147,13 +142,13 @@ describe("review change managed workflow", () => {
       buildDocument([
         {
           type: "agent",
-          id: "upstream_validation",
-          prompt: "Write validation ledger output.",
+          id: "upstream_evaluation",
+          prompt: "Write evaluation ledger output.",
           outputs: [
             {
-              name: "validation_ledger",
+              name: "evaluation_ledger",
               from: "attempt",
-              path: "validation-ledger.json",
+              path: "evaluation-ledger.json",
               required: true
             }
           ]
@@ -170,10 +165,10 @@ describe("review change managed workflow", () => {
               kind: "file",
               path: "artifacts/change-summary.md"
             },
-            validation_ledger: {
+            evaluation_ledger: {
               kind: "managed_output",
-              node: "upstream_validation",
-              output: "validation_ledger"
+              node: "upstream_evaluation",
+              output: "evaluation_ledger"
             },
             additional_context: [
               {
@@ -197,7 +192,7 @@ describe("review change managed workflow", () => {
     const workflow = root.steps[1];
 
     if (!workflow || workflow.type !== "sequence") {
-      throw new Error("Expected review_change to lower into a sequence workflow.");
+      throw new Error("Expected pattern_review_change to lower into a sequence workflow.");
     }
 
     const prepareNode = workflow.steps[0];
@@ -205,7 +200,7 @@ describe("review change managed workflow", () => {
     expect(prepareNode).toEqual(
       expect.objectContaining({
         type: "agent",
-        id: "review_bundle__managed__review_change__prepare_review_packet",
+        id: "review_bundle__managed__pattern_review_change__prepare_review_packet",
         inputs: expect.arrayContaining([
           expect.objectContaining({ kind: "file", path: "artifacts/change.patch" }),
           expect.objectContaining({ kind: "file", path: "artifacts/change-summary.md" }),
@@ -213,9 +208,9 @@ describe("review change managed workflow", () => {
         ]),
         context_from: expect.arrayContaining([
           expect.objectContaining({
-            node: "upstream_validation",
+            node: "upstream_evaluation",
             include: "output",
-            output: "validation_ledger",
+            output: "evaluation_ledger",
             optional: true
           })
         ])
@@ -223,7 +218,7 @@ describe("review change managed workflow", () => {
     );
   });
 
-  it("compiles review_change so downstream nodes depend on the final published review", () => {
+  it("compiles pattern_review_change so downstream nodes depend on the final published review package", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument([
         buildReviewStep({
@@ -252,12 +247,14 @@ describe("review change managed workflow", () => {
             {
               node: "review_managed_nodes",
               include: "output",
-              output: "calibrated_findings"
+              output: "review_bundle"
             }
           ]
         }
       ])
     );
+
+    expect(normalized.diagnostics).toEqual([]);
 
     const launch = resolveLaunchConfig(normalized.document!);
     const compilation = compileAuthoredGraph(
@@ -271,29 +268,29 @@ describe("review change managed workflow", () => {
 
     const compiledGraph = compilation.compiled_graph!;
     const finalReviewNode = compiledGraph.nodes.find((node) => node.authored_id === "review_managed_nodes");
-    const reviewerScope = compiledGraph.scopes.find(
-      (scope) => scope.authored_id === "review_managed_nodes__managed__review_change__reviewer_panel"
-    );
     const handoffNode = compiledGraph.nodes.find((node) => node.authored_id === "handoff");
-
-    expect(compiledGraph.authored_to_compiled.review_managed_nodes).toEqual([
-      "root__review_managed_nodes__managed__review_change__workflow__review_managed_nodes"
-    ]);
-    expect(finalReviewNode).toEqual(
-      expect.objectContaining({
-        kind: "agent",
-        lowered_from: "review_change",
-        compiled_id: "root__review_managed_nodes__managed__review_change__workflow__review_managed_nodes"
-      })
+    const reviewerScope = compiledGraph.scopes.find(
+      (scope) => scope.authored_id === "review_managed_nodes__managed__pattern_review_change__reviewer_panel"
     );
+
     expect(reviewerScope).toEqual(
       expect.objectContaining({
         kind: "parallel"
       })
     );
+    expect(compiledGraph.authored_to_compiled.review_managed_nodes).toEqual([
+      "root__review_managed_nodes__managed__pattern_review_change__workflow__review_managed_nodes"
+    ]);
+    expect(finalReviewNode).toEqual(
+      expect.objectContaining({
+        kind: "agent",
+        lowered_from: "pattern_review_change",
+        compiled_id: "root__review_managed_nodes__managed__pattern_review_change__workflow__review_managed_nodes"
+      })
+    );
     expect(handoffNode).toEqual(
       expect.objectContaining({
-        deps: ["root__review_managed_nodes__managed__review_change__workflow__review_managed_nodes"]
+        deps: ["root__review_managed_nodes__managed__pattern_review_change__workflow__review_managed_nodes"]
       })
     );
   });

@@ -12,6 +12,7 @@ export interface AgentInvocation {
   repoAlias: string;
   repoPath: string;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
+  skipGitRepoCheck?: boolean;
   model: string | undefined;
   reasoningEffort?: ReasoningEffort;
   prompt: string;

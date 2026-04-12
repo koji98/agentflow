@@ -20,14 +20,14 @@ Included examples:
   Small read-only graph using primitive `agent` and deterministic `check` nodes.
 - `feature-showcase.json`
   Broader primitive-graph example covering profiles, `parallel`, `repeat`, deterministic checks, AI checks, and context flow.
-- `deep-research-showcase.json`
-  Managed workflow example showing `deep_research` with the shared `brief/context_policy/approval_policy/strategy/delivery` contract plus a downstream handoff.
-- `spec-design-showcase.json`
-  Managed workflow example showing `spec_design` plus a downstream handoff.
-- `execute-spec-showcase.json`
-  Managed workflow example showing the `spec_design -> execute_spec` path with autonomous-by-default execution planning.
-- `review-change-showcase.json`
-  Managed workflow example showing the `execute_spec -> review_change` path with structured review packets and calibrated findings.
+- `pattern-deep-research-showcase.json`
+  Managed pattern example showing `pattern_deep_research` plus a downstream handoff.
+- `pattern-spec-design-showcase.json`
+  Managed pattern example showing `pattern_spec_design` plus a downstream handoff.
+- `pattern-generate-evaluate-fix-showcase.json`
+  Managed pattern example showing the `pattern_spec_design -> pattern_generate_evaluate_fix` path with the narrow generate/evaluate/fix contract.
+- `pattern-review-change-showcase.json`
+  Managed pattern example showing the `pattern_generate_evaluate_fix -> pattern_review_change` path with structured review packets and calibrated findings.
 
 Run any example from the repository root with:
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
 import { renderRunSummary } from "../runtime/delivery/summary.js";
 import type { RuntimeEventEnvelope } from "../runtime/events.js";
+import { summarizeSoftVerifications } from "../runtime/session.js";
 import type {
   LatestExecutionSummary,
   RuntimeNodeStatus,
@@ -210,17 +211,23 @@ function sealTerminalState(
       }
     ])
   ) as RuntimeStateSnapshot["repeat_scopes"];
+  const softVerificationSummary = summarizeSoftVerifications(
+    Object.values(latest_execution_by_compiled_id)
+  );
 
   return {
     ...state,
     status: outcome,
     snapshot_seq: snapshotSeq,
     ended_at: endedAt,
+    evidence_status: softVerificationSummary.evidence_status,
     node_statuses,
     active_executions: {},
     latest_execution_by_compiled_id,
     repeat_scopes,
-    counts: countNodeStatuses(Object.values(node_statuses))
+    counts: countNodeStatuses(Object.values(node_statuses)),
+    soft_verification_counts: softVerificationSummary.soft_verification_counts,
+    failed_soft_verifications: softVerificationSummary.failed_soft_verifications
   };
 }
 

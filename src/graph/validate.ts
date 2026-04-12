@@ -9,6 +9,7 @@ import type {
   ContainerGraphNode,
   ContextReference,
   ExecutableGraphNode,
+  GraphPrerequisiteCheck,
   InputItem
 } from "./authored.js";
 import { normalizeAuthoredGraphDocument } from "./normalize.js";
@@ -122,6 +123,48 @@ function validateInputPath(
   }
 }
 
+function validatePrerequisiteCheck(
+  check: GraphPrerequisiteCheck,
+  path: string,
+  repoAliases: Set<string>,
+  repoCount: number,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  if (check.kind === "file") {
+    const repoAlias = readQualifiedRepoAlias(check.path);
+
+    if (repoAlias && !repoAliases.has(repoAlias)) {
+      diagnostics.push({
+        path: `${path}.path`,
+        message: `Unknown repo alias "${repoAlias}" in prerequisite path "${check.path}".`
+      });
+    }
+
+    if (!repoAlias && repoCount > 1) {
+      diagnostics.push({
+        path: `${path}.path`,
+        message: `Prerequisite path "${check.path}" must be repo-qualified when multiple repos exist.`
+      });
+    }
+
+    if (!isRelativeSubpath(readQualifiedRepoPath(check.path))) {
+      diagnostics.push({
+        path: `${path}.path`,
+        message: `Prerequisite path "${check.path}" must stay within the selected repo root.`
+      });
+    }
+
+    return;
+  }
+
+  if (check.kind === "repo" && !repoAliases.has(check.repo)) {
+    diagnostics.push({
+      path: `${path}.repo`,
+      message: `Unknown repo alias "${check.repo}".`
+    });
+  }
+}
+
 function validateNodeCwd(
   cwd: string | undefined,
   path: string,
@@ -137,6 +180,21 @@ function validateNodeCwd(
       message: `cwd "${cwd}" must stay within the node workspace root.`
     });
   }
+}
+
+function validateEnvFiles(
+  envFiles: string[] | undefined,
+  path: string,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  (envFiles ?? []).forEach((envFile, index) => {
+    if (envFile.includes(":") || !isRelativeSubpath(envFile)) {
+      diagnostics.push({
+        path: `${path}[${index}]`,
+        message: `env_files entry "${envFile}" must stay within the node workspace root.`
+      });
+    }
+  });
 }
 
 function validateContextReference(
@@ -192,6 +250,14 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
   const seenNodeIds = new Set<string>();
   const nodeIndex = new Map<string, NodeMetadata>();
 
+  (document.prerequisites?.checks ?? []).forEach((check, index) => {
+    validatePrerequisiteCheck(check, `$.prerequisites.checks[${index}]`, repoAliases, repoCount, diagnostics);
+  });
+
+  Object.entries(document.profiles ?? {}).forEach(([profileName, profile]) => {
+    validateEnvFiles(profile.env_files, `$.profiles.${profileName}.env_files`, diagnostics);
+  });
+
   visitNodes(document.graph, (node, metadata) => {
     if (seenNodeIds.has(node.id)) {
       diagnostics.push({
@@ -231,6 +297,7 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
 
       if (node.type === "exec" || (node.type === "check" && node.check_kind === "deterministic")) {
         validateNodeCwd(node.cwd, `${metadata.path}.cwd`, diagnostics);
+        validateEnvFiles(node.env_files, `${metadata.path}.env_files`, diagnostics);
       }
 
       const declaredOutputs = new Set<string>();
@@ -262,6 +329,11 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
         diagnostics.push({
           path: `${metadata.path}.until.node`,
           message: `repeat.until.node "${node.until.node}" must reference a descendant check or checkpoint node.`
+        });
+      } else if (untilTarget.type === "check" && untilTarget.on_failure === "continue") {
+        diagnostics.push({
+          path: `${metadata.path}.until.node`,
+          message: `repeat.until.node "${node.until.node}" cannot use on_failure = "continue".`
         });
       }
     }

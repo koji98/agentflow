@@ -9,11 +9,11 @@ This repository is the current Agentflow workspace. Prefer the repository docs a
 3. `docs/DEFERRED.md`
 4. `docs/OPERATIONS.md`
 5. `docs/ARCHITECTURE.md`
-6. `docs/MANAGED_WORKFLOWS.md`
-7. `docs/DEEP_RESEARCH_WORKFLOW.md`
-8. `docs/SPEC_DESIGN_WORKFLOW.md`
-9. `docs/EXECUTE_SPEC_WORKFLOW.md`
-10. `docs/REVIEW_CHANGE_WORKFLOW.md`
+6. `docs/MANAGED_PATTERNS.md`
+7. `docs/PATTERN_DEEP_RESEARCH.md`
+8. `docs/PATTERN_SPEC_DESIGN.md`
+9. `docs/PATTERN_GENERATE_EVALUATE_FIX.md`
+10. `docs/PATTERN_REVIEW_CHANGE.md`
 
 ## Canonical Surface
 

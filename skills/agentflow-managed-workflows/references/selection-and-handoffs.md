@@ -1,72 +1,72 @@
-# Managed Workflow Selection And Handoffs
+# Managed Pattern Selection And Handoffs
 
-Use this reference when choosing a managed workflow or deciding what should consume its outputs.
+Use this reference when choosing a managed pattern or deciding what should consume its outputs.
 
 ## Choose by lifecycle, not by label
 
-Use `deep_research` when the task needs:
+Use `pattern_deep_research` when the task needs:
 
 - multi-track investigation
 - source policy and citation discipline
 - contradiction handling
-- a synthesized final report
+- a synthesized research package
 
-Use `spec_design` when the task needs:
+Use `pattern_spec_design` when the task needs:
 
 - repo-grounded design work
 - current-state analysis
 - alternatives and tradeoffs
 - an implementation-ready design package
 
-Use `execute_spec` when the task needs:
+Use `pattern_generate_evaluate_fix` when the task needs:
 
-- implementing an existing spec source
-- planning before mutation
-- validation-led execution
-- bounded repair and a final handoff
+- implementing against a prepared design or task packet
+- concrete evaluator-command fan-out
+- bounded fix retries driven by a hard evaluation gate
 
-Use `review_change` when the task needs:
+Use `pattern_review_change` when the task needs:
 
-- structured review of a diff or change packet
+- structured review of a diff or change package
 - reviewer specialization
-- merged, calibrated findings
+- merged and calibrated findings
 
 ## When not to use them
 
-Do not use a managed workflow when:
+Do not use a managed pattern when:
 
 - the task is only one or two primitive steps
-- the task needs a custom graph shape that the workflow does not model well
-- the authored contract would mostly be empty because the workflow is overkill
+- the task needs a custom graph shape that the pattern does not model well
+- the authored contract would mostly be empty because the pattern is overkill
 
 ## Approval policy
 
-Managed workflows are autonomous by default.
+Managed patterns are autonomous by default.
 
-Only add `approval_policy` when the workflow should intentionally stop for operator review. Do not add checkpoints just to slow the workflow down or simulate caution.
+Only `pattern_deep_research` and `pattern_spec_design` support `approval_policy`. Use it only when the pattern should intentionally stop for operator review. Do not add checkpoints just to simulate caution.
 
 ## Delivery and downstream nodes
 
 Always decide what the next node actually needs:
 
 - a final report
-- a design spec
-- an implementation handoff
-- calibrated review findings
+- a machine-readable packet
+- a review bundle
+- a short operator handoff
 
 Good handoff pattern:
 
-1. managed workflow publishes named outputs
-2. one downstream primitive node consumes the exact published artifact it needs
+1. managed pattern publishes named outputs
+2. one downstream primitive node consumes the exact artifact it needs
 
 Bad handoff pattern:
 
-1. managed workflow publishes a full result
+1. managed pattern publishes a full result
 2. one more `agent` node restates the same result with no new responsibility
 
 ## Common mistakes
 
-- using `runtime` to express workflow intent
-- moving key output requirements out of `delivery`
+- using `runtime` to express pattern intent
+- expecting `delivery` to add or remove the core output set
+- adding `delivery` or `approval_policy` to `pattern_generate_evaluate_fix`
 - enabling checkpoints when autonomy would be cleaner
-- forgetting to design the downstream consumer of the workflow's published artifact
+- forgetting to design the downstream consumer of the pattern’s published artifact

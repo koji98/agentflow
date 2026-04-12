@@ -192,6 +192,13 @@
                   "include": "summary"
                 },
                 {
+                  "node": "review_walkthrough",
+                  "include": "output",
+                  "output": "review_report",
+                  "iteration": "latest_failed",
+                  "optional": true
+                },
+                {
                   "node": "verify_package_contract",
                   "include": "result"
                 }

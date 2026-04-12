@@ -244,4 +244,45 @@ describe("graph profile resolution", () => {
     expect(resolution.diagnostics).toEqual([]);
     expect(resolution.policy.reasoning_effort).toBe("xhigh");
   });
+
+  it("resolves codex skip_git_repo_check only for codex-backed nodes", () => {
+    const document = createDocument(
+      {
+        default: {
+          harness: "codex-cli",
+          skip_git_repo_check: true
+        },
+        cursor: {
+          harness: "cursor-cli"
+        }
+      },
+      {
+        launch_profile: "default"
+      }
+    );
+
+    const launch = resolveLaunchConfig(document);
+    const codexResolution = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "implement",
+      prompt: "Implement the change."
+    } satisfies AgentNode);
+    const cursorResolution = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "cursor_implement",
+      profile: "cursor",
+      prompt: "Implement the change."
+    } satisfies AgentNode);
+
+    expect(codexResolution.diagnostics).toEqual([]);
+    expect(codexResolution.policy).toEqual(
+      expect.objectContaining({
+        harness: "codex-cli",
+        skip_git_repo_check: true
+      })
+    );
+    expect(cursorResolution.diagnostics).toEqual([]);
+    expect(cursorResolution.policy.harness).toBe("cursor-cli");
+    expect(cursorResolution.policy.skip_git_repo_check).toBeUndefined();
+  });
 });

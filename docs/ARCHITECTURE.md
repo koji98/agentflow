@@ -65,6 +65,7 @@ The authored graph is the operator-facing source document. It is nested, readabl
 - `repos.<alias>.path` is resolved relative to the authored graph file location.
 - `defaults.launch_profile` selects the run launch profile.
 - `defaults.workspace_backend` selects the run workspace backend.
+- optional `prerequisites.checks` declares launch-time file, command, env, or repo checks shared by `validate`, `run`, and `resume`.
 - The run root is not authored inside the graph. It is launch-time configuration owned by the CLI and resolved from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
 
 ### Multi-repo ownership
@@ -92,10 +93,10 @@ Only `agent`, `exec`, `check`, and `checkpoint` are executable runtime nodes.
 
 Managed-workflow authoring supports:
 
-- `deep_research`
-- `spec_design`
-- `execute_spec`
-- `review_change`
+- `pattern_deep_research`
+- `pattern_spec_design`
+- `pattern_generate_evaluate_fix`
+- `pattern_review_change`
 
 Those workflows compile into internal primitive subgraphs rather than execute as direct runtime node kinds. Their authored schemas are part of the current release contract.
 
@@ -145,11 +146,15 @@ Optional node-specific fields:
 
 - `args`
 - `cwd`
+- `env_files`
 - `env`
+- `on_failure`
 
 `cwd`, when present, resolves relative to the node workspace and must stay within that workspace root.
 
-`exec` does not support `allow_failure` in this release. Soft-failure behavior must be expressed with explicit `check` or `repeat` structure.
+`env_files`, when present, is a list of dotenv-style files resolved relative to the node workspace root. The files must stay within that workspace root, load in order, and are applied before inline `env` overrides.
+
+`on_failure` defaults to `"fail"`. With `"continue"`, non-zero verifier exits are recorded as soft verification evidence in `result.json` and `verification.recorded`, but control flow continues. Spawn errors, timeouts, cancellation, context failures, and output materialization failures still fail the node hard.
 
 ### `check`
 
@@ -169,12 +174,14 @@ Optional shared check fields:
 - `inputs`
 - `context_from`
 - `outputs`
+- `on_failure`
 
 Deterministic check fields:
 
 - `command`
 - optional `args`
 - optional `cwd`
+- optional `env_files`
 - optional `env`
 - optional `pass_if`
 
@@ -188,6 +195,8 @@ AI check fields:
 - `prompt`
 - optional `rubric`
 - optional `model`
+
+`on_failure` defaults to `"fail"`. With `"continue"`, a failed deterministic or AI evaluation records its true pass/fail result as soft verification evidence while the graph continues. Managed internal hard gates remain hard unless the workflow contract lowers them explicitly as soft evidence.
 
 AI checks must return structured JSON:
 
@@ -393,10 +402,12 @@ The compiler rejects:
 - missing or duplicate node ids
 - unknown repo aliases
 - unknown profile names
+- profile and node `env_files` paths that are absolute, repo-qualified, or escape the node workspace root
 - `context_from` references to nodes that are not guaranteed to execute before the consumer
 - ambiguous repeated-node references without an `iteration` selector
 - `output` references to undeclared names
 - cross-repo direct file reads without explicit repo qualification when the source repo is not the consumer repo
+- `repeat.until.node` targets that use `on_failure = "continue"`
 
 Runtime context resolution fails the node when:
 
@@ -405,6 +416,14 @@ Runtime context resolution fails the node when:
 - input material exceeds the effective limits after truncation rules are applied
 
 If `optional: true`, the missing item is omitted and the omission is recorded in `context_packet.json`.
+
+CLI validation runs in three phases:
+
+1. authored validation
+2. compiled validation after lowering managed patterns
+3. readiness validation for declared prerequisites and resolved repo sources
+
+Readiness validation blocks launch only for required checks. Optional prerequisite failures remain visible as warnings.
 
 ## Profile Model
 
@@ -415,6 +434,8 @@ Profiles are named policy bundles. They avoid repeating execution policy on ever
 - `harness`
 - `model`
 - `sandbox`
+- `skip_git_repo_check`
+- `env_files`
 - `timeout_sec`
 - `input_rules`
 - `deterministic_check_defaults`
@@ -446,6 +467,8 @@ Applicability rules:
 
 - `harness`, `model`, and codex `reasoning_effort` apply to `agent` and AI `check`
 - `model` inheritance stops at a harness boundary; if a node profile switches harnesses, it does not inherit a launch-profile model from the previous harness
+- `skip_git_repo_check` applies only to `codex-cli` `agent` and AI `check` nodes, and maps to Codex CLI `--skip-git-repo-check`
+- `env_files` apply only to `exec` and deterministic `check`; node-level `env_files` replaces the profile list, paths resolve inside the node workspace root, files load in order, and inline node `env` wins last
 - AI `check` always executes in `read-only` mode, regardless of profile sandbox defaults, and the release requires `codex-cli` for that strict evaluator contract
 - `deterministic_check_defaults` apply only to deterministic `check`
 - `ai_check_defaults` apply only to AI `check`
@@ -815,6 +838,7 @@ Runs before compilation. It checks:
 - valid profile references
 - legal `inputs`, `context_from`, and `outputs`
 - repeat semantics
+- `env_files` path boundaries
 - unsupported deferred features
 
 ### 2. Compile validation

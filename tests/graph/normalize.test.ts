@@ -172,7 +172,7 @@ describe("graph normalization", () => {
         expect.objectContaining({
           path: "$.graph.steps[0].type",
           message:
-            "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, deep_research, spec_design, execute_spec, review_change."
+            "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, pattern_review_change."
         })
       ])
     );
@@ -228,6 +228,207 @@ describe("graph normalization", () => {
     }
 
     expect(graph.steps[0].reasoning_effort).toBe("xhigh");
+  });
+
+  it("normalizes prerequisites and soft verification settings", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "soft-verify-prereqs",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      prerequisites: {
+        checks: [
+          {
+            kind: "command",
+            command: "git"
+          },
+          {
+            kind: "file",
+            path: "main:README.md",
+            required: false
+          },
+          {
+            kind: "env",
+            name: "HOME"
+          },
+          {
+            kind: "repo",
+            repo: "main"
+          }
+        ]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "capture_command",
+            command: "sh",
+            on_failure: "continue"
+          },
+          {
+            type: "check",
+            id: "capture_check",
+            check_kind: "deterministic",
+            command: "sh",
+            on_failure: "continue"
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.prerequisites).toEqual({
+      checks: [
+        {
+          kind: "command",
+          command: "git"
+        },
+        {
+          kind: "file",
+          path: "main:README.md",
+          required: false
+        },
+        {
+          kind: "env",
+          name: "HOME"
+        },
+        {
+          kind: "repo",
+          repo: "main"
+        }
+      ]
+    });
+
+    const graph = normalized.document?.graph;
+    if (!graph || graph.type !== "sequence") {
+      throw new Error("Expected normalized graph to be a sequence.");
+    }
+
+    expect(graph.steps[0]).toEqual(
+      expect.objectContaining({
+        type: "exec",
+        id: "capture_command",
+        on_failure: "continue"
+      })
+    );
+    expect(graph.steps[1]).toEqual(
+      expect.objectContaining({
+        type: "check",
+        id: "capture_check",
+        on_failure: "continue"
+      })
+    );
+  });
+
+  it("normalizes env_files on profiles and local command nodes", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "env-files",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          env_files: [".env", ".env.development"]
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "run_script",
+            command: "npm",
+            args: ["test"],
+            env_files: [".env.test"]
+          },
+          {
+            type: "check",
+            id: "verify",
+            check_kind: "deterministic",
+            command: "npm",
+            args: ["test"],
+            env_files: []
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.profiles?.default.env_files).toEqual([".env", ".env.development"]);
+
+    const graph = normalized.document?.graph;
+    if (!graph || graph.type !== "sequence") {
+      throw new Error("Expected normalized graph to be a sequence.");
+    }
+
+    expect(graph.steps[0]).toEqual(
+      expect.objectContaining({
+        env_files: [".env.test"]
+      })
+    );
+    expect(graph.steps[1]).toEqual(
+      expect.objectContaining({
+        env_files: []
+      })
+    );
+  });
+
+  it("rejects env_files on AI checks", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "ai-env-files",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "check",
+            id: "judge",
+            check_kind: "ai",
+            prompt: "Judge it.",
+            env_files: [".env"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].env_files",
+          message: 'Field "env_files" does not apply to AI checks.'
+        })
+      ])
+    );
   });
 
   it("rejects input_rules.max_files and points authors to byte budgets or glob-local caps", () => {

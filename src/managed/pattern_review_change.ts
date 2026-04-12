@@ -9,7 +9,6 @@ import type {
   SequenceNode
 } from "../graph/authored.js";
 import {
-  appendOutput,
   attemptOutput,
   body,
   listOrFallback,
@@ -18,63 +17,61 @@ import {
   renderPrompt,
   section,
   sharedNodeBase,
-  type ManagedWorkflowRuntime,
+  type ManagedPatternRuntime,
   workflowBriefOutput,
-  workflowEventsOutput,
   workflowPlanJsonOutput,
-  workflowPlanMarkdownOutput,
-  workflowStatusOutput
+  workflowPlanMarkdownOutput
 } from "./foundation.js";
 
-export interface ReviewChangeScope {
+export interface PatternReviewChangeScope {
   paths?: string[];
   areas?: string[];
 }
 
-export interface ReviewChangeManagedNodeSource {
+export interface PatternReviewChangeManagedNodeSource {
   kind: "managed_node";
   node: string;
 }
 
-export interface ReviewChangeFileSourceRef {
+export interface PatternReviewChangeFileSourceRef {
   kind: "file";
   path: string;
 }
 
-export interface ReviewChangeManagedOutputSourceRef {
+export interface PatternReviewChangeManagedOutputSourceRef {
   kind: "managed_output";
   node: string;
   output: string;
 }
 
-export type ReviewChangeSourceRef = ReviewChangeFileSourceRef | ReviewChangeManagedOutputSourceRef;
+export type PatternReviewChangeSourceRef = PatternReviewChangeFileSourceRef | PatternReviewChangeManagedOutputSourceRef;
 
-export interface ReviewChangeArtifactBundleSource {
+export interface PatternReviewChangeArtifactBundleSource {
   kind: "artifact_bundle";
-  diff?: ReviewChangeSourceRef;
-  summary?: ReviewChangeSourceRef;
-  validation_ledger?: ReviewChangeSourceRef;
-  files_touched?: ReviewChangeSourceRef;
-  additional_context?: ReviewChangeSourceRef[];
+  diff?: PatternReviewChangeSourceRef;
+  summary?: PatternReviewChangeSourceRef;
+  evaluation_ledger?: PatternReviewChangeSourceRef;
+  files_touched?: PatternReviewChangeSourceRef;
+  additional_context?: PatternReviewChangeSourceRef[];
 }
 
-export type ReviewChangeSource = ReviewChangeManagedNodeSource | ReviewChangeArtifactBundleSource;
+export type PatternReviewChangeSource = PatternReviewChangeManagedNodeSource | PatternReviewChangeArtifactBundleSource;
 
-export interface ReviewChangeBrief {
+export interface PatternReviewChangeBrief {
   review_goal?: string;
   focus?: string[];
   audience?: string;
-  scope?: ReviewChangeScope;
+  scope?: PatternReviewChangeScope;
 }
 
-export interface ReviewChangeContextPolicy {
+export interface PatternReviewChangeContextPolicy {
   include_surrounding_code?: boolean;
   include_tests?: boolean;
   include_docs?: boolean;
   include_validation?: boolean;
 }
 
-export interface ReviewChangeStrategy {
+export interface PatternReviewChangeStrategy {
   reviewer_profiles?: string[];
   severity_policy?: "balanced" | "conservative" | "strict";
   include_surrounding_context?: boolean;
@@ -82,23 +79,22 @@ export interface ReviewChangeStrategy {
   require_file_references?: boolean;
 }
 
-export interface ReviewChangeDelivery {
-  write_review_summary?: boolean;
-  write_raw_findings?: boolean;
-  write_calibrated_findings?: boolean;
+export interface PatternReviewChangeDelivery {
+  format?: string;
+  sections?: string[];
 }
 
-export interface ReviewChangeWorkflowConfig extends BaseExecutableNode {
-  brief: ReviewChangeBrief;
-  review_source: ReviewChangeSource;
-  context_policy: ReviewChangeContextPolicy;
-  strategy: ReviewChangeStrategy;
-  delivery: ReviewChangeDelivery;
-  runtime?: ManagedWorkflowRuntime;
+export interface PatternReviewChangeConfig extends BaseExecutableNode {
+  brief: PatternReviewChangeBrief;
+  review_source: PatternReviewChangeSource;
+  context_policy: PatternReviewChangeContextPolicy;
+  strategy: PatternReviewChangeStrategy;
+  delivery: PatternReviewChangeDelivery;
+  runtime?: ManagedPatternRuntime;
 }
 
 function workflowNodeId(rootId: string, suffix: string): string {
-  return managedId(rootId, "review_change", suffix);
+  return managedId(rootId, "pattern_review_change", suffix);
 }
 
 function slugValue(value: string): string {
@@ -109,7 +105,7 @@ function slugValue(value: string): string {
     .replace(/^_+|_+$/g, "") || "reviewer";
 }
 
-function formatScope(scope: ReviewChangeScope | undefined): string[] {
+function formatScope(scope: PatternReviewChangeScope | undefined): string[] {
   if (!scope) {
     return ["Scope: infer the most relevant repository surfaces from the review source and packet."];
   }
@@ -129,7 +125,7 @@ function formatScope(scope: ReviewChangeScope | undefined): string[] {
   return lines.length > 0 ? lines : ["Scope: infer the most relevant repository surfaces from the review source and packet."];
 }
 
-function formatBrief(brief: ReviewChangeBrief): string[] {
+function formatBrief(brief: PatternReviewChangeBrief): string[] {
   return [
     `Review goal: ${brief.review_goal ?? "Find the highest-signal defects and risks in the change."}`,
     ...(brief.audience ? [`Audience: ${brief.audience}`] : []),
@@ -139,7 +135,7 @@ function formatBrief(brief: ReviewChangeBrief): string[] {
   ].filter((line) => line.length > 0);
 }
 
-function formatContextPolicy(policy: ReviewChangeContextPolicy): string[] {
+function formatContextPolicy(policy: PatternReviewChangeContextPolicy): string[] {
   return [
     `- Include surrounding code: ${policy.include_surrounding_code ? "yes" : "no"}`,
     `- Include tests: ${policy.include_tests ? "yes" : "no"}`,
@@ -148,7 +144,7 @@ function formatContextPolicy(policy: ReviewChangeContextPolicy): string[] {
   ];
 }
 
-function formatStrategy(strategy: ReviewChangeStrategy): string[] {
+function formatStrategy(strategy: PatternReviewChangeStrategy): string[] {
   return [
     `- Reviewer profiles: ${(strategy.reviewer_profiles ?? ["correctness", "testing", "maintainability"]).join(", ")}`,
     `- Severity policy: ${strategy.severity_policy ?? "balanced"}`,
@@ -158,18 +154,27 @@ function formatStrategy(strategy: ReviewChangeStrategy): string[] {
   ];
 }
 
-function formatSourceRef(reference: ReviewChangeSourceRef): string {
+function formatDelivery(delivery: PatternReviewChangeDelivery): string[] {
+  return [
+    `- Format: ${delivery.format ?? "review_summary"}`,
+    ...(delivery.sections && delivery.sections.length > 0
+      ? [`- Required sections: ${delivery.sections.join(", ")}`]
+      : [])
+  ];
+}
+
+function formatSourceRef(reference: PatternReviewChangeSourceRef): string {
   return reference.kind === "file"
     ? `file:${reference.path}`
     : `managed_output:${reference.node}.${reference.output}`;
 }
 
-function formatReviewSource(source: ReviewChangeSource): string[] {
+function formatReviewSource(source: PatternReviewChangeSource): string[] {
   if (source.kind === "managed_node") {
     return [
       "- Source kind: managed_node",
       `- Source node: ${source.node}`,
-      "- Expected outputs when available: handoff, validation_ledger, repair_log, execution_plan, file_plan, mutation_boundary"
+      "- Expected outputs when available: change_summary, change_packet, evaluation_ledger, fix_log"
     ];
   }
 
@@ -177,7 +182,7 @@ function formatReviewSource(source: ReviewChangeSource): string[] {
     "- Source kind: artifact_bundle",
     ...(source.diff ? [`- diff: ${formatSourceRef(source.diff)}`] : []),
     ...(source.summary ? [`- summary: ${formatSourceRef(source.summary)}`] : []),
-    ...(source.validation_ledger ? [`- validation_ledger: ${formatSourceRef(source.validation_ledger)}`] : []),
+    ...(source.evaluation_ledger ? [`- evaluation_ledger: ${formatSourceRef(source.evaluation_ledger)}`] : []),
     ...(source.files_touched ? [`- files_touched: ${formatSourceRef(source.files_touched)}`] : []),
     ...(source.additional_context && source.additional_context.length > 0
       ? ["- additional_context:", ...source.additional_context.map((reference) => `  - ${formatSourceRef(reference)}`)]
@@ -185,7 +190,7 @@ function formatReviewSource(source: ReviewChangeSource): string[] {
   ];
 }
 
-function sourceRefToInput(reference: ReviewChangeSourceRef): InputItem | undefined {
+function sourceRefToInput(reference: PatternReviewChangeSourceRef): InputItem | undefined {
   if (reference.kind !== "file") {
     return undefined;
   }
@@ -196,7 +201,7 @@ function sourceRefToInput(reference: ReviewChangeSourceRef): InputItem | undefin
   } satisfies FileInput;
 }
 
-function sourceRefToContext(reference: ReviewChangeSourceRef, optional: boolean): ContextReference | undefined {
+function sourceRefToContext(reference: PatternReviewChangeSourceRef, optional: boolean): ContextReference | undefined {
   if (reference.kind !== "managed_output") {
     return undefined;
   }
@@ -209,7 +214,7 @@ function sourceRefToContext(reference: ReviewChangeSourceRef, optional: boolean)
   };
 }
 
-function resolveReviewSourceMaterials(source: ReviewChangeSource): {
+function resolveReviewSourceMaterials(source: PatternReviewChangeSource): {
   inputs: InputItem[];
   context_from: ContextReference[];
 } {
@@ -224,47 +229,35 @@ function resolveReviewSourceMaterials(source: ReviewChangeSource): {
         {
           node: source.node,
           include: "output",
-          output: "handoff",
+          output: "change_summary",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "validation_ledger",
+          output: "change_packet",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "repair_log",
+          output: "evaluation_ledger",
           optional: true
         },
         {
           node: source.node,
           include: "output",
-          output: "execution_plan",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "file_plan",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "mutation_boundary",
+          output: "fix_log",
           optional: true
         }
       ]
     };
   }
 
-  const refs: Array<{ reference: ReviewChangeSourceRef; optional: boolean }> = [
+  const refs: Array<{ reference: PatternReviewChangeSourceRef; optional: boolean }> = [
     ...(source.diff ? [{ reference: source.diff, optional: false }] : []),
     ...(source.summary ? [{ reference: source.summary, optional: false }] : []),
-    ...(source.validation_ledger ? [{ reference: source.validation_ledger, optional: true }] : []),
+    ...(source.evaluation_ledger ? [{ reference: source.evaluation_ledger, optional: true }] : []),
     ...(source.files_touched ? [{ reference: source.files_touched, optional: true }] : []),
     ...(source.additional_context ?? []).map((reference) => ({
       reference,
@@ -311,7 +304,7 @@ function roleGuidance(role: string): string {
   }
 }
 
-function buildPreparePrompt(config: ReviewChangeWorkflowConfig): string {
+function buildPreparePrompt(config: PatternReviewChangeConfig): string {
   return renderPrompt([
     body("Prepare the structured review packet for this change review."),
     section("Objective", formatBrief(config.brief)),
@@ -329,7 +322,7 @@ function buildPreparePrompt(config: ReviewChangeWorkflowConfig): string {
   ]);
 }
 
-function buildPlanPrompt(config: ReviewChangeWorkflowConfig): string {
+function buildPlanPrompt(config: PatternReviewChangeConfig): string {
   return renderPrompt([
     body("Turn the review packet into an explicit review plan."),
     section("Objective", formatBrief(config.brief)),
@@ -349,7 +342,7 @@ function buildPlanPrompt(config: ReviewChangeWorkflowConfig): string {
   ]);
 }
 
-function buildReviewerPrompt(role: string, config: ReviewChangeWorkflowConfig): string {
+function buildReviewerPrompt(role: string, config: PatternReviewChangeConfig): string {
   const slug = slugValue(role);
 
   return renderPrompt([
@@ -401,7 +394,7 @@ function buildMergePrompt(): string {
   ]);
 }
 
-function buildCalibratePrompt(config: ReviewChangeWorkflowConfig): string {
+function buildCalibratePrompt(config: PatternReviewChangeConfig): string {
   return renderPrompt([
     body("Calibrate the merged findings for severity, confidence, and false positives."),
     section("Objective", formatBrief(config.brief)),
@@ -424,20 +417,25 @@ function buildCalibratePrompt(config: ReviewChangeWorkflowConfig): string {
   ]);
 }
 
-function buildFinalizePrompt(outputs: OutputDefinition[]): string {
+function buildFinalizePrompt(config: PatternReviewChangeConfig, outputs: OutputDefinition[]): string {
   return renderPrompt([
-    body("Publish the final review summary and workflow status artifacts."),
+    body("Publish the final review package."),
     section("Current Context", [
       "Use the review packet, workflow plan, merged findings, and calibrated findings in context."
     ]),
-    section("Output Contract", outputs.map((output) => `- \`${output.path}\``)),
+    section("Output Contract", [
+      ...outputs.map((output) => `- \`${output.path}\``),
+      "Use this exact schema for `review-bundle.json`:",
+      '{"change_summary":"...","findings":[{"title":"...","severity":"...","confidence":"...","evidence":["..."]}],"severity_summary":{"high":0,"medium":0,"low":0},"recommended_actions":["..."]}'
+    ]),
+    section("Delivery Preferences", formatDelivery(config.delivery)),
     section("Quality Bar", [
       "The final review should be concise, findings-first, and aligned with the calibrated findings set."
     ])
   ]);
 }
 
-export function buildReviewChangeWorkflow(config: ReviewChangeWorkflowConfig): SequenceNode {
+export function buildPatternReviewChange(config: PatternReviewChangeConfig): SequenceNode {
   const shared = sharedNodeBase(config);
   const workflowId = workflowNodeId(config.id, "workflow");
   const reviewerProfiles = config.strategy.reviewer_profiles ?? ["correctness", "testing", "maintainability"];
@@ -586,23 +584,13 @@ export function buildReviewChangeWorkflow(config: ReviewChangeWorkflowConfig): S
     }
   ];
 
-  let finalOutputs: OutputDefinition[] = config.outputs && config.outputs.length > 0 ? config.outputs : [];
-
-  if (config.delivery.write_review_summary !== false) {
-    finalOutputs = appendOutput(finalOutputs, attemptOutput("review_summary", "review-summary.md", true));
-  }
-
-  if (config.delivery.write_raw_findings !== false) {
-    finalOutputs = appendOutput(finalOutputs, attemptOutput("raw_findings", "raw-findings.json", true));
-  }
-
-  if (config.delivery.write_calibrated_findings !== false) {
-    finalOutputs = appendOutput(finalOutputs, attemptOutput("calibrated_findings", "calibrated-findings.json", true));
-  }
-
-  finalOutputs = appendOutput(finalOutputs, attemptOutput("merged_findings", "merged-findings.json", true));
-  finalOutputs = appendOutput(finalOutputs, workflowStatusOutput());
-  finalOutputs = appendOutput(finalOutputs, workflowEventsOutput());
+  const finalOutputs: OutputDefinition[] = [
+    attemptOutput("review_summary", "review-summary.md", true),
+    attemptOutput("review_bundle", "review-bundle.json", true),
+    attemptOutput("raw_findings", "raw-findings.json", true),
+    attemptOutput("merged_findings", "merged-findings.json", true),
+    attemptOutput("calibrated_findings", "calibrated-findings.json", true)
+  ];
 
   steps.push({
     type: "agent",
@@ -638,7 +626,7 @@ export function buildReviewChangeWorkflow(config: ReviewChangeWorkflowConfig): S
       }
     ],
     outputs: finalOutputs,
-    prompt: buildFinalizePrompt(finalOutputs)
+    prompt: buildFinalizePrompt(config, finalOutputs)
   });
 
   return {

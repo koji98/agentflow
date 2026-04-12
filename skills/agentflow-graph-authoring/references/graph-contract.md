@@ -45,12 +45,12 @@ Authoring containers:
 - `parallel`
 - `repeat`
 
-Managed workflows:
+Managed patterns:
 
-- `deep_research`
-- `spec_design`
-- `execute_spec`
-- `review_change`
+- `pattern_deep_research`
+- `pattern_spec_design`
+- `pattern_generate_evaluate_fix`
+- `pattern_review_change`
 
 ## Profiles
 
@@ -62,10 +62,16 @@ Typical fields:
 - `model`
 - `reasoning_effort`
 - `sandbox`
+- `skip_git_repo_check`
+- `env_files`
 - `timeout_sec`
 - `input_rules`
 
 Keep graph structure out of profiles.
+
+Use `skip_git_repo_check: true` only for `codex-cli` profiles that intentionally run from a non-git workspace root.
+
+Use profile-level `env_files` for repo-local dotenv-style files that local command nodes need, for example `.env.development`. This applies to `exec` and deterministic `check` nodes using that profile, not to agent harnesses or AI checks.
 
 Important `input_rules` fields:
 
@@ -148,9 +154,12 @@ Optional node-specific fields:
 
 - `args`
 - `cwd`
+- `env_files`
 - `env`
 
-`exec` does not have an `allow_failure` flag. Soft-failure behavior must be modeled structurally.
+`env_files` paths resolve inside the node workspace root, load in order, and are applied before inline `env`.
+
+Use `on_failure: "continue"` when an `exec` command should record soft verification evidence without stopping control flow. Operational failures such as spawn errors, timeouts, missing required env files, or output materialization still fail hard.
 
 ### `check`
 
@@ -164,6 +173,7 @@ Deterministic checks use:
 - `command`
 - optional `args`
 - optional `cwd`
+- optional `env_files`
 - optional `env`
 - optional `pass_if`
 
@@ -210,7 +220,7 @@ Use `repeat` only when:
 
 Every fan-out should have a clear fan-in. Avoid parallel branches that never reconcile into one explicit next step.
 
-Managed workflows are authored shortcuts, not a second runtime model. Use the dedicated managed-workflow skill or docs when the graph includes `deep_research`, `spec_design`, `execute_spec`, or `review_change`.
+Managed patterns are authored shortcuts, not a second runtime model. Use the dedicated managed-pattern skill or docs when the graph includes `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, or `pattern_review_change`.
 
 ## Validation
 
@@ -218,6 +228,6 @@ Every meaningful implementation or synthesis boundary should end with:
 
 - a deterministic `check`
 - an AI `check`
-- or a managed workflow phase that already includes validation
+- or a managed pattern phase that already includes validation
 
 Use `exec` plus a downstream review node instead of a hard `check` when command failure should be investigated and documented rather than immediately terminate the graph.

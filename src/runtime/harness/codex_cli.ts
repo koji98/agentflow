@@ -50,6 +50,10 @@ function buildCodexArgs(
     last_message_path
   ];
 
+  if (invocation.skipGitRepoCheck) {
+    args.push("--skip-git-repo-check");
+  }
+
   if (invocation.model) {
     args.push("-m", invocation.model);
   }

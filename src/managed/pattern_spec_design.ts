@@ -9,7 +9,6 @@ import type {
   SequenceNode
 } from "../graph/authored.js";
 import {
-  appendOutput,
   attemptOutput,
   body,
   listOrFallback,
@@ -18,64 +17,62 @@ import {
   renderPrompt,
   section,
   sharedNodeBase,
-  type ManagedWorkflowRuntime,
+  type ManagedPatternRuntime,
   workflowBriefOutput,
-  workflowEventsOutput,
   workflowPlanJsonOutput,
-  workflowPlanMarkdownOutput,
-  workflowStatusOutput
+  workflowPlanMarkdownOutput
 } from "./foundation.js";
 
-export interface SpecDesignScope {
+export interface PatternSpecDesignScope {
   paths?: string[];
   areas?: string[];
 }
 
-export interface SpecDesignBrief {
+export interface PatternSpecDesignBrief {
   problem: string;
   goal: string;
   audience?: string;
   constraints?: string[];
   decision_drivers?: string[];
-  scope?: SpecDesignScope;
+  scope?: PatternSpecDesignScope;
 }
 
-export interface SpecDesignContextPolicy {
+export interface PatternSpecDesignContextPolicy {
   repo_first?: boolean;
   allow_web_fallback?: boolean;
   web_triggers?: string[];
   allow_domains?: string[];
 }
 
-export interface SpecDesignApprovalPolicy {
+export interface PatternSpecDesignApprovalPolicy {
   require_direction_approval?: boolean;
 }
 
-export interface SpecDesignStrategy {
+export interface PatternSpecDesignStrategy {
   alternatives?: number;
   critique_profiles?: string[];
   max_revision_cycles?: number;
 }
 
-export interface SpecDesignDelivery {
+export interface PatternSpecDesignDelivery {
   format?: string;
   sections?: string[];
 }
 
-export interface SpecDesignWorkflowConfig extends BaseExecutableNode {
-  brief: SpecDesignBrief;
-  context_policy: SpecDesignContextPolicy;
-  approval_policy: SpecDesignApprovalPolicy;
-  strategy: SpecDesignStrategy;
-  delivery: SpecDesignDelivery;
-  runtime?: ManagedWorkflowRuntime;
+export interface PatternSpecDesignConfig extends BaseExecutableNode {
+  brief: PatternSpecDesignBrief;
+  context_policy: PatternSpecDesignContextPolicy;
+  approval_policy: PatternSpecDesignApprovalPolicy;
+  strategy: PatternSpecDesignStrategy;
+  delivery: PatternSpecDesignDelivery;
+  runtime?: ManagedPatternRuntime;
 }
 
 function workflowNodeId(rootId: string, suffix: string): string {
-  return managedId(rootId, "spec_design", suffix);
+  return managedId(rootId, "pattern_spec_design", suffix);
 }
 
-function formatScope(scope: SpecDesignScope | undefined): string[] {
+function formatScope(scope: PatternSpecDesignScope | undefined): string[] {
   if (!scope) {
     return ["Scope: infer the most relevant repository surfaces from the problem and goal."];
   }
@@ -95,7 +92,7 @@ function formatScope(scope: SpecDesignScope | undefined): string[] {
   return lines.length > 0 ? lines : ["Scope: infer the most relevant repository surfaces from the problem and goal."];
 }
 
-function formatBrief(brief: SpecDesignBrief): string[] {
+function formatBrief(brief: PatternSpecDesignBrief): string[] {
   return [
     `Problem: ${brief.problem}`,
     `Goal: ${brief.goal}`,
@@ -108,7 +105,7 @@ function formatBrief(brief: SpecDesignBrief): string[] {
   ].filter((line) => line.length > 0);
 }
 
-function formatContextPolicy(policy: SpecDesignContextPolicy): string[] {
+function formatContextPolicy(policy: PatternSpecDesignContextPolicy): string[] {
   return [
     `- Repo first: ${policy.repo_first === false ? "no" : "yes"}`,
     `- Allow web fallback: ${policy.allow_web_fallback ? "yes" : "no"}`,
@@ -121,7 +118,7 @@ function formatContextPolicy(policy: SpecDesignContextPolicy): string[] {
   ];
 }
 
-function formatStrategy(strategy: SpecDesignStrategy): string[] {
+function formatStrategy(strategy: PatternSpecDesignStrategy): string[] {
   return [
     `- Alternatives: ${strategy.alternatives ?? 3}`,
     `- Critique profiles: ${(strategy.critique_profiles ?? ["architecture", "implementation", "ux"]).join(", ")}`,
@@ -129,7 +126,7 @@ function formatStrategy(strategy: SpecDesignStrategy): string[] {
   ];
 }
 
-function formatDelivery(delivery: SpecDesignDelivery): string[] {
+function formatDelivery(delivery: PatternSpecDesignDelivery): string[] {
   return [
     `- Format: ${delivery.format ?? "design_spec"}`,
     ...(delivery.sections && delivery.sections.length > 0
@@ -138,7 +135,7 @@ function formatDelivery(delivery: SpecDesignDelivery): string[] {
   ];
 }
 
-function buildBriefPrompt(config: SpecDesignWorkflowConfig): string {
+function buildBriefPrompt(config: PatternSpecDesignConfig): string {
   return renderPrompt([
     body("Clarify the problem and turn it into a concrete design brief."),
     section("Objective", formatBrief(config.brief)),
@@ -153,7 +150,7 @@ function buildBriefPrompt(config: SpecDesignWorkflowConfig): string {
   ]);
 }
 
-function buildInspectPrompt(config: SpecDesignWorkflowConfig): string {
+function buildInspectPrompt(config: PatternSpecDesignConfig): string {
   return renderPrompt([
     body("Inspect the repository and capture the current system shape relevant to the design problem."),
     section("Objective", formatBrief(config.brief)),
@@ -170,7 +167,7 @@ function buildInspectPrompt(config: SpecDesignWorkflowConfig): string {
   ]);
 }
 
-function buildGapPrompt(config: SpecDesignWorkflowConfig): string {
+function buildGapPrompt(config: PatternSpecDesignConfig): string {
   return renderPrompt([
     body("Identify the information gaps that still matter after repo inspection."),
     section("Objective", formatBrief(config.brief)),
@@ -188,7 +185,7 @@ function buildGapPrompt(config: SpecDesignWorkflowConfig): string {
   ]);
 }
 
-function buildExternalResearchPrompt(config: SpecDesignWorkflowConfig, taskIndex: number): string {
+function buildExternalResearchPrompt(config: PatternSpecDesignConfig, taskIndex: number): string {
   return renderPrompt([
     body(`Run targeted external research task ${taskIndex + 1}.`),
     section("Objective", formatBrief(config.brief)),
@@ -206,7 +203,7 @@ function buildExternalResearchPrompt(config: SpecDesignWorkflowConfig, taskIndex
   ]);
 }
 
-function buildOptionPrompt(config: SpecDesignWorkflowConfig, optionIndex: number, total: number): string {
+function buildOptionPrompt(config: PatternSpecDesignConfig, optionIndex: number, total: number): string {
   return renderPrompt([
     body(`Generate design option ${optionIndex + 1} of ${total}.`),
     section("Objective", formatBrief(config.brief)),
@@ -223,7 +220,7 @@ function buildOptionPrompt(config: SpecDesignWorkflowConfig, optionIndex: number
   ]);
 }
 
-function buildDirectionPrompt(config: SpecDesignWorkflowConfig, total: number): string {
+function buildDirectionPrompt(config: PatternSpecDesignConfig, total: number): string {
   return renderPrompt([
     body("Compare the design options, choose a direction, and define the design plan."),
     section("Objective", formatBrief(config.brief)),
@@ -255,7 +252,7 @@ function buildDirectionCheckpointPrompt(): string {
   ]);
 }
 
-function buildDraftPrompt(config: SpecDesignWorkflowConfig): string {
+function buildDraftPrompt(config: PatternSpecDesignConfig): string {
   return renderPrompt([
     body("Draft the strongest current implementation-ready design spec."),
     section("Objective", formatBrief(config.brief)),
@@ -272,7 +269,7 @@ function buildDraftPrompt(config: SpecDesignWorkflowConfig): string {
   ]);
 }
 
-function buildCritiquePrompt(profile: string, config: SpecDesignWorkflowConfig): string {
+function buildCritiquePrompt(profile: string, config: PatternSpecDesignConfig): string {
   return renderPrompt([
     body(`Critique the current spec draft from the ${profile} perspective.`),
     section("Objective", formatBrief(config.brief)),
@@ -301,7 +298,7 @@ function buildMergePrompt(): string {
   ]);
 }
 
-function buildQualityPrompt(config: SpecDesignWorkflowConfig): string {
+function buildQualityPrompt(config: PatternSpecDesignConfig): string {
   return renderPrompt([
     body("Review whether the current design spec is implementation-ready."),
     section("Objective", formatBrief(config.brief)),
@@ -315,7 +312,7 @@ function buildQualityPrompt(config: SpecDesignWorkflowConfig): string {
   ]);
 }
 
-function buildQualityRubric(config: SpecDesignWorkflowConfig): string {
+function buildQualityRubric(config: PatternSpecDesignConfig): string {
   const sectionRequirement =
     config.delivery.sections && config.delivery.sections.length > 0
       ? `Pass only if the draft covers: ${config.delivery.sections.join(", ")}.`
@@ -324,19 +321,21 @@ function buildQualityRubric(config: SpecDesignWorkflowConfig): string {
   return [
     sectionRequirement,
     "Fail if the draft leaves repo-specific ownership, migration consequences, file boundaries, or validation expectations implicit.",
-    "Fail if blockers remain unresolved in a way that would force execute_spec to guess."
+    "Fail if blockers remain unresolved in a way that would force pattern_generate_evaluate_fix to guess."
   ].join(" ");
 }
 
-function buildFinalizePrompt(config: SpecDesignWorkflowConfig): string {
+function buildFinalizePrompt(config: PatternSpecDesignConfig): string {
   return renderPrompt([
-    body("Publish the final design package and workflow status artifacts."),
+    body("Publish the final design package."),
     section("Objective", formatBrief(config.brief)),
     section("Current Context", [
       "Use the latest passed spec draft, merged critiques, latest direction proposal, and current-state notes in context."
     ]),
     section("Output Contract", [
-      "Write `design-spec.md`, `direction-proposal.md`, `tradeoff-matrix.md`, `decision-log.md`, `implementation-readiness.md`, `workflow-status.json`, and `workflow-events.jsonl` to the output directory."
+      "Write `design-spec.md`, `design-packet.json`, `direction-proposal.md`, `tradeoff-matrix.md`, `decision-log.md`, `implementation-readiness.md`, `critique-merged.md`, and `quality-review.json` to the output directory.",
+      "Use this exact schema for `design-packet.json`:",
+      '{"problem":"...","goal":"...","chosen_direction":"...","affected_surfaces":["..."],"constraints":["..."],"non_goals":["..."],"validation_expectations":["..."],"unresolved_questions":["..."],"downstream_execution_hints":["..."]}'
     ]),
     section("Quality Bar", [
       "The final package should read like the intended long-term design, not a draft with unresolved placeholders."
@@ -349,7 +348,7 @@ function buildOptionOutputs(index: number): OutputDefinition[] {
   return [attemptOutput(`option_${suffix}`, `option-${suffix}.md`, true)];
 }
 
-export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): SequenceNode {
+export function buildPatternSpecDesign(config: PatternSpecDesignConfig): SequenceNode {
   const shared = sharedNodeBase(config);
   const workflowId = workflowNodeId(config.id, "workflow");
   const alternatives = config.strategy.alternatives ?? 3;
@@ -772,22 +771,16 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
     }
   } satisfies RepeatNode);
 
-  const finalOutputs: OutputDefinition[] =
-    config.outputs && config.outputs.length > 0
-      ? config.outputs
-      : [
-          attemptOutput("design_spec", "design-spec.md", true)
-        ];
-
   const publishedOutputs = [
-    ...finalOutputs,
+    attemptOutput("design_spec", "design-spec.md", true),
+    attemptOutput("design_packet", "design-packet.json", true),
     attemptOutput("direction_proposal", "direction-proposal.md", true),
     attemptOutput("tradeoff_matrix", "tradeoff-matrix.md", true),
     attemptOutput("decision_log", "decision-log.md", true),
     attemptOutput("implementation_readiness", "implementation-readiness.md", true),
-    workflowStatusOutput(),
-    workflowEventsOutput()
-  ].reduce(appendOutput, [] as OutputDefinition[]);
+    attemptOutput("critique_merged", "critique-merged.md", true),
+    attemptOutput("quality_review", "quality-review.json", true)
+  ];
 
   steps.push({
     type: "agent",
@@ -819,6 +812,12 @@ export function buildSpecDesignWorkflow(config: SpecDesignWorkflowConfig): Seque
         output: "critique_merged",
         iteration: "latest_passed",
         optional: true
+      },
+      {
+        node: qualityId,
+        include: "output",
+        output: "quality_review",
+        iteration: "latest_passed"
       }
     ],
     outputs: publishedOutputs,

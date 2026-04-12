@@ -5,7 +5,7 @@ import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 function buildEnvelope(step) {
   return {
     version: "1",
-    graph_id: "managed-validation",
+    graph_id: "managed-pattern-validation",
     repos: {
       main: {
         path: "."
@@ -28,11 +28,11 @@ function buildEnvelope(step) {
   };
 }
 
-describe("managed workflow normalization edges", () => {
-  it("falls back through deep_research optional objects while surfacing diagnostics", () => {
+describe("managed pattern normalization edges", () => {
+  it("falls back through pattern_deep_research optional objects while surfacing diagnostics", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({
-        type: "deep_research",
+        type: "pattern_deep_research",
         id: "market_scan",
         brief: {
           question: "How should Agentflow design deep research?",
@@ -51,36 +51,36 @@ describe("managed workflow normalization edges", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.steps[0].context_policy",
-          message: "deep_research.context_policy must be an object."
+          message: "pattern_deep_research.context_policy must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].approval_policy",
-          message: "deep_research.approval_policy must be an object."
+          message: "pattern_deep_research.approval_policy must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].strategy",
-          message: "deep_research.strategy must be an object."
+          message: "pattern_deep_research.strategy must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].delivery",
-          message: "deep_research.delivery must be an object."
+          message: "pattern_deep_research.delivery must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].runtime",
-          message: "managed workflow runtime must be an object."
+          message: "managed pattern runtime must be an object."
         })
       ])
     );
   });
 
-  it("falls back through spec_design optional objects while surfacing diagnostics", () => {
+  it("falls back through pattern_spec_design optional objects while surfacing diagnostics", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({
-        type: "spec_design",
+        type: "pattern_spec_design",
         id: "managed_nodes_spec",
         brief: {
-          problem: "Managed workflows are too thin.",
-          goal: "Design a real workflow model.",
+          problem: "Managed patterns are too thin.",
+          goal: "Design a real pattern model.",
           scope: "bad"
         },
         context_policy: "bad",
@@ -95,96 +95,103 @@ describe("managed workflow normalization edges", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.steps[0].brief.scope",
-          message: "spec_design.scope must be an object."
+          message: "pattern_spec_design.scope must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].context_policy",
-          message: "spec_design.context_policy must be an object."
+          message: "pattern_spec_design.context_policy must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].approval_policy",
-          message: "spec_design.approval_policy must be an object."
+          message: "pattern_spec_design.approval_policy must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].strategy",
-          message: "spec_design.strategy must be an object."
+          message: "pattern_spec_design.strategy must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].delivery",
-          message: "spec_design.delivery must be an object."
+          message: "pattern_spec_design.delivery must be an object."
         })
       ])
     );
   });
 
-  it("surfaces execute_spec strategy and delivery diagnostics while still lowering the node", () => {
+  it("surfaces deprecated execute-spec style fields on pattern_generate_evaluate_fix while still lowering a valid node", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({
-        type: "execute_spec",
+        type: "pattern_generate_evaluate_fix",
         id: "implement_from_bundle",
         brief: {
-          objective: "Implement the supplied spec."
+          objective: "Implement the supplied task packet."
         },
-        spec_source: {
+        task_source: {
           kind: "artifact_bundle",
-          design_spec: {
+          design_packet: {
             kind: "file",
-            path: "docs/spec.md"
+            path: "artifacts/design-packet.json"
           }
         },
         context_policy: {
           allow_official_docs_fallback: true
         },
+        strategy: {
+          max_fix_cycles: 2,
+          single_writer: false
+        },
+        evaluation: {
+          commands: ["npm test"]
+        },
         approval_policy: {
           require_execution_plan_approval: false
         },
-        strategy: {
-          single_writer: false,
-          allow_readonly_recon: true,
-          max_repair_cycles: 2
-        },
-        validation: {
-          commands: ["npm test"]
-        },
         delivery: {
-          write_handoff: false,
-          write_validation_ledger: false,
-          write_repair_log: false
+          write_handoff: false
         }
       })
     );
 
     expect(normalized.document).toBeUndefined();
+    expect(normalized.lowered_managed_nodes).toEqual([
+      {
+        authored_id: "implement_from_bundle",
+        managed_kind: "pattern_generate_evaluate_fix",
+        lowered_to: "sequence"
+      }
+    ]);
     expect(normalized.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          path: "$.graph.steps[0].approval_policy",
+          message: 'Unknown field "approval_policy" is not part of the graph contract.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].delivery",
+          message: 'Unknown field "delivery" is not part of the graph contract.'
+        }),
+        expect.objectContaining({
           path: "$.graph.steps[0].strategy.single_writer",
-          message:
-            "execute_spec currently supports only single_writer = true; the workflow will still compile as a single-writer executor."
+          message: 'Unknown field "single_writer" is not part of the graph contract.'
         })
       ])
     );
   });
 
-  it("rejects invalid execute_spec source kinds and source reference kinds", () => {
+  it("rejects invalid pattern_generate_evaluate_fix source kinds and source reference kinds", () => {
     const normalized = normalizeAuthoredGraphDocument({
       ...buildEnvelope({
-        type: "execute_spec",
+        type: "pattern_generate_evaluate_fix",
         id: "bad_kind",
         brief: {
-          objective: "Implement the supplied spec."
+          objective: "Implement the supplied task packet."
         },
-        spec_source: {
+        task_source: {
           kind: "unsupported"
         },
         context_policy: {},
-        approval_policy: {},
         strategy: {},
-        validation: {
+        evaluation: {
           commands: ["npm test"]
-        },
-        delivery: {
-          write_handoff: true
         }
       }),
       graph: {
@@ -192,44 +199,36 @@ describe("managed workflow normalization edges", () => {
         id: "root",
         steps: [
           {
-            type: "execute_spec",
+            type: "pattern_generate_evaluate_fix",
             id: "bad_kind",
             brief: {
-              objective: "Implement the supplied spec."
+              objective: "Implement the supplied task packet."
             },
-            spec_source: {
+            task_source: {
               kind: "unsupported"
             },
             context_policy: {},
-            approval_policy: {},
             strategy: {},
-            validation: {
+            evaluation: {
               commands: ["npm test"]
-            },
-            delivery: {
-              write_handoff: true
             }
           },
           {
-            type: "execute_spec",
+            type: "pattern_generate_evaluate_fix",
             id: "bad_ref",
             brief: {
-              objective: "Implement the supplied spec."
+              objective: "Implement the supplied task packet."
             },
-            spec_source: {
+            task_source: {
               kind: "artifact_bundle",
-              design_spec: {
+              design_packet: {
                 kind: "unsupported"
               }
             },
             context_policy: {},
-            approval_policy: {},
             strategy: {},
-            validation: {
+            evaluation: {
               commands: ["npm test"]
-            },
-            delivery: {
-              write_handoff: true
             }
           }
         ]
@@ -240,21 +239,21 @@ describe("managed workflow normalization edges", () => {
     expect(normalized.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "$.graph.steps[0].spec_source.kind",
-          message: 'execute_spec.spec_source.kind must be "managed_node" or "artifact_bundle".'
+          path: "$.graph.steps[0].task_source.kind",
+          message: 'pattern_generate_evaluate_fix.task_source.kind must be "managed_node" or "artifact_bundle".'
         }),
         expect.objectContaining({
-          path: "$.graph.steps[1].spec_source.design_spec.kind",
-          message: 'execute_spec spec source reference kind must be "file" or "managed_output".'
+          path: "$.graph.steps[1].task_source.design_packet.kind",
+          message: 'pattern_generate_evaluate_fix task source reference kind must be "file" or "managed_output".'
         })
       ])
     );
   });
 
-  it("surfaces review_change source and delivery diagnostics", () => {
+  it("surfaces pattern_review_change source and delivery diagnostics", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({
-        type: "review_change",
+        type: "pattern_review_change",
         id: "review_bundle",
         review_source: {
           kind: "artifact_bundle",
@@ -266,9 +265,7 @@ describe("managed workflow normalization edges", () => {
         context_policy: "bad",
         strategy: "bad",
         delivery: {
-          write_review_summary: false,
-          write_raw_findings: false,
-          write_calibrated_findings: false
+          write_review_summary: false
         }
       })
     );
@@ -278,20 +275,24 @@ describe("managed workflow normalization edges", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.steps[0].review_source.additional_context",
-          message: "review_change.review_source.additional_context must be an array."
+          message: "pattern_review_change.review_source.additional_context must be an array."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].review_source",
           message:
-            "review_change.review_source artifact_bundle must include at least one of diff, summary, or additional_context."
+            "pattern_review_change.review_source artifact_bundle must include at least one of diff, summary, or additional_context."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].context_policy",
-          message: "review_change.context_policy must be an object."
+          message: "pattern_review_change.context_policy must be an object."
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].strategy",
-          message: "review_change.strategy must be an object."
+          message: "pattern_review_change.strategy must be an object."
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].delivery.write_review_summary",
+          message: 'Unknown field "write_review_summary" is not part of the graph contract.'
         })
       ])
     );

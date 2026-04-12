@@ -4,7 +4,7 @@ import type {
   OutputDefinition
 } from "../graph/authored.js";
 
-export interface ManagedWorkflowRuntime {
+export interface ManagedPatternRuntime {
   max_concurrency?: number;
 }
 
@@ -40,7 +40,7 @@ export function attemptOutput(name: string, path: string, required: boolean): Ou
   };
 }
 
-export function maxConcurrency(runtime: ManagedWorkflowRuntime | undefined, desired: number): number {
+export function maxConcurrency(runtime: ManagedPatternRuntime | undefined, desired: number): number {
   if (!runtime?.max_concurrency || runtime.max_concurrency < 1) {
     return desired;
   }
@@ -98,12 +98,4 @@ export function workflowPlanMarkdownOutput(): OutputDefinition {
 
 export function workflowPlanJsonOutput(): OutputDefinition {
   return attemptOutput("workflow_plan_json", "workflow-plan.json", true);
-}
-
-export function workflowStatusOutput(): OutputDefinition {
-  return attemptOutput("workflow_status", "workflow-status.json", true);
-}
-
-export function workflowEventsOutput(): OutputDefinition {
-  return attemptOutput("workflow_events", "workflow-events.jsonl", true);
 }

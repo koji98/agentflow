@@ -2,8 +2,10 @@ import type {
   AuthoredNodeKind,
   CheckKind,
   ContextSelector,
+  FailureBehavior,
   HarnessName,
   OutputSourceKind,
+  PrerequisiteKind,
   ReasoningEffort,
   SandboxMode,
   WorkspaceBackend
@@ -45,6 +47,8 @@ export interface GraphProfile {
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
+  skip_git_repo_check?: boolean;
+  env_files?: string[];
   timeout_sec?: number;
   input_rules?: InputRules;
   deterministic_check_defaults?: DeterministicCheckDefaults;
@@ -91,6 +95,40 @@ export interface OutputDefinition {
   required?: boolean;
 }
 
+export interface FilePrerequisite {
+  kind: Extract<PrerequisiteKind, "file">;
+  path: string;
+  required?: boolean;
+}
+
+export interface CommandPrerequisite {
+  kind: Extract<PrerequisiteKind, "command">;
+  command: string;
+  required?: boolean;
+}
+
+export interface EnvPrerequisite {
+  kind: Extract<PrerequisiteKind, "env">;
+  name: string;
+  required?: boolean;
+}
+
+export interface RepoPrerequisite {
+  kind: Extract<PrerequisiteKind, "repo">;
+  repo: string;
+  required?: boolean;
+}
+
+export type GraphPrerequisiteCheck =
+  | FilePrerequisite
+  | CommandPrerequisite
+  | EnvPrerequisite
+  | RepoPrerequisite;
+
+export interface GraphPrerequisites {
+  checks: GraphPrerequisiteCheck[];
+}
+
 export interface BaseNode {
   id: string;
   label?: string;
@@ -118,7 +156,9 @@ export interface ExecNode extends BaseExecutableNode {
   command: string;
   args?: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
+  on_failure?: FailureBehavior;
 }
 
 export interface CheckNode extends BaseExecutableNode {
@@ -127,12 +167,14 @@ export interface CheckNode extends BaseExecutableNode {
   command?: string;
   args?: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
   pass_if?: DeterministicPassIf;
   prompt?: string;
   rubric?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;
+  on_failure?: FailureBehavior;
 }
 
 export interface CheckpointNode extends BaseExecutableNode {
@@ -171,6 +213,7 @@ export interface AuthoredGraphDocument {
   repos: Record<string, RepoDefinition>;
   defaults?: GraphDefaults;
   profiles?: Record<string, GraphProfile>;
+  prerequisites?: GraphPrerequisites;
   graph: ContainerGraphNode;
 }
 

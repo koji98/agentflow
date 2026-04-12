@@ -17,6 +17,7 @@ export interface RunAiCheckInvocation {
   repo_path: string;
   model: string | undefined;
   reasoning_effort?: ReasoningEffort;
+  skip_git_repo_check?: boolean;
   prompt: string;
   rubric: string | undefined;
   context_packet_path: string;
@@ -219,6 +220,7 @@ export async function runAiCheck(
       repoAlias: invocation.repo_alias,
       repoPath: invocation.repo_path,
       sandbox: "read-only",
+      ...(invocation.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
       model: invocation.model,
       ...(invocation.reasoning_effort ? { reasoningEffort: invocation.reasoning_effort } : {}),
       prompt: buildAiCheckPrompt({

@@ -268,7 +268,72 @@ describe("graph compilation", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: expect.stringContaining("context_from[0].iteration"),
-          message: expect.stringContaining("requires an iteration selector")
+          message: expect.stringContaining("latest_failed")
+        })
+      ])
+    );
+  });
+
+  it("names the actual repeat body exit when repeat.until resolves before the body exit", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "repeat-body-exit-mismatch",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "check",
+                  id: "verify",
+                  check_kind: "deterministic",
+                  command: "sh"
+                },
+                {
+                  type: "agent",
+                  id: "summarize",
+                  prompt: "Summarize the latest attempt."
+                }
+              ]
+            },
+            until: {
+              node: "verify"
+            }
+          }
+        ]
+      }
+    });
+
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+
+    expect(compilation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].until.node",
+          message: expect.stringContaining('currently exits through "summarize"')
         })
       ])
     );
@@ -355,6 +420,7 @@ describe("graph compilation", () => {
           harness: "codex-cli",
           model: "gpt-5-codex",
           sandbox: "workspace-write",
+          env_files: [".env.defaults"],
           deterministic_check_defaults: {
             pass_if: {
               exit_code: 3
@@ -371,10 +437,16 @@ describe("graph compilation", () => {
         id: "root",
         steps: [
           {
+            type: "exec",
+            id: "profile_env_command",
+            command: "node"
+          },
+          {
             type: "check",
             id: "local_gate",
             check_kind: "deterministic",
             command: "npm",
+            env_files: [".env.local"],
             env: {
               ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
             }
@@ -399,13 +471,21 @@ describe("graph compilation", () => {
     expect(compilation.diagnostics).toEqual([]);
 
     const compiledGraph = compilation.compiled_graph!;
+    const profileEnvCommand = compiledGraph.nodes.find((node) => node.authored_id === "profile_env_command");
     const deterministicCheck = compiledGraph.nodes.find((node) => node.authored_id === "local_gate");
     const aiCheck = compiledGraph.nodes.find((node) => node.authored_id === "ai_gate");
 
+    expect(profileEnvCommand).toEqual(
+      expect.objectContaining({
+        kind: "exec",
+        env_files: [".env.defaults"]
+      })
+    );
     expect(deterministicCheck).toEqual(
       expect.objectContaining({
         kind: "check",
         check_kind: "deterministic",
+        env_files: [".env.local"],
         env: {
           ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
         },
@@ -716,7 +796,7 @@ describe("graph compilation", () => {
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].until.node",
-          message: "repeat.until.node must resolve to the body exit node in this release."
+          message: expect.stringContaining('currently exits through "repair"')
         })
       ])
     );

@@ -16,6 +16,7 @@ import {
   type RuntimeSession,
   type RuntimeStateSnapshot
 } from "./session.js";
+import type { VerificationRecordedPayload } from "./events.js";
 
 function buildLatestExecutionSummary(attempt: RuntimeNodeAttempt): LatestExecutionSummary {
   const status =
@@ -34,7 +35,12 @@ function buildLatestExecutionSummary(attempt: RuntimeNodeAttempt): LatestExecuti
     ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
-    ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {})
+    ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {}),
+    ...(attempt.metadata.verification &&
+    typeof attempt.metadata.verification === "object" &&
+    attempt.metadata.verification !== null
+      ? { verification: attempt.metadata.verification as VerificationRecordedPayload }
+      : {})
   };
 }
 
@@ -78,7 +84,9 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
       ...shared,
       command: node.command,
       args: node.args,
+      on_failure: node.on_failure,
       ...(node.cwd ? { cwd: node.cwd } : {}),
+      ...(node.env_files !== undefined ? { env_files: node.env_files } : {}),
       ...(node.env ? { env: node.env } : {})
     }));
   }
@@ -94,9 +102,11 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
   return JSON.stringify(sortJson({
     ...shared,
     check_kind: node.check_kind,
+    on_failure: node.on_failure,
     ...(node.command ? { command: node.command } : {}),
     ...(node.args ? { args: node.args } : {}),
     ...(node.cwd ? { cwd: node.cwd } : {}),
+    ...(node.env_files !== undefined ? { env_files: node.env_files } : {}),
     ...(node.env ? { env: node.env } : {}),
     ...(node.pass_if ? { pass_if: node.pass_if } : {}),
     ...(node.prompt ? { prompt: node.prompt } : {}),

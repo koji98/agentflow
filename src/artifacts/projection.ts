@@ -11,7 +11,10 @@ import type {
 } from "../graph/compiled.js";
 import type { GraphOutcome } from "../graph/schema.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
-import type { RuntimeEventEnvelope } from "../runtime/events.js";
+import type {
+  RuntimeEventEnvelope,
+  VerificationRecordedPayload
+} from "../runtime/events.js";
 import type {
   ExecutionManifest,
   RuntimeNodeStatus,
@@ -49,6 +52,7 @@ export interface ProjectedRunSummary {
   graph_id: string;
   run_root: string;
   status: ProjectionStatus;
+  evidence_status: RuntimeStateSnapshot["evidence_status"];
   launch_profile: string;
   workspace_backend: ExecutionManifest["workspace_backend"];
   snapshot_seq: number;
@@ -57,6 +61,8 @@ export interface ProjectedRunSummary {
   failed_nodes: number;
   current_repeat_depth: number;
   counts: RuntimeStateSnapshot["counts"];
+  soft_verification_counts: RuntimeStateSnapshot["soft_verification_counts"];
+  failed_soft_verifications: RuntimeStateSnapshot["failed_soft_verifications"];
   started_at: string;
   ended_at?: string;
 }
@@ -149,6 +155,12 @@ export interface ProjectedCheckEvaluation {
   summary?: string;
 }
 
+export interface ProjectedVerificationRecord extends VerificationRecordedPayload {
+  seq: number;
+  execution_id?: string;
+  result_artifact_path?: string;
+}
+
 export interface ProjectedNodeDefinition {
   inputs: CompiledExecutableNode["inputs"];
   context_from: CompiledExecutableNode["context_from"];
@@ -158,8 +170,10 @@ export interface ProjectedNodeDefinition {
   command?: string;
   args?: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
   check_kind?: CompiledCheckNode["check_kind"];
+  on_failure?: "fail" | "continue";
   rubric?: string;
   review_from?: CompiledCheckpointNode["review_from"];
 }
@@ -176,6 +190,7 @@ export interface ProjectedNodeDetail {
   selected_execution_id?: string;
   artifacts: ProjectedArtifactItem[];
   check_evaluations: ProjectedCheckEvaluation[];
+  soft_verifications: ProjectedVerificationRecord[];
   events: ProjectedRunEvent[];
 }
 
@@ -266,6 +281,7 @@ function buildRunSummary(
     graph_id: state.graph_id,
     run_root: runRoot,
     status: toProjectionStatus(state.status),
+    evidence_status: state.evidence_status,
     launch_profile: manifest.launch_profile,
     workspace_backend: state.workspace_backend,
     snapshot_seq: state.snapshot_seq,
@@ -274,6 +290,8 @@ function buildRunSummary(
     failed_nodes: state.counts.failed,
     current_repeat_depth: countActiveRepeatScopes(state),
     counts: state.counts,
+    soft_verification_counts: state.soft_verification_counts,
+    failed_soft_verifications: state.failed_soft_verifications,
     started_at: state.started_at,
     ...(state.ended_at ? { ended_at: state.ended_at } : {})
   };
@@ -410,6 +428,14 @@ function buildEventSummary(
         summary: payload.passed === true
           ? String(payload.summary ?? "Check passed.")
           : String(payload.summary ?? "Check failed.")
+      };
+    case "verification.recorded":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: payload.passed === true
+          ? String(payload.summary ?? "Soft verification passed.")
+          : String(payload.summary ?? "Soft verification failed.")
       };
     case "node.completed":
       return {
@@ -549,13 +575,27 @@ function buildRunDiagnostic(
             ...(event.node_label ? { node_label: event.node_label } : {})
           }
         : undefined;
+    case "verification.recorded":
+      return payload.passed === false
+        ? {
+            seq: event.seq,
+            ts: event.ts,
+            severity: "warning",
+            event_type: event.type,
+            summary: event.summary,
+            ...(event.compiled_id ? { compiled_id: event.compiled_id } : {}),
+            ...(event.authored_id ? { authored_id: event.authored_id } : {}),
+            ...(event.execution_id ? { execution_id: event.execution_id } : {}),
+            ...(event.node_label ? { node_label: event.node_label } : {})
+          }
+        : undefined;
     default:
       return undefined;
   }
 }
 
 function buildRunDiagnostics(context: RunProjectionContext): ProjectedRunDiagnostic[] {
-  if (context.state.status === "passed") {
+  if (context.state.status === "passed" && context.state.evidence_status === "clean") {
     return [];
   }
 
@@ -577,7 +617,7 @@ function buildRunDiagnostics(context: RunProjectionContext): ProjectedRunDiagnos
       diagnostic.compiled_id
       && nodeStatus
       && !["failed", "blocked", "canceled"].includes(nodeStatus)
-      && diagnostic.event_type !== "check.evaluated"
+      && !["check.evaluated", "verification.recorded"].includes(diagnostic.event_type)
     ) {
       continue;
     }
@@ -587,6 +627,15 @@ function buildRunDiagnostics(context: RunProjectionContext): ProjectedRunDiagnos
       && diagnostic.compiled_id
       && nodeStatus
       && !["failed", "blocked", "canceled", "running"].includes(nodeStatus)
+    ) {
+      continue;
+    }
+
+    if (
+      diagnostic.event_type === "verification.recorded"
+      && diagnostic.compiled_id
+      && nodeStatus
+      && !["passed", "failed", "blocked", "canceled", "running"].includes(nodeStatus)
     ) {
       continue;
     }
@@ -764,7 +813,9 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
       ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
       command: node.command,
       args: node.args,
+      on_failure: node.on_failure,
       ...(node.cwd ? { cwd: node.cwd } : {}),
+      ...(node.env_files !== undefined ? { env_files: node.env_files } : {}),
       ...(node.env ? { env: node.env } : {})
     };
   }
@@ -788,6 +839,9 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
     ...(node.command ? { command: node.command } : {}),
     ...(node.args ? { args: node.args } : {}),
     ...(node.cwd ? { cwd: node.cwd } : {}),
+    ...(node.env_files !== undefined ? { env_files: node.env_files } : {}),
+    ...(node.env ? { env: node.env } : {}),
+    on_failure: node.on_failure,
     check_kind: node.check_kind,
     ...(node.prompt ? { prompt: node.prompt } : {}),
     ...(node.rubric ? { rubric: node.rubric } : {})
@@ -867,6 +921,7 @@ export async function listProjectedRuns(runsRoot: string): Promise<ProjectedRunS
             graph_id: runRecord.graph_id,
             run_root: runRoot,
             status: toProjectionStatus(state.status),
+            evidence_status: state.evidence_status,
             launch_profile: manifest.launch_profile,
             workspace_backend: state.workspace_backend,
             snapshot_seq: state.snapshot_seq,
@@ -875,6 +930,8 @@ export async function listProjectedRuns(runsRoot: string): Promise<ProjectedRunS
             failed_nodes: state.counts.failed,
             current_repeat_depth: countActiveRepeatScopes(state),
             counts: state.counts,
+            soft_verification_counts: state.soft_verification_counts,
+            failed_soft_verifications: state.failed_soft_verifications,
             started_at: state.started_at,
             ...(state.ended_at ? { ended_at: state.ended_at } : {})
           } satisfies ProjectedRunSummary;
@@ -945,6 +1002,9 @@ export async function projectNodeDetail(
     after_seq: 0,
     compiled_id: compiledId
   }).events;
+  const attemptsByExecutionId = new Map(
+    attempts.map((attempt) => [attempt.execution_id, attempt])
+  );
   const check_evaluations = context.events
     .filter(
       (event) => event.type === "check.evaluated" && event.compiled_id === compiledId
@@ -966,6 +1026,25 @@ export async function projectNodeDetail(
         ...(payload.summary ? { summary: payload.summary } : {})
       } satisfies ProjectedCheckEvaluation;
     });
+  const soft_verifications = context.events
+    .filter(
+      (event) => event.type === "verification.recorded" && event.compiled_id === compiledId
+    )
+    .map((event) => {
+      const payload = event.payload as VerificationRecordedPayload;
+      const attempt = event.execution_id ? attemptsByExecutionId.get(event.execution_id) : undefined;
+
+      return {
+        seq: event.seq,
+        verifier_kind: payload.verifier_kind,
+        passed: payload.passed,
+        summary: payload.summary,
+        ...(event.execution_id ? { execution_id: event.execution_id } : {}),
+        ...(payload.check_kind ? { check_kind: payload.check_kind } : {}),
+        ...(payload.exit_code !== undefined ? { exit_code: payload.exit_code } : {}),
+        ...(attempt?.result_path ? { result_artifact_path: attempt.result_path } : {})
+      } satisfies ProjectedVerificationRecord;
+    });
 
   return {
     run_id: context.state.run_id,
@@ -981,6 +1060,7 @@ export async function projectNodeDetail(
     ...(selectedExecutionId ? { selected_execution_id: selectedExecutionId } : {}),
     artifacts,
     check_evaluations,
+    soft_verifications,
     events
   };
 }

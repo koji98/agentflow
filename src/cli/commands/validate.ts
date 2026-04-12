@@ -1,12 +1,15 @@
 import { compileAuthoredGraph } from "../../graph/compile.js";
+import { buildManagedExpansionSummaries } from "../../graph/managed_expansion.js";
 import { resolveLaunchConfig } from "../../graph/profiles.js";
 import { workspaceBackends } from "../../graph/schema.js";
 import { loadAuthoredGraphDocument, summarizeAuthoredGraph } from "../../graph/validate.js";
+import { evaluateGraphReadiness } from "../../runtime/readiness.js";
 import {
   createGraphCliInvocation,
   createGraphPathResolution,
   renderCommandUsageError
 } from "../command_support.js";
+import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
 
 export const validateCommand = {
   name: "validate",
@@ -51,10 +54,14 @@ export const validateCommand = {
           message: "Graph could not be loaded or normalized from --graph.",
           graph_path: loaded.absolute_path,
           path_resolution: pathResolution,
+          diagnostics: loaded.diagnostics,
+          authored_validation: {
+            status: "failed",
+            diagnostics: loaded.diagnostics
+          },
           next_steps: {
             graph_help: "agentflow graph-help"
-          },
-          diagnostics: loaded.diagnostics
+          }
         }
       };
     }
@@ -70,6 +77,15 @@ export const validateCommand = {
           message: "Launch settings could not be resolved from the graph for validation.",
           graph_path: loaded.absolute_path,
           path_resolution: pathResolution,
+          diagnostics: launch.diagnostics,
+          authored_validation: {
+            status: "passed",
+            diagnostics: []
+          },
+          compiled_validation: {
+            status: "failed",
+            diagnostics: launch.diagnostics
+          },
           available_profiles: Object.keys(loaded.document.profiles ?? {}),
           supported_workspace_backends: workspaceBackends,
           next_steps: {
@@ -77,8 +93,7 @@ export const validateCommand = {
             retry_validate: createGraphCliInvocation("validate", {
               graphPath: loaded.absolute_path
             })
-          },
-          diagnostics: launch.diagnostics
+          }
         }
       };
     }
@@ -98,35 +113,101 @@ export const validateCommand = {
           message: "Graph validation reached compile-time diagnostics.",
           graph_path: loaded.absolute_path,
           path_resolution: pathResolution,
+          diagnostics: compilation.diagnostics,
+          authored_validation: {
+            status: "passed",
+            diagnostics: []
+          },
+          compiled_validation: {
+            status: "failed",
+            diagnostics: compilation.diagnostics,
+            ...(compilation.compiled_graph
+              ? {
+                  compiled_summary: {
+                    entry_node_count: compilation.compiled_graph.entry_node_ids.length,
+                    node_count: compilation.compiled_graph.nodes.length,
+                    edge_count: compilation.compiled_graph.edges.length,
+                    scope_count: compilation.compiled_graph.scopes.length
+                  },
+                  managed_expansion: buildManagedExpansionSummaries(
+                    compilation.compiled_graph,
+                    loaded.lowered_managed_nodes
+                  )
+                }
+              : {})
+          },
+          ...(compilation.compiled_graph
+            ? {
+                compiled_summary: {
+                  entry_node_count: compilation.compiled_graph.entry_node_ids.length,
+                  node_count: compilation.compiled_graph.nodes.length,
+                  edge_count: compilation.compiled_graph.edges.length,
+                  scope_count: compilation.compiled_graph.scopes.length
+                },
+                managed_expansion: buildManagedExpansionSummaries(
+                  compilation.compiled_graph,
+                  loaded.lowered_managed_nodes
+                )
+              }
+            : {}),
           next_steps: {
             graph_help: "agentflow graph-help",
             inspect_compile: createGraphCliInvocation("compile", {
               graphPath: loaded.absolute_path
             })
-          },
-          diagnostics: compilation.diagnostics,
-          ...(compilation.compiled_graph ? { compiled_graph: compilation.compiled_graph } : {})
+          }
         }
       };
     }
 
+    const repoResolution = await resolveRepoSources(
+      loaded.absolute_path,
+      loaded.document,
+      collectReferencedRepoAliases(compilation.compiled_graph!)
+    );
+    const readiness = await evaluateGraphReadiness({
+      graph: compilation.compiled_graph!,
+      repo_sources: repoResolution.repo_sources ?? {},
+      repo_source_diagnostics: repoResolution.diagnostics
+    });
+    const compiledValidation = {
+      status: "passed",
+      diagnostics: [] as Array<{ path: string; message: string }>,
+      compiled_summary: {
+        entry_node_count: compilation.compiled_graph!.entry_node_ids.length,
+        node_count: compilation.compiled_graph!.nodes.length,
+        edge_count: compilation.compiled_graph!.edges.length,
+        scope_count: compilation.compiled_graph!.scopes.length
+      },
+      managed_expansion: buildManagedExpansionSummaries(
+        compilation.compiled_graph!,
+        loaded.lowered_managed_nodes
+      )
+    };
+
     return {
-      exitCode: 0,
+      exitCode: readiness.status === "blocked" ? 1 : 0,
       output: {
         command: "validate",
-        status: "passed",
-        message: `Graph validated for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`,
+        status: readiness.status === "blocked" ? "failed" : "passed",
+        message:
+          readiness.status === "blocked"
+            ? `Graph compiled, but readiness validation is blocked for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
+            : readiness.status === "warnings"
+              ? `Graph validated with readiness warnings for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
+              : `Graph validated for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`,
         graph_path: loaded.absolute_path,
         path_resolution: pathResolution,
         authored_summary: summarizeAuthoredGraph(loaded.document),
         launch,
-        lowered_managed_nodes: loaded.lowered_managed_nodes,
-        compiled_summary: {
-          entry_node_count: compilation.compiled_graph!.entry_node_ids.length,
-          node_count: compilation.compiled_graph!.nodes.length,
-          edge_count: compilation.compiled_graph!.edges.length,
-          scope_count: compilation.compiled_graph!.scopes.length
+        compiled_summary: compiledValidation.compiled_summary,
+        managed_expansion: compiledValidation.managed_expansion,
+        authored_validation: {
+          status: "passed",
+          diagnostics: []
         },
+        compiled_validation: compiledValidation,
+        readiness,
         next_steps: {
           compile: createGraphCliInvocation("compile", {
             graphPath: loaded.absolute_path

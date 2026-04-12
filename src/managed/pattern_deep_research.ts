@@ -9,7 +9,6 @@ import type {
   SequenceNode
 } from "../graph/authored.js";
 import {
-  appendOutput,
   attemptOutput,
   body,
   managedId,
@@ -17,15 +16,13 @@ import {
   renderPrompt,
   section,
   sharedNodeBase,
-  type ManagedWorkflowRuntime,
+  type ManagedPatternRuntime,
   workflowBriefOutput,
-  workflowEventsOutput,
   workflowPlanJsonOutput,
-  workflowPlanMarkdownOutput,
-  workflowStatusOutput
+  workflowPlanMarkdownOutput
 } from "./foundation.js";
 
-export interface DeepResearchBrief {
+export interface PatternDeepResearchBrief {
   question: string;
   objective: string;
   audience?: string;
@@ -33,7 +30,7 @@ export interface DeepResearchBrief {
   success_bar?: string[];
 }
 
-export interface DeepResearchContextPolicy {
+export interface PatternDeepResearchContextPolicy {
   web?: boolean;
   files?: boolean;
   apps?: boolean;
@@ -42,41 +39,41 @@ export interface DeepResearchContextPolicy {
   preferred_sources?: string[];
 }
 
-export interface DeepResearchApprovalPolicy {
+export interface PatternDeepResearchApprovalPolicy {
   require_plan_approval?: boolean;
 }
 
-export interface DeepResearchStrategy {
+export interface PatternDeepResearchStrategy {
   depth?: "shallow" | "standard" | "deep";
   coverage_mode?: "breadth" | "balanced" | "depth_first";
   followup_passes?: number;
   final_critique?: boolean;
 }
 
-export interface DeepResearchDelivery {
+export interface PatternDeepResearchDelivery {
   format?: string;
   citation_style?: string;
   sections?: string[];
 }
 
-export interface DeepResearchWorkflowConfig extends BaseExecutableNode {
-  brief: DeepResearchBrief;
-  context_policy: DeepResearchContextPolicy;
-  approval_policy: DeepResearchApprovalPolicy;
-  strategy: DeepResearchStrategy;
-  delivery: DeepResearchDelivery;
-  runtime?: ManagedWorkflowRuntime;
+export interface PatternDeepResearchConfig extends BaseExecutableNode {
+  brief: PatternDeepResearchBrief;
+  context_policy: PatternDeepResearchContextPolicy;
+  approval_policy: PatternDeepResearchApprovalPolicy;
+  strategy: PatternDeepResearchStrategy;
+  delivery: PatternDeepResearchDelivery;
+  runtime?: ManagedPatternRuntime;
 }
 
 function workflowNodeId(rootId: string, suffix: string): string {
-  return managedId(rootId, "deep_research", suffix);
+  return managedId(rootId, "pattern_deep_research", suffix);
 }
 
 function zeroPad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-function depthTrackCount(depth: DeepResearchStrategy["depth"]): number {
+function depthTrackCount(depth: PatternDeepResearchStrategy["depth"]): number {
   switch (depth) {
     case "shallow":
       return 3;
@@ -87,7 +84,7 @@ function depthTrackCount(depth: DeepResearchStrategy["depth"]): number {
   }
 }
 
-function formatContextPolicy(policy: DeepResearchContextPolicy): string[] {
+function formatContextPolicy(policy: PatternDeepResearchContextPolicy): string[] {
   return [
     `- Web research: ${policy.web === false ? "disabled" : "enabled"}`,
     `- Local file research: ${policy.files === false ? "disabled" : "enabled"}`,
@@ -104,7 +101,7 @@ function formatContextPolicy(policy: DeepResearchContextPolicy): string[] {
   ];
 }
 
-function formatStrategy(strategy: DeepResearchStrategy): string[] {
+function formatStrategy(strategy: PatternDeepResearchStrategy): string[] {
   return [
     `- Depth: ${strategy.depth ?? "standard"}`,
     `- Coverage mode: ${strategy.coverage_mode ?? "balanced"}`,
@@ -113,7 +110,7 @@ function formatStrategy(strategy: DeepResearchStrategy): string[] {
   ];
 }
 
-function formatDelivery(delivery: DeepResearchDelivery): string[] {
+function formatDelivery(delivery: PatternDeepResearchDelivery): string[] {
   return [
     `- Format: ${delivery.format ?? "report"}`,
     `- Citation style: ${delivery.citation_style ?? "inline"}`,
@@ -123,7 +120,7 @@ function formatDelivery(delivery: DeepResearchDelivery): string[] {
   ];
 }
 
-function formatBrief(brief: DeepResearchBrief): string[] {
+function formatBrief(brief: PatternDeepResearchBrief): string[] {
   return [
     `Question: ${brief.question}`,
     `Objective: ${brief.objective}`,
@@ -137,7 +134,7 @@ function formatBrief(brief: DeepResearchBrief): string[] {
   ];
 }
 
-function buildBriefPrompt(config: DeepResearchWorkflowConfig): string {
+function buildBriefPrompt(config: PatternDeepResearchConfig): string {
   return renderPrompt([
     body("Rewrite the research ask into a concrete, execution-ready research brief."),
     section("Objective", formatBrief(config.brief)),
@@ -153,7 +150,7 @@ function buildBriefPrompt(config: DeepResearchWorkflowConfig): string {
   ]);
 }
 
-function buildPlanPrompt(config: DeepResearchWorkflowConfig, trackCount: number): string {
+function buildPlanPrompt(config: PatternDeepResearchConfig, trackCount: number): string {
   return renderPrompt([
     body("Build the research plan that will drive the investigation."),
     section("Objective", formatBrief(config.brief)),
@@ -191,7 +188,7 @@ function buildPlanCheckpointPrompt(): string {
   ]);
 }
 
-function buildTrackPrompt(config: DeepResearchWorkflowConfig): string {
+function buildTrackPrompt(config: PatternDeepResearchConfig): string {
   return renderPrompt([
     body("Derive the concrete investigation briefs from the approved research plan."),
     section("Objective", formatBrief(config.brief)),
@@ -206,7 +203,7 @@ function buildTrackPrompt(config: DeepResearchWorkflowConfig): string {
   ]);
 }
 
-function buildWorkerPrompt(config: DeepResearchWorkflowConfig, trackIndex: number, phaseLabel: string): string {
+function buildWorkerPrompt(config: PatternDeepResearchConfig, trackIndex: number, phaseLabel: string): string {
   const trackNumber = zeroPad(trackIndex + 1);
 
   return renderPrompt([
@@ -256,7 +253,7 @@ function buildFollowupPlanPrompt(passIndex: number): string {
   ]);
 }
 
-function buildConsolidatePrompt(config: DeepResearchWorkflowConfig): string {
+function buildConsolidatePrompt(config: PatternDeepResearchConfig): string {
   return renderPrompt([
     body("Consolidate the investigation artifacts into machine-readable interim findings, provenance, and uncertainty outputs."),
     section("Objective", formatBrief(config.brief)),
@@ -274,16 +271,18 @@ function buildConsolidatePrompt(config: DeepResearchWorkflowConfig): string {
   ]);
 }
 
-function buildFinalPrompt(config: DeepResearchWorkflowConfig): string {
+function buildFinalPrompt(config: PatternDeepResearchConfig): string {
   return renderPrompt([
-    body("Publish the final deep research report and workflow status artifacts."),
+    body("Publish the final deep research package."),
     section("Objective", formatBrief(config.brief)),
     section("Current Context", [
       "Use the research brief, latest approved plan, interim findings, source ledger, and uncertainty register in context."
     ]),
     section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
     section("Output Contract", [
-      "Write `final-report.md`, `source-ledger.json`, `uncertainties.md`, `interim-findings.jsonl`, `workflow-status.json`, and `workflow-events.jsonl` to the output directory.",
+      "Write `research-report.md`, `research-packet.json`, `source-ledger.json`, `uncertainties.md`, and `interim-findings.jsonl` to the output directory.",
+      "Use this exact schema for `research-packet.json`:",
+      '{"question":"...","objective":"...","top_findings":["..."],"major_uncertainties":["..."],"source_summary":["..."],"recommended_downstream_uses":["..."]}',
       ...formatDelivery(config.delivery)
     ]),
     section("Quality Bar", [
@@ -293,7 +292,7 @@ function buildFinalPrompt(config: DeepResearchWorkflowConfig): string {
   ]);
 }
 
-function buildFinalCritiquePrompt(config: DeepResearchWorkflowConfig): string {
+function buildFinalCritiquePrompt(config: PatternDeepResearchConfig): string {
   return renderPrompt([
     body("Review whether the final research report is complete, balanced, and grounded in the gathered evidence."),
     section("Objective", formatBrief(config.brief)),
@@ -303,7 +302,7 @@ function buildFinalCritiquePrompt(config: DeepResearchWorkflowConfig): string {
   ]);
 }
 
-function buildFinalCritiqueRubric(config: DeepResearchWorkflowConfig): string {
+function buildFinalCritiqueRubric(config: PatternDeepResearchConfig): string {
   const sectionRequirement =
     config.delivery.sections && config.delivery.sections.length > 0
       ? `Pass only if the report covers: ${config.delivery.sections.join(", ")}.`
@@ -336,7 +335,7 @@ function buildFollowupOutputs(passIndex: number, trackIndex: number): OutputDefi
   ];
 }
 
-export function buildDeepResearchWorkflow(config: DeepResearchWorkflowConfig): SequenceNode {
+export function buildPatternDeepResearch(config: PatternDeepResearchConfig): SequenceNode {
   const shared = sharedNodeBase(config);
   const workflowId = workflowNodeId(config.id, "workflow");
   const trackCount = depthTrackCount(config.strategy.depth);
@@ -642,26 +641,18 @@ export function buildDeepResearchWorkflow(config: DeepResearchWorkflowConfig): S
     prompt: buildConsolidatePrompt(config)
   });
 
-  const finalOutputs: OutputDefinition[] =
-    config.outputs && config.outputs.length > 0
-      ? config.outputs
-      : [
-          attemptOutput("final_report", "final-report.md", true)
-        ];
-
   const publishedOutputs = [
-    ...finalOutputs,
+    attemptOutput("research_report", "research-report.md", true),
+    attemptOutput("research_packet", "research-packet.json", true),
     attemptOutput("source_ledger", "source-ledger.json", true),
     attemptOutput("uncertainties", "uncertainties.md", true),
-    attemptOutput("interim_findings", "interim-findings.jsonl", true),
-    workflowStatusOutput(),
-    workflowEventsOutput()
-  ].reduce(appendOutput, [] as OutputDefinition[]);
+    attemptOutput("interim_findings", "interim-findings.jsonl", true)
+  ];
 
   steps.push({
     type: "agent",
     id: config.id,
-    ...(config.label ? { label: config.label } : { label: "Publish Research Report" }),
+    ...(config.label ? { label: config.label } : { label: "Publish Research Package" }),
     ...shared,
     context_from: [
       {
@@ -702,7 +693,7 @@ export function buildDeepResearchWorkflow(config: DeepResearchWorkflowConfig): S
         {
           node: config.id,
           include: "output",
-          output: "final_report"
+          output: "research_report"
         },
         {
           node: config.id,

@@ -1,6 +1,6 @@
 ---
 name: agentflow-graph-authoring
-description: Design, review, and refine Agentflow execution graphs. Use when authoring or editing Agentflow graph JSON, choosing between primitive nodes and managed workflows, or checking topology, profiles, context flow, outputs, and validation against the shipped runtime contract.
+description: Design, review, and refine Agentflow execution graphs. Use when authoring or editing Agentflow graph JSON, choosing between primitive nodes and managed patterns, or checking topology, profiles, context flow, outputs, and validation against the shipped runtime contract.
 ---
 
 # Agentflow Graph Authoring
@@ -13,7 +13,7 @@ Use this skill when the task is any of:
 
 - turn a coding, research, or review request into an Agentflow graph
 - review an existing graph for topology, validation, or brittleness issues
-- decide between primitive nodes and managed workflows
+- decide between primitive nodes and managed patterns
 - decide how failures should propagate through the graph
 - choose graph outputs, context flow, and run-time validation boundaries
 
@@ -44,7 +44,7 @@ Read [references/brittleness-review.md](references/brittleness-review.md) before
 
 Read [references/examples.md](references/examples.md) when choosing topology or output patterns.
 
-If the graph uses managed workflows, also use the `agentflow-managed-workflows` skill when available.
+If the graph uses managed patterns, also use the `agentflow-managed-workflows` skill when available.
 
 ## Workflow
 
@@ -52,7 +52,7 @@ If the graph uses managed workflows, also use the `agentflow-managed-workflows` 
 
 Decide:
 
-- whether the graph should use primitives, managed workflows, or both
+- whether the graph should use primitives, managed patterns, or both
 - which repos it operates on
 - which artifacts later nodes need
 - where validation should happen
@@ -76,12 +76,12 @@ Use primitives for small, explicit flows:
 - `parallel`
 - `repeat`
 
-Use managed workflows when the task clearly matches the shipped semantics:
+Use managed patterns when the task clearly matches the shipped semantics:
 
-- `deep_research`
-- `spec_design`
-- `execute_spec`
-- `review_change`
+- `pattern_deep_research`
+- `pattern_spec_design`
+- `pattern_generate_evaluate_fix`
+- `pattern_review_change`
 
 4. Slice the graph by responsibility and failure boundary.
 
@@ -110,7 +110,7 @@ Pass only what the next node actually needs.
 
 Check for:
 
-- wrong node kind or wrong managed workflow choice
+- wrong node kind or wrong managed pattern choice
 - oversized nodes with mixed responsibilities
 - missing outputs that later nodes need
 - noisy `context_from`
@@ -118,6 +118,7 @@ Check for:
 - unnecessary `parallel` or `repeat`
 - prompts that restate too much ambient context instead of defining a sharp task
 - avoidable brittleness from overly broad globs, env-sensitive commands, or hard gates in the wrong place
+- missing profile or node `env_files` for command-only dotenv requirements
 - missing evidence outputs for later diagnosis when an `exec` can fail
 
 8. Finish with the actual CLI contract.

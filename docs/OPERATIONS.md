@@ -74,9 +74,9 @@ Cleanup and reconciliation rules:
 What the operator should expect:
 
 - A preflight failure can happen before any node starts and still produce a readable run from artifacts alone.
-- In this release, graph-global preflight is narrow: it is mostly workspace initialization and run-root setup, not node-specific harness or checkpoint readiness.
+- In this release, graph-global preflight includes workspace initialization plus readiness checks derived from declared prerequisites and resolved repo sources. Node-specific harness and checkpoint readiness remain lazy and fail the node that reaches that boundary.
 - A canceled run is canceled from the terminal that launched `run` with `Ctrl-C`.
-- `run` and `resume` print live graph progress to `stderr` while the final structured JSON result stays on `stdout`, so shell pipelines can still consume the command result without parsing progress noise.
+- `run` and `resume` print live graph progress to `stderr`. When `stdout` is an interactive terminal they print a compact terminal summary with final status and duration; when `stdout` is redirected or piped they keep emitting the full structured JSON result on `stdout`, so shell pipelines can still consume the command result without parsing progress noise.
 - The `workspaces/` directory is an implementation detail of the run and is not preserved as a long-lived checkout contract after worktree cleanup.
 - Authored `file` and `glob` inputs resolve live when each node starts. Missing files or empty globs become explicit omitted context instead of run-preflight failure.
 - Node and execution directories under `nodes/` use hashed names on disk.
@@ -127,10 +127,10 @@ Harness policy notes:
 
 ## CLI Entry Points
 
-Each supported command is JSON-first and returns explicit next-step hints.
+Each supported command returns explicit next-step hints. `validate`, `compile`, and non-interactive `run` or `resume` remain JSON-first; interactive `run` and `resume` render a compact terminal summary instead of dumping the full payload.
 
-- `graph-help`: prints the authored graph contract, supported node kinds, path rules, and a minimal example.
-- `validate`: validates authoring plus launch settings and returns `path_resolution`, launch data, compiled summary, and next-step commands.
+- `graph-help`: prints the authored graph contract, supported node kinds, path rules, `prerequisites.checks`, local command `env_files`, soft verification via `on_failure`, and a minimal example.
+- `validate`: validates the authored graph, validates the compiled graph, runs readiness checks, and returns `path_resolution`, launch data, readiness data, compiled summary, managed expansion details, and next-step commands.
 - `compile`: returns the compiled graph contract for inspection plus the same path and next-step metadata.
 - `run`: executes the compiled graph, writes durable artifacts, and returns `runs_root`, `run_root`, artifact paths, rerun or resume commands, and the cancellation note.
 - `resume`: recompiles a failed or canceled run root and resumes from durable state when the compiled contract still matches preserved work.
@@ -185,6 +185,34 @@ Checks:
 - ensure each repo path is a real git working tree
 - use `inplace` if you intentionally do not want a git worktree copy
 - inspect the preflight-failed run artifacts; they are still written
+
+### Readiness prerequisite failures
+
+Symptoms:
+
+- `Graph compiled, but readiness validation is blocked...`
+- `run.preflight_failed` with `reason = readiness_blocked`
+- missing file, command, env var, or repo diagnostics under `readiness.checks`
+
+Checks:
+
+- use top-level `prerequisites.checks` for launch-time assumptions that must be explicit
+- mark non-blocking checks with `"required": false` when they should warn but not stop the run
+- re-run `validate` after fixing the missing prerequisite to confirm `readiness.status = "ready"`
+
+### Missing command environment
+
+Symptoms:
+
+- deterministic `check` or `exec` fails because a test command cannot see a required secret or local env value
+- a command succeeds from the shell but fails under Agentflow with a missing env-var message
+
+Checks:
+
+- remember that local command nodes use a narrow baseline environment instead of inheriting arbitrary shell variables
+- put repo-local dotenv-style files in `env_files` on the relevant profile or node, for example `"env_files": [".env.development"]`
+- keep secrets out of graph inline `env`; use ignored env files or the existing repo secret workflow instead
+- declare a top-level env prerequisite only when the launch shell itself must provide the variable
 
 ### Missing harness binaries
 

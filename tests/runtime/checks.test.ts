@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
@@ -319,5 +323,72 @@ describe("runtime checks", () => {
 
     expect(result.exit_code).toBe(0);
     expect(result.stdout).toBe("visible");
+  });
+
+  it("loads declared env files before explicit local process env overrides", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-env-files-"));
+    const envFile = join(tempRoot, ".env.development");
+
+    try {
+      await writeFile(
+        envFile,
+        [
+          "# comments are ignored",
+          "AGENTFLOW_ENV_FILE_VALUE=from-file",
+          "AGENTFLOW_ENV_FILE_OVERRIDE=from-file",
+          "export AGENTFLOW_EXPORTED_ENV_FILE_VALUE='from exported file'"
+        ].join("\n")
+      );
+
+      const result = await runLocalProcess({
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            "process.stdout.write(JSON.stringify({",
+            "value: process.env.AGENTFLOW_ENV_FILE_VALUE,",
+            "override: process.env.AGENTFLOW_ENV_FILE_OVERRIDE,",
+            "exported: process.env.AGENTFLOW_EXPORTED_ENV_FILE_VALUE",
+            "}));"
+          ].join("")
+        ],
+        cwd: tempRoot,
+        env_files: [envFile],
+        env: {
+          AGENTFLOW_ENV_FILE_OVERRIDE: "from-inline-env"
+        },
+        timeout_sec: 30,
+        signal: undefined
+      });
+
+      expect(result.exit_code).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        value: "from-file",
+        override: "from-inline-env",
+        exported: "from exported file"
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("treats missing declared env files as launch errors", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-missing-env-file-"));
+
+    try {
+      await expect(
+        runLocalProcess({
+          command: process.execPath,
+          args: ["-e", "process.exit(0)"],
+          cwd: tempRoot,
+          env_files: ["missing.env"],
+          env: undefined,
+          timeout_sec: 30,
+          signal: undefined
+        })
+      ).rejects.toThrow("missing.env");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

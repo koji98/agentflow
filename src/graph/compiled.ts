@@ -1,11 +1,13 @@
 import type {
   ContextReference,
   DeterministicPassIf,
+  GraphPrerequisites,
   InputItem,
   OutputDefinition
 } from "./authored.js";
 import type {
   ContainerNodeKind,
+  FailureBehavior,
   GraphDiagnostic,
   GraphOutcome,
   LoweredManagedKind
@@ -39,7 +41,9 @@ export interface CompiledExecNode extends CompiledExecutableNodeBase {
   command: string;
   args: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
+  on_failure: FailureBehavior;
 }
 
 export interface CompiledCheckNode extends CompiledExecutableNodeBase {
@@ -48,10 +52,12 @@ export interface CompiledCheckNode extends CompiledExecutableNodeBase {
   command?: string;
   args?: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
   pass_if?: DeterministicPassIf;
   prompt?: string;
   rubric?: string;
+  on_failure: FailureBehavior;
 }
 
 export interface CompiledCheckpointNode extends CompiledExecutableNodeBase {
@@ -113,6 +119,7 @@ export interface CompiledGraph {
   edges: CompiledEdge[];
   scopes: CompiledScope[];
   authored_to_compiled: Record<string, string[]>;
+  prerequisites: GraphPrerequisites;
 }
 
 export interface CompileGraphResult {

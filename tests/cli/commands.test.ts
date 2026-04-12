@@ -99,8 +99,125 @@ describe("graph CLI", () => {
     expect(payload.launch.launch_profile).toBe("default");
     expect(payload.compiled_summary.node_count).toBe(7);
     expect(payload.compiled_summary.scope_count).toBeGreaterThan(0);
+    expect(payload.authored_validation.status).toBe("passed");
+    expect(payload.compiled_validation.status).toBe("passed");
+    expect(payload.compiled_validation.compiled_summary.node_count).toBe(7);
+    expect(payload.compiled_validation.managed_expansion).toEqual([]);
+    expect(payload.readiness.status).toBe("ready");
     expect(payload.next_steps.compile).toContain("agentflow compile --graph");
     expect(payload.next_steps.graph_help).toBe("agentflow graph-help");
+  });
+
+  it("surfaces readiness warnings and blocks from declarative prerequisites during validate", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-validate-prereqs-"));
+    const repoDir = join(tempRoot, "repo");
+    const warningGraphPath = join(tempRoot, "warning.graph.json");
+    const blockedGraphPath = join(tempRoot, "blocked.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const baseGraph = {
+      version: "1",
+      repos: {
+        main: {
+          path: "./repo"
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "ok",
+            repo: "main",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    };
+
+    await writeFile(
+      warningGraphPath,
+      `${JSON.stringify(
+        {
+          ...baseGraph,
+          graph_id: "cli-validate-prereq-warning",
+          prerequisites: {
+            checks: [
+              {
+                kind: "env",
+                name: "AGENTFLOW_TEST_MISSING_ENV",
+                required: false
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+    await writeFile(
+      blockedGraphPath,
+      `${JSON.stringify(
+        {
+          ...baseGraph,
+          graph_id: "cli-validate-prereq-blocked",
+          prerequisites: {
+            checks: [
+              {
+                kind: "command",
+                command: "definitely-missing-command"
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const warningResult = await executeCli(["validate", "--graph", warningGraphPath], tempRoot);
+    const blockedResult = await executeCli(["validate", "--graph", blockedGraphPath], tempRoot);
+    const warningPayload = JSON.parse(warningResult.stdout);
+    const blockedPayload = JSON.parse(blockedResult.stdout);
+
+    expect(warningResult.exitCode).toBe(0);
+    expect(warningPayload.status).toBe("passed");
+    expect(warningPayload.readiness.status).toBe("warnings");
+    expect(warningPayload.readiness.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "env",
+          status: "warning",
+          message: expect.stringContaining("AGENTFLOW_TEST_MISSING_ENV")
+        })
+      ])
+    );
+
+    expect(blockedResult.exitCode).toBe(1);
+    expect(blockedPayload.status).toBe("failed");
+    expect(blockedPayload.compiled_validation.status).toBe("passed");
+    expect(blockedPayload.readiness.status).toBe("blocked");
+    expect(blockedPayload.readiness.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "command",
+          status: "blocked",
+          message: expect.stringContaining("definitely-missing-command")
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("runs a deterministic graph end to end and writes run artifacts", async () => {
@@ -185,6 +302,7 @@ describe("graph CLI", () => {
     expect(payload.runs_root_contract).toContain("AGENTFLOW_RUNS_ROOT");
     expect(payload.run_root).toBe(join(payload.runs_root, payload.run_id));
     expect(payload.counts.passed).toBe(2);
+    expect(payload.duration_ms).toBeGreaterThanOrEqual(0);
     expect(payload.cancel_note).toContain("Ctrl-C");
     expect(payload.next_steps.rerun).toContain("agentflow run --graph");
     expect(payload.next_steps.resume).toContain("agentflow resume --run-root");
@@ -197,6 +315,72 @@ describe("graph CLI", () => {
     expect(progressOutput).toContain("[1/2] start check verify_marker · repo=main");
     expect(progressOutput).toContain("[2/2] passed check verify_marker");
     expect(progressOutput).toContain("agentflow: run passed · 2/2 terminal nodes");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("returns a primary terminal diagnostic for failed runs", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-failed-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-run-failed-graph",
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {}
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "check",
+                id: "verify_missing",
+                repo: "main",
+                check_kind: "deterministic",
+                command: "node",
+                args: [
+                  "-e",
+                  "process.stdout.write(JSON.stringify({passed:false})); process.exit(1);"
+                ],
+                pass_if: {
+                  json_path: "$.passed",
+                  equals: true
+                }
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const result = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const payload = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(payload.command).toBe("run");
+    expect(payload.status).toBe("failed");
+    expect(payload.duration_ms).toBeGreaterThanOrEqual(0);
+    expect(payload.terminal_error).toContain("Deterministic check failed.");
+    expect(payload.terminal_diagnostics).toContainEqual(
+      expect.stringContaining("Deterministic check failed.")
+    );
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -1349,7 +1533,7 @@ describe("graph CLI", () => {
     expect(graphHelp.exitCode).toBe(0);
     expect(graphHelp.stdout).toContain("Executable node kinds: agent, exec, check, checkpoint");
     expect(graphHelp.stdout).toContain(
-      "Managed workflow scaffolds: deep_research, spec_design, execute_spec, review_change"
+      "Managed pattern scaffolds: pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, pattern_review_change"
     );
     expect(graphHelp.stdout).not.toContain("Legacy thin aliases");
     expect(graphHelp.stdout).toContain(`"version": "1"`);

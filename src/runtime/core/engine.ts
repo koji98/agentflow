@@ -29,11 +29,13 @@ import {
 import { runAiCheck } from "../checks/ai.js";
 import { runDeterministicCheck, runLocalProcess } from "../checks/deterministic.js";
 import { resolveExecutionContext } from "../context/resolve.js";
+import { evaluateGraphReadiness } from "../readiness.js";
 import {
   createRuntimeEvent,
   type CheckEvaluatedPayload,
   type RuntimeEventContext,
-  type RuntimeEventEnvelope
+  type RuntimeEventEnvelope,
+  type VerificationRecordedPayload
 } from "../events.js";
 import type { HarnessAdapter } from "../harness/types.js";
 import {
@@ -70,6 +72,7 @@ export interface RuntimeNodeExecutionResult {
   stderr: string | undefined;
   metadata?: Record<string, unknown>;
   check?: CheckEvaluatedPayload;
+  verification?: VerificationRecordedPayload;
 }
 
 export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode> {
@@ -336,6 +339,12 @@ function predictWorkspaceBindings(
         backend
       }
     ])
+  );
+}
+
+function collectSourcePathsFromWorkspace(workspace: WorkspaceSetup): Record<string, string> {
+  return Object.fromEntries(
+    Object.values(workspace.repo_workspaces).map((binding) => [binding.repo_alias, binding.source_path])
   );
 }
 
@@ -734,13 +743,55 @@ function resolveNodeWorkingDirectory(
   );
 }
 
+function resolveNodeEnvFiles(
+  workspacePath: string,
+  envFiles: string[] | undefined
+): string[] | undefined {
+  if (envFiles === undefined) {
+    return undefined;
+  }
+
+  return envFiles.map((envFile) => {
+    if (envFile.includes(":")) {
+      throw new Error(`env_files entry "${envFile}" must be a relative path that stays within its repo or workspace root.`);
+    }
+
+    return resolveSubpathWithinRoot(
+      workspacePath,
+      envFile,
+      `env_files entry "${envFile}"`
+    );
+  });
+}
+
+function summarizeExecVerification(exitCode: number): string {
+  return exitCode === 0 ? "Command completed successfully." : `Command exited with code ${exitCode}.`;
+}
+
+function annotateSoftVerificationResult(
+  result: Record<string, unknown>,
+  verification: VerificationRecordedPayload
+): Record<string, unknown> {
+  return {
+    ...result,
+    soft_verification: true,
+    verifier_kind: verification.verifier_kind,
+    passed: verification.passed,
+    summary: verification.summary,
+    ...(verification.check_kind ? { check_kind: verification.check_kind } : {}),
+    ...(verification.exit_code !== undefined ? { exit_code: verification.exit_code } : {})
+  };
+}
+
 async function defaultExecExecutor(
   context: RuntimeNodeExecutorContext<CompiledExecNode>
 ): Promise<RuntimeNodeExecutionResult> {
+  const env_files = resolveNodeEnvFiles(context.workspace_path, context.node.env_files);
   const processResult = await runLocalProcess({
     command: context.node.command,
     args: context.node.args,
     cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
+    ...(env_files !== undefined ? { env_files } : {}),
     env: context.node.env,
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal
@@ -752,6 +803,27 @@ async function defaultExecExecutor(
       result: processResult,
       stdout: processResult.stdout,
       stderr: processResult.stderr
+    };
+  }
+
+  if (context.node.on_failure === "continue" && !processResult.timed_out) {
+    const verification: VerificationRecordedPayload = {
+      verifier_kind: "exec",
+      passed: processResult.exit_code === 0,
+      summary: summarizeExecVerification(processResult.exit_code),
+      exit_code: processResult.exit_code
+    };
+
+    return {
+      status: "passed",
+      outcome: "passed",
+      result: annotateSoftVerificationResult(
+        processResult as unknown as Record<string, unknown>,
+        verification
+      ),
+      stdout: processResult.stdout,
+      stderr: processResult.stderr,
+      verification
     };
   }
 
@@ -769,10 +841,12 @@ async function defaultCheckExecutor(
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>
 ): Promise<RuntimeNodeExecutionResult> {
   if (context.node.check_kind === "deterministic") {
+    const env_files = resolveNodeEnvFiles(context.workspace_path, context.node.env_files);
     const result = await runDeterministicCheck({
       command: context.node.command ?? "",
       args: context.node.args ?? [],
       cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
+      ...(env_files !== undefined ? { env_files } : {}),
       env: context.node.env,
       timeout_sec: context.node.effective_policy.timeout_sec,
       pass_if: context.node.pass_if,
@@ -785,6 +859,33 @@ async function defaultCheckExecutor(
         result,
         stdout: result.stdout,
         stderr: result.stderr
+      };
+    }
+
+    if (context.node.on_failure === "continue" && !result.timed_out) {
+      const verification: VerificationRecordedPayload = {
+        verifier_kind: "check",
+        passed: result.passed,
+        summary: result.summary,
+        check_kind: "deterministic",
+        exit_code: result.exit_code
+      };
+
+      return {
+        status: "passed",
+        outcome: "passed",
+        result: annotateSoftVerificationResult(
+          result as unknown as Record<string, unknown>,
+          verification
+        ),
+        stdout: result.stdout,
+        stderr: result.stderr,
+        check: {
+          check_kind: "deterministic",
+          passed: result.passed,
+          summary: result.summary
+        },
+        verification
       };
     }
 
@@ -818,6 +919,7 @@ async function defaultCheckExecutor(
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
+    ...(context.node.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
     prompt: context.node.prompt ?? "",
     rubric: context.node.rubric,
     context_packet_path: context.context_packet_path,
@@ -842,6 +944,38 @@ async function defaultCheckExecutor(
   }
 
   const passed = harness_result.status === "passed" && evaluation.passed;
+
+  if (context.node.on_failure === "continue" && harness_result.status === "passed") {
+    const verification: VerificationRecordedPayload = {
+      verifier_kind: "check",
+      passed,
+      summary: evaluation.summary ?? (passed ? "AI check passed." : "AI check failed."),
+      check_kind: "ai"
+    };
+
+    return {
+      status: "passed",
+      outcome: "passed",
+      result: annotateSoftVerificationResult({
+        exit_code: harness_result.exitCode,
+        passed,
+        ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
+        ...(evaluation.summary ? { summary: evaluation.summary } : {}),
+        ...(evaluation.issues ? { issues: evaluation.issues } : {}),
+        ...(evaluation.raw ? { raw: evaluation.raw } : {}),
+        metadata: harness_result.metadata ?? {}
+      }, verification),
+      stdout: harness_result.stdout,
+      stderr: harness_result.stderr,
+      check: {
+        check_kind: "ai",
+        passed,
+        ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
+        ...(evaluation.summary ? { summary: evaluation.summary } : {})
+      },
+      verification
+    };
+  }
 
   return {
     status: passed ? "passed" : "failed",
@@ -882,6 +1016,7 @@ async function defaultAgentExecutor(
     repoAlias: context.node.repo,
     repoPath: context.workspace_path,
     sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
+    ...(context.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
     model: context.node.effective_policy.model,
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoningEffort: context.node.effective_policy.reasoning_effort }
@@ -1077,7 +1212,14 @@ async function executeNode(
       context_summary_path: context.summary_path,
       context_provenance_path: context.provenance_path,
       output_artifacts,
-      ...(result.metadata ? { metadata: result.metadata } : {})
+      ...((result.metadata || result.verification)
+        ? {
+            metadata: {
+              ...(result.metadata ?? {}),
+              ...(result.verification ? { verification: result.verification } : {})
+            }
+          }
+        : {})
     });
 
     await writer.writeExecutionCompletion(completedAttempt, {
@@ -1496,6 +1638,16 @@ async function executeRunLoop(
       });
     }
 
+    if (result.verification) {
+      await emitEvent(session, writer, runOwner, events, options.on_event, "verification.recorded", result.verification, {
+        compiled_id: node.compiled_id,
+        execution_id: attempt.execution_id,
+        repeat_scope_id: attempt.repeat_scope_id,
+        iteration_index: attempt.iteration_index,
+        attempt_index: attempt.attempt_index
+      });
+    }
+
     if (result.status === "canceled") {
       if (session.status === "running") {
         session.status = "canceled";
@@ -1674,6 +1826,34 @@ export async function runCompiledGraph(
     scope_count: options.compiled_graph.scopes.length
   });
 
+  const readiness = await evaluateGraphReadiness({
+    graph: options.compiled_graph,
+    repo_sources: activeRepoSources
+  });
+
+  if (readiness.status === "blocked") {
+    session.status = "failed";
+    session.ended_at = new Date().toISOString();
+    await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
+    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
+      reason: "readiness_blocked",
+      message: readiness.checks
+        .filter((check) => check.status === "blocked")
+        .map((check) => check.message)
+        .join(" | ")
+    });
+    const state = await writeTerminalRunSummary(session, writer, events);
+
+    return {
+      run_id,
+      run_root: writer.run_root,
+      outcome: "failed",
+      state,
+      attempts: [],
+      events: await readRunEvents(writer.run_root)
+    };
+  }
+
   try {
     workspace = await initializeWorkspace(
       options.compiled_graph.launch.workspace_backend,
@@ -1727,6 +1907,33 @@ export async function resumeCompiledGraph(
   const session = options.resumed_session;
   const events = [...options.prior_events];
   const topology = buildSchedulerTopology(options.compiled_graph);
+  const readiness = await evaluateGraphReadiness({
+    graph: options.compiled_graph,
+    repo_sources: collectSourcePathsFromWorkspace(options.workspace)
+  });
+
+  if (readiness.status === "blocked") {
+    session.status = "failed";
+    session.ended_at = new Date().toISOString();
+    await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
+    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
+      reason: "readiness_blocked",
+      message: readiness.checks
+        .filter((check) => check.status === "blocked")
+        .map((check) => check.message)
+        .join(" | ")
+    });
+    const state = await writeTerminalRunSummary(session, writer, events);
+
+    return {
+      run_id: session.run_id,
+      run_root: writer.run_root,
+      outcome: "failed",
+      state,
+      attempts: await readRunExecutionAttempts(writer.run_root),
+      events: await readRunEvents(writer.run_root)
+    };
+  }
 
   session.status = "running";
   delete session.ended_at;

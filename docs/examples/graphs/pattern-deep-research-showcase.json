@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "graph_id": "deep-research-showcase",
+  "graph_id": "pattern-deep-research-showcase",
   "repos": {
     "main": {
       "path": "../../..",
@@ -29,16 +29,16 @@
     "id": "root",
     "steps": [
       {
-        "type": "deep_research",
-        "id": "managed_workflows_research",
+        "type": "pattern_deep_research",
+        "id": "managed_patterns_research",
         "repo": "main",
         "profile": "default",
         "brief": {
-          "question": "What should Agentflow's first managed workflows be and how should deep research behave?",
-          "objective": "Produce a grounded recommendation for Agentflow's managed workflow roadmap.",
+          "question": "What should Agentflow's first managed patterns be and how should deep research behave?",
+          "objective": "Produce a grounded recommendation for Agentflow's managed pattern roadmap.",
           "audience": "engineering",
           "scope_cues": [
-            "managed workflow contracts",
+            "managed pattern contracts",
             "compiled subgraph behavior"
           ],
           "success_bar": [
@@ -53,7 +53,7 @@
           },
           {
             "kind": "file",
-            "path": "docs/MANAGED_WORKFLOWS.md"
+            "path": "docs/MANAGED_PATTERNS.md"
           }
         ],
         "context_policy": {
@@ -83,7 +83,7 @@
           "citation_style": "inline",
           "sections": [
             "patterns",
-            "proposed managed workflows",
+            "proposed managed patterns",
             "deep research design",
             "recommendation"
           ]
@@ -97,16 +97,16 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "prompt": "Summarize the deep research result for a human operator. Mention the question, the recommended managed workflows, and the command a user should run next to inspect the graph.",
+        "prompt": "Summarize the deep research result for a human operator. Mention the question, the recommended managed patterns, and the command a user should run next to inspect the graph.",
         "context_from": [
           {
-            "node": "managed_workflows_research",
+            "node": "managed_patterns_research",
             "include": "summary"
           },
           {
-            "node": "managed_workflows_research",
+            "node": "managed_patterns_research",
             "include": "output",
-            "output": "final_report"
+            "output": "research_report"
           }
         ]
       }

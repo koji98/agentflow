@@ -164,6 +164,65 @@ describe("graph validation", () => {
     );
   });
 
+  it("rejects repeat.until checks that use soft failure semantics", () => {
+    const diagnostics = validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "invalid-soft-repeat-until",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "agent",
+                  id: "fix",
+                  prompt: "Apply the fix."
+                },
+                {
+                  type: "check",
+                  id: "verify",
+                  check_kind: "deterministic",
+                  command: "sh",
+                  on_failure: "continue"
+                }
+              ]
+            },
+            until: {
+              node: "verify"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].until.node",
+          message: expect.stringContaining('cannot use on_failure = "continue"')
+        })
+      ])
+    );
+  });
+
   it("rejects checkpoint nodes outside repeat bodies", () => {
     const diagnostics = validateAuthoredGraphDocument({
       version: "1",
@@ -308,7 +367,8 @@ describe("graph validation", () => {
       },
       profiles: {
         default: {
-          harness: "codex-cli"
+          harness: "codex-cli",
+          env_files: ["../.env"]
         }
       },
       graph: {
@@ -334,14 +394,16 @@ describe("graph validation", () => {
             type: "exec",
             id: "escape_exec",
             command: "pwd",
-            cwd: "../outside"
+            cwd: "../outside",
+            env_files: ["main:.env"]
           },
           {
             type: "check",
             id: "escape_check",
             check_kind: "deterministic",
             command: "pwd",
-            cwd: "main:../outside"
+            cwd: "main:../outside",
+            env_files: ["/tmp/.env"]
           }
         ]
       }
@@ -364,6 +426,18 @@ describe("graph validation", () => {
         expect.objectContaining({
           path: "$.graph.steps[2].cwd",
           message: 'cwd "main:../outside" must stay within the node workspace root.'
+        }),
+        expect.objectContaining({
+          path: "$.profiles.default.env_files[0]",
+          message: 'env_files entry "../.env" must stay within the node workspace root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].env_files[0]",
+          message: 'env_files entry "main:.env" must stay within the node workspace root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[2].env_files[0]",
+          message: 'env_files entry "/tmp/.env" must stay within the node workspace root.'
         })
       ])
     );

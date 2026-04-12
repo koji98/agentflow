@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "graph_id": "execute-spec-showcase",
+  "graph_id": "pattern-generate-evaluate-fix-showcase",
   "repos": {
     "main": {
       "path": "../../.."
@@ -28,16 +28,16 @@
     "id": "root",
     "steps": [
       {
-        "type": "spec_design",
+        "type": "pattern_spec_design",
         "id": "managed_nodes_spec",
         "repo": "main",
         "profile": "default",
         "brief": {
-          "problem": "Agentflow needs true managed workflows instead of thin aliases.",
-          "goal": "Design the first implementation-ready managed workflow model for Agentflow.",
+          "problem": "Agentflow needs true managed patterns instead of thin aliases.",
+          "goal": "Design the first implementation-ready managed pattern model for Agentflow.",
           "constraints": [
             "Keep primitive graph nodes stable.",
-            "Managed workflows must compile into primitive subgraphs.",
+            "Managed patterns must compile into primitive subgraphs.",
             "The README should remain enough to get started."
           ],
           "decision_drivers": [
@@ -53,7 +53,7 @@
             ],
             "areas": [
               "graph",
-              "managed workflows",
+              "managed patterns",
               "docs"
             ]
           }
@@ -65,11 +65,11 @@
           },
           {
             "kind": "file",
-            "path": "docs/MANAGED_WORKFLOWS.md"
+            "path": "docs/MANAGED_PATTERNS.md"
           },
           {
             "kind": "file",
-            "path": "docs/EXECUTE_SPEC_WORKFLOW.md"
+            "path": "docs/PATTERN_GENERATE_EVALUATE_FIX.md"
           }
         ],
         "context_policy": {
@@ -101,12 +101,12 @@
         }
       },
       {
-        "type": "execute_spec",
+        "type": "pattern_generate_evaluate_fix",
         "id": "implement_managed_nodes",
         "repo": "main",
         "profile": "default",
         "brief": {
-          "objective": "Implement the managed workflow model described by the upstream spec.",
+          "objective": "Implement the managed pattern model described by the upstream design packet.",
           "scope": {
             "paths": [
               "src/**",
@@ -115,12 +115,12 @@
             ],
             "areas": [
               "graph",
-              "managed workflows",
+              "managed patterns",
               "docs"
             ]
           }
         },
-        "spec_source": {
+        "task_source": {
           "kind": "managed_node",
           "node": "managed_nodes_spec"
         },
@@ -131,25 +131,15 @@
             "react.dev"
           ]
         },
-        "approval_policy": {
-          "require_execution_plan_approval": false
-        },
         "strategy": {
-          "single_writer": true,
-          "allow_readonly_recon": true,
-          "max_repair_cycles": 2
+          "max_fix_cycles": 2
         },
-        "validation": {
+        "evaluation": {
           "commands": [
             "npm run typecheck",
             "npm test"
           ],
           "required": true
-        },
-        "delivery": {
-          "write_handoff": true,
-          "write_validation_ledger": true,
-          "write_repair_log": true
         }
       },
       {
@@ -157,7 +147,7 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "prompt": "Summarize the final implementation handoff for an operator who needs the outcome, validation status, and residual risks.",
+        "prompt": "Summarize the final change package for an operator who needs the outcome, evaluation status, and residual risks.",
         "context_from": [
           {
             "node": "implement_managed_nodes",
@@ -166,12 +156,12 @@
           {
             "node": "implement_managed_nodes",
             "include": "output",
-            "output": "handoff"
+            "output": "change_summary"
           },
           {
             "node": "implement_managed_nodes",
             "include": "output",
-            "output": "validation_ledger"
+            "output": "evaluation_ledger"
           }
         ]
       }

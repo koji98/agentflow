@@ -1,6 +1,7 @@
 import type { CompiledExecutableNode, CompiledGraph, CompiledRepeatScope } from "../graph/compiled.js";
 import type { WorkspaceBackend } from "../graph/schema.js";
 import type { AttemptRegistry, RuntimeNodeAttempt } from "./attempts.js";
+import type { VerificationRecordedPayload } from "./events.js";
 
 export type RuntimeNodeStatus =
   | "pending"
@@ -13,6 +14,7 @@ export type RuntimeNodeStatus =
   | "skipped";
 
 export type RuntimeRunStatus = "pending" | "running" | "passed" | "failed" | "canceled";
+export type EvidenceStatus = "clean" | "warnings";
 
 export interface WorkspaceBinding {
   repo_alias: string;
@@ -64,6 +66,7 @@ export interface LatestExecutionSummary {
   started_at: string;
   ended_at?: string;
   duration_ms?: number;
+  verification?: VerificationRecordedPayload;
 }
 
 export interface RepeatScopeState {
@@ -88,14 +91,28 @@ export interface RuntimeCounts {
   skipped: number;
 }
 
+export interface SoftVerificationCounts {
+  passed: number;
+  failed: number;
+}
+
+export interface FailedSoftVerificationSummary extends VerificationRecordedPayload {
+  compiled_id: string;
+  authored_id: string;
+  execution_id: string;
+}
+
 export interface RuntimeStateSnapshot {
   run_id: string;
   graph_id: string;
   snapshot_seq: number;
   status: RuntimeRunStatus;
+  evidence_status: EvidenceStatus;
   workspace_backend: WorkspaceBackend;
   repo_workspaces: Record<string, WorkspaceBinding>;
   counts: RuntimeCounts;
+  soft_verification_counts: SoftVerificationCounts;
+  failed_soft_verifications: FailedSoftVerificationSummary[];
   node_statuses: Record<string, RuntimeNodeStatus>;
   active_executions: Record<string, ActiveExecutionSummary>;
   latest_execution_by_compiled_id: Record<string, LatestExecutionSummary>;
@@ -140,6 +157,36 @@ function createCounts(values: Iterable<RuntimeNodeStatus>): RuntimeCounts {
   }
 
   return counts;
+}
+
+export function summarizeSoftVerifications(
+  latestExecutionByCompiledId: Iterable<LatestExecutionSummary>
+): {
+  evidence_status: EvidenceStatus;
+  soft_verification_counts: SoftVerificationCounts;
+  failed_soft_verifications: FailedSoftVerificationSummary[];
+} {
+  const verifications = [...latestExecutionByCompiledId]
+    .filter((summary): summary is LatestExecutionSummary & { verification: VerificationRecordedPayload } =>
+      summary.verification !== undefined
+    );
+  const failed_soft_verifications = verifications
+    .filter((summary) => !summary.verification.passed)
+    .map((summary) => ({
+      ...summary.verification,
+      compiled_id: summary.compiled_id,
+      authored_id: summary.authored_id,
+      execution_id: summary.execution_id
+    }));
+
+  return {
+    evidence_status: failed_soft_verifications.length > 0 ? "warnings" : "clean",
+    soft_verification_counts: {
+      passed: verifications.filter((summary) => summary.verification.passed).length,
+      failed: failed_soft_verifications.length
+    },
+    failed_soft_verifications
+  };
 }
 
 export function buildExecutionManifest(
@@ -254,7 +301,12 @@ export function finalizeExecutionSummary(
     ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
-    ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {})
+    ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {}),
+    ...(attempt.metadata.verification &&
+    typeof attempt.metadata.verification === "object" &&
+    attempt.metadata.verification !== null
+      ? { verification: attempt.metadata.verification as VerificationRecordedPayload }
+      : {})
   });
 }
 
@@ -292,15 +344,19 @@ export function completeRepeatIteration(
 
 export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeStateSnapshot {
   const snapshot_seq = Math.max(0, session.next_event_seq - 1);
+  const softVerificationSummary = summarizeSoftVerifications(session.latest_execution_by_compiled_id.values());
 
   return {
     run_id: session.run_id,
     graph_id: session.graph.graph_id,
     snapshot_seq,
     status: session.status,
+    evidence_status: softVerificationSummary.evidence_status,
     workspace_backend: session.manifest.workspace_backend,
     repo_workspaces: session.manifest.repo_workspaces,
     counts: createCounts(session.node_statuses.values()),
+    soft_verification_counts: softVerificationSummary.soft_verification_counts,
+    failed_soft_verifications: softVerificationSummary.failed_soft_verifications,
     node_statuses: Object.fromEntries(session.node_statuses),
     active_executions: Object.fromEntries(session.active_executions),
     latest_execution_by_compiled_id: Object.fromEntries(session.latest_execution_by_compiled_id),

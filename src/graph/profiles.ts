@@ -27,6 +27,7 @@ export interface EffectiveNodePolicy {
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
+  skip_git_repo_check?: boolean;
   timeout_sec: number;
   input_rules: EffectiveInputRules;
 }
@@ -212,6 +213,7 @@ export function resolveNodePolicy(
   let model: string | undefined;
   let reasoning_effort: ReasoningEffort | undefined;
   let sandbox: SandboxMode | undefined;
+  let skip_git_repo_check: boolean | undefined;
 
   if (node.type === "agent" || isAiCheck(node)) {
     harness = node_profile?.harness ?? launch_profile?.harness;
@@ -238,6 +240,13 @@ export function resolveNodePolicy(
       node.type === "agent"
         ? node.sandbox ?? node_profile?.sandbox ?? launch_profile?.sandbox ?? "workspace-write"
         : "read-only";
+    skip_git_repo_check =
+      harness === "codex-cli"
+        ? node_profile?.skip_git_repo_check ??
+          (canInheritLaunchModel(launch_profile, node_profile)
+            ? launch_profile?.skip_git_repo_check
+            : undefined)
+        : undefined;
 
     if (!harness) {
       diagnostics.push({
@@ -262,6 +271,7 @@ export function resolveNodePolicy(
       ...(model ? { model } : {}),
       ...(reasoning_effort ? { reasoning_effort } : {}),
       ...(sandbox ? { sandbox } : {}),
+      ...(skip_git_repo_check !== undefined ? { skip_git_repo_check } : {}),
       timeout_sec,
       input_rules
     },

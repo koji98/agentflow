@@ -342,7 +342,262 @@ describe("runtime engine", () => {
         expect(await pathExists(join(attempt.execution_dir, "artifacts"))).toBe(false);
       })
     );
-    expect(await readFile(join(runRoot, "summary.md"), "utf8")).toContain("- Status: `passed`");
+    const summary = await readFile(join(runRoot, "summary.md"), "utf8");
+    expect(summary).toContain("- Control-flow status: `passed`");
+    expect(summary).toContain("- Evidence status: `clean`");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("continues past a soft-failing exec verifier and records evidence warnings", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-soft-exec-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-soft-exec",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "verify",
+            command: "sh",
+            args: ["-lc", "exit 7"],
+            on_failure: "continue"
+          },
+          {
+            type: "exec",
+            id: "after",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    const verifyAttempt = run.attempts.find((attempt) => attempt.authored_id === "verify");
+    expect(run.outcome).toBe("passed");
+    expect(run.state.node_statuses.root__verify).toBe("passed");
+    expect(run.state.node_statuses.root__after).toBe("passed");
+    expect(run.state.evidence_status).toBe("warnings");
+    expect(run.state.soft_verification_counts).toEqual({
+      passed: 0,
+      failed: 1
+    });
+    expect(run.state.failed_soft_verifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          authored_id: "verify",
+          verifier_kind: "exec",
+          passed: false,
+          exit_code: 7
+        })
+      ])
+    );
+    expect(JSON.parse(await readFile(verifyAttempt!.result_path!, "utf8"))).toEqual(
+      expect.objectContaining({
+        soft_verification: true,
+        verifier_kind: "exec",
+        passed: false,
+        exit_code: 7
+      })
+    );
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "verification.recorded",
+          compiled_id: "root__verify",
+          payload: expect.objectContaining({
+            verifier_kind: "exec",
+            passed: false,
+            exit_code: 7
+          })
+        })
+      ])
+    );
+
+    const summary = await readFile(join(runRoot, "summary.md"), "utf8");
+    expect(summary).toContain("- Evidence status: `warnings`");
+    expect(summary).toContain("## Failed Soft Verifications");
+    expect(summary).toContain("Command exited with code 7.");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("continues past a soft deterministic check failure and keeps check evidence visible", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-soft-check-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-soft-check",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "check",
+            id: "verify",
+            check_kind: "deterministic",
+            command: "sh",
+            args: ["-lc", "exit 2"],
+            pass_if: {
+              exit_code: 0
+            },
+            on_failure: "continue"
+          },
+          {
+            type: "exec",
+            id: "after",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    const verifyAttempt = run.attempts.find((attempt) => attempt.authored_id === "verify");
+    expect(run.outcome).toBe("passed");
+    expect(run.state.node_statuses.root__verify).toBe("passed");
+    expect(run.state.evidence_status).toBe("warnings");
+    expect(run.state.soft_verification_counts.failed).toBe(1);
+    expect(JSON.parse(await readFile(verifyAttempt!.result_path!, "utf8"))).toEqual(
+      expect.objectContaining({
+        soft_verification: true,
+        verifier_kind: "check",
+        check_kind: "deterministic",
+        passed: false,
+        exit_code: 2,
+        summary: "Deterministic check failed."
+      })
+    );
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "check.evaluated",
+          payload: expect.objectContaining({
+            check_kind: "deterministic",
+            passed: false,
+            summary: "Deterministic check failed."
+          })
+        }),
+        expect.objectContaining({
+          type: "verification.recorded",
+          payload: expect.objectContaining({
+            verifier_kind: "check",
+            check_kind: "deterministic",
+            passed: false,
+            summary: "Deterministic check failed."
+          })
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("keeps operational exec failures hard even when on_failure is continue", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-soft-exec-hard-failure-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-soft-exec-hard-failure",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "verify",
+            command: "definitely-missing-command",
+            on_failure: "continue"
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    const verifyAttempt = run.attempts.find((attempt) => attempt.authored_id === "verify");
+    expect(run.outcome).toBe("failed");
+    expect(run.state.node_statuses.root__verify).toBe("failed");
+    expect(run.state.evidence_status).toBe("clean");
+    expect(run.events.some((event) => event.type === "verification.recorded")).toBe(false);
+    expect(JSON.parse(await readFile(verifyAttempt!.result_path!, "utf8"))).toEqual(
+      expect.objectContaining({
+        error: expect.stringContaining("definitely-missing-command")
+      })
+    );
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -1619,6 +1874,135 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("failed");
     expect(run.state.node_statuses.root__fail_first).toBe("failed");
     expect(run.state.node_statuses.root__never_runs).toBe("blocked");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("preflight-fails required prerequisites before execution begins", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-prereq-blocked-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-prereq-blocked",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      prerequisites: {
+        checks: [
+          {
+            kind: "command",
+            command: "definitely-missing-command"
+          }
+        ]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "ok",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.attempts).toEqual([]);
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run.preflight_failed",
+          payload: expect.objectContaining({
+            reason: "readiness_blocked",
+            message: expect.stringContaining("definitely-missing-command")
+          })
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("continues when prerequisites only emit readiness warnings", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-prereq-warning-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-prereq-warning",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      prerequisites: {
+        checks: [
+          {
+            kind: "env",
+            name: "AGENTFLOW_TEST_MISSING_ENV",
+            required: false
+          }
+        ]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "ok",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(run.events.some((event) => event.type === "run.preflight_failed")).toBe(false);
+    expect(run.attempts).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
   });

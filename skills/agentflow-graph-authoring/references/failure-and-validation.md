@@ -50,7 +50,7 @@ Avoid `repeat` when the graph really wants:
 
 - a one-time retry inside the command itself
 - a straight `sequence`
-- a managed workflow that already includes bounded revision behavior
+- a managed pattern that already includes bounded revision behavior
 
 ## Validation placement
 

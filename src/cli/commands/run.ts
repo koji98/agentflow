@@ -22,6 +22,7 @@ import {
 } from "../command_support.js";
 import { createRuntimeProgressReporter } from "../progress.js";
 import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
+import { createRunTerminalFields } from "../run_output.js";
 
 export const runCommand = {
   name: "run",
@@ -196,6 +197,7 @@ export const runCommand = {
     const artifactPaths = resolveRunArtifactPaths(run.run_root);
     const runsRoot = dirname(run.run_root);
     const runsRootDetails = createRunsRootDetails(currentWorkingDirectory, process.env);
+    const terminalFields = createRunTerminalFields(run.state, run.attempts, run.events);
     const runMessage =
       run.outcome === "passed"
         ? "Run completed and durable artifacts are ready."
@@ -227,6 +229,7 @@ export const runCommand = {
         counts: run.state.counts,
         repo_workspaces: run.state.repo_workspaces,
         attempt_count: run.attempts.length,
+        ...terminalFields,
         artifacts: {
           run_file: artifactPaths.run_file,
           authored_graph_file: artifactPaths.authored_graph_file,

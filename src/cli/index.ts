@@ -18,14 +18,15 @@ import {
   executableNodeKinds,
   graphVersion,
   harnessNames,
-  managedWorkflowKinds,
+  managedPatternKinds,
   workspaceBackends
 } from "../graph/schema.js";
-import { managedWorkflowDescriptors } from "../managed/index.js";
+import { managedPatternDescriptors } from "../managed/index.js";
 import { compileCommand } from "./commands/compile.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
 import { validateCommand } from "./commands/validate.js";
+import { formatDuration } from "./progress.js";
 
 interface GraphCliCommandResult {
   exitCode: number;
@@ -56,7 +57,7 @@ const optionDescriptions: Record<string, string> = {
 };
 
 function renderGraphHelp(): string {
-  const managedWorkflowLines = managedWorkflowDescriptors.map(
+  const managedPatternLines = managedPatternDescriptors.map(
     (descriptor) => `- ${descriptor.kind}: ${descriptor.summary}`
   );
 
@@ -91,13 +92,13 @@ function renderGraphHelp(): string {
     `Version: ${graphVersion}`,
     `Executable node kinds: ${executableNodeKinds.join(", ")}`,
     `Container node kinds: ${containerNodeKinds.join(", ")}`,
-    `Managed workflow scaffolds: ${managedWorkflowKinds.join(", ")}`,
+    `Managed pattern scaffolds: ${managedPatternKinds.join(", ")}`,
     `Harness adapters: ${harnessNames.join(", ")}`,
     `Check kinds: ${checkKinds.join(", ")}`,
     `Workspace backends: ${workspaceBackends.join(", ")}`,
     "",
-    "Managed workflow direction:",
-    ...managedWorkflowLines,
+    "Managed pattern direction:",
+    ...managedPatternLines,
     "",
     "Top-level document fields:",
     "- graph_id",
@@ -105,15 +106,22 @@ function renderGraphHelp(): string {
     "- defaults.launch_profile",
     "- defaults.workspace_backend",
     "- profiles",
+    "- prerequisites.checks",
     "- graph",
     "",
     "Key rules:",
     "- The runtime executes compiled graphs only.",
+    "- validate reports authored validation, compiled validation, and readiness validation.",
     "- sequence, parallel, and repeat are authoring containers, not executable runtime nodes.",
-    "- deep_research, spec_design, execute_spec, and review_change are implemented as managed workflows that lower into generated primitive subgraphs.",
+    "- pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, and pattern_review_change are implemented as managed patterns that lower into generated primitive subgraphs.",
     "- repeat.until.node must target a descendant check or checkpoint node.",
+    "- repeat context selectors support latest, latest_passed, latest_failed, or a positive integer ordinal.",
     "- launch profile and workspace backend come from graph defaults in this release.",
     "- executable nodes may still select node-level profiles inside the authored graph.",
+    "- codex-cli profiles may set skip_git_repo_check for intentional non-git workspace roots.",
+    "- profiles, exec nodes, and deterministic check nodes may set env_files for repo-local dotenv-style command environment.",
+    "- exec and check support on_failure = fail | continue; soft verification still records the true verifier result.",
+    "- prerequisites.checks may assert required files, commands, env vars, or repos before launch.",
     "- agent and ai check nodes require a resolved harness; deterministic checks do not.",
     `- ${graphPathRuleText}`,
     `- ${repoPathRuleText}`,
@@ -222,6 +230,77 @@ export type GraphCliCommandName = keyof typeof commandRegistry;
 export interface GraphCliExecutionResult {
   exitCode: number;
   stdout: string;
+  output?: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function renderInteractiveRunResult(output: Record<string, unknown>): string | undefined {
+  const command = typeof output.command === "string" ? output.command : undefined;
+
+  if (command !== "run" && command !== "resume") {
+    return undefined;
+  }
+
+  const status = typeof output.status === "string" ? output.status : "unknown";
+  const durationMs = typeof output.duration_ms === "number" ? output.duration_ms : undefined;
+  const runRoot = typeof output.run_root === "string" ? output.run_root : undefined;
+  const message = typeof output.message === "string" ? output.message.trim() : undefined;
+  const terminalError =
+    typeof output.terminal_error === "string" && output.terminal_error.trim().length > 0
+      ? output.terminal_error.trim()
+      : undefined;
+  const terminalWarning =
+    typeof output.terminal_warning === "string" && output.terminal_warning.trim().length > 0
+      ? output.terminal_warning.trim()
+      : undefined;
+  const evidenceStatus =
+    typeof output.evidence_status === "string" ? output.evidence_status : undefined;
+  const artifacts = isRecord(output.artifacts) ? output.artifacts : undefined;
+  const summaryFile =
+    artifacts && typeof artifacts.summary_file === "string" ? artifacts.summary_file : undefined;
+
+  const statusLabel =
+    status === "passed"
+      ? "succeeded"
+      : status === "failed"
+        ? "failed"
+        : status === "canceled"
+          ? "canceled"
+          : status;
+  const headline = `${command === "resume" ? "Resume" : "Run"} ${statusLabel}${
+    durationMs !== undefined ? ` in ${formatDuration(durationMs)}` : ""
+  }.`;
+  const errorText =
+    status === "passed"
+      ? undefined
+      : terminalError ?? message;
+  const lines = [
+    headline,
+    ...(errorText ? [`Error: ${errorText}`] : []),
+    ...(status === "passed" && evidenceStatus === "warnings" && terminalWarning
+      ? [`Warning: ${terminalWarning}`]
+      : []),
+    ...(runRoot ? [`Run root: ${runRoot}`] : []),
+    ...(summaryFile ? [`Summary: ${summaryFile}`] : [])
+  ];
+
+  return lines.join("\n");
+}
+
+export function renderCliStdout(
+  result: GraphCliExecutionResult,
+  options: {
+    isTty: boolean;
+  }
+): string {
+  if (!options.isTty || !isRecord(result.output)) {
+    return result.stdout;
+  }
+
+  return renderInteractiveRunResult(result.output) ?? result.stdout;
 }
 
 function renderMainHelp(): string {
@@ -237,7 +316,7 @@ function renderMainHelp(): string {
     "",
     "Local workflow:",
     "  1. graph-help: review the authored graph contract and minimal example",
-    "  2. validate: check the authored graph plus launch settings without running it",
+    "  2. validate: check authored, compiled, and readiness phases without running the graph",
     "  3. compile: inspect the compiled graph contract before execution",
     "  4. run: execute the compiled graph and write durable artifacts under the run root",
     "  5. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work",
@@ -421,22 +500,22 @@ export async function executeCli(
 
     return {
       exitCode: result.exitCode,
+      output: result.output,
       stdout:
         result.stdout ??
         JSON.stringify(result.output ?? { command: command.name, status: "ok" }, null, 2)
     };
   } catch (error) {
+    const output = {
+      command: command.name,
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error)
+    };
+
     return {
       exitCode: 1,
-      stdout: JSON.stringify(
-        {
-          command: command.name,
-          status: "failed",
-          message: error instanceof Error ? error.message : String(error)
-        },
-        null,
-        2
-      )
+      output,
+      stdout: JSON.stringify(output, null, 2)
     };
   }
 }
@@ -459,7 +538,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<number> {
     const result = await executeCli(argv, process.cwd(), {
       signal: abortController.signal
     });
-    process.stdout.write(`${result.stdout}\n`);
+    process.stdout.write(`${renderCliStdout(result, { isTty: process.stdout.isTTY === true })}\n`);
     process.exitCode = result.exitCode;
     return result.exitCode;
   } finally {

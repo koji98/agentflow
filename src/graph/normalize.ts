@@ -4,14 +4,19 @@ import type {
   AuthoredGraphDocument,
   AuthoredGraphNode,
   BaseExecutableNode,
+  CommandPrerequisite,
   CheckNode,
   CheckpointNode,
   ContainerGraphNode,
   ContextReference,
   DeterministicCheckDefaults,
   DeterministicPassIf,
+  EnvPrerequisite,
   ExecNode,
   FileInput,
+  FilePrerequisite,
+  GraphPrerequisiteCheck,
+  GraphPrerequisites,
   GlobInput,
   GraphDefaults,
   GraphProfile,
@@ -20,6 +25,7 @@ import type {
   OutputDefinition,
   ParallelNode,
   RepeatNode,
+  RepoPrerequisite,
   RepoDefinition,
   SequenceNode,
   TextInput
@@ -29,10 +35,12 @@ import {
   checkKinds,
   contextIncludes,
   contextSelectors,
+  failureBehaviors,
   graphVersion,
   harnessNames,
-  managedWorkflowKinds,
+  managedPatternKinds,
   outputSourceKinds,
+  prerequisiteKinds,
   reasoningEfforts,
   sandboxModes,
   workspaceBackends
@@ -43,49 +51,47 @@ import type {
   LoweredManagedKind
 } from "./schema.js";
 import {
-  buildDeepResearchWorkflow,
-  type DeepResearchApprovalPolicy,
-  type DeepResearchBrief,
-  type DeepResearchContextPolicy,
-  type DeepResearchDelivery,
-  type DeepResearchStrategy
-} from "../managed/deep_research.js";
+  buildPatternDeepResearch,
+  type PatternDeepResearchApprovalPolicy,
+  type PatternDeepResearchBrief,
+  type PatternDeepResearchContextPolicy,
+  type PatternDeepResearchDelivery,
+  type PatternDeepResearchStrategy
+} from "../managed/pattern_deep_research.js";
 import {
-  buildSpecDesignWorkflow,
-  type SpecDesignApprovalPolicy,
-  type SpecDesignBrief,
-  type SpecDesignContextPolicy,
-  type SpecDesignDelivery,
-  type SpecDesignScope,
-  type SpecDesignStrategy
-} from "../managed/spec_design.js";
+  buildPatternSpecDesign,
+  type PatternSpecDesignApprovalPolicy,
+  type PatternSpecDesignBrief,
+  type PatternSpecDesignContextPolicy,
+  type PatternSpecDesignDelivery,
+  type PatternSpecDesignScope,
+  type PatternSpecDesignStrategy
+} from "../managed/pattern_spec_design.js";
 import {
-  buildExecuteSpecWorkflow,
-  type ExecuteSpecApprovalPolicy,
-  type ExecuteSpecArtifactBundleSource,
-  type ExecuteSpecBrief,
-  type ExecuteSpecContextPolicy,
-  type ExecuteSpecDelivery,
-  type ExecuteSpecManagedNodeSource,
-  type ExecuteSpecScope,
-  type ExecuteSpecSource,
-  type ExecuteSpecSourceRef,
-  type ExecuteSpecStrategy,
-  type ExecuteSpecValidation
-} from "../managed/execute_spec.js";
+  buildPatternGenerateEvaluateFix,
+  type PatternGenerateEvaluateFixArtifactBundleSource,
+  type PatternGenerateEvaluateFixBrief,
+  type PatternGenerateEvaluateFixContextPolicy,
+  type PatternGenerateEvaluateFixEvaluation,
+  type PatternGenerateEvaluateFixManagedNodeSource,
+  type PatternGenerateEvaluateFixScope,
+  type PatternGenerateEvaluateFixSourceRef,
+  type PatternGenerateEvaluateFixStrategy,
+  type PatternGenerateEvaluateFixTaskSource
+} from "../managed/pattern_generate_evaluate_fix.js";
 import {
-  buildReviewChangeWorkflow,
-  type ReviewChangeArtifactBundleSource,
-  type ReviewChangeBrief,
-  type ReviewChangeContextPolicy,
-  type ReviewChangeDelivery,
-  type ReviewChangeManagedNodeSource,
-  type ReviewChangeScope,
-  type ReviewChangeSource,
-  type ReviewChangeSourceRef,
-  type ReviewChangeStrategy
-} from "../managed/review_change.js";
-import type { ManagedWorkflowRuntime } from "../managed/foundation.js";
+  buildPatternReviewChange,
+  type PatternReviewChangeArtifactBundleSource,
+  type PatternReviewChangeBrief,
+  type PatternReviewChangeContextPolicy,
+  type PatternReviewChangeDelivery,
+  type PatternReviewChangeManagedNodeSource,
+  type PatternReviewChangeScope,
+  type PatternReviewChangeSource,
+  type PatternReviewChangeSourceRef,
+  type PatternReviewChangeStrategy
+} from "../managed/pattern_review_change.js";
+import type { ManagedPatternRuntime } from "../managed/foundation.js";
 
 export interface LoweredManagedNode {
   authored_id: string;
@@ -513,6 +519,8 @@ function normalizeGraphProfile(
       "model",
       "reasoning_effort",
       "sandbox",
+      "skip_git_repo_check",
+      "env_files",
       "timeout_sec",
       "input_rules",
       "deterministic_check_defaults",
@@ -530,6 +538,12 @@ function normalizeGraphProfile(
     diagnostics
   );
   const sandbox = readEnumValue(record.sandbox, `${path}.sandbox`, sandboxModes, diagnostics);
+  const skip_git_repo_check = readBoolean(
+    record.skip_git_repo_check,
+    `${path}.skip_git_repo_check`,
+    diagnostics
+  );
+  const env_files = readStringArray(record.env_files, `${path}.env_files`, diagnostics);
   const timeout_sec = readPositiveInteger(record.timeout_sec, `${path}.timeout_sec`, diagnostics);
   const input_rules = normalizeInputRules(record.input_rules, `${path}.input_rules`, diagnostics);
   const deterministic_check_defaults = normalizeDeterministicCheckDefaults(
@@ -548,6 +562,8 @@ function normalizeGraphProfile(
     ...(model ? { model } : {}),
     ...(reasoning_effort ? { reasoning_effort } : {}),
     ...(sandbox ? { sandbox } : {}),
+    ...(skip_git_repo_check !== undefined ? { skip_git_repo_check } : {}),
+    ...(env_files !== undefined ? { env_files } : {}),
     ...(timeout_sec !== undefined ? { timeout_sec } : {}),
     ...(input_rules ? { input_rules } : {}),
     ...(deterministic_check_defaults ? { deterministic_check_defaults } : {}),
@@ -870,6 +886,117 @@ function normalizeOutputs(
   return outputs;
 }
 
+function normalizeGraphPrerequisiteCheck(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): GraphPrerequisiteCheck | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "Prerequisite check must be an object."
+    });
+    return undefined;
+  }
+
+  const kind = readEnumValue(record.kind, `${path}.kind`, prerequisiteKinds, diagnostics, {
+    required: true
+  });
+  const required = readBoolean(record.required, `${path}.required`, diagnostics);
+
+  if (!kind) {
+    return undefined;
+  }
+
+  if (kind === "file") {
+    pushUnknownKeyDiagnostics(record, path, ["kind", "path", "required"], diagnostics);
+    const prerequisitePath = readRequiredString(record.path, `${path}.path`, diagnostics);
+
+    return prerequisitePath
+      ? {
+          kind,
+          path: prerequisitePath,
+          ...(required !== undefined ? { required } : {})
+        } satisfies FilePrerequisite
+      : undefined;
+  }
+
+  if (kind === "command") {
+    pushUnknownKeyDiagnostics(record, path, ["kind", "command", "required"], diagnostics);
+    const command = readRequiredString(record.command, `${path}.command`, diagnostics);
+
+    return command
+      ? {
+          kind,
+          command,
+          ...(required !== undefined ? { required } : {})
+        } satisfies CommandPrerequisite
+      : undefined;
+  }
+
+  if (kind === "env") {
+    pushUnknownKeyDiagnostics(record, path, ["kind", "name", "required"], diagnostics);
+    const name = readRequiredString(record.name, `${path}.name`, diagnostics);
+
+    return name
+      ? {
+          kind,
+          name,
+          ...(required !== undefined ? { required } : {})
+        } satisfies EnvPrerequisite
+      : undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["kind", "repo", "required"], diagnostics);
+  const repo = readRequiredString(record.repo, `${path}.repo`, diagnostics);
+
+  return repo
+    ? {
+        kind,
+        repo,
+        ...(required !== undefined ? { required } : {})
+      } satisfies RepoPrerequisite
+    : undefined;
+}
+
+function normalizeGraphPrerequisites(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): GraphPrerequisites | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "prerequisites must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["checks"], diagnostics);
+
+  if (!Array.isArray(record.checks)) {
+    diagnostics.push({
+      path: `${path}.checks`,
+      message: "prerequisites.checks must be an array."
+    });
+    return undefined;
+  }
+
+  return {
+    checks: record.checks
+      .map((item, index) => normalizeGraphPrerequisiteCheck(item, `${path}.checks[${index}]`, diagnostics))
+      .filter((item): item is GraphPrerequisiteCheck => item !== undefined)
+  };
+}
+
 function normalizeExecutableBase(
   record: Record<string, unknown>,
   path: string,
@@ -989,7 +1116,9 @@ function normalizeExecNode(
       "command",
       "args",
       "cwd",
-      "env"
+      "env_files",
+      "env",
+      "on_failure"
     ],
     diagnostics
   );
@@ -998,7 +1127,9 @@ function normalizeExecNode(
   const command = readRequiredString(record.command, `${path}.command`, diagnostics);
   const args = readStringArray(record.args, `${path}.args`, diagnostics);
   const cwd = readOptionalString(record.cwd, `${path}.cwd`, diagnostics);
+  const env_files = readStringArray(record.env_files, `${path}.env_files`, diagnostics);
   const env = readStringRecord(record.env, `${path}.env`, diagnostics);
+  const on_failure = readEnumValue(record.on_failure, `${path}.on_failure`, failureBehaviors, diagnostics);
 
   if (!base || !command) {
     return undefined;
@@ -1010,7 +1141,9 @@ function normalizeExecNode(
     command,
     ...(args ? { args } : {}),
     ...(cwd ? { cwd } : {}),
-    ...(env ? { env } : {})
+    ...(env_files !== undefined ? { env_files } : {}),
+    ...(env ? { env } : {}),
+    ...(on_failure ? { on_failure } : {})
   };
 }
 
@@ -1036,12 +1169,14 @@ function normalizeCheckNode(
       "command",
       "args",
       "cwd",
+      "env_files",
       "env",
       "pass_if",
       "prompt",
       "rubric",
       "model",
-      "reasoning_effort"
+      "reasoning_effort",
+      "on_failure"
     ],
     diagnostics
   );
@@ -1053,11 +1188,13 @@ function normalizeCheckNode(
   const command = readOptionalString(record.command, `${path}.command`, diagnostics);
   const args = readStringArray(record.args, `${path}.args`, diagnostics);
   const cwd = readOptionalString(record.cwd, `${path}.cwd`, diagnostics);
+  const env_files = readStringArray(record.env_files, `${path}.env_files`, diagnostics);
   const env = readStringRecord(record.env, `${path}.env`, diagnostics);
   const pass_if = normalizePassIf(record.pass_if, `${path}.pass_if`, diagnostics);
   const prompt = readOptionalString(record.prompt, `${path}.prompt`, diagnostics);
   const rubric = readOptionalString(record.rubric, `${path}.rubric`, diagnostics);
   const model = readOptionalString(record.model, `${path}.model`, diagnostics);
+  const on_failure = readEnumValue(record.on_failure, `${path}.on_failure`, failureBehaviors, diagnostics);
   const reasoning_effort = readEnumValue(
     record.reasoning_effort,
     `${path}.reasoning_effort`,
@@ -1081,7 +1218,7 @@ function normalizeCheckNode(
   }
 
   if (check_kind === "ai") {
-    for (const field of ["command", "args", "cwd", "env", "pass_if"] as const) {
+    for (const field of ["command", "args", "cwd", "env_files", "env", "pass_if"] as const) {
       if (record[field] !== undefined) {
         diagnostics.push({
           path: `${path}.${field}`,
@@ -1112,12 +1249,14 @@ function normalizeCheckNode(
     ...(check_kind === "deterministic" && command ? { command } : {}),
     ...(check_kind === "deterministic" && args ? { args } : {}),
     ...(check_kind === "deterministic" && cwd ? { cwd } : {}),
+    ...(check_kind === "deterministic" && env_files !== undefined ? { env_files } : {}),
     ...(check_kind === "deterministic" && env ? { env } : {}),
     ...(check_kind === "deterministic" && pass_if ? { pass_if } : {}),
     ...(check_kind === "ai" && prompt ? { prompt } : {}),
     ...(check_kind === "ai" && rubric ? { rubric } : {}),
     ...(check_kind === "ai" && model ? { model } : {}),
-    ...(check_kind === "ai" && reasoning_effort ? { reasoning_effort } : {})
+    ...(check_kind === "ai" && reasoning_effort ? { reasoning_effort } : {}),
+    ...(on_failure ? { on_failure } : {})
   };
 }
 
@@ -1304,7 +1443,7 @@ function normalizeManagedRuntime(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ManagedWorkflowRuntime {
+): ManagedPatternRuntime {
   if (value === undefined) {
     return {};
   }
@@ -1314,7 +1453,7 @@ function normalizeManagedRuntime(
   if (!record) {
     diagnostics.push({
       path,
-      message: "managed workflow runtime must be an object."
+      message: "managed pattern runtime must be an object."
     });
     return {};
   }
@@ -1328,17 +1467,17 @@ function normalizeManagedRuntime(
   };
 }
 
-function normalizeDeepResearchBrief(
+function normalizePatternDeepResearchBrief(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): DeepResearchBrief | undefined {
+): PatternDeepResearchBrief | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "deep_research.brief must be an object."
+      message: "pattern_deep_research.brief must be an object."
     });
     return undefined;
   }
@@ -1364,11 +1503,11 @@ function normalizeDeepResearchBrief(
   };
 }
 
-function normalizeDeepResearchContextPolicy(
+function normalizePatternDeepResearchContextPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): DeepResearchContextPolicy {
+): PatternDeepResearchContextPolicy {
   if (value === undefined) {
     return {
       web: true,
@@ -1382,7 +1521,7 @@ function normalizeDeepResearchContextPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "deep_research.context_policy must be an object."
+      message: "pattern_deep_research.context_policy must be an object."
     });
     return {
       web: true,
@@ -1415,11 +1554,11 @@ function normalizeDeepResearchContextPolicy(
   };
 }
 
-function normalizeDeepResearchApprovalPolicy(
+function normalizePatternDeepResearchApprovalPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): DeepResearchApprovalPolicy {
+): PatternDeepResearchApprovalPolicy {
   if (value === undefined) {
     return {
       require_plan_approval: false
@@ -1431,7 +1570,7 @@ function normalizeDeepResearchApprovalPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "deep_research.approval_policy must be an object."
+      message: "pattern_deep_research.approval_policy must be an object."
     });
     return {
       require_plan_approval: false
@@ -1446,11 +1585,11 @@ function normalizeDeepResearchApprovalPolicy(
   };
 }
 
-function normalizeDeepResearchStrategy(
+function normalizePatternDeepResearchStrategy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): DeepResearchStrategy {
+): PatternDeepResearchStrategy {
   if (value === undefined) {
     return {
       depth: "standard",
@@ -1465,7 +1604,7 @@ function normalizeDeepResearchStrategy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "deep_research.strategy must be an object."
+      message: "pattern_deep_research.strategy must be an object."
     });
     return {
       depth: "standard",
@@ -1491,11 +1630,11 @@ function normalizeDeepResearchStrategy(
   };
 }
 
-function normalizeDeepResearchDelivery(
+function normalizePatternDeepResearchDelivery(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): DeepResearchDelivery {
+): PatternDeepResearchDelivery {
   if (value === undefined) {
     return {
       format: "report",
@@ -1508,7 +1647,7 @@ function normalizeDeepResearchDelivery(
   if (!record) {
     diagnostics.push({
       path,
-      message: "deep_research.delivery must be an object."
+      message: "pattern_deep_research.delivery must be an object."
     });
     return {
       format: "report",
@@ -1529,7 +1668,7 @@ function normalizeDeepResearchDelivery(
   };
 }
 
-function normalizeDeepResearchNode(
+function normalizePatternDeepResearchNode(
   record: Record<string, unknown>,
   path: string,
   diagnostics: GraphDiagnostic[],
@@ -1559,11 +1698,11 @@ function normalizeDeepResearchNode(
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const brief = normalizeDeepResearchBrief(record.brief, `${path}.brief`, diagnostics);
-  const context_policy = normalizeDeepResearchContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
-  const approval_policy = normalizeDeepResearchApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
-  const strategy = normalizeDeepResearchStrategy(record.strategy, `${path}.strategy`, diagnostics);
-  const delivery = normalizeDeepResearchDelivery(record.delivery, `${path}.delivery`, diagnostics);
+  const brief = normalizePatternDeepResearchBrief(record.brief, `${path}.brief`, diagnostics);
+  const context_policy = normalizePatternDeepResearchContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
+  const approval_policy = normalizePatternDeepResearchApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
+  const strategy = normalizePatternDeepResearchStrategy(record.strategy, `${path}.strategy`, diagnostics);
+  const delivery = normalizePatternDeepResearchDelivery(record.delivery, `${path}.delivery`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
   if (!base || !brief) {
@@ -1572,11 +1711,11 @@ function normalizeDeepResearchNode(
 
   loweredManagedNodes.push({
     authored_id: base.id,
-    managed_kind: "deep_research",
+    managed_kind: "pattern_deep_research",
     lowered_to: "sequence"
   });
 
-  return buildDeepResearchWorkflow({
+  return buildPatternDeepResearch({
     ...base,
     brief,
     context_policy,
@@ -1587,11 +1726,11 @@ function normalizeDeepResearchNode(
   });
 }
 
-function normalizeSpecDesignScope(
+function normalizePatternSpecDesignScope(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SpecDesignScope {
+): PatternSpecDesignScope {
   if (value === undefined) {
     return {};
   }
@@ -1601,7 +1740,7 @@ function normalizeSpecDesignScope(
   if (!record) {
     diagnostics.push({
       path,
-      message: "spec_design.scope must be an object."
+      message: "pattern_spec_design.scope must be an object."
     });
     return {};
   }
@@ -1617,17 +1756,17 @@ function normalizeSpecDesignScope(
   };
 }
 
-function normalizeSpecDesignBrief(
+function normalizePatternSpecDesignBrief(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SpecDesignBrief | undefined {
+): PatternSpecDesignBrief | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "spec_design.brief must be an object."
+      message: "pattern_spec_design.brief must be an object."
     });
     return undefined;
   }
@@ -1644,7 +1783,7 @@ function normalizeSpecDesignBrief(
   const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
   const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
   const decision_drivers = readStringArray(record.decision_drivers, `${path}.decision_drivers`, diagnostics);
-  const scope = normalizeSpecDesignScope(record.scope, `${path}.scope`, diagnostics);
+  const scope = normalizePatternSpecDesignScope(record.scope, `${path}.scope`, diagnostics);
 
   if (!problem || !goal) {
     return undefined;
@@ -1660,11 +1799,11 @@ function normalizeSpecDesignBrief(
   };
 }
 
-function normalizeSpecDesignContextPolicy(
+function normalizePatternSpecDesignContextPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SpecDesignContextPolicy {
+): PatternSpecDesignContextPolicy {
   if (value === undefined) {
     return {
       repo_first: true,
@@ -1677,7 +1816,7 @@ function normalizeSpecDesignContextPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "spec_design.context_policy must be an object."
+      message: "pattern_spec_design.context_policy must be an object."
     });
     return {
       repo_first: true,
@@ -1700,11 +1839,11 @@ function normalizeSpecDesignContextPolicy(
   };
 }
 
-function normalizeSpecDesignApprovalPolicy(
+function normalizePatternSpecDesignApprovalPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SpecDesignApprovalPolicy {
+): PatternSpecDesignApprovalPolicy {
   if (value === undefined) {
     return {
       require_direction_approval: false
@@ -1716,7 +1855,7 @@ function normalizeSpecDesignApprovalPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "spec_design.approval_policy must be an object."
+      message: "pattern_spec_design.approval_policy must be an object."
     });
     return {
       require_direction_approval: false
@@ -1731,11 +1870,11 @@ function normalizeSpecDesignApprovalPolicy(
   };
 }
 
-function normalizeSpecDesignStrategy(
+function normalizePatternSpecDesignStrategy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SpecDesignStrategy {
+): PatternSpecDesignStrategy {
   if (value === undefined) {
     return {
       alternatives: 3,
@@ -1749,7 +1888,7 @@ function normalizeSpecDesignStrategy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "spec_design.strategy must be an object."
+      message: "pattern_spec_design.strategy must be an object."
     });
     return {
       alternatives: 3,
@@ -1772,11 +1911,11 @@ function normalizeSpecDesignStrategy(
   };
 }
 
-function normalizeSpecDesignDelivery(
+function normalizePatternSpecDesignDelivery(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SpecDesignDelivery {
+): PatternSpecDesignDelivery {
   if (value === undefined) {
     return {
       format: "design_spec"
@@ -1788,7 +1927,7 @@ function normalizeSpecDesignDelivery(
   if (!record) {
     diagnostics.push({
       path,
-      message: "spec_design.delivery must be an object."
+      message: "pattern_spec_design.delivery must be an object."
     });
     return {
       format: "design_spec"
@@ -1806,7 +1945,7 @@ function normalizeSpecDesignDelivery(
   };
 }
 
-function normalizeSpecDesignNode(
+function normalizePatternSpecDesignNode(
   record: Record<string, unknown>,
   path: string,
   diagnostics: GraphDiagnostic[],
@@ -1836,11 +1975,11 @@ function normalizeSpecDesignNode(
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const brief = normalizeSpecDesignBrief(record.brief, `${path}.brief`, diagnostics);
-  const context_policy = normalizeSpecDesignContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
-  const approval_policy = normalizeSpecDesignApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
-  const strategy = normalizeSpecDesignStrategy(record.strategy, `${path}.strategy`, diagnostics);
-  const delivery = normalizeSpecDesignDelivery(record.delivery, `${path}.delivery`, diagnostics);
+  const brief = normalizePatternSpecDesignBrief(record.brief, `${path}.brief`, diagnostics);
+  const context_policy = normalizePatternSpecDesignContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
+  const approval_policy = normalizePatternSpecDesignApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
+  const strategy = normalizePatternSpecDesignStrategy(record.strategy, `${path}.strategy`, diagnostics);
+  const delivery = normalizePatternSpecDesignDelivery(record.delivery, `${path}.delivery`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
   if (!base || !brief) {
@@ -1849,11 +1988,11 @@ function normalizeSpecDesignNode(
 
   loweredManagedNodes.push({
     authored_id: base.id,
-    managed_kind: "spec_design",
+    managed_kind: "pattern_spec_design",
     lowered_to: "sequence"
   });
 
-  return buildSpecDesignWorkflow({
+  return buildPatternSpecDesign({
     ...base,
     brief,
     context_policy,
@@ -1864,11 +2003,11 @@ function normalizeSpecDesignNode(
   });
 }
 
-function normalizeExecuteSpecScope(
+function normalizePatternGenerateEvaluateFixScope(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ExecuteSpecScope {
+): PatternGenerateEvaluateFixScope {
   if (value === undefined) {
     return {};
   }
@@ -1878,7 +2017,7 @@ function normalizeExecuteSpecScope(
   if (!record) {
     diagnostics.push({
       path,
-      message: "execute_spec.scope must be an object."
+      message: "pattern_generate_evaluate_fix.scope must be an object."
     });
     return {};
   }
@@ -1894,11 +2033,11 @@ function normalizeExecuteSpecScope(
   };
 }
 
-function normalizeExecuteSpecBrief(
+function normalizePatternGenerateEvaluateFixBrief(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ExecuteSpecBrief {
+): PatternGenerateEvaluateFixBrief {
   if (value === undefined) {
     return {};
   }
@@ -1908,7 +2047,7 @@ function normalizeExecuteSpecBrief(
   if (!record) {
     diagnostics.push({
       path,
-      message: "execute_spec.brief must be an object."
+      message: "pattern_generate_evaluate_fix.brief must be an object."
     });
     return {};
   }
@@ -1916,7 +2055,7 @@ function normalizeExecuteSpecBrief(
   pushUnknownKeyDiagnostics(record, path, ["objective", "scope"], diagnostics);
 
   const objective = readOptionalString(record.objective, `${path}.objective`, diagnostics);
-  const scope = normalizeExecuteSpecScope(record.scope, `${path}.scope`, diagnostics);
+  const scope = normalizePatternGenerateEvaluateFixScope(record.scope, `${path}.scope`, diagnostics);
 
   return {
     ...(objective ? { objective } : {}),
@@ -1924,17 +2063,17 @@ function normalizeExecuteSpecBrief(
   };
 }
 
-function normalizeExecuteSpecSourceRef(
+function normalizePatternGenerateEvaluateFixSourceRef(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ExecuteSpecSourceRef | undefined {
+): PatternGenerateEvaluateFixSourceRef | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "execute_spec spec source reference must be an object."
+      message: "pattern_generate_evaluate_fix task source reference must be an object."
     });
     return undefined;
   }
@@ -1977,22 +2116,22 @@ function normalizeExecuteSpecSourceRef(
 
   diagnostics.push({
     path: `${path}.kind`,
-    message: 'execute_spec spec source reference kind must be "file" or "managed_output".'
+    message: 'pattern_generate_evaluate_fix task source reference kind must be "file" or "managed_output".'
   });
   return undefined;
 }
 
-function normalizeExecuteSpecSource(
+function normalizePatternGenerateEvaluateFixTaskSource(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ExecuteSpecSource | undefined {
+): PatternGenerateEvaluateFixTaskSource | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "execute_spec.spec_source must be an object."
+      message: "pattern_generate_evaluate_fix.task_source must be an object."
     });
     return undefined;
   }
@@ -2014,65 +2153,94 @@ function normalizeExecuteSpecSource(
     return {
       kind: "managed_node",
       node
-    } satisfies ExecuteSpecManagedNodeSource;
+    } satisfies PatternGenerateEvaluateFixManagedNodeSource;
   }
 
   if (kind === "artifact_bundle") {
     pushUnknownKeyDiagnostics(
       record,
       path,
-      ["kind", "design_spec", "direction_proposal", "tradeoff_matrix", "decision_log", "implementation_readiness"],
+      [
+        "kind",
+        "design_packet",
+        "design_spec",
+        "direction_proposal",
+        "tradeoff_matrix",
+        "decision_log",
+        "implementation_readiness",
+        "additional_context"
+      ],
       diagnostics
     );
 
-    const design_spec = normalizeExecuteSpecSourceRef(
-      record.design_spec,
-      `${path}.design_spec`,
+    const design_packet = normalizePatternGenerateEvaluateFixSourceRef(
+      record.design_packet,
+      `${path}.design_packet`,
       diagnostics
     );
+    const design_spec = record.design_spec
+      ? normalizePatternGenerateEvaluateFixSourceRef(record.design_spec, `${path}.design_spec`, diagnostics)
+      : undefined;
     const direction_proposal = record.direction_proposal
-      ? normalizeExecuteSpecSourceRef(record.direction_proposal, `${path}.direction_proposal`, diagnostics)
+      ? normalizePatternGenerateEvaluateFixSourceRef(record.direction_proposal, `${path}.direction_proposal`, diagnostics)
       : undefined;
     const tradeoff_matrix = record.tradeoff_matrix
-      ? normalizeExecuteSpecSourceRef(record.tradeoff_matrix, `${path}.tradeoff_matrix`, diagnostics)
+      ? normalizePatternGenerateEvaluateFixSourceRef(record.tradeoff_matrix, `${path}.tradeoff_matrix`, diagnostics)
       : undefined;
     const decision_log = record.decision_log
-      ? normalizeExecuteSpecSourceRef(record.decision_log, `${path}.decision_log`, diagnostics)
+      ? normalizePatternGenerateEvaluateFixSourceRef(record.decision_log, `${path}.decision_log`, diagnostics)
       : undefined;
     const implementation_readiness = record.implementation_readiness
-      ? normalizeExecuteSpecSourceRef(
+      ? normalizePatternGenerateEvaluateFixSourceRef(
           record.implementation_readiness,
           `${path}.implementation_readiness`,
           diagnostics
         )
       : undefined;
+    const additional_context = Array.isArray(record.additional_context)
+      ? record.additional_context
+          .map((item, index) =>
+            normalizePatternGenerateEvaluateFixSourceRef(item, `${path}.additional_context[${index}]`, diagnostics)
+          )
+          .filter((item): item is PatternGenerateEvaluateFixSourceRef => item !== undefined)
+      : record.additional_context === undefined
+        ? undefined
+        : (() => {
+            diagnostics.push({
+              path: `${path}.additional_context`,
+              message: "pattern_generate_evaluate_fix.task_source.additional_context must be an array."
+            });
+            return undefined;
+          })();
 
-    if (!design_spec) {
+    if (!design_packet) {
       return undefined;
     }
 
     return {
       kind: "artifact_bundle",
-      design_spec,
+      design_packet,
+      ...(design_spec ? { design_spec } : {}),
       ...(direction_proposal ? { direction_proposal } : {}),
       ...(tradeoff_matrix ? { tradeoff_matrix } : {}),
       ...(decision_log ? { decision_log } : {}),
-      ...(implementation_readiness ? { implementation_readiness } : {})
-    } satisfies ExecuteSpecArtifactBundleSource;
+      ...(implementation_readiness ? { implementation_readiness } : {}),
+      ...(additional_context && additional_context.length > 0 ? { additional_context } : {})
+    } satisfies PatternGenerateEvaluateFixArtifactBundleSource;
   }
 
   diagnostics.push({
     path: `${path}.kind`,
-    message: 'execute_spec.spec_source.kind must be "managed_node" or "artifact_bundle".'
+    message: 'pattern_generate_evaluate_fix.task_source.kind must be "managed_node" or "artifact_bundle".'
   });
   return undefined;
 }
 
-function normalizeExecuteSpecContextPolicy(
+function normalizePatternGenerateEvaluateFixContextPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ExecuteSpecContextPolicy {
+): PatternGenerateEvaluateFixContextPolicy {
   if (value === undefined) {
     return {
       allow_official_docs_fallback: true
@@ -2084,7 +2252,7 @@ function normalizeExecuteSpecContextPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "execute_spec.context_policy must be an object."
+      message: "pattern_generate_evaluate_fix.context_policy must be an object."
     });
     return {
       allow_official_docs_fallback: true
@@ -2106,14 +2274,14 @@ function normalizeExecuteSpecContextPolicy(
   };
 }
 
-function normalizeExecuteSpecApprovalPolicy(
+function normalizePatternGenerateEvaluateFixStrategy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ExecuteSpecApprovalPolicy {
+): PatternGenerateEvaluateFixStrategy {
   if (value === undefined) {
     return {
-      require_execution_plan_approval: false
+      max_fix_cycles: 2
     };
   }
 
@@ -2122,84 +2290,25 @@ function normalizeExecuteSpecApprovalPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "execute_spec.approval_policy must be an object."
+      message: "pattern_generate_evaluate_fix.strategy must be an object."
     });
     return {
-      require_execution_plan_approval: false
+      max_fix_cycles: 2
     };
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["require_execution_plan_approval"], diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["max_fix_cycles"], diagnostics);
 
   return {
-    require_execution_plan_approval:
-      readBoolean(
-        record.require_execution_plan_approval,
-        `${path}.require_execution_plan_approval`,
-        diagnostics
-      ) ?? false
+    max_fix_cycles: readPositiveInteger(record.max_fix_cycles, `${path}.max_fix_cycles`, diagnostics) ?? 2
   };
 }
 
-function normalizeExecuteSpecStrategy(
+function normalizePatternGenerateEvaluateFixEvaluation(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ExecuteSpecStrategy {
-  if (value === undefined) {
-    return {
-      single_writer: true,
-      allow_readonly_recon: true,
-      max_repair_cycles: 2
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "execute_spec.strategy must be an object."
-    });
-    return {
-      single_writer: true,
-      allow_readonly_recon: true,
-      max_repair_cycles: 2
-    };
-  }
-
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["single_writer", "allow_readonly_recon", "max_repair_cycles"],
-    diagnostics
-  );
-
-  const single_writer = readBoolean(record.single_writer, `${path}.single_writer`, diagnostics) ?? true;
-  const allow_readonly_recon =
-    readBoolean(record.allow_readonly_recon, `${path}.allow_readonly_recon`, diagnostics) ?? true;
-  const max_repair_cycles =
-    readPositiveInteger(record.max_repair_cycles, `${path}.max_repair_cycles`, diagnostics) ?? 2;
-
-  if (single_writer === false) {
-    diagnostics.push({
-      path: `${path}.single_writer`,
-      message: "execute_spec currently supports only single_writer = true; the workflow will still compile as a single-writer executor."
-    });
-  }
-
-  return {
-    single_writer: true,
-    allow_readonly_recon,
-    max_repair_cycles
-  };
-}
-
-function normalizeExecuteSpecValidation(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): ExecuteSpecValidation {
+): PatternGenerateEvaluateFixEvaluation {
   if (value === undefined) {
     return {
       commands: [],
@@ -2212,7 +2321,7 @@ function normalizeExecuteSpecValidation(
   if (!record) {
     diagnostics.push({
       path,
-      message: "execute_spec.validation must be an object."
+      message: "pattern_generate_evaluate_fix.evaluation must be an object."
     });
     return {
       commands: [],
@@ -2230,45 +2339,7 @@ function normalizeExecuteSpecValidation(
   };
 }
 
-function normalizeExecuteSpecDelivery(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): ExecuteSpecDelivery {
-  if (value === undefined) {
-    return {
-      write_handoff: true,
-      write_validation_ledger: true,
-      write_repair_log: true
-    };
-  }
-
-  const typed = asRecord(value);
-
-  if (!typed) {
-    diagnostics.push({
-      path,
-      message: "execute_spec.delivery must be an object."
-    });
-    return {
-      write_handoff: true,
-      write_validation_ledger: true,
-      write_repair_log: true
-    };
-  }
-
-  pushUnknownKeyDiagnostics(typed, path, ["write_handoff", "write_validation_ledger", "write_repair_log"], diagnostics);
-
-  return {
-    write_handoff: readBoolean(typed.write_handoff, `${path}.write_handoff`, diagnostics) ?? true,
-    write_validation_ledger:
-      readBoolean(typed.write_validation_ledger, `${path}.write_validation_ledger`, diagnostics) ?? true,
-    write_repair_log:
-      readBoolean(typed.write_repair_log, `${path}.write_repair_log`, diagnostics) ?? true
-  };
-}
-
-function normalizeExecuteSpecNode(
+function normalizePatternGenerateEvaluateFixNode(
   record: Record<string, unknown>,
   path: string,
   diagnostics: GraphDiagnostic[],
@@ -2285,65 +2356,66 @@ function normalizeExecuteSpecNode(
       "profile",
       "inputs",
       "context_from",
-      "outputs",
       "timeout_sec",
       "brief",
-      "spec_source",
+      "task_source",
       "context_policy",
-      "approval_policy",
       "strategy",
-      "validation",
-      "delivery",
+      "evaluation",
       "runtime"
     ],
     diagnostics
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const brief = normalizeExecuteSpecBrief(record.brief, `${path}.brief`, diagnostics);
-  const spec_source = normalizeExecuteSpecSource(record.spec_source, `${path}.spec_source`, diagnostics);
-  const context_policy = normalizeExecuteSpecContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
-  const approval_policy = normalizeExecuteSpecApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
-  const strategy = normalizeExecuteSpecStrategy(record.strategy, `${path}.strategy`, diagnostics);
-  const validation = normalizeExecuteSpecValidation(record.validation, `${path}.validation`, diagnostics);
-  const delivery = normalizeExecuteSpecDelivery(record.delivery, `${path}.delivery`, diagnostics);
+  const brief = normalizePatternGenerateEvaluateFixBrief(record.brief, `${path}.brief`, diagnostics);
+  const task_source = normalizePatternGenerateEvaluateFixTaskSource(
+    record.task_source,
+    `${path}.task_source`,
+    diagnostics
+  );
+  const context_policy = normalizePatternGenerateEvaluateFixContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
+  const strategy = normalizePatternGenerateEvaluateFixStrategy(record.strategy, `${path}.strategy`, diagnostics);
+  const evaluation = normalizePatternGenerateEvaluateFixEvaluation(
+    record.evaluation,
+    `${path}.evaluation`,
+    diagnostics
+  );
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (validation.commands.length === 0) {
+  if (evaluation.commands.length === 0) {
     diagnostics.push({
-      path: `${path}.validation.commands`,
-      message: "execute_spec.validation.commands must include at least one command."
+      path: `${path}.evaluation.commands`,
+      message: "pattern_generate_evaluate_fix.evaluation.commands must include at least one command."
     });
   }
 
-  if (!base || !spec_source) {
+  if (!base || !task_source) {
     return undefined;
   }
 
   loweredManagedNodes.push({
     authored_id: base.id,
-    managed_kind: "execute_spec",
+    managed_kind: "pattern_generate_evaluate_fix",
     lowered_to: "sequence"
   });
 
-  return buildExecuteSpecWorkflow({
+  return buildPatternGenerateEvaluateFix({
     ...base,
     brief,
-    spec_source,
+    task_source,
     context_policy,
-    approval_policy,
     strategy,
-    validation,
-    delivery,
+    evaluation,
     runtime
   });
 }
 
-function normalizeReviewChangeScope(
+function normalizePatternReviewChangeScope(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeScope {
+): PatternReviewChangeScope {
   if (value === undefined) {
     return {};
   }
@@ -2353,7 +2425,7 @@ function normalizeReviewChangeScope(
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change.scope must be an object."
+      message: "pattern_review_change.scope must be an object."
     });
     return {};
   }
@@ -2369,11 +2441,11 @@ function normalizeReviewChangeScope(
   };
 }
 
-function normalizeReviewChangeBrief(
+function normalizePatternReviewChangeBrief(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeBrief {
+): PatternReviewChangeBrief {
   if (value === undefined) {
     return {};
   }
@@ -2383,7 +2455,7 @@ function normalizeReviewChangeBrief(
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change.brief must be an object."
+      message: "pattern_review_change.brief must be an object."
     });
     return {};
   }
@@ -2393,7 +2465,7 @@ function normalizeReviewChangeBrief(
   const review_goal = readOptionalString(record.review_goal, `${path}.review_goal`, diagnostics);
   const focus = readStringArray(record.focus, `${path}.focus`, diagnostics);
   const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
-  const scope = normalizeReviewChangeScope(record.scope, `${path}.scope`, diagnostics);
+  const scope = normalizePatternReviewChangeScope(record.scope, `${path}.scope`, diagnostics);
 
   return {
     ...(review_goal ? { review_goal } : {}),
@@ -2403,17 +2475,17 @@ function normalizeReviewChangeBrief(
   };
 }
 
-function normalizeReviewChangeSourceRef(
+function normalizePatternReviewChangeSourceRef(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeSourceRef | undefined {
+): PatternReviewChangeSourceRef | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change source reference must be an object."
+      message: "pattern_review_change source reference must be an object."
     });
     return undefined;
   }
@@ -2456,22 +2528,22 @@ function normalizeReviewChangeSourceRef(
 
   diagnostics.push({
     path: `${path}.kind`,
-    message: 'review_change source reference kind must be "file" or "managed_output".'
+    message: 'pattern_review_change source reference kind must be "file" or "managed_output".'
   });
   return undefined;
 }
 
-function normalizeReviewChangeSource(
+function normalizePatternReviewChangeSource(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeSource | undefined {
+): PatternReviewChangeSource | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change.review_source must be an object."
+      message: "pattern_review_change.review_source must be an object."
     });
     return undefined;
   }
@@ -2493,41 +2565,41 @@ function normalizeReviewChangeSource(
     return {
       kind: "managed_node",
       node
-    } satisfies ReviewChangeManagedNodeSource;
+    } satisfies PatternReviewChangeManagedNodeSource;
   }
 
   if (kind === "artifact_bundle") {
     pushUnknownKeyDiagnostics(
       record,
       path,
-      ["kind", "diff", "summary", "validation_ledger", "files_touched", "additional_context"],
+      ["kind", "diff", "summary", "evaluation_ledger", "files_touched", "additional_context"],
       diagnostics
     );
 
     const diff = record.diff
-      ? normalizeReviewChangeSourceRef(record.diff, `${path}.diff`, diagnostics)
+      ? normalizePatternReviewChangeSourceRef(record.diff, `${path}.diff`, diagnostics)
       : undefined;
     const summary = record.summary
-      ? normalizeReviewChangeSourceRef(record.summary, `${path}.summary`, diagnostics)
+      ? normalizePatternReviewChangeSourceRef(record.summary, `${path}.summary`, diagnostics)
       : undefined;
-    const validation_ledger = record.validation_ledger
-      ? normalizeReviewChangeSourceRef(record.validation_ledger, `${path}.validation_ledger`, diagnostics)
+    const evaluation_ledger = record.evaluation_ledger
+      ? normalizePatternReviewChangeSourceRef(record.evaluation_ledger, `${path}.evaluation_ledger`, diagnostics)
       : undefined;
     const files_touched = record.files_touched
-      ? normalizeReviewChangeSourceRef(record.files_touched, `${path}.files_touched`, diagnostics)
+      ? normalizePatternReviewChangeSourceRef(record.files_touched, `${path}.files_touched`, diagnostics)
       : undefined;
     const additional_context = Array.isArray(record.additional_context)
       ? record.additional_context
           .map((item, index) =>
-            normalizeReviewChangeSourceRef(item, `${path}.additional_context[${index}]`, diagnostics)
+            normalizePatternReviewChangeSourceRef(item, `${path}.additional_context[${index}]`, diagnostics)
           )
-          .filter((item): item is ReviewChangeSourceRef => item !== undefined)
+          .filter((item): item is PatternReviewChangeSourceRef => item !== undefined)
       : record.additional_context === undefined
         ? undefined
         : (() => {
             diagnostics.push({
               path: `${path}.additional_context`,
-              message: "review_change.review_source.additional_context must be an array."
+              message: "pattern_review_change.review_source.additional_context must be an array."
             });
             return undefined;
           })();
@@ -2536,7 +2608,7 @@ function normalizeReviewChangeSource(
       diagnostics.push({
         path,
         message:
-          "review_change.review_source artifact_bundle must include at least one of diff, summary, or additional_context."
+          "pattern_review_change.review_source artifact_bundle must include at least one of diff, summary, or additional_context."
       });
       return undefined;
     }
@@ -2545,24 +2617,24 @@ function normalizeReviewChangeSource(
       kind: "artifact_bundle",
       ...(diff ? { diff } : {}),
       ...(summary ? { summary } : {}),
-      ...(validation_ledger ? { validation_ledger } : {}),
+      ...(evaluation_ledger ? { evaluation_ledger } : {}),
       ...(files_touched ? { files_touched } : {}),
       ...(additional_context && additional_context.length > 0 ? { additional_context } : {})
-    } satisfies ReviewChangeArtifactBundleSource;
+    } satisfies PatternReviewChangeArtifactBundleSource;
   }
 
   diagnostics.push({
     path: `${path}.kind`,
-    message: 'review_change.review_source.kind must be "managed_node" or "artifact_bundle".'
+    message: 'pattern_review_change.review_source.kind must be "managed_node" or "artifact_bundle".'
   });
   return undefined;
 }
 
-function normalizeReviewChangeContextPolicy(
+function normalizePatternReviewChangeContextPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeContextPolicy {
+): PatternReviewChangeContextPolicy {
   if (value === undefined) {
     return {
       include_surrounding_code: true,
@@ -2577,7 +2649,7 @@ function normalizeReviewChangeContextPolicy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change.context_policy must be an object."
+      message: "pattern_review_change.context_policy must be an object."
     });
     return {
       include_surrounding_code: true,
@@ -2604,11 +2676,11 @@ function normalizeReviewChangeContextPolicy(
   };
 }
 
-function normalizeReviewChangeStrategy(
+function normalizePatternReviewChangeStrategy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeStrategy {
+): PatternReviewChangeStrategy {
   if (value === undefined) {
     return {
       reviewer_profiles: ["correctness", "testing", "maintainability"],
@@ -2624,7 +2696,7 @@ function normalizeReviewChangeStrategy(
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change.strategy must be an object."
+      message: "pattern_review_change.strategy must be an object."
     });
     return {
       reviewer_profiles: ["correctness", "testing", "maintainability"],
@@ -2668,16 +2740,14 @@ function normalizeReviewChangeStrategy(
   };
 }
 
-function normalizeReviewChangeDelivery(
+function normalizePatternReviewChangeDelivery(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ReviewChangeDelivery {
+): PatternReviewChangeDelivery {
   if (value === undefined) {
     return {
-      write_review_summary: true,
-      write_raw_findings: true,
-      write_calibrated_findings: true
+      format: "review_summary"
     };
   }
 
@@ -2686,33 +2756,24 @@ function normalizeReviewChangeDelivery(
   if (!record) {
     diagnostics.push({
       path,
-      message: "review_change.delivery must be an object."
+      message: "pattern_review_change.delivery must be an object."
     });
     return {
-      write_review_summary: true,
-      write_raw_findings: true,
-      write_calibrated_findings: true
+      format: "review_summary"
     };
   }
 
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["write_review_summary", "write_raw_findings", "write_calibrated_findings"],
-    diagnostics
-  );
+  pushUnknownKeyDiagnostics(record, path, ["format", "sections"], diagnostics);
+  const format = readOptionalString(record.format, `${path}.format`, diagnostics);
+  const sections = readStringArray(record.sections, `${path}.sections`, diagnostics);
 
   return {
-    write_review_summary:
-      readBoolean(record.write_review_summary, `${path}.write_review_summary`, diagnostics) ?? true,
-    write_raw_findings:
-      readBoolean(record.write_raw_findings, `${path}.write_raw_findings`, diagnostics) ?? true,
-    write_calibrated_findings:
-      readBoolean(record.write_calibrated_findings, `${path}.write_calibrated_findings`, diagnostics) ?? true
+    ...(format ? { format } : { format: "review_summary" }),
+    ...(sections && sections.length > 0 ? { sections } : {})
   };
 }
 
-function normalizeReviewChangeNode(
+function normalizePatternReviewChangeNode(
   record: Record<string, unknown>,
   path: string,
   diagnostics: GraphDiagnostic[],
@@ -2729,7 +2790,6 @@ function normalizeReviewChangeNode(
       "profile",
       "inputs",
       "context_from",
-      "outputs",
       "timeout_sec",
       "brief",
       "review_source",
@@ -2742,19 +2802,19 @@ function normalizeReviewChangeNode(
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const brief = normalizeReviewChangeBrief(record.brief, `${path}.brief`, diagnostics);
-  const review_source = normalizeReviewChangeSource(
+  const brief = normalizePatternReviewChangeBrief(record.brief, `${path}.brief`, diagnostics);
+  const review_source = normalizePatternReviewChangeSource(
     record.review_source,
     `${path}.review_source`,
     diagnostics
   );
-  const context_policy = normalizeReviewChangeContextPolicy(
+  const context_policy = normalizePatternReviewChangeContextPolicy(
     record.context_policy,
     `${path}.context_policy`,
     diagnostics
   );
-  const strategy = normalizeReviewChangeStrategy(record.strategy, `${path}.strategy`, diagnostics);
-  const delivery = normalizeReviewChangeDelivery(record.delivery, `${path}.delivery`, diagnostics);
+  const strategy = normalizePatternReviewChangeStrategy(record.strategy, `${path}.strategy`, diagnostics);
+  const delivery = normalizePatternReviewChangeDelivery(record.delivery, `${path}.delivery`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
   if (!base || !review_source) {
@@ -2763,11 +2823,11 @@ function normalizeReviewChangeNode(
 
   loweredManagedNodes.push({
     authored_id: base.id,
-    managed_kind: "review_change",
+    managed_kind: "pattern_review_change",
     lowered_to: "sequence"
   });
 
-  return buildReviewChangeWorkflow({
+  return buildPatternReviewChange({
     ...base,
     brief,
     review_source,
@@ -2828,25 +2888,25 @@ export function normalizeGraphNode(
     return normalizeRepeatNode(record, path, diagnostics, loweredManagedNodes);
   }
 
-  if (type === "deep_research") {
-    return normalizeDeepResearchNode(record, path, diagnostics, loweredManagedNodes);
+  if (type === "pattern_deep_research") {
+    return normalizePatternDeepResearchNode(record, path, diagnostics, loweredManagedNodes);
   }
 
-  if (type === "spec_design") {
-    return normalizeSpecDesignNode(record, path, diagnostics, loweredManagedNodes);
+  if (type === "pattern_spec_design") {
+    return normalizePatternSpecDesignNode(record, path, diagnostics, loweredManagedNodes);
   }
 
-  if (type === "execute_spec") {
-    return normalizeExecuteSpecNode(record, path, diagnostics, loweredManagedNodes);
+  if (type === "pattern_generate_evaluate_fix") {
+    return normalizePatternGenerateEvaluateFixNode(record, path, diagnostics, loweredManagedNodes);
   }
 
-  if (type === "review_change") {
-    return normalizeReviewChangeNode(record, path, diagnostics, loweredManagedNodes);
+  if (type === "pattern_review_change") {
+    return normalizePatternReviewChangeNode(record, path, diagnostics, loweredManagedNodes);
   }
 
   diagnostics.push({
     path: `${path}.type`,
-    message: `Node type must be one of: ${[...authoredNodeKinds, ...managedWorkflowKinds].join(", ")}.`
+    message: `Node type must be one of: ${[...authoredNodeKinds, ...managedPatternKinds].join(", ")}.`
   });
   return undefined;
 }
@@ -2871,7 +2931,7 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
   pushUnknownKeyDiagnostics(
     documentRecord,
     "$",
-    ["version", "graph_id", "repos", "defaults", "profiles", "graph"],
+    ["version", "graph_id", "repos", "defaults", "profiles", "prerequisites", "graph"],
     diagnostics
   );
 
@@ -2885,6 +2945,11 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
 
   const graph_id = readRequiredString(documentRecord.graph_id, "$.graph_id", diagnostics);
   const defaults = normalizeGraphDefaults(documentRecord.defaults, "$.defaults", diagnostics);
+  const prerequisites = normalizeGraphPrerequisites(
+    documentRecord.prerequisites,
+    "$.prerequisites",
+    diagnostics
+  );
 
   const reposRecord = asRecord(documentRecord.repos);
   const repos: Record<string, RepoDefinition> = {};
@@ -2947,6 +3012,7 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     repos,
     ...(defaults ? { defaults } : {}),
     ...(Object.keys(profiles).length > 0 ? { profiles } : {}),
+    ...(prerequisites ? { prerequisites } : {}),
     graph: normalizedGraph as ContainerGraphNode
   };
 

@@ -28,6 +28,7 @@ Use this as the final review checklist before shipping or approving a graph.
 - Are launch settings authored in the graph rather than assumed from the CLI?
 - Are node-level profiles used only where a real runtime policy difference exists?
 - Are env-sensitive commands and repo assumptions clearly localized to the nodes that need them?
+- Do env-sensitive local commands declare `env_files` on the profile or node instead of relying on hidden shell setup?
 - Would `resume` behave sensibly if an explicit input file or harness instruction file changes?
 
 ## Maintainability

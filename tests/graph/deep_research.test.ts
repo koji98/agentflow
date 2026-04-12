@@ -27,15 +27,15 @@ function buildDocument(stepOverrides = {}) {
       id: "root",
       steps: [
         {
-          type: "deep_research",
+          type: "pattern_deep_research",
           id: "market_scan",
           repo: "main",
           profile: "default",
           brief: {
-            question: "How should Agentflow evolve managed workflows?",
+            question: "How should Agentflow evolve managed patterns?",
             objective: "Produce a grounded recommendation for the workflow surface.",
             audience: "engineering",
-            scope_cues: ["managed workflows", "compiled subgraphs"],
+            scope_cues: ["managed patterns", "compiled subgraphs"],
             success_bar: ["cover competing patterns", "preserve uncertainty"]
           },
           context_policy: {
@@ -65,8 +65,8 @@ function buildDocument(stepOverrides = {}) {
   };
 }
 
-describe("deep research managed workflow", () => {
-  it("lowers to the research workflow with optional plan approval and first-class research artifacts", () => {
+describe("deep research managed pattern", () => {
+  it("lowers to the research pattern with optional plan approval and fixed research package outputs", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument({
         approval_policy: {
@@ -88,7 +88,7 @@ describe("deep research managed workflow", () => {
     expect(normalized.lowered_managed_nodes).toEqual([
       {
         authored_id: "market_scan",
-        managed_kind: "deep_research",
+        managed_kind: "pattern_deep_research",
         lowered_to: "sequence"
       }
     ]);
@@ -102,21 +102,21 @@ describe("deep research managed workflow", () => {
     const workflow = root.steps[0];
 
     if (!workflow || workflow.type !== "sequence") {
-      throw new Error("Expected deep_research to lower into a sequence workflow.");
+      throw new Error("Expected pattern_deep_research to lower into a sequence workflow.");
     }
 
-    expect(workflow.id).toBe("market_scan__managed__deep_research__workflow");
+    expect(workflow.id).toBe("market_scan__managed__pattern_deep_research__workflow");
     expect(workflow.steps.map((step) => step.id)).toEqual([
-      "market_scan__managed__deep_research__clarify_brief",
-      "market_scan__managed__deep_research__planning_loop",
-      "market_scan__managed__deep_research__derive_tracks",
-      "market_scan__managed__deep_research__investigation_fanout",
-      "market_scan__managed__deep_research__scan_contradictions",
-      "market_scan__managed__deep_research__followup_plan_01",
-      "market_scan__managed__deep_research__followup_fanout_01",
-      "market_scan__managed__deep_research__consolidate_findings",
+      "market_scan__managed__pattern_deep_research__clarify_brief",
+      "market_scan__managed__pattern_deep_research__planning_loop",
+      "market_scan__managed__pattern_deep_research__derive_tracks",
+      "market_scan__managed__pattern_deep_research__investigation_fanout",
+      "market_scan__managed__pattern_deep_research__scan_contradictions",
+      "market_scan__managed__pattern_deep_research__followup_plan_01",
+      "market_scan__managed__pattern_deep_research__followup_fanout_01",
+      "market_scan__managed__pattern_deep_research__consolidate_findings",
       "market_scan",
-      "market_scan__managed__deep_research__final_critique"
+      "market_scan__managed__pattern_deep_research__final_critique"
     ]);
 
     const planningLoop = workflow.steps[1];
@@ -137,7 +137,7 @@ describe("deep research managed workflow", () => {
       throw new Error("Expected follow-up fanout to be parallel.");
     }
 
-    expect(planningLoop.until.node).toBe("market_scan__managed__deep_research__approve_research_plan");
+    expect(planningLoop.until.node).toBe("market_scan__managed__pattern_deep_research__approve_research_plan");
     expect(investigationFanout.max_concurrency).toBe(2);
     expect(investigationFanout.steps).toHaveLength(3);
     expect(followupFanout.max_concurrency).toBe(2);
@@ -147,12 +147,11 @@ describe("deep research managed workflow", () => {
         id: "market_scan",
         type: "agent",
         outputs: expect.arrayContaining([
-          expect.objectContaining({ name: "final_report", path: "final-report.md" }),
+          expect.objectContaining({ name: "research_report", path: "research-report.md" }),
+          expect.objectContaining({ name: "research_packet", path: "research-packet.json" }),
           expect.objectContaining({ name: "source_ledger", path: "source-ledger.json" }),
           expect.objectContaining({ name: "uncertainties", path: "uncertainties.md" }),
-          expect.objectContaining({ name: "interim_findings", path: "interim-findings.jsonl" }),
-          expect.objectContaining({ name: "workflow_status", path: "workflow-status.json" }),
-          expect.objectContaining({ name: "workflow_events", path: "workflow-events.jsonl" })
+          expect.objectContaining({ name: "interim_findings", path: "interim-findings.jsonl" })
         ])
       })
     );
@@ -160,12 +159,12 @@ describe("deep research managed workflow", () => {
       expect.objectContaining({
         type: "check",
         check_kind: "ai",
-        id: "market_scan__managed__deep_research__final_critique"
+        id: "market_scan__managed__pattern_deep_research__final_critique"
       })
     );
   });
 
-  it("compiles deep_research so downstream nodes depend on the final published report", () => {
+  it("compiles pattern_deep_research so downstream nodes depend on the final published research package", () => {
     const normalized = normalizeAuthoredGraphDocument({
       ...buildDocument({
         strategy: {
@@ -205,7 +204,7 @@ describe("deep research managed workflow", () => {
               {
                 node: "market_scan",
                 include: "output",
-                output: "final_report"
+                output: "research_report"
               }
             ]
           }
@@ -227,17 +226,17 @@ describe("deep research managed workflow", () => {
     const finalResearchNode = compiledGraph.nodes.find((node) => node.authored_id === "market_scan");
     const handoffNode = compiledGraph.nodes.find((node) => node.authored_id === "handoff");
     const trackScope = compiledGraph.scopes.find(
-      (scope) => scope.authored_id === "market_scan__managed__deep_research__investigation_fanout"
+      (scope) => scope.authored_id === "market_scan__managed__pattern_deep_research__investigation_fanout"
     );
 
     expect(compiledGraph.authored_to_compiled.market_scan).toEqual([
-      "root__market_scan__managed__deep_research__workflow__market_scan"
+      "root__market_scan__managed__pattern_deep_research__workflow__market_scan"
     ]);
     expect(finalResearchNode).toEqual(
       expect.objectContaining({
         kind: "agent",
-        lowered_from: "deep_research",
-        compiled_id: "root__market_scan__managed__deep_research__workflow__market_scan"
+        lowered_from: "pattern_deep_research",
+        compiled_id: "root__market_scan__managed__pattern_deep_research__workflow__market_scan"
       })
     );
     expect(trackScope).toEqual(
@@ -248,7 +247,7 @@ describe("deep research managed workflow", () => {
     );
     expect(handoffNode).toEqual(
       expect.objectContaining({
-        deps: ["root__market_scan__managed__deep_research__workflow__market_scan"]
+        deps: ["root__market_scan__managed__pattern_deep_research__workflow__market_scan"]
       })
     );
   });

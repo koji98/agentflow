@@ -59,13 +59,13 @@ Good shape:
 
 Only use when the repair owner, gate, and maximum useful cycle count are all obvious.
 
-## Managed workflow handoff
+## Managed pattern handoff
 
-Use a managed workflow when the built-in lifecycle matches the task, then hand off to a primitive node only if something concrete still needs to happen afterward.
+Use a managed pattern when the built-in lifecycle matches the task, then hand off to a primitive node only if something concrete still needs to happen afterward.
 
 Examples in this repo:
 
-- `docs/examples/graphs/deep-research-showcase.json`
-- `docs/examples/graphs/spec-design-showcase.json`
-- `docs/examples/graphs/execute-spec-showcase.json`
-- `docs/examples/graphs/review-change-showcase.json`
+- `docs/examples/graphs/pattern-deep-research-showcase.json`
+- `docs/examples/graphs/pattern-spec-design-showcase.json`
+- `docs/examples/graphs/pattern-generate-evaluate-fix-showcase.json`
+- `docs/examples/graphs/pattern-review-change-showcase.json`

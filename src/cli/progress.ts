@@ -5,7 +5,7 @@ interface WritableStreamLike {
   write(chunk: string): unknown;
 }
 
-function formatDuration(durationMs: number | undefined): string {
+export function formatDuration(durationMs: number | undefined): string {
   if (durationMs === undefined || Number.isNaN(durationMs)) {
     return "0ms";
   }
@@ -141,6 +141,22 @@ export function createRuntimeProgressReporter(
               payload.score !== undefined ? ` · score=${payload.score.toFixed(2)}` : "";
             writeLine(
               `agentflow: check failed ${summarizeNode(node)}${scoreText}${payload.summary ? ` · ${payload.summary}` : ""}`
+            );
+          }
+          return;
+        }
+
+        case "verification.recorded": {
+          const payload = event.payload as {
+            passed?: boolean;
+            summary?: string;
+            verifier_kind?: string;
+          };
+
+          if (payload.passed === false) {
+            const node = nodeByCompiledId.get(event.compiled_id ?? "");
+            writeLine(
+              `agentflow: soft verification failed ${summarizeNode(node)}${payload.summary ? ` · ${payload.summary}` : payload.verifier_kind ? ` · ${payload.verifier_kind}` : ""}`
             );
           }
           return;
