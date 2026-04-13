@@ -46,8 +46,8 @@ The authored graph is the operator-facing source document. It is nested, readabl
       "sandbox": "workspace-write",
       "timeout_sec": 1800,
       "input_rules": {
-        "max_total_bytes": 524288,
-        "max_bytes_per_item": 131072
+        "max_total_tokens": 128000,
+        "max_tokens_per_item": 32000
       }
     }
   },
@@ -480,15 +480,15 @@ Inline or profile fields that do not apply to a node kind are rejected at compil
 
 Supported release `input_rules` fields:
 
-- `max_total_bytes`
-- `max_bytes_per_item`
+- `max_total_tokens`
+- `max_tokens_per_item`
 
 Built-in defaults:
 
-- `max_total_bytes: 524288`
-- `max_bytes_per_item: 131072`
+- `max_total_tokens: 128000`
+- `max_tokens_per_item: 32000`
 
-The runtime enforces these byte limits during context packet materialization. If you need to bound a broad file pattern, use `glob.max_files` on that specific input instead of relying on a graph-wide file-count budget.
+The runtime enforces these token limits during context packet materialization. If you need to bound a broad file pattern, use `glob.max_files` on that specific input instead of relying on a graph-wide file-count budget.
 
 ## Compiler Contract
 
@@ -697,11 +697,12 @@ Context resolution produces:
 
 - `execution_id`
 - target repo alias and workspace path
+- tokenizer identifier used for materialized text
 - one entry per materialized input
 - original source descriptor for each entry
 - materialized file path inside the execution directory
 - live-workspace binding metadata when the material came from a resolved file or glob input
-- byte counts and truncation flags
+- token counts and truncation flags
 - omitted optional items
 
 `context_provenance.json` must include:
@@ -712,9 +713,9 @@ Context resolution produces:
 
 Agentflow does not duplicate repository instruction files into the context packet. Harness-native instruction discovery stays with the harness itself.
 
-Context materialization is incremental. The runtime enforces `max_total_bytes` while it materializes items and fails as soon as the next item would overflow the byte budget.
+Context materialization is incremental. The runtime enforces `max_total_tokens` while it materializes items and fails as soon as the next item would overflow the token budget.
 
-Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing file or glob inputs are recorded explicitly as omitted context instead of crashing the whole run during preflight.
+Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing file or glob inputs are recorded explicitly as omitted context instead of crashing the whole run during preflight. Resolved material that is not valid UTF-8 text is also omitted because context packets are tokenized text.
 
 The release does not implement retrieval, embeddings, ranking, or semantic search. Input resolution is explicit file and artifact materialization only.
 

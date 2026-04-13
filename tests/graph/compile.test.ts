@@ -529,8 +529,8 @@ describe("graph compilation", () => {
           sandbox: "workspace-write",
           timeout_sec: 900,
           input_rules: {
-            max_total_bytes: 131072,
-            max_bytes_per_item: 32768
+            max_total_tokens: 32000,
+            max_tokens_per_item: 8000
           }
         },
         review: {
@@ -539,8 +539,8 @@ describe("graph compilation", () => {
           sandbox: "read-only",
           timeout_sec: 120,
           input_rules: {
-            max_total_bytes: 65536,
-            max_bytes_per_item: 16384
+            max_total_tokens: 16000,
+            max_tokens_per_item: 4000
           }
         }
       },
@@ -604,8 +604,8 @@ describe("graph compilation", () => {
             sandbox: "read-only",
             timeout_sec: 120,
             input_rules: {
-              max_total_bytes: 65536,
-              max_bytes_per_item: 16384
+              max_total_tokens: 16000,
+              max_tokens_per_item: 4000
             }
           })
         }),
@@ -616,8 +616,8 @@ describe("graph compilation", () => {
             workspace_backend: "inplace",
             timeout_sec: 900,
             input_rules: {
-              max_total_bytes: 131072,
-              max_bytes_per_item: 32768
+              max_total_tokens: 32000,
+              max_tokens_per_item: 8000
             }
           })
         }),

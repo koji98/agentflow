@@ -69,3 +69,18 @@ Examples in this repo:
 - `docs/examples/graphs/pattern-spec-design-showcase.json`
 - `docs/examples/graphs/pattern-generate-evaluate-fix-showcase.json`
 - `docs/examples/graphs/pattern-review-change-showcase.json`
+
+## Local eval suite
+
+Use an eval suite when you need to measure workflow quality across cases.
+
+Good shape:
+
+1. `suite.json` defines graph template, cases, graders, variants, and thresholds
+2. `cases.jsonl` defines realistic local tasks and fixture paths
+3. graph template uses placeholders such as `{{case.task}}` and `{{case.repos.main.path}}`
+4. script graders inspect run artifacts and print normalized JSON
+
+Example in this repo:
+
+- `docs/examples/evals/basic/suite.json`

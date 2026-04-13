@@ -144,6 +144,7 @@ describe("checkpoint CLI helpers", () => {
         authored_id: "review",
         repo_alias: "main",
         workspace_path: "/repo",
+        tokenizer: "o200k_base",
         materials: [
           {
             key: "context_1",
@@ -154,7 +155,7 @@ describe("checkpoint CLI helpers", () => {
               output: "draft_spec"
             },
             materialized_path: reviewPath,
-            bytes: 300,
+            tokens: 60,
             truncated: false
           }
         ],
@@ -162,7 +163,7 @@ describe("checkpoint CLI helpers", () => {
         totals: {
           material_count: 1,
           file_count: 1,
-          total_bytes: 300
+          total_tokens: 60
         }
       }),
       "utf8"
@@ -251,6 +252,7 @@ describe("checkpoint CLI helpers", () => {
         authored_id: "review",
         repo_alias: "main",
         workspace_path: "/repo",
+        tokenizer: "o200k_base",
         materials: [
           {
             key: "context_1",
@@ -261,7 +263,7 @@ describe("checkpoint CLI helpers", () => {
               output: "draft_spec"
             },
             materialized_path: reviewPath,
-            bytes: 6,
+            tokens: 2,
             truncated: false
           }
         ],
@@ -269,7 +271,7 @@ describe("checkpoint CLI helpers", () => {
         totals: {
           material_count: 1,
           file_count: 1,
-          total_bytes: 6
+          total_tokens: 2
         }
       }),
       "utf8"

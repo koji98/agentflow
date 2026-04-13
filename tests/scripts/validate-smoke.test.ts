@@ -19,7 +19,8 @@ describe("validate:smoke contract", () => {
     expect(scriptModule.commandChecks).toEqual([
       { name: "typecheck", script: "typecheck" },
       { name: "tests", script: "test" },
-      { name: "build", script: "build" }
+      { name: "build", script: "build" },
+      { name: "skill pack", script: "validate:skills" }
     ]);
     expect(scriptModule.builtCliSmokeContract).toEqual({
       builtCliRelativePath: "dist/cli/index.js",

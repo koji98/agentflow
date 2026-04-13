@@ -33,7 +33,8 @@ export const canonicalDocs = [
 export const commandChecks = [
   { name: "typecheck", script: "typecheck" },
   { name: "tests", script: "test" },
-  { name: "build", script: "build" }
+  { name: "build", script: "build" },
+  { name: "skill pack", script: "validate:skills" }
 ];
 
 export const builtCliSmokeContract = {

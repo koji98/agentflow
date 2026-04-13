@@ -431,7 +431,53 @@ describe("graph normalization", () => {
     );
   });
 
-  it("rejects input_rules.max_files and points authors to byte budgets or glob-local caps", () => {
+  it("rejects byte-based input_rules fields", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "reject-byte-input-rules",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          input_rules: {
+            max_total_bytes: 262144,
+            max_bytes_per_item: 131072
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "inspect",
+            prompt: "Inspect the repo."
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.profiles.default.input_rules.max_bytes_per_item",
+          message: 'Unknown field "max_bytes_per_item" is not part of the graph contract.'
+        }),
+        expect.objectContaining({
+          path: "$.profiles.default.input_rules.max_total_bytes",
+          message: 'Unknown field "max_total_bytes" is not part of the graph contract.'
+        })
+      ])
+    );
+  });
+
+  it("rejects input_rules.max_files and points authors to token budgets or glob-local caps", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "reject-input-max-files",
@@ -445,7 +491,7 @@ describe("graph normalization", () => {
           harness: "codex-cli",
           input_rules: {
             max_files: 8,
-            max_total_bytes: 262144
+            max_total_tokens: 64000
           }
         }
       },
@@ -468,7 +514,7 @@ describe("graph normalization", () => {
         expect.objectContaining({
           path: "$.profiles.default.input_rules.max_files",
           message:
-            "input_rules.max_files is no longer supported. Use input_rules.max_total_bytes for global context budgets and glob.max_files to cap specific globs."
+            "input_rules.max_files is no longer supported. Use input_rules.max_total_tokens for global context budgets and glob.max_files to cap specific globs."
         })
       ])
     );

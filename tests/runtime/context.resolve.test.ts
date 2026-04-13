@@ -125,6 +125,7 @@ describe("context resolution", () => {
     });
 
     expect(resolved.packet.materials).toHaveLength(3);
+    expect(resolved.packet.tokenizer).toBe("o200k_base");
     expect(resolved.packet.omitted).toEqual([]);
     expect(await readFile(resolved.summary_path, "utf8")).toContain("Materialized items");
     expect(await readFile(resolved.summary_path, "utf8")).toContain('requested "src.txt"');
@@ -359,7 +360,7 @@ describe("context resolution", () => {
         "",
         "Line one should survive.",
         "Line two should survive.",
-        "Line three should be cut off because the file is too large for the configured byte limit."
+        "Line three should be cut off because the file is too large for the configured token limit."
       ].join("\n"),
       "utf8"
     );
@@ -398,7 +399,7 @@ describe("context resolution", () => {
     });
 
     const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
-    consumerNode.effective_policy.input_rules.max_bytes_per_item = 120;
+    consumerNode.effective_policy.input_rules.max_tokens_per_item = 30;
 
     const resolved = await resolveExecutionContext({
       compiled_graph: graph,
@@ -419,8 +420,9 @@ describe("context resolution", () => {
 
     expect(materialized).toContain("Line one should survive.");
     expect(materialized).toContain("[Truncated by Agentflow. Read the original file for full context.]");
+    expect(resolved.packet.materials[0]?.tokens).toBeLessThanOrEqual(30);
     expect(summary).toContain("- Truncated items: `1`");
-    expect(summary).toContain("bytes, truncated");
+    expect(summary).toContain("tokens, truncated");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -487,6 +489,72 @@ describe("context resolution", () => {
       }
     ]);
     expect(await readFile(resolved.summary_path, "utf8")).toContain('Requested input file "watched.txt" was not found');
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("omits non-UTF-8 file inputs instead of materializing binary content", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-binary-file-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, "binary.dat"), Buffer.from([0xff, 0xfe, 0xfd]));
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-binary-file",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            inputs: [
+              {
+                kind: "file",
+                path: "binary.dat"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toEqual([]);
+    expect(resolved.packet.omitted).toEqual([
+      {
+        key: "input_1",
+        source: {
+          kind: "file",
+          path: "binary.dat"
+        },
+        reason: "Material is not valid UTF-8 text and cannot be tokenized.",
+        optional: false
+      }
+    ]);
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -766,8 +834,8 @@ describe("context resolution", () => {
         default: {
           harness: "codex-cli",
           input_rules: {
-            max_total_bytes: 1024,
-            max_bytes_per_item: 256
+            max_total_tokens: 250,
+            max_tokens_per_item: 64
           }
         }
       },
@@ -807,22 +875,22 @@ describe("context resolution", () => {
     expect(resolved.packet.totals).toEqual({
       material_count: 5,
       file_count: 5,
-      total_bytes: expect.any(Number)
+      total_tokens: expect.any(Number)
     });
 
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("fails incrementally when the next item would exceed max_total_bytes", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-byte-budget-"));
+  it("fails incrementally when the next item would exceed max_total_tokens", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-token-budget-"));
     const repoDir = join(tempRoot, "repo");
     await mkdir(repoDir, { recursive: true });
-    await writeFile(join(repoDir, "first.txt"), "abcdefghij", "utf8");
-    await writeFile(join(repoDir, "second.txt"), "klmnopqrst", "utf8");
+    await writeFile(join(repoDir, "first.txt"), "one", "utf8");
+    await writeFile(join(repoDir, "second.txt"), "two", "utf8");
 
     const graph = compileGraph({
       version: "1",
-      graph_id: "context-byte-budget",
+      graph_id: "context-token-budget",
       repos: {
         main: { path: "." }
       },
@@ -833,8 +901,8 @@ describe("context resolution", () => {
         default: {
           harness: "codex-cli",
           input_rules: {
-            max_total_bytes: 12,
-            max_bytes_per_item: 32
+            max_total_tokens: 1,
+            max_tokens_per_item: 10
           }
         }
       },
@@ -877,10 +945,10 @@ describe("context resolution", () => {
         attempts: createAttemptRegistry()
       })
     ).rejects.toThrow(
-      'Materializing input_2 (file "second.txt") would exceed max_total_bytes 12. Current bytes: 10. Next item bytes: 10.'
+      'Materializing input_2 (file "second.txt") would exceed max_total_tokens 1. Current tokens: 1. Next item tokens: 1.'
     );
 
-    await expect(readFile(join(executionDir, "context_materialized", "input_1", "first.txt"), "utf8")).resolves.toBe("abcdefghij");
+    await expect(readFile(join(executionDir, "context_materialized", "input_1", "first.txt"), "utf8")).resolves.toBe("one");
     await expect(readFile(join(executionDir, "context_materialized", "input_2", "second.txt"), "utf8")).rejects.toThrow();
 
     await rm(tempRoot, { recursive: true, force: true });

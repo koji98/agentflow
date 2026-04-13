@@ -123,13 +123,12 @@ See also: [`docs/examples/graphs/README.md`](docs/examples/graphs/README.md)
 
 ## Packaged Skills
 
-This repo also ships installable agent skills under [`skills/`](skills/README.md) in a `skills.sh` compatible layout.
+This repo also ships one installable agent skill under [`skills/`](skills/README.md) in a `skills.sh` compatible layout.
 
-Included skills:
+Included skill:
 
-- [`agentflow-graph-authoring`](skills/agentflow-graph-authoring/SKILL.md)
-- [`agentflow-managed-workflows`](skills/agentflow-managed-workflows/SKILL.md)
-- [`agentflow-run-debugging`](skills/agentflow-run-debugging/SKILL.md)
+- [`agentflow`](skills/agentflow/SKILL.md)
+  A compact router skill with packaged references for graph authoring, managed workflows, local eval suites, run debugging, graph contracts, CLI validation, failure semantics, and examples.
 
 Once the repo is published, supporting agents can install the package with:
 

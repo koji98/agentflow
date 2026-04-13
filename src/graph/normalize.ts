@@ -332,7 +332,7 @@ function normalizeInputRules(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["max_total_bytes", "max_bytes_per_item"],
+    ["max_total_tokens", "max_tokens_per_item"],
     diagnostics
   );
 
@@ -340,24 +340,24 @@ function normalizeInputRules(
     diagnostics.push({
       path: `${path}.max_files`,
       message:
-        "input_rules.max_files is no longer supported. Use input_rules.max_total_bytes for global context budgets and glob.max_files to cap specific globs."
+        "input_rules.max_files is no longer supported. Use input_rules.max_total_tokens for global context budgets and glob.max_files to cap specific globs."
     });
   }
 
-  const max_total_bytes = readPositiveInteger(
-    record.max_total_bytes,
-    `${path}.max_total_bytes`,
+  const max_total_tokens = readPositiveInteger(
+    record.max_total_tokens,
+    `${path}.max_total_tokens`,
     diagnostics
   );
-  const max_bytes_per_item = readPositiveInteger(
-    record.max_bytes_per_item,
-    `${path}.max_bytes_per_item`,
+  const max_tokens_per_item = readPositiveInteger(
+    record.max_tokens_per_item,
+    `${path}.max_tokens_per_item`,
     diagnostics
   );
 
   return {
-    ...(max_total_bytes !== undefined ? { max_total_bytes } : {}),
-    ...(max_bytes_per_item !== undefined ? { max_bytes_per_item } : {})
+    ...(max_total_tokens !== undefined ? { max_total_tokens } : {}),
+    ...(max_tokens_per_item !== undefined ? { max_tokens_per_item } : {})
   };
 }
 

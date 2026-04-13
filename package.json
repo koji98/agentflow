@@ -27,6 +27,7 @@
     "test": "vitest run",
     "test:coverage": "node scripts/test-coverage.mjs",
     "build": "tsc -p tsconfig.json",
+    "validate:skills": "node scripts/validate-skills.mjs",
     "validate:smoke": "node scripts/validate-smoke.mjs",
     "validate:confidence": "node scripts/validate-confidence.mjs",
     "validate:real-harness": "node scripts/validate-real-harness.mjs"
@@ -39,6 +40,7 @@
     "vitest": "2.1.9"
   },
   "dependencies": {
-    "ignore": "^7.0.5"
+    "ignore": "^7.0.5",
+    "js-tiktoken": "^1.0.21"
   }
 }

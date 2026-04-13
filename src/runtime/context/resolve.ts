@@ -30,18 +30,24 @@ import {
   splitQualifiedPath
 } from "./common.js";
 import { listRepoFiles } from "./repo_files.js";
+import {
+  contextTokenizerName,
+  countContextTokens,
+  decodeContextTokens,
+  encodeContextText
+} from "./tokenizer.js";
 
 interface PreparedMaterialization {
-  buffer: Buffer;
-  bytes: number;
+  text: string;
+  tokens: number;
   truncated: boolean;
 }
 
 interface MaterializationAccumulator {
   materials: ContextPacketMaterializedItem[];
   omitted: ContextPacketOmittedItem[];
-  total_bytes: number;
-  max_total_bytes: number;
+  total_tokens: number;
+  max_total_tokens: number;
 }
 
 export interface ResolveContextOptions {
@@ -65,85 +71,66 @@ function tryDecodeUtf8(buffer: Buffer): string | undefined {
   }
 }
 
-function sliceTextToByteLimit(text: string, maxBytes: number): string {
+function buildTruncatedTextCandidate(tokens: number[], prefixTokenCount: number): string {
+  const selected = decodeContextTokens(tokens.slice(0, prefixTokenCount));
+  const trimmed = selected.replace(/\s+$/u, "");
+  const prefix = trimmed.length > 0 ? `${trimmed}\n\n` : "";
+  return `${prefix}${truncatedTextNotice}`;
+}
+
+function truncateTextToTokenLimit(text: string, maxTokens: number): PreparedMaterialization {
+  const sourceTokens = encodeContextText(text);
+
+  if (sourceTokens.length <= maxTokens) {
+    return {
+      text,
+      tokens: sourceTokens.length,
+      truncated: false
+    };
+  }
+
   let low = 0;
-  let high = text.length;
+  let high = Math.min(sourceTokens.length, maxTokens);
 
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    const candidate = text.slice(0, mid);
+    const candidate = buildTruncatedTextCandidate(sourceTokens, mid);
 
-    if (Buffer.byteLength(candidate, "utf8") <= maxBytes) {
+    if (countContextTokens(candidate) <= maxTokens) {
       low = mid;
     } else {
       high = mid - 1;
     }
   }
 
-  return text.slice(0, low);
-}
+  let materializedText = buildTruncatedTextCandidate(sourceTokens, low);
+  let tokens = countContextTokens(materializedText);
 
-function truncateTextBuffer(buffer: Buffer, maxBytes: number): Buffer | undefined {
-  const decoded = tryDecodeUtf8(buffer);
-
-  if (decoded === undefined) {
-    return undefined;
+  if (tokens > maxTokens) {
+    materializedText = decodeContextTokens(encodeContextText(truncatedTextNotice).slice(0, maxTokens));
+    tokens = countContextTokens(materializedText);
   }
-
-  const noticeBytes = Buffer.byteLength(truncatedTextNotice, "utf8");
-
-  if (maxBytes <= noticeBytes + 1) {
-    return undefined;
-  }
-
-  const availableBytes = maxBytes - noticeBytes;
-  const lines = decoded.split(/(?<=\n)/u);
-  let selected = "";
-  let usedBytes = 0;
-
-  for (const line of lines) {
-    const lineBytes = Buffer.byteLength(line, "utf8");
-
-    if (usedBytes + lineBytes > availableBytes) {
-      const remainingBytes = availableBytes - usedBytes;
-
-      if (remainingBytes > 0) {
-        selected += sliceTextToByteLimit(line, remainingBytes);
-      }
-
-      break;
-    }
-
-    selected += line;
-    usedBytes += lineBytes;
-  }
-
-  if (selected.length === 0) {
-    selected = sliceTextToByteLimit(decoded, availableBytes);
-  }
-
-  const trimmed = selected.replace(/\s+$/u, "");
-  const prefix = trimmed.length > 0 ? `${trimmed}\n\n` : "";
-  return Buffer.from(`${prefix}${truncatedTextNotice}`, "utf8");
-}
-
-function truncateMaterializedBuffer(buffer: Buffer, maxBytes: number): Buffer {
-  return truncateTextBuffer(buffer, maxBytes) ?? buffer.subarray(0, maxBytes);
-}
-
-function prepareMaterialization(
-  contents: string | Buffer,
-  maxBytesPerItem: number
-): PreparedMaterialization {
-  const buffer = Buffer.isBuffer(contents) ? contents : Buffer.from(contents);
-  const materializedBuffer =
-    buffer.byteLength > maxBytesPerItem ? truncateMaterializedBuffer(buffer, maxBytesPerItem) : buffer;
 
   return {
-    buffer: materializedBuffer,
-    bytes: materializedBuffer.byteLength,
-    truncated: materializedBuffer.byteLength !== buffer.byteLength
+    text: materializedText,
+    tokens,
+    truncated: true
   };
+}
+
+function prepareTextMaterialization(
+  contents: string,
+  maxTokensPerItem: number
+): PreparedMaterialization {
+  return truncateTextToTokenLimit(contents, maxTokensPerItem);
+}
+
+function prepareBufferMaterialization(
+  contents: Buffer,
+  maxTokensPerItem: number
+): PreparedMaterialization | undefined {
+  const text = tryDecodeUtf8(contents);
+  return text === undefined ? undefined : prepareTextMaterialization(text, maxTokensPerItem);
 }
 
 async function writePreparedMaterialization(
@@ -151,7 +138,7 @@ async function writePreparedMaterialization(
   materialized: PreparedMaterialization
 ): Promise<void> {
   await mkdir(dirname(destinationPath), { recursive: true });
-  await writeFile(destinationPath, materialized.buffer);
+  await writeFile(destinationPath, materialized.text, "utf8");
 }
 
 function describeInput(input: InputItem, index: number): string {
@@ -180,12 +167,12 @@ function describeContextReference(reference: ContextReference, index: number): s
 
 function createBudgetOverflowError(
   descriptor: string,
-  currentBytes: number,
-  nextBytes: number,
-  maxTotalBytes: number
+  currentTokens: number,
+  nextTokens: number,
+  maxTotalTokens: number
 ): Error {
   return new Error(
-    `Materializing ${descriptor} would exceed max_total_bytes ${maxTotalBytes}. Current bytes: ${currentBytes}. Next item bytes: ${nextBytes}.`
+    `Materializing ${descriptor} would exceed max_total_tokens ${maxTotalTokens}. Current tokens: ${currentTokens}. Next item tokens: ${nextTokens}.`
   );
 }
 
@@ -195,18 +182,32 @@ async function appendMaterializedItem(
   materialized: PreparedMaterialization,
   descriptor: string
 ): Promise<void> {
-  if (accumulator.total_bytes + materialized.bytes > accumulator.max_total_bytes) {
+  if (accumulator.total_tokens + materialized.tokens > accumulator.max_total_tokens) {
     throw createBudgetOverflowError(
       descriptor,
-      accumulator.total_bytes,
-      materialized.bytes,
-      accumulator.max_total_bytes
+      accumulator.total_tokens,
+      materialized.tokens,
+      accumulator.max_total_tokens
     );
   }
 
   await writePreparedMaterialization(item.materialized_path, materialized);
   accumulator.materials.push(item);
-  accumulator.total_bytes += materialized.bytes;
+  accumulator.total_tokens += materialized.tokens;
+}
+
+function appendNonTokenizableOmission(
+  accumulator: MaterializationAccumulator,
+  key: string,
+  source: InputItem | ContextReference,
+  optional: boolean
+): void {
+  accumulator.omitted.push({
+    key,
+    source,
+    reason: "Material is not valid UTF-8 text and cannot be tokenized.",
+    optional
+  });
 }
 
 function selectAttemptsForReference(
@@ -263,10 +264,10 @@ async function materializeTextInput(
   index: number,
   options: ResolveContextOptions,
   accumulator: MaterializationAccumulator,
-  maxBytesPerItem: number
+  maxTokensPerItem: number
 ): Promise<void> {
   const descriptor = describeInput(input, index);
-  const materialized = prepareMaterialization(input.text, maxBytesPerItem);
+  const materialized = prepareTextMaterialization(input.text, maxTokensPerItem);
 
   await appendMaterializedItem(
     accumulator,
@@ -280,7 +281,7 @@ async function materializeTextInput(
         `input_${index + 1}`,
         `${input.name}.txt`
       ),
-      bytes: materialized.bytes,
+      tokens: materialized.tokens,
       truncated: materialized.truncated
     },
     materialized,
@@ -295,7 +296,7 @@ async function materializeFileInput(
   cache: ContextDiscoveryCache,
   accumulator: MaterializationAccumulator,
   inputProvenance: ContextInputProvenance[],
-  maxBytesPerItem: number
+  maxTokensPerItem: number
 ): Promise<void> {
   const descriptor = describeInput(input, index);
   const key = `input_${index + 1}`;
@@ -331,7 +332,12 @@ async function materializeFileInput(
     throw error;
   }
 
-  const materialized = prepareMaterialization(contents, maxBytesPerItem);
+  const materialized = prepareBufferMaterialization(contents, maxTokensPerItem);
+
+  if (!materialized) {
+    appendNonTokenizableOmission(accumulator, key, input, false);
+    return;
+  }
 
   await appendMaterializedItem(
     accumulator,
@@ -345,7 +351,7 @@ async function materializeFileInput(
         key,
         basename(normalizedPath)
       ),
-      bytes: materialized.bytes,
+      tokens: materialized.tokens,
       truncated: materialized.truncated,
       binding: {
         kind: "live_workspace_input",
@@ -376,7 +382,7 @@ async function materializeGlobInput(
   cache: ContextDiscoveryCache,
   accumulator: MaterializationAccumulator,
   inputProvenance: ContextInputProvenance[],
-  maxBytesPerItem: number
+  maxTokensPerItem: number
 ): Promise<void> {
   const descriptor = describeInput(input, index);
   const key = `input_${index + 1}`;
@@ -415,12 +421,18 @@ async function materializeGlobInput(
     const contents = await readFile(sourcePath);
     const digest = createDigest(contents);
     cache.file_digests.set(sourcePath, digest);
-    const materialized = prepareMaterialization(contents, maxBytesPerItem);
+    const materialized = prepareBufferMaterialization(contents, maxTokensPerItem);
+    const materializedKey = `${key}_${matchIndex + 1}`;
+
+    if (!materialized) {
+      appendNonTokenizableOmission(accumulator, materializedKey, input, false);
+      continue;
+    }
 
     await appendMaterializedItem(
       accumulator,
       {
-        key: `${key}_${matchIndex + 1}`,
+        key: materializedKey,
         kind: "input",
         source: input,
         materialized_path: join(
@@ -429,7 +441,7 @@ async function materializeGlobInput(
           key,
           `${matchIndex + 1}-${basename(relativePath)}`
         ),
-        bytes: materialized.bytes,
+        tokens: materialized.tokens,
         truncated: materialized.truncated,
         binding: {
           kind: "live_workspace_input",
@@ -465,10 +477,10 @@ async function materializeInputItem(
   cache: ContextDiscoveryCache,
   accumulator: MaterializationAccumulator,
   inputProvenance: ContextInputProvenance[],
-  maxBytesPerItem: number
+  maxTokensPerItem: number
 ): Promise<void> {
   if (input.kind === "text") {
-    await materializeTextInput(input, index, options, accumulator, maxBytesPerItem);
+    await materializeTextInput(input, index, options, accumulator, maxTokensPerItem);
     return;
   }
 
@@ -480,7 +492,7 @@ async function materializeInputItem(
       cache,
       accumulator,
       inputProvenance,
-      maxBytesPerItem
+      maxTokensPerItem
     );
     return;
   }
@@ -492,7 +504,7 @@ async function materializeInputItem(
     cache,
     accumulator,
     inputProvenance,
-    maxBytesPerItem
+    maxTokensPerItem
   );
 }
 
@@ -501,7 +513,7 @@ async function materializeContextReference(
   index: number,
   options: ResolveContextOptions,
   accumulator: MaterializationAccumulator,
-  maxBytesPerItem: number
+  maxTokensPerItem: number
 ): Promise<void> {
   const compiledIds = options.compiled_graph.authored_to_compiled[reference.node] ?? [];
   const attempts = selectAttemptsForReference(
@@ -555,21 +567,27 @@ async function materializeContextReference(
     throw new Error(`Required context artifact is missing for "${reference.node}".`);
   }
 
-  const materialized = prepareMaterialization(await readFile(sourcePath), maxBytesPerItem);
+  const materialized = prepareBufferMaterialization(await readFile(sourcePath), maxTokensPerItem);
+  const key = `context_${index + 1}`;
+
+  if (!materialized) {
+    appendNonTokenizableOmission(accumulator, key, reference, reference.optional ?? false);
+    return;
+  }
 
   await appendMaterializedItem(
     accumulator,
     {
-      key: `context_${index + 1}`,
+      key,
       kind: "context",
       source: reference,
       materialized_path: join(
         options.execution_dir,
         "context_materialized",
-        `context_${index + 1}`,
+        key,
         basename(sourcePath)
       ),
-      bytes: materialized.bytes,
+      tokens: materialized.tokens,
       truncated: materialized.truncated
     },
     materialized,
@@ -586,9 +604,10 @@ function renderContextSummary(packet: ContextPacket): string {
     `- Compiled node: \`${packet.compiled_id}\``,
     `- Repo: \`${packet.repo_alias}\``,
     `- Workspace: \`${packet.workspace_path}\``,
+    `- Tokenizer: \`${packet.tokenizer}\``,
     `- Materialized items: \`${packet.totals.material_count}\``,
     `- Total files: \`${packet.totals.file_count}\``,
-    `- Total bytes: \`${packet.totals.total_bytes}\``,
+    `- Total tokens: \`${packet.totals.total_tokens}\``,
     `- Truncated items: \`${truncatedCount}\``,
     `- Live workspace inputs: \`${liveInputItems.length}\``,
     `- Omitted items: \`${packet.omitted.length}\``,
@@ -604,7 +623,7 @@ function renderContextSummary(packet: ContextPacket): string {
           ? `, requested "${item.binding.requested_path ?? "inline text"}", resolved "${item.binding.resolved_path}"`
           : "";
       lines.push(
-        `- \`${item.key}\` -> \`${item.materialized_path}\` (${item.bytes} bytes${item.truncated ? ", truncated" : ""}${bindingSuffix})`
+        `- \`${item.key}\` -> \`${item.materialized_path}\` (${item.tokens} tokens${item.truncated ? ", truncated" : ""}${bindingSuffix})`
       );
     }
 
@@ -636,8 +655,8 @@ export async function resolveExecutionContext(
   const accumulator: MaterializationAccumulator = {
     materials: [],
     omitted: [],
-    total_bytes: 0,
-    max_total_bytes: options.node.effective_policy.input_rules.max_total_bytes
+    total_tokens: 0,
+    max_total_tokens: options.node.effective_policy.input_rules.max_total_tokens
   };
 
   for (const [index, input] of (options.node.inputs ?? []).entries()) {
@@ -648,7 +667,7 @@ export async function resolveExecutionContext(
       cache,
       accumulator,
       inputProvenance,
-      options.node.effective_policy.input_rules.max_bytes_per_item
+      options.node.effective_policy.input_rules.max_tokens_per_item
     );
   }
 
@@ -658,7 +677,7 @@ export async function resolveExecutionContext(
       index,
       options,
       accumulator,
-      options.node.effective_policy.input_rules.max_bytes_per_item
+      options.node.effective_policy.input_rules.max_tokens_per_item
     );
   }
 
@@ -681,12 +700,13 @@ export async function resolveExecutionContext(
     authored_id: options.node.authored_id,
     repo_alias: options.node.repo,
     workspace_path: options.workspace_path,
+    tokenizer: contextTokenizerName,
     materials: accumulator.materials,
     omitted: accumulator.omitted,
     totals: {
       material_count: accumulator.materials.length,
       file_count: accumulator.materials.length,
-      total_bytes: accumulator.total_bytes
+      total_tokens: accumulator.total_tokens
     }
   };
 

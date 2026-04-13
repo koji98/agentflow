@@ -23,6 +23,7 @@ import {
 } from "../graph/schema.js";
 import { managedPatternDescriptors } from "../managed/index.js";
 import { compileCommand } from "./commands/compile.js";
+import { evalCommand } from "./commands/eval.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
 import { validateCommand } from "./commands/validate.js";
@@ -44,7 +45,8 @@ interface GraphCliCommand {
   run: (
     options: Record<string, string | boolean | undefined>,
     currentWorkingDirectory: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    positionals?: readonly string[]
   ) => Promise<GraphCliCommandResult>;
 }
 
@@ -52,6 +54,11 @@ const optionDescriptions: Record<string, string> = {
   graph: "--graph <path>               Authored graph document to validate, compile, or run.",
   label: "--label <run_label>          Optional run label appended to the generated run root.",
   "run-root": "--run-root <path>            Existing run root to resume.",
+  suite: "--suite <path>               Eval suite JSON file.",
+  case: "--case <id>                  Eval case id filter.",
+  variant: "--variant <id>              Eval variant id filter.",
+  "evals-root": "--evals-root <path>          Absolute eval artifact root for a new eval run.",
+  "eval-root": "--eval-root <path>           Existing eval artifact root to report.",
   mission: "--mission <path>             Mission state file reserved for the deferred controller surface.",
   help: "--help, -h                   Show command help."
 };
@@ -221,6 +228,7 @@ const commandRegistry = {
   compile: compileCommand,
   run: runCommand,
   resume: resumeCommand,
+  eval: evalCommand,
   "graph-help": graphHelpCommand,
   control: controlCommand
 } as const satisfies Record<string, GraphCliCommand>;
@@ -320,6 +328,7 @@ function renderMainHelp(): string {
     "  3. compile: inspect the compiled graph contract before execution",
     "  4. run: execute the compiled graph and write durable artifacts under the run root",
     "  5. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work",
+    "  6. eval: validate or run local eval suites for Agentflow graphs",
     "",
     "Examples:",
     "  agentflow graph-help",
@@ -327,6 +336,7 @@ function renderMainHelp(): string {
     "  agentflow compile --graph agentflow.graph.json",
     "  agentflow run --graph agentflow.graph.json",
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
+    "  agentflow eval validate --suite evals/example/suite.json",
     "  agentflow control --mission mission.json",
     "",
     "Path rules:",
@@ -465,7 +475,7 @@ export async function executeCli(
     };
   }
 
-  if (positionals.length > 0) {
+  if (positionals.length > 0 && command.name !== "eval") {
     return {
       exitCode: 2,
       stdout: renderCommandUsageError({
@@ -495,7 +505,8 @@ export async function executeCli(
     const result: GraphCliCommandResult = await command.run(
       options,
       currentWorkingDirectory,
-      execution.signal
+      execution.signal,
+      positionals
     );
 
     return {

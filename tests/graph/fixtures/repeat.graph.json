@@ -18,8 +18,8 @@
       "sandbox": "workspace-write",
       "timeout_sec": 1800,
       "input_rules": {
-        "max_total_bytes": 524288,
-        "max_bytes_per_item": 131072
+        "max_total_tokens": 128000,
+        "max_tokens_per_item": 32000
       }
     },
     "review": {

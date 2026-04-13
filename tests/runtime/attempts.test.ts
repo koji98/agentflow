@@ -24,8 +24,8 @@ const execNode: CompiledExecNode = {
     workspace_backend: "inplace",
     timeout_sec: 30,
     input_rules: {
-      max_total_bytes: 4096,
-      max_bytes_per_item: 1024
+      max_total_tokens: 1000,
+      max_tokens_per_item: 250
     }
   },
   inputs: [],

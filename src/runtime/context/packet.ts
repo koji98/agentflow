@@ -11,7 +11,7 @@ export interface ContextPacketMaterializedItem {
   kind: "input" | "context";
   source: InputItem | ContextReference;
   materialized_path: string;
-  bytes: number;
+  tokens: number;
   truncated: boolean;
   binding?: ContextPacketLiveWorkspaceBinding;
 }
@@ -29,12 +29,13 @@ export interface ContextPacket {
   authored_id: string;
   repo_alias: string;
   workspace_path: string;
+  tokenizer: string;
   materials: ContextPacketMaterializedItem[];
   omitted: ContextPacketOmittedItem[];
   totals: {
     material_count: number;
     file_count: number;
-    total_bytes: number;
+    total_tokens: number;
   };
 }
 

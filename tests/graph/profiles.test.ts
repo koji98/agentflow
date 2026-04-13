@@ -109,14 +109,14 @@ describe("graph profile resolution", () => {
           harness: "codex-cli",
           timeout_sec: 900,
           input_rules: {
-            max_total_bytes: 262144
+            max_total_tokens: 64000
           }
         },
         review: {
           timeout_sec: 120,
           input_rules: {
-            max_total_bytes: 65536,
-            max_bytes_per_item: 2048
+            max_total_tokens: 16000,
+            max_tokens_per_item: 500
           }
         }
       },
@@ -141,8 +141,8 @@ describe("graph profile resolution", () => {
       workspace_backend: "inplace",
       timeout_sec: 15,
       input_rules: {
-        max_total_bytes: 65536,
-        max_bytes_per_item: 2048
+        max_total_tokens: 16000,
+        max_tokens_per_item: 500
       }
     });
     expect(resolution.policy.harness).toBeUndefined();

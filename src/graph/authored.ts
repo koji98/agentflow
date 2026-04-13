@@ -17,8 +17,8 @@ export interface RepoDefinition {
 }
 
 export interface InputRules {
-  max_total_bytes?: number;
-  max_bytes_per_item?: number;
+  max_total_tokens?: number;
+  max_tokens_per_item?: number;
 }
 
 export interface DeterministicPassIfExitCode {
