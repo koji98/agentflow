@@ -185,6 +185,22 @@ export function renderRunSummary(
     lines.push("");
   }
 
+  const workspaceChangeArtifacts = Object.values(state.workspace_change_artifacts);
+
+  if (workspaceChangeArtifacts.length > 0) {
+    lines.push("## Workspace Changes", "");
+
+    for (const artifact of workspaceChangeArtifacts) {
+      lines.push(
+        `- \`${artifact.repo_alias}\`: status=\`${artifact.status_file}\`, diff=\`${artifact.diff_file}\`, changed_files=\`${artifact.changed_files_file}\` (${artifact.changed_files.length} files)${
+          artifact.capture_error_file ? `, capture_error=\`${artifact.capture_error_file}\`` : ""
+        }`
+      );
+    }
+
+    lines.push("");
+  }
+
   if (attempts.length === 0) {
     lines.push("No node executions were recorded.");
     return `${lines.join("\n")}\n`;

@@ -7,7 +7,8 @@ Use these as compact mental models.
 Use primitives only:
 
 1. `agent` or `exec` to make the change
-2. `check` to verify it
+2. declare any handoff file in `artifacts`
+3. `check` to verify it
 
 Good when:
 
@@ -23,7 +24,8 @@ Good shape:
 
 1. `agent` inspect request and choose surfaces
 2. `parallel` gather evidence
-3. `agent` synthesize findings
+3. each branch publishes a named artifact or relies on `agent_response`
+4. `agent` synthesize findings from explicit artifact context
 4. `check` review or verify synthesis if needed
 
 Good when:
@@ -39,7 +41,7 @@ Use this when a command should run and produce evidence, but failure should not 
 Good shape:
 
 1. `exec` run command and publish status or logs
-2. `agent` inspect artifacts and explain success, failure, or next cleanup
+2. `agent` inspect named artifacts or `result_json` and explain success, failure, or next cleanup
 
 Good when:
 
@@ -54,8 +56,9 @@ Use `repeat` only when a descendant `check` or `checkpoint` should decide whethe
 Good shape:
 
 1. implement node
-2. validation node
-3. repeat back-edge on failure
+2. validation node with hard pass/fail semantics
+3. optional next attempt consumes `latest_failed` artifacts from the prior failed iteration
+4. repeat back-edge on failure
 
 Only use when the repair owner, gate, and maximum useful cycle count are all obvious.
 

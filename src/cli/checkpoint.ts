@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { join } from "node:path";
 
-import type { ContextReference } from "../graph/authored.js";
+import type { ArtifactReference, ContextItem } from "../graph/authored.js";
 import type { CompiledCheckpointNode, CompiledGraph } from "../graph/compiled.js";
 import type { GraphDiagnostic } from "../graph/schema.js";
 import type {
@@ -45,23 +45,25 @@ interface CheckpointRenderInput {
     label: string;
     path: string;
   }>;
-  context_summary_preview?: string;
+  context_manifest_preview?: string;
 }
 
-function contextReferenceKey(reference: ContextReference): string {
+function artifactReferenceKey(reference: ArtifactReference): string {
   return JSON.stringify({
     node: reference.node,
-    include: reference.include,
-    output: reference.output,
+    artifact: reference.artifact,
     iteration: reference.iteration,
     attempt: reference.attempt,
     optional: reference.optional
   });
 }
 
-function describeContextReference(reference: ContextReference): string {
-  const outputText = reference.output ? `:${reference.output}` : "";
-  return `${reference.node} ${reference.include}${outputText}`;
+function describeContextSource(source: ContextItem): string {
+  if (source.from !== "artifact") {
+    return source.name;
+  }
+
+  return `${source.node}:${source.artifact}`;
 }
 
 function truncatePreview(
@@ -108,8 +110,8 @@ function renderCheckpointReview(input: CheckpointRenderInput): string {
     );
   }
 
-  if (input.context_summary_preview) {
-    sections.push("Context summary:", input.context_summary_preview);
+  if (input.context_manifest_preview) {
+    sections.push("Context manifest:", input.context_manifest_preview);
   }
 
   sections.push("Choose:", "  [1] Pass", "  [2] Deny", "  [3] Abort run");
@@ -190,14 +192,13 @@ async function promptForDecision(adapter: CheckpointPromptAdapter): Promise<Chec
 
 function findReviewMaterial(
   packet: ContextPacket,
-  reviewFrom: ContextReference
+  reviewFrom: ArtifactReference
 ): ContextPacketMaterializedItem | undefined {
-  const key = contextReferenceKey(reviewFrom);
+  const key = artifactReferenceKey(reviewFrom);
   return packet.materials.find(
     (item) =>
-      item.kind === "context" &&
-      "node" in item.source &&
-      contextReferenceKey(item.source) === key
+      item.source.from === "artifact" &&
+      artifactReferenceKey(item.source) === key
   );
 }
 
@@ -252,18 +253,17 @@ export function createInteractiveCheckpointExecutor(
     }
 
     const reviewText = await readFile(reviewMaterial.materialized_path, "utf8");
-    const contextSummaryPreview = truncatePreview(
-      await readFile(context.context_summary_path, "utf8"),
+    const contextManifestPreview = truncatePreview(
+      await readFile(context.context_manifest_path, "utf8"),
       {
         max_lines: 20,
         max_chars: 2000
       }
     );
     const supporting_context = packet.materials
-      .filter((item) => item.kind === "context" && item.materialized_path !== reviewMaterial.materialized_path)
+      .filter((item) => item.materialized_path !== reviewMaterial.materialized_path)
       .map((item) => ({
-        label:
-          "node" in item.source ? describeContextReference(item.source) : item.key,
+        label: describeContextSource(item.source),
         path: item.materialized_path
       }));
 
@@ -276,7 +276,7 @@ export function createInteractiveCheckpointExecutor(
           review_artifact_path: reviewMaterial.materialized_path,
           review_preview: truncatePreview(reviewText),
           supporting_context,
-          context_summary_preview: contextSummaryPreview
+          context_manifest_preview: contextManifestPreview
         })}`
       );
 

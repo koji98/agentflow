@@ -1,8 +1,10 @@
 import type {
   AgentNode,
+  ArtifactDefinition,
   BaseExecutableNode,
-  OutputDefinition
+  ContextItem
 } from "../graph/authored.js";
+import type { ContextSelector } from "../graph/schema.js";
 
 export interface ManagedPatternRuntime {
   max_concurrency?: number;
@@ -27,16 +29,65 @@ export function sharedNodeBase(
   };
 }
 
-export function appendOutput(outputs: OutputDefinition[], output: OutputDefinition): OutputDefinition[] {
-  return outputs.some((item) => item.name === output.name) ? outputs : [...outputs, output];
+export function mergeArtifacts(
+  ...artifacts: Array<Record<string, ArtifactDefinition>>
+): Record<string, ArtifactDefinition> {
+  return Object.assign({}, ...artifacts);
 }
 
-export function attemptOutput(name: string, path: string, required: boolean): OutputDefinition {
+function defaultArtifactDescription(name: string, path: string): string {
+  const readableName = name.replace(/_/gu, " ");
+  const format = path.endsWith(".jsonl")
+    ? "Line-delimited JSON"
+    : path.endsWith(".json")
+      ? "Structured JSON"
+      : path.endsWith(".md")
+        ? "Markdown"
+        : "Durable";
+
+  return `${format} artifact containing the ${readableName} expected from this node.`;
+}
+
+export function outputDirArtifact(
+  name: string,
+  path: string,
+  description = defaultArtifactDescription(name, path)
+): Record<string, ArtifactDefinition> {
+  return {
+    [name]: {
+      from: "output_dir",
+      path,
+      description
+    }
+  };
+}
+
+export function artifactContext(
+  name: string,
+  node: string,
+  artifact: string,
+  options: {
+    iteration?: ContextSelector;
+    attempt?: ContextSelector;
+    optional?: boolean;
+  } = {}
+): Extract<ContextItem, { from: "artifact" }> {
   return {
     name,
-    from: "attempt",
-    path,
-    required
+    from: "artifact",
+    node,
+    artifact,
+    ...(options.iteration !== undefined ? { iteration: options.iteration } : {}),
+    ...(options.attempt !== undefined ? { attempt: options.attempt } : {}),
+    ...(options.optional !== undefined ? { optional: options.optional } : {})
+  };
+}
+
+export function workspaceFileContext(name: string, path: string): Extract<ContextItem, { from: "workspace_file" }> {
+  return {
+    name,
+    from: "workspace_file",
+    path
   };
 }
 
@@ -88,14 +139,14 @@ export function listOrFallback(title: string, values: string[], fallback: string
   return [title, ...values.map((value) => `- ${value}`)];
 }
 
-export function workflowBriefOutput(): OutputDefinition {
-  return attemptOutput("workflow_brief", "workflow-brief.md", true);
+export function workflowBriefOutput(): Record<string, ArtifactDefinition> {
+  return outputDirArtifact("workflow_brief", "workflow-brief.md");
 }
 
-export function workflowPlanMarkdownOutput(): OutputDefinition {
-  return attemptOutput("workflow_plan_markdown", "workflow-plan.md", true);
+export function workflowPlanMarkdownOutput(): Record<string, ArtifactDefinition> {
+  return outputDirArtifact("workflow_plan_markdown", "workflow-plan.md");
 }
 
-export function workflowPlanJsonOutput(): OutputDefinition {
-  return attemptOutput("workflow_plan_json", "workflow-plan.json", true);
+export function workflowPlanJsonOutput(): Record<string, ArtifactDefinition> {
+  return outputDirArtifact("workflow_plan_json", "workflow-plan.json");
 }

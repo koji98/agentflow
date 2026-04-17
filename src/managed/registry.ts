@@ -54,7 +54,7 @@ export const managedPatternDescriptors = [
       { id: "direction", label: "Choose Direction", summary: "Recommend a direction, publish a tradeoff matrix, and optionally gate the choice with a checkpoint.", mode: "single-agent" },
       { id: "draft", label: "Draft Spec", summary: "Draft the initial spec from the approved or autonomous direction.", mode: "single-agent" },
       { id: "revise", label: "Revise to Quality Bar", summary: "Run critique profiles, merge feedback, and iterate until the quality review passes.", mode: "repair-loop" },
-      { id: "deliver", label: "Publish Design Package", summary: "Publish the final design spec, design packet, and readiness outputs.", mode: "single-agent" }
+      { id: "deliver", label: "Publish Design Package", summary: "Publish the final design spec, design packet, and readiness artifacts.", mode: "single-agent" }
     ]
   }),
   definePattern({
@@ -100,7 +100,7 @@ export const managedPatternDescriptors = [
       { id: "prepare", label: "Prepare Review", summary: "Load the target diff, packet, or artifact and establish review focus.", mode: "single-agent" },
       { id: "plan", label: "Plan Review", summary: "Turn the review packet into explicit reviewer focus and evidence expectations.", mode: "single-agent" },
       { id: "reviewers", label: "Parallel Reviewers", summary: "Run multiple reviewers against correctness, tests, regressions, and maintainability.", mode: "parallel-agents" },
-      { id: "aggregate", label: "Aggregate Raw Findings", summary: "Collect raw reviewer outputs into one combined findings set.", mode: "single-agent" },
+      { id: "aggregate", label: "Aggregate Raw Findings", summary: "Collect raw reviewer artifacts into one combined findings set.", mode: "single-agent" },
       { id: "merge", label: "Merge Findings", summary: "Deduplicate overlap while preserving the strongest evidence.", mode: "single-agent" },
       { id: "calibrate", label: "Calibrate Findings", summary: "Calibrate severity, confidence, and false positives before publication.", mode: "single-agent" },
       { id: "deliver", label: "Deliver Review", summary: "Publish the final review summary and machine-readable bundle.", mode: "single-agent" }

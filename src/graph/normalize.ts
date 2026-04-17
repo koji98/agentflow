@@ -8,40 +8,38 @@ import type {
   CheckNode,
   CheckpointNode,
   ContainerGraphNode,
-  ContextReference,
+  ArtifactDefinition,
+  ArtifactReference,
+  ContextItem,
   DeterministicCheckDefaults,
   DeterministicPassIf,
   EnvPrerequisite,
   ExecNode,
-  FileInput,
   FilePrerequisite,
   GraphPrerequisiteCheck,
   GraphPrerequisites,
-  GlobInput,
   GraphDefaults,
   GraphProfile,
-  InputItem,
   InputRules,
-  OutputDefinition,
   ParallelNode,
   RepeatNode,
   RepoPrerequisite,
   RepoDefinition,
-  SequenceNode,
-  TextInput
+  SequenceNode
 } from "./authored.js";
 import {
   authoredNodeKinds,
+  artifactSourceKinds,
   checkKinds,
-  contextIncludes,
+  contextSourceKinds,
   contextSelectors,
   failureBehaviors,
   graphVersion,
   harnessNames,
   managedPatternKinds,
-  outputSourceKinds,
   prerequisiteKinds,
   reasoningEfforts,
+  reservedArtifactNames,
   sandboxModes,
   workspaceBackends
 } from "./schema.js";
@@ -105,11 +103,10 @@ export interface NormalizedGraphDocument {
   lowered_managed_nodes: LoweredManagedNode[];
 }
 
-const checkpointOperatorFeedbackOutput: OutputDefinition = {
-  name: "operator_feedback",
-  from: "attempt",
+const checkpointOperatorFeedbackArtifact: ArtifactDefinition = {
+  from: "output_dir",
   path: "operator-feedback.md",
-  required: false
+  description: "Operator feedback captured when a checkpoint is reviewed."
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -636,35 +633,44 @@ function normalizeGraphDefaults(
   };
 }
 
-function normalizeInputItem(
+function normalizeContextItem(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): InputItem | undefined {
+): ContextItem | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "Input item must be an object."
+      message: "context item must be an object."
     });
     return undefined;
   }
 
-  const kind = readRequiredString(record.kind, `${path}.kind`, diagnostics);
+  const name = readRequiredString(record.name, `${path}.name`, diagnostics);
+  const from = readEnumValue(record.from, `${path}.from`, contextSourceKinds, diagnostics, {
+    required: true
+  });
 
-  if (!kind) {
+  if (!name || !from) {
     return undefined;
   }
 
-  if (kind === "file") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "path"], diagnostics);
+  if (from === "workspace_file") {
+    pushUnknownKeyDiagnostics(record, path, ["name", "from", "path"], diagnostics);
     const itemPath = readRequiredString(record.path, `${path}.path`, diagnostics);
-    return itemPath ? ({ kind, path: itemPath } satisfies FileInput) : undefined;
+    return itemPath
+      ? {
+          name,
+          from,
+          path: itemPath
+        }
+      : undefined;
   }
 
-  if (kind === "glob") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "path", "max_files"], diagnostics);
+  if (from === "workspace_glob") {
+    pushUnknownKeyDiagnostics(record, path, ["name", "from", "path", "max_files"], diagnostics);
     const itemPath = readRequiredString(record.path, `${path}.path`, diagnostics);
     const max_files = readPositiveInteger(record.max_files, `${path}.max_files`, diagnostics);
 
@@ -673,40 +679,60 @@ function normalizeInputItem(
     }
 
     return {
-      kind,
+      name,
+      from,
       path: itemPath,
       ...(max_files !== undefined ? { max_files } : {})
-    } satisfies GlobInput;
+    };
   }
 
-  if (kind === "text") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "name", "text"], diagnostics);
-    const name = readRequiredString(record.name, `${path}.name`, diagnostics);
+  if (from === "text") {
+    pushUnknownKeyDiagnostics(record, path, ["name", "from", "text"], diagnostics);
     const text = readRequiredString(record.text, `${path}.text`, diagnostics);
 
-    if (!name || !text) {
+    if (!text) {
       return undefined;
     }
 
     return {
-      kind,
       name,
+      from,
       text
-    } satisfies TextInput;
+    };
   }
 
-  diagnostics.push({
-    path: `${path}.kind`,
-    message: "inputs.kind must be file, glob, or text."
-  });
-  return undefined;
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["name", "from", "node", "artifact", "iteration", "attempt", "optional"],
+    diagnostics
+  );
+  const node = readRequiredString(record.node, `${path}.node`, diagnostics);
+  const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
+  const iteration = normalizeSelector(record.iteration, `${path}.iteration`, diagnostics);
+  const attempt = normalizeSelector(record.attempt, `${path}.attempt`, diagnostics);
+  const optional = readBoolean(record.optional, `${path}.optional`, diagnostics);
+
+  if (!node || !artifact) {
+    return undefined;
+  }
+
+  return {
+    name,
+    from,
+    node,
+    artifact,
+    ...(iteration !== undefined ? { iteration } : {}),
+    ...(attempt !== undefined ? { attempt } : {}),
+    ...(optional !== undefined ? { optional } : {})
+  };
 }
 
-function normalizeInputs(
+function normalizeContextItems(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): InputItem[] | undefined {
+): ContextItem[] | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -714,16 +740,153 @@ function normalizeInputs(
   if (!Array.isArray(value)) {
     diagnostics.push({
       path,
-      message: "inputs must be an array."
+      message: "context must be an array."
     });
     return undefined;
   }
 
   const items = value
-    .map((item, index) => normalizeInputItem(item, `${path}[${index}]`, diagnostics))
-    .filter((item): item is InputItem => item !== undefined);
+    .map((item, index) => normalizeContextItem(item, `${path}[${index}]`, diagnostics))
+    .filter((item): item is ContextItem => item !== undefined);
 
   return items;
+}
+
+function normalizeArtifactReference(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ArtifactReference | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "artifact reference must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["node", "artifact", "iteration", "attempt", "optional"], diagnostics);
+
+  const node = readRequiredString(record.node, `${path}.node`, diagnostics);
+  const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
+  const iteration = normalizeSelector(record.iteration, `${path}.iteration`, diagnostics);
+  const attempt = normalizeSelector(record.attempt, `${path}.attempt`, diagnostics);
+  const optional = readBoolean(record.optional, `${path}.optional`, diagnostics);
+
+  if (!node || !artifact) {
+    return undefined;
+  }
+
+  return {
+    node,
+    artifact,
+    ...(iteration !== undefined ? { iteration } : {}),
+    ...(attempt !== undefined ? { attempt } : {}),
+    ...(optional !== undefined ? { optional } : {})
+  };
+}
+
+function normalizeArtifactDefinition(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ArtifactDefinition | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "artifact definition must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["from", "path", "description"], diagnostics);
+
+  const from = readEnumValue(record.from, `${path}.from`, artifactSourceKinds, diagnostics, {
+    required: true
+  });
+  const artifactPath = readRequiredString(record.path, `${path}.path`, diagnostics);
+  const description = readRequiredString(record.description, `${path}.description`, diagnostics);
+
+  if (!from || !artifactPath || !description) {
+    return undefined;
+  }
+
+  return {
+    from,
+    path: artifactPath,
+    description
+  };
+}
+
+function normalizeArtifacts(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): Record<string, ArtifactDefinition> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "artifacts must be an object map."
+    });
+    return undefined;
+  }
+
+  const artifacts: Record<string, ArtifactDefinition> = {};
+
+  for (const [name, definition] of Object.entries(record)) {
+    if (reservedArtifactNames.includes(name as (typeof reservedArtifactNames)[number])) {
+      diagnostics.push({
+        path: `${path}.${name}`,
+        message: `Artifact name "${name}" is reserved by Agentflow.`
+      });
+      continue;
+    }
+
+    const normalized = normalizeArtifactDefinition(definition, `${path}.${name}`, diagnostics);
+
+    if (normalized) {
+      artifacts[name] = normalized;
+    }
+  }
+
+  return artifacts;
+}
+
+function normalizeLegacyDataFlowFields(
+  record: Record<string, unknown>,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): void {
+  if (record.inputs !== undefined) {
+    diagnostics.push({
+      path: `${path}.inputs`,
+      message: 'Field "inputs" has been replaced by "context".'
+    });
+  }
+
+  if (record.context_from !== undefined) {
+    diagnostics.push({
+      path: `${path}.context_from`,
+      message: 'Field "context_from" has been replaced by context items with from = "artifact".'
+    });
+  }
+
+  if (record.outputs !== undefined) {
+    diagnostics.push({
+      path: `${path}.outputs`,
+      message: 'Field "outputs" has been replaced by "artifacts".'
+    });
+  }
 }
 
 function normalizeSelector(
@@ -750,140 +913,21 @@ function normalizeSelector(
   return readEnumValue(value, path, contextSelectors, diagnostics);
 }
 
-function normalizeContextReference(
+function normalizeLegacyContextReference(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ContextReference | undefined {
+): ArtifactReference | undefined {
   const record = asRecord(value);
 
-  if (!record) {
+  if (record && ("include" in record || "output" in record)) {
     diagnostics.push({
       path,
-      message: "context_from item must be an object."
-    });
-    return undefined;
-  }
-
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["node", "include", "output", "iteration", "attempt", "optional"],
-    diagnostics
-  );
-
-  const node = readRequiredString(record.node, `${path}.node`, diagnostics);
-  const include = readEnumValue(record.include, `${path}.include`, contextIncludes, diagnostics, {
-    required: true
-  });
-  const output = readOptionalString(record.output, `${path}.output`, diagnostics);
-  const iteration = normalizeSelector(record.iteration, `${path}.iteration`, diagnostics);
-  const attempt = normalizeSelector(record.attempt, `${path}.attempt`, diagnostics);
-  const optional = readBoolean(record.optional, `${path}.optional`, diagnostics);
-
-  if (!node || !include) {
-    return undefined;
-  }
-
-  if (include === "output" && !output) {
-    diagnostics.push({
-      path: `${path}.output`,
-      message: "context_from.output is required when include = output."
+      message: 'Legacy context reference fields "include" and "output" have been replaced by "artifact".'
     });
   }
 
-  return {
-    node,
-    include,
-    ...(output ? { output } : {}),
-    ...(iteration !== undefined ? { iteration } : {}),
-    ...(attempt !== undefined ? { attempt } : {}),
-    ...(optional !== undefined ? { optional } : {})
-  };
-}
-
-function normalizeContextReferences(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): ContextReference[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    diagnostics.push({
-      path,
-      message: "context_from must be an array."
-    });
-    return undefined;
-  }
-
-  const references = value
-    .map((item, index) => normalizeContextReference(item, `${path}[${index}]`, diagnostics))
-    .filter((item): item is ContextReference => item !== undefined);
-
-  return references;
-}
-
-function normalizeOutputDefinition(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): OutputDefinition | undefined {
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "outputs item must be an object."
-    });
-    return undefined;
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["name", "from", "path", "required"], diagnostics);
-
-  const name = readRequiredString(record.name, `${path}.name`, diagnostics);
-  const from = readEnumValue(record.from, `${path}.from`, outputSourceKinds, diagnostics, {
-    required: true
-  });
-  const outputPath = readRequiredString(record.path, `${path}.path`, diagnostics);
-  const required = readBoolean(record.required, `${path}.required`, diagnostics);
-
-  if (!name || !from || !outputPath) {
-    return undefined;
-  }
-
-  return {
-    name,
-    from,
-    path: outputPath,
-    ...(required !== undefined ? { required } : {})
-  };
-}
-
-function normalizeOutputs(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): OutputDefinition[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    diagnostics.push({
-      path,
-      message: "outputs must be an array."
-    });
-    return undefined;
-  }
-
-  const outputs = value
-    .map((item, index) => normalizeOutputDefinition(item, `${path}[${index}]`, diagnostics))
-    .filter((item): item is OutputDefinition => item !== undefined);
-
-  return outputs;
+  return normalizeArtifactReference(value, path, diagnostics);
 }
 
 function normalizeGraphPrerequisiteCheck(
@@ -1002,29 +1046,25 @@ function normalizeExecutableBase(
   path: string,
   diagnostics: GraphDiagnostic[],
   options: {
-    allow_outputs?: boolean;
+    allow_artifacts?: boolean;
   } = {}
 ): BaseExecutableNode | undefined {
-  const allow_outputs = options.allow_outputs ?? true;
+  const allow_artifacts = options.allow_artifacts ?? true;
   const id = readRequiredString(record.id, `${path}.id`, diagnostics);
   const label = readOptionalString(record.label, `${path}.label`, diagnostics);
   const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
   const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
-  const inputs = normalizeInputs(record.inputs, `${path}.inputs`, diagnostics);
-  const context_from = normalizeContextReferences(
-    record.context_from,
-    `${path}.context_from`,
-    diagnostics
-  );
-  const outputs = allow_outputs
-    ? normalizeOutputs(record.outputs, `${path}.outputs`, diagnostics)
+  normalizeLegacyDataFlowFields(record, path, diagnostics);
+  const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
+  const artifacts = allow_artifacts
+    ? normalizeArtifacts(record.artifacts, `${path}.artifacts`, diagnostics)
     : undefined;
   const timeout_sec = readPositiveInteger(record.timeout_sec, `${path}.timeout_sec`, diagnostics);
 
-  if (!allow_outputs && record.outputs !== undefined) {
+  if (!allow_artifacts && record.artifacts !== undefined) {
     diagnostics.push({
-      path: `${path}.outputs`,
-      message: 'Field "outputs" does not apply to checkpoint nodes.'
+      path: `${path}.artifacts`,
+      message: 'Field "artifacts" does not apply to this node kind.'
     });
   }
 
@@ -1037,9 +1077,8 @@ function normalizeExecutableBase(
     ...(label ? { label } : {}),
     ...(repo ? { repo } : {}),
     ...(profile ? { profile } : {}),
-    ...(inputs ? { inputs } : {}),
-    ...(context_from ? { context_from } : {}),
-    ...(outputs ? { outputs } : {}),
+    ...(context ? { context } : {}),
+    ...(artifacts ? { artifacts } : {}),
     ...(timeout_sec !== undefined ? { timeout_sec } : {})
   };
 }
@@ -1058,6 +1097,8 @@ function normalizeAgentNode(
       "label",
       "repo",
       "profile",
+      "context",
+      "artifacts",
       "inputs",
       "context_from",
       "outputs",
@@ -1109,6 +1150,8 @@ function normalizeExecNode(
       "label",
       "repo",
       "profile",
+      "context",
+      "artifacts",
       "inputs",
       "context_from",
       "outputs",
@@ -1161,6 +1204,8 @@ function normalizeCheckNode(
       "label",
       "repo",
       "profile",
+      "context",
+      "artifacts",
       "inputs",
       "context_from",
       "outputs",
@@ -1274,6 +1319,8 @@ function normalizeCheckpointNode(
       "label",
       "repo",
       "profile",
+      "context",
+      "artifacts",
       "inputs",
       "context_from",
       "outputs",
@@ -1285,10 +1332,10 @@ function normalizeCheckpointNode(
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics, {
-    allow_outputs: false
+    allow_artifacts: false
   });
   const prompt = readRequiredString(record.prompt, `${path}.prompt`, diagnostics);
-  const review_from = normalizeContextReference(
+  const review_from = normalizeLegacyContextReference(
     record.review_from,
     `${path}.review_from`,
     diagnostics
@@ -1301,7 +1348,9 @@ function normalizeCheckpointNode(
   return {
     type: "checkpoint",
     ...base,
-    outputs: [...(base.outputs ?? []), checkpointOperatorFeedbackOutput],
+    artifacts: {
+      operator_feedback: checkpointOperatorFeedbackArtifact
+    },
     prompt,
     review_from
   };
@@ -1683,6 +1732,8 @@ function normalizePatternDeepResearchNode(
       "label",
       "repo",
       "profile",
+      "context",
+      "artifacts",
       "inputs",
       "context_from",
       "outputs",
@@ -1697,7 +1748,9 @@ function normalizePatternDeepResearchNode(
     diagnostics
   );
 
-  const base = normalizeExecutableBase(record, path, diagnostics);
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_artifacts: false
+  });
   const brief = normalizePatternDeepResearchBrief(record.brief, `${path}.brief`, diagnostics);
   const context_policy = normalizePatternDeepResearchContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
   const approval_policy = normalizePatternDeepResearchApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
@@ -1960,6 +2013,8 @@ function normalizePatternSpecDesignNode(
       "label",
       "repo",
       "profile",
+      "context",
+      "artifacts",
       "inputs",
       "context_from",
       "outputs",
@@ -1974,7 +2029,9 @@ function normalizePatternSpecDesignNode(
     diagnostics
   );
 
-  const base = normalizeExecutableBase(record, path, diagnostics);
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_artifacts: false
+  });
   const brief = normalizePatternSpecDesignBrief(record.brief, `${path}.brief`, diagnostics);
   const context_policy = normalizePatternSpecDesignContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
   const approval_policy = normalizePatternSpecDesignApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
@@ -2098,25 +2155,25 @@ function normalizePatternGenerateEvaluateFixSourceRef(
     };
   }
 
-  if (kind === "managed_output") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "node", "output"], diagnostics);
+  if (kind === "artifact") {
+    pushUnknownKeyDiagnostics(record, path, ["kind", "node", "artifact"], diagnostics);
     const node = readRequiredString(record.node, `${path}.node`, diagnostics);
-    const output = readRequiredString(record.output, `${path}.output`, diagnostics);
+    const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
 
-    if (!node || !output) {
+    if (!node || !artifact) {
       return undefined;
     }
 
     return {
-      kind: "managed_output",
+      kind: "artifact",
       node,
-      output
+      artifact
     };
   }
 
   diagnostics.push({
     path: `${path}.kind`,
-    message: 'pattern_generate_evaluate_fix task source reference kind must be "file" or "managed_output".'
+    message: 'pattern_generate_evaluate_fix task source reference kind must be "file" or "artifact".'
   });
   return undefined;
 }
@@ -2354,8 +2411,11 @@ function normalizePatternGenerateEvaluateFixNode(
       "label",
       "repo",
       "profile",
+      "context",
+      "artifacts",
       "inputs",
       "context_from",
+      "outputs",
       "timeout_sec",
       "brief",
       "task_source",
@@ -2367,7 +2427,9 @@ function normalizePatternGenerateEvaluateFixNode(
     diagnostics
   );
 
-  const base = normalizeExecutableBase(record, path, diagnostics);
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_artifacts: false
+  });
   const brief = normalizePatternGenerateEvaluateFixBrief(record.brief, `${path}.brief`, diagnostics);
   const task_source = normalizePatternGenerateEvaluateFixTaskSource(
     record.task_source,
@@ -2510,25 +2572,25 @@ function normalizePatternReviewChangeSourceRef(
     };
   }
 
-  if (kind === "managed_output") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "node", "output"], diagnostics);
+  if (kind === "artifact") {
+    pushUnknownKeyDiagnostics(record, path, ["kind", "node", "artifact"], diagnostics);
     const node = readRequiredString(record.node, `${path}.node`, diagnostics);
-    const output = readRequiredString(record.output, `${path}.output`, diagnostics);
+    const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
 
-    if (!node || !output) {
+    if (!node || !artifact) {
       return undefined;
     }
 
     return {
-      kind: "managed_output",
+      kind: "artifact",
       node,
-      output
+      artifact
     };
   }
 
   diagnostics.push({
     path: `${path}.kind`,
-    message: 'pattern_review_change source reference kind must be "file" or "managed_output".'
+    message: 'pattern_review_change source reference kind must be "file" or "artifact".'
   });
   return undefined;
 }
@@ -2788,8 +2850,11 @@ function normalizePatternReviewChangeNode(
       "label",
       "repo",
       "profile",
+      "context",
+      "artifacts",
       "inputs",
       "context_from",
+      "outputs",
       "timeout_sec",
       "brief",
       "review_source",
@@ -2801,7 +2866,9 @@ function normalizePatternReviewChangeNode(
     diagnostics
   );
 
-  const base = normalizeExecutableBase(record, path, diagnostics);
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_artifacts: false
+  });
   const brief = normalizePatternReviewChangeBrief(record.brief, `${path}.brief`, diagnostics);
   const review_source = normalizePatternReviewChangeSource(
     record.review_source,

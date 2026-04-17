@@ -1,24 +1,25 @@
 import type {
   AgentNode,
+  ArtifactDefinition,
   BaseExecutableNode,
   CheckNode,
-  ContextReference,
-  FileInput,
-  InputItem,
-  OutputDefinition,
+  ContextItem,
   ParallelNode,
   RepeatNode,
   SequenceNode
 } from "../graph/authored.js";
 import {
-  attemptOutput,
+  artifactContext,
   body,
   listOrFallback,
   managedId,
+  mergeArtifacts,
+  outputDirArtifact,
   renderPrompt,
   section,
   sharedNodeBase,
   type ManagedPatternRuntime,
+  workspaceFileContext,
   workflowBriefOutput
 } from "./foundation.js";
 
@@ -37,15 +38,15 @@ export interface PatternGenerateEvaluateFixFileSourceRef {
   path: string;
 }
 
-export interface PatternGenerateEvaluateFixManagedOutputSourceRef {
-  kind: "managed_output";
+export interface PatternGenerateEvaluateFixArtifactSourceRef {
+  kind: "artifact";
   node: string;
-  output: string;
+  artifact: string;
 }
 
 export type PatternGenerateEvaluateFixSourceRef =
   | PatternGenerateEvaluateFixFileSourceRef
-  | PatternGenerateEvaluateFixManagedOutputSourceRef;
+  | PatternGenerateEvaluateFixArtifactSourceRef;
 
 export interface PatternGenerateEvaluateFixArtifactBundleSource {
   kind: "artifact_bundle";
@@ -153,7 +154,7 @@ function formatEvaluation(evaluation: PatternGenerateEvaluateFixEvaluation): str
 function formatSourceRef(reference: PatternGenerateEvaluateFixSourceRef): string {
   return reference.kind === "file"
     ? `file:${reference.path}`
-    : `managed_output:${reference.node}.${reference.output}`;
+    : `artifact:${reference.node}.${reference.artifact}`;
 }
 
 function formatTaskSource(source: PatternGenerateEvaluateFixTaskSource): string[] {
@@ -161,7 +162,7 @@ function formatTaskSource(source: PatternGenerateEvaluateFixTaskSource): string[
     return [
       "- Source kind: managed_node",
       `- Source node: ${source.node}`,
-      "- Expected outputs when available: design_packet, design_spec, direction_proposal, tradeoff_matrix, decision_log, implementation_readiness"
+      "- Expected artifacts when available: design_packet, design_spec, direction_proposal, tradeoff_matrix, decision_log, implementation_readiness"
     ];
   }
 
@@ -181,100 +182,52 @@ function formatTaskSource(source: PatternGenerateEvaluateFixTaskSource): string[
   ];
 }
 
-function sourceRefToInput(reference: PatternGenerateEvaluateFixSourceRef): InputItem | undefined {
-  if (reference.kind !== "file") {
-    return undefined;
-  }
-
-  return {
-    kind: "file",
-    path: reference.path
-  } satisfies FileInput;
-}
-
 function sourceRefToContext(
+  name: string,
   reference: PatternGenerateEvaluateFixSourceRef,
   optional: boolean
-): ContextReference | undefined {
-  if (reference.kind !== "managed_output") {
-    return undefined;
-  }
-
-  return {
-    node: reference.node,
-    include: "output",
-    output: reference.output,
-    ...(optional ? { optional: true } : {})
-  };
+): ContextItem {
+  return reference.kind === "file"
+    ? workspaceFileContext(name, reference.path)
+    : artifactContext(name, reference.node, reference.artifact, { optional });
 }
 
 function resolveTaskSourceMaterials(source: PatternGenerateEvaluateFixTaskSource): {
-  inputs: InputItem[];
-  context_from: ContextReference[];
+  context: ContextItem[];
 } {
   if (source.kind === "managed_node") {
     return {
-      inputs: [],
-      context_from: [
-        {
-          node: source.node,
-          include: "output",
-          output: "design_packet"
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "design_spec",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "direction_proposal",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "tradeoff_matrix",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "decision_log",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "implementation_readiness",
-          optional: true
-        }
+      context: [
+        artifactContext("design_packet", source.node, "design_packet"),
+        artifactContext("design_spec", source.node, "design_spec", { optional: true }),
+        artifactContext("direction_proposal", source.node, "direction_proposal", { optional: true }),
+        artifactContext("tradeoff_matrix", source.node, "tradeoff_matrix", { optional: true }),
+        artifactContext("decision_log", source.node, "decision_log", { optional: true }),
+        artifactContext("implementation_readiness", source.node, "implementation_readiness", { optional: true })
       ]
     };
   }
 
-  const refs: Array<{ reference: PatternGenerateEvaluateFixSourceRef; optional: boolean }> = [
-    { reference: source.design_packet, optional: false },
-    ...(source.design_spec ? [{ reference: source.design_spec, optional: true }] : []),
-    ...(source.direction_proposal ? [{ reference: source.direction_proposal, optional: true }] : []),
-    ...(source.tradeoff_matrix ? [{ reference: source.tradeoff_matrix, optional: true }] : []),
-    ...(source.decision_log ? [{ reference: source.decision_log, optional: true }] : []),
-    ...(source.implementation_readiness ? [{ reference: source.implementation_readiness, optional: true }] : []),
-    ...(source.additional_context ?? []).map((reference) => ({ reference, optional: true }))
+  const refs: Array<{ name: string; reference: PatternGenerateEvaluateFixSourceRef; optional: boolean }> = [
+    { name: "design_packet", reference: source.design_packet, optional: false },
+    ...(source.design_spec ? [{ name: "design_spec", reference: source.design_spec, optional: true }] : []),
+    ...(source.direction_proposal
+      ? [{ name: "direction_proposal", reference: source.direction_proposal, optional: true }]
+      : []),
+    ...(source.tradeoff_matrix ? [{ name: "tradeoff_matrix", reference: source.tradeoff_matrix, optional: true }] : []),
+    ...(source.decision_log ? [{ name: "decision_log", reference: source.decision_log, optional: true }] : []),
+    ...(source.implementation_readiness
+      ? [{ name: "implementation_readiness", reference: source.implementation_readiness, optional: true }]
+      : []),
+    ...(source.additional_context ?? []).map((reference, index) => ({
+      name: `additional_context_${zeroPad(index + 1)}`,
+      reference,
+      optional: true
+    }))
   ];
 
-  const inputs = refs
-    .map(({ reference }) => sourceRefToInput(reference))
-    .filter((item): item is InputItem => item !== undefined);
-  const context_from = refs
-    .map(({ reference, optional }) => sourceRefToContext(reference, optional))
-    .filter((item): item is ContextReference => item !== undefined);
-
   return {
-    inputs,
-    context_from
+    context: refs.map(({ name, reference, optional }) => sourceRefToContext(name, reference, optional))
   };
 }
 
@@ -393,16 +346,10 @@ function buildEvaluatorNode(
     command: "sh",
     args: ["-lc", command],
     on_failure: "continue",
-    context_from: [
-      {
-        node: generateId,
-        include: "output",
-        output: "change_notes"
-      }
+    context: [
+      artifactContext("change_notes", generateId, "change_notes")
     ],
-    outputs: [
-      attemptOutput(`evaluation_result_${suffix}`, "result.json", true)
-    ]
+    artifacts: outputDirArtifact(`evaluation_result_${suffix}`, "result.json")
   };
 }
 
@@ -410,23 +357,17 @@ function buildAggregateContext(
   config: PatternGenerateEvaluateFixConfig,
   taskPacketId: string,
   generateId: string
-): ContextReference[] {
+): ContextItem[] {
   return [
-    {
-      node: taskPacketId,
-      include: "output",
-      output: "task_packet"
-    },
-    {
-      node: generateId,
-      include: "output",
-      output: "change_notes"
-    },
-    ...config.evaluation.commands.map((_, index): ContextReference => ({
-      node: workflowNodeId(config.id, `evaluate_${zeroPad(index + 1)}`),
-      include: "output",
-      output: `evaluation_result_${zeroPad(index + 1)}`
-    }))
+    artifactContext("task_packet", taskPacketId, "task_packet"),
+    artifactContext("change_notes", generateId, "change_notes"),
+    ...config.evaluation.commands.map((_, index): ContextItem =>
+      artifactContext(
+        `evaluation_result_${zeroPad(index + 1)}`,
+        workflowNodeId(config.id, `evaluate_${zeroPad(index + 1)}`),
+        `evaluation_result_${zeroPad(index + 1)}`
+      )
+    )
   ];
 }
 
@@ -453,12 +394,11 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     label: "Prepare Task Packet",
     ...shared,
     sandbox: "read-only",
-    inputs: [...(config.inputs ?? []), ...sourceMaterials.inputs],
-    context_from: [...(config.context_from ?? []), ...sourceMaterials.context_from],
-    outputs: [
-      attemptOutput("task_packet", "task-packet.json", true),
+    context: [...(config.context ?? []), ...sourceMaterials.context],
+    artifacts: mergeArtifacts(
+      outputDirArtifact("task_packet", "task-packet.json"),
       workflowBriefOutput()
-    ],
+    ),
     prompt: buildPreparePrompt(config)
   };
 
@@ -468,23 +408,14 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     label: "Generate Or Fix Change",
     ...shared,
     sandbox: "workspace-write",
-    context_from: [
-      {
-        node: prepareId,
-        include: "output",
-        output: "task_packet"
-      },
-      {
-        node: aggregateId,
-        include: "output",
-        output: "evaluation_ledger",
+    context: [
+      artifactContext("task_packet", prepareId, "task_packet"),
+      artifactContext("failed_evaluation_ledger", aggregateId, "evaluation_ledger", {
         iteration: "latest_failed",
         optional: true
-      }
+      })
     ],
-    outputs: [
-      attemptOutput("change_notes", "change-notes.md", true)
-    ],
+    artifacts: outputDirArtifact("change_notes", "change-notes.md"),
     prompt: buildGeneratePrompt(config)
   };
 
@@ -494,10 +425,8 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     label: "Aggregate Evaluations",
     ...shared,
     sandbox: "read-only",
-    context_from: buildAggregateContext(config, prepareId, changeId),
-    outputs: [
-      attemptOutput("evaluation_ledger", "evaluation-ledger.json", true)
-    ],
+    context: buildAggregateContext(config, prepareId, changeId),
+    artifacts: outputDirArtifact("evaluation_ledger", "evaluation-ledger.json"),
     prompt: buildAggregatePrompt(config.evaluation)
   };
 
@@ -507,26 +436,20 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     label: "Evaluation Gate",
     ...shared,
     check_kind: "ai",
-    context_from: [
-      {
-        node: aggregateId,
-        include: "output",
-        output: "evaluation_ledger"
-      }
+    context: [
+      artifactContext("evaluation_ledger", aggregateId, "evaluation_ledger")
     ],
-    outputs: [
-      attemptOutput("gate_result", "result.json", true)
-    ],
+    artifacts: outputDirArtifact("gate_result", "result.json"),
     prompt: buildGatePrompt(),
     rubric: buildGateRubric()
   };
 
-  const publishedOutputs: OutputDefinition[] = [
-    attemptOutput("change_summary", "change-summary.md", true),
-    attemptOutput("change_packet", "change-packet.json", true),
-    attemptOutput("evaluation_ledger", "evaluation-ledger.json", true),
-    attemptOutput("fix_log", "fix-log.md", true)
-  ];
+  const publishedArtifacts: Record<string, ArtifactDefinition> = mergeArtifacts(
+    outputDirArtifact("change_summary", "change-summary.md"),
+    outputDirArtifact("change_packet", "change-packet.json"),
+    outputDirArtifact("evaluation_ledger", "evaluation-ledger.json"),
+    outputDirArtifact("fix_log", "fix-log.md")
+  );
 
   const publishNode: AgentNode = {
     type: "agent",
@@ -534,33 +457,20 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     ...(config.label ? { label: config.label } : { label: "Publish Change Package" }),
     ...shared,
     sandbox: "read-only",
-    context_from: [
-      {
-        node: prepareId,
-        include: "output",
-        output: "task_packet"
-      },
-      {
-        node: changeId,
-        include: "output",
-        output: "change_notes",
+    context: [
+      artifactContext("task_packet", prepareId, "task_packet"),
+      artifactContext("change_notes", changeId, "change_notes", {
         ...(evaluationRequired ? { iteration: "latest_passed" as const } : {})
-      },
-      {
-        node: aggregateId,
-        include: "output",
-        output: "evaluation_ledger",
+      }),
+      artifactContext("evaluation_ledger", aggregateId, "evaluation_ledger", {
         ...(evaluationRequired ? { iteration: "latest_passed" as const } : {})
-      },
-      {
-        node: aggregateId,
-        include: "output",
-        output: "evaluation_ledger",
+      }),
+      artifactContext("failed_evaluation_ledger", aggregateId, "evaluation_ledger", {
         iteration: "latest_failed",
         optional: true
-      }
+      })
     ],
-    outputs: publishedOutputs,
+    artifacts: publishedArtifacts,
     prompt: buildPublishPrompt(config)
   };
 

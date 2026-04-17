@@ -73,4 +73,48 @@ describe("runs root resolution", () => {
     expect(nodeSegment).toMatch(/^node-[0-9a-f]{16}$/);
     expect(executionSegment).toMatch(/^exec-[0-9a-f]{16}$/);
   });
+
+  it("uses ordered readable node directories when compiled node order is provided", () => {
+    const executionDir = resolveNodeExecutionDirectory(
+      "/tmp/agentflow-launch/.agentflow/runs/demo",
+      "root__repair_loop__repair_body__verify_fix",
+      "exec__root__repair_loop__repair_body__verify_fix__attempt_1",
+      {
+        nodeIndex: 14,
+        nodeCount: 331,
+        label: "Verify Fix",
+        attemptIndex: 1
+      }
+    );
+
+    const segments = executionDir.split("/").filter(Boolean);
+    const nodeSegment = segments.at(-3) ?? "";
+    const executionSegment = segments.at(-1) ?? "";
+
+    expect(nodeSegment).toMatch(/^015-verify-fix-[0-9a-f]{12}$/);
+    expect(executionSegment).toMatch(/^001-exec-[0-9a-f]{16}$/);
+  });
+
+  it("uses ordered execution directories for repeat iterations", () => {
+    const executionDir = resolveNodeExecutionDirectory(
+      "/tmp/agentflow-launch/.agentflow/runs/demo",
+      "root__retry__body__repair",
+      "exec__root__retry__body__repair__attempt_12__repeat_scope__root__retry__iter_3",
+      {
+        nodeIndex: 1,
+        nodeCount: 4,
+        label: "Repair",
+        attemptIndex: 12,
+        iterationIndex: 3,
+        iterationAttemptIndex: 2
+      }
+    );
+
+    const segments = executionDir.split("/").filter(Boolean);
+    const nodeSegment = segments.at(-3) ?? "";
+    const executionSegment = segments.at(-1) ?? "";
+
+    expect(nodeSegment).toMatch(/^002-repair-[0-9a-f]{12}$/);
+    expect(executionSegment).toMatch(/^i003-a002-exec-[0-9a-f]{16}$/);
+  });
 });

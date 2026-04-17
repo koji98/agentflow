@@ -59,8 +59,7 @@ Shared executable fields are also available:
 - `label`
 - `repo`
 - `profile`
-- `inputs`
-- `context_from`
+- `context`
 - `timeout_sec`
 
 ## Example
@@ -118,14 +117,14 @@ When available, the pattern consumes:
 
 ### `artifact_bundle`
 
-Use files or prior managed outputs directly:
+Use files or prior artifacts directly:
 
 ```json
 {
   "kind": "artifact_bundle",
   "design_packet": { "kind": "file", "path": "artifacts/design-packet.json" },
   "design_spec": { "kind": "file", "path": "docs/design-spec.md" },
-  "decision_log": { "kind": "managed_output", "node": "upstream_plan", "output": "decision_log" }
+  "decision_log": { "kind": "artifact", "node": "upstream_plan", "artifact": "decision_log" }
 }
 ```
 
@@ -142,7 +141,7 @@ Supported bundle keys:
 Reference kinds:
 
 - `{ "kind": "file", "path": "..." }`
-- `{ "kind": "managed_output", "node": "...", "output": "..." }`
+- `{ "kind": "artifact", "node": "...", "artifact": "..." }`
 
 ## Field Notes
 
@@ -184,7 +183,7 @@ Behavior:
 
 ## Produced Artifacts
 
-Core outputs:
+Core artifacts:
 
 - `change-summary.md`
 - `change-packet.json`

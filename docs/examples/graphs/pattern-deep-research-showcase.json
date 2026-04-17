@@ -46,13 +46,15 @@
             "preserve uncertainty and contradictions"
           ]
         },
-        "inputs": [
+        "context": [
           {
-            "kind": "file",
+            "name": "readme",
+            "from": "workspace_file",
             "path": "README.md"
           },
           {
-            "kind": "file",
+            "name": "managed_patterns_doc",
+            "from": "workspace_file",
             "path": "docs/MANAGED_PATTERNS.md"
           }
         ],
@@ -98,15 +100,18 @@
         "repo": "main",
         "profile": "default",
         "prompt": "Summarize the deep research result for a human operator. Mention the question, the recommended managed patterns, and the command a user should run next to inspect the graph.",
-        "context_from": [
+        "context": [
           {
+            "name": "research_response",
+            "from": "artifact",
             "node": "managed_patterns_research",
-            "include": "summary"
+            "artifact": "agent_response"
           },
           {
+            "name": "research_report",
+            "from": "artifact",
             "node": "managed_patterns_research",
-            "include": "output",
-            "output": "research_report"
+            "artifact": "research_report"
           }
         ]
       }

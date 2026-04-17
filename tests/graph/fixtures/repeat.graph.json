@@ -37,14 +37,13 @@
         "id": "understand",
         "repo": "main",
         "prompt": "Inspect the checkout timeout flow.",
-        "outputs": [
-          {
-            "name": "notes",
-            "from": "attempt",
+        "artifacts": {
+          "notes": {
+            "from": "output_dir",
             "path": "notes.md",
-            "required": false
+            "description": "Markdown notes from the initial repository inspection."
           }
-        ]
+        }
       },
       {
         "type": "parallel",
@@ -80,17 +79,18 @@
               "id": "implement_fix",
               "repo": "main",
               "prompt": "Implement the timeout fix.",
-              "inputs": [
+              "context": [
                 {
-                  "kind": "glob",
+                  "name": "sources",
+                  "from": "workspace_glob",
                   "path": "src/**/*.ts",
                   "max_files": 4
-                }
-              ],
-              "context_from": [
+                },
                 {
+                  "name": "understand_response",
+                  "from": "artifact",
                   "node": "understand",
-                  "include": "summary"
+                  "artifact": "agent_response"
                 }
               ]
             },
@@ -100,10 +100,12 @@
               "repo": "main",
               "profile": "review",
               "prompt": "Review the fix and tighten any rough edges.",
-              "context_from": [
+              "context": [
                 {
+                  "name": "implementation_response",
+                  "from": "artifact",
                   "node": "implement_fix",
-                  "include": "summary"
+                  "artifact": "agent_response"
                 }
               ]
             },
@@ -117,14 +119,13 @@
               "pass_if": {
                 "exit_code": 0
               },
-              "outputs": [
-                {
-                  "name": "verification",
-                  "from": "attempt",
+              "artifacts": {
+                "verification": {
+                  "from": "output_dir",
                   "path": "result.json",
-                  "required": true
+                  "description": "Structured JSON verification result for the repair loop."
                 }
-              ]
+              }
             }
           ]
         },
@@ -137,11 +138,12 @@
         "id": "handoff",
         "repo": "main",
         "prompt": "Summarize the fix and remaining risks.",
-        "context_from": [
+        "context": [
           {
+            "name": "verification",
+            "from": "artifact",
             "node": "verify_fix",
-            "include": "output",
-            "output": "verification",
+            "artifact": "verification",
             "iteration": "latest_passed"
           }
         ]

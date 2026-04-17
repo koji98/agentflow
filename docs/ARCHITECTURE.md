@@ -8,7 +8,7 @@ Agentflow has six runtime subsystems and one deferred control-plane stub.
 
 1. `graph`: parse, normalize, validate, resolve profiles, and compile authored graphs
 2. `runtime/core`: schedule compiled nodes, track state, and emit events
-3. `runtime/context`: resolve node inputs and prior artifacts into a bounded context packet
+3. `runtime/context`: resolve node context material and prior artifacts into a bounded context packet
 4. `runtime/harness`: execute `agent` nodes and AI `check` nodes through CLI-backed harness adapters
 5. `runtime/checks`: execute deterministic `check` nodes and normalize AI evaluator results
 6. `artifacts`: persist run files, append events, and project a stable read model for inspection tooling
@@ -74,7 +74,7 @@ The authored graph is the operator-facing source document. It is nested, readabl
 - CLI commands use the same rule: prefer an absolute `AGENTFLOW_RUNS_ROOT`, otherwise fall back to the command launch directory.
 - The run root is the only owner of run artifacts, events, and projected state.
 - Each repo alias resolves to both a source path and an effective workspace path for the current run.
-- Cross-repo reads are allowed only through explicit repo-qualified `inputs` or run-artifact references in `context_from`.
+- Cross-repo reads are allowed only through explicit repo-qualified workspace context paths or run-artifact references in `context`.
 - Cross-repo writes happen only by executing a node against that repo's workspace.
 
 ### Node kinds
@@ -108,9 +108,8 @@ Every executable node may define:
 - optional `label`
 - optional `repo`
 - optional `profile`
-- optional `inputs`
-- optional `context_from`
-- optional `outputs`
+- optional `context`
+- optional `artifacts`
 - optional `timeout_sec`
 
 Rules:
@@ -171,9 +170,8 @@ Supported release `check_kind` values:
 
 Optional shared check fields:
 
-- `inputs`
-- `context_from`
-- `outputs`
+- `context`
+- `artifacts`
 - `on_failure`
 
 Deterministic check fields:
@@ -223,15 +221,14 @@ Optional shared fields:
 - `label`
 - `repo`
 - `profile`
-- `inputs`
-- `context_from`
+- `context`
+- `artifacts`
 - `timeout_sec`
 
 Rules:
 
 - `checkpoint` is only valid inside a `repeat.body` in this release.
-- `review_from` must reference an upstream `context_from.include = "output"` artifact.
-- authored `outputs` are not allowed on checkpoint nodes.
+- `review_from` must reference an upstream named artifact.
 - the runtime exposes one automatic checkpoint output named `operator_feedback` from `operator-feedback.md`.
 - checkpoint execution requires an interactive terminal because the operator must choose `pass`, `deny`, or `abort`.
 
@@ -287,57 +284,55 @@ Rules:
 
 There are no free-form conditions in this release.
 
-## Inputs, Context, and Outputs
+## Context and Artifacts
 
-`inputs`, `context_from`, and `outputs` are the authored contract between graph authoring and runtime context resolution.
+`context` and `artifacts` are the authored contract between graph authoring and runtime context resolution. Old public data-flow fields `inputs`, `context_from`, and `outputs` are invalid graph syntax and are rejected with replacement guidance.
 
-### `inputs`
+The runtime keeps two channels separate:
 
-`inputs` is a list of static materials resolved before execution. Supported release item shapes:
+- Workspace state is mutable repo state. Agents and commands read and edit it through their selected workspace backend.
+- Artifacts are durable named handoff files. They are the only execution-produced material that downstream nodes can consume through `context.from = "artifact"`.
+
+This separation is intentional. A graph may modify source files in a worktree, but a later node should not depend on guessing which execution directory or scratch file mattered. If a later node needs material, the producer must publish a named artifact or rely on the reserved automatic artifacts.
+
+### `context`
+
+`context` is a list of named materials resolved before execution. Supported release item shapes:
 
 ```json
-{ "kind": "file", "path": "src/server.ts" }
-{ "kind": "file", "path": "web:src/App.tsx" }
-{ "kind": "glob", "path": "src/**/*.ts", "max_files": 20 }
-{ "kind": "text", "name": "acceptance", "text": "Keep the CLI surface unchanged." }
+{ "name": "server", "from": "workspace_file", "path": "src/server.ts" }
+{ "name": "web_app", "from": "workspace_file", "path": "web:src/App.tsx" }
+{ "name": "sources", "from": "workspace_glob", "path": "src/**/*.ts", "max_files": 20 }
+{ "name": "acceptance", "from": "text", "text": "Keep the CLI surface unchanged." }
 ```
 
-Rules:
-
-- Unqualified file and glob paths resolve against the node repo.
-- Repo-qualified paths use `<repo_alias>:<relative_path>`.
-- File and glob paths must stay within the selected repo root.
-- `glob` enumeration uses a deterministic sorted recursive filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`.
-- `glob.max_files` is a local cap for that glob only.
-- `text.name` is required and stable inside the materialized context packet.
-
-### `context_from`
-
-`context_from` is a list of upstream references resolved from prior node executions.
+Artifact context resolves named artifacts from prior node executions:
 
 ```json
 {
+  "name": "agent_notes",
+  "from": "artifact",
   "node": "understand_codebase",
-  "include": "summary"
+  "artifact": "agent_response"
 }
 ```
 
 ```json
 {
+  "name": "junit",
+  "from": "artifact",
   "node": "run_tests",
-  "include": "output",
-  "output": "junit",
+  "artifact": "junit",
   "iteration": "latest",
   "attempt": "latest_passed",
   "optional": false
 }
 ```
 
-Supported release fields:
+Supported artifact context fields:
 
 - `node`: upstream authored node id
-- `include`: `summary` | `result` | `output`
-- `output`: required when `include = "output"`
+- `artifact`: upstream artifact name
 - `iteration`: optional selector for repeated nodes
 - `attempt`: optional execution selector
 - `optional`: optional boolean, default `false`
@@ -351,49 +346,73 @@ Supported selectors:
 
 Resolution rules:
 
+- Unqualified workspace file and glob paths resolve against the node repo.
+- Repo-qualified paths use `<repo_alias>:<relative_path>`.
+- Workspace file and glob paths must stay within the selected repo root.
+- `workspace_glob` enumeration uses a deterministic sorted recursive filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`.
+- `workspace_glob.max_files` is a local cap for that glob only.
+- `name` is required and stable inside the materialized context packet.
 - `node` always references an authored id. The compiler resolves it to one or more compiled nodes.
 - For nodes outside any `repeat`, `iteration` is omitted and treated as `0`.
 - For nodes inside a `repeat`, cross-scope references must specify `iteration` when more than one iteration could satisfy the reference.
 - `attempt` is evaluated after `iteration` is resolved.
-- `summary` resolves to `context_summary.md`.
-- `result` resolves to `result.json`.
-- `output` resolves to a declared named output inside the selected execution.
+- `agent_response` resolves to `agent-response.md` for agent nodes.
+- `result_json` resolves to `result.json` for every executable node.
+- other artifact names resolve to declared artifacts on the selected execution.
+- declared artifact descriptions are carried from the producer into the consumer's context packet and manifest.
 
-### `outputs`
+### `artifacts`
 
-`outputs` declares named artifacts that downstream nodes may reference.
+`artifacts` declares named artifacts that downstream nodes may reference.
 
 ```json
 {
-  "name": "junit",
-  "from": "workspace",
-  "path": "reports/junit.xml",
-  "required": false
+  "junit": {
+    "from": "workspace",
+    "path": "reports/junit.xml",
+    "description": "JUnit XML test report produced by the validation command."
+  }
 }
 ```
 
 ```json
 {
-  "name": "summary",
-  "from": "attempt",
-  "path": "summary.md",
-  "required": true
+  "design_packet": {
+    "from": "output_dir",
+    "path": "design-packet.json",
+    "description": "Structured JSON implementation packet for downstream implementation nodes."
+  }
 }
 ```
 
 Supported release fields:
 
-- `name`
-- `from`: `workspace` | `attempt`
+- map key: artifact name
+- `from`: `workspace` | `output_dir`
 - `path`
-- optional `required`, default `false`
+- `description`: a one-sentence description of the expected file contents
 
 Rules:
 
-- Output names are unique per node.
+- Artifact names are unique per node.
+- User-declared artifact names must not collide with reserved automatic artifacts: `agent_response` and `result_json`.
 - `from = "workspace"` copies a file from the node workspace into the execution artifact directory when the node closes.
-- `from = "attempt"` points at a file already written directly into the execution artifact directory by the executor.
-- Downstream `context_from.include = "output"` must reference a declared output name.
+- `from = "output_dir"` reads a file from the node execution output directory when the node closes.
+- Every declared artifact must exist when the node closes. Missing declared artifacts fail the node.
+- Both path forms must remain inside their source root.
+- Downstream artifact context must reference either a declared artifact or a reserved automatic artifact.
+- Agent harness prompts explain that the model is executing one node in a graph, list declared artifacts with descriptions, and state that the final response is captured as `agent_response`.
+- Harness subprocesses receive `AGENTFLOW_WORKSPACE`, `AGENTFLOW_OUTPUT_DIR`, `AGENTFLOW_CONTEXT_PACKET`, and `AGENTFLOW_CONTEXT_MANIFEST`, matching command nodes.
+- Source edits happen in the workspace, durable handoff artifacts go in `AGENTFLOW_OUTPUT_DIR`, and downstream nodes consume only named artifacts.
+
+Authoring guidance:
+
+- Use `agent_response` for short narrative handoffs where the final model response is the artifact. It should summarize outcome, work completed, artifacts produced, validation, and handoff notes.
+- Declare `output_dir` artifacts for machine-readable packets, summaries, ledgers, and reports the agent or command intentionally writes.
+- Declare `workspace` artifacts when the important output is produced in the repo workspace, such as a test report under `reports/`.
+- Do not declare a producer artifact unless the node is responsible for producing it. For supplementary evidence, either require a concise artifact or rely on `agent_response`.
+- Descriptions should tell the producer what to write and tell consumers what the material means.
+- Keep artifact names semantic: `design_packet`, `evaluation_ledger`, `review_summary`, not `output1`.
 
 ### Validation rules
 
@@ -403,19 +422,19 @@ The compiler rejects:
 - unknown repo aliases
 - unknown profile names
 - profile and node `env_files` paths that are absolute, repo-qualified, or escape the node workspace root
-- `context_from` references to nodes that are not guaranteed to execute before the consumer
+- artifact context references to nodes that are not guaranteed to execute before the consumer
 - ambiguous repeated-node references without an `iteration` selector
-- `output` references to undeclared names
+- artifact references to undeclared names
 - cross-repo direct file reads without explicit repo qualification when the source repo is not the consumer repo
 - `repeat.until.node` targets that use `on_failure = "continue"`
 
 Runtime context resolution fails the node when:
 
-- a required referenced file or output is missing
+- a required referenced file or artifact is missing
 - an `attempt` selector resolves to no execution
-- input material exceeds the effective limits after truncation rules are applied
+- context material exceeds the effective limits after truncation rules are applied
 
-If `optional: true`, the missing item is omitted and the omission is recorded in `context_packet.json`.
+If `optional: true`, the missing item is omitted and the omission is recorded in `context/packet.json`.
 
 CLI validation runs in three phases:
 
@@ -423,7 +442,7 @@ CLI validation runs in three phases:
 2. compiled validation after lowering managed patterns
 3. readiness validation for declared prerequisites and resolved repo sources
 
-Readiness validation blocks launch only for required checks. Optional prerequisite failures remain visible as warnings.
+Plain readiness validation blocks launch only for required declared checks. Optional prerequisite failures remain visible as warnings. `agentflow validate --graph <path> --run-ready` adds local machine checks for `git`, repo worktree status, executable node commands, and harness binaries so an operator can prove the graph is runnable on the current host before starting a run.
 
 ## Profile Model
 
@@ -556,7 +575,8 @@ The runtime consumes a flat compiled graph plus explicit scope metadata.
         "sandbox": "workspace-write",
         "timeout_sec": 1800
       },
-      "declared_outputs": []
+      "context": [],
+      "declared_artifacts": {}
     }
   ],
   "edges": [
@@ -678,36 +698,36 @@ The state store must be able to answer:
 
 ### Inputs accepted by context resolution
 
-- static `inputs`
-- upstream `context_from` references
+- static `context` items
+- upstream artifact references
 - repo metadata and workspace paths
 - effective `input_rules`
 
-Authored `inputs` resolve live when each node starts. Agentflow does not snapshot all authored inputs up front for the whole run.
+Authored workspace context resolves live when each node starts. Agentflow does not snapshot all authored context up front for the whole run.
 
 ### Materialization behavior
 
 Context resolution produces:
 
-- `context_packet.json`
-- `context_summary.md`
-- `context_provenance.json`
+- `context/packet.json`
+- `context/manifest.md`
+- `context/provenance.json`
 
-`context_packet.json` must include:
+`context/packet.json` must include:
 
 - `execution_id`
 - target repo alias and workspace path
 - tokenizer identifier used for materialized text
-- one entry per materialized input
+- one entry per materialized context item
 - original source descriptor for each entry
 - materialized file path inside the execution directory
-- live-workspace binding metadata when the material came from a resolved file or glob input
+- live-workspace binding metadata when the material came from a resolved workspace file or glob context item
 - token counts and truncation flags
 - omitted optional items
 
-`context_provenance.json` must include:
+`context/provenance.json` must include:
 
-- digests for resolved explicit file inputs
+- digests for resolved explicit workspace file context
 - sorted live glob match sets plus per-file digests
 - harness instruction digests for `agent`, AI `check`, and `checkpoint` nodes
 
@@ -715,9 +735,9 @@ Agentflow does not duplicate repository instruction files into the context packe
 
 Context materialization is incremental. The runtime enforces `max_total_tokens` while it materializes items and fails as soon as the next item would overflow the token budget.
 
-Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing file or glob inputs are recorded explicitly as omitted context instead of crashing the whole run during preflight. Resolved material that is not valid UTF-8 text is also omitted because context packets are tokenized text.
+Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing workspace files, empty globs, and optional artifact context references are recorded explicitly as omitted context instead of crashing the whole run during preflight. Resolved artifact materials include the producer's description. Resolved material that is not valid UTF-8 text is also omitted because context packets are tokenized text.
 
-The release does not implement retrieval, embeddings, ranking, or semantic search. Input resolution is explicit file and artifact materialization only.
+The release does not implement retrieval, embeddings, ranking, or semantic search. Context resolution is explicit file and artifact materialization only.
 
 ## Resume Preservation
 
@@ -749,6 +769,7 @@ interface AgentInvocation {
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   prompt: string;
   contextPacketPath: string;
+  contextManifestPath: string;
   outputDir: string;
   timeoutSec: number;
 }
@@ -837,7 +858,7 @@ Runs before compilation. It checks:
 - unique ids
 - valid repo references
 - valid profile references
-- legal `inputs`, `context_from`, and `outputs`
+- legal `context` and `artifacts`
 - repeat semantics
 - `env_files` path boundaries
 - unsupported deferred features
@@ -861,7 +882,7 @@ Runs after successful compilation and before execution. It checks:
 - workspace backend can initialize
 - run artifact directory is writable
 
-Node-specific readiness is lazy in this release. Missing harness binaries, missing checkpoint executors, and missing interactive TTY support fail the node that reaches that boundary instead of failing the whole graph before execution starts.
+Run-time node-specific readiness is lazy in this release. Missing harness binaries, missing checkpoint executors, and missing interactive TTY support fail the node that reaches that boundary instead of failing the whole graph before execution starts. Operators who want upfront local proof should run `validate --run-ready` before launch.
 
 ## Artifact Model
 
@@ -877,20 +898,33 @@ Run artifacts live under the run root:
   state.json
   events.jsonl
   summary.md
+  workspace-changes/
+    <repo_alias>/
+      status.txt
+      diff.patch
+      changed-files.json
   workspaces/
     <repo_alias>/
   nodes/
-    node-<hash>/
+    001-<node-label>-<hash>/
       executions/
-        exec-<hash>/
+        001-exec-<hash>/
           execution.json
-          context_packet.json
-          context_summary.md
-          context_provenance.json
-          stdout.log
-          stderr.log
+          context/
+          logs/
+        i001-a001-exec-<hash>/
+          execution.json
+          context/
+            packet.json
+            manifest.md
+            provenance.json
+            materialized/
+          logs/
+            stdout.log
+            stderr.log
           result.json
-          artifacts/   # present only when workspace outputs are copied here
+          agent-response.md
+          artifacts/   # present only when declared artifacts are copied here
 ```
 
 `<runs-root>` resolves from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
@@ -906,13 +940,17 @@ Run artifacts live under the run root:
 - `state.json` is the latest projected read model
 - `events.jsonl` is append-only and authoritative for history
 - `summary.md` is written for every terminal run, including preflight failure with zero node executions
-- node and execution directories use stable hashed names on disk, not literal `compiled_id` or `execution_id` values
+- `workspace-changes/` captures per-repo `git status --porcelain=v1`, `git diff --binary`, and changed-file metadata before terminal worktree cleanup when the repository is inspectable
+- node directories are prefixed with stable compiled-order numbers and readable labels, then a hash suffix
+- execution directories are prefixed with append-only runtime ordinals, then a hash suffix; repeated nodes include both iteration and attempt ordinals, such as `i001-a002-exec-<hash>`
 - execution directories are immutable once closed except for final summary writes
-- execution-root files are written directly in the execution directory: `execution.json`, `stdout.log`, `stderr.log`, and `result.json` are always present once execution starts; `context_packet.json`, `context_summary.md`, and `context_provenance.json` appear only when context resolution succeeds
-- `artifacts/` is optional and exists only when Agentflow materializes declared workspace outputs there
+- execution-root files stay small: `execution.json` and `result.json` are always present once execution starts; `logs/stdout.log` and `logs/stderr.log` hold durable process output; `context/packet.json`, `context/manifest.md`, and `context/provenance.json` appear only when context resolution succeeds
+- `agent-response.md` appears for agent nodes and is published as the reserved `agent_response` artifact
+- `result.json` is published as the reserved `result_json` artifact for every executable node
+- `artifacts/` is optional and exists only when Agentflow materializes declared artifacts there
 - `workspaces/` is durable only for an active `worktree` run. Once the run reaches a terminal state or workspace init rolls back, the manifest still records the historical path, but the worktree directory itself may already be gone
 - projection reads may repair stale `pending` or `running` artifacts into a terminal failed state when the recorded runtime owner fingerprint no longer matches a live local process or when a terminal run record or terminal event proves the durable state drifted
-- authored `file` and `glob` inputs resolve from the live workspace when the node starts; missing files or empty globs are recorded in `context_summary.md` and `context_packet.json` as omitted items
+- authored workspace context resolves from the live workspace when the node starts; missing files or empty globs are recorded in `context/manifest.md` and `context/packet.json` as omitted items
 
 ### Failure and partial-output rules
 
@@ -962,7 +1000,7 @@ Every event record contains:
 | `run.canceled` | `reason` |
 | `run.completed` | `outcome`, `duration_ms` |
 
-Log lines are not required to be replayable through the event stream in this release. Inspection tooling reads logs from `stdout.log` and `stderr.log`.
+Log lines are not required to be replayable through the event stream in this release. Inspection tooling reads logs from `logs/stdout.log` and `logs/stderr.log`.
 
 ## Artifact Read Model Boundary
 

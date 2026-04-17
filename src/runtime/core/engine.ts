@@ -1,3 +1,4 @@
+import { access, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
@@ -23,7 +24,7 @@ import {
   latestOutcomeForIteration,
   listAttemptsForCompiledNode,
   openNodeAttempt,
-  peekNextAttemptIndex,
+  peekNextAttemptIndexes,
   type RuntimeNodeAttempt
 } from "../attempts.js";
 import { runAiCheck } from "../checks/ai.js";
@@ -52,6 +53,7 @@ import {
 } from "../session.js";
 import { initializeInplaceWorkspace } from "../workspace/inplace.js";
 import type { WorkspaceSetup } from "../workspace/types.js";
+import { captureWorkspaceChanges } from "../workspace/changes.js";
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
 import {
   buildSchedulerTopology,
@@ -73,6 +75,7 @@ export interface RuntimeNodeExecutionResult {
   metadata?: Record<string, unknown>;
   check?: CheckEvaluatedPayload;
   verification?: VerificationRecordedPayload;
+  agent_response?: string;
 }
 
 export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode> {
@@ -82,7 +85,7 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
   workspace_path: string;
   execution_dir: string;
   context_packet_path: string;
-  context_summary_path: string;
+  context_manifest_path: string;
   signal: AbortSignal | undefined;
   on_stdout_chunk?: (chunk: string) => void;
   on_stderr_chunk?: (chunk: string) => void;
@@ -764,6 +767,15 @@ function resolveNodeEnvFiles(
   });
 }
 
+function buildNodeRuntimeEnv(context: RuntimeNodeExecutorContext<CompiledExecutableNode>): Record<string, string> {
+  return {
+    AGENTFLOW_WORKSPACE: context.workspace_path,
+    AGENTFLOW_OUTPUT_DIR: context.execution_dir,
+    AGENTFLOW_CONTEXT_PACKET: context.context_packet_path,
+    AGENTFLOW_CONTEXT_MANIFEST: context.context_manifest_path
+  };
+}
+
 function summarizeExecVerification(exitCode: number): string {
   return exitCode === 0 ? "Command completed successfully." : `Command exited with code ${exitCode}.`;
 }
@@ -793,6 +805,7 @@ async function defaultExecExecutor(
     cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
     ...(env_files !== undefined ? { env_files } : {}),
     env: context.node.env,
+    runtime_env: buildNodeRuntimeEnv(context),
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal
   });
@@ -848,6 +861,7 @@ async function defaultCheckExecutor(
       cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
       ...(env_files !== undefined ? { env_files } : {}),
       env: context.node.env,
+      runtime_env: buildNodeRuntimeEnv(context),
       timeout_sec: context.node.effective_policy.timeout_sec,
       pass_if: context.node.pass_if,
       signal: context.signal
@@ -923,6 +937,7 @@ async function defaultCheckExecutor(
     prompt: context.node.prompt ?? "",
     rubric: context.node.rubric,
     context_packet_path: context.context_packet_path,
+    context_manifest_path: context.context_manifest_path,
     output_dir: context.execution_dir,
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
@@ -1011,6 +1026,7 @@ async function defaultAgentExecutor(
   }
 
   const harnessResult = await harnesses[harnessName]!.run({
+    promptKind: "agent",
     runId: context.run_id,
     executionId: context.attempt.execution_id,
     repoAlias: context.node.repo,
@@ -1023,7 +1039,9 @@ async function defaultAgentExecutor(
       : {}),
     prompt: context.node.prompt,
     contextPacketPath: context.context_packet_path,
+    contextManifestPath: context.context_manifest_path,
     outputDir: context.execution_dir,
+    artifacts: context.node.declared_artifacts,
     timeoutSec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
     ...(context.on_stdout_chunk ? { onStdoutChunk: context.on_stdout_chunk } : {}),
@@ -1039,8 +1057,65 @@ async function defaultAgentExecutor(
     },
     stdout: harnessResult.stdout,
     stderr: harnessResult.stderr,
+    agent_response: harnessResult.transcript?.last_message ?? harnessResult.stdout ?? "",
     ...(harnessResult.metadata ? { metadata: harnessResult.metadata } : {})
   };
+}
+
+async function writeAutomaticArtifacts(
+  node: CompiledExecutableNode,
+  attempt: RuntimeNodeAttempt,
+  executionPaths: Awaited<ReturnType<ArtifactWriter["writeExecutionStart"]>>,
+  result: RuntimeNodeExecutionResult
+): Promise<Record<string, string>> {
+  const artifacts: Record<string, string> = {
+    result_json: executionPaths.result_path
+  };
+
+  if (node.kind !== "agent") {
+    return artifacts;
+  }
+
+  const responsePath = join(attempt.execution_dir, "agent-response.md");
+  const response =
+    typeof result.agent_response === "string" && result.agent_response.trim().length > 0
+      ? result.agent_response
+      : "Agent completed without a captured final response.\n";
+
+  await writeFile(responsePath, response.endsWith("\n") ? response : `${response}\n`, "utf8");
+  artifacts.agent_response = responsePath;
+  return artifacts;
+}
+
+async function ensureCheckpointPassFeedbackArtifact(
+  node: CompiledExecutableNode,
+  attempt: RuntimeNodeAttempt,
+  result: RuntimeNodeExecutionResult
+): Promise<void> {
+  if (node.kind !== "checkpoint" || result.status !== "passed") {
+    return;
+  }
+
+  const feedbackArtifact = node.declared_artifacts.operator_feedback;
+  if (!feedbackArtifact || feedbackArtifact.from !== "output_dir") {
+    return;
+  }
+
+  const feedbackPath = resolveSubpathWithinRoot(
+    attempt.execution_dir,
+    feedbackArtifact.path,
+    'Checkpoint "operator_feedback" artifact path'
+  );
+
+  try {
+    await access(feedbackPath);
+  } catch {
+    await writeFile(
+      feedbackPath,
+      "Checkpoint passed. No operator feedback was provided.\n",
+      "utf8"
+    );
+  }
 }
 
 async function executeNode(
@@ -1068,6 +1143,7 @@ async function executeNode(
     | Awaited<ReturnType<ArtifactWriter["writeExecutionStart"]>>
     | undefined;
   let logSink: StreamingLogSink | undefined;
+  let automaticArtifacts: Record<string, string> | undefined;
 
   try {
     executionPaths = await writer.writeExecutionStart(attempt);
@@ -1101,7 +1177,7 @@ async function executeNode(
             workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -1113,7 +1189,7 @@ async function executeNode(
             workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal
           });
     } else if (node.kind === "check") {
@@ -1125,7 +1201,7 @@ async function executeNode(
             workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -1138,7 +1214,7 @@ async function executeNode(
               workspace_path: workspace.workspace_path,
               execution_dir: attempt.execution_dir,
               context_packet_path: context.packet_path,
-              context_summary_path: context.summary_path,
+              context_manifest_path: context.manifest_path,
               signal
             },
             options.harnesses ?? {}
@@ -1155,7 +1231,7 @@ async function executeNode(
         workspace_path: workspace.workspace_path,
         execution_dir: attempt.execution_dir,
         context_packet_path: context.packet_path,
-        context_summary_path: context.summary_path,
+        context_manifest_path: context.manifest_path,
         signal,
         on_stdout_chunk: logSink.on_stdout_chunk,
         on_stderr_chunk: logSink.on_stderr_chunk
@@ -1169,7 +1245,7 @@ async function executeNode(
             workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal
           })
         : await defaultAgentExecutor(
@@ -1180,7 +1256,7 @@ async function executeNode(
               workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -1197,10 +1273,18 @@ async function executeNode(
       ...(result.stderr !== undefined ? { stderr: result.stderr } : {})
     });
 
-    const output_artifacts =
+    await ensureCheckpointPassFeedbackArtifact(node, attempt, result);
+
+    automaticArtifacts = await writeAutomaticArtifacts(node, attempt, executionPaths, result);
+    const artifacts =
       result.status === "canceled"
-        ? {}
-        : await writer.materializeDeclaredOutputs(node, attempt, workspace.workspace_path);
+        ? automaticArtifacts
+        : await writer.materializeDeclaredArtifacts(
+            node,
+            attempt,
+            workspace.workspace_path,
+            automaticArtifacts
+          );
 
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
       status: result.status,
@@ -1209,9 +1293,9 @@ async function executeNode(
       stderr_log_path: executionPaths.stderr_log_path,
       result_path: executionPaths.result_path,
       context_packet_path: context.packet_path,
-      context_summary_path: context.summary_path,
+      context_manifest_path: context.manifest_path,
       context_provenance_path: context.provenance_path,
-      output_artifacts,
+      artifacts,
       ...((result.metadata || result.verification)
         ? {
             metadata: {
@@ -1239,6 +1323,22 @@ async function executeNode(
     }
 
     const message = error instanceof Error ? error.message : String(error);
+    const failureArtifacts: Record<string, string> | undefined = executionPaths
+      ? {
+          result_json: executionPaths.result_path,
+          ...(automaticArtifacts ?? {})
+        }
+      : undefined;
+
+    if (executionPaths && node.kind === "agent" && !failureArtifacts?.agent_response) {
+      const responsePath = join(attempt.execution_dir, "agent-response.md");
+      await writeFile(responsePath, `Agent failed before a final response was captured: ${message}\n`, "utf8");
+
+      if (failureArtifacts) {
+        failureArtifacts.agent_response = responsePath;
+      }
+    }
+
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
       status: "failed",
       outcome: "failed",
@@ -1246,13 +1346,14 @@ async function executeNode(
         ? {
             stdout_log_path: executionPaths.stdout_log_path,
             stderr_log_path: executionPaths.stderr_log_path,
-            result_path: executionPaths.result_path
+            result_path: executionPaths.result_path,
+            ...(failureArtifacts ? { artifacts: failureArtifacts } : {})
           }
         : {}),
       ...(context
         ? {
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             context_provenance_path: context.provenance_path
           }
         : {}),
@@ -1322,15 +1423,27 @@ async function startReadyNode(
     readyQueue.queue.splice(index, 1);
     readyQueue.queued_keys.delete(createReadyNodeKey(readyNode));
 
-    const nextAttemptIndex = peekNextAttemptIndex(session.attempts, node.compiled_id);
-    const executionId = buildExecutionId(node.compiled_id, nextAttemptIndex, {
+    const nextAttemptIndexes = peekNextAttemptIndexes(session.attempts, node.compiled_id, {
+      ...(readyNode.iteration_index !== undefined ? { iteration_index: readyNode.iteration_index } : {})
+    });
+    const executionId = buildExecutionId(node.compiled_id, nextAttemptIndexes.attempt_index, {
       ...(readyNode.repeat_scope_id ? { repeat_scope_id: readyNode.repeat_scope_id } : {}),
       ...(readyNode.iteration_index !== undefined ? { iteration_index: readyNode.iteration_index } : {})
     });
-    const executionDir = writer.getExecutionDirectory(node.compiled_id, executionId);
+    const executionDir = writer.getExecutionDirectory(node.compiled_id, executionId, {
+      attemptIndex: nextAttemptIndexes.attempt_index,
+      ...(readyNode.iteration_index !== undefined ? { iterationIndex: readyNode.iteration_index } : {}),
+      ...(nextAttemptIndexes.iteration_attempt_index !== undefined
+        ? { iterationAttemptIndex: nextAttemptIndexes.iteration_attempt_index }
+        : {})
+    });
     const attempt = openNodeAttempt(session.attempts, node, executionDir, {
       ...(readyNode.repeat_scope_id ? { repeat_scope_id: readyNode.repeat_scope_id } : {}),
-      ...(readyNode.iteration_index !== undefined ? { iteration_index: readyNode.iteration_index } : {})
+      ...(readyNode.iteration_index !== undefined ? { iteration_index: readyNode.iteration_index } : {}),
+      attempt_index: nextAttemptIndexes.attempt_index,
+      ...(nextAttemptIndexes.iteration_attempt_index !== undefined
+        ? { iteration_attempt_index: nextAttemptIndexes.iteration_attempt_index }
+        : {})
     });
     registerActiveExecution(session, attempt);
     const abortControl = createExecutionAbortControl(options.signal);
@@ -1481,6 +1594,11 @@ async function finalizeRunWithWorkspaceCleanup(
   let finalReason = reason;
 
   if (workspace) {
+    session.workspace_change_artifacts = await captureWorkspaceChanges(
+      writer.run_root,
+      Object.values(workspace.repo_workspaces)
+    );
+
     try {
       await workspace.cleanup();
     } catch (error) {
@@ -1799,7 +1917,7 @@ export async function runCompiledGraph(
   options: RunCompiledGraphOptions
 ): Promise<RunCompiledGraphResult> {
   const run_id = deriveRunId(options.run_root);
-  const writer = new ArtifactWriter(options.run_root);
+  const writer = new ArtifactWriter(options.run_root, options.compiled_graph);
   const activeRepoSources = filterActiveRepoSources(options.compiled_graph, options.repo_sources);
   const predictedBindings = predictWorkspaceBindings(
     options.compiled_graph.launch.workspace_backend,
@@ -1902,7 +2020,7 @@ export async function runCompiledGraph(
 export async function resumeCompiledGraph(
   options: ResumeCompiledGraphOptions
 ): Promise<RunCompiledGraphResult> {
-  const writer = new ArtifactWriter(options.run_root);
+  const writer = new ArtifactWriter(options.run_root, options.compiled_graph);
   const runOwner = await createRunOwnerRecord();
   const session = options.resumed_session;
   const events = [...options.prior_events];

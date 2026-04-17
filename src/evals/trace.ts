@@ -53,7 +53,7 @@ export async function writeEvalTrace(options: {
       node_kind: node.kind,
       repo_alias: node.repo,
       lowered_from: node.lowered_from,
-      declared_outputs: node.declared_outputs,
+      declared_artifacts: node.declared_artifacts,
       effective_policy: node.effective_policy
     }));
   }

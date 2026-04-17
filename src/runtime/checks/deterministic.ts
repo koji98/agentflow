@@ -11,6 +11,7 @@ export interface LocalProcessInvocation {
   cwd: string;
   env_files?: string[];
   env: Record<string, string> | undefined;
+  runtime_env?: Record<string, string>;
   timeout_sec: number;
   signal: AbortSignal | undefined;
 }
@@ -36,7 +37,8 @@ export interface DeterministicCheckResult extends LocalProcessResult {
 async function buildLocalProcessEnv(
   cwd: string,
   envFilePaths: string[] | undefined,
-  envOverrides: Record<string, string> | undefined
+  envOverrides: Record<string, string> | undefined,
+  runtimeEnv: Record<string, string> | undefined
 ): Promise<Record<string, string>> {
   const baselineKeys =
     process.platform === "win32"
@@ -57,6 +59,7 @@ async function buildLocalProcessEnv(
   return {
     ...env,
     ...envFileValues,
+    ...(runtimeEnv ?? {}),
     ...(envOverrides ?? {})
   };
 }
@@ -179,7 +182,12 @@ function evaluateDeterministicPassIf(
 export async function runLocalProcess(
   invocation: LocalProcessInvocation
 ): Promise<LocalProcessResult> {
-  const env = await buildLocalProcessEnv(invocation.cwd, invocation.env_files, invocation.env);
+  const env = await buildLocalProcessEnv(
+    invocation.cwd,
+    invocation.env_files,
+    invocation.env,
+    invocation.runtime_env
+  );
 
   return new Promise<LocalProcessResult>((resolve, reject) => {
     const child = spawn(invocation.command, invocation.args, {

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
-import { executeCli } from "../../src/cli/index.js";
+import { executeCli, renderCliStdout } from "../../src/cli/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -103,9 +103,23 @@ describe("graph CLI", () => {
     expect(payload.compiled_validation.status).toBe("passed");
     expect(payload.compiled_validation.compiled_summary.node_count).toBe(7);
     expect(payload.compiled_validation.managed_expansion).toEqual([]);
+    expect(payload.readiness_mode).toBe("declared");
     expect(payload.readiness.status).toBe("ready");
     expect(payload.next_steps.compile).toContain("agentflow compile --graph");
     expect(payload.next_steps.graph_help).toBe("agentflow graph-help");
+  });
+
+  it("renders compact interactive validate success output", async () => {
+    const graphPath = fileURLToPath(
+      new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
+    );
+    const result = await executeCli(["validate", "--graph", graphPath]);
+    const rendered = renderCliStdout(result, { isTty: true });
+
+    expect(result.exitCode).toBe(0);
+    expect(rendered).toContain("Graph validated.");
+    expect(rendered).toContain("Run-ready checks: not requested");
+    expect(rendered).not.toContain("{");
   });
 
   it("surfaces readiness warnings and blocks from declarative prerequisites during validate", async () => {
@@ -220,6 +234,172 @@ describe("graph CLI", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("checks local runtime dependencies when validate is run-ready", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const writeGraph = async (command: string) => {
+      await writeFile(
+        graphPath,
+        `${JSON.stringify(
+          {
+            version: "1",
+            graph_id: "cli-run-ready",
+            repos: {
+              main: {
+                path: "./repo"
+              }
+            },
+            defaults: {
+              launch_profile: "default",
+              workspace_backend: "worktree"
+            },
+            profiles: {
+              default: {}
+            },
+            graph: {
+              type: "sequence",
+              id: "root",
+              steps: [
+                {
+                  type: "exec",
+                  id: "verify_tooling",
+                  repo: "main",
+                  command,
+                  args: ["-e", "process.exit(0)"]
+                }
+              ]
+            }
+          },
+          null,
+          2
+        )}\n`
+      );
+    };
+
+    await writeGraph(process.execPath);
+    const readyResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+    const readyPayload = JSON.parse(readyResult.stdout);
+
+    expect(readyResult.exitCode).toBe(0);
+    expect(readyPayload.readiness_mode).toBe("run-ready");
+    expect(readyPayload.readiness.status).toBe("ready");
+    expect(readyPayload.readiness.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "command",
+          target: `verify_tooling: ${process.execPath}`,
+          status: "passed"
+        }),
+        expect.objectContaining({
+          kind: "repo",
+          target: "main",
+          status: "passed"
+        })
+      ])
+    );
+
+    await writeGraph("definitely-missing-node-command");
+    const blockedResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+    const blockedPayload = JSON.parse(blockedResult.stdout);
+
+    expect(blockedResult.exitCode).toBe(1);
+    expect(blockedPayload.readiness_mode).toBe("run-ready");
+    expect(blockedPayload.readiness.status).toBe("blocked");
+    expect(blockedPayload.readiness.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "command",
+          target: "verify_tooling: definitely-missing-node-command",
+          status: "blocked",
+          message: expect.stringContaining("not available on PATH")
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("checks required harness binaries only during run-ready validate", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-harness-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    const missingCodex = join(tempRoot, "missing-codex");
+    const previousCodex = process.env.AGENTFLOW_CODEX_CLI_BIN;
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-run-ready-harness",
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "worktree"
+          },
+          profiles: {
+            default: {
+              harness: "codex-cli"
+            }
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "agent",
+                id: "implement",
+                repo: "main",
+                prompt: "Implement the change."
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+    process.env.AGENTFLOW_CODEX_CLI_BIN = missingCodex;
+
+    try {
+      const normalResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
+      const normalPayload = JSON.parse(normalResult.stdout);
+      const runReadyResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+      const runReadyPayload = JSON.parse(runReadyResult.stdout);
+
+      expect(normalResult.exitCode).toBe(0);
+      expect(normalPayload.readiness_mode).toBe("declared");
+      expect(runReadyResult.exitCode).toBe(1);
+      expect(runReadyPayload.readiness.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "harness",
+            target: "codex-cli",
+            status: "blocked",
+            message: expect.stringContaining(missingCodex)
+          })
+        ])
+      );
+    } finally {
+      if (previousCodex === undefined) {
+        delete process.env.AGENTFLOW_CODEX_CLI_BIN;
+      } else {
+        process.env.AGENTFLOW_CODEX_CLI_BIN = previousCodex;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("runs a deterministic graph end to end and writes run artifacts", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-"));
     const repoDir = join(tempRoot, "repo");
@@ -307,6 +487,13 @@ describe("graph CLI", () => {
     expect(payload.next_steps.rerun).toContain("agentflow run --graph");
     expect(payload.next_steps.resume).toContain("agentflow resume --run-root");
     expect(state.status).toBe("passed");
+    const attempts = await readRunExecutionAttempts(payload.run_root);
+    const writeAttempt = attempts.find((attempt) => attempt.authored_id === "write_marker");
+    expect(writeAttempt?.execution_dir).toMatch(/\/nodes\/001-write-marker-[0-9a-f]{12}\/executions\/001-exec-[0-9a-f]{16}$/);
+    expect(writeAttempt?.context_packet_path).toBe(join(writeAttempt!.execution_dir, "context", "packet.json"));
+    expect(writeAttempt?.context_manifest_path).toBe(join(writeAttempt!.execution_dir, "context", "manifest.md"));
+    await expect(access(join(writeAttempt!.execution_dir, "logs", "stdout.log"), constants.F_OK)).resolves.toBeUndefined();
+    await expect(access(join(writeAttempt!.execution_dir, "logs", "stderr.log"), constants.F_OK)).resolves.toBeUndefined();
     expect(await readFile(join(repoDir, "marker.txt"), "utf8")).toBe("ok\n");
     expect(progressOutput).toContain('agentflow: compiled graph "cli-run-graph" with 2 executable nodes');
     expect(progressOutput).toContain("agentflow: started run · workspace=inplace");
@@ -315,6 +502,80 @@ describe("graph CLI", () => {
     expect(progressOutput).toContain("[1/2] start check verify_marker · repo=main");
     expect(progressOutput).toContain("[2/2] passed check verify_marker");
     expect(progressOutput).toContain("agentflow: run passed · 2/2 terminal nodes");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("captures worktree status, binary diff, and changed files before cleanup", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-worktree-changes-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-worktree-change-capture",
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "worktree"
+          },
+          profiles: {
+            default: {}
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "mutate_workspace",
+                repo: "main",
+                command: process.execPath,
+                args: [
+                  "-e",
+                  [
+                    "const fs = require('node:fs');",
+                    "fs.writeFileSync('README.md', 'changed from worktree\\n');",
+                    "fs.writeFileSync('new-file.txt', 'new workspace file\\n');"
+                  ].join(" ")
+                ]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const result = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const payload = JSON.parse(result.stdout);
+    const capture = payload.workspace_change_artifacts.main;
+    const status = await readFile(capture.status_file, "utf8");
+    const diff = await readFile(capture.diff_file, "utf8");
+    const changedFiles = JSON.parse(await readFile(capture.changed_files_file, "utf8"));
+    const summary = await readFile(payload.artifacts.summary_file, "utf8");
+
+    expect(result.exitCode).toBe(0);
+    expect(payload.status).toBe("passed");
+    expect(payload.artifacts.workspace_changes_dir).toBe(join(payload.run_root, "workspace-changes"));
+    expect(capture.changed_files).toEqual(["README.md", "new-file.txt"]);
+    expect(changedFiles).toEqual(["README.md", "new-file.txt"]);
+    expect(status).toContain(" M README.md");
+    expect(status).toContain("?? new-file.txt");
+    expect(diff).toContain("changed from worktree");
+    expect(diff).toContain("new workspace file");
+    expect(summary).toContain("## Workspace Changes");
+    expect(summary).toContain(capture.diff_file);
+    await expect(access(payload.repo_workspaces.main.workspace_path)).rejects.toThrow();
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -500,14 +761,13 @@ describe("graph CLI", () => {
                       repo: "main",
                       command: process.execPath,
                       args: ["-e", "process.exit(0)"],
-                      outputs: [
-                        {
-                          name: "draft_spec",
-                          from: "attempt",
+                      artifacts: {
+                        draft_spec: {
+                          from: "output_dir",
                           path: "draft.md",
-                          required: true
+                          description: "Test artifact produced at draft.md."
                         }
-                      ]
+                      }
                     },
                     {
                       type: "checkpoint",
@@ -516,8 +776,7 @@ describe("graph CLI", () => {
                       prompt: "Review the artifact.",
                       review_from: {
                         node: "draft",
-                        include: "output",
-                        output: "draft_spec"
+                        artifact: "draft_spec"
                       }
                     }
                   ]
@@ -1039,6 +1298,35 @@ describe("graph CLI", () => {
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed").map((attempt) => ({
+      attempt_index: attempt.attempt_index,
+      execution_dir: attempt.execution_dir
+    }))).toEqual([
+      {
+        attempt_index: 1,
+        execution_dir: expect.stringMatching(/\/executions\/001-exec-[0-9a-f]{16}$/)
+      },
+      {
+        attempt_index: 2,
+        execution_dir: expect.stringMatching(/\/executions\/002-exec-[0-9a-f]{16}$/)
+      }
+    ]);
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output").map((attempt) => ({
+      iteration_index: attempt.iteration_index,
+      iteration_attempt_index: attempt.iteration_attempt_index,
+      execution_dir: attempt.execution_dir
+    }))).toEqual([
+      {
+        iteration_index: 1,
+        iteration_attempt_index: 1,
+        execution_dir: expect.stringMatching(/\/executions\/i001-a001-exec-[0-9a-f]{16}$/)
+      },
+      {
+        iteration_index: 1,
+        iteration_attempt_index: 2,
+        execution_dir: expect.stringMatching(/\/executions\/i001-a002-exec-[0-9a-f]{16}$/)
+      }
+    ]);
 
     await rm(tempRoot, { recursive: true, force: true });
   });

@@ -58,17 +58,20 @@
             ]
           }
         },
-        "inputs": [
+        "context": [
           {
-            "kind": "file",
+            "name": "readme",
+            "from": "workspace_file",
             "path": "README.md"
           },
           {
-            "kind": "file",
+            "name": "managed_patterns_doc",
+            "from": "workspace_file",
             "path": "docs/MANAGED_PATTERNS.md"
           },
           {
-            "kind": "file",
+            "name": "generate_evaluate_fix_doc",
+            "from": "workspace_file",
             "path": "docs/PATTERN_GENERATE_EVALUATE_FIX.md"
           }
         ],
@@ -148,20 +151,24 @@
         "repo": "main",
         "profile": "default",
         "prompt": "Summarize the final change package for an operator who needs the outcome, evaluation status, and residual risks.",
-        "context_from": [
+        "context": [
           {
+            "name": "implementation_response",
+            "from": "artifact",
             "node": "implement_managed_nodes",
-            "include": "summary"
+            "artifact": "agent_response"
           },
           {
+            "name": "change_summary",
+            "from": "artifact",
             "node": "implement_managed_nodes",
-            "include": "output",
-            "output": "change_summary"
+            "artifact": "change_summary"
           },
           {
+            "name": "evaluation_ledger",
+            "from": "artifact",
             "node": "implement_managed_nodes",
-            "include": "output",
-            "output": "evaluation_ledger"
+            "artifact": "evaluation_ledger"
           }
         ]
       }

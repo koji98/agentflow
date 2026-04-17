@@ -33,9 +33,8 @@ function createCompiledGraph(): CompiledGraph {
             max_tokens_per_item: 2000
           }
         },
-        inputs: [],
-        context_from: [],
-        declared_outputs: [],
+        context: [],
+        declared_artifacts: {},
         prompt: "Inspect the repo."
       },
       {
@@ -59,9 +58,8 @@ function createCompiledGraph(): CompiledGraph {
             max_tokens_per_item: 2000
           }
         },
-        inputs: [],
-        context_from: [],
-        declared_outputs: [],
+        context: [],
+        declared_artifacts: {},
         check_kind: "ai",
         prompt: "Check quality."
       }

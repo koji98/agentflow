@@ -1,10 +1,10 @@
 import type {
   AuthoredNodeKind,
+  ArtifactSourceKind,
   CheckKind,
   ContextSelector,
   FailureBehavior,
   HarnessName,
-  OutputSourceKind,
   PrerequisiteKind,
   ReasoningEffort,
   SandboxMode,
@@ -61,38 +61,48 @@ export interface GraphDefaults {
 }
 
 export interface FileInput {
-  kind: "file";
+  name: string;
+  from: "workspace_file";
   path: string;
 }
 
 export interface GlobInput {
-  kind: "glob";
+  name: string;
+  from: "workspace_glob";
   path: string;
   max_files?: number;
 }
 
 export interface TextInput {
-  kind: "text";
   name: string;
+  from: "text";
   text: string;
 }
 
-export type InputItem = FileInput | GlobInput | TextInput;
-
-export interface ContextReference {
+export interface ArtifactContext {
+  name: string;
+  from: "artifact";
   node: string;
-  include: "summary" | "result" | "output";
-  output?: string;
+  artifact: string;
   iteration?: ContextSelector;
   attempt?: ContextSelector;
   optional?: boolean;
 }
 
-export interface OutputDefinition {
-  name: string;
-  from: OutputSourceKind;
+export type ContextItem = FileInput | GlobInput | TextInput | ArtifactContext;
+
+export interface ArtifactReference {
+  node: string;
+  artifact: string;
+  iteration?: ContextSelector;
+  attempt?: ContextSelector;
+  optional?: boolean;
+}
+
+export interface ArtifactDefinition {
+  from: ArtifactSourceKind;
   path: string;
-  required?: boolean;
+  description: string;
 }
 
 export interface FilePrerequisite {
@@ -137,9 +147,8 @@ export interface BaseNode {
 export interface BaseExecutableNode extends BaseNode {
   repo?: string;
   profile?: string;
-  inputs?: InputItem[];
-  context_from?: ContextReference[];
-  outputs?: OutputDefinition[];
+  context?: ContextItem[];
+  artifacts?: Record<string, ArtifactDefinition>;
   timeout_sec?: number;
 }
 
@@ -180,7 +189,7 @@ export interface CheckNode extends BaseExecutableNode {
 export interface CheckpointNode extends BaseExecutableNode {
   type: "checkpoint";
   prompt: string;
-  review_from: ContextReference;
+  review_from: ArtifactReference;
 }
 
 export interface SequenceNode extends BaseNode {

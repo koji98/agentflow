@@ -37,7 +37,7 @@ The point is not just that Agentflow has several node kinds. It is that those no
 - Author the orchestration as data, not as hidden control flow inside a single agent prompt.
 - Keep execution local-first with explicit repos, workspaces, harnesses, and checks.
 - Compile author-friendly control flow into a runtime contract you can inspect before launch.
-- Preserve a durable run trail with summaries, logs, outputs, events, and projected state.
+- Preserve a durable run trail with summaries, logs, artifacts, events, and projected state.
 - Reuse structured managed patterns when you want higher-level scaffolds without inventing new runtime node kinds.
 
 ## Node Model
@@ -111,7 +111,7 @@ See also: [`docs/examples/graphs/README.md`](docs/examples/graphs/README.md)
 - [`docs/examples/graphs/fake-plan.json`](docs/examples/graphs/fake-plan.json)
   Small read-only sample with primitive `agent` and deterministic `check` nodes.
 - [`docs/examples/graphs/feature-showcase.json`](docs/examples/graphs/feature-showcase.json)
-  Broader sample that demonstrates profiles, `sequence`, `parallel`, `repeat`, primitive `agent`, `exec`, deterministic `check`, AI `check`, inputs, context flow, outputs, and a repair loop that uses `latest_failed` and `latest_passed`.
+  Broader sample that demonstrates profiles, `sequence`, `parallel`, `repeat`, primitive `agent`, `exec`, deterministic `check`, AI `check`, context flow, declared artifacts, and a repair loop that uses `latest_failed` and `latest_passed`.
 - [`docs/examples/graphs/pattern-deep-research-showcase.json`](docs/examples/graphs/pattern-deep-research-showcase.json)
   Managed pattern sample showing `pattern_deep_research` plus a downstream handoff node that consumes the published research package.
 - [`docs/examples/graphs/pattern-spec-design-showcase.json`](docs/examples/graphs/pattern-spec-design-showcase.json)
@@ -231,7 +231,7 @@ For pattern fields, authored examples, and compiled phases:
 
 Authoring contract references:
 
-- Primitive nodes, shared executable fields, containers, `inputs`, `context_from`, and `outputs`: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- Primitive nodes, shared executable fields, containers, `context`, and `artifacts`: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - `pattern_deep_research`: [`docs/PATTERN_DEEP_RESEARCH.md`](docs/PATTERN_DEEP_RESEARCH.md)
 - `pattern_spec_design`: [`docs/PATTERN_SPEC_DESIGN.md`](docs/PATTERN_SPEC_DESIGN.md)
 - `pattern_generate_evaluate_fix`: [`docs/PATTERN_GENERATE_EVALUATE_FIX.md`](docs/PATTERN_GENERATE_EVALUATE_FIX.md)
@@ -304,13 +304,21 @@ agentflow graph-help
 
 ### `validate`
 
-Validates and compiles a graph without running it. The output is organized into authored validation, compiled validation, and readiness validation.
+Validates and compiles a graph without running it. In an interactive terminal, success output is intentionally compact. Structured JSON remains available when stdout is redirected or when callers use the API-level command result.
 
 ```bash
 agentflow validate --graph ./agentflow.graph.json
 ```
 
 Use this first whenever you author or change a graph, especially when managed patterns or run prerequisites are involved.
+
+Add run-ready validation when you need proof that the local machine can launch the graph:
+
+```bash
+agentflow validate --graph ./agentflow.graph.json --run-ready
+```
+
+`--run-ready` checks runtime dependencies such as `git`, referenced repo worktrees, executable node commands, and harness binaries for agent and AI-check nodes.
 
 ### `compile`
 
@@ -337,7 +345,7 @@ agentflow run --graph ./agentflow.graph.json
 agentflow run --graph ./agentflow.graph.json --label demo
 ```
 
-During a run, `agent` and AI `check` nodes append live harness output into each execution's `stdout.log` and `stderr.log` under the run root. The final completed logs still remain the authoritative artifact.
+During a run, `agent` and AI `check` nodes append live harness output into each execution's `logs/stdout.log` and `logs/stderr.log` under the run root. The final completed logs still remain the authoritative artifact.
 
 While the graph is running, the CLI also prints human-readable progress to `stderr`. When `stdout` is a terminal, `run` prints a compact terminal summary with the final status and duration. When `stdout` is redirected or piped, the final machine-readable JSON result remains on `stdout`, so `agentflow run ... | jq` still works.
 
@@ -368,39 +376,92 @@ Like `run`, `resume` prints live graph progress to `stderr`, shows a compact ter
 
 This is meant for interrupted or failed runs where you want to keep unchanged passed work while still picking up graph or workflow fixes.
 
-## Inputs, Context, and Outputs
+## Context and Artifacts
 
-Supported input kinds:
+Executable nodes use one `context` array for all material passed into the node.
 
-- `file`
-- `glob`
+Think of the workspace and artifacts as separate channels:
+
+- The workspace is where source changes happen while the graph runs.
+- Artifacts are durable named files that later nodes may consume.
+- Downstream nodes do not implicitly receive arbitrary files from a prior execution directory. They receive only their authored `context`, including explicitly named artifacts.
+
+Supported context sources:
+
 - `text`
+- `workspace_file`
+- `workspace_glob`
+- `artifact`
 
-Input resolution rules:
+Context resolution rules:
 
-- authored `file` and `glob` inputs resolve from the live repo workspace when the node starts
-- missing live files and empty globs become explicit omitted context instead of crashing the run
+- authored `workspace_file` and `workspace_glob` context resolves from the live repo workspace when the node starts
+- missing live files, empty globs, and optional artifact context references become explicit omitted context instead of crashing the run
 - path escapes and unknown repo aliases are still hard errors
 - `run` and `resume` only resolve repo aliases the compiled graph actually references
-- `glob` uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`
-- `glob.max_files` is a local cap applied after deterministic sorting
+- `workspace_glob` uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`
+- `workspace_glob.max_files` is a local cap applied after deterministic sorting
 
-Context can be pulled from earlier nodes with `context_from`.
+Nodes publish durable named material with an `artifacts` map.
 
-Supported context includes:
+Supported declared artifact sources:
 
-- `summary`
-- `result`
-- `output`
+- `output_dir`, for files the executor or harness writes under `AGENTFLOW_OUTPUT_DIR`
+- `workspace`, for files copied from the node's repo workspace
 
-Outputs let one node expose named material for downstream use.
+Automatic artifacts are always reserved:
 
-This is how later nodes can consume:
+- `agent_response`, the final agent response for every `agent` node, persisted as `agent-response.md`
+- `result_json`, the normalized `result.json` for every executable node
 
-- a prior agent summary
-- a deterministic check result
-- an AI check output file
-- the latest passed loop iteration output
+Agent harness prompts explain that the model is executing one node in a graph, list declared artifacts with their descriptions, and tell the model that the final response is captured as `agent_response`. Use that final response for concise narrative handoff: outcome, work completed, artifacts produced, validation run, and notes for the next node or human. Do not use it as a substitute for a declared machine-readable artifact.
+
+Downstream nodes consume only named artifacts through `context` items with `"from": "artifact"`. Old public data-flow fields `inputs`, `context_from`, and `outputs` are invalid graph syntax.
+
+Example handoff:
+
+```json
+{
+  "type": "agent",
+  "id": "design",
+  "prompt": "Write the implementation packet.",
+  "context": [
+    { "name": "goal", "from": "text", "text": "Keep the CLI contract stable." },
+    { "name": "architecture", "from": "workspace_file", "path": "docs/ARCHITECTURE.md" }
+  ],
+  "artifacts": {
+    "design_packet": {
+      "from": "output_dir",
+      "path": "design-packet.json",
+      "description": "Structured JSON implementation packet for downstream implementation nodes."
+    }
+  }
+}
+```
+
+```json
+{
+  "type": "agent",
+  "id": "implement",
+  "prompt": "Implement the approved packet.",
+  "context": [
+    {
+      "name": "design_packet",
+      "from": "artifact",
+      "node": "design",
+      "artifact": "design_packet",
+      "attempt": "latest_passed"
+    }
+  ]
+}
+```
+
+During execution, agents and commands also receive:
+
+- `AGENTFLOW_WORKSPACE`, the repo workspace where source edits happen
+- `AGENTFLOW_OUTPUT_DIR`, the execution directory where declared `output_dir` artifacts should be written
+- `AGENTFLOW_CONTEXT_PACKET`, the resolved context packet
+- `AGENTFLOW_CONTEXT_MANIFEST`, the human-readable context manifest
 
 ## Local Command Environment
 

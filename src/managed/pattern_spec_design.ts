@@ -1,19 +1,21 @@
 import type {
   AgentNode,
+  ArtifactDefinition,
   BaseExecutableNode,
   CheckNode,
-  ContextReference,
-  OutputDefinition,
+  ContextItem,
   ParallelNode,
   RepeatNode,
   SequenceNode
 } from "../graph/authored.js";
 import {
-  attemptOutput,
+  artifactContext,
   body,
   listOrFallback,
   managedId,
   maxConcurrency,
+  mergeArtifacts,
+  outputDirArtifact,
   renderPrompt,
   section,
   sharedNodeBase,
@@ -343,9 +345,9 @@ function buildFinalizePrompt(config: PatternSpecDesignConfig): string {
   ]);
 }
 
-function buildOptionOutputs(index: number): OutputDefinition[] {
+function buildOptionArtifacts(index: number): Record<string, ArtifactDefinition> {
   const suffix = String(index + 1).padStart(2, "0");
-  return [attemptOutput(`option_${suffix}`, `option-${suffix}.md`, true)];
+  return outputDirArtifact(`option_${suffix}`, `option-${suffix}.md`);
 }
 
 export function buildPatternSpecDesign(config: PatternSpecDesignConfig): SequenceNode {
@@ -379,11 +381,11 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
       id: briefId,
       label: "Clarify Design Brief",
       ...shared,
-      ...(config.context_from ? { context_from: config.context_from } : {}),
-      outputs: [
-        attemptOutput("design_brief", "design-brief.md", true),
+      ...(config.context ? { context: config.context } : {}),
+      artifacts: mergeArtifacts(
+        outputDirArtifact("design_brief", "design-brief.md"),
         workflowBriefOutput()
-      ],
+      ),
       prompt: buildBriefPrompt(config)
     },
     {
@@ -391,17 +393,10 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
       id: inspectId,
       label: "Inspect Current State",
       ...shared,
-      ...(config.inputs ? { inputs: config.inputs } : {}),
-      context_from: [
-        {
-          node: briefId,
-          include: "output",
-          output: "design_brief"
-        }
+      context: [
+        artifactContext("design_brief", briefId, "design_brief")
       ],
-      outputs: [
-        attemptOutput("current_state", "current-state.md", true)
-      ],
+      artifacts: outputDirArtifact("current_state", "current-state.md"),
       prompt: buildInspectPrompt(config)
     },
     {
@@ -409,21 +404,11 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
       id: gapId,
       label: "Identify Information Gaps",
       ...shared,
-      context_from: [
-        {
-          node: briefId,
-          include: "output",
-          output: "design_brief"
-        },
-        {
-          node: inspectId,
-          include: "output",
-          output: "current_state"
-        }
+      context: [
+        artifactContext("design_brief", briefId, "design_brief"),
+        artifactContext("current_state", inspectId, "current_state")
       ],
-      outputs: [
-        attemptOutput("information_gaps", "information-gaps.md", true)
-      ],
+      artifacts: outputDirArtifact("information_gaps", "information-gaps.md"),
       prompt: buildGapPrompt(config)
     }
   ];
@@ -439,57 +424,34 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
         id: workflowNodeId(config.id, `external_research_${String(index + 1).padStart(2, "0")}`),
         label: `External Research ${String(index + 1).padStart(2, "0")}`,
         ...shared,
-        context_from: [
-          {
-            node: briefId,
-            include: "output",
-            output: "design_brief"
-          },
-          {
-            node: inspectId,
-            include: "output",
-            output: "current_state"
-          },
-          {
-            node: gapId,
-            include: "output",
-            output: "information_gaps"
-          }
+        context: [
+          artifactContext("design_brief", briefId, "design_brief"),
+          artifactContext("current_state", inspectId, "current_state"),
+          artifactContext("information_gaps", gapId, "information_gaps")
         ],
-        outputs: [
-          attemptOutput(`external_findings_${String(index + 1).padStart(2, "0")}`, "external-findings.md", false)
-        ],
+        artifacts: outputDirArtifact(`external_findings_${String(index + 1).padStart(2, "0")}`, "external-findings.md"),
         prompt: buildExternalResearchPrompt(config, index)
       }))
     } satisfies ParallelNode);
   }
 
-  const directionContext: ContextReference[] = [
-    {
-      node: briefId,
-      include: "output",
-      output: "design_brief"
-    },
-    {
-      node: inspectId,
-      include: "output",
-      output: "current_state"
-    },
-    {
-      node: gapId,
-      include: "output",
-      output: "information_gaps"
-    }
+  const directionContext: ContextItem[] = [
+    artifactContext("design_brief", briefId, "design_brief"),
+    artifactContext("current_state", inspectId, "current_state"),
+    artifactContext("information_gaps", gapId, "information_gaps")
   ];
 
   if (externalTasks > 0) {
     for (let index = 0; index < externalTasks; index += 1) {
-      directionContext.push({
-        node: workflowNodeId(config.id, `external_research_${String(index + 1).padStart(2, "0")}`),
-        include: "output",
-        output: `external_findings_${String(index + 1).padStart(2, "0")}`,
-        optional: true
-      });
+      const suffix = String(index + 1).padStart(2, "0");
+      directionContext.push(
+        artifactContext(
+          `external_findings_${suffix}`,
+          workflowNodeId(config.id, `external_research_${suffix}`),
+          `external_findings_${suffix}`,
+          { optional: true }
+        )
+      );
     }
   }
 
@@ -498,8 +460,8 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
     id: workflowNodeId(config.id, `option_${String(index + 1).padStart(2, "0")}`),
     label: `Option ${String(index + 1).padStart(2, "0")}`,
     ...shared,
-    context_from: directionContext,
-    outputs: buildOptionOutputs(index),
+    context: directionContext,
+    artifacts: buildOptionArtifacts(index),
     prompt: buildOptionPrompt(config, index, alternatives)
   }));
 
@@ -514,11 +476,10 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
   const directionInputs = [
     ...directionContext,
     ...optionNodes.map(
-      (_, index): ContextReference => ({
-        node: workflowNodeId(config.id, `option_${String(index + 1).padStart(2, "0")}`),
-        include: "output",
-        output: `option_${String(index + 1).padStart(2, "0")}`
-      })
+      (_, index): ContextItem => {
+        const suffix = String(index + 1).padStart(2, "0");
+        return artifactContext(`option_${suffix}`, workflowNodeId(config.id, `option_${suffix}`), `option_${suffix}`);
+      }
     )
   ];
 
@@ -538,22 +499,19 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
             id: directionId,
             label: "Propose Direction",
             ...shared,
-            context_from: [
+            context: [
               ...directionInputs,
-              {
-                node: directionCheckpointId,
-                include: "output",
-                output: "operator_feedback",
+              artifactContext("operator_feedback", directionCheckpointId, "operator_feedback", {
                 iteration: "latest_failed",
                 optional: true
-              }
+              })
             ],
-            outputs: [
-              attemptOutput("direction_proposal", "direction-proposal.md", true),
-              attemptOutput("tradeoff_matrix", "tradeoff-matrix.md", true),
+            artifacts: mergeArtifacts(
+              outputDirArtifact("direction_proposal", "direction-proposal.md"),
+              outputDirArtifact("tradeoff_matrix", "tradeoff-matrix.md"),
               workflowPlanMarkdownOutput(),
               workflowPlanJsonOutput()
-            ],
+            ),
             prompt: buildDirectionPrompt(config, alternatives)
           },
           {
@@ -561,17 +519,12 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
             id: directionCheckpointId,
             label: "Approve Direction",
             ...shared,
-            context_from: [
-              {
-                node: directionId,
-                include: "output",
-                output: "tradeoff_matrix"
-              }
+            context: [
+              artifactContext("tradeoff_matrix", directionId, "tradeoff_matrix")
             ],
             review_from: {
               node: directionId,
-              include: "output",
-              output: "direction_proposal"
+              artifact: "direction_proposal"
             },
             prompt: buildDirectionCheckpointPrompt()
           }
@@ -587,53 +540,37 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
       id: directionId,
       label: "Propose Direction",
       ...shared,
-      context_from: directionInputs,
-      outputs: [
-        attemptOutput("direction_proposal", "direction-proposal.md", true),
-        attemptOutput("tradeoff_matrix", "tradeoff-matrix.md", true),
+      context: directionInputs,
+      artifacts: mergeArtifacts(
+        outputDirArtifact("direction_proposal", "direction-proposal.md"),
+        outputDirArtifact("tradeoff_matrix", "tradeoff-matrix.md"),
         workflowPlanMarkdownOutput(),
         workflowPlanJsonOutput()
-      ],
+      ),
       prompt: buildDirectionPrompt(config, alternatives)
     });
   }
 
-  const latestDirectionRef = {
-    node: directionId,
-    include: "output" as const,
-    output: "direction_proposal",
+  const latestDirectionRef = artifactContext("direction_proposal", directionId, "direction_proposal", {
     ...(config.approval_policy.require_direction_approval ? { iteration: "latest_passed" as const } : {})
-  };
+  });
 
-  const latestTradeoffRef = {
-    node: directionId,
-    include: "output" as const,
-    output: "tradeoff_matrix",
+  const latestTradeoffRef = artifactContext("tradeoff_matrix", directionId, "tradeoff_matrix", {
     ...(config.approval_policy.require_direction_approval ? { iteration: "latest_passed" as const } : {})
-  };
+  });
 
   steps.push({
     type: "agent",
     id: initialDraftId,
     label: "Draft Spec",
     ...shared,
-    context_from: [
-      {
-        node: briefId,
-        include: "output",
-        output: "design_brief"
-      },
-      {
-        node: inspectId,
-        include: "output",
-        output: "current_state"
-      },
+    context: [
+      artifactContext("design_brief", briefId, "design_brief"),
+      artifactContext("current_state", inspectId, "current_state"),
       latestDirectionRef,
       latestTradeoffRef
     ],
-    outputs: [
-      attemptOutput("spec_draft", "spec-draft.md", true)
-    ],
+    artifacts: outputDirArtifact("spec_draft", "spec-draft.md"),
     prompt: buildDraftPrompt(config)
   });
 
@@ -642,23 +579,13 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
     id: workflowNodeId(config.id, `critique_${profile}`),
     label: `Critique ${profile}`,
     ...shared,
-    context_from: [
-      {
-        node: reviseId,
-        include: "output",
-        output: "spec_revision"
-      },
+    context: [
+      artifactContext("spec_revision", reviseId, "spec_revision"),
       latestDirectionRef,
       latestTradeoffRef,
-      {
-        node: inspectId,
-        include: "output",
-        output: "current_state"
-      }
+      artifactContext("current_state", inspectId, "current_state")
     ],
-    outputs: [
-      attemptOutput(`critique_${profile}`, `critique-${profile}.md`, true)
-    ],
+    artifacts: outputDirArtifact(`critique_${profile}`, `critique-${profile}.md`),
     prompt: buildCritiquePrompt(profile, config)
   }));
 
@@ -677,37 +604,21 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
           id: reviseId,
           label: "Revise Spec",
           ...shared,
-          context_from: [
-            {
-              node: initialDraftId,
-              include: "output",
-              output: "spec_draft"
-            },
+          context: [
+            artifactContext("spec_draft", initialDraftId, "spec_draft"),
             latestDirectionRef,
             latestTradeoffRef,
-            {
-              node: inspectId,
-              include: "output",
-              output: "current_state"
-            },
-            {
-              node: mergeId,
-              include: "output",
-              output: "critique_merged",
+            artifactContext("current_state", inspectId, "current_state"),
+            artifactContext("failed_critique_merged", mergeId, "critique_merged", {
               iteration: "latest_failed",
               optional: true
-            },
-            {
-              node: qualityId,
-              include: "output",
-              output: "quality_review",
+            }),
+            artifactContext("failed_quality_review", qualityId, "quality_review", {
               iteration: "latest_failed",
               optional: true
-            }
+            })
           ],
-          outputs: [
-            attemptOutput("spec_revision", "spec-revision.md", true)
-          ],
+          artifacts: outputDirArtifact("spec_revision", "spec-revision.md"),
           prompt: buildDraftPrompt(config)
         },
         {
@@ -722,16 +633,10 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
           id: mergeId,
           label: "Merge Critiques",
           ...shared,
-          context_from: critiqueProfiles.map(
-            (profile): ContextReference => ({
-              node: workflowNodeId(config.id, `critique_${profile}`),
-              include: "output",
-              output: `critique_${profile}`
-            })
+          context: critiqueProfiles.map((profile): ContextItem =>
+            artifactContext(`critique_${profile}`, workflowNodeId(config.id, `critique_${profile}`), `critique_${profile}`)
           ),
-          outputs: [
-            attemptOutput("critique_merged", "critique-merged.md", true)
-          ],
+          artifacts: outputDirArtifact("critique_merged", "critique-merged.md"),
           prompt: buildMergePrompt()
         },
         {
@@ -740,27 +645,13 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
           label: "Quality Review",
           ...shared,
           check_kind: "ai",
-          context_from: [
-            {
-              node: reviseId,
-              include: "output",
-              output: "spec_revision"
-            },
-            {
-              node: mergeId,
-              include: "output",
-              output: "critique_merged"
-            },
+          context: [
+            artifactContext("spec_revision", reviseId, "spec_revision"),
+            artifactContext("critique_merged", mergeId, "critique_merged"),
             latestDirectionRef,
-            {
-              node: inspectId,
-              include: "output",
-              output: "current_state"
-            }
+            artifactContext("current_state", inspectId, "current_state")
           ],
-          outputs: [
-            attemptOutput("quality_review", "quality-review.json", true)
-          ],
+          artifacts: outputDirArtifact("quality_review", "quality-review.json"),
           prompt: buildQualityPrompt(config),
           rubric: buildQualityRubric(config)
         }
@@ -771,56 +662,39 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
     }
   } satisfies RepeatNode);
 
-  const publishedOutputs = [
-    attemptOutput("design_spec", "design-spec.md", true),
-    attemptOutput("design_packet", "design-packet.json", true),
-    attemptOutput("direction_proposal", "direction-proposal.md", true),
-    attemptOutput("tradeoff_matrix", "tradeoff-matrix.md", true),
-    attemptOutput("decision_log", "decision-log.md", true),
-    attemptOutput("implementation_readiness", "implementation-readiness.md", true),
-    attemptOutput("critique_merged", "critique-merged.md", true),
-    attemptOutput("quality_review", "quality-review.json", true)
-  ];
+  const publishedArtifacts = mergeArtifacts(
+    outputDirArtifact("design_spec", "design-spec.md"),
+    outputDirArtifact("design_packet", "design-packet.json"),
+    outputDirArtifact("direction_proposal", "direction-proposal.md"),
+    outputDirArtifact("tradeoff_matrix", "tradeoff-matrix.md"),
+    outputDirArtifact("decision_log", "decision-log.md"),
+    outputDirArtifact("implementation_readiness", "implementation-readiness.md"),
+    outputDirArtifact("critique_merged", "critique-merged.md"),
+    outputDirArtifact("quality_review", "quality-review.json")
+  );
 
   steps.push({
     type: "agent",
     id: config.id,
     ...(config.label ? { label: config.label } : { label: "Publish Design Package" }),
     ...shared,
-    context_from: [
-      {
-        node: briefId,
-        include: "output",
-        output: "design_brief"
-      },
-      {
-        node: inspectId,
-        include: "output",
-        output: "current_state"
-      },
+    context: [
+      artifactContext("design_brief", briefId, "design_brief"),
+      artifactContext("current_state", inspectId, "current_state"),
       latestDirectionRef,
       latestTradeoffRef,
-      {
-        node: reviseId,
-        include: "output",
-        output: "spec_revision",
+      artifactContext("spec_revision", reviseId, "spec_revision", {
         iteration: "latest_passed"
-      },
-      {
-        node: mergeId,
-        include: "output",
-        output: "critique_merged",
+      }),
+      artifactContext("critique_merged", mergeId, "critique_merged", {
         iteration: "latest_passed",
         optional: true
-      },
-      {
-        node: qualityId,
-        include: "output",
-        output: "quality_review",
+      }),
+      artifactContext("quality_review", qualityId, "quality_review", {
         iteration: "latest_passed"
-      }
+      })
     ],
-    outputs: publishedOutputs,
+    artifacts: publishedArtifacts,
     prompt: buildFinalizePrompt(config)
   });
 

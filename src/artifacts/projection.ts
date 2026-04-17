@@ -80,6 +80,7 @@ export interface ProjectedRunNode {
   latest_execution_id?: string;
   iteration_index?: number;
   attempt_index?: number;
+  iteration_attempt_index?: number;
   badge?: string;
 }
 
@@ -129,11 +130,12 @@ export interface ProjectedNodeAttemptSummary {
   repeat_scope_id?: string;
   iteration_index?: number;
   attempt_index: number;
+  iteration_attempt_index?: number;
   started_at: string;
   ended_at?: string;
   duration_ms?: number;
   artifact_count: number;
-  output_artifacts: Record<string, string>;
+  artifacts: Record<string, string>;
 }
 
 export interface ProjectedArtifactItem {
@@ -162,9 +164,8 @@ export interface ProjectedVerificationRecord extends VerificationRecordedPayload
 }
 
 export interface ProjectedNodeDefinition {
-  inputs: CompiledExecutableNode["inputs"];
-  context_from: CompiledExecutableNode["context_from"];
-  declared_outputs: CompiledExecutableNode["declared_outputs"];
+  context: CompiledExecutableNode["context"];
+  declared_artifacts: CompiledExecutableNode["declared_artifacts"];
   lowered_from?: CompiledExecutableNode["lowered_from"];
   prompt?: string;
   command?: string;
@@ -307,9 +308,11 @@ function buildNodeBadge(
   const latestExecution = state.latest_execution_by_compiled_id[node.compiled_id];
   const iterationIndex = activeExecution?.iteration_index ?? latestExecution?.iteration_index;
   const attemptIndex = activeExecution?.attempt_index ?? latestExecution?.attempt_index;
+  const iterationAttemptIndex =
+    activeExecution?.iteration_attempt_index ?? latestExecution?.iteration_attempt_index;
 
-  if (iterationIndex !== undefined && attemptIndex !== undefined) {
-    return `i${iterationIndex}/a${attemptIndex}`;
+  if (iterationIndex !== undefined) {
+    return `i${iterationIndex}/a${iterationAttemptIndex ?? attemptIndex ?? "?"}`;
   }
 
   if (attemptIndex !== undefined) {
@@ -361,6 +364,11 @@ function buildRunNode(
       ? { attempt_index: activeExecution.attempt_index }
       : latestExecution?.attempt_index !== undefined
         ? { attempt_index: latestExecution.attempt_index }
+        : {}),
+    ...(activeExecution?.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: activeExecution.iteration_attempt_index }
+      : latestExecution?.iteration_attempt_index !== undefined
+        ? { iteration_attempt_index: latestExecution.iteration_attempt_index }
         : {}),
     ...(badge ? { badge } : {})
   };
@@ -663,17 +671,21 @@ function buildRunDiagnostics(context: RunProjectionContext): ProjectedRunDiagnos
 }
 
 function classifyArtifactKind(relativePath: string): ProjectedArtifactItem["kind"] {
-  if (relativePath === "stdout.log") {
+  if (relativePath === "logs/stdout.log" || relativePath === "stdout.log") {
     return "stdout";
   }
 
-  if (relativePath === "stderr.log") {
+  if (relativePath === "logs/stderr.log" || relativePath === "stderr.log") {
     return "stderr";
   }
 
   if (
+    relativePath === "context/packet.json" ||
+    relativePath === "context/manifest.md" ||
+    relativePath === "context/provenance.json" ||
     relativePath === "context_packet.json" ||
-    relativePath === "context_summary.md"
+    relativePath === "context-manifest.md" ||
+    relativePath === "context_provenance.json"
   ) {
     return "context";
   }
@@ -754,11 +766,14 @@ async function buildAttemptSummary(
     ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
     ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
     attempt_index: attempt.attempt_index,
+    ...(attempt.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: attempt.iteration_attempt_index }
+      : {}),
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
     ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {}),
     artifact_count: artifacts.length,
-    output_artifacts: attempt.output_artifacts
+    artifacts: attempt.artifacts
   };
 }
 
@@ -768,6 +783,13 @@ function sortAttempts(left: RuntimeNodeAttempt, right: RuntimeNodeAttempt): numb
 
   if (leftIteration !== rightIteration) {
     return leftIteration - rightIteration;
+  }
+
+  const leftIterationAttempt = left.iteration_attempt_index ?? left.attempt_index;
+  const rightIterationAttempt = right.iteration_attempt_index ?? right.attempt_index;
+
+  if (leftIterationAttempt !== rightIterationAttempt) {
+    return leftIterationAttempt - rightIterationAttempt;
   }
 
   return left.attempt_index - right.attempt_index;
@@ -797,9 +819,8 @@ function selectExecutionId(
 function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinition {
   if (node.kind === "agent") {
     return {
-      inputs: node.inputs,
-      context_from: node.context_from,
-      declared_outputs: node.declared_outputs,
+      context: node.context,
+      declared_artifacts: node.declared_artifacts,
       ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
       prompt: node.prompt
     };
@@ -807,9 +828,8 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
 
   if (node.kind === "exec") {
     return {
-      inputs: node.inputs,
-      context_from: node.context_from,
-      declared_outputs: node.declared_outputs,
+      context: node.context,
+      declared_artifacts: node.declared_artifacts,
       ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
       command: node.command,
       args: node.args,
@@ -822,9 +842,8 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
 
   if (node.kind === "checkpoint") {
     return {
-      inputs: node.inputs,
-      context_from: node.context_from,
-      declared_outputs: node.declared_outputs,
+      context: node.context,
+      declared_artifacts: node.declared_artifacts,
       ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
       prompt: node.prompt,
       review_from: node.review_from
@@ -832,9 +851,8 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
   }
 
   return {
-    inputs: node.inputs,
-    context_from: node.context_from,
-    declared_outputs: node.declared_outputs,
+    context: node.context,
+    declared_artifacts: node.declared_artifacts,
     ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
     ...(node.command ? { command: node.command } : {}),
     ...(node.args ? { args: node.args } : {}),
@@ -1104,8 +1122,12 @@ export async function projectNodeLogs(
     Promise.all(attempts.map((attempt) => buildAttemptSummary(attempt))),
     selectedExecution ? indexExecutionArtifacts(selectedExecution) : Promise.resolve([])
   ]);
-  const stdoutArtifact = artifacts.find((artifact) => artifact.relative_path === "stdout.log");
-  const stderrArtifact = artifacts.find((artifact) => artifact.relative_path === "stderr.log");
+  const stdoutArtifact = artifacts.find((artifact) =>
+    artifact.relative_path === "logs/stdout.log" || artifact.relative_path === "stdout.log"
+  );
+  const stderrArtifact = artifacts.find((artifact) =>
+    artifact.relative_path === "logs/stderr.log" || artifact.relative_path === "stderr.log"
+  );
 
   return {
     run_id: context.state.run_id,

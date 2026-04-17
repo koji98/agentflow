@@ -125,14 +125,13 @@ async function createFixtureRun() {
           type: "agent",
           id: "inspect",
           prompt: "Inspect the repository.",
-          outputs: [
-            {
-              name: "notes",
-              from: "attempt",
+          artifacts: {
+            notes: {
+              from: "output_dir",
               path: "notes.md",
-              required: true
+              description: "Test artifact produced at notes.md."
             }
-          ]
+          }
         },
         {
           type: "repeat",
@@ -146,28 +145,26 @@ async function createFixtureRun() {
                 type: "agent",
                 id: "apply-fix",
                 prompt: "Apply the fix.",
-                outputs: [
-                  {
-                    name: "patch",
-                    from: "attempt",
+                artifacts: {
+                  patch: {
+                    from: "output_dir",
                     path: "patch.md",
-                    required: true
+                    description: "Test artifact produced at patch.md."
                   }
-                ]
+                }
               },
               {
                 type: "check",
                 id: "verify-fix",
                 check_kind: "deterministic",
                 command: "placeholder",
-                outputs: [
-                  {
-                    name: "verification",
-                    from: "attempt",
+                artifacts: {
+                  verification: {
+                    from: "output_dir",
                     path: "result.json",
-                    required: true
+                    description: "Test artifact produced at result.json."
                   }
-                ]
+                }
               }
             ]
           },
@@ -179,11 +176,12 @@ async function createFixtureRun() {
           type: "exec",
           id: "finalize",
           command: "placeholder",
-          context_from: [
+          context: [
             {
+              name: "verification",
+              from: "artifact",
               node: "verify-fix",
-              include: "output",
-              output: "verification",
+              artifact: "verification",
               iteration: "latest_passed"
             }
           ]
@@ -462,7 +460,7 @@ describe("artifacts projection", () => {
         nodeDetail.selected_execution_id
       );
       expect(nodeLogs.stdout?.content).toContain("\"passed\":true");
-      expect(nodeLogs.artifacts.map((artifact) => artifact.relative_path)).toContain("stdout.log");
+      expect(nodeLogs.artifacts.map((artifact) => artifact.relative_path)).toContain("logs/stdout.log");
 
       const artifact = await readProjectedArtifact(
         fixture.runRoot,

@@ -7,12 +7,12 @@ export function collectReferencedRepoAliases(graph: CompiledGraph): string[] {
   for (const node of graph.nodes) {
     repoAliases.add(node.repo);
 
-    for (const input of node.inputs) {
-      if (input.kind === "text") {
+    for (const item of node.context) {
+      if (item.from === "text" || item.from === "artifact") {
         continue;
       }
 
-      repoAliases.add(splitQualifiedPath(input.path, node.repo).repo_alias);
+      repoAliases.add(splitQualifiedPath(item.path, node.repo).repo_alias);
     }
   }
 

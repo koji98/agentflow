@@ -1,18 +1,20 @@
 import type {
   AgentNode,
+  ArtifactDefinition,
   BaseExecutableNode,
   CheckNode,
-  ContextReference,
-  OutputDefinition,
+  ContextItem,
   ParallelNode,
   RepeatNode,
   SequenceNode
 } from "../graph/authored.js";
 import {
-  attemptOutput,
+  artifactContext,
   body,
   managedId,
   maxConcurrency,
+  mergeArtifacts,
+  outputDirArtifact,
   renderPrompt,
   section,
   sharedNodeBase,
@@ -255,7 +257,7 @@ function buildFollowupPlanPrompt(passIndex: number): string {
 
 function buildConsolidatePrompt(config: PatternDeepResearchConfig): string {
   return renderPrompt([
-    body("Consolidate the investigation artifacts into machine-readable interim findings, provenance, and uncertainty outputs."),
+    body("Consolidate the investigation artifacts into machine-readable interim findings, provenance, and uncertainty artifacts."),
     section("Objective", formatBrief(config.brief)),
     section("Current Context", [
       "Use track summaries, track source ledgers, contradiction notes, and any follow-up artifacts in context."
@@ -314,25 +316,25 @@ function buildFinalCritiqueRubric(config: PatternDeepResearchConfig): string {
   ].join(" ");
 }
 
-function buildWorkerOutputs(trackIndex: number): OutputDefinition[] {
+function buildWorkerArtifacts(trackIndex: number): Record<string, ArtifactDefinition> {
   const suffix = zeroPad(trackIndex + 1);
 
-  return [
-    attemptOutput(`track_report_${suffix}`, "track-report.md", true),
-    attemptOutput(`track_summary_${suffix}`, "track-summary.md", true),
-    attemptOutput(`track_sources_${suffix}`, "sources.json", true)
-  ];
+  return mergeArtifacts(
+    outputDirArtifact(`track_report_${suffix}`, "track-report.md"),
+    outputDirArtifact(`track_summary_${suffix}`, "track-summary.md"),
+    outputDirArtifact(`track_sources_${suffix}`, "sources.json")
+  );
 }
 
-function buildFollowupOutputs(passIndex: number, trackIndex: number): OutputDefinition[] {
+function buildFollowupArtifacts(passIndex: number, trackIndex: number): Record<string, ArtifactDefinition> {
   const passSuffix = zeroPad(passIndex + 1);
   const trackSuffix = zeroPad(trackIndex + 1);
 
-  return [
-    attemptOutput(`followup_report_${passSuffix}_${trackSuffix}`, "track-report.md", true),
-    attemptOutput(`followup_summary_${passSuffix}_${trackSuffix}`, "track-summary.md", true),
-    attemptOutput(`followup_sources_${passSuffix}_${trackSuffix}`, "sources.json", true)
-  ];
+  return mergeArtifacts(
+    outputDirArtifact(`followup_report_${passSuffix}_${trackSuffix}`, "track-report.md"),
+    outputDirArtifact(`followup_summary_${passSuffix}_${trackSuffix}`, "track-summary.md"),
+    outputDirArtifact(`followup_sources_${passSuffix}_${trackSuffix}`, "sources.json")
+  );
 }
 
 export function buildPatternDeepResearch(config: PatternDeepResearchConfig): SequenceNode {
@@ -357,22 +359,17 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       id: briefId,
       label: "Clarify Research Brief",
       ...shared,
-      ...(config.inputs ? { inputs: config.inputs } : {}),
-      ...(config.context_from ? { context_from: config.context_from } : {}),
-      outputs: [
-        attemptOutput("research_brief", "research-brief.md", true),
+      ...(config.context ? { context: config.context } : {}),
+      artifacts: mergeArtifacts(
+        outputDirArtifact("research_brief", "research-brief.md"),
         workflowBriefOutput()
-      ],
+      ),
       prompt: buildBriefPrompt(config)
     }
   ];
 
-  const planContextFrom: ContextReference[] = [
-    {
-      node: briefId,
-      include: "output",
-      output: "research_brief"
-    }
+  const planContext: ContextItem[] = [
+    artifactContext("research_brief", briefId, "research_brief")
   ];
 
   if (config.approval_policy.require_plan_approval) {
@@ -391,22 +388,19 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
             id: planId,
             label: "Draft Research Plan",
             ...shared,
-            context_from: [
-              ...planContextFrom,
-              {
-                node: planCheckpointId,
-                include: "output",
-                output: "operator_feedback",
+            context: [
+              ...planContext,
+              artifactContext("operator_feedback", planCheckpointId, "operator_feedback", {
                 iteration: "latest_failed",
                 optional: true
-              }
+              })
             ],
-            outputs: [
-              attemptOutput("research_plan_markdown", "research-plan.md", true),
-              attemptOutput("research_plan_json", "research-plan.json", true),
+            artifacts: mergeArtifacts(
+              outputDirArtifact("research_plan_markdown", "research-plan.md"),
+              outputDirArtifact("research_plan_json", "research-plan.json"),
               workflowPlanMarkdownOutput(),
               workflowPlanJsonOutput()
-            ],
+            ),
             prompt: buildPlanPrompt(config, trackCount)
           },
           {
@@ -414,17 +408,12 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
             id: planCheckpointId,
             label: "Approve Research Plan",
             ...shared,
-            context_from: [
-              {
-                node: planId,
-                include: "output",
-                output: "research_plan_json"
-              }
+            context: [
+              artifactContext("research_plan_json", planId, "research_plan_json")
             ],
             review_from: {
               node: planId,
-              include: "output",
-              output: "research_plan_markdown"
+              artifact: "research_plan_markdown"
             },
             prompt: buildPlanCheckpointPrompt()
           }
@@ -442,30 +431,24 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       id: planId,
       label: "Plan Research",
       ...shared,
-      context_from: planContextFrom,
-      outputs: [
-        attemptOutput("research_plan_markdown", "research-plan.md", true),
-        attemptOutput("research_plan_json", "research-plan.json", true),
+      context: planContext,
+      artifacts: mergeArtifacts(
+        outputDirArtifact("research_plan_markdown", "research-plan.md"),
+        outputDirArtifact("research_plan_json", "research-plan.json"),
         workflowPlanMarkdownOutput(),
         workflowPlanJsonOutput()
-      ],
+      ),
       prompt: buildPlanPrompt(config, trackCount)
     });
   }
 
-  const latestPlanRef = {
-    node: planId,
-    include: "output" as const,
-    output: "research_plan_markdown",
+  const latestPlanRef = artifactContext("research_plan_markdown", planId, "research_plan_markdown", {
     ...(config.approval_policy.require_plan_approval ? { iteration: "latest_passed" as const } : {})
-  };
+  });
 
-  const latestPlanJsonRef = {
-    node: planId,
-    include: "output" as const,
-    output: "research_plan_json",
+  const latestPlanJsonRef = artifactContext("research_plan_json", planId, "research_plan_json", {
     ...(config.approval_policy.require_plan_approval ? { iteration: "latest_passed" as const } : {})
-  };
+  });
 
   steps.push(
     {
@@ -473,17 +456,11 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       id: trackId,
       label: "Derive Investigation Tracks",
       ...shared,
-      context_from: [
-        {
-          node: briefId,
-          include: "output",
-          output: "research_brief"
-        },
+      context: [
+        artifactContext("research_brief", briefId, "research_brief"),
         latestPlanJsonRef
       ],
-      outputs: [
-        attemptOutput("track_briefs", "track-briefs.json", true)
-      ],
+      artifacts: outputDirArtifact("track_briefs", "track-briefs.json"),
       prompt: buildTrackPrompt(config)
     },
     {
@@ -496,20 +473,12 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         id: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
         label: `Investigation Track ${zeroPad(index + 1)}`,
         ...shared,
-        context_from: [
-          {
-            node: trackId,
-            include: "output",
-            output: "track_briefs"
-          },
-          {
-            node: briefId,
-            include: "output",
-            output: "research_brief"
-          },
+        context: [
+          artifactContext("track_briefs", trackId, "track_briefs"),
+          artifactContext("research_brief", briefId, "research_brief"),
           latestPlanRef
         ],
-        outputs: buildWorkerOutputs(index),
+        artifacts: buildWorkerArtifacts(index),
         prompt: buildWorkerPrompt(config, index, "initial")
       }))
     },
@@ -518,35 +487,26 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       id: contradictionId,
       label: "Scan Contradictions",
       ...shared,
-      context_from: Array.from({ length: trackCount }, (_, index): ContextReference => ({
-        node: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
-        include: "output",
-        output: `track_summary_${zeroPad(index + 1)}`
-      })),
-      outputs: [
-        attemptOutput("contradictions", "contradictions.md", true)
-      ],
+      context: Array.from({ length: trackCount }, (_, index): ContextItem => {
+        const suffix = zeroPad(index + 1);
+        return artifactContext(`track_summary_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_summary_${suffix}`);
+      }),
+      artifacts: outputDirArtifact("contradictions", "contradictions.md"),
       prompt: buildContradictionPrompt()
     }
   );
 
-  const consolidationContext: ContextReference[] = [
+  const consolidationContext: ContextItem[] = [
     latestPlanJsonRef,
-    {
-      node: contradictionId,
-      include: "output",
-      output: "contradictions"
-    },
-    ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
-      node: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
-      include: "output",
-      output: `track_summary_${zeroPad(index + 1)}`
-    })),
-    ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
-      node: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
-      include: "output",
-      output: `track_sources_${zeroPad(index + 1)}`
-    }))
+    artifactContext("contradictions", contradictionId, "contradictions"),
+    ...Array.from({ length: trackCount }, (_, index): ContextItem => {
+      const suffix = zeroPad(index + 1);
+      return artifactContext(`track_summary_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_summary_${suffix}`);
+    }),
+    ...Array.from({ length: trackCount }, (_, index): ContextItem => {
+      const suffix = zeroPad(index + 1);
+      return artifactContext(`track_sources_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_sources_${suffix}`);
+    })
   ];
 
   for (let passIndex = 0; passIndex < (config.strategy.followup_passes ?? 1); passIndex += 1) {
@@ -559,22 +519,15 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         id: followupPlanId,
         label: `Plan Follow-up Pass ${zeroPad(passIndex + 1)}`,
         ...shared,
-        context_from: [
+        context: [
           latestPlanJsonRef,
-          {
-            node: contradictionId,
-            include: "output",
-            output: "contradictions"
-          },
-          ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
-            node: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
-            include: "output",
-            output: `track_summary_${zeroPad(index + 1)}`
-          }))
+          artifactContext("contradictions", contradictionId, "contradictions"),
+          ...Array.from({ length: trackCount }, (_, index): ContextItem => {
+            const suffix = zeroPad(index + 1);
+            return artifactContext(`track_summary_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_summary_${suffix}`);
+          })
         ],
-        outputs: [
-          attemptOutput(`followup_plan_${zeroPad(passIndex + 1)}`, `followup-plan-pass-${zeroPad(passIndex + 1)}.json`, true)
-        ],
+        artifacts: outputDirArtifact(`followup_plan_${zeroPad(passIndex + 1)}`, `followup-plan-pass-${zeroPad(passIndex + 1)}.json`),
         prompt: buildFollowupPlanPrompt(passIndex)
       },
       {
@@ -587,43 +540,41 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
           id: workflowNodeId(config.id, `followup_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`),
           label: `Follow-up ${zeroPad(passIndex + 1)} Track ${zeroPad(index + 1)}`,
           ...shared,
-          context_from: [
-            {
-              node: followupPlanId,
-              include: "output",
-              output: `followup_plan_${zeroPad(passIndex + 1)}`
-            },
-            {
-              node: briefId,
-              include: "output",
-              output: "research_brief"
-            }
+          context: [
+            artifactContext(`followup_plan_${zeroPad(passIndex + 1)}`, followupPlanId, `followup_plan_${zeroPad(passIndex + 1)}`),
+            artifactContext("research_brief", briefId, "research_brief")
           ],
-          outputs: buildFollowupOutputs(passIndex, index),
+          artifacts: buildFollowupArtifacts(passIndex, index),
           prompt: buildWorkerPrompt(config, index, `follow-up pass ${zeroPad(passIndex + 1)}`)
         }))
       }
     );
 
-    consolidationContext.push({
-      node: followupPlanId,
-      include: "output",
-      output: `followup_plan_${zeroPad(passIndex + 1)}`
-    });
+    consolidationContext.push(
+      artifactContext(`followup_plan_${zeroPad(passIndex + 1)}`, followupPlanId, `followup_plan_${zeroPad(passIndex + 1)}`)
+    );
 
     consolidationContext.push(
-      ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
-        node: workflowNodeId(config.id, `followup_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`),
-        include: "output",
-        output: `followup_summary_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`
-      }))
+      ...Array.from({ length: trackCount }, (_, index): ContextItem => {
+        const passSuffix = zeroPad(passIndex + 1);
+        const trackSuffix = zeroPad(index + 1);
+        return artifactContext(
+          `followup_summary_${passSuffix}_${trackSuffix}`,
+          workflowNodeId(config.id, `followup_${passSuffix}_${trackSuffix}`),
+          `followup_summary_${passSuffix}_${trackSuffix}`
+        );
+      })
     );
     consolidationContext.push(
-      ...Array.from({ length: trackCount }, (_, index): ContextReference => ({
-        node: workflowNodeId(config.id, `followup_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`),
-        include: "output",
-        output: `followup_sources_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`
-      }))
+      ...Array.from({ length: trackCount }, (_, index): ContextItem => {
+        const passSuffix = zeroPad(passIndex + 1);
+        const trackSuffix = zeroPad(index + 1);
+        return artifactContext(
+          `followup_sources_${passSuffix}_${trackSuffix}`,
+          workflowNodeId(config.id, `followup_${passSuffix}_${trackSuffix}`),
+          `followup_sources_${passSuffix}_${trackSuffix}`
+        );
+      })
     );
   }
 
@@ -632,53 +583,37 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
     id: consolidateId,
     label: "Consolidate Findings",
     ...shared,
-    context_from: consolidationContext,
-    outputs: [
-      attemptOutput("interim_findings", "interim-findings.jsonl", true),
-      attemptOutput("source_ledger", "source-ledger.json", true),
-      attemptOutput("uncertainties", "uncertainties.md", true)
-    ],
+    context: consolidationContext,
+    artifacts: mergeArtifacts(
+      outputDirArtifact("interim_findings", "interim-findings.jsonl"),
+      outputDirArtifact("source_ledger", "source-ledger.json"),
+      outputDirArtifact("uncertainties", "uncertainties.md")
+    ),
     prompt: buildConsolidatePrompt(config)
   });
 
-  const publishedOutputs = [
-    attemptOutput("research_report", "research-report.md", true),
-    attemptOutput("research_packet", "research-packet.json", true),
-    attemptOutput("source_ledger", "source-ledger.json", true),
-    attemptOutput("uncertainties", "uncertainties.md", true),
-    attemptOutput("interim_findings", "interim-findings.jsonl", true)
-  ];
+  const publishedArtifacts = mergeArtifacts(
+    outputDirArtifact("research_report", "research-report.md"),
+    outputDirArtifact("research_packet", "research-packet.json"),
+    outputDirArtifact("source_ledger", "source-ledger.json"),
+    outputDirArtifact("uncertainties", "uncertainties.md"),
+    outputDirArtifact("interim_findings", "interim-findings.jsonl")
+  );
 
   steps.push({
     type: "agent",
     id: config.id,
     ...(config.label ? { label: config.label } : { label: "Publish Research Package" }),
     ...shared,
-    context_from: [
-      {
-        node: briefId,
-        include: "output",
-        output: "research_brief"
-      },
+    context: [
+      artifactContext("research_brief", briefId, "research_brief"),
       latestPlanRef,
       latestPlanJsonRef,
-      {
-        node: consolidateId,
-        include: "output",
-        output: "interim_findings"
-      },
-      {
-        node: consolidateId,
-        include: "output",
-        output: "source_ledger"
-      },
-      {
-        node: consolidateId,
-        include: "output",
-        output: "uncertainties"
-      }
+      artifactContext("interim_findings", consolidateId, "interim_findings"),
+      artifactContext("source_ledger", consolidateId, "source_ledger"),
+      artifactContext("uncertainties", consolidateId, "uncertainties")
     ],
-    outputs: publishedOutputs,
+    artifacts: publishedArtifacts,
     prompt: buildFinalPrompt(config)
   });
 
@@ -689,27 +624,13 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       label: "Critique Final Report",
       ...shared,
       check_kind: "ai",
-      context_from: [
-        {
-          node: config.id,
-          include: "output",
-          output: "research_report"
-        },
-        {
-          node: config.id,
-          include: "output",
-          output: "source_ledger"
-        },
-        {
-          node: config.id,
-          include: "output",
-          output: "uncertainties"
-        },
+      context: [
+        artifactContext("research_report", config.id, "research_report"),
+        artifactContext("source_ledger", config.id, "source_ledger"),
+        artifactContext("uncertainties", config.id, "uncertainties"),
         latestPlanRef
       ],
-      outputs: [
-        attemptOutput("final_critique", "result.json", true)
-      ],
+      artifacts: outputDirArtifact("final_critique", "result.json"),
       prompt: buildFinalCritiquePrompt(config),
       rubric: buildFinalCritiqueRubric(config)
     } satisfies CheckNode);

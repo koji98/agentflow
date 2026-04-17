@@ -1,23 +1,24 @@
 import type {
   AgentNode,
+  ArtifactDefinition,
   BaseExecutableNode,
-  ContextReference,
-  FileInput,
-  InputItem,
-  OutputDefinition,
+  ContextItem,
   ParallelNode,
   SequenceNode
 } from "../graph/authored.js";
 import {
-  attemptOutput,
+  artifactContext,
   body,
   listOrFallback,
   managedId,
   maxConcurrency,
+  mergeArtifacts,
+  outputDirArtifact,
   renderPrompt,
   section,
   sharedNodeBase,
   type ManagedPatternRuntime,
+  workspaceFileContext,
   workflowBriefOutput,
   workflowPlanJsonOutput,
   workflowPlanMarkdownOutput
@@ -38,13 +39,13 @@ export interface PatternReviewChangeFileSourceRef {
   path: string;
 }
 
-export interface PatternReviewChangeManagedOutputSourceRef {
-  kind: "managed_output";
+export interface PatternReviewChangeArtifactSourceRef {
+  kind: "artifact";
   node: string;
-  output: string;
+  artifact: string;
 }
 
-export type PatternReviewChangeSourceRef = PatternReviewChangeFileSourceRef | PatternReviewChangeManagedOutputSourceRef;
+export type PatternReviewChangeSourceRef = PatternReviewChangeFileSourceRef | PatternReviewChangeArtifactSourceRef;
 
 export interface PatternReviewChangeArtifactBundleSource {
   kind: "artifact_bundle";
@@ -166,7 +167,7 @@ function formatDelivery(delivery: PatternReviewChangeDelivery): string[] {
 function formatSourceRef(reference: PatternReviewChangeSourceRef): string {
   return reference.kind === "file"
     ? `file:${reference.path}`
-    : `managed_output:${reference.node}.${reference.output}`;
+    : `artifact:${reference.node}.${reference.artifact}`;
 }
 
 function formatReviewSource(source: PatternReviewChangeSource): string[] {
@@ -174,7 +175,7 @@ function formatReviewSource(source: PatternReviewChangeSource): string[] {
     return [
       "- Source kind: managed_node",
       `- Source node: ${source.node}`,
-      "- Expected outputs when available: change_summary, change_packet, evaluation_ledger, fix_log"
+      "- Expected artifacts when available: change_summary, change_packet, evaluation_ledger, fix_log"
     ];
   }
 
@@ -190,101 +191,44 @@ function formatReviewSource(source: PatternReviewChangeSource): string[] {
   ];
 }
 
-function sourceRefToInput(reference: PatternReviewChangeSourceRef): InputItem | undefined {
-  if (reference.kind !== "file") {
-    return undefined;
-  }
-
-  return {
-    kind: "file",
-    path: reference.path
-  } satisfies FileInput;
-}
-
-function sourceRefToContext(reference: PatternReviewChangeSourceRef, optional: boolean): ContextReference | undefined {
-  if (reference.kind !== "managed_output") {
-    return undefined;
-  }
-
-  return {
-    node: reference.node,
-    include: "output",
-    output: reference.output,
-    ...(optional ? { optional: true } : {})
-  };
+function sourceRefToContext(name: string, reference: PatternReviewChangeSourceRef, optional: boolean): ContextItem {
+  return reference.kind === "file"
+    ? workspaceFileContext(name, reference.path)
+    : artifactContext(name, reference.node, reference.artifact, { optional });
 }
 
 function resolveReviewSourceMaterials(source: PatternReviewChangeSource): {
-  inputs: InputItem[];
-  context_from: ContextReference[];
+  context: ContextItem[];
 } {
   if (source.kind === "managed_node") {
     return {
-      inputs: [],
-      context_from: [
-        {
-          node: source.node,
-          include: "summary"
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "change_summary",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "change_packet",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "evaluation_ledger",
-          optional: true
-        },
-        {
-          node: source.node,
-          include: "output",
-          output: "fix_log",
-          optional: true
-        }
+      context: [
+        artifactContext("agent_response", source.node, "agent_response"),
+        artifactContext("change_summary", source.node, "change_summary", { optional: true }),
+        artifactContext("change_packet", source.node, "change_packet", { optional: true }),
+        artifactContext("evaluation_ledger", source.node, "evaluation_ledger", { optional: true }),
+        artifactContext("fix_log", source.node, "fix_log", { optional: true })
       ]
     };
   }
 
-  const refs: Array<{ reference: PatternReviewChangeSourceRef; optional: boolean }> = [
-    ...(source.diff ? [{ reference: source.diff, optional: false }] : []),
-    ...(source.summary ? [{ reference: source.summary, optional: false }] : []),
-    ...(source.evaluation_ledger ? [{ reference: source.evaluation_ledger, optional: true }] : []),
-    ...(source.files_touched ? [{ reference: source.files_touched, optional: true }] : []),
-    ...(source.additional_context ?? []).map((reference) => ({
+  const refs: Array<{ name: string; reference: PatternReviewChangeSourceRef; optional: boolean }> = [
+    ...(source.diff ? [{ name: "diff", reference: source.diff, optional: false }] : []),
+    ...(source.summary ? [{ name: "summary", reference: source.summary, optional: false }] : []),
+    ...(source.evaluation_ledger
+      ? [{ name: "evaluation_ledger", reference: source.evaluation_ledger, optional: true }]
+      : []),
+    ...(source.files_touched ? [{ name: "files_touched", reference: source.files_touched, optional: true }] : []),
+    ...(source.additional_context ?? []).map((reference, index) => ({
+      name: `additional_context_${index + 1}`,
       reference,
       optional: true
     }))
   ];
 
-  return refs.reduce(
-    (accumulator, item) => {
-      const input = sourceRefToInput(item.reference);
-      const context = sourceRefToContext(item.reference, item.optional);
-
-      if (input) {
-        accumulator.inputs.push(input);
-      }
-
-      if (context) {
-        accumulator.context_from.push(context);
-      }
-
-      return accumulator;
-    },
-    {
-      inputs: [] as InputItem[],
-      context_from: [] as ContextReference[]
-    }
-  );
+  return {
+    context: refs.map(({ name, reference, optional }) => sourceRefToContext(name, reference, optional))
+  };
 }
 
 function roleGuidance(role: string): string {
@@ -372,7 +316,7 @@ function buildReviewerPrompt(role: string, config: PatternReviewChangeConfig): s
 
 function buildRawFindingsPrompt(): string {
   return renderPrompt([
-    body("Aggregate the reviewer outputs into one raw findings set."),
+    body("Aggregate the reviewer artifacts into one raw findings set."),
     section("Quality Bar", [
       "Preserve reviewer intent and evidence before deduplication or severity calibration."
     ]),
@@ -417,14 +361,14 @@ function buildCalibratePrompt(config: PatternReviewChangeConfig): string {
   ]);
 }
 
-function buildFinalizePrompt(config: PatternReviewChangeConfig, outputs: OutputDefinition[]): string {
+function buildFinalizePrompt(config: PatternReviewChangeConfig, artifacts: Record<string, ArtifactDefinition>): string {
   return renderPrompt([
     body("Publish the final review package."),
     section("Current Context", [
       "Use the review packet, workflow plan, merged findings, and calibrated findings in context."
     ]),
     section("Output Contract", [
-      ...outputs.map((output) => `- \`${output.path}\``),
+      ...Object.values(artifacts).map((artifact) => `- \`${artifact.path}\``),
       "Use this exact schema for `review-bundle.json`:",
       '{"change_summary":"...","findings":[{"title":"...","severity":"...","confidence":"...","evidence":["..."]}],"severity_summary":{"high":0,"medium":0,"low":0},"recommended_actions":["..."]}'
     ]),
@@ -457,12 +401,11 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       label: "Prepare Review Packet",
       ...shared,
       sandbox: "read-only",
-      inputs: [...(config.inputs ?? []), ...sourceMaterials.inputs],
-      context_from: [...(config.context_from ?? []), ...sourceMaterials.context_from],
-      outputs: [
-        attemptOutput("review_packet", "review-packet.json", true),
+      context: [...(config.context ?? []), ...sourceMaterials.context],
+      artifacts: mergeArtifacts(
+        outputDirArtifact("review_packet", "review-packet.json"),
         workflowBriefOutput()
-      ],
+      ),
       prompt: buildPreparePrompt(config)
     },
     {
@@ -471,17 +414,13 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       label: "Plan Review",
       ...shared,
       sandbox: "read-only",
-      context_from: [
-        {
-          node: prepareId,
-          include: "output",
-          output: "review_packet"
-        }
+      context: [
+        artifactContext("review_packet", prepareId, "review_packet")
       ],
-      outputs: [
+      artifacts: mergeArtifacts(
         workflowPlanMarkdownOutput(),
         workflowPlanJsonOutput()
-      ],
+      ),
       prompt: buildPlanPrompt(config)
     },
     {
@@ -495,21 +434,11 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
         label: `${profile} Reviewer`,
         ...shared,
         sandbox: "read-only",
-        context_from: [
-          {
-            node: prepareId,
-            include: "output",
-            output: "review_packet"
-          },
-          {
-            node: planId,
-            include: "output",
-            output: "workflow_plan_json"
-          }
+        context: [
+          artifactContext("review_packet", prepareId, "review_packet"),
+          artifactContext("workflow_plan_json", planId, "workflow_plan_json")
         ],
-        outputs: [
-          attemptOutput(`findings_${slugValue(profile)}`, `findings-${slugValue(profile)}.json`, true)
-        ],
+        artifacts: outputDirArtifact(`findings_${slugValue(profile)}`, `findings-${slugValue(profile)}.json`),
         prompt: buildReviewerPrompt(profile, config)
       }))
     } satisfies ParallelNode,
@@ -519,16 +448,14 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       label: "Aggregate Raw Findings",
       ...shared,
       sandbox: "read-only",
-      context_from: reviewerProfiles.map(
-        (profile): ContextReference => ({
-          node: workflowNodeId(config.id, `reviewer_${slugValue(profile)}`),
-          include: "output",
-          output: `findings_${slugValue(profile)}`
-        })
+      context: reviewerProfiles.map((profile): ContextItem =>
+        artifactContext(
+          `findings_${slugValue(profile)}`,
+          workflowNodeId(config.id, `reviewer_${slugValue(profile)}`),
+          `findings_${slugValue(profile)}`
+        )
       ),
-      outputs: [
-        attemptOutput("raw_findings", "raw-findings.json", true)
-      ],
+      artifacts: outputDirArtifact("raw_findings", "raw-findings.json"),
       prompt: buildRawFindingsPrompt()
     },
     {
@@ -537,21 +464,11 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       label: "Merge Findings",
       ...shared,
       sandbox: "read-only",
-      context_from: [
-        {
-          node: prepareId,
-          include: "output",
-          output: "review_packet"
-        },
-        {
-          node: rawId,
-          include: "output",
-          output: "raw_findings"
-        }
+      context: [
+        artifactContext("review_packet", prepareId, "review_packet"),
+        artifactContext("raw_findings", rawId, "raw_findings")
       ],
-      outputs: [
-        attemptOutput("merged_findings", "merged-findings.json", true)
-      ],
+      artifacts: outputDirArtifact("merged_findings", "merged-findings.json"),
       prompt: buildMergePrompt()
     },
     {
@@ -560,37 +477,23 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       label: "Calibrate Findings",
       ...shared,
       sandbox: "read-only",
-      context_from: [
-        {
-          node: prepareId,
-          include: "output",
-          output: "review_packet"
-        },
-        {
-          node: planId,
-          include: "output",
-          output: "workflow_plan_json"
-        },
-        {
-          node: mergeId,
-          include: "output",
-          output: "merged_findings"
-        }
+      context: [
+        artifactContext("review_packet", prepareId, "review_packet"),
+        artifactContext("workflow_plan_json", planId, "workflow_plan_json"),
+        artifactContext("merged_findings", mergeId, "merged_findings")
       ],
-      outputs: [
-        attemptOutput("calibrated_findings", "calibrated-findings.json", true)
-      ],
+      artifacts: outputDirArtifact("calibrated_findings", "calibrated-findings.json"),
       prompt: buildCalibratePrompt(config)
     }
   ];
 
-  const finalOutputs: OutputDefinition[] = [
-    attemptOutput("review_summary", "review-summary.md", true),
-    attemptOutput("review_bundle", "review-bundle.json", true),
-    attemptOutput("raw_findings", "raw-findings.json", true),
-    attemptOutput("merged_findings", "merged-findings.json", true),
-    attemptOutput("calibrated_findings", "calibrated-findings.json", true)
-  ];
+  const finalArtifacts: Record<string, ArtifactDefinition> = mergeArtifacts(
+    outputDirArtifact("review_summary", "review-summary.md"),
+    outputDirArtifact("review_bundle", "review-bundle.json"),
+    outputDirArtifact("raw_findings", "raw-findings.json"),
+    outputDirArtifact("merged_findings", "merged-findings.json"),
+    outputDirArtifact("calibrated_findings", "calibrated-findings.json")
+  );
 
   steps.push({
     type: "agent",
@@ -598,35 +501,15 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
     ...(config.label ? { label: config.label } : { label: "Publish Review" }),
     ...shared,
     sandbox: "read-only",
-    context_from: [
-      {
-        node: prepareId,
-        include: "output",
-        output: "review_packet"
-      },
-      {
-        node: planId,
-        include: "output",
-        output: "workflow_plan_json"
-      },
-      {
-        node: rawId,
-        include: "output",
-        output: "raw_findings"
-      },
-      {
-        node: mergeId,
-        include: "output",
-        output: "merged_findings"
-      },
-      {
-        node: calibrateId,
-        include: "output",
-        output: "calibrated_findings"
-      }
+    context: [
+      artifactContext("review_packet", prepareId, "review_packet"),
+      artifactContext("workflow_plan_json", planId, "workflow_plan_json"),
+      artifactContext("raw_findings", rawId, "raw_findings"),
+      artifactContext("merged_findings", mergeId, "merged_findings"),
+      artifactContext("calibrated_findings", calibrateId, "calibrated_findings")
     ],
-    outputs: finalOutputs,
-    prompt: buildFinalizePrompt(config, finalOutputs)
+    artifacts: finalArtifacts,
+    prompt: buildFinalizePrompt(config, finalArtifacts)
   });
 
   return {

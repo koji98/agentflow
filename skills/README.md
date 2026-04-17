@@ -27,7 +27,7 @@ The skill is intentionally a small table of contents. Agents load only the refer
 What the skill is optimized for:
 
 - the real `agentflow` CLI surface: `graph-help`, `validate`, `compile`, `run`, `resume`, and `eval`
-- explicit graph authoring choices around context, outputs, validation, and failure propagation
+- explicit graph authoring choices around context, artifacts, validation, and failure propagation
 - managed-pattern field authoring and downstream handoffs
 - local file-backed eval suite authoring and grading
 - artifact-first debugging and provenance-aware resume diagnosis

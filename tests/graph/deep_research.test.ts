@@ -146,13 +146,13 @@ describe("deep research managed pattern", () => {
       expect.objectContaining({
         id: "market_scan",
         type: "agent",
-        outputs: expect.arrayContaining([
-          expect.objectContaining({ name: "research_report", path: "research-report.md" }),
-          expect.objectContaining({ name: "research_packet", path: "research-packet.json" }),
-          expect.objectContaining({ name: "source_ledger", path: "source-ledger.json" }),
-          expect.objectContaining({ name: "uncertainties", path: "uncertainties.md" }),
-          expect.objectContaining({ name: "interim_findings", path: "interim-findings.jsonl" })
-        ])
+        artifacts: expect.objectContaining({
+          research_report: expect.objectContaining({ path: "research-report.md" }),
+          research_packet: expect.objectContaining({ path: "research-packet.json" }),
+          source_ledger: expect.objectContaining({ path: "source-ledger.json" }),
+          uncertainties: expect.objectContaining({ path: "uncertainties.md" }),
+          interim_findings: expect.objectContaining({ path: "interim-findings.jsonl" })
+        })
       })
     );
     expect(finalCritique).toEqual(
@@ -196,15 +196,18 @@ describe("deep research managed pattern", () => {
             type: "agent",
             id: "handoff",
             prompt: "Summarize the research recommendation.",
-            context_from: [
+            context: [
               {
+                name: "research_agent_response",
+                from: "artifact",
                 node: "market_scan",
-                include: "summary"
+                artifact: "agent_response"
               },
               {
+                name: "research_report",
+                from: "artifact",
                 node: "market_scan",
-                include: "output",
-                output: "research_report"
+                artifact: "research_report"
               }
             ]
           }

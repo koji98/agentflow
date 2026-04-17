@@ -203,8 +203,10 @@ async function runAiRubricGrader(options: {
 
   const rubricPath = resolve(options.suite_dir, options.grader.rubric);
   const rubric = await readFile(rubricPath, "utf8");
-  const contextPacketPath = resolve(options.output_dir, "context_packet.json");
-  const contextSummaryPath = resolve(options.output_dir, "context_summary.md");
+  const contextDir = resolve(options.output_dir, "context");
+  const contextPacketPath = resolve(contextDir, "packet.json");
+  const contextManifestPath = resolve(contextDir, "manifest.md");
+  await mkdir(contextDir, { recursive: true });
 
   await Promise.all([
     writeFile(
@@ -223,7 +225,7 @@ async function runAiRubricGrader(options: {
       "utf8"
     ),
     writeFile(
-      contextSummaryPath,
+      contextManifestPath,
       [
         "# Eval Grader Context",
         "",
@@ -256,6 +258,7 @@ async function runAiRubricGrader(options: {
     ].join("\n"),
     rubric,
     context_packet_path: contextPacketPath,
+    context_manifest_path: contextManifestPath,
     output_dir: options.output_dir,
     timeout_sec: options.grader.timeout_sec ?? 900,
     signal: options.signal

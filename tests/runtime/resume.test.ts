@@ -154,9 +154,10 @@ describe("runtime resume", () => {
               id: "consumer",
               repo: "main",
               command: "placeholder",
-              inputs: [
+              context: [
                 {
-                  kind: "file",
+                  name: "watched",
+                  from: "workspace_file",
                   path: "watched.txt"
                 }
               ]
@@ -202,9 +203,10 @@ describe("runtime resume", () => {
               id: "consumer",
               repo: "main",
               command: "placeholder",
-              inputs: [
+              context: [
                 {
-                  kind: "glob",
+                  name: "docs",
+                  from: "workspace_glob",
                   path: "docs/*.md"
                 }
               ]
@@ -299,9 +301,10 @@ describe("runtime resume", () => {
               id: "consumer",
               repo: "main",
               command: "placeholder",
-              inputs: [
+              context: [
                 {
-                  kind: "file",
+                  name: "watched",
+                  from: "workspace_file",
                   path: "watched.txt"
                 }
               ]

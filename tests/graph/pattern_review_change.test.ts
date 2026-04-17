@@ -126,32 +126,31 @@ describe("pattern review change", () => {
       expect.objectContaining({
         id: "review_managed_nodes",
         type: "agent",
-        outputs: expect.arrayContaining([
-          expect.objectContaining({ name: "review_summary", path: "review-summary.md" }),
-          expect.objectContaining({ name: "review_bundle", path: "review-bundle.json" }),
-          expect.objectContaining({ name: "raw_findings", path: "raw-findings.json" }),
-          expect.objectContaining({ name: "merged_findings", path: "merged-findings.json" }),
-          expect.objectContaining({ name: "calibrated_findings", path: "calibrated-findings.json" })
-        ])
+        artifacts: expect.objectContaining({
+          review_summary: expect.objectContaining({ path: "review-summary.md" }),
+          review_bundle: expect.objectContaining({ path: "review-bundle.json" }),
+          raw_findings: expect.objectContaining({ path: "raw-findings.json" }),
+          merged_findings: expect.objectContaining({ path: "merged-findings.json" }),
+          calibrated_findings: expect.objectContaining({ path: "calibrated-findings.json" })
+        })
       })
     );
   });
 
-  it("maps artifact_bundle review sources into prepare inputs and managed-output context", () => {
+  it("maps artifact_bundle review sources into prepare context", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument([
         {
           type: "agent",
           id: "upstream_evaluation",
           prompt: "Write evaluation ledger output.",
-          outputs: [
-            {
-              name: "evaluation_ledger",
-              from: "attempt",
+          artifacts: {
+            evaluation_ledger: {
+              from: "output_dir",
               path: "evaluation-ledger.json",
-              required: true
+              description: "Test artifact produced at evaluation-ledger.json."
             }
-          ]
+          }
         },
         buildReviewStep({
           id: "review_bundle",
@@ -166,9 +165,9 @@ describe("pattern review change", () => {
               path: "artifacts/change-summary.md"
             },
             evaluation_ledger: {
-              kind: "managed_output",
+              kind: "artifact",
               node: "upstream_evaluation",
-              output: "evaluation_ledger"
+              artifact: "evaluation_ledger"
             },
             additional_context: [
               {
@@ -201,16 +200,15 @@ describe("pattern review change", () => {
       expect.objectContaining({
         type: "agent",
         id: "review_bundle__managed__pattern_review_change__prepare_review_packet",
-        inputs: expect.arrayContaining([
-          expect.objectContaining({ kind: "file", path: "artifacts/change.patch" }),
-          expect.objectContaining({ kind: "file", path: "artifacts/change-summary.md" }),
-          expect.objectContaining({ kind: "file", path: "artifacts/notes.md" })
-        ]),
-        context_from: expect.arrayContaining([
+        context: expect.arrayContaining([
+          expect.objectContaining({ name: "diff", from: "workspace_file", path: "artifacts/change.patch" }),
+          expect.objectContaining({ name: "summary", from: "workspace_file", path: "artifacts/change-summary.md" }),
+          expect.objectContaining({ name: "additional_context_1", from: "workspace_file", path: "artifacts/notes.md" }),
           expect.objectContaining({
+            name: "evaluation_ledger",
+            from: "artifact",
             node: "upstream_evaluation",
-            include: "output",
-            output: "evaluation_ledger",
+            artifact: "evaluation_ledger",
             optional: true
           })
         ])
@@ -234,20 +232,24 @@ describe("pattern review change", () => {
           type: "agent",
           id: "handoff",
           prompt: "Summarize the review result for an engineer.",
-          context_from: [
+          context: [
             {
+              name: "review_agent_response",
+              from: "artifact",
               node: "review_managed_nodes",
-              include: "summary"
+              artifact: "agent_response"
             },
             {
+              name: "review_summary",
+              from: "artifact",
               node: "review_managed_nodes",
-              include: "output",
-              output: "review_summary"
+              artifact: "review_summary"
             },
             {
+              name: "review_bundle",
+              from: "artifact",
               node: "review_managed_nodes",
-              include: "output",
-              output: "review_bundle"
+              artifact: "review_bundle"
             }
           ]
         }

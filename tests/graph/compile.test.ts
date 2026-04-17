@@ -119,14 +119,13 @@ describe("graph compilation", () => {
                   type: "agent",
                   id: "draft",
                   prompt: "Draft the artifact.",
-                  outputs: [
-                    {
-                      name: "draft_spec",
-                      from: "attempt",
+                  artifacts: {
+                    draft_spec: {
+                      from: "output_dir",
                       path: "draft.md",
-                      required: true
+                      description: "Test artifact produced at draft.md."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "checkpoint",
@@ -134,8 +133,7 @@ describe("graph compilation", () => {
                   prompt: "Review the draft.",
                   review_from: {
                     node: "draft",
-                    include: "output",
-                    output: "draft_spec"
+                    artifact: "draft_spec"
                   }
                 }
               ]
@@ -167,8 +165,7 @@ describe("graph compilation", () => {
           kind: "checkpoint",
           review_from: expect.objectContaining({
             node: "draft",
-            include: "output",
-            output: "draft_spec"
+            artifact: "draft_spec"
           })
         })
       ])
@@ -246,10 +243,12 @@ describe("graph compilation", () => {
             type: "agent",
             id: "handoff",
             prompt: "Summarize the run.",
-            context_from: [
+            context: [
               {
+                name: "fix_response",
+                from: "artifact",
                 node: "fix",
-                include: "summary"
+                artifact: "agent_response"
               }
             ]
           }
@@ -267,7 +266,7 @@ describe("graph compilation", () => {
     expect(compilation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: expect.stringContaining("context_from[0].iteration"),
+          path: expect.stringContaining("context[0].iteration"),
           message: expect.stringContaining("latest_failed")
         })
       ])
@@ -373,10 +372,12 @@ describe("graph compilation", () => {
                 type: "agent",
                 id: "report",
                 prompt: "Write the report.",
-                context_from: [
+                context: [
                   {
+                    name: "inspect_response",
+                    from: "artifact",
                     node: "inspect",
-                    include: "summary"
+                    artifact: "agent_response"
                   }
                 ]
               }
@@ -396,7 +397,7 @@ describe("graph compilation", () => {
     expect(compilation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: expect.stringContaining("context_from[0].node"),
+          path: expect.stringContaining("context[0].node"),
           message: expect.stringContaining("not guaranteed to execute before")
         })
       ])

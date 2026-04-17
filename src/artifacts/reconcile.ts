@@ -118,6 +118,9 @@ function buildLatestExecutionSummary(
     attempt_index: attempt.attempt_index,
     ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
     ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+    ...(attempt.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: attempt.iteration_attempt_index }
+      : {}),
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
     ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {})
@@ -139,6 +142,9 @@ function buildSyntheticLatestExecution(
     ...(activeExecution.repeat_scope_id ? { repeat_scope_id: activeExecution.repeat_scope_id } : {}),
     ...(activeExecution.iteration_index !== undefined
       ? { iteration_index: activeExecution.iteration_index }
+      : {}),
+    ...(activeExecution.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: activeExecution.iteration_attempt_index }
       : {}),
     started_at: activeExecution.started_at,
     ended_at: endedAt,
@@ -174,6 +180,9 @@ function sealTerminalState(
         attempt_index: attempt.attempt_index,
         ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
         ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+        ...(attempt.iteration_attempt_index !== undefined
+          ? { iteration_attempt_index: attempt.iteration_attempt_index }
+          : {}),
         started_at: attempt.started_at,
         ended_at: endedAt,
         duration_ms: computeDurationMs(attempt.started_at, endedAt)

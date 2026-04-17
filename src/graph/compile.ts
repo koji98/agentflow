@@ -180,9 +180,8 @@ function compileExecutableNode(
       ? { repeat_scope_id: scopeFrame.nearest_repeat_scope_id }
       : {}),
     effective_policy: nodePolicyResolution.policy,
-    inputs: node.inputs ?? [],
-    context_from: node.context_from ?? [],
-    declared_outputs: node.outputs ?? [],
+    context: node.context ?? [],
+    declared_artifacts: node.artifacts ?? {},
     ...(lowered_from ? { lowered_from } : {})
   };
 
@@ -534,7 +533,7 @@ function isReachable(
   return false;
 }
 
-function validateCompiledContextReferences(
+function validateCompiledArtifactReferences(
   context: CompileContext,
   compiledGraph: CompiledGraph
 ): void {
@@ -544,10 +543,14 @@ function validateCompiledContextReferences(
 
   compiledGraph.nodes.forEach((node) => {
     const references = [
-      ...node.context_from.map((reference, index) => ({
-        reference,
-        path_suffix: `context_from[${index}]`
-      })),
+      ...node.context
+        .map((item, index) => item.from === "artifact"
+          ? {
+              reference: item,
+              path_suffix: `context[${index}]`
+            }
+          : undefined)
+        .filter((item): item is { reference: Extract<CompiledExecutableNode["context"][number], { from: "artifact" }>; path_suffix: string } => item !== undefined),
       ...(node.kind === "checkpoint"
         ? [
             {
@@ -583,7 +586,7 @@ function validateCompiledContextReferences(
       if (!allTargetsArePriorIterationReferences && orderedTargetIds.length !== targetCompiledIds.length) {
         context.diagnostics.push({
           path: `${path}.${path_suffix}.node`,
-          message: `${path_suffix === "review_from" ? "review_from" : "context_from"} node "${reference.node}" is not guaranteed to execute before "${node.authored_id}".`
+          message: `${path_suffix === "review_from" ? "review_from" : "context"} node "${reference.node}" is not guaranteed to execute before "${node.authored_id}".`
         });
       }
 
@@ -598,7 +601,7 @@ function validateCompiledContextReferences(
           context.diagnostics.push({
             path: `${path}.${path_suffix}.iteration`,
             message:
-              `${path_suffix === "review_from" ? "review_from" : "context_from"} node "${reference.node}" ` +
+              `${path_suffix === "review_from" ? "review_from" : "context"} node "${reference.node}" ` +
               `requires an iteration selector outside repeat scope "${targetNode.repeat_scope_id}". ` +
               `Use "latest_failed" or "latest_passed" when you want the most recent failed or passed iteration.`
           });
@@ -679,7 +682,7 @@ export function compileAuthoredGraph(
     )
   };
 
-  validateCompiledContextReferences(context, compiled_graph);
+  validateCompiledArtifactReferences(context, compiled_graph);
   validateManagedSoftFailureRules(context, compiled_graph);
 
   return {

@@ -19,6 +19,8 @@ The intended high-level composition is:
 
 Patterns can also hand off to primitive nodes directly when the graph only needs a narrower follow-on step.
 
+Managed patterns still use the same graph contract as primitive nodes. They accept authored `context`, lower into primitive subgraphs, and publish named artifacts from their final publish phase. A downstream node should consume those artifacts explicitly rather than scrape intermediate execution directories.
+
 ## Shared Model
 
 Every managed pattern uses this base:
@@ -40,16 +42,22 @@ Shared executable fields still apply:
 - `label`
 - `repo`
 - `profile`
-- `inputs`
-- `context_from`
+- `context`
 - `timeout_sec`
 
 Rules:
 
 - Managed patterns are fixed strategy contracts, not prompt buckets.
-- Only the patterns that explicitly define `delivery` accept it. `delivery` can shape format or sections, but it does not toggle core outputs on or off.
+- Only the patterns that explicitly define `delivery` accept it. `delivery` can shape format or sections, but it does not toggle core artifacts on or off.
 - Only `pattern_deep_research` and `pattern_spec_design` expose `approval_policy` in this release.
 - Runtime truth lives in run artifacts. Managed patterns do not publish fake runtime-status or workflow-event files.
+
+Handoff rule:
+
+- Prefer the machine-readable packet when another pattern or deterministic command consumes the result.
+- Prefer the human-readable summary/report when the next step is operator review.
+- Add a downstream primitive `agent` only when it has a new responsibility, such as translating a packet into a release note or combining multiple pattern artifacts.
+- Do not add a handoff node that merely repeats the previous pattern's final answer.
 
 ## Pattern Inventory
 
@@ -58,7 +66,7 @@ Rules:
 Purpose:
 - Clarify a research question, plan the investigation, fan out researchers, consolidate findings, and publish a sourced report plus machine-readable packet.
 
-Core outputs:
+Core artifacts:
 - `research-report.md`
 - `research-packet.json`
 - `source-ledger.json`
@@ -77,7 +85,7 @@ Reference:
 Purpose:
 - Turn a repo-grounded problem statement into an implementation-ready design package that downstream primitives or patterns can consume.
 
-Core outputs:
+Core artifacts:
 - `design-spec.md`
 - `design-packet.json`
 - `direction-proposal.md`
@@ -99,7 +107,7 @@ Reference:
 Purpose:
 - Consume a prepared task packet, generate or fix a change, evaluate concrete commands independently, aggregate the evidence, and optionally repeat until the hard evaluation gate passes.
 
-Core outputs:
+Core artifacts:
 - `change-summary.md`
 - `change-packet.json`
 - `evaluation-ledger.json`
@@ -119,7 +127,7 @@ Reference:
 Purpose:
 - Prepare a review packet, plan reviewer focus, fan out specialized reviewers, merge and calibrate findings, and publish a final review package.
 
-Core outputs:
+Core artifacts:
 - `review-summary.md`
 - `review-bundle.json`
 - `raw-findings.json`

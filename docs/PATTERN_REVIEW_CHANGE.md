@@ -55,7 +55,7 @@ When available, the pattern consumes:
 
 ### `artifact_bundle`
 
-Use files or prior managed outputs directly:
+Use files or prior artifacts directly:
 
 ```json
 {
@@ -63,9 +63,9 @@ Use files or prior managed outputs directly:
   "diff": { "kind": "file", "path": "artifacts/change.patch" },
   "summary": { "kind": "file", "path": "artifacts/change-summary.md" },
   "evaluation_ledger": {
-    "kind": "managed_output",
+    "kind": "artifact",
     "node": "upstream_evaluation",
-    "output": "evaluation_ledger"
+    "artifact": "evaluation_ledger"
   }
 }
 ```
@@ -78,7 +78,7 @@ Supported bundle keys:
 - optional `files_touched`
 - optional `additional_context`
 
-## Core Outputs
+## Core Artifacts
 
 - `review-summary.md`
 - `review-bundle.json`

@@ -5,7 +5,9 @@ description: Work with Agentflow graphs, managed workflows, local eval suites, r
 
 # Agentflow
 
-Use this as the router for Agentflow work. Load only the reference that matches the task.
+Use this as the router for Agentflow work. Agentflow is a local-first graph executor for agentic workflows over local repositories. A graph is executable control flow: nodes run, context is materialized, artifacts are published, validation gates decide outcomes, and durable run artifacts explain what happened.
+
+Do not treat an Agentflow graph as a prose plan. It must validate, compile, and have intentional handoffs.
 
 ## Route by task
 
@@ -26,5 +28,18 @@ Prefer the repository `docs/`, `src/`, and `tests/` when available. The packaged
 
 1. Identify whether the user needs authoring, managed patterns, evals, or run debugging.
 2. Read the smallest relevant reference.
-3. Use `agentflow --help` or the relevant `agentflow <command> --help` when the CLI surface matters.
-4. Validate executable artifacts before handoff.
+3. Use `agentflow graph-help` or the relevant `agentflow <command> --help` when the CLI surface matters.
+4. Author or edit the graph using current fields only: `context` and `artifacts`, not `inputs`, `context_from`, or `outputs`.
+5. Run `agentflow validate --graph <path>` and fix diagnostics.
+6. Run `agentflow validate --graph <path> --run-ready` when the user needs launch assurance on this machine, or when the graph depends on local commands, git worktrees, Codex, or Cursor.
+7. Run `agentflow compile --graph <path>` and inspect lowered shape when the graph uses managed patterns, `repeat`, `parallel`, or nontrivial artifact handoffs.
+8. Hand off only after validation and compile pass, or explicitly report the exact command that failed and the diagnostics that remain.
+
+## Authoring posture
+
+- Keep nodes narrow enough that a failure tells the operator what broke.
+- Use named artifacts for durable handoffs. Do not rely on downstream nodes rediscovering scratch files.
+- Treat an agent node's final response as the `agent_response` handoff summary, but declare structured artifacts when downstream work needs stable data.
+- Use deterministic `check` for real gates and `exec` for evidence collection.
+- Use managed patterns only when the task lifecycle matches the pattern contract.
+- Prefer smaller explicit graphs over clever graphs with ambiguous context or hidden dependencies.

@@ -42,10 +42,12 @@ describe("graph normalization", () => {
                 type: "agent",
                 id: "handoff",
                 prompt: "Summarize the work.",
-                context_from: [
+                context: [
                   {
+                    name: "inspect_response",
+                    from: "artifact",
                     node: "inspect",
-                    include: "summary",
+                    artifact: "agent_response",
                     iteration: 1,
                     attempt: "latest_failed",
                     optional: true
@@ -94,16 +96,226 @@ describe("graph normalization", () => {
       expect.objectContaining({
         type: "agent",
         id: "handoff",
-        context_from: [
+        context: [
           {
+            name: "inspect_response",
+            from: "artifact",
             node: "inspect",
-            include: "summary",
+            artifact: "agent_response",
             iteration: 1,
             attempt: "latest_failed",
             optional: true
           }
         ]
       })
+    );
+  });
+
+  it("rejects legacy data-flow fields with replacement guidance", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "legacy-data-flow",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "bad",
+            prompt: "Legacy fields.",
+            inputs: [],
+            context_from: [],
+            outputs: []
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].inputs",
+          message: 'Field "inputs" has been replaced by "context".'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].context_from",
+          message: 'Field "context_from" has been replaced by context items with from = "artifact".'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].outputs",
+          message: 'Field "outputs" has been replaced by "artifacts".'
+        })
+      ])
+    );
+  });
+
+  it("rejects legacy data-flow fields on managed patterns too", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "legacy-managed-data-flow",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_generate_evaluate_fix",
+            id: "implement",
+            task_source: {
+              kind: "artifact_bundle",
+              design_packet: {
+                kind: "file",
+                path: "design-packet.json"
+              }
+            },
+            evaluation: {
+              commands: ["npm test"]
+            },
+            inputs: [],
+            context_from: [],
+            outputs: []
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].inputs",
+          message: 'Field "inputs" has been replaced by "context".'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].context_from",
+          message: 'Field "context_from" has been replaced by context items with from = "artifact".'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].outputs",
+          message: 'Field "outputs" has been replaced by "artifacts".'
+        })
+      ])
+    );
+  });
+
+  it("rejects user-declared artifacts that collide with reserved automatic artifacts", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "reserved-artifacts",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "bad",
+            prompt: "Try to redefine automatic artifacts.",
+            artifacts: {
+              agent_response: {
+                from: "output_dir",
+                path: "agent-response.md"
+              },
+              result_json: {
+                from: "output_dir",
+                path: "result.json"
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts.agent_response",
+          message: 'Artifact name "agent_response" is reserved by Agentflow.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts.result_json",
+          message: 'Artifact name "result_json" is reserved by Agentflow.'
+        })
+      ])
+    );
+  });
+
+  it("requires artifact descriptions and rejects removed artifact required flags", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "artifact-descriptions",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "bad",
+            prompt: "Write a packet.",
+            artifacts: {
+              packet: {
+                from: "output_dir",
+                path: "packet.json",
+                required: true
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts.packet.required",
+          message: 'Unknown field "required" is not part of the graph contract.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts.packet.description",
+          message: "Expected a non-empty string."
+        })
+      ])
     );
   });
 

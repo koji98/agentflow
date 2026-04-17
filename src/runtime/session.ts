@@ -23,6 +23,16 @@ export interface WorkspaceBinding {
   backend: WorkspaceBackend;
 }
 
+export interface WorkspaceChangeArtifacts {
+  repo_alias: string;
+  workspace_path: string;
+  status_file: string;
+  diff_file: string;
+  changed_files_file: string;
+  changed_files: string[];
+  capture_error_file?: string;
+}
+
 export interface ExecutionManifestEntry {
   compiled_id: string;
   authored_id: string;
@@ -51,6 +61,7 @@ export interface ActiveExecutionSummary {
   attempt_index: number;
   repeat_scope_id?: string;
   iteration_index?: number;
+  iteration_attempt_index?: number;
   started_at: string;
 }
 
@@ -63,6 +74,7 @@ export interface LatestExecutionSummary {
   attempt_index: number;
   repeat_scope_id?: string;
   iteration_index?: number;
+  iteration_attempt_index?: number;
   started_at: string;
   ended_at?: string;
   duration_ms?: number;
@@ -110,6 +122,7 @@ export interface RuntimeStateSnapshot {
   evidence_status: EvidenceStatus;
   workspace_backend: WorkspaceBackend;
   repo_workspaces: Record<string, WorkspaceBinding>;
+  workspace_change_artifacts: Record<string, WorkspaceChangeArtifacts>;
   counts: RuntimeCounts;
   soft_verification_counts: SoftVerificationCounts;
   failed_soft_verifications: FailedSoftVerificationSummary[];
@@ -134,6 +147,7 @@ export interface RuntimeSession {
   latest_execution_by_compiled_id: Map<string, LatestExecutionSummary>;
   active_executions: Map<string, ActiveExecutionSummary>;
   repeat_scopes: Map<string, RepeatScopeState>;
+  workspace_change_artifacts: Record<string, WorkspaceChangeArtifacts>;
   started_at: string;
   ended_at?: string;
 }
@@ -251,6 +265,7 @@ export function createRuntimeSession(
     latest_execution_by_compiled_id: new Map(),
     active_executions: new Map(),
     repeat_scopes,
+    workspace_change_artifacts: {},
     started_at
   };
 }
@@ -277,6 +292,9 @@ export function registerActiveExecution(
     attempt_index: attempt.attempt_index,
     ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
     ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+    ...(attempt.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: attempt.iteration_attempt_index }
+      : {}),
     started_at: attempt.started_at
   });
 }
@@ -299,6 +317,9 @@ export function finalizeExecutionSummary(
     attempt_index: attempt.attempt_index,
     ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
     ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+    ...(attempt.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: attempt.iteration_attempt_index }
+      : {}),
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
     ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {}),
@@ -354,6 +375,7 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     evidence_status: softVerificationSummary.evidence_status,
     workspace_backend: session.manifest.workspace_backend,
     repo_workspaces: session.manifest.repo_workspaces,
+    workspace_change_artifacts: session.workspace_change_artifacts,
     counts: createCounts(session.node_statuses.values()),
     soft_verification_counts: softVerificationSummary.soft_verification_counts,
     failed_soft_verifications: softVerificationSummary.failed_soft_verifications,

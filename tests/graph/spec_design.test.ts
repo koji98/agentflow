@@ -162,19 +162,16 @@ describe("spec design managed pattern", () => {
       expect.objectContaining({
         id: "managed_nodes_spec",
         type: "agent",
-        outputs: expect.arrayContaining([
-          expect.objectContaining({ name: "design_spec", path: "design-spec.md" }),
-          expect.objectContaining({ name: "design_packet", path: "design-packet.json" }),
-          expect.objectContaining({ name: "direction_proposal", path: "direction-proposal.md" }),
-          expect.objectContaining({ name: "tradeoff_matrix", path: "tradeoff-matrix.md" }),
-          expect.objectContaining({ name: "decision_log", path: "decision-log.md" }),
-          expect.objectContaining({
-            name: "implementation_readiness",
-            path: "implementation-readiness.md"
-          }),
-          expect.objectContaining({ name: "critique_merged", path: "critique-merged.md" }),
-          expect.objectContaining({ name: "quality_review", path: "quality-review.json" })
-        ])
+        artifacts: expect.objectContaining({
+          design_spec: expect.objectContaining({ path: "design-spec.md" }),
+          design_packet: expect.objectContaining({ path: "design-packet.json" }),
+          direction_proposal: expect.objectContaining({ path: "direction-proposal.md" }),
+          tradeoff_matrix: expect.objectContaining({ path: "tradeoff-matrix.md" }),
+          decision_log: expect.objectContaining({ path: "decision-log.md" }),
+          implementation_readiness: expect.objectContaining({ path: "implementation-readiness.md" }),
+          critique_merged: expect.objectContaining({ path: "critique-merged.md" }),
+          quality_review: expect.objectContaining({ path: "quality-review.json" })
+        })
       })
     );
   });
@@ -201,20 +198,24 @@ describe("spec design managed pattern", () => {
             type: "agent",
             id: "handoff",
             prompt: "Summarize the design package for an implementer.",
-            context_from: [
+            context: [
               {
+                name: "design_agent_response",
+                from: "artifact",
                 node: "managed_nodes_spec",
-                include: "summary"
+                artifact: "agent_response"
               },
               {
+                name: "design_spec",
+                from: "artifact",
                 node: "managed_nodes_spec",
-                include: "output",
-                output: "design_spec"
+                artifact: "design_spec"
               },
               {
+                name: "implementation_readiness",
+                from: "artifact",
                 node: "managed_nodes_spec",
-                include: "output",
-                output: "implementation_readiness"
+                artifact: "implementation_readiness"
               }
             ]
           }

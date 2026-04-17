@@ -1,4 +1,4 @@
-import type { OutputDefinition } from "./authored.js";
+import type { ArtifactDefinition } from "./authored.js";
 import type { CompiledGraph, CompiledRepeatScope } from "./compiled.js";
 import type { LoweredManagedNode } from "./normalize.js";
 
@@ -15,7 +15,7 @@ export interface ManagedExpansionSummary {
   ordered_internal_step_ids: string[];
   internal_hard_gates: string[];
   repeat_loops: ManagedExpansionRepeatLoop[];
-  published_outputs: OutputDefinition[];
+  published_artifacts: Record<string, ArtifactDefinition>;
 }
 
 function unique(values: string[]): string[] {
@@ -62,7 +62,7 @@ export function buildManagedExpansionSummaries(
           .map((node) => node.authored_id)
       ),
       repeat_loops: repeatLoops,
-      published_outputs: publishedNode?.declared_outputs ?? []
+      published_artifacts: publishedNode?.declared_artifacts ?? {}
     };
   });
 }

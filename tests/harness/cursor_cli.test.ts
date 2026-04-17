@@ -9,16 +9,27 @@ import { createCursorCliHarness } from "../../src/runtime/harness/cursor_cli.js"
 async function createMockCursorBinary(tempRoot: string): Promise<{
   binary_path: string;
   argv_path: string;
+  env_path: string;
 }> {
   const binary_path = join(tempRoot, "mock-agent.mjs");
   const argv_path = join(tempRoot, "argv.json");
+  const env_path = join(tempRoot, "env.json");
   const source = `#!/usr/bin/env node
 import { writeFileSync } from "node:fs";
 
 const argvPath = process.env.MOCK_ARGV_PATH;
+const envPath = process.env.MOCK_ENV_PATH;
 
 if (argvPath) {
   writeFileSync(argvPath, JSON.stringify(process.argv.slice(2), null, 2));
+}
+if (envPath) {
+  writeFileSync(envPath, JSON.stringify({
+    AGENTFLOW_WORKSPACE: process.env.AGENTFLOW_WORKSPACE,
+    AGENTFLOW_OUTPUT_DIR: process.env.AGENTFLOW_OUTPUT_DIR,
+    AGENTFLOW_CONTEXT_PACKET: process.env.AGENTFLOW_CONTEXT_PACKET,
+    AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST
+  }, null, 2));
 }
 
 process.stdout.write('{"passed":true,"summary":"cursor ok"}');
@@ -29,7 +40,8 @@ process.stdout.write('{"passed":true,"summary":"cursor ok"}');
 
   return {
     binary_path,
-    argv_path
+    argv_path,
+    env_path
   };
 }
 
@@ -98,8 +110,10 @@ describe("cursor cli harness", () => {
         sandbox: "read-only",
         model: "gpt-5-cursor",
         prompt: "Read from env override.",
-        contextPacketPath: join(executionDir, "context_packet.json"),
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
         outputDir: executionDir,
+        artifacts: {},
         timeoutSec: 10,
         signal: undefined
       });
@@ -140,7 +154,9 @@ describe("cursor cli harness", () => {
     });
 
     const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
     process.env.MOCK_ARGV_PATH = mock.argv_path;
+    process.env.MOCK_ENV_PATH = mock.env_path;
 
     try {
       const result = await harness.run({
@@ -151,14 +167,23 @@ describe("cursor cli harness", () => {
         sandbox: "read-only",
         model: "gpt-5-cursor",
         prompt: "Review the change.",
-        contextPacketPath: join(executionDir, "context_packet.json"),
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
         outputDir: executionDir,
+        artifacts: {
+          review_report: {
+            from: "output_dir",
+            path: "review-report.md",
+            description: "Markdown review report for downstream nodes."
+          }
+        },
         timeoutSec: 10,
         signal: undefined
       });
 
       const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
       const prompt = argv.at(-1) ?? "";
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
 
       expect(result.status).toBe("passed");
       expect(argv).toEqual(
@@ -175,13 +200,28 @@ describe("cursor cli harness", () => {
         ])
       );
       expect(argv).not.toContain("--force");
+      expect(prompt).toContain("## Agentflow Runtime Contract");
+      expect(prompt).toContain("You are executing one node in an Agentflow graph.");
+      expect(prompt).toContain("Future nodes can consume only named artifacts");
+      expect(prompt).toContain("## Node Task");
       expect(prompt).toContain("Review the change.");
-      expect(prompt).toContain("Context packet");
-      expect(prompt).toContain(join(executionDir, "context_packet.json"));
-      expect(prompt).toContain("## Working Contract");
-      expect(prompt).toContain("default local contract");
-      expect(prompt).toContain("higher-priority instruction overrides them");
-      expect(prompt).toContain("If the context summary reports omitted or truncated items");
+      expect(prompt).toContain("Exact context packet");
+      expect(prompt).toContain(join(executionDir, "context", "packet.json"));
+      expect(prompt).toContain("Read first");
+      expect(prompt).toContain(join(executionDir, "context", "manifest.md"));
+      expect(prompt).toContain("## Artifact Contract");
+      expect(prompt).toContain("Every declared artifact must exist before you finish");
+      expect(prompt).toContain("`review_report` (from `output_dir`)");
+      expect(prompt).toContain("$AGENTFLOW_OUTPUT_DIR/review-report.md");
+      expect(prompt).toContain("Expected content: Markdown review report for downstream nodes.");
+      expect(prompt).toContain("## Final Response Requirements");
+      expect(prompt).toContain("captured by Agentflow as the reserved `agent_response` artifact");
+      expect(env).toEqual({
+        AGENTFLOW_WORKSPACE: repoDir,
+        AGENTFLOW_OUTPUT_DIR: executionDir,
+        AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
+        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md")
+      });
       expect(result.outputJson).toEqual({
         passed: true,
         summary: "cursor ok"
@@ -197,6 +237,12 @@ describe("cursor cli harness", () => {
         delete process.env.MOCK_ARGV_PATH;
       } else {
         process.env.MOCK_ARGV_PATH = previousArgvPath;
+      }
+
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
       }
 
       await rm(tempRoot, { recursive: true, force: true });
@@ -227,8 +273,10 @@ describe("cursor cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-cursor",
         prompt: "Apply the change.",
-        contextPacketPath: join(executionDir, "context_packet.json"),
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
         outputDir: executionDir,
+        artifacts: {},
         timeoutSec: 10,
         signal: undefined
       });
@@ -275,8 +323,10 @@ describe("cursor cli harness", () => {
         sandbox: "read-only",
         model: "gpt-5-cursor",
         prompt: "Stream logs.",
-        contextPacketPath: join(executionDir, "context_packet.json"),
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
         outputDir: executionDir,
+        artifacts: {},
         timeoutSec: 10,
         signal: undefined,
         onStdoutChunk(chunk) {

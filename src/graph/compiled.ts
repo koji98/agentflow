@@ -1,9 +1,9 @@
 import type {
-  ContextReference,
+  ArtifactDefinition,
+  ArtifactReference,
+  ContextItem,
   DeterministicPassIf,
-  GraphPrerequisites,
-  InputItem,
-  OutputDefinition
+  GraphPrerequisites
 } from "./authored.js";
 import type {
   ContainerNodeKind,
@@ -25,9 +25,8 @@ export interface CompiledExecutableNodeBase {
   scope_stack: string[];
   repeat_scope_id?: string;
   effective_policy: EffectiveNodePolicy;
-  inputs: InputItem[];
-  context_from: ContextReference[];
-  declared_outputs: OutputDefinition[];
+  context: ContextItem[];
+  declared_artifacts: Record<string, ArtifactDefinition>;
   lowered_from?: LoweredManagedKind;
 }
 
@@ -63,7 +62,7 @@ export interface CompiledCheckNode extends CompiledExecutableNodeBase {
 export interface CompiledCheckpointNode extends CompiledExecutableNodeBase {
   kind: "checkpoint";
   prompt: string;
-  review_from: ContextReference;
+  review_from: ArtifactReference;
 }
 
 export type CompiledExecutableNode =

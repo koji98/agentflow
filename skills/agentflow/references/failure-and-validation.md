@@ -11,7 +11,7 @@ Choose node kinds based on control-flow semantics, not just on what tool happens
 - `agent`
   Use for model-driven coding, synthesis, planning, or review work.
 - `exec`
-  Use to run a concrete command and capture its logs, result, and declared outputs.
+  Use to run a concrete command and capture its logs, result, and declared artifacts.
 - deterministic `check`
   Use when pass or fail should immediately decide whether the graph continues.
 - AI `check`
@@ -35,8 +35,12 @@ Use an `exec` followed by a review node when failure should be documented rather
 
 Good soft-verifier shape:
 
-1. `exec` runs the command and writes status/log artifacts
-2. `agent` consumes those artifacts and explains success, failure, or cleanup needed
+1. `exec` runs the command with `on_failure: "continue"`.
+2. The command writes any durable report to `AGENTFLOW_OUTPUT_DIR` or the workspace.
+3. The node declares those files in `artifacts`.
+4. A downstream `agent` consumes the named artifacts and explains success, failure, or cleanup needed.
+
+Do not rely on a downstream node reading raw stdout by convention. It can consume `result_json`, but a purposeful report artifact is clearer when the evidence matters.
 
 ## `repeat` discipline
 
@@ -69,3 +73,5 @@ Do not add validation everywhere by reflex. Extra validation nodes add noise, ru
 - inserting `checkpoint` where no operator review is actually wanted
 - using `repeat` without a strong convergence signal
 - running destructive or environment-sensitive commands without deciding whether their failure should terminate the graph
+- declaring optional artifacts that are required for the next node to make sense
+- using `agent_response` as a machine-readable contract when the producer should write a JSON artifact

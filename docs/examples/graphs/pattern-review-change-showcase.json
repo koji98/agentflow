@@ -58,17 +58,20 @@
             ]
           }
         },
-        "inputs": [
+        "context": [
           {
-            "kind": "file",
+            "name": "readme",
+            "from": "workspace_file",
             "path": "README.md"
           },
           {
-            "kind": "file",
+            "name": "managed_patterns_doc",
+            "from": "workspace_file",
             "path": "docs/MANAGED_PATTERNS.md"
           },
           {
-            "kind": "file",
+            "name": "review_change_doc",
+            "from": "workspace_file",
             "path": "docs/PATTERN_REVIEW_CHANGE.md"
           }
         ],
@@ -190,20 +193,24 @@
         "repo": "main",
         "profile": "default",
         "prompt": "Summarize the final review for an implementer. Focus on the highest-priority findings, their likely impact, and any evaluation or residual-risk context from upstream stages.",
-        "context_from": [
+        "context": [
           {
+            "name": "review_response",
+            "from": "artifact",
             "node": "review_managed_nodes",
-            "include": "summary"
+            "artifact": "agent_response"
           },
           {
+            "name": "review_summary",
+            "from": "artifact",
             "node": "review_managed_nodes",
-            "include": "output",
-            "output": "review_summary"
+            "artifact": "review_summary"
           },
           {
+            "name": "calibrated_findings",
+            "from": "artifact",
             "node": "review_managed_nodes",
-            "include": "output",
-            "output": "calibrated_findings"
+            "artifact": "calibrated_findings"
           }
         ]
       }

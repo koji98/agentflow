@@ -1,36 +1,61 @@
 # Agentflow Graph Contract
 
-Use this as the compact reference for the shipped graph surface.
+Use this as the compact syntax reference for the current Agentflow graph surface.
 
-## Top-level document
+## Document Shape
 
-Required shape:
+Required top-level fields:
 
-- `version`
+- `version`: always `"1"`
 - `graph_id`
 - `repos`
 - `defaults`
 - `profiles`
 - `graph`
 
-Important defaults:
+Optional top-level field:
 
-- `defaults.launch_profile` chooses the run launch profile
-- `defaults.workspace_backend` chooses `inplace` or `worktree`
+- `prerequisites.checks`
 
-Repo rules:
+Path rules:
 
-- `--graph` resolves from the shell current working directory
-- `repos.<alias>.path` resolves from the graph file directory
+- `--graph` resolves from the shell current working directory.
+- `repos.<alias>.path` resolves from the graph file directory.
+- Node workspace paths must stay inside their workspace root.
+- Context workspace paths must stay inside the selected repo root.
+- Artifact paths must stay inside their source root.
 
-Run settings:
+Launch rules:
 
-- `defaults.launch_profile`
-- `defaults.workspace_backend`
+- `defaults.launch_profile` selects a named profile.
+- `defaults.workspace_backend` is `inplace` or `worktree`.
+- The graph owns launch settings. Do not expect CLI overrides for profile or workspace backend.
 
-The graph owns launch settings. They are not expected to come from CLI overrides.
+## Profiles
 
-## Node model
+Profiles hold runtime policy, not graph structure.
+
+Common fields:
+
+- `harness`: `codex-cli` or `cursor-cli`
+- `model`
+- `reasoning_effort`: `none`, `low`, `medium`, `high`, `xhigh`
+- `sandbox`: `read-only`, `workspace-write`, `danger-full-access`
+- `skip_git_repo_check`
+- `env_files`
+- `timeout_sec`
+- `input_rules`
+- `deterministic_check_defaults`
+- `ai_check_defaults`
+
+`env_files` applies to `exec` and deterministic `check` nodes. It does not apply to agent harnesses or AI checks.
+
+`input_rules` fields:
+
+- `max_total_tokens`
+- `max_tokens_per_item`
+
+## Node Kinds
 
 Primitive executable nodes:
 
@@ -52,35 +77,9 @@ Managed patterns:
 - `pattern_generate_evaluate_fix`
 - `pattern_review_change`
 
-## Profiles
+Only executable nodes run directly. Containers compile into scopes and edges. Managed patterns lower into generated primitive subgraphs.
 
-Profiles hold runtime policy, not control flow.
-
-Typical fields:
-
-- `harness`
-- `model`
-- `reasoning_effort`
-- `sandbox`
-- `skip_git_repo_check`
-- `env_files`
-- `timeout_sec`
-- `input_rules`
-
-Keep graph structure out of profiles.
-
-Use `skip_git_repo_check: true` only for `codex-cli` profiles that intentionally run from a non-git workspace root.
-
-Use profile-level `env_files` for repo-local dotenv-style files that local command nodes need, for example `.env.development`. This applies to `exec` and deterministic `check` nodes using that profile, not to agent harnesses or AI checks.
-
-Important `input_rules` fields:
-
-- `max_total_bytes`
-- `max_bytes_per_item`
-
-There is no global `max_files` budget anymore. Keep contexts small by authoring narrower inputs, not by relying on a file-count stop.
-
-## Common executable fields
+## Common Executable Fields
 
 Executable nodes may define:
 
@@ -88,84 +87,121 @@ Executable nodes may define:
 - optional `label`
 - optional `repo`
 - optional `profile`
-- optional `inputs`
-- optional `context_from`
-- optional `outputs`
+- optional `context`
+- optional `artifacts`
 - optional `timeout_sec`
 
-Use node-level `profile` only when one executable node genuinely needs a different runtime policy than the graph default.
+When multiple repos are declared, executable nodes must declare `repo`.
 
 ## Context
 
-Supported `inputs` kinds:
+`context` is a node array. Every item needs a stable `name`.
 
-- `file`
-- `glob`
-- `text`
+Supported context sources:
 
-Supported `context_from.include` values:
+```json
+{ "name": "goal", "from": "text", "text": "..." }
+{ "name": "readme", "from": "workspace_file", "path": "README.md" }
+{ "name": "sources", "from": "workspace_glob", "path": "src/**/*.ts", "max_files": 20 }
+{ "name": "packet", "from": "artifact", "node": "design", "artifact": "design_packet" }
+```
 
-- `summary`
-- `result`
-- `output`
+Artifact context fields:
 
-Guidelines:
+- `node`: upstream authored node id
+- `artifact`: reserved or declared artifact name
+- optional `iteration`: `latest`, `latest_passed`, `latest_failed`, or a positive integer
+- optional `attempt`: `latest`, `latest_passed`, `latest_failed`, or a positive integer
+- optional `optional`: boolean
 
-- prefer summaries by default
-- publish named outputs when downstream nodes need concrete artifacts
-- use repo-qualified paths like `ui:src/App.tsx` only when cross-repo reads are intentional
-- `glob` inputs are resolved deterministically with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`, but broad globs are still a common source of brittle graphs
+Use `optional: true` only when the consumer can still do useful work without the material.
 
-`outputs` are the explicit downstream artifact contract. Prefer named outputs over hoping a later node will rediscover files from workspace state.
+## Artifacts
 
-## Primitive node semantics
+`artifacts` is a node map keyed by artifact name.
 
-- `agent`
-  Model-driven work: planning, coding, synthesis, critique, or review.
-- `exec`
-  Concrete command execution with logs, result, and optional outputs.
-- `check`
-  Concrete gate. Use deterministic `check` when pass/fail is command-based; use AI `check` when the gate is semantic.
-- `checkpoint`
-  Operator decision point. This is for intentional human review, not general pause behavior.
+```json
+{
+  "design_packet": {
+    "from": "output_dir",
+    "path": "design-packet.json",
+    "required": true
+  },
+  "junit": {
+    "from": "workspace",
+    "path": "reports/junit.xml",
+    "required": false
+  }
+}
+```
 
-## Primitive node fields
+Artifact sources:
+
+- `output_dir`: file written under `AGENTFLOW_OUTPUT_DIR`
+- `workspace`: file copied from the node repo workspace
+
+Reserved automatic artifact names:
+
+- `agent_response`: every agent final response, persisted as `agent-response.md`
+- `result_json`: every executable node's normalized `result.json`
+
+Do not declare artifacts with reserved names.
+
+## Runtime Environment
+
+`exec` and deterministic `check` nodes receive:
+
+- `AGENTFLOW_WORKSPACE`
+- `AGENTFLOW_OUTPUT_DIR`
+- `AGENTFLOW_CONTEXT_PACKET`
+- `AGENTFLOW_CONTEXT_MANIFEST`
+
+Agents receive the same environment variables and the same contract through their harness prompt. Source edits happen in `AGENTFLOW_WORKSPACE`. Durable handoff files go in `AGENTFLOW_OUTPUT_DIR` and must be declared in `artifacts`.
+
+Agent harness prompts tell the model it is executing one node in a graph, list declared artifacts with required or optional status, and explain that the final response is captured as reserved `agent_response`. Treat `agent_response` as a concise narrative handoff, not a replacement for a required structured artifact.
+
+## Primitive Fields
 
 ### `agent`
 
 Required:
 
 - `type: "agent"`
+- `id`
 - `prompt`
 
-Optional node-specific fields:
+Optional:
 
 - `model`
+- `reasoning_effort`
 - `sandbox`
+
+Use agents for model-driven work. Prefer declared artifacts for structured handoffs; use reserved `agent_response` for concise narrative handoffs that include outcome, work completed, artifacts produced, validation, and handoff notes.
 
 ### `exec`
 
 Required:
 
 - `type: "exec"`
+- `id`
 - `command`
 
-Optional node-specific fields:
+Optional:
 
 - `args`
 - `cwd`
 - `env_files`
 - `env`
+- `on_failure`
 
-`env_files` paths resolve inside the node workspace root, load in order, and are applied before inline `env`.
-
-Use `on_failure: "continue"` when an `exec` command should record soft verification evidence without stopping control flow. Operational failures such as spawn errors, timeouts, missing required env files, or output materialization still fail hard.
+`on_failure` defaults to `"fail"`. Use `"continue"` for soft evidence collection. Spawn errors, timeouts, missing env files, cancellation, context failures, and required artifact failures still fail hard.
 
 ### `check`
 
 Required:
 
 - `type: "check"`
+- `id`
 - `check_kind`
 
 Deterministic checks use:
@@ -182,52 +218,74 @@ AI checks use:
 - `prompt`
 - optional `rubric`
 - optional `model`
+- optional `reasoning_effort`
 
-Supported release `check_kind` values:
+Supported `pass_if`:
 
-- `deterministic`
-- `ai`
-
-Supported release `pass_if` forms:
-
-- `{ "exit_code": 0 }`
-- `{ "json_path": "$.passed", "equals": true }`
+```json
+{ "exit_code": 0 }
+{ "json_path": "$.passed", "equals": true }
+```
 
 ### `checkpoint`
 
 Required:
 
 - `type: "checkpoint"`
+- `id`
 - `prompt`
 - `review_from`
 
-Release rule:
+Rules:
 
-- `checkpoint` is only valid inside `repeat.body`
-- `review_from` must target an upstream output artifact
-- checkpoints are interactive operator gates, not passive pauses
+- valid only inside `repeat.body`
+- `review_from` must target an upstream named artifact
+- interactive operator gate, not a passive pause
 
-## Topology guidance
+## Containers
 
-Default to `sequence`.
+`sequence`:
 
-Use `parallel` only when branches are genuinely independent and fan-in is explicit.
+- ordered child dependencies
+- default topology
 
-Use `repeat` only when:
+`parallel`:
 
-- a descendant `check` or `checkpoint` decides convergence
-- bounded repair or revision is actually useful
+- independent branches
+- optional `max_concurrency`
+- should have explicit fan-in after branches
 
-Every fan-out should have a clear fan-in. Avoid parallel branches that never reconcile into one explicit next step.
+`repeat`:
 
-Managed patterns are authored shortcuts, not a second runtime model. Use the dedicated managed-pattern skill or docs when the graph includes `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, or `pattern_review_change`.
+- `max_attempts`
+- `body`
+- `until.node`
+- `until.node` must be a descendant `check` or `checkpoint`
+
+Use `repeat` only for bounded repair or revision where the gate genuinely decides convergence.
+
+## Removed Fields
+
+These are invalid graph syntax:
+
+- `inputs`
+- `context_from`
+- `outputs`
+
+Replacements:
+
+- `inputs` -> `context`
+- `context_from` -> `context` item with `from: "artifact"`
+- `outputs` -> `artifacts`
 
 ## Validation
 
-Every meaningful implementation or synthesis boundary should end with:
+Always run:
 
-- a deterministic `check`
-- an AI `check`
-- or a managed pattern phase that already includes validation
+```bash
+agentflow validate --graph <path>
+agentflow validate --graph <path> --run-ready
+agentflow compile --graph <path>
+```
 
-Use `exec` plus a downstream review node instead of a hard `check` when command failure should be investigated and documented rather than immediately terminate the graph.
+Fix validation first. Use `--run-ready` when the user needs proof that this machine has required runtime tools, repo worktrees, node commands, and harness binaries. Use compile output to inspect lowered managed patterns, profile resolution, dependency edges, repeat scopes, and artifact references.

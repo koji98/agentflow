@@ -53,17 +53,20 @@
             "areas": ["graph", "runtime", "ui"]
           }
         },
-        "inputs": [
+        "context": [
           {
-            "kind": "file",
+            "name": "readme",
+            "from": "workspace_file",
             "path": "README.md"
           },
           {
-            "kind": "file",
+            "name": "managed_patterns_doc",
+            "from": "workspace_file",
             "path": "docs/MANAGED_PATTERNS.md"
           },
           {
-            "kind": "file",
+            "name": "spec_design_doc",
+            "from": "workspace_file",
             "path": "docs/PATTERN_SPEC_DESIGN.md"
           }
         ],
@@ -115,21 +118,25 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "prompt": "Summarize the final design package for a human operator. Mention the problem, the recommendation, and the outputs a follow-on pattern_generate_evaluate_fix pattern would likely consume.",
-        "context_from": [
+        "prompt": "Summarize the final design package for a human operator. Mention the problem, the recommendation, and the artifacts a follow-on pattern_generate_evaluate_fix pattern would likely consume.",
+        "context": [
           {
+            "name": "design_response",
+            "from": "artifact",
             "node": "managed_nodes_spec",
-            "include": "summary"
+            "artifact": "agent_response"
           },
           {
+            "name": "design_spec",
+            "from": "artifact",
             "node": "managed_nodes_spec",
-            "include": "output",
-            "output": "design_spec"
+            "artifact": "design_spec"
           },
           {
+            "name": "implementation_readiness",
+            "from": "artifact",
             "node": "managed_nodes_spec",
-            "include": "output",
-            "output": "implementation_readiness",
+            "artifact": "implementation_readiness",
             "optional": true
           }
         ]

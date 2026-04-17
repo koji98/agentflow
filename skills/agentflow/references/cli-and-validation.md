@@ -7,7 +7,10 @@ Use this when authoring, reviewing, or handing off an Agentflow graph.
 - `agentflow graph-help`
   Prints the authored graph contract, supported node kinds, path rules, and a minimal example.
 - `agentflow validate --graph <path/to/agentflow.graph.json>`
-  Validates the authored graph and resolved launch settings.
+  Validates the authored graph and resolved launch settings without running local machine dependency checks.
+- `agentflow validate --graph <path/to/agentflow.graph.json> --run-ready`
+  Validates the graph plus local launch dependencies: `git`, referenced repo worktrees, executable node commands, and harness binaries used by agent or AI-check nodes.
+  Plain validate proves graph legality; run-ready validate proves the current machine is prepared to launch it.
 - `agentflow compile --graph <path/to/agentflow.graph.json>`
   Shows the compiled graph contract that the runtime will execute.
 - `agentflow run --graph <path/to/agentflow.graph.json>`
@@ -41,8 +44,13 @@ Recommended order:
 
 1. draft or edit the graph
 2. run `agentflow validate --graph ...`
-3. run `agentflow compile --graph ...` if you need to inspect the lowered contract
-4. run `agentflow run --graph ...` when the graph is ready to execute
+3. fix diagnostics until validation passes
+4. run `agentflow validate --graph ... --run-ready` when local commands, git worktrees, Codex, or Cursor readiness matters before launch
+5. run `agentflow compile --graph ...`
+6. inspect the compiled contract for node count, dependencies, repeat scopes, managed expansion, profiles, and artifact references
+7. run `agentflow run --graph ...` when the graph is ready to execute
+
+Do not skip compile for nontrivial graphs. Validation tells you the graph is legal; compile tells you what will actually run.
 
 Recommended eval loop:
 
@@ -56,10 +64,22 @@ Recommended eval loop:
 Before handing off a graph, make sure:
 
 - `validate` passes
+- `validate --run-ready` passes when the handoff says the graph is ready to run on the current machine
+- `compile` passes
 - the chosen node kinds express the intended control-flow semantics
-- outputs and `context_from` references line up
+- declared artifacts and artifact context references line up
 - hard-stop versus soft-review failure boundaries are deliberate
 - launch settings live in the graph, not in imagined CLI flags
+
+When validation fails, repair the graph instead of explaining around the error. Common repairs:
+
+- replace legacy `inputs`, `context_from`, or `outputs` with `context` and `artifacts`
+- add missing `repo` fields in multi-repo graphs
+- declare an artifact that a downstream node references
+- change optional context to required, or required to optional, based on whether the consumer can proceed
+- move env-dependent command setup into `env_files`
+- cap broad globs with `max_files`
+- replace a soft `check` in `repeat.until` with a hard gate
 
 Before handing off an eval suite, make sure:
 

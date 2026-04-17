@@ -78,11 +78,13 @@ What the operator should expect:
 - A canceled run is canceled from the terminal that launched `run` with `Ctrl-C`.
 - `run` and `resume` print live graph progress to `stderr`. When `stdout` is an interactive terminal they print a compact terminal summary with final status and duration; when `stdout` is redirected or piped they keep emitting the full structured JSON result on `stdout`, so shell pipelines can still consume the command result without parsing progress noise.
 - The `workspaces/` directory is an implementation detail of the run and is not preserved as a long-lived checkout contract after worktree cleanup.
-- Authored `file` and `glob` inputs resolve live when each node starts. Missing files or empty globs become explicit omitted context instead of run-preflight failure.
-- Node and execution directories under `nodes/` use hashed names on disk.
-- Execution-root runtime files live directly in each execution directory and include `context_provenance.json`; `artifacts/` appears only when workspace outputs are materialized there.
+- Authored `workspace_file` and `workspace_glob` context resolves live when each node starts. Missing files or empty globs become explicit omitted context instead of run-preflight failure.
+- Node directories under `nodes/` use compiled-order prefixes plus readable labels, for example `001-plan-<hash>`. Execution directories use append-only runtime ordinals, for example `001-exec-<hash>` or `i001-a001-exec-<hash>` inside repeat loops.
+- Execution directories keep bookkeeping at the root and segment bulky material: `context/` contains the context packet, manifest, provenance, and materialized files; `logs/` contains stdout and stderr; `artifacts/` appears only when declared artifacts are materialized there.
+- Agent harness prompts orient the model as one node in a graph, list declared artifacts, and capture the model's final response as `agent-response.md` for narrative handoff.
 - `run` and `resume` only resolve repo aliases that the compiled graph actually references; unused declared repos stay inert.
-- `glob` inputs use a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`.
+- `workspace_glob` context uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`.
+- Terminal runs capture per-repo workspace change artifacts before cleanup when possible: `workspace-changes/<repo>/status.txt`, `workspace-changes/<repo>/diff.patch`, and `workspace-changes/<repo>/changed-files.json`.
 
 ## Recommended Dev Workflow
 
@@ -101,9 +103,12 @@ Use the CLI in this order:
 ```bash
 agentflow graph-help
 agentflow validate --graph ./agentflow.graph.json
+agentflow validate --graph ./agentflow.graph.json --run-ready
 agentflow compile --graph ./agentflow.graph.json
 agentflow run --graph ./agentflow.graph.json
 ```
+
+Plain `validate` proves the authored graph and compiled contract. Add `--run-ready` when you want local machine proof before launch: it checks required runtime tools such as `git`, referenced repo worktrees, executable node commands, and harness binaries used by compiled agent or AI-check nodes.
 
 Recommended local loop while developing Agentflow:
 
@@ -127,10 +132,10 @@ Harness policy notes:
 
 ## CLI Entry Points
 
-Each supported command returns explicit next-step hints. `validate`, `compile`, and non-interactive `run` or `resume` remain JSON-first; interactive `run` and `resume` render a compact terminal summary instead of dumping the full payload.
+Each supported command returns explicit next-step hints. `compile` and non-interactive `validate`, `run`, or `resume` remain JSON-first; interactive `validate`, `run`, and `resume` render compact terminal summaries instead of dumping full payloads.
 
 - `graph-help`: prints the authored graph contract, supported node kinds, path rules, `prerequisites.checks`, local command `env_files`, soft verification via `on_failure`, and a minimal example.
-- `validate`: validates the authored graph, validates the compiled graph, runs readiness checks, and returns `path_resolution`, launch data, readiness data, compiled summary, managed expansion details, and next-step commands.
+- `validate`: validates the authored graph, validates the compiled graph, runs declared readiness checks, and returns `path_resolution`, launch data, readiness data, compiled summary, managed expansion details, and next-step commands. Add `--run-ready` to also verify local runtime dependencies such as `git`, repo worktrees, executable node commands, and harness binaries.
 - `compile`: returns the compiled graph contract for inspection plus the same path and next-step metadata.
 - `run`: executes the compiled graph, writes durable artifacts, and returns `runs_root`, `run_root`, artifact paths, rerun or resume commands, and the cancellation note.
 - `resume`: recompiles a failed or canceled run root and resumes from durable state when the compiled contract still matches preserved work.
@@ -198,7 +203,7 @@ Checks:
 
 - use top-level `prerequisites.checks` for launch-time assumptions that must be explicit
 - mark non-blocking checks with `"required": false` when they should warn but not stop the run
-- re-run `validate` after fixing the missing prerequisite to confirm `readiness.status = "ready"`
+- re-run `validate` after fixing the missing prerequisite to confirm `readiness.status = "ready"`; use `validate --run-ready` when the fix is a local machine dependency rather than graph syntax
 
 ### Missing command environment
 
@@ -225,7 +230,7 @@ Checks:
 
 - make sure `codex` and/or `agent` are installed and authenticated when the graph needs them
 - set `AGENTFLOW_CODEX_CLI_BIN` or `AGENTFLOW_CURSOR_CLI_BIN` to explicit binary paths if needed
-- remember that `validate` and `compile` do not require those binaries, and `npm run validate:smoke` injects temporary mock binaries instead of depending on real installs
+- remember that plain `validate` and `compile` do not require those binaries; `validate --run-ready` does when the compiled graph uses the harness
 - use `npm run validate:real-harness -- --harness codex-cli` or `cursor-cli` for an additive real-install smoke; it reports `skipped` instead of failing when the selected binary is unavailable
 
 ### Checkpoint graphs without an interactive terminal
@@ -239,7 +244,7 @@ Checks:
 
 - launch `run` or `resume` from an interactive terminal
 - remember that `checkpoint` is only supported inside `repeat` bodies
-- make sure the checkpoint `review_from` reference resolves to an upstream output artifact
+- make sure the checkpoint `review_from` reference resolves to an upstream named artifact
 
 ### Artifacts are not where you expect
 
@@ -278,7 +283,7 @@ Add optional real-harness proof when you need it:
 npm run validate:real-harness
 ```
 
-For active runs, `agent` and AI `check` executions append live harness output directly into the current execution's `stdout.log` and `stderr.log`. Completion still rewrites the final authoritative log contents.
+For active runs, `agent` and AI `check` executions append live harness output directly into the current execution's `logs/stdout.log` and `logs/stderr.log`. Completion still rewrites the final authoritative log contents.
 
 That live harness output is separate from the CLI progress stream. CLI progress is human-oriented terminal status on `stderr`; durable execution logs remain the source of truth in the run artifacts.
 

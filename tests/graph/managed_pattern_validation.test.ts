@@ -244,7 +244,7 @@ describe("managed pattern normalization edges", () => {
         }),
         expect.objectContaining({
           path: "$.graph.steps[1].task_source.design_packet.kind",
-          message: 'pattern_generate_evaluate_fix task source reference kind must be "file" or "managed_output".'
+          message: 'pattern_generate_evaluate_fix task source reference kind must be "file" or "artifact".'
         })
       ])
     );

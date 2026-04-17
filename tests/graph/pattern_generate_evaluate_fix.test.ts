@@ -177,31 +177,30 @@ describe("pattern generate evaluate fix", () => {
       expect.objectContaining({
         id: "implement_managed_nodes",
         type: "agent",
-        outputs: expect.arrayContaining([
-          expect.objectContaining({ name: "change_summary", path: "change-summary.md" }),
-          expect.objectContaining({ name: "change_packet", path: "change-packet.json" }),
-          expect.objectContaining({ name: "evaluation_ledger", path: "evaluation-ledger.json" }),
-          expect.objectContaining({ name: "fix_log", path: "fix-log.md" })
-        ])
+        artifacts: expect.objectContaining({
+          change_summary: expect.objectContaining({ path: "change-summary.md" }),
+          change_packet: expect.objectContaining({ path: "change-packet.json" }),
+          evaluation_ledger: expect.objectContaining({ path: "evaluation-ledger.json" }),
+          fix_log: expect.objectContaining({ path: "fix-log.md" })
+        })
       })
     );
   });
 
-  it("maps artifact_bundle task sources into prepare inputs and managed-output context", () => {
+  it("maps artifact_bundle task sources into prepare context", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument([
         {
           type: "agent",
           id: "upstream_decisions",
           prompt: "Write a decision log artifact.",
-          outputs: [
-            {
-              name: "decision_log",
-              from: "attempt",
+          artifacts: {
+            decision_log: {
+              from: "output_dir",
               path: "decision-log.md",
-              required: true
+              description: "Test artifact produced at decision-log.md."
             }
-          ]
+          }
         },
         buildPatternStep({
           id: "implement_from_bundle",
@@ -216,9 +215,9 @@ describe("pattern generate evaluate fix", () => {
               path: "docs/design-spec.md"
             },
             decision_log: {
-              kind: "managed_output",
+              kind: "artifact",
               node: "upstream_decisions",
-              output: "decision_log"
+              artifact: "decision_log"
             }
           }
         })
@@ -245,15 +244,14 @@ describe("pattern generate evaluate fix", () => {
       expect.objectContaining({
         type: "agent",
         id: "implement_from_bundle__managed__pattern_generate_evaluate_fix__prepare_task_packet",
-        inputs: expect.arrayContaining([
-          expect.objectContaining({ kind: "file", path: "artifacts/design-packet.json" }),
-          expect.objectContaining({ kind: "file", path: "docs/design-spec.md" })
-        ]),
-        context_from: expect.arrayContaining([
+        context: expect.arrayContaining([
+          expect.objectContaining({ name: "design_packet", from: "workspace_file", path: "artifacts/design-packet.json" }),
+          expect.objectContaining({ name: "design_spec", from: "workspace_file", path: "docs/design-spec.md" }),
           expect.objectContaining({
+            name: "decision_log",
+            from: "artifact",
             node: "upstream_decisions",
-            include: "output",
-            output: "decision_log",
+            artifact: "decision_log",
             optional: true
           })
         ])
@@ -270,20 +268,24 @@ describe("pattern generate evaluate fix", () => {
           type: "agent",
           id: "handoff",
           prompt: "Summarize the final change package for an operator.",
-          context_from: [
+          context: [
             {
+              name: "change_agent_response",
+              from: "artifact",
               node: "implement_managed_nodes",
-              include: "summary"
+              artifact: "agent_response"
             },
             {
+              name: "change_summary",
+              from: "artifact",
               node: "implement_managed_nodes",
-              include: "output",
-              output: "change_summary"
+              artifact: "change_summary"
             },
             {
+              name: "evaluation_ledger",
+              from: "artifact",
               node: "implement_managed_nodes",
-              include: "output",
-              output: "evaluation_ledger"
+              artifact: "evaluation_ledger"
             }
           ]
         }

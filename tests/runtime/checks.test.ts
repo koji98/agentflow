@@ -25,7 +25,9 @@ function createHarness(
 
 describe("runtime checks", () => {
   it("fails AI checks closed on malformed evaluator output", async () => {
-    const harness = createHarness("codex-cli", async () => {
+    let capturedInvocation: Parameters<HarnessAdapter["run"]>[0] | undefined;
+    const harness = createHarness("codex-cli", async (invocation) => {
+      capturedInvocation = invocation;
       return {
         status: "passed",
         exitCode: 0,
@@ -42,12 +44,24 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
     });
 
+    expect(capturedInvocation).toEqual(
+      expect.objectContaining({
+        promptKind: "ai_check",
+        contextPacketPath: "/tmp/context/packet.json",
+        contextManifestPath: "/tmp/context/manifest.md",
+        outputDir: "/tmp",
+        artifacts: {}
+      })
+    );
+    expect(capturedInvocation?.prompt).toContain("Evaluate the patch.");
+    expect(capturedInvocation?.prompt).toContain("Return JSON only with this shape:");
     expect(result.evaluation).toEqual(
       expect.objectContaining({
         passed: false,
@@ -74,7 +88,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -108,7 +123,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -147,7 +163,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -183,7 +200,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -215,7 +233,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: undefined,
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined

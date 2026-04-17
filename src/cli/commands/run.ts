@@ -228,6 +228,7 @@ export const runCommand = {
         run_root: run.run_root,
         counts: run.state.counts,
         repo_workspaces: run.state.repo_workspaces,
+        workspace_change_artifacts: run.state.workspace_change_artifacts,
         attempt_count: run.attempts.length,
         ...terminalFields,
         artifacts: {
@@ -238,7 +239,8 @@ export const runCommand = {
           compile_diagnostics_file: artifactPaths.compile_diagnostics_file,
           state_file: artifactPaths.state_file,
           events_file: artifactPaths.events_file,
-          summary_file: artifactPaths.summary_file
+          summary_file: artifactPaths.summary_file,
+          workspace_changes_dir: artifactPaths.workspace_changes_dir
         },
         cancel_note: runCancellationText,
         next_steps: {

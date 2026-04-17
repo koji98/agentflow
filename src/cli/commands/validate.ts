@@ -3,6 +3,8 @@ import { buildManagedExpansionSummaries } from "../../graph/managed_expansion.js
 import { resolveLaunchConfig } from "../../graph/profiles.js";
 import { workspaceBackends } from "../../graph/schema.js";
 import { loadAuthoredGraphDocument, summarizeAuthoredGraph } from "../../graph/validate.js";
+import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
+import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import { evaluateGraphReadiness } from "../../runtime/readiness.js";
 import {
   createGraphCliInvocation,
@@ -14,17 +16,20 @@ import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_source
 export const validateCommand = {
   name: "validate",
   summary: "Validate and compile an authored graph without launching a run.",
-  usage: "agentflow validate --graph <path/to/agentflow.graph.json>",
+  usage: "agentflow validate --graph <path/to/agentflow.graph.json> [--run-ready]",
   examples: [
-    "agentflow validate --graph ./agentflow.graph.json"
+    "agentflow validate --graph ./agentflow.graph.json",
+    "agentflow validate --graph ./agentflow.graph.json --run-ready"
   ] as const,
-  optionNames: ["graph", "help"] as const,
+  optionNames: ["graph", "run-ready", "help"] as const,
   helpNotes: [
     "--graph validation resolves from the launch shell current working directory.",
+    "--run-ready also checks local runtime dependencies such as git, node commands, and harness binaries.",
     "Use compile next when you want the full compiled graph contract, or run when you want durable artifacts."
   ] as const,
   async run(options: Record<string, string | boolean | undefined>, currentWorkingDirectory: string) {
     const graphPath = typeof options.graph === "string" ? options.graph : undefined;
+    const runReady = options["run-ready"] === true;
 
     if (!graphPath) {
       return {
@@ -168,7 +173,16 @@ export const validateCommand = {
     const readiness = await evaluateGraphReadiness({
       graph: compilation.compiled_graph!,
       repo_sources: repoResolution.repo_sources ?? {},
-      repo_source_diagnostics: repoResolution.diagnostics
+      repo_source_diagnostics: repoResolution.diagnostics,
+      machine_checks: runReady,
+      ...(runReady
+        ? {
+            harnesses: {
+              "codex-cli": createCodexCliHarness(),
+              "cursor-cli": createCursorCliHarness()
+            }
+          }
+        : {})
     });
     const compiledValidation = {
       status: "passed",
@@ -195,11 +209,14 @@ export const validateCommand = {
             ? `Graph compiled, but readiness validation is blocked for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
             : readiness.status === "warnings"
               ? `Graph validated with readiness warnings for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
-              : `Graph validated for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`,
+              : runReady
+                ? `Graph validated and run-ready checks passed for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
+                : `Graph contract validated for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`,
         graph_path: loaded.absolute_path,
         path_resolution: pathResolution,
         authored_summary: summarizeAuthoredGraph(loaded.document),
         launch,
+        readiness_mode: runReady ? "run-ready" : "declared",
         compiled_summary: compiledValidation.compiled_summary,
         managed_expansion: compiledValidation.managed_expansion,
         authored_validation: {
