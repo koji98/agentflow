@@ -109,7 +109,8 @@ Rules:
 - Every declared artifact needs `description` and must exist when the node closes.
 - Do not declare an artifact unless the node is responsible for producing it.
 - Use `if_available: true` on consumer artifact context only when the consumer can still do useful work without the material.
-- The final agent response is captured as `agent_response`; use it for a concise narrative handoff with outcome, work completed, produced artifacts, validation, and next-node notes.
+- The final agent response is captured as `agent_response`; use it for a concise narrative handoff with outcome, work completed, what was tried, what was not tried, produced artifacts, validation, and next-node notes.
+- Repeat loops automatically receive `repeat_history` context after iteration 1. Do not add extra self-artifact references just to remind the next iteration what happened; use explicit prior-iteration artifact context only when the next node needs a full file.
 - Do not rely on `agent_response` when downstream work needs a stable machine-readable packet.
 
 ## Non-Brittle Graph Conventions

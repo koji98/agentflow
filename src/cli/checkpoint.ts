@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { join } from "node:path";
 
-import type { ArtifactReference, ContextItem } from "../graph/authored.js";
+import type { ArtifactReference } from "../graph/authored.js";
 import type { CompiledCheckpointNode, CompiledGraph } from "../graph/compiled.js";
 import type { GraphDiagnostic } from "../graph/schema.js";
 import type {
@@ -10,7 +10,11 @@ import type {
   RuntimeNodeExecutor,
   RuntimeNodeExecutorContext
 } from "../runtime/core/engine.js";
-import type { ContextPacket, ContextPacketMaterializedItem } from "../runtime/context/packet.js";
+import type {
+  ContextPacket,
+  ContextPacketMaterializedItem,
+  ContextPacketSource
+} from "../runtime/context/packet.js";
 
 interface TtyLike {
   isTTY?: boolean;
@@ -57,7 +61,11 @@ function artifactReferenceKey(reference: ArtifactReference): string {
   });
 }
 
-function describeContextSource(source: ContextItem): string {
+function describeContextSource(source: ContextPacketSource): string {
+  if (source.from === "runtime_repeat_history") {
+    return source.name;
+  }
+
   if (source.from !== "artifact") {
     return source.name;
   }

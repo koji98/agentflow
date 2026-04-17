@@ -360,6 +360,9 @@ Resolution rules:
 - `result_json` resolves to `result.json` for every executable node.
 - other artifact names resolve to declared artifacts on the selected execution.
 - declared artifact descriptions are carried from the producer into the consumer's context packet and manifest.
+- Executable nodes inside a `repeat.body` receive automatic runtime `repeat_history` context. It is omitted on iteration 1 and materialized on later iterations from completed prior iterations in the same repeat scope.
+
+`repeat_history` is not authored graph syntax. It is a reserved runtime context material that summarizes repeat metadata, the retry cause, prior node outcomes, prior agent responses, checkpoint feedback, failed check output excerpts, and prior artifact inventories. It is deterministic and bounded by the same context token limits as authored context.
 
 ### `artifacts`
 
@@ -723,7 +726,7 @@ Context resolution produces:
 - materialized file path inside the execution directory
 - live-workspace binding metadata when the material came from a resolved workspace file or glob context item
 - token counts and truncation flags
-- omitted unavailable workspace items and artifact context items marked `if_available: true`
+- omitted unavailable workspace items, first-iteration repeat history, and artifact context items marked `if_available: true`
 
 `context/provenance.json` must include:
 
@@ -735,7 +738,7 @@ Agentflow does not duplicate repository instruction files into the context packe
 
 Context materialization is incremental. The runtime enforces `max_total_tokens` while it materializes items and fails as soon as the next item would overflow the token budget.
 
-Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing workspace files, empty globs, and artifact context references marked `if_available: true` are recorded explicitly as omitted context instead of crashing the whole run during preflight. Resolved artifact materials include the producer's description. Resolved material that is not valid UTF-8 text is also omitted because context packets are tokenized text.
+Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing workspace files, empty globs, first-iteration repeat history, and artifact context references marked `if_available: true` are recorded explicitly as omitted context instead of crashing the whole run during preflight. Resolved artifact materials include the producer's description. Resolved material that is not valid UTF-8 text is also omitted because context packets are tokenized text.
 
 The release does not implement retrieval, embeddings, ranking, or semantic search. Context resolution is explicit file and artifact materialization only.
 

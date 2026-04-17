@@ -234,6 +234,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "Include:",
     "- Outcome: passed, blocked, or partial.",
     "- Work completed: concise summary of what changed or what was learned.",
+    "- Tried: concrete approaches or changes attempted.",
+    "- Not tried: relevant approaches intentionally avoided or left for a future iteration.",
     "- Artifacts produced: names and paths of declared artifacts you wrote.",
     "- Validation: commands or checks run and their results.",
     "- Handoff notes: what a downstream node or human should know next.",

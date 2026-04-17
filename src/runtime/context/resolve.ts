@@ -11,6 +11,7 @@ import type {
   ContextPacket,
   ContextPacketMaterializedItem,
   ContextPacketOmittedItem,
+  ContextPacketSource,
   ContextProvenance,
   WorkspaceFileContextProvenance,
   WorkspaceGlobContextProvenance
@@ -36,6 +37,7 @@ import {
   decodeContextTokens,
   encodeContextText
 } from "./tokenizer.js";
+import { buildRepeatHistory } from "./repeat_history.js";
 
 interface PreparedMaterialization {
   text: string;
@@ -220,7 +222,7 @@ async function appendMaterializedItem(
 function appendNonTokenizableOmission(
   accumulator: MaterializationAccumulator,
   key: string,
-  source: ContextItem,
+  source: ContextPacketSource,
   ifAvailable: boolean
 ): void {
   accumulator.omitted.push({
@@ -229,6 +231,69 @@ function appendNonTokenizableOmission(
     reason: "Material is not valid UTF-8 text and cannot be tokenized.",
     if_available: ifAvailable
   });
+}
+
+async function materializeRepeatHistoryContext(
+  options: ResolveContextOptions,
+  accumulator: MaterializationAccumulator,
+  maxTokensPerItem: number
+): Promise<void> {
+  const history = await buildRepeatHistory({
+    compiled_graph: options.compiled_graph,
+    node: options.node,
+    execution_id: options.execution_id,
+    attempts: options.attempts
+  });
+
+  if (!history) {
+    return;
+  }
+
+  if ("reason" in history) {
+    accumulator.omitted.push({
+      key: history.source.name,
+      source: history.source,
+      description: history.description,
+      reason: history.reason,
+      if_available: true
+    });
+    return;
+  }
+
+  const remainingTokens = accumulator.max_total_tokens - accumulator.total_tokens;
+
+  if (remainingTokens <= 0) {
+    accumulator.omitted.push({
+      key: history.source.name,
+      source: history.source,
+      description: history.description,
+      reason: "Repeat history was omitted because authored context consumed the available token budget.",
+      if_available: true
+    });
+    return;
+  }
+
+  const materialized = prepareTextMaterialization(history.text, Math.min(maxTokensPerItem, remainingTokens));
+
+  await appendMaterializedItem(
+    accumulator,
+    {
+      key: history.source.name,
+      source: history.source,
+      description: history.description,
+      materialized_path: join(
+        options.execution_dir,
+        "context",
+        "materialized",
+        history.source.name,
+        "repeat-history.md"
+      ),
+      tokens: materialized.tokens,
+      truncated: materialized.truncated
+    },
+    materialized,
+    "runtime repeat history"
+  );
 }
 
 function selectAttemptsForReference(
@@ -699,6 +764,12 @@ export async function resolveExecutionContext(
       options.node.effective_policy.input_rules.max_tokens_per_item
     );
   }
+
+  await materializeRepeatHistoryContext(
+    options,
+    accumulator,
+    options.node.effective_policy.input_rules.max_tokens_per_item
+  );
 
   const harness_instructions = await computeHarnessInstructionProvenance({
     node: options.node,

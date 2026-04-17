@@ -1,5 +1,14 @@
 import type { ContextItem } from "../../graph/authored.js";
 
+export interface RuntimeRepeatHistoryContext {
+  name: "repeat_history";
+  from: "runtime_repeat_history";
+  repeat_scope_id: string;
+  current_iteration: number;
+}
+
+export type ContextPacketSource = ContextItem | RuntimeRepeatHistoryContext;
+
 export interface ContextPacketLiveWorkspaceBinding {
   kind: "live_workspace_input";
   requested_path?: string;
@@ -8,7 +17,7 @@ export interface ContextPacketLiveWorkspaceBinding {
 
 export interface ContextPacketMaterializedItem {
   key: string;
-  source: ContextItem;
+  source: ContextPacketSource;
   description?: string;
   materialized_path: string;
   tokens: number;
@@ -18,7 +27,7 @@ export interface ContextPacketMaterializedItem {
 
 export interface ContextPacketOmittedItem {
   key: string;
-  source: ContextItem;
+  source: ContextPacketSource;
   description?: string;
   reason: string;
   if_available: boolean;

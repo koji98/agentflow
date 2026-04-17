@@ -219,6 +219,241 @@ describe("context resolution", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("automatically materializes repeat history from completed prior iterations", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-repeat-history-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "repeat-history",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "repair",
+            max_attempts: 3,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "agent",
+                  id: "implement",
+                  prompt: "Implement the fix.",
+                  artifacts: {
+                    fix_log: {
+                      from: "output_dir",
+                      path: "fix-log.md",
+                      description: "Notes about the attempted fix."
+                    }
+                  }
+                },
+                {
+                  type: "check",
+                  id: "verify",
+                  check_kind: "deterministic",
+                  command: "npm"
+                }
+              ]
+            },
+            until: {
+              node: "verify"
+            }
+          }
+        ]
+      }
+    });
+
+    const implementNode = graph.nodes.find((node) => node.authored_id === "implement")!;
+    const verifyNode = graph.nodes.find((node) => node.authored_id === "verify")!;
+    const repeatScopeId = implementNode.repeat_scope_id!;
+    const attempts = createAttemptRegistry();
+    const implementDir = join(tempRoot, "implement-iteration-1");
+    const verifyDir = join(tempRoot, "verify-iteration-1");
+    const currentDir = join(tempRoot, "implement-iteration-2");
+    await mkdir(implementDir, { recursive: true });
+    await mkdir(verifyDir, { recursive: true });
+    await mkdir(currentDir, { recursive: true });
+    await writeFile(join(implementDir, "agent-response.md"), "Tried parser normalization.\nNot tried tokenizer changes.\n");
+    await writeFile(join(implementDir, "result.json"), JSON.stringify({ exit_code: 0 }));
+    await writeFile(join(implementDir, "fix-log.md"), "Changed parser branch.\n");
+    await writeFile(join(verifyDir, "result.json"), JSON.stringify({
+      passed: false,
+      summary: "parser.test.ts still fails",
+      exit_code: 1
+    }));
+    await writeFile(join(verifyDir, "stdout.log"), "expected token count 3, received 2\n");
+    await writeFile(join(verifyDir, "stderr.log"), "parser.test.ts failed\n");
+
+    const priorImplement = openNodeAttempt(attempts, implementNode, implementDir, {
+      repeat_scope_id: repeatScopeId,
+      iteration_index: 1
+    });
+    closeNodeAttempt(attempts, priorImplement.execution_id, {
+      status: "passed",
+      outcome: "passed",
+      result_path: join(implementDir, "result.json"),
+      artifacts: {
+        agent_response: join(implementDir, "agent-response.md"),
+        result_json: join(implementDir, "result.json"),
+        fix_log: join(implementDir, "fix-log.md")
+      }
+    });
+    const priorVerify = openNodeAttempt(attempts, verifyNode, verifyDir, {
+      repeat_scope_id: repeatScopeId,
+      iteration_index: 1
+    });
+    closeNodeAttempt(attempts, priorVerify.execution_id, {
+      status: "failed",
+      outcome: "failed",
+      result_path: join(verifyDir, "result.json"),
+      stdout_log_path: join(verifyDir, "stdout.log"),
+      stderr_log_path: join(verifyDir, "stderr.log"),
+      artifacts: {
+        result_json: join(verifyDir, "result.json")
+      }
+    });
+    const currentAttempt = openNodeAttempt(attempts, implementNode, currentDir, {
+      repeat_scope_id: repeatScopeId,
+      iteration_index: 2
+    });
+
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: implementNode,
+      execution_id: currentAttempt.execution_id,
+      execution_dir: currentDir,
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts
+    });
+
+    const history = resolved.packet.materials.find((item) => item.key === "repeat_history");
+    expect(history).toEqual(
+      expect.objectContaining({
+        description: "Deterministic summary of completed prior iterations in the enclosing repeat scope."
+      })
+    );
+    expect(history?.source).toEqual({
+      name: "repeat_history",
+      from: "runtime_repeat_history",
+      repeat_scope_id: repeatScopeId,
+      current_iteration: 2
+    });
+
+    const historyText = await readFile(history!.materialized_path, "utf8");
+    expect(historyText).toContain("Current iteration: 2 of 3");
+    expect(historyText).toContain("Loop continued because `verify` failed.");
+    expect(historyText).toContain("Tried parser normalization.");
+    expect(historyText).toContain("Not tried tokenizer changes.");
+    expect(historyText).toContain("parser.test.ts still fails");
+    expect(historyText).toContain("parser.test.ts failed");
+    expect(await readFile(resolved.manifest_path, "utf8")).toContain("repeat_history");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("records repeat history as omitted on the first repeat iteration", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-repeat-history-first-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "repeat-history-first",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "repair",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "agent",
+                  id: "implement",
+                  prompt: "Implement the fix."
+                },
+                {
+                  type: "check",
+                  id: "verify",
+                  check_kind: "deterministic",
+                  command: "npm"
+                }
+              ]
+            },
+            until: {
+              node: "verify"
+            }
+          }
+        ]
+      }
+    });
+
+    const implementNode = graph.nodes.find((node) => node.authored_id === "implement")!;
+    const attempts = createAttemptRegistry();
+    const currentAttempt = openNodeAttempt(attempts, implementNode, join(tempRoot, "current"), {
+      repeat_scope_id: implementNode.repeat_scope_id!,
+      iteration_index: 1
+    });
+
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: implementNode,
+      execution_id: currentAttempt.execution_id,
+      execution_dir: join(tempRoot, "current"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts
+    });
+
+    expect(resolved.packet.materials.find((item) => item.key === "repeat_history")).toBeUndefined();
+    expect(resolved.packet.omitted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "repeat_history",
+          reason: "No prior repeat iterations have completed.",
+          if_available: true
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("resolves context selectors against repeat iteration and attempt filters", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-selectors-"));
     const repoDir = join(tempRoot, "repo");
