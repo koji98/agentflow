@@ -189,6 +189,7 @@ describe("codex cli harness", () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-harness-"));
     const repoDir = join(tempRoot, "repo");
     const executionDir = join(tempRoot, "execution");
+    const outputDir = join(executionDir, "artifacts");
     await mkdir(repoDir, { recursive: true });
     await mkdir(executionDir, { recursive: true });
 
@@ -217,7 +218,7 @@ describe("codex cli harness", () => {
         prompt: "Implement the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
-        outputDir: executionDir,
+        outputDir,
         artifacts: {
           handoff: {
             from: "output_dir",
@@ -245,9 +246,9 @@ describe("codex cli harness", () => {
           "--sandbox",
           "workspace-write",
           "--add-dir",
-          executionDir,
+          outputDir,
           "--output-last-message",
-          join(executionDir, "last_message.txt"),
+          join(outputDir, "last_message.txt"),
           "--skip-git-repo-check",
           "-m",
           "gpt-5-codex",
@@ -279,7 +280,7 @@ describe("codex cli harness", () => {
       expect(prompt).toContain("Artifacts produced: names and paths of declared artifacts you wrote.");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
-        AGENTFLOW_OUTPUT_DIR: executionDir,
+        AGENTFLOW_OUTPUT_DIR: outputDir,
         AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
         AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md")
       });
@@ -287,7 +288,7 @@ describe("codex cli harness", () => {
         passed: true,
         summary: "codex ok"
       });
-      expect(result.transcript?.last_message_path).toBe(join(executionDir, "last_message.txt"));
+      expect(result.transcript?.last_message_path).toBe(join(outputDir, "last_message.txt"));
       expect(result.metadata).toEqual(
         expect.objectContaining({
           binary: mock.binary_path,

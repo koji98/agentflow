@@ -378,6 +378,18 @@ function formatDuration(durationMs: unknown): string {
   return typeof durationMs === "number" ? `${durationMs}ms` : "unknown duration";
 }
 
+function formatPayloadList(value: unknown, fallback: string): string {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const items = value
+    .map((item) => typeof item === "string" ? item : undefined)
+    .filter((item): item is string => item !== undefined && item.trim().length > 0);
+
+  return items.length > 0 ? items.join(", ") : fallback;
+}
+
 function buildEventSummary(
   event: RuntimeEventEnvelope,
   graph: CompiledGraph
@@ -428,6 +440,24 @@ function buildEventSummary(
         ...(authored_id ? { authored_id } : {}),
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: `${String(payload.kind ?? "node")} started in repo ${String(payload.repo_alias ?? "unknown")}.`
+      };
+    case "artifact_repair.started":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Artifact repair attempt ${payload.repair_attempt ?? "?"} started for ${formatPayloadList(payload.missing_artifacts, "missing artifacts")}.`
+      };
+    case "artifact_repair.completed":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Artifact repair attempt ${payload.repair_attempt ?? "?"} completed.`
+      };
+    case "artifact_repair.failed":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: String(payload.summary ?? `Artifact repair attempt ${payload.repair_attempt ?? "?"} failed.`)
       };
     case "check.evaluated":
       return {
@@ -558,6 +588,7 @@ function buildRunDiagnostic(
         : undefined;
     case "node.blocked":
     case "node.canceled":
+    case "artifact_repair.failed":
       return {
         seq: event.seq,
         ts: event.ts,

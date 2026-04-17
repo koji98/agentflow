@@ -211,7 +211,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "",
     "## Workspace",
     `- Workspace path: ${invocation.repoPath}`,
-    `- Output directory: ${invocation.outputDir}`,
+    `- Output directory (artifacts): ${invocation.outputDir}`,
     `- Sandbox: ${invocation.sandbox}`,
     "- Source edits happen in the workspace.",
     "- Durable handoff files declared with `from: \"output_dir\"` must be written under the output directory.",

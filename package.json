@@ -21,6 +21,7 @@
     "graph-help": "tsx src/cli/index.ts graph-help",
     "control": "tsx src/cli/index.ts control",
     "resume": "tsx src/cli/index.ts resume",
+    "apply": "tsx src/cli/index.ts apply",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
     "typecheck": "tsc --noEmit -p tsconfig.json",

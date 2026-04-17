@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import type { AuthoredGraphDocument } from "../../src/graph/authored.js";
+import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
@@ -300,18 +301,21 @@ describe("runtime repeat", () => {
 
           if (node.authored_id === "revise") {
             await writeFile(
-              join(execution_dir, "spec-revision.md"),
+              join(resolveExecutionArtifactsDirectory(execution_dir), "spec-revision.md"),
               `revision ${attempt.iteration_index ?? 1}\n`
             );
           }
 
           if (node.authored_id === "merge_feedback") {
-            await writeFile(join(execution_dir, "critique-merged.md"), "close the blockers\n");
+            await writeFile(
+              join(resolveExecutionArtifactsDirectory(execution_dir), "critique-merged.md"),
+              "close the blockers\n"
+            );
           }
 
           if (node.authored_id === "quality_review") {
             await writeFile(
-              join(execution_dir, "quality-review.json"),
+              join(resolveExecutionArtifactsDirectory(execution_dir), "quality-review.json"),
               JSON.stringify({
                 passed: attempt.iteration_index === 2,
                 summary: attempt.iteration_index === 2 ? "ready" : "needs revision"
@@ -332,7 +336,7 @@ describe("runtime repeat", () => {
         checkpoint: async ({ attempt, execution_dir }) => {
           if (attempt.iteration_index === 1) {
             await writeFile(
-              join(execution_dir, "operator-feedback.md"),
+              join(resolveExecutionArtifactsDirectory(execution_dir), "operator-feedback.md"),
               "Add a rollback section and clarify ownership.\n"
             );
             return {
@@ -453,7 +457,7 @@ describe("runtime repeat", () => {
       },
       executors: {
         agent: async ({ execution_dir }) => {
-          await writeFile(join(execution_dir, "draft.md"), "draft\n");
+          await writeFile(join(resolveExecutionArtifactsDirectory(execution_dir), "draft.md"), "draft\n");
           return {
             status: "passed",
             outcome: "passed",

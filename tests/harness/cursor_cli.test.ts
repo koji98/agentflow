@@ -145,6 +145,7 @@ describe("cursor cli harness", () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-harness-"));
     const repoDir = join(tempRoot, "repo");
     const executionDir = join(tempRoot, "execution");
+    const outputDir = join(executionDir, "artifacts");
     await mkdir(repoDir, { recursive: true });
     await mkdir(executionDir, { recursive: true });
 
@@ -169,7 +170,7 @@ describe("cursor cli harness", () => {
         prompt: "Review the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
-        outputDir: executionDir,
+        outputDir,
         artifacts: {
           review_report: {
             from: "output_dir",
@@ -218,7 +219,7 @@ describe("cursor cli harness", () => {
       expect(prompt).toContain("captured by Agentflow as the reserved `agent_response` artifact");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
-        AGENTFLOW_OUTPUT_DIR: executionDir,
+        AGENTFLOW_OUTPUT_DIR: outputDir,
         AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
         AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md")
       });

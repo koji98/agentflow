@@ -1,6 +1,7 @@
 import type {
   AgentNode,
   AiCheckDefaults,
+  ArtifactRepairPolicy,
   AuthoredGraphDocument,
   AuthoredGraphNode,
   BaseExecutableNode,
@@ -195,6 +196,41 @@ function readPositiveInteger(
     diagnostics.push({
       path,
       message: `Expected an integer greater than or equal to ${minimum}.`
+    });
+    return undefined;
+  }
+
+  return value as number;
+}
+
+function readBoundedInteger(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  options: {
+    minimum: number;
+    maximum: number;
+    required?: boolean;
+  }
+): number | undefined {
+  if (value === undefined) {
+    if (options.required) {
+      diagnostics.push({
+        path,
+        message: `Expected an integer between ${options.minimum} and ${options.maximum}.`
+      });
+    }
+    return undefined;
+  }
+
+  if (
+    !Number.isInteger(value) ||
+    (value as number) < options.minimum ||
+    (value as number) > options.maximum
+  ) {
+    diagnostics.push({
+      path,
+      message: `Expected an integer between ${options.minimum} and ${options.maximum}.`
     });
     return undefined;
   }
@@ -493,6 +529,42 @@ function normalizeAiCheckDefaults(
   };
 }
 
+function normalizeArtifactRepairPolicy(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ArtifactRepairPolicy | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "artifact_repair must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["max_attempts"], diagnostics);
+
+  const max_attempts = readBoundedInteger(
+    record.max_attempts,
+    `${path}.max_attempts`,
+    diagnostics,
+    {
+      minimum: 0,
+      maximum: 3
+    }
+  );
+
+  return {
+    ...(max_attempts !== undefined ? { max_attempts } : {})
+  };
+}
+
 function normalizeGraphProfile(
   value: unknown,
   path: string,
@@ -521,7 +593,8 @@ function normalizeGraphProfile(
       "timeout_sec",
       "input_rules",
       "deterministic_check_defaults",
-      "ai_check_defaults"
+      "ai_check_defaults",
+      "artifact_repair"
     ],
     diagnostics
   );
@@ -553,6 +626,11 @@ function normalizeGraphProfile(
     `${path}.ai_check_defaults`,
     diagnostics
   );
+  const artifact_repair = normalizeArtifactRepairPolicy(
+    record.artifact_repair,
+    `${path}.artifact_repair`,
+    diagnostics
+  );
 
   return {
     ...(harness ? { harness } : {}),
@@ -564,7 +642,8 @@ function normalizeGraphProfile(
     ...(timeout_sec !== undefined ? { timeout_sec } : {}),
     ...(input_rules ? { input_rules } : {}),
     ...(deterministic_check_defaults ? { deterministic_check_defaults } : {}),
-    ...(ai_check_defaults ? { ai_check_defaults } : {})
+    ...(ai_check_defaults ? { ai_check_defaults } : {}),
+    ...(artifact_repair ? { artifact_repair } : {})
   };
 }
 
@@ -1056,7 +1135,8 @@ function normalizeAgentNode(
       "prompt",
       "model",
       "reasoning_effort",
-      "sandbox"
+      "sandbox",
+      "artifact_repair"
     ],
     diagnostics
   );
@@ -1071,6 +1151,11 @@ function normalizeAgentNode(
     diagnostics
   );
   const sandbox = readEnumValue(record.sandbox, `${path}.sandbox`, sandboxModes, diagnostics);
+  const artifact_repair = normalizeArtifactRepairPolicy(
+    record.artifact_repair,
+    `${path}.artifact_repair`,
+    diagnostics
+  );
 
   if (!base || !prompt) {
     return undefined;
@@ -1082,7 +1167,8 @@ function normalizeAgentNode(
     prompt,
     ...(model ? { model } : {}),
     ...(reasoning_effort ? { reasoning_effort } : {}),
-    ...(sandbox ? { sandbox } : {})
+    ...(sandbox ? { sandbox } : {}),
+    ...(artifact_repair ? { artifact_repair } : {})
   };
 }
 

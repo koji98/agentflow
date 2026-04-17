@@ -98,18 +98,20 @@ Good artifact examples:
 
 Reserved artifacts:
 
-- `agent_response`: every agent final response, saved as `agent-response.md`.
-- `result_json`: every executable node's `result.json`.
+- `agent_response`: every agent final response, saved as `artifacts/agent-response.md`.
+- `result_json`: every executable node's normalized result, saved as `artifacts/result.json`.
 
 Rules:
 
 - Source edits happen in the workspace.
 - Durable handoff files should be written to `AGENTFLOW_OUTPUT_DIR` and declared in `artifacts`.
+- Every graph-consumable artifact lives under the execution `artifacts/` directory; root execution files, `context/`, and `logs/` are inspection material.
 - Downstream nodes consume only named artifacts or authored workspace/text context.
-- Every declared artifact needs `description` and must exist when the node closes.
+- Every declared artifact needs `description` and must exist when the node closes after any configured agent artifact repair attempts.
 - Do not declare an artifact unless the node is responsible for producing it.
 - Use `if_available: true` on consumer artifact context only when the consumer can still do useful work without the material.
 - The final agent response is captured as `agent_response`; use it for a concise narrative handoff with outcome, work completed, what was tried, what was not tried, produced artifacts, validation, and next-node notes.
+- Agent artifact repair defaults to one same-workspace harness repair when a successful agent misses a declared artifact. Use `artifact_repair.max_attempts: 0` to disable it for a profile or agent node, or up to `3` when handoff repair is a normal part of the graph.
 - Repeat loops automatically receive `repeat_history` context after iteration 1. Do not add extra self-artifact references just to remind the next iteration what happened; use explicit prior-iteration artifact context only when the next node needs a full file.
 - Do not rely on `agent_response` when downstream work needs a stable machine-readable packet.
 
@@ -158,7 +160,7 @@ Before handoff:
 - `agentflow compile --graph <path>` passed.
 - Every downstream artifact reference names a reserved or declared artifact.
 - Every declared artifact includes a useful `description`.
-- Every artifact path is relative and stays inside `AGENTFLOW_OUTPUT_DIR` or the workspace.
+- Every artifact path is relative and stays inside `AGENTFLOW_OUTPUT_DIR` or the workspace. `AGENTFLOW_OUTPUT_DIR` points at the execution `artifacts/` directory.
 - Every broad glob is justified and capped.
 - Every command that needs env declares `env_files`.
 - Every failure boundary is intentional: hard `check`, soft `exec`, or managed-pattern behavior.

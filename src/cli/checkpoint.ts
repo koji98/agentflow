@@ -1,10 +1,11 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { ArtifactReference } from "../graph/authored.js";
 import type { CompiledCheckpointNode, CompiledGraph } from "../graph/compiled.js";
 import type { GraphDiagnostic } from "../graph/schema.js";
+import { resolveExecutionArtifactsDirectory } from "../artifacts/paths.js";
 import type {
   RuntimeNodeExecutionResult,
   RuntimeNodeExecutor,
@@ -322,7 +323,11 @@ export function createInteractiveCheckpointExecutor(
         };
       }
 
-      const feedbackPath = join(context.execution_dir, "operator-feedback.md");
+      const feedbackPath = join(
+        resolveExecutionArtifactsDirectory(context.execution_dir),
+        "operator-feedback.md"
+      );
+      await mkdir(dirname(feedbackPath), { recursive: true });
       await writeFile(feedbackPath, `${decision.feedback?.trim()}\n`, "utf8");
 
       return {

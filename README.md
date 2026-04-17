@@ -179,6 +179,7 @@ Profiles typically define:
 - `env_files`
 - `timeout_sec`
 - `input_rules`
+- `artifact_repair`
 
 Profiles do not define graph structure.
 
@@ -376,6 +377,17 @@ Like `run`, `resume` prints live graph progress to `stderr`, shows a compact ter
 
 This is meant for interrupted or failed runs where you want to keep unchanged passed work while still picking up graph or workflow fixes.
 
+### `apply`
+
+Applies captured workspace changes from a run back to a git repo.
+
+```bash
+agentflow apply --run-root ./.agentflow/runs/<run-id>
+agentflow apply --run-root ./.agentflow/runs/<run-id> --commit-message "Apply Agentflow run changes"
+```
+
+`apply` reads `workspace-changes/<repo>/diff.patch` and defaults to the source repo path recorded in `execution_manifest.json`. If a run touched multiple repos, pass `--repo <alias>`. The command refuses to apply onto an already-dirty target unless `--allow-dirty` is passed.
+
 ## Context and Artifacts
 
 Executable nodes use one `context` array for all material passed into the node.
@@ -412,10 +424,14 @@ Supported declared artifact sources:
 
 Automatic artifacts are always reserved:
 
-- `agent_response`, the final agent response for every `agent` node, persisted as `agent-response.md`
-- `result_json`, the normalized `result.json` for every executable node
+- `agent_response`, the final agent response for every `agent` node, persisted as `artifacts/agent-response.md`
+- `result_json`, the normalized executable result, persisted as `artifacts/result.json`
+
+Every graph-consumable artifact lives under the node execution's `artifacts/` directory. The root `execution.json`, root `result.json`, `context/`, and `logs/` files remain inspectable runtime bookkeeping.
 
 Agent harness prompts explain that the model is executing one node in a graph, list declared artifacts with their descriptions, and tell the model that the final response is captured as `agent_response`. Use that final response for concise narrative handoff: outcome, work completed, artifacts produced, validation run, and notes for the next node or human. Do not use it as a substitute for a declared machine-readable artifact.
+
+Agent nodes also have a bounded artifact-repair policy. If an agent reports success but misses a declared artifact, Agentflow can invoke the same harness again in the same workspace with the same context and output directory, using a focused repair prompt that asks the agent to put the missing artifact at the declared path. The policy is `artifact_repair.max_attempts`, defaults to `1` for agent nodes, can be set on a profile or an individual agent node, and can be disabled with `0`. Keep the default on for declared handoffs; it avoids brittle failures caused by an agent doing the work but writing the handoff to the wrong place.
 
 Downstream nodes consume only named artifacts through `context` items with `"from": "artifact"`. Old public data-flow fields `inputs`, `context_from`, and `outputs` are invalid graph syntax.
 
@@ -460,7 +476,7 @@ Example handoff:
 During execution, agents and commands also receive:
 
 - `AGENTFLOW_WORKSPACE`, the repo workspace where source edits happen
-- `AGENTFLOW_OUTPUT_DIR`, the execution directory where declared `output_dir` artifacts should be written
+- `AGENTFLOW_OUTPUT_DIR`, the execution artifact directory where declared `output_dir` artifacts should be written
 - `AGENTFLOW_CONTEXT_PACKET`, the resolved context packet
 - `AGENTFLOW_CONTEXT_MANIFEST`, the human-readable context manifest
 

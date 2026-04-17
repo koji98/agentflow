@@ -18,7 +18,7 @@ Required product surface:
 - Codex CLI and Cursor CLI harness adapters
 - deterministic checks and AI checks
 - durable run artifacts, append-only events, and projected inspection state
-- CLI commands for `graph-help`, `validate`, `compile`, `run`, and `resume`
+- CLI commands for `graph-help`, `validate`, `compile`, `run`, `resume`, and `apply`
 
 ## Required Behavior
 
@@ -48,6 +48,7 @@ Required product surface:
 - enforce `input_rules`
 - materialize declared `artifacts` for downstream use
 - publish reserved `agent_response` and `result_json` artifacts automatically
+- run bounded agent artifact repair when a successful agent misses declared artifacts
 - fail clearly on missing required context
 
 ### Harnesses and checks

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createRunRootPath,
+  resolveExecutionArtifactsDirectory,
   resolveNodeExecutionDirectory,
   resolveRunsRoot,
   runsRootEnvironmentVariable
@@ -116,5 +117,11 @@ describe("runs root resolution", () => {
 
     expect(nodeSegment).toMatch(/^002-repair-[0-9a-f]{12}$/);
     expect(executionSegment).toMatch(/^i003-a002-exec-[0-9a-f]{16}$/);
+  });
+
+  it("resolves execution artifact directories as a stable execution subdirectory", () => {
+    expect(resolveExecutionArtifactsDirectory("/tmp/agentflow/run/node/execution")).toBe(
+      "/tmp/agentflow/run/node/execution/artifacts"
+    );
   });
 });
