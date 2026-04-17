@@ -21,6 +21,7 @@ import {
   readProjectedArtifact
 } from "../../src/artifacts/projection.js";
 import { createRunOwnerRecord } from "../../src/artifacts/owner.js";
+import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
 import {
   readRunExecutionAttempts,
   readRunRecord,
@@ -203,7 +204,10 @@ async function createFixtureRun() {
     executors: {
       agent: async ({ node, execution_dir, workspace_path }) => {
         if (node.authored_id === "inspect") {
-          await writeFile(join(execution_dir, "notes.md"), "inspection complete\n");
+          await writeFile(
+            join(resolveExecutionArtifactsDirectory(execution_dir), "notes.md"),
+            "inspection complete\n"
+          );
           return {
             status: "passed",
             outcome: "passed",
@@ -217,7 +221,10 @@ async function createFixtureRun() {
 
         repairAttempts += 1;
         await writeFile(join(workspace_path, "repair-counter.txt"), `${repairAttempts}\n`);
-        await writeFile(join(execution_dir, "patch.md"), `repair attempt ${repairAttempts}\n`);
+        await writeFile(
+          join(resolveExecutionArtifactsDirectory(execution_dir), "patch.md"),
+          `repair attempt ${repairAttempts}\n`
+        );
 
         return {
           status: "passed",
@@ -429,7 +436,7 @@ describe("artifacts projection", () => {
       expect(await pathExists(join(fixture.runRoot, "repos"))).toBe(false);
       await Promise.all(
         fixture.run.attempts.map(async (attempt) => {
-          expect(await pathExists(join(attempt.execution_dir, "artifacts"))).toBe(false);
+          expect(await pathExists(resolveExecutionArtifactsDirectory(attempt.execution_dir))).toBe(true);
         })
       );
 
@@ -452,7 +459,7 @@ describe("artifacts projection", () => {
       expect(nodeDetail.executions).toHaveLength(2);
       expect(nodeDetail.check_evaluations.at(-1)?.passed).toBe(true);
       expect(nodeDetail.selected_execution_id).toBeDefined();
-      expect(nodeDetail.artifacts.map((artifact) => artifact.relative_path)).toContain("result.json");
+      expect(nodeDetail.artifacts.map((artifact) => artifact.relative_path)).toContain("artifacts/result.json");
 
       const nodeLogs = await projectNodeLogs(
         fixture.runRoot,
@@ -466,7 +473,7 @@ describe("artifacts projection", () => {
         fixture.runRoot,
         fixture.compiledVerifyId,
         nodeDetail.selected_execution_id!,
-        "result.json"
+        "artifacts/result.json"
       );
       expect(JSON.parse(artifact.content)).toMatchObject({
         currentCounter: 2,

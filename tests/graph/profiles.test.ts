@@ -9,6 +9,7 @@ import type {
   GraphProfile
 } from "../../src/graph/authored.js";
 import {
+  builtInAgentArtifactRepairPolicy,
   builtInCodexReasoningEffort,
   builtInInputRules,
   builtInTimeoutSeconds,
@@ -68,6 +69,7 @@ describe("graph profile resolution", () => {
         reasoning_effort: builtInCodexReasoningEffort,
         timeout_sec: builtInTimeoutSeconds,
         input_rules: builtInInputRules,
+        artifact_repair: builtInAgentArtifactRepairPolicy,
         sandbox: "workspace-write"
       })
     );
@@ -148,6 +150,64 @@ describe("graph profile resolution", () => {
     expect(resolution.policy.harness).toBeUndefined();
     expect(resolution.policy.model).toBeUndefined();
     expect(resolution.policy.sandbox).toBeUndefined();
+    expect(resolution.policy.artifact_repair).toBeUndefined();
+  });
+
+  it("resolves artifact repair policy only for agent nodes", () => {
+    const document = createDocument(
+      {
+        default: {
+          harness: "codex-cli",
+          artifact_repair: {
+            max_attempts: 2
+          }
+        },
+        disabled: {
+          harness: "codex-cli",
+          artifact_repair: {
+            max_attempts: 0
+          }
+        }
+      },
+      {
+        launch_profile: "default"
+      }
+    );
+
+    const launch = resolveLaunchConfig(document);
+    const inherited = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "inherited",
+      prompt: "Write artifacts."
+    } satisfies AgentNode);
+    const profileOverride = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "profile_override",
+      profile: "disabled",
+      prompt: "Write artifacts."
+    } satisfies AgentNode);
+    const nodeOverride = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "node_override",
+      prompt: "Write artifacts.",
+      artifact_repair: {
+        max_attempts: 3
+      }
+    } satisfies AgentNode);
+    const exec = resolveNodePolicy(document, launch, {
+      type: "exec",
+      id: "exec",
+      command: "npm"
+    } satisfies ExecNode);
+
+    expect(inherited.diagnostics).toEqual([]);
+    expect(profileOverride.diagnostics).toEqual([]);
+    expect(nodeOverride.diagnostics).toEqual([]);
+    expect(exec.diagnostics).toEqual([]);
+    expect(inherited.policy.artifact_repair).toEqual({ max_attempts: 2 });
+    expect(profileOverride.policy.artifact_repair).toEqual({ max_attempts: 0 });
+    expect(nodeOverride.policy.artifact_repair).toEqual({ max_attempts: 3 });
+    expect(exec.policy.artifact_repair).toBeUndefined();
   });
 
   it("inherits launch AI-check models only when the node profile stays on the same harness", () => {

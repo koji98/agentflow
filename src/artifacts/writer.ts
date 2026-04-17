@@ -8,6 +8,7 @@ import type { GraphDiagnostic } from "../graph/schema.js";
 import {
   type ExecutionDirectoryOptions,
   type NodeArtifactDirectoryOptions,
+  resolveExecutionArtifactsDirectory,
   resolveNodeExecutionDirectory,
   resolveRunArtifactPaths
 } from "./paths.js";
@@ -193,6 +194,7 @@ export class ArtifactWriter {
     });
     await writeText(paths.stdout_log_path, "");
     await writeText(paths.stderr_log_path, "");
+    await mkdir(resolveExecutionArtifactsDirectory(executionDir), { recursive: true });
 
     return paths;
   }
@@ -254,9 +256,11 @@ export class ArtifactWriter {
     executionDir: string,
     workspacePath: string
   ): Promise<string> {
+    const artifactsRoot = resolveExecutionArtifactsDirectory(executionDir);
+
     if (definition.from === "output_dir") {
       const outputPath = resolveSubpathWithinRoot(
-        executionDir,
+        artifactsRoot,
         definition.path,
         `Artifact "${name}" path`
       );
@@ -274,9 +278,8 @@ export class ArtifactWriter {
       definition.path,
       `Artifact "${name}" path`
     );
-    const destinationRoot = join(executionDir, "artifacts");
     const destinationPath = resolveSubpathWithinRoot(
-      destinationRoot,
+      artifactsRoot,
       definition.path,
       `Materialized artifact "${name}" path`
     );

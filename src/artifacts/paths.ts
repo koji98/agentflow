@@ -231,6 +231,10 @@ export function resolveNodeExecutionDirectory(
   );
 }
 
+export function resolveExecutionArtifactsDirectory(executionDir: string): string {
+  return join(executionDir, "artifacts");
+}
+
 export function resolveNodeArtifactDirectory(
   runRoot: string,
   compiledId: string,

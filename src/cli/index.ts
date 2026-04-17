@@ -25,6 +25,7 @@ import {
   workspaceBackends
 } from "../graph/schema.js";
 import { managedPatternDescriptors } from "../managed/index.js";
+import { applyCommand } from "./commands/apply.js";
 import { compileCommand } from "./commands/compile.js";
 import { evalCommand } from "./commands/eval.js";
 import { resumeCommand } from "./commands/resume.js";
@@ -58,6 +59,10 @@ const optionDescriptions: Record<string, string> = {
   label: "--label <run_label>          Optional run label appended to the generated run root.",
   "run-ready": "--run-ready                  Also check local runtime dependencies during validate.",
   "run-root": "--run-root <path>            Existing run root to resume.",
+  repo: "--repo <alias>                Repo alias to select from run workspace changes.",
+  target: "--target <path>              Git worktree where captured workspace changes should be applied.",
+  "allow-dirty": "--allow-dirty                Apply onto a target repo that already has local changes.",
+  "commit-message": "--commit-message <message>   Commit the applied captured changes with this message.",
   suite: "--suite <path>               Eval suite JSON file.",
   case: "--case <id>                  Eval case id filter.",
   variant: "--variant <id>              Eval variant id filter.",
@@ -140,9 +145,10 @@ function renderGraphHelp(): string {
     "- executable nodes may still select node-level profiles inside the authored graph.",
     "- codex-cli profiles may set skip_git_repo_check for intentional non-git workspace roots.",
     "- profiles, exec nodes, and deterministic check nodes may set env_files for repo-local dotenv-style command environment.",
+    "- profiles and agent nodes may set artifact_repair.max_attempts from 0 to 3; agent nodes default to one repair attempt.",
     "- exec and check support on_failure = fail | continue; soft verification still records the true verifier result.",
     "- executable nodes use context for text, workspace files, workspace globs, and prior artifacts.",
-    "- executable nodes use artifacts to declare durable handoff files from AGENTFLOW_OUTPUT_DIR or the workspace.",
+    "- executable nodes use artifacts to declare durable handoff files from AGENTFLOW_OUTPUT_DIR (execution artifacts/) or the workspace.",
     "- inputs, context_from, and outputs are invalid graph syntax; use context and artifacts.",
     "- agent_response is automatically written for agent nodes; result_json is automatically available for every executable node.",
     "- prerequisites.checks may assert required files, commands, env vars, or repos before launch.",
@@ -246,6 +252,7 @@ const commandRegistry = {
   compile: compileCommand,
   run: runCommand,
   resume: resumeCommand,
+  apply: applyCommand,
   eval: evalCommand,
   "graph-help": graphHelpCommand,
   control: controlCommand
@@ -412,7 +419,8 @@ function renderMainHelp(): string {
     "  3. compile: inspect the compiled graph contract before execution",
     "  4. run: execute the compiled graph and write durable artifacts under the run root",
     "  5. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work",
-    "  6. eval: validate or run local eval suites for Agentflow graphs",
+    "  6. apply: apply captured workspace changes from a run back to a git repo",
+    "  7. eval: validate or run local eval suites for Agentflow graphs",
     "",
     "Examples:",
   "  agentflow graph-help",
@@ -421,6 +429,7 @@ function renderMainHelp(): string {
   "  agentflow compile --graph agentflow.graph.json",
     "  agentflow run --graph agentflow.graph.json",
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
+    "  agentflow apply --run-root .agentflow/runs/<run-id>",
     "  agentflow eval validate --suite evals/example/suite.json",
     "  agentflow control --mission mission.json",
     "",

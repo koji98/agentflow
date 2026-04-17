@@ -11,6 +11,7 @@ import {
   createInteractiveCheckpointExecutor,
   type CheckpointPromptAdapter
 } from "../../src/cli/checkpoint.js";
+import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
 import type { CompiledCheckpointNode, CompiledGraph } from "../../src/graph/compiled.js";
 
 class FakePromptAdapter implements CheckpointPromptAdapter {
@@ -226,7 +227,7 @@ describe("checkpoint CLI helpers", () => {
     expect(stderrChunks.join("")).toContain("Checkpoint: review");
     expect(stderrChunks.join("")).toContain("[preview truncated]");
 
-    await expect(access(join(executionDir, "operator-feedback.md"))).rejects.toThrow();
+    await expect(access(join(resolveExecutionArtifactsDirectory(executionDir), "operator-feedback.md"))).rejects.toThrow();
     await rm(tempRoot, { recursive: true, force: true });
   });
 
@@ -319,7 +320,7 @@ describe("checkpoint CLI helpers", () => {
     });
 
     expect(result.status).toBe("failed");
-    expect(await readFile(join(executionDir, "operator-feedback.md"), "utf8")).toBe(
+    expect(await readFile(join(resolveExecutionArtifactsDirectory(executionDir), "operator-feedback.md"), "utf8")).toBe(
       "Add rollback details\nDefine owner\n"
     );
 

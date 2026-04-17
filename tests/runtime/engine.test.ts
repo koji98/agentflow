@@ -11,7 +11,10 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
-import { resolveNodeExecutionDirectory } from "../../src/artifacts/paths.js";
+import {
+  resolveExecutionArtifactsDirectory,
+  resolveNodeExecutionDirectory
+} from "../../src/artifacts/paths.js";
 import { buildExecutionId } from "../../src/runtime/attempts.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
@@ -245,7 +248,10 @@ describe("runtime engine", () => {
         agent: async ({ workspace_path, execution_dir }) => {
           counter += 1;
           await writeFile(join(workspace_path, "counter.txt"), `${counter}\n`);
-          await writeFile(join(execution_dir, "notes.md"), `iteration ${counter}\n`);
+          await writeFile(
+            join(resolveExecutionArtifactsDirectory(execution_dir), "notes.md"),
+            `iteration ${counter}\n`
+          );
           return {
             status: "passed",
             outcome: "passed",
@@ -345,7 +351,7 @@ describe("runtime engine", () => {
     expect(await pathExists(join(runRoot, "repos"))).toBe(false);
     await Promise.all(
       run.attempts.map(async (attempt) => {
-        expect(await pathExists(join(attempt.execution_dir, "artifacts"))).toBe(false);
+        expect(await pathExists(resolveExecutionArtifactsDirectory(attempt.execution_dir))).toBe(true);
       })
     );
     const summary = await readFile(join(runRoot, "summary.md"), "utf8");
@@ -725,6 +731,7 @@ describe("runtime engine", () => {
                 "const path = require('node:path');",
                 "const payload = {",
                 "  workspace: process.env.AGENTFLOW_WORKSPACE,",
+                "  output_dir: process.env.AGENTFLOW_OUTPUT_DIR,",
                 "  packet_exists: fs.existsSync(process.env.AGENTFLOW_CONTEXT_PACKET),",
                 "  manifest_exists: fs.existsSync(process.env.AGENTFLOW_CONTEXT_MANIFEST)",
                 "};",
@@ -755,11 +762,92 @@ describe("runtime engine", () => {
     const handoff = JSON.parse(await readFile(attempt.artifacts.handoff!, "utf8"));
 
     expect(run.outcome).toBe("passed");
-    expect(attempt.artifacts.handoff).toBe(join(attempt.execution_dir, "handoff.json"));
+    expect(attempt.artifacts.handoff).toBe(
+      join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "handoff.json")
+    );
     expect(handoff).toEqual({
       workspace: repoDir,
+      output_dir: resolveExecutionArtifactsDirectory(attempt.execution_dir),
       packet_exists: true,
       manifest_exists: true
+    });
+    await expect(access(join(attempt.execution_dir, "handoff.json"))).rejects.toThrow();
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("does not accept legacy execution-root files as output_dir artifacts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-output-dir-root-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-output-dir-root",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "legacy_writer",
+            command: "placeholder",
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Markdown handoff for downstream nodes."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async ({ execution_dir }) => {
+          await writeFile(join(execution_dir, "handoff.md"), "legacy root handoff\n");
+          return {
+            status: "passed",
+            outcome: "passed",
+            result: { ok: true },
+            stdout: "",
+            stderr: ""
+          };
+        }
+      }
+    });
+
+    const attempt = run.attempts[0]!;
+
+    expect(run.outcome).toBe("failed");
+    expect(await readFile(join(attempt.execution_dir, "handoff.md"), "utf8")).toBe("legacy root handoff\n");
+    expect(attempt.artifacts.handoff).toBeUndefined();
+    expect(attempt.artifacts.result_json).toBe(
+      join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "result.json")
+    );
+    expect(JSON.parse(await readFile(attempt.artifacts.result_json!, "utf8"))).toEqual({
+      error: 'Required output_dir artifact "handoff" is missing at handoff.md.'
     });
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -841,7 +929,7 @@ describe("runtime engine", () => {
     expect(capturedInvocation).toEqual(
       expect.objectContaining({
         repoPath: repoDir,
-        outputDir: attempt.execution_dir,
+        outputDir: resolveExecutionArtifactsDirectory(attempt.execution_dir),
         artifacts: {
           handoff: {
             from: "output_dir",
@@ -851,8 +939,217 @@ describe("runtime engine", () => {
         }
       })
     );
-    expect(attempt.artifacts.handoff).toBe(join(attempt.execution_dir, "handoff.md"));
-    expect(attempt.artifacts.agent_response).toBe(join(attempt.execution_dir, "agent-response.md"));
+    expect(attempt.artifacts.handoff).toBe(
+      join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "handoff.md")
+    );
+    expect(attempt.artifacts.agent_response).toBe(
+      join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md")
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("repairs missing agent artifacts before finalizing the node", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-agent-artifact-repair-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-agent-artifact-repair",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "write_handoff",
+            prompt: "Write a handoff after inspecting the repo.",
+            artifact_repair: {
+              max_attempts: 2
+            },
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Markdown handoff for downstream nodes."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const invocations: Parameters<HarnessAdapter["run"]>[0][] = [];
+    const harness = createHarness("codex-cli", async (invocation) => {
+      invocations.push(invocation);
+
+      if (invocation.executionId.endsWith("__artifact_repair_2")) {
+        await writeFile(join(invocation.outputDir, "handoff.md"), "repaired handoff\n");
+      }
+
+      return {
+        status: "passed",
+        exitCode: 0,
+        stdout: `stdout for ${invocation.executionId}`,
+        stderr: "",
+        transcript: {
+          last_message: invocation.executionId.includes("__artifact_repair_")
+            ? "repair response"
+            : "initial response"
+        }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": harness
+      }
+    });
+
+    const attempt = run.attempts[0]!;
+    const artifactsRoot = resolveExecutionArtifactsDirectory(attempt.execution_dir);
+
+    expect(run.outcome).toBe("passed");
+    expect(invocations).toHaveLength(3);
+    expect(invocations.map((invocation) => invocation.executionId)).toEqual([
+      attempt.execution_id,
+      `${attempt.execution_id}__artifact_repair_1`,
+      `${attempt.execution_id}__artifact_repair_2`
+    ]);
+    expect(invocations[1]?.prompt).toContain("## Agentflow Artifact Repair");
+    expect(invocations[1]?.prompt).toContain("Write a handoff after inspecting the repo.");
+    expect(invocations[1]?.prompt).toContain("expected absolute path");
+    expect(attempt.artifacts.handoff).toBe(join(artifactsRoot, "handoff.md"));
+    expect(await readFile(attempt.artifacts.handoff!, "utf8")).toBe("repaired handoff\n");
+    expect(attempt.metadata.artifact_repair).toEqual({
+      status: "passed",
+      max_attempts: 2,
+      attempt_count: 2,
+      missing_artifacts: []
+    });
+    expect(run.events.filter((event) => event.type === "artifact_repair.started")).toHaveLength(2);
+    expect(run.events.filter((event) => event.type === "artifact_repair.failed")).toHaveLength(1);
+    expect(run.events.filter((event) => event.type === "artifact_repair.completed")).toHaveLength(1);
+    expect(await pathExists(join(attempt.execution_dir, "artifact-repairs", "001", "prompt.md"))).toBe(true);
+    expect(await pathExists(join(attempt.execution_dir, "artifact-repairs", "002", "result.json"))).toBe(true);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("accepts a repair attempt when the missing artifact exists after the harness returns failed", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-agent-artifact-repair-failed-status-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-agent-artifact-repair-failed-status",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "write_handoff",
+            prompt: "Write a handoff.",
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Markdown handoff for downstream nodes."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const harness = createHarness("codex-cli", async (invocation) => {
+      if (invocation.executionId.includes("__artifact_repair_")) {
+        await writeFile(join(invocation.outputDir, "handoff.md"), "handoff from failed repair\n");
+        return {
+          status: "failed",
+          exitCode: 1,
+          stdout: "repair wrote the artifact but exited nonzero",
+          stderr: "nonzero",
+          transcript: {
+            last_message: "repair failed after writing"
+          }
+        };
+      }
+
+      return {
+        status: "passed",
+        exitCode: 0,
+        stdout: "initial",
+        stderr: "",
+        transcript: {
+          last_message: "initial response"
+        }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": harness
+      }
+    });
+
+    const attempt = run.attempts[0]!;
+
+    expect(run.outcome).toBe("passed");
+    expect(await readFile(attempt.artifacts.handoff!, "utf8")).toBe("handoff from failed repair\n");
+    expect(attempt.metadata.artifact_repair).toEqual({
+      status: "passed",
+      max_attempts: 1,
+      attempt_count: 1,
+      missing_artifacts: []
+    });
+    expect(run.events.filter((event) => event.type === "artifact_repair.failed")).toHaveLength(0);
+    expect(run.events.filter((event) => event.type === "artifact_repair.completed")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -915,7 +1212,9 @@ describe("runtime engine", () => {
     const attempt = run.attempts[0]!;
 
     expect(run.outcome).toBe("passed");
-    expect(attempt.artifacts.agent_response).toBe(join(attempt.execution_dir, "agent-response.md"));
+    expect(attempt.artifacts.agent_response).toBe(
+      join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md")
+    );
     expect(await readFile(attempt.artifacts.agent_response!, "utf8")).toBe(
       "Agent completed without a captured final response.\n"
     );
@@ -991,14 +1290,35 @@ describe("runtime engine", () => {
     expect(attempt?.status).toBe("failed");
     expect(attempt?.artifacts).toEqual(
       expect.objectContaining({
-        result_json: join(attempt!.execution_dir, "result.json"),
-        agent_response: join(attempt!.execution_dir, "agent-response.md")
+        result_json: join(resolveExecutionArtifactsDirectory(attempt!.execution_dir), "result.json"),
+        agent_response: join(resolveExecutionArtifactsDirectory(attempt!.execution_dir), "agent-response.md")
       })
     );
     expect(await readFile(attempt!.artifacts.agent_response!, "utf8")).toBe("final response\n");
     expect(JSON.parse(await readFile(attempt!.result_path!, "utf8"))).toEqual({
-      error: 'Required output_dir artifact "handoff" is missing at handoff.md.'
+      error: "Required artifact contract is missing after 1 artifact repair attempt: handoff at handoff.md."
     });
+    expect(attempt?.metadata.artifact_repair).toEqual({
+      status: "failed",
+      max_attempts: 1,
+      attempt_count: 1,
+      missing_artifacts: ["handoff"]
+    });
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "artifact_repair.started",
+          compiled_id: "root__write_handoff"
+        }),
+        expect.objectContaining({
+          type: "artifact_repair.failed",
+          compiled_id: "root__write_handoff",
+          payload: expect.objectContaining({
+            summary: "Artifact repair could not run because the resolved harness adapter is unavailable."
+          })
+        })
+      ])
+    );
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -1718,7 +2038,7 @@ describe("runtime engine", () => {
       },
       executors: {
         exec: async ({ execution_dir }) => {
-          await writeFile(join(execution_dir, "draft.md"), "draft\n");
+          await writeFile(join(resolveExecutionArtifactsDirectory(execution_dir), "draft.md"), "draft\n");
           return {
             status: "passed",
             outcome: "passed",

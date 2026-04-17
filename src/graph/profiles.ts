@@ -1,4 +1,5 @@
 import type {
+  ArtifactRepairPolicy,
   AuthoredGraphDocument,
   CheckNode,
   ExecutableGraphNode,
@@ -30,6 +31,7 @@ export interface EffectiveNodePolicy {
   skip_git_repo_check?: boolean;
   timeout_sec: number;
   input_rules: EffectiveInputRules;
+  artifact_repair?: Required<ArtifactRepairPolicy>;
 }
 
 export interface LaunchResolution {
@@ -51,6 +53,9 @@ export const builtInInputRules: EffectiveInputRules = {
 
 export const builtInTimeoutSeconds = 1800;
 export const builtInCodexReasoningEffort: ReasoningEffort = "medium";
+export const builtInAgentArtifactRepairPolicy: Required<ArtifactRepairPolicy> = {
+  max_attempts: 1
+};
 
 function mergeInputRules(...rules: Array<InputRules | undefined>): EffectiveInputRules {
   return rules.reduce<EffectiveInputRules>(
@@ -208,6 +213,16 @@ export function resolveNodePolicy(
     launch_profile?.input_rules,
     node_profile?.input_rules
   );
+  const artifact_repair =
+    node.type === "agent"
+      ? {
+          max_attempts:
+            node.artifact_repair?.max_attempts ??
+            node_profile?.artifact_repair?.max_attempts ??
+            launch_profile?.artifact_repair?.max_attempts ??
+            builtInAgentArtifactRepairPolicy.max_attempts
+        }
+      : undefined;
 
   let harness: HarnessName | undefined;
   let model: string | undefined;
@@ -273,7 +288,8 @@ export function resolveNodePolicy(
       ...(sandbox ? { sandbox } : {}),
       ...(skip_git_repo_check !== undefined ? { skip_git_repo_check } : {}),
       timeout_sec,
-      input_rules
+      input_rules,
+      ...(artifact_repair ? { artifact_repair } : {})
     },
     diagnostics,
     profile_name,

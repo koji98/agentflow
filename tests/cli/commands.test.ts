@@ -51,6 +51,7 @@ describe("graph CLI", () => {
     expect(result.stdout).toContain("compile");
     expect(result.stdout).toContain("run");
     expect(result.stdout).toContain("resume");
+    expect(result.stdout).toContain("apply");
     expect(result.stdout).toContain("graph-help");
     expect(result.stdout).toContain("control");
     expect(result.stdout).toContain("Local workflow:");
@@ -576,6 +577,159 @@ describe("graph CLI", () => {
     expect(summary).toContain("## Workspace Changes");
     expect(summary).toContain(capture.diff_file);
     await expect(access(payload.repo_workspaces.main.workspace_path)).rejects.toThrow();
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("applies captured worktree changes back to the source repo", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-apply-worktree-changes-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-apply-worktree-change",
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "worktree"
+          },
+          profiles: {
+            default: {}
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "mutate_workspace",
+                repo: "main",
+                command: process.execPath,
+                args: [
+                  "-e",
+                  [
+                    "const fs = require('node:fs');",
+                    "fs.writeFileSync('README.md', 'changed from captured patch\\n');",
+                    "fs.writeFileSync('new-file.txt', 'new workspace file\\n');"
+                  ].join(" ")
+                ]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const runResult = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const runPayload = JSON.parse(runResult.stdout);
+
+    expect(runResult.exitCode).toBe(0);
+    expect(await readFile(join(repoDir, "README.md"), "utf8")).toBe("seed\n");
+
+    const applyResult = await executeCli(["apply", "--run-root", runPayload.run_root], tempRoot);
+    const applyPayload = JSON.parse(applyResult.stdout);
+
+    expect(applyResult.exitCode).toBe(0);
+    expect(applyPayload.command).toBe("apply");
+    expect(applyPayload.status).toBe("passed");
+    expect(applyPayload.repo_alias).toBe("main");
+    expect(applyPayload.target_path).toBe(repoDir);
+    expect(applyPayload.changed_files).toEqual(["README.md", "new-file.txt"]);
+    expect(await readFile(join(repoDir, "README.md"), "utf8")).toBe(
+      "changed from captured patch\n"
+    );
+    expect(await readFile(join(repoDir, "new-file.txt"), "utf8")).toBe("new workspace file\n");
+    await expect(
+      execFileAsync("git", ["status", "--porcelain=v1"], { cwd: repoDir }).then(
+        (result) => result.stdout
+      )
+    ).resolves.toContain(" M README.md");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("commits captured worktree changes when a commit message is provided", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-apply-commit-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-apply-commit",
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "worktree"
+          },
+          profiles: {
+            default: {}
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "mutate_workspace",
+                repo: "main",
+                command: process.execPath,
+                args: [
+                  "-e",
+                  [
+                    "const fs = require('node:fs');",
+                    "fs.writeFileSync('README.md', 'committed captured patch\\n');"
+                  ].join(" ")
+                ]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const runResult = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const runPayload = JSON.parse(runResult.stdout);
+    const applyResult = await executeCli(
+      [
+        "apply",
+        "--run-root",
+        runPayload.run_root,
+        "--commit-message",
+        "Apply captured Agentflow changes"
+      ],
+      tempRoot
+    );
+    const applyPayload = JSON.parse(applyResult.stdout);
+    const logSubject = await execFileAsync("git", ["log", "-1", "--pretty=%s"], { cwd: repoDir });
+    const status = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: repoDir });
+
+    expect(applyResult.exitCode).toBe(0);
+    expect(applyPayload.status).toBe("passed");
+    expect(applyPayload.commit.message).toBe("Apply captured Agentflow changes");
+    expect(applyPayload.commit.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(logSubject.stdout.trim()).toBe("Apply captured Agentflow changes");
+    expect(status.stdout).toBe("");
 
     await rm(tempRoot, { recursive: true, force: true });
   });

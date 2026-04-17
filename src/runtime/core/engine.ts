@@ -1,8 +1,8 @@
-import { access, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
-import type { AuthoredGraphDocument } from "../../graph/authored.js";
+import type { ArtifactDefinition, AuthoredGraphDocument } from "../../graph/authored.js";
 import type {
   CompiledAgentNode,
   CompiledCheckNode,
@@ -16,6 +16,7 @@ import { createRunOwnerRecord, type RunOwnerRecord } from "../../artifacts/owner
 import type { GraphDiagnostic, GraphOutcome, HarnessName } from "../../graph/schema.js";
 import { ArtifactWriter } from "../../artifacts/writer.js";
 import { readRunEvents, readRunExecutionAttempts } from "../../artifacts/reader.js";
+import { resolveExecutionArtifactsDirectory } from "../../artifacts/paths.js";
 import { renderRunSummary } from "../delivery/summary.js";
 import {
   buildExecutionId,
@@ -159,6 +160,31 @@ interface StreamingLogSink {
 
 interface NodeReadinessCache {
   harnesses: Map<HarnessName, Promise<string[]>>;
+}
+
+interface MissingDeclaredArtifact {
+  name: string;
+  from: ArtifactDefinition["from"];
+  path: string;
+  description: string;
+  expected_path: string;
+}
+
+interface ArtifactRepairMetadata {
+  status: "passed" | "failed";
+  max_attempts: number;
+  attempt_count: number;
+  missing_artifacts: string[];
+}
+
+class ArtifactMaterializationError extends Error {
+  readonly repair_metadata: ArtifactRepairMetadata | undefined;
+
+  constructor(message: string, repairMetadata?: ArtifactRepairMetadata) {
+    super(message);
+    this.name = "ArtifactMaterializationError";
+    this.repair_metadata = repairMetadata;
+  }
 }
 
 function deriveRunId(runRoot: string): string {
@@ -770,7 +796,7 @@ function resolveNodeEnvFiles(
 function buildNodeRuntimeEnv(context: RuntimeNodeExecutorContext<CompiledExecutableNode>): Record<string, string> {
   return {
     AGENTFLOW_WORKSPACE: context.workspace_path,
-    AGENTFLOW_OUTPUT_DIR: context.execution_dir,
+    AGENTFLOW_OUTPUT_DIR: resolveExecutionArtifactsDirectory(context.execution_dir),
     AGENTFLOW_CONTEXT_PACKET: context.context_packet_path,
     AGENTFLOW_CONTEXT_MANIFEST: context.context_manifest_path
   };
@@ -938,7 +964,7 @@ async function defaultCheckExecutor(
     rubric: context.node.rubric,
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
-    output_dir: context.execution_dir,
+    output_dir: resolveExecutionArtifactsDirectory(context.execution_dir),
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
     ...(context.on_stdout_chunk ? { on_stdout_chunk: context.on_stdout_chunk } : {}),
@@ -1040,7 +1066,7 @@ async function defaultAgentExecutor(
     prompt: context.node.prompt,
     contextPacketPath: context.context_packet_path,
     contextManifestPath: context.context_manifest_path,
-    outputDir: context.execution_dir,
+    outputDir: resolveExecutionArtifactsDirectory(context.execution_dir),
     artifacts: context.node.declared_artifacts,
     timeoutSec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
@@ -1065,18 +1091,20 @@ async function defaultAgentExecutor(
 async function writeAutomaticArtifacts(
   node: CompiledExecutableNode,
   attempt: RuntimeNodeAttempt,
-  executionPaths: Awaited<ReturnType<ArtifactWriter["writeExecutionStart"]>>,
   result: RuntimeNodeExecutionResult
 ): Promise<Record<string, string>> {
+  const resultJsonPath = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "result.json");
+  await writeFile(resultJsonPath, `${JSON.stringify(result.result, null, 2)}\n`, "utf8");
+
   const artifacts: Record<string, string> = {
-    result_json: executionPaths.result_path
+    result_json: resultJsonPath
   };
 
   if (node.kind !== "agent") {
     return artifacts;
   }
 
-  const responsePath = join(attempt.execution_dir, "agent-response.md");
+  const responsePath = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md");
   const response =
     typeof result.agent_response === "string" && result.agent_response.trim().length > 0
       ? result.agent_response
@@ -1085,6 +1113,377 @@ async function writeAutomaticArtifacts(
   await writeFile(responsePath, response.endsWith("\n") ? response : `${response}\n`, "utf8");
   artifacts.agent_response = responsePath;
   return artifacts;
+}
+
+async function writeFailureResultArtifact(attempt: RuntimeNodeAttempt, message: string): Promise<string> {
+  const resultJsonPath = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "result.json");
+  await writeFile(resultJsonPath, `${JSON.stringify({ error: message }, null, 2)}\n`, "utf8");
+  return resultJsonPath;
+}
+
+async function collectMissingDeclaredArtifacts(
+  node: CompiledExecutableNode,
+  executionDir: string,
+  workspacePath: string
+): Promise<MissingDeclaredArtifact[]> {
+  const artifactsRoot = resolveExecutionArtifactsDirectory(executionDir);
+  const missing: MissingDeclaredArtifact[] = [];
+
+  for (const [name, definition] of Object.entries(node.declared_artifacts)) {
+    const expected_path = resolveSubpathWithinRoot(
+      definition.from === "output_dir" ? artifactsRoot : workspacePath,
+      definition.path,
+      `Artifact "${name}" path`
+    );
+
+    try {
+      await access(expected_path);
+    } catch {
+      missing.push({
+        name,
+        from: definition.from,
+        path: definition.path,
+        description: definition.description,
+        expected_path
+      });
+    }
+  }
+
+  return missing;
+}
+
+function formatMissingArtifactList(missingArtifacts: MissingDeclaredArtifact[]): string {
+  return missingArtifacts
+    .map((artifact) => [
+      `- \`${artifact.name}\``,
+      `  - from: \`${artifact.from}\``,
+      `  - declared path: \`${artifact.path}\``,
+      `  - expected absolute path: \`${artifact.expected_path}\``,
+      `  - expected content: ${artifact.description}`
+    ].join("\n"))
+    .join("\n");
+}
+
+function buildArtifactRepairPrompt(options: {
+  node: CompiledAgentNode;
+  attempt: RuntimeNodeAttempt;
+  repairAttempt: number;
+  maxAttempts: number;
+  missingArtifacts: MissingDeclaredArtifact[];
+  workspacePath: string;
+  contextPacketPath: string;
+  contextManifestPath: string;
+  runId: string;
+}): string {
+  const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
+  const priorResponsePath = join(artifactsRoot, "agent-response.md");
+
+  return [
+    "## Agentflow Artifact Repair",
+    "",
+    "You already executed this Agentflow agent node, but the node did not satisfy its declared artifact contract.",
+    "Do not redo unrelated work. Your only job is to produce the missing declared artifacts at the exact expected paths.",
+    "",
+    "## Original Node Task",
+    options.node.prompt,
+    "",
+    "## Missing Artifacts",
+    formatMissingArtifactList(options.missingArtifacts),
+    "",
+    "## Available Evidence",
+    `- Workspace: ${options.workspacePath}`,
+    `- Output directory for output_dir artifacts: ${artifactsRoot}`,
+    `- Context manifest: ${options.contextManifestPath}`,
+    `- Context packet: ${options.contextPacketPath}`,
+    `- Prior final response artifact, if present: ${priorResponsePath}`,
+    `- Prior stdout log: ${options.attempt.stdout_log_path ?? join(options.attempt.execution_dir, "logs", "stdout.log")}`,
+    `- Prior stderr log: ${options.attempt.stderr_log_path ?? join(options.attempt.execution_dir, "logs", "stderr.log")}`,
+    "",
+    "## Repair Instructions",
+    "- Inspect the workspace, git status, git diff, output directory, context, prior response, and logs as needed.",
+    "- If the artifact content exists in the wrong location, move or copy it to the expected absolute path.",
+    "- If the handoff was never written, write it now from the completed work, workspace changes, and available context.",
+    "- Do not make unrelated source changes.",
+    "- Finish only after every missing artifact exists at its exact expected absolute path.",
+    "",
+    "## Diagnostics",
+    `- Repair attempt: ${options.repairAttempt} of ${options.maxAttempts}`,
+    `- Run ID: ${options.runId}`,
+    `- Execution ID: ${options.attempt.execution_id}`,
+    `- Agent node: ${options.node.authored_id}`
+  ].join("\n");
+}
+
+async function runArtifactRepairHarness(options: {
+  node: CompiledAgentNode;
+  attempt: RuntimeNodeAttempt;
+  repairAttempt: number;
+  maxAttempts: number;
+  missingArtifacts: MissingDeclaredArtifact[];
+  session: RuntimeSession;
+  workspacePath: string;
+  contextPacketPath: string;
+  contextManifestPath: string;
+  signal: AbortSignal | undefined;
+  harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
+}): Promise<"passed" | "failed" | "canceled" | "unavailable"> {
+  const harnessName = options.node.effective_policy.harness;
+  const harness = harnessName ? options.harnesses[harnessName] : undefined;
+
+  if (!harnessName || !harness) {
+    return "unavailable";
+  }
+
+  const repairDir = join(
+    options.attempt.execution_dir,
+    "artifact-repairs",
+    String(options.repairAttempt).padStart(3, "0")
+  );
+  await mkdir(repairDir, { recursive: true });
+  const prompt = buildArtifactRepairPrompt({
+    node: options.node,
+    attempt: options.attempt,
+    repairAttempt: options.repairAttempt,
+    maxAttempts: options.maxAttempts,
+    missingArtifacts: options.missingArtifacts,
+    workspacePath: options.workspacePath,
+    contextPacketPath: options.contextPacketPath,
+    contextManifestPath: options.contextManifestPath,
+    runId: options.session.run_id
+  });
+  await writeFile(join(repairDir, "prompt.md"), `${prompt}\n`, "utf8");
+
+  const result = await harness.run({
+    promptKind: "agent",
+    runId: options.session.run_id,
+    executionId: `${options.attempt.execution_id}__artifact_repair_${options.repairAttempt}`,
+    repoAlias: options.node.repo,
+    repoPath: options.workspacePath,
+    sandbox: options.node.effective_policy.sandbox ?? "workspace-write",
+    ...(options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
+    model: options.node.effective_policy.model,
+    ...(options.node.effective_policy.reasoning_effort
+      ? { reasoningEffort: options.node.effective_policy.reasoning_effort }
+      : {}),
+    prompt,
+    contextPacketPath: options.contextPacketPath,
+    contextManifestPath: options.contextManifestPath,
+    outputDir: resolveExecutionArtifactsDirectory(options.attempt.execution_dir),
+    artifacts: options.node.declared_artifacts,
+    timeoutSec: options.node.effective_policy.timeout_sec,
+    signal: options.signal
+  });
+
+  await Promise.all([
+    writeFile(join(repairDir, "stdout.log"), result.stdout ?? "", "utf8"),
+    writeFile(join(repairDir, "stderr.log"), result.stderr ?? "", "utf8"),
+    writeFile(
+      join(repairDir, "result.json"),
+      `${JSON.stringify({
+        status: result.status,
+        exit_code: result.exitCode,
+        ...(result.metadata ? { metadata: result.metadata } : {}),
+        ...(result.outputJson ? { output_json: result.outputJson } : {}),
+        ...(result.transcript?.last_message ? { last_message: result.transcript.last_message } : {})
+      }, null, 2)}\n`,
+      "utf8"
+    )
+  ]);
+
+  return result.status;
+}
+
+async function materializeDeclaredArtifactsWithRepair(options: {
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  session: RuntimeSession;
+  writer: ArtifactWriter;
+  runOwner: RunOwnerRecord;
+  events: RuntimeEventEnvelope[];
+  onEvent: RunCompiledGraphOptions["on_event"];
+  workspacePath: string;
+  automaticArtifacts: Record<string, string>;
+  resultStatus: RuntimeNodeExecutionResult["status"];
+  contextPacketPath: string;
+  contextManifestPath: string;
+  signal: AbortSignal | undefined;
+  harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
+}): Promise<{
+  artifacts: Record<string, string>;
+  repair_metadata?: ArtifactRepairMetadata;
+  canceled?: boolean;
+}> {
+  try {
+    return {
+      artifacts: await options.writer.materializeDeclaredArtifacts(
+        options.node,
+        options.attempt,
+        options.workspacePath,
+        options.automaticArtifacts
+      )
+    };
+  } catch (error) {
+    if (
+      options.node.kind !== "agent" ||
+      options.resultStatus !== "passed" ||
+      options.attempt.status === "canceled"
+    ) {
+      throw error;
+    }
+
+    const maxAttempts = options.node.effective_policy.artifact_repair?.max_attempts ?? 0;
+
+    if (maxAttempts <= 0) {
+      throw error;
+    }
+
+    let missingArtifacts = await collectMissingDeclaredArtifacts(
+      options.node,
+      options.attempt.execution_dir,
+      options.workspacePath
+    );
+
+    if (missingArtifacts.length === 0) {
+      throw error;
+    }
+
+    let attempted = 0;
+
+    for (let repairAttempt = 1; repairAttempt <= maxAttempts; repairAttempt += 1) {
+      attempted = repairAttempt;
+      await emitEvent(
+        options.session,
+        options.writer,
+        options.runOwner,
+        options.events,
+        options.onEvent,
+        "artifact_repair.started",
+        {
+          repair_attempt: repairAttempt,
+          max_attempts: maxAttempts,
+          missing_artifacts: missingArtifacts.map((artifact) => artifact.name)
+        },
+        {
+          compiled_id: options.node.compiled_id,
+          execution_id: options.attempt.execution_id,
+          repeat_scope_id: options.attempt.repeat_scope_id,
+          iteration_index: options.attempt.iteration_index,
+          attempt_index: options.attempt.attempt_index
+        }
+      );
+
+      const repairStatus = await runArtifactRepairHarness({
+        node: options.node,
+        attempt: options.attempt,
+        repairAttempt,
+        maxAttempts,
+        missingArtifacts,
+        session: options.session,
+        workspacePath: options.workspacePath,
+        contextPacketPath: options.contextPacketPath,
+        contextManifestPath: options.contextManifestPath,
+        signal: options.signal,
+        harnesses: options.harnesses
+      });
+
+      if (repairStatus === "canceled") {
+        return {
+          artifacts: options.automaticArtifacts,
+          repair_metadata: {
+            status: "failed",
+            max_attempts: maxAttempts,
+            attempt_count: attempted,
+            missing_artifacts: missingArtifacts.map((artifact) => artifact.name)
+          },
+          canceled: true
+        };
+      }
+
+      missingArtifacts = await collectMissingDeclaredArtifacts(
+        options.node,
+        options.attempt.execution_dir,
+        options.workspacePath
+      );
+
+      if (missingArtifacts.length === 0) {
+        await emitEvent(
+          options.session,
+          options.writer,
+          options.runOwner,
+          options.events,
+          options.onEvent,
+          "artifact_repair.completed",
+          {
+            repair_attempt: repairAttempt,
+            max_attempts: maxAttempts,
+            repaired_artifacts: Object.keys(options.node.declared_artifacts).sort()
+          },
+          {
+            compiled_id: options.node.compiled_id,
+            execution_id: options.attempt.execution_id,
+            repeat_scope_id: options.attempt.repeat_scope_id,
+            iteration_index: options.attempt.iteration_index,
+            attempt_index: options.attempt.attempt_index
+          }
+        );
+
+        return {
+          artifacts: await options.writer.materializeDeclaredArtifacts(
+            options.node,
+            options.attempt,
+            options.workspacePath,
+            options.automaticArtifacts
+          ),
+          repair_metadata: {
+            status: "passed",
+            max_attempts: maxAttempts,
+            attempt_count: attempted,
+            missing_artifacts: []
+          }
+        };
+      }
+
+      const summary =
+        repairStatus === "unavailable"
+          ? "Artifact repair could not run because the resolved harness adapter is unavailable."
+          : `Artifact repair attempt ${repairAttempt} finished with status ${repairStatus}; missing artifacts remain: ${missingArtifacts.map((artifact) => artifact.name).join(", ")}.`;
+      await emitEvent(
+        options.session,
+        options.writer,
+        options.runOwner,
+        options.events,
+        options.onEvent,
+        "artifact_repair.failed",
+        {
+          repair_attempt: repairAttempt,
+          max_attempts: maxAttempts,
+          missing_artifacts: missingArtifacts.map((artifact) => artifact.name),
+          summary
+        },
+        {
+          compiled_id: options.node.compiled_id,
+          execution_id: options.attempt.execution_id,
+          repeat_scope_id: options.attempt.repeat_scope_id,
+          iteration_index: options.attempt.iteration_index,
+          attempt_index: options.attempt.attempt_index
+        }
+      );
+
+      if (repairStatus === "unavailable") {
+        break;
+      }
+    }
+
+    throw new ArtifactMaterializationError(
+      `Required artifact contract is missing after ${attempted} artifact repair attempt${attempted === 1 ? "" : "s"}: ${missingArtifacts.map((artifact) => `${artifact.name} at ${artifact.path}`).join(", ")}.`,
+      {
+        status: "failed",
+        max_attempts: maxAttempts,
+        attempt_count: attempted,
+        missing_artifacts: missingArtifacts.map((artifact) => artifact.name)
+      }
+    );
+  }
 }
 
 async function ensureCheckpointPassFeedbackArtifact(
@@ -1102,7 +1501,7 @@ async function ensureCheckpointPassFeedbackArtifact(
   }
 
   const feedbackPath = resolveSubpathWithinRoot(
-    attempt.execution_dir,
+    resolveExecutionArtifactsDirectory(attempt.execution_dir),
     feedbackArtifact.path,
     'Checkpoint "operator_feedback" artifact path'
   );
@@ -1110,6 +1509,7 @@ async function ensureCheckpointPassFeedbackArtifact(
   try {
     await access(feedbackPath);
   } catch {
+    await mkdir(dirname(feedbackPath), { recursive: true });
     await writeFile(
       feedbackPath,
       "Checkpoint passed. No operator feedback was provided.\n",
@@ -1122,6 +1522,8 @@ async function executeNode(
   options: RunCompiledGraphOptions,
   session: RuntimeSession,
   writer: ArtifactWriter,
+  runOwner: RunOwnerRecord,
+  events: RuntimeEventEnvelope[],
   node: CompiledExecutableNode,
   attempt: RuntimeNodeAttempt,
   signal: AbortSignal | undefined,
@@ -1144,6 +1546,7 @@ async function executeNode(
     | undefined;
   let logSink: StreamingLogSink | undefined;
   let automaticArtifacts: Record<string, string> | undefined;
+  let artifactRepairMetadata: ArtifactRepairMetadata | undefined;
 
   try {
     executionPaths = await writer.writeExecutionStart(attempt);
@@ -1254,15 +1657,15 @@ async function executeNode(
               node,
               attempt,
               workspace_path: workspace.workspace_path,
-            execution_dir: attempt.execution_dir,
-            context_packet_path: context.packet_path,
-            context_manifest_path: context.manifest_path,
-            signal,
-            on_stdout_chunk: logSink.on_stdout_chunk,
-            on_stderr_chunk: logSink.on_stderr_chunk
-          },
-          options.harnesses ?? {}
-        );
+              execution_dir: attempt.execution_dir,
+              context_packet_path: context.packet_path,
+              context_manifest_path: context.manifest_path,
+              signal,
+              on_stdout_chunk: logSink.on_stdout_chunk,
+              on_stderr_chunk: logSink.on_stderr_chunk
+            },
+            options.harnesses ?? {}
+          );
     }
 
     await logSink.flush();
@@ -1275,16 +1678,36 @@ async function executeNode(
 
     await ensureCheckpointPassFeedbackArtifact(node, attempt, result);
 
-    automaticArtifacts = await writeAutomaticArtifacts(node, attempt, executionPaths, result);
-    const artifacts =
+    automaticArtifacts = await writeAutomaticArtifacts(node, attempt, result);
+    const materialized =
       result.status === "canceled"
-        ? automaticArtifacts
-        : await writer.materializeDeclaredArtifacts(
+        ? { artifacts: automaticArtifacts }
+        : await materializeDeclaredArtifactsWithRepair({
             node,
             attempt,
-            workspace.workspace_path,
-            automaticArtifacts
-          );
+            session,
+            writer,
+            runOwner,
+            events,
+            onEvent: options.on_event,
+            workspacePath: workspace.workspace_path,
+            automaticArtifacts,
+            resultStatus: result.status,
+            contextPacketPath: context.packet_path,
+            contextManifestPath: context.manifest_path,
+            signal,
+            harnesses: options.harnesses ?? {}
+          });
+    const artifacts = materialized.artifacts;
+    artifactRepairMetadata = materialized.repair_metadata;
+
+    if (materialized.canceled) {
+      result = {
+        ...result,
+        status: "canceled"
+      };
+      delete result.outcome;
+    }
 
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
       status: result.status,
@@ -1296,10 +1719,11 @@ async function executeNode(
       context_manifest_path: context.manifest_path,
       context_provenance_path: context.provenance_path,
       artifacts,
-      ...((result.metadata || result.verification)
+      ...((result.metadata || result.verification || artifactRepairMetadata)
         ? {
             metadata: {
               ...(result.metadata ?? {}),
+              ...(artifactRepairMetadata ? { artifact_repair: artifactRepairMetadata } : {}),
               ...(result.verification ? { verification: result.verification } : {})
             }
           }
@@ -1323,15 +1747,19 @@ async function executeNode(
     }
 
     const message = error instanceof Error ? error.message : String(error);
+    const repairMetadata =
+      error instanceof ArtifactMaterializationError
+        ? error.repair_metadata
+        : artifactRepairMetadata;
     const failureArtifacts: Record<string, string> | undefined = executionPaths
       ? {
-          result_json: executionPaths.result_path,
+          result_json: await writeFailureResultArtifact(attempt, message),
           ...(automaticArtifacts ?? {})
         }
       : undefined;
 
     if (executionPaths && node.kind === "agent" && !failureArtifacts?.agent_response) {
-      const responsePath = join(attempt.execution_dir, "agent-response.md");
+      const responsePath = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md");
       await writeFile(responsePath, `Agent failed before a final response was captured: ${message}\n`, "utf8");
 
       if (failureArtifacts) {
@@ -1359,7 +1787,8 @@ async function executeNode(
         : {}),
       metadata: {
         error: message,
-        context_status: context ? "resolved" : "failed"
+        context_status: context ? "resolved" : "failed",
+        ...(repairMetadata ? { artifact_repair: repairMetadata } : {})
       }
     });
 
@@ -1451,6 +1880,8 @@ async function startReadyNode(
       options,
       session,
       writer,
+      runOwner,
+      events,
       node,
       attempt,
       abortControl.signal,

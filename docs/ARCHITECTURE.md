@@ -48,6 +48,9 @@ The authored graph is the operator-facing source document. It is nested, readabl
       "input_rules": {
         "max_total_tokens": 128000,
         "max_tokens_per_item": 32000
+      },
+      "artifact_repair": {
+        "max_attempts": 1
       }
     }
   },
@@ -129,7 +132,9 @@ Required fields:
 Optional node-specific fields:
 
 - `model`
+- `reasoning_effort`
 - `sandbox`
+- `artifact_repair`
 
 `agent` nodes are the only nodes that may modify repository state through a harness.
 
@@ -356,8 +361,8 @@ Resolution rules:
 - For nodes outside any `repeat`, `iteration` is omitted and treated as `0`.
 - For nodes inside a `repeat`, cross-scope references must specify `iteration` when more than one iteration could satisfy the reference.
 - `attempt` is evaluated after `iteration` is resolved.
-- `agent_response` resolves to `agent-response.md` for agent nodes.
-- `result_json` resolves to `result.json` for every executable node.
+- `agent_response` resolves to `artifacts/agent-response.md` for agent nodes.
+- `result_json` resolves to `artifacts/result.json` for every executable node.
 - other artifact names resolve to declared artifacts on the selected execution.
 - declared artifact descriptions are carried from the producer into the consumer's context packet and manifest.
 - Executable nodes inside a `repeat.body` receive automatic runtime `repeat_history` context. It is omitted on iteration 1 and materialized on later iterations from completed prior iterations in the same repeat scope.
@@ -399,14 +404,23 @@ Rules:
 
 - Artifact names are unique per node.
 - User-declared artifact names must not collide with reserved automatic artifacts: `agent_response` and `result_json`.
-- `from = "workspace"` copies a file from the node workspace into the execution artifact directory when the node closes.
-- `from = "output_dir"` reads a file from the node execution output directory when the node closes.
-- Every declared artifact must exist when the node closes. Missing declared artifacts fail the node.
+- `from = "workspace"` copies a file from the node workspace into the execution `artifacts/` directory when the node closes.
+- `from = "output_dir"` reads a file from `AGENTFLOW_OUTPUT_DIR`, which is the execution `artifacts/` directory.
+- Every declared artifact must exist when the node closes. Missing declared artifacts fail the node after any configured agent artifact repair attempts are exhausted.
 - Both path forms must remain inside their source root.
 - Downstream artifact context must reference either a declared artifact or a reserved automatic artifact.
 - Agent harness prompts explain that the model is executing one node in a graph, list declared artifacts with descriptions, and state that the final response is captured as `agent_response`.
 - Harness subprocesses receive `AGENTFLOW_WORKSPACE`, `AGENTFLOW_OUTPUT_DIR`, `AGENTFLOW_CONTEXT_PACKET`, and `AGENTFLOW_CONTEXT_MANIFEST`, matching command nodes.
 - Source edits happen in the workspace, durable handoff artifacts go in `AGENTFLOW_OUTPUT_DIR`, and downstream nodes consume only named artifacts.
+
+Artifact repair rules:
+
+- Repair applies only to `agent` nodes whose primary execution returned `passed`.
+- Repair reuses the same workspace, context packet, context manifest, declared artifact contract, and `AGENTFLOW_OUTPUT_DIR`.
+- Repair is a new harness invocation, not a harness-specific session resume.
+- Each repair prompt, stdout, stderr, and result JSON is written under `artifact-repairs/<attempt>/` inside the original execution directory.
+- A successful repair must make every missing declared artifact exist at its exact declared path before the node can close as passed.
+- If repair is unavailable, canceled, or exhausts `max_attempts`, the node fails but reserved automatic artifacts such as `agent_response` and `result_json` remain available for inspection.
 
 Authoring guidance:
 
@@ -462,6 +476,7 @@ Profiles are named policy bundles. They avoid repeating execution policy on ever
 - `input_rules`
 - `deterministic_check_defaults`
 - `ai_check_defaults`
+- `artifact_repair`
 
 Profiles do not own graph structure. They do not set workspace backend in this release.
 
@@ -494,9 +509,27 @@ Applicability rules:
 - AI `check` always executes in `read-only` mode, regardless of profile sandbox defaults, and the release requires `codex-cli` for that strict evaluator contract
 - `deterministic_check_defaults` apply only to deterministic `check`
 - `ai_check_defaults` apply only to AI `check`
+- `artifact_repair` applies only to `agent` nodes
 - `timeout_sec` and `input_rules` may apply to any executable node
 
 Inline or profile fields that do not apply to a node kind are rejected at compile time.
+
+### `artifact_repair`
+
+Agent artifact repair is a bounded recovery path for successful agent runs that miss declared artifacts.
+
+Supported release fields:
+
+- `max_attempts`: integer from `0` through `3`
+
+Resolution follows normal node policy order:
+
+1. built-in agent default: `1`
+2. selected launch profile
+3. node-referenced profile
+4. agent node inline override
+
+Set `max_attempts` to `0` to disable repair for a profile or node.
 
 ### `input_rules`
 
@@ -926,8 +959,10 @@ Run artifacts live under the run root:
             stdout.log
             stderr.log
           result.json
-          agent-response.md
-          artifacts/   # present only when declared artifacts are copied here
+          artifacts/
+            result.json
+            agent-response.md
+            <declared-artifacts>
 ```
 
 `<runs-root>` resolves from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
@@ -947,10 +982,10 @@ Run artifacts live under the run root:
 - node directories are prefixed with stable compiled-order numbers and readable labels, then a hash suffix
 - execution directories are prefixed with append-only runtime ordinals, then a hash suffix; repeated nodes include both iteration and attempt ordinals, such as `i001-a002-exec-<hash>`
 - execution directories are immutable once closed except for final summary writes
-- execution-root files stay small: `execution.json` and `result.json` are always present once execution starts; `logs/stdout.log` and `logs/stderr.log` hold durable process output; `context/packet.json`, `context/manifest.md`, and `context/provenance.json` appear only when context resolution succeeds
-- `agent-response.md` appears for agent nodes and is published as the reserved `agent_response` artifact
-- `result.json` is published as the reserved `result_json` artifact for every executable node
-- `artifacts/` is optional and exists only when Agentflow materializes declared artifacts there
+- execution-root files stay small: `execution.json` and root `result.json` are runtime bookkeeping; `logs/stdout.log` and `logs/stderr.log` hold durable process output; `context/packet.json`, `context/manifest.md`, and `context/provenance.json` appear only when context resolution succeeds
+- `artifacts/agent-response.md` appears for agent nodes and is published as the reserved `agent_response` artifact
+- `artifacts/result.json` is published as the reserved `result_json` artifact for every executable node
+- `artifacts/` is always created for executable nodes and is the only graph-consumable handoff directory
 - `workspaces/` is durable only for an active `worktree` run. Once the run reaches a terminal state or workspace init rolls back, the manifest still records the historical path, but the worktree directory itself may already be gone
 - projection reads may repair stale `pending` or `running` artifacts into a terminal failed state when the recorded runtime owner fingerprint no longer matches a live local process or when a terminal run record or terminal event proves the durable state drifted
 - authored workspace context resolves from the live workspace when the node starts; missing files or empty globs are recorded in `context/manifest.md` and `context/packet.json` as omitted items
@@ -994,6 +1029,9 @@ Every event record contains:
 | `node.ready` | `deps_satisfied` |
 | `repeat.iteration.started` | `max_attempts` |
 | `node.started` | `kind`, `repo_alias`, `profile_name` |
+| `artifact_repair.started` | `repair_attempt`, `max_attempts`, `missing_artifacts` |
+| `artifact_repair.completed` | `repair_attempt`, `max_attempts`, `repaired_artifacts` |
+| `artifact_repair.failed` | `repair_attempt`, `max_attempts`, `missing_artifacts`, `summary` |
 | `check.evaluated` | `check_kind`, `passed`, optional `score`, `summary` |
 | `node.completed` | `outcome`, `duration_ms` |
 | `node.blocked` | `reason`, `upstream_compiled_id` |

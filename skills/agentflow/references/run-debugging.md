@@ -30,9 +30,11 @@ Use node and execution metadata to inspect:
 - `logs/stdout.log`
 - `logs/stderr.log`
 - `result.json`
-- `agent-response.md` for agent nodes
+- `artifacts/result.json`
+- `artifacts/agent-response.md` for agent nodes
+- `artifact-repairs/<attempt>/prompt.md`, `stdout.log`, `stderr.log`, and `result.json` when agent artifact repair ran
 
-`artifacts/` is optional and appears only when declared artifacts are copied there. For terminal runs, also inspect `workspace-changes/<repo>/status.txt`, `workspace-changes/<repo>/diff.patch`, and `workspace-changes/<repo>/changed-files.json` when workspace delivery matters.
+`artifacts/` is always the graph-consumable handoff folder. It contains reserved artifacts plus declared artifacts copied from `AGENTFLOW_OUTPUT_DIR` or the workspace. For terminal runs, also inspect `workspace-changes/<repo>/status.txt`, `workspace-changes/<repo>/diff.patch`, and `workspace-changes/<repo>/changed-files.json` when workspace delivery matters.
 
 ## Failure buckets
 

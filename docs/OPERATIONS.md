@@ -7,7 +7,7 @@ This is the canonical local operator runbook for Agentflow. Keep it aligned with
 The supported surface is intentionally narrow:
 
 - local graph authoring in `1` format
-- CLI `graph-help`, `validate`, `compile`, `run`, and `resume`
+- CLI `graph-help`, `validate`, `compile`, `run`, `resume`, and `apply`
 - workspace backends `inplace` and `worktree`
 - local Codex CLI and Cursor CLI harness adapters
 - durable run artifacts under one canonical runs root
@@ -80,8 +80,9 @@ What the operator should expect:
 - The `workspaces/` directory is an implementation detail of the run and is not preserved as a long-lived checkout contract after worktree cleanup.
 - Authored `workspace_file` and `workspace_glob` context resolves live when each node starts. Missing files or empty globs become explicit omitted context instead of run-preflight failure.
 - Node directories under `nodes/` use compiled-order prefixes plus readable labels, for example `001-plan-<hash>`. Execution directories use append-only runtime ordinals, for example `001-exec-<hash>` or `i001-a001-exec-<hash>` inside repeat loops.
-- Execution directories keep bookkeeping at the root and segment bulky material: `context/` contains the context packet, manifest, provenance, and materialized files; `logs/` contains stdout and stderr; `artifacts/` appears only when declared artifacts are materialized there.
-- Agent harness prompts orient the model as one node in a graph, list declared artifacts, and capture the model's final response as `agent-response.md` for narrative handoff.
+- Execution directories keep bookkeeping at the root and segment bulky material: `context/` contains the context packet, manifest, provenance, and materialized files; `logs/` contains stdout and stderr; `artifacts/` contains every graph-consumable artifact, including reserved artifacts.
+- Agent harness prompts orient the model as one node in a graph, list declared artifacts, and capture the model's final response as `artifacts/agent-response.md` for narrative handoff.
+- Agent artifact repair is bounded by `artifact_repair.max_attempts`. It defaults to one repair attempt for agent nodes, runs in the same workspace and output artifact directory, and records repair prompts and logs under `artifact-repairs/<attempt>/` inside the original execution directory.
 - `run` and `resume` only resolve repo aliases that the compiled graph actually references; unused declared repos stay inert.
 - `workspace_glob` context uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`.
 - Terminal runs capture per-repo workspace change artifacts before cleanup when possible: `workspace-changes/<repo>/status.txt`, `workspace-changes/<repo>/diff.patch`, and `workspace-changes/<repo>/changed-files.json`.
@@ -139,6 +140,7 @@ Each supported command returns explicit next-step hints. `compile` and non-inter
 - `compile`: returns the compiled graph contract for inspection plus the same path and next-step metadata.
 - `run`: executes the compiled graph, writes durable artifacts, and returns `runs_root`, `run_root`, artifact paths, rerun or resume commands, and the cancellation note.
 - `resume`: recompiles a failed or canceled run root and resumes from durable state when the compiled contract still matches preserved work.
+- `apply`: applies captured `workspace-changes/<repo>/diff.patch` from a run back to the source repo recorded in `execution_manifest.json`, or to `--target <path>` when provided. It refuses dirty targets unless `--allow-dirty` is passed and commits only when `--commit-message <message>` is provided.
 
 For help:
 
@@ -257,6 +259,21 @@ Checks:
 - compare the emitted `runs_root` with your shell environment
 - check whether `AGENTFLOW_RUNS_ROOT` is set
 - remember that the default fallback is `<launch-cwd>/.agentflow/runs`
+
+### Agent declared artifact is missing
+
+Symptoms:
+
+- an agent node reports success but the node later fails while materializing a declared artifact
+- `events.jsonl` contains `artifact_repair.started` followed by `artifact_repair.failed`
+- the execution metadata contains `artifact_repair.status = "failed"`
+
+Checks:
+
+- inspect the original execution's `artifacts/agent-response.md`, `logs/stdout.log`, `logs/stderr.log`, and `artifact-repairs/<attempt>/prompt.md`
+- confirm the graph declared the artifact path under the right source: `output_dir` means `AGENTFLOW_OUTPUT_DIR`, while `workspace` means the repo workspace
+- set profile or node `artifact_repair.max_attempts` to `0` when repair would mask a graph-authoring bug, or raise it up to `3` when the agent can usually recover the handoff from existing workspace changes
+- if repair says the harness is unavailable, install or configure the resolved harness binary before rerunning; repair uses the same harness as the agent node
 
 ## Replacement Sign-Off
 

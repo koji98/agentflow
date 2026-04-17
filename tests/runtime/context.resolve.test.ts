@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
+import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
 import { closeNodeAttempt, createAttemptRegistry, openNodeAttempt } from "../../src/runtime/attempts.js";
 import { resolveExecutionContext } from "../../src/runtime/context/resolve.js";
 
@@ -33,13 +34,15 @@ describe("context resolution", () => {
     await mkdir(repoDir, { recursive: true });
     await mkdir(join(repoDir, ".cursor", "rules"), { recursive: true });
     await mkdir(upstreamDir, { recursive: true });
+    await mkdir(resolveExecutionArtifactsDirectory(upstreamDir), { recursive: true });
     await writeFile(join(repoDir, "src.txt"), "source file\n");
     await writeFile(join(repoDir, "AGENTS.md"), "Follow repo instructions.\n");
     await writeFile(join(repoDir, ".cursor", "rules", "review.mdc"), "Review rule.\n");
     await mkdir(join(upstreamDir, "context"), { recursive: true });
     await writeFile(join(upstreamDir, "context", "manifest.md"), "# Manifest\n");
     await writeFile(join(upstreamDir, "result.json"), JSON.stringify({ passed: true }));
-    await writeFile(join(upstreamDir, "artifact.json"), JSON.stringify({ passed: true }));
+    await writeFile(join(resolveExecutionArtifactsDirectory(upstreamDir), "result.json"), JSON.stringify({ passed: true }));
+    await writeFile(join(resolveExecutionArtifactsDirectory(upstreamDir), "artifact.json"), JSON.stringify({ passed: true }));
 
     const graph = compileGraph({
       version: "1",
@@ -108,8 +111,8 @@ describe("context resolution", () => {
       result_path: join(upstreamDir, "result.json"),
       context_manifest_path: join(upstreamDir, "context", "manifest.md"),
       artifacts: {
-        result_json: join(upstreamDir, "result.json"),
-        verification: join(upstreamDir, "artifact.json")
+        result_json: join(resolveExecutionArtifactsDirectory(upstreamDir), "result.json"),
+        verification: join(resolveExecutionArtifactsDirectory(upstreamDir), "artifact.json")
       }
     });
 
@@ -288,10 +291,24 @@ describe("context resolution", () => {
     await mkdir(implementDir, { recursive: true });
     await mkdir(verifyDir, { recursive: true });
     await mkdir(currentDir, { recursive: true });
-    await writeFile(join(implementDir, "agent-response.md"), "Tried parser normalization.\nNot tried tokenizer changes.\n");
+    await mkdir(resolveExecutionArtifactsDirectory(implementDir), { recursive: true });
+    await mkdir(resolveExecutionArtifactsDirectory(verifyDir), { recursive: true });
+    await writeFile(
+      join(resolveExecutionArtifactsDirectory(implementDir), "agent-response.md"),
+      "Tried parser normalization.\nNot tried tokenizer changes.\n"
+    );
     await writeFile(join(implementDir, "result.json"), JSON.stringify({ exit_code: 0 }));
-    await writeFile(join(implementDir, "fix-log.md"), "Changed parser branch.\n");
+    await writeFile(
+      join(resolveExecutionArtifactsDirectory(implementDir), "result.json"),
+      JSON.stringify({ exit_code: 0 })
+    );
+    await writeFile(join(resolveExecutionArtifactsDirectory(implementDir), "fix-log.md"), "Changed parser branch.\n");
     await writeFile(join(verifyDir, "result.json"), JSON.stringify({
+      passed: false,
+      summary: "parser.test.ts still fails",
+      exit_code: 1
+    }));
+    await writeFile(join(resolveExecutionArtifactsDirectory(verifyDir), "result.json"), JSON.stringify({
       passed: false,
       summary: "parser.test.ts still fails",
       exit_code: 1
@@ -308,9 +325,9 @@ describe("context resolution", () => {
       outcome: "passed",
       result_path: join(implementDir, "result.json"),
       artifacts: {
-        agent_response: join(implementDir, "agent-response.md"),
-        result_json: join(implementDir, "result.json"),
-        fix_log: join(implementDir, "fix-log.md")
+        agent_response: join(resolveExecutionArtifactsDirectory(implementDir), "agent-response.md"),
+        result_json: join(resolveExecutionArtifactsDirectory(implementDir), "result.json"),
+        fix_log: join(resolveExecutionArtifactsDirectory(implementDir), "fix-log.md")
       }
     });
     const priorVerify = openNodeAttempt(attempts, verifyNode, verifyDir, {
@@ -324,7 +341,7 @@ describe("context resolution", () => {
       stdout_log_path: join(verifyDir, "stdout.log"),
       stderr_log_path: join(verifyDir, "stderr.log"),
       artifacts: {
-        result_json: join(verifyDir, "result.json")
+        result_json: join(resolveExecutionArtifactsDirectory(verifyDir), "result.json")
       }
     });
     const currentAttempt = openNodeAttempt(attempts, implementNode, currentDir, {

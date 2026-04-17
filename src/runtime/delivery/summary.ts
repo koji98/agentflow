@@ -39,6 +39,8 @@ function readEventSummary(event: RuntimeEventEnvelope): string | undefined {
         : payload.passed === false
           ? "Soft verification failed."
           : undefined;
+    case "artifact_repair.failed":
+      return typeof payload.summary === "string" ? payload.summary : "Artifact repair failed.";
     case "run.canceled":
       return typeof payload.reason === "string" ? `Run canceled: ${payload.reason}` : "Run canceled.";
     case "run.completed":

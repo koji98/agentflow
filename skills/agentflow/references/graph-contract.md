@@ -47,6 +47,7 @@ Common fields:
 - `input_rules`
 - `deterministic_check_defaults`
 - `ai_check_defaults`
+- `artifact_repair`
 
 `env_files` applies to `exec` and deterministic `check` nodes. It does not apply to agent harnesses or AI checks.
 
@@ -54,6 +55,8 @@ Common fields:
 
 - `max_total_tokens`
 - `max_tokens_per_item`
+
+`artifact_repair.max_attempts` applies only to agent nodes. It defaults to `1`, accepts integers from `0` through `3`, and `0` disables repair.
 
 ## Node Kinds
 
@@ -145,12 +148,12 @@ Artifact sources:
 
 Reserved automatic artifact names:
 
-- `agent_response`: every agent final response, persisted as `agent-response.md`
-- `result_json`: every executable node's normalized `result.json`
+- `agent_response`: every agent final response, persisted as `artifacts/agent-response.md`
+- `result_json`: every executable node's normalized result, persisted as `artifacts/result.json`
 
 Do not declare artifacts with reserved names.
 
-Every declared artifact must exist when the node closes. Missing declared artifacts fail the node. Producer artifact declarations do not have `required` or `optional`; availability belongs on consumer `context.from = "artifact"` items with `if_available: true` when the consumer can still do useful work without that material.
+Every declared artifact must exist when the node closes. Missing declared artifacts fail the node after any configured agent artifact repair attempts are exhausted. Producer artifact declarations do not have `required` or `optional`; availability belongs on consumer `context.from = "artifact"` items with `if_available: true` when the consumer can still do useful work without that material.
 
 ## Runtime Environment
 
@@ -163,7 +166,11 @@ Every declared artifact must exist when the node closes. Missing declared artifa
 
 Agents receive the same environment variables and the same contract through their harness prompt. Source edits happen in `AGENTFLOW_WORKSPACE`. Durable handoff files go in `AGENTFLOW_OUTPUT_DIR` and must be declared in `artifacts`.
 
+`AGENTFLOW_OUTPUT_DIR` points at the current execution's `artifacts/` directory. Runtime bookkeeping such as root `execution.json`, root `result.json`, `context/`, and `logs/` is inspectable but is not the graph handoff surface.
+
 Agent harness prompts tell the model it is executing one node in a graph, list declared artifacts with their descriptions, and explain that the final response is captured as reserved `agent_response`. Treat `agent_response` as a concise narrative handoff, not a replacement for a declared structured artifact.
+
+If an agent reports success but misses declared artifacts, Agentflow can run artifact repair: a new invocation of the same harness in the same workspace, same context, and same `AGENTFLOW_OUTPUT_DIR`, with a focused prompt to create or move the missing files. Repair prompts and logs live under `artifact-repairs/<attempt>/` in the original execution directory.
 
 ## Primitive Fields
 
@@ -180,6 +187,7 @@ Optional:
 - `model`
 - `reasoning_effort`
 - `sandbox`
+- `artifact_repair`
 
 Use agents for model-driven work. Prefer declared artifacts for structured handoffs; use reserved `agent_response` for concise narrative handoffs that include outcome, work completed, artifacts produced, validation, and handoff notes.
 

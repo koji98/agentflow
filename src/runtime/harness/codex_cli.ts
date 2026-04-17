@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
@@ -86,6 +86,7 @@ export function createCodexCliHarness(
       );
     },
     async run(invocation: AgentInvocation): Promise<HarnessResult> {
+      await mkdir(invocation.outputDir, { recursive: true });
       const { args, last_message_path } = buildCodexArgs(invocation);
       const prompt = renderHarnessPrompt(invocation);
 

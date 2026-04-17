@@ -42,6 +42,10 @@ export interface AiCheckDefaults {
   rubric?: string;
 }
 
+export interface ArtifactRepairPolicy {
+  max_attempts?: number;
+}
+
 export interface GraphProfile {
   harness?: HarnessName;
   model?: string;
@@ -53,6 +57,7 @@ export interface GraphProfile {
   input_rules?: InputRules;
   deterministic_check_defaults?: DeterministicCheckDefaults;
   ai_check_defaults?: AiCheckDefaults;
+  artifact_repair?: ArtifactRepairPolicy;
 }
 
 export interface GraphDefaults {
@@ -157,6 +162,7 @@ export interface AgentNode extends BaseExecutableNode {
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
+  artifact_repair?: ArtifactRepairPolicy;
 }
 
 export interface ExecNode extends BaseExecutableNode {

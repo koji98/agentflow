@@ -489,6 +489,114 @@ describe("graph normalization", () => {
     expect(graph.steps[0].reasoning_effort).toBe("xhigh");
   });
 
+  it("normalizes artifact repair policy on profiles and agent nodes", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "artifact-repair-policy",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          artifact_repair: {
+            max_attempts: 2
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "write_handoff",
+            prompt: "Write the handoff.",
+            artifact_repair: {
+              max_attempts: 0
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.profiles?.default.artifact_repair).toEqual({
+      max_attempts: 2
+    });
+
+    const graph = normalized.document?.graph;
+    if (!graph || graph.type !== "sequence" || graph.steps[0]?.type !== "agent") {
+      throw new Error("Expected normalized graph to contain an agent step.");
+    }
+
+    expect(graph.steps[0].artifact_repair).toEqual({
+      max_attempts: 0
+    });
+  });
+
+  it("rejects invalid artifact repair policy syntax", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "bad-artifact-repair-policy",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          artifact_repair: {
+            max_attempts: 4
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "write_handoff",
+            prompt: "Write the handoff.",
+            artifact_repair: {
+              max_attempts: -1
+            }
+          },
+          {
+            type: "exec",
+            id: "run_tests",
+            command: "npm",
+            artifact_repair: {
+              max_attempts: 1
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.profiles.default.artifact_repair.max_attempts",
+          message: "Expected an integer between 0 and 3."
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifact_repair.max_attempts",
+          message: "Expected an integer between 0 and 3."
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].artifact_repair",
+          message: 'Unknown field "artifact_repair" is not part of the graph contract.'
+        })
+      ])
+    );
+  });
+
   it("normalizes prerequisites and soft verification settings", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
