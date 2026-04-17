@@ -1,11 +1,13 @@
 import type {
-  ContextReference,
+  ArtifactDefinition,
+  ArtifactReference,
+  ContextItem,
   DeterministicPassIf,
-  InputItem,
-  OutputDefinition
+  GraphPrerequisites
 } from "./authored.js";
 import type {
   ContainerNodeKind,
+  FailureBehavior,
   GraphDiagnostic,
   GraphOutcome,
   LoweredManagedKind
@@ -23,9 +25,8 @@ export interface CompiledExecutableNodeBase {
   scope_stack: string[];
   repeat_scope_id?: string;
   effective_policy: EffectiveNodePolicy;
-  inputs: InputItem[];
-  context_from: ContextReference[];
-  declared_outputs: OutputDefinition[];
+  context: ContextItem[];
+  declared_artifacts: Record<string, ArtifactDefinition>;
   lowered_from?: LoweredManagedKind;
 }
 
@@ -39,7 +40,9 @@ export interface CompiledExecNode extends CompiledExecutableNodeBase {
   command: string;
   args: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
+  on_failure: FailureBehavior;
 }
 
 export interface CompiledCheckNode extends CompiledExecutableNodeBase {
@@ -48,16 +51,18 @@ export interface CompiledCheckNode extends CompiledExecutableNodeBase {
   command?: string;
   args?: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
   pass_if?: DeterministicPassIf;
   prompt?: string;
   rubric?: string;
+  on_failure: FailureBehavior;
 }
 
 export interface CompiledCheckpointNode extends CompiledExecutableNodeBase {
   kind: "checkpoint";
   prompt: string;
-  review_from: ContextReference;
+  review_from: ArtifactReference;
 }
 
 export type CompiledExecutableNode =
@@ -113,6 +118,7 @@ export interface CompiledGraph {
   edges: CompiledEdge[];
   scopes: CompiledScope[];
   authored_to_compiled: Record<string, string[]>;
+  prerequisites: GraphPrerequisites;
 }
 
 export interface CompileGraphResult {

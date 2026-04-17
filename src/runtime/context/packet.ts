@@ -1,4 +1,4 @@
-import type { ContextReference, InputItem } from "../../graph/authored.js";
+import type { ContextItem } from "../../graph/authored.js";
 
 export interface ContextPacketLiveWorkspaceBinding {
   kind: "live_workspace_input";
@@ -8,17 +8,18 @@ export interface ContextPacketLiveWorkspaceBinding {
 
 export interface ContextPacketMaterializedItem {
   key: string;
-  kind: "input" | "context";
-  source: InputItem | ContextReference;
+  source: ContextItem;
+  description?: string;
   materialized_path: string;
-  bytes: number;
+  tokens: number;
   truncated: boolean;
   binding?: ContextPacketLiveWorkspaceBinding;
 }
 
 export interface ContextPacketOmittedItem {
   key: string;
-  source: InputItem | ContextReference;
+  source: ContextItem;
+  description?: string;
   reason: string;
   optional: boolean;
 }
@@ -29,12 +30,13 @@ export interface ContextPacket {
   authored_id: string;
   repo_alias: string;
   workspace_path: string;
+  tokenizer: string;
   materials: ContextPacketMaterializedItem[];
   omitted: ContextPacketOmittedItem[];
   totals: {
     material_count: number;
     file_count: number;
-    total_bytes: number;
+    total_tokens: number;
   };
 }
 
@@ -47,8 +49,8 @@ export interface ContextResolvedDigestEntry extends ContextDigestEntry {
   resolved_path: string;
 }
 
-export interface ContextFileInputProvenance {
-  kind: "file";
+export interface WorkspaceFileContextProvenance {
+  from: "workspace_file";
   key: string;
   repo_alias: string;
   path: string;
@@ -56,8 +58,8 @@ export interface ContextFileInputProvenance {
   resolved_path: string;
 }
 
-export interface ContextGlobInputProvenance {
-  kind: "glob";
+export interface WorkspaceGlobContextProvenance {
+  from: "workspace_glob";
   key: string;
   repo_alias: string;
   pattern: string;
@@ -66,8 +68,8 @@ export interface ContextGlobInputProvenance {
 }
 
 export type ContextInputProvenance =
-  | ContextFileInputProvenance
-  | ContextGlobInputProvenance;
+  | WorkspaceFileContextProvenance
+  | WorkspaceGlobContextProvenance;
 
 export interface ContextHarnessInstructionProvenance {
   repo_alias: string;
@@ -79,6 +81,6 @@ export interface ContextProvenance {
   compiled_id: string;
   authored_id: string;
   repo_alias: string;
-  inputs: ContextInputProvenance[];
+  workspace_context: ContextInputProvenance[];
   harness_instructions?: ContextHarnessInstructionProvenance;
 }

@@ -10,16 +10,17 @@ describe("validate:smoke contract", () => {
       "docs/DEFERRED.md",
       "docs/ARCHITECTURE.md",
       "docs/OPERATIONS.md",
-      "docs/MANAGED_WORKFLOWS.md",
-      "docs/DEEP_RESEARCH_WORKFLOW.md",
-      "docs/SPEC_DESIGN_WORKFLOW.md",
-      "docs/EXECUTE_SPEC_WORKFLOW.md",
-      "docs/REVIEW_CHANGE_WORKFLOW.md"
+      "docs/MANAGED_PATTERNS.md",
+      "docs/PATTERN_DEEP_RESEARCH.md",
+      "docs/PATTERN_SPEC_DESIGN.md",
+      "docs/PATTERN_GENERATE_EVALUATE_FIX.md",
+      "docs/PATTERN_REVIEW_CHANGE.md"
     ]);
     expect(scriptModule.commandChecks).toEqual([
       { name: "typecheck", script: "typecheck" },
       { name: "tests", script: "test" },
-      { name: "build", script: "build" }
+      { name: "build", script: "build" },
+      { name: "skill pack", script: "validate:skills" }
     ]);
     expect(scriptModule.builtCliSmokeContract).toEqual({
       builtCliRelativePath: "dist/cli/index.js",

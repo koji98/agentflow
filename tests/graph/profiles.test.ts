@@ -109,14 +109,14 @@ describe("graph profile resolution", () => {
           harness: "codex-cli",
           timeout_sec: 900,
           input_rules: {
-            max_total_bytes: 262144
+            max_total_tokens: 64000
           }
         },
         review: {
           timeout_sec: 120,
           input_rules: {
-            max_total_bytes: 65536,
-            max_bytes_per_item: 2048
+            max_total_tokens: 16000,
+            max_tokens_per_item: 500
           }
         }
       },
@@ -141,8 +141,8 @@ describe("graph profile resolution", () => {
       workspace_backend: "inplace",
       timeout_sec: 15,
       input_rules: {
-        max_total_bytes: 65536,
-        max_bytes_per_item: 2048
+        max_total_tokens: 16000,
+        max_tokens_per_item: 500
       }
     });
     expect(resolution.policy.harness).toBeUndefined();
@@ -243,5 +243,46 @@ describe("graph profile resolution", () => {
 
     expect(resolution.diagnostics).toEqual([]);
     expect(resolution.policy.reasoning_effort).toBe("xhigh");
+  });
+
+  it("resolves codex skip_git_repo_check only for codex-backed nodes", () => {
+    const document = createDocument(
+      {
+        default: {
+          harness: "codex-cli",
+          skip_git_repo_check: true
+        },
+        cursor: {
+          harness: "cursor-cli"
+        }
+      },
+      {
+        launch_profile: "default"
+      }
+    );
+
+    const launch = resolveLaunchConfig(document);
+    const codexResolution = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "implement",
+      prompt: "Implement the change."
+    } satisfies AgentNode);
+    const cursorResolution = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "cursor_implement",
+      profile: "cursor",
+      prompt: "Implement the change."
+    } satisfies AgentNode);
+
+    expect(codexResolution.diagnostics).toEqual([]);
+    expect(codexResolution.policy).toEqual(
+      expect.objectContaining({
+        harness: "codex-cli",
+        skip_git_repo_check: true
+      })
+    );
+    expect(cursorResolution.diagnostics).toEqual([]);
+    expect(cursorResolution.policy.harness).toBe("cursor-cli");
+    expect(cursorResolution.policy.skip_git_repo_check).toBeUndefined();
   });
 });

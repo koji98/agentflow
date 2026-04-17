@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
@@ -21,7 +25,9 @@ function createHarness(
 
 describe("runtime checks", () => {
   it("fails AI checks closed on malformed evaluator output", async () => {
-    const harness = createHarness("codex-cli", async () => {
+    let capturedInvocation: Parameters<HarnessAdapter["run"]>[0] | undefined;
+    const harness = createHarness("codex-cli", async (invocation) => {
+      capturedInvocation = invocation;
       return {
         status: "passed",
         exitCode: 0,
@@ -38,12 +44,24 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
     });
 
+    expect(capturedInvocation).toEqual(
+      expect.objectContaining({
+        promptKind: "ai_check",
+        contextPacketPath: "/tmp/context/packet.json",
+        contextManifestPath: "/tmp/context/manifest.md",
+        outputDir: "/tmp",
+        artifacts: {}
+      })
+    );
+    expect(capturedInvocation?.prompt).toContain("Evaluate the patch.");
+    expect(capturedInvocation?.prompt).toContain("Return JSON only with this shape:");
     expect(result.evaluation).toEqual(
       expect.objectContaining({
         passed: false,
@@ -70,7 +88,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -104,7 +123,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -143,7 +163,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -179,7 +200,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -211,7 +233,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       prompt: "Evaluate the patch.",
       rubric: undefined,
-      context_packet_path: "/tmp/context_packet.json",
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -319,5 +342,72 @@ describe("runtime checks", () => {
 
     expect(result.exit_code).toBe(0);
     expect(result.stdout).toBe("visible");
+  });
+
+  it("loads declared env files before explicit local process env overrides", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-env-files-"));
+    const envFile = join(tempRoot, ".env.development");
+
+    try {
+      await writeFile(
+        envFile,
+        [
+          "# comments are ignored",
+          "AGENTFLOW_ENV_FILE_VALUE=from-file",
+          "AGENTFLOW_ENV_FILE_OVERRIDE=from-file",
+          "export AGENTFLOW_EXPORTED_ENV_FILE_VALUE='from exported file'"
+        ].join("\n")
+      );
+
+      const result = await runLocalProcess({
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            "process.stdout.write(JSON.stringify({",
+            "value: process.env.AGENTFLOW_ENV_FILE_VALUE,",
+            "override: process.env.AGENTFLOW_ENV_FILE_OVERRIDE,",
+            "exported: process.env.AGENTFLOW_EXPORTED_ENV_FILE_VALUE",
+            "}));"
+          ].join("")
+        ],
+        cwd: tempRoot,
+        env_files: [envFile],
+        env: {
+          AGENTFLOW_ENV_FILE_OVERRIDE: "from-inline-env"
+        },
+        timeout_sec: 30,
+        signal: undefined
+      });
+
+      expect(result.exit_code).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        value: "from-file",
+        override: "from-inline-env",
+        exported: "from exported file"
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("treats missing declared env files as launch errors", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-missing-env-file-"));
+
+    try {
+      await expect(
+        runLocalProcess({
+          command: process.execPath,
+          args: ["-e", "process.exit(0)"],
+          cwd: tempRoot,
+          env_files: ["missing.env"],
+          env: undefined,
+          timeout_sec: 30,
+          signal: undefined
+        })
+      ).rejects.toThrow("missing.env");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -28,7 +28,7 @@ flowchart TB
     review -- pass --> artifacts["artifacts\noutputs, logs, summary"]
 ```
 
-Managed workflows such as `deep_research`, `spec_design`, `execute_spec`, and `review_change` are authored shortcuts that lower into the same kinds of patterns rather than introducing a separate runtime model.
+Managed patterns such as `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change` are authored shortcuts that lower into generated primitive subgraphs rather than introducing a separate runtime model.
 
 The point is not just that Agentflow has several node kinds. It is that those node kinds compose into deliberate coding graphs: fan out when evidence gathering is independent, fan in when a plan needs synthesis, and use repair loops only where implementation and validation genuinely need iteration.
 
@@ -37,8 +37,8 @@ The point is not just that Agentflow has several node kinds. It is that those no
 - Author the orchestration as data, not as hidden control flow inside a single agent prompt.
 - Keep execution local-first with explicit repos, workspaces, harnesses, and checks.
 - Compile author-friendly control flow into a runtime contract you can inspect before launch.
-- Preserve a durable run trail with summaries, logs, outputs, events, and projected state.
-- Reuse structured managed workflows when you want higher-level scaffolds without inventing new runtime node kinds.
+- Preserve a durable run trail with summaries, logs, artifacts, events, and projected state.
+- Reuse structured managed patterns when you want higher-level scaffolds without inventing new runtime node kinds.
 
 ## Node Model
 
@@ -46,7 +46,7 @@ The point is not just that Agentflow has several node kinds. It is that those no
 | --- | --- | --- |
 | Primitive executable nodes | `agent`, `exec`, `check`, `checkpoint` | Executed directly by the runtime |
 | Authoring containers | `sequence`, `parallel`, `repeat` | Authoring-only control flow, compiled into primitive execution edges and scopes |
-| Managed workflows | `deep_research`, `spec_design`, `execute_spec`, `review_change` | Authored as structured intent, lowered into generated primitive subgraphs |
+| Managed patterns | `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, `pattern_review_change` | Authored as structured intent, lowered into generated primitive subgraphs |
 
 ## Release Boundary
 
@@ -111,25 +111,24 @@ See also: [`docs/examples/graphs/README.md`](docs/examples/graphs/README.md)
 - [`docs/examples/graphs/fake-plan.json`](docs/examples/graphs/fake-plan.json)
   Small read-only sample with primitive `agent` and deterministic `check` nodes.
 - [`docs/examples/graphs/feature-showcase.json`](docs/examples/graphs/feature-showcase.json)
-  Broader sample that demonstrates profiles, `sequence`, `parallel`, `repeat`, primitive `agent`, `exec`, deterministic `check`, AI `check`, inputs, context flow, and outputs.
-- [`docs/examples/graphs/deep-research-showcase.json`](docs/examples/graphs/deep-research-showcase.json)
-  Managed workflow sample showing `deep_research` plus a downstream handoff node that consumes the synthesized result.
-- [`docs/examples/graphs/spec-design-showcase.json`](docs/examples/graphs/spec-design-showcase.json)
-  Managed workflow sample showing `spec_design` plus a downstream handoff node that consumes the published design spec.
-- [`docs/examples/graphs/execute-spec-showcase.json`](docs/examples/graphs/execute-spec-showcase.json)
-  Managed workflow sample showing the `spec_design -> execute_spec` path plus a downstream handoff node that consumes the published implementation handoff.
-- [`docs/examples/graphs/review-change-showcase.json`](docs/examples/graphs/review-change-showcase.json)
-  Managed workflow sample showing the `execute_spec -> review_change` path plus a downstream handoff node that consumes the final published review.
+  Broader sample that demonstrates profiles, `sequence`, `parallel`, `repeat`, primitive `agent`, `exec`, deterministic `check`, AI `check`, context flow, declared artifacts, and a repair loop that uses `latest_failed` and `latest_passed`.
+- [`docs/examples/graphs/pattern-deep-research-showcase.json`](docs/examples/graphs/pattern-deep-research-showcase.json)
+  Managed pattern sample showing `pattern_deep_research` plus a downstream handoff node that consumes the published research package.
+- [`docs/examples/graphs/pattern-spec-design-showcase.json`](docs/examples/graphs/pattern-spec-design-showcase.json)
+  Managed pattern sample showing `pattern_spec_design` plus a downstream handoff node that consumes the published design package.
+- [`docs/examples/graphs/pattern-generate-evaluate-fix-showcase.json`](docs/examples/graphs/pattern-generate-evaluate-fix-showcase.json)
+  Managed pattern sample showing the `pattern_spec_design -> pattern_generate_evaluate_fix` path plus a downstream handoff node that consumes the published change package.
+- [`docs/examples/graphs/pattern-review-change-showcase.json`](docs/examples/graphs/pattern-review-change-showcase.json)
+  Managed pattern sample showing the `pattern_generate_evaluate_fix -> pattern_review_change` path plus a downstream handoff node that consumes the final published review package.
 
 ## Packaged Skills
 
-This repo also ships installable agent skills under [`skills/`](skills/README.md) in a `skills.sh` compatible layout.
+This repo also ships one installable agent skill under [`skills/`](skills/README.md) in a `skills.sh` compatible layout.
 
-Included skills:
+Included skill:
 
-- [`agentflow-graph-authoring`](skills/agentflow-graph-authoring/SKILL.md)
-- [`agentflow-managed-workflows`](skills/agentflow-managed-workflows/SKILL.md)
-- [`agentflow-run-debugging`](skills/agentflow-run-debugging/SKILL.md)
+- [`agentflow`](skills/agentflow/SKILL.md)
+  A compact router skill with packaged references for graph authoring, managed workflows, local eval suites, run debugging, graph contracts, CLI validation, failure semantics, and examples.
 
 Once the repo is published, supporting agents can install the package with:
 
@@ -176,6 +175,8 @@ Profiles typically define:
 - `reasoning_effort`
   Supported values: `none`, `low`, `medium`, `high`, `xhigh`
 - `sandbox`
+- `skip_git_repo_check`
+- `env_files`
 - `timeout_sec`
 - `input_rules`
 
@@ -187,49 +188,54 @@ Three authoring categories matter:
 
 - Primitive executable nodes: `agent`, `exec`, `check`, `checkpoint`
 - Authoring containers: `sequence`, `parallel`, `repeat`
-- Managed workflows: `deep_research`, `spec_design`, `execute_spec`, `review_change`
+- Managed patterns: `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, `pattern_review_change`
 
-Only primitive executable nodes run directly. Containers compile into control-flow edges and scopes, and managed workflows compile into generated primitive subgraphs.
+Only primitive executable nodes run directly. Containers compile into control-flow edges and scopes, and managed patterns compile into generated primitive subgraphs.
 
-`deep_research`, `spec_design`, `execute_spec`, and `review_change` are structured managed workflows that compile into generated primitive subgraphs. Start with [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md). The workflow-specific contracts live in [`docs/DEEP_RESEARCH_WORKFLOW.md`](docs/DEEP_RESEARCH_WORKFLOW.md), [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md), [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md), and [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md).
+`pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change` are structured managed patterns that compile into generated primitive subgraphs. Start with [`docs/MANAGED_PATTERNS.md`](docs/MANAGED_PATTERNS.md). The pattern-specific contracts live in [`docs/PATTERN_DEEP_RESEARCH.md`](docs/PATTERN_DEEP_RESEARCH.md), [`docs/PATTERN_SPEC_DESIGN.md`](docs/PATTERN_SPEC_DESIGN.md), [`docs/PATTERN_GENERATE_EVALUATE_FIX.md`](docs/PATTERN_GENERATE_EVALUATE_FIX.md), and [`docs/PATTERN_REVIEW_CHANGE.md`](docs/PATTERN_REVIEW_CHANGE.md).
 
-All managed workflows share the same top-level shape:
+Managed patterns share a common base:
 
 - `brief`
 - `context_policy`
-- `approval_policy`
 - `strategy`
-- `delivery`
 - optional `runtime`
 
-They are autonomous by default. A managed workflow only pauses for operator input when its `approval_policy` explicitly enables a checkpoint.
+Pattern-specific fields vary:
 
-Managed workflow summary:
+- `pattern_deep_research`: optional `approval_policy`, `delivery`
+- `pattern_spec_design`: optional `approval_policy`, `delivery`
+- `pattern_generate_evaluate_fix`: `task_source`, `evaluation`
+- `pattern_review_change`: `review_source`, `delivery`
 
-- `deep_research`
-  Plans and runs research, consolidates evidence, and publishes a sourced final report.
-- `spec_design`
-  Turns a repo-grounded problem statement into an implementation-ready design package.
-- `execute_spec`
-  Executes a structured spec source through planning, single-writer implementation, validation, and bounded repair.
-- `review_change`
-  Reviews a structured change source with a reviewer panel and publishes calibrated findings.
+They are autonomous by default. Only `pattern_deep_research` and `pattern_spec_design` expose `approval_policy`, and a checkpoint appears only when that field explicitly enables one.
 
-For workflow fields, authored examples, and compiled phases:
+Managed pattern summary:
 
-- [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md)
-- [`docs/DEEP_RESEARCH_WORKFLOW.md`](docs/DEEP_RESEARCH_WORKFLOW.md)
-- [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md)
-- [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md)
-- [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md)
+- `pattern_deep_research`
+  Plans and runs research, consolidates evidence, and publishes a sourced report plus machine-readable packet.
+- `pattern_spec_design`
+  Turns a repo-grounded problem statement into an implementation-ready design package plus machine-readable packet.
+- `pattern_generate_evaluate_fix`
+  Consumes a prepared task packet, generates or fixes a change, evaluates concrete commands independently, and optionally loops until the hard gate passes.
+- `pattern_review_change`
+  Reviews a structured change source with a reviewer panel and publishes a calibrated review summary plus machine-readable bundle.
+
+For pattern fields, authored examples, and compiled phases:
+
+- [`docs/MANAGED_PATTERNS.md`](docs/MANAGED_PATTERNS.md)
+- [`docs/PATTERN_DEEP_RESEARCH.md`](docs/PATTERN_DEEP_RESEARCH.md)
+- [`docs/PATTERN_SPEC_DESIGN.md`](docs/PATTERN_SPEC_DESIGN.md)
+- [`docs/PATTERN_GENERATE_EVALUATE_FIX.md`](docs/PATTERN_GENERATE_EVALUATE_FIX.md)
+- [`docs/PATTERN_REVIEW_CHANGE.md`](docs/PATTERN_REVIEW_CHANGE.md)
 
 Authoring contract references:
 
-- Primitive nodes, shared executable fields, containers, `inputs`, `context_from`, and `outputs`: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- `deep_research`: [`docs/DEEP_RESEARCH_WORKFLOW.md`](docs/DEEP_RESEARCH_WORKFLOW.md)
-- `spec_design`: [`docs/SPEC_DESIGN_WORKFLOW.md`](docs/SPEC_DESIGN_WORKFLOW.md)
-- `execute_spec`: [`docs/EXECUTE_SPEC_WORKFLOW.md`](docs/EXECUTE_SPEC_WORKFLOW.md)
-- `review_change`: [`docs/REVIEW_CHANGE_WORKFLOW.md`](docs/REVIEW_CHANGE_WORKFLOW.md)
+- Primitive nodes, shared executable fields, containers, `context`, and `artifacts`: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- `pattern_deep_research`: [`docs/PATTERN_DEEP_RESEARCH.md`](docs/PATTERN_DEEP_RESEARCH.md)
+- `pattern_spec_design`: [`docs/PATTERN_SPEC_DESIGN.md`](docs/PATTERN_SPEC_DESIGN.md)
+- `pattern_generate_evaluate_fix`: [`docs/PATTERN_GENERATE_EVALUATE_FIX.md`](docs/PATTERN_GENERATE_EVALUATE_FIX.md)
+- `pattern_review_change`: [`docs/PATTERN_REVIEW_CHANGE.md`](docs/PATTERN_REVIEW_CHANGE.md)
 
 ### Runs root
 
@@ -290,7 +296,7 @@ Resolution rules:
 
 ### `graph-help`
 
-Prints the current graph contract and a minimal example.
+Prints the current graph contract, including `prerequisites.checks`, soft verification via `on_failure`, repeat selector guidance, and a minimal example.
 
 ```bash
 agentflow graph-help
@@ -298,13 +304,21 @@ agentflow graph-help
 
 ### `validate`
 
-Validates and compiles a graph without running it.
+Validates and compiles a graph without running it. In an interactive terminal, success output is intentionally compact. Structured JSON remains available when stdout is redirected or when callers use the API-level command result.
 
 ```bash
 agentflow validate --graph ./agentflow.graph.json
 ```
 
-Use this first whenever you author or change a graph.
+Use this first whenever you author or change a graph, especially when managed patterns or run prerequisites are involved.
+
+Add run-ready validation when you need proof that the local machine can launch the graph:
+
+```bash
+agentflow validate --graph ./agentflow.graph.json --run-ready
+```
+
+`--run-ready` checks runtime dependencies such as `git`, referenced repo worktrees, executable node commands, and harness binaries for agent and AI-check nodes.
 
 ### `compile`
 
@@ -331,9 +345,9 @@ agentflow run --graph ./agentflow.graph.json
 agentflow run --graph ./agentflow.graph.json --label demo
 ```
 
-During a run, `agent` and AI `check` nodes append live harness output into each execution's `stdout.log` and `stderr.log` under the run root. The final completed logs still remain the authoritative artifact.
+During a run, `agent` and AI `check` nodes append live harness output into each execution's `logs/stdout.log` and `logs/stderr.log` under the run root. The final completed logs still remain the authoritative artifact.
 
-While the graph is running, the CLI also prints human-readable progress to `stderr`. The final machine-readable command result remains on `stdout`, so piping `agentflow run ... | jq` still works.
+While the graph is running, the CLI also prints human-readable progress to `stderr`. When `stdout` is a terminal, `run` prints a compact terminal summary with the final status and duration. When `stdout` is redirected or piped, the final machine-readable JSON result remains on `stdout`, so `agentflow run ... | jq` still works.
 
 Cancel behavior:
 
@@ -358,43 +372,121 @@ Resume behavior:
 - does not treat live workspace file changes as a resume invalidation boundary
 - appends new events and attempts into the same run root
 
-Like `run`, `resume` prints live graph progress to `stderr` and keeps its final structured result on `stdout`.
+Like `run`, `resume` prints live graph progress to `stderr`, shows a compact terminal summary on interactive `stdout`, and keeps its final structured JSON result on `stdout` when redirected or piped.
 
 This is meant for interrupted or failed runs where you want to keep unchanged passed work while still picking up graph or workflow fixes.
 
-## Inputs, Context, and Outputs
+## Context and Artifacts
 
-Supported input kinds:
+Executable nodes use one `context` array for all material passed into the node.
 
-- `file`
-- `glob`
+Think of the workspace and artifacts as separate channels:
+
+- The workspace is where source changes happen while the graph runs.
+- Artifacts are durable named files that later nodes may consume.
+- Downstream nodes do not implicitly receive arbitrary files from a prior execution directory. They receive only their authored `context`, including explicitly named artifacts.
+
+Supported context sources:
+
 - `text`
+- `workspace_file`
+- `workspace_glob`
+- `artifact`
 
-Input resolution rules:
+Context resolution rules:
 
-- authored `file` and `glob` inputs resolve from the live repo workspace when the node starts
-- missing live files and empty globs become explicit omitted context instead of crashing the run
+- authored `workspace_file` and `workspace_glob` context resolves from the live repo workspace when the node starts
+- missing live files, empty globs, and optional artifact context references become explicit omitted context instead of crashing the run
 - path escapes and unknown repo aliases are still hard errors
 - `run` and `resume` only resolve repo aliases the compiled graph actually references
-- `glob` uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`
-- `glob.max_files` is a local cap applied after deterministic sorting
+- `workspace_glob` uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`
+- `workspace_glob.max_files` is a local cap applied after deterministic sorting
 
-Context can be pulled from earlier nodes with `context_from`.
+Nodes publish durable named material with an `artifacts` map.
 
-Supported context includes:
+Supported declared artifact sources:
 
-- `summary`
-- `result`
-- `output`
+- `output_dir`, for files the executor or harness writes under `AGENTFLOW_OUTPUT_DIR`
+- `workspace`, for files copied from the node's repo workspace
 
-Outputs let one node expose named material for downstream use.
+Automatic artifacts are always reserved:
 
-This is how later nodes can consume:
+- `agent_response`, the final agent response for every `agent` node, persisted as `agent-response.md`
+- `result_json`, the normalized `result.json` for every executable node
 
-- a prior agent summary
-- a deterministic check result
-- an AI check output file
-- the latest passed loop iteration output
+Agent harness prompts explain that the model is executing one node in a graph, list declared artifacts with their descriptions, and tell the model that the final response is captured as `agent_response`. Use that final response for concise narrative handoff: outcome, work completed, artifacts produced, validation run, and notes for the next node or human. Do not use it as a substitute for a declared machine-readable artifact.
+
+Downstream nodes consume only named artifacts through `context` items with `"from": "artifact"`. Old public data-flow fields `inputs`, `context_from`, and `outputs` are invalid graph syntax.
+
+Example handoff:
+
+```json
+{
+  "type": "agent",
+  "id": "design",
+  "prompt": "Write the implementation packet.",
+  "context": [
+    { "name": "goal", "from": "text", "text": "Keep the CLI contract stable." },
+    { "name": "architecture", "from": "workspace_file", "path": "docs/ARCHITECTURE.md" }
+  ],
+  "artifacts": {
+    "design_packet": {
+      "from": "output_dir",
+      "path": "design-packet.json",
+      "description": "Structured JSON implementation packet for downstream implementation nodes."
+    }
+  }
+}
+```
+
+```json
+{
+  "type": "agent",
+  "id": "implement",
+  "prompt": "Implement the approved packet.",
+  "context": [
+    {
+      "name": "design_packet",
+      "from": "artifact",
+      "node": "design",
+      "artifact": "design_packet",
+      "attempt": "latest_passed"
+    }
+  ]
+}
+```
+
+During execution, agents and commands also receive:
+
+- `AGENTFLOW_WORKSPACE`, the repo workspace where source edits happen
+- `AGENTFLOW_OUTPUT_DIR`, the execution directory where declared `output_dir` artifacts should be written
+- `AGENTFLOW_CONTEXT_PACKET`, the resolved context packet
+- `AGENTFLOW_CONTEXT_MANIFEST`, the human-readable context manifest
+
+## Local Command Environment
+
+`exec` nodes and deterministic `check` nodes run with a narrow baseline process environment. They do not inherit arbitrary shell variables by default.
+
+Use `env_files` to load repo-local dotenv-style files for local commands:
+
+```json
+{
+  "profiles": {
+    "zero_mock": {
+      "env_files": [".env.development"]
+    }
+  }
+}
+```
+
+Rules:
+
+- profile-level `env_files` apply to `exec` and deterministic `check` nodes using that profile
+- node-level `env_files` replaces the profile list for that node
+- paths resolve relative to the node workspace root and must stay inside it
+- files load in order, and inline node `env` overrides loaded values
+- declared env files are required; missing files fail the command node hard
+- AI checks and agent harnesses do not consume `env_files`
 
 ## Harness Notes
 
@@ -403,6 +495,7 @@ This is how later nodes can consume:
 - Works for `agent` nodes
 - Works for AI `check` nodes
 - If `reasoning_effort` is omitted, Agentflow resolves Codex to `medium`
+- Set profile `skip_git_repo_check: true` only when a Codex-backed node must run from an intentional non-git workspace root
 
 ### Cursor
 
@@ -476,4 +569,4 @@ You should not need anything else to get started. If you want deeper detail afte
 - [`docs/SCOPE.md`](docs/SCOPE.md): supported product surface
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): compiler, runtime, and artifact contracts
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md): runs-root behavior, lifecycle, cleanup, and operator runbook
-- [`docs/MANAGED_WORKFLOWS.md`](docs/MANAGED_WORKFLOWS.md): managed workflow model and shipped workflow nodes
+- [`docs/MANAGED_PATTERNS.md`](docs/MANAGED_PATTERNS.md): managed pattern model and shipped workflow nodes

@@ -8,6 +8,7 @@ export const runtimeEventTypes = [
   "repeat.iteration.started",
   "node.started",
   "check.evaluated",
+  "verification.recorded",
   "node.completed",
   "node.blocked",
   "node.skipped",
@@ -56,6 +57,14 @@ export interface CheckEvaluatedPayload {
   passed: boolean;
   score?: number;
   summary?: string;
+}
+
+export interface VerificationRecordedPayload {
+  verifier_kind: "exec" | "check";
+  passed: boolean;
+  summary: string;
+  check_kind?: "deterministic" | "ai";
+  exit_code?: number;
 }
 
 export interface RepeatIterationStartedPayload {

@@ -16,6 +16,7 @@ import {
   type RuntimeSession,
   type RuntimeStateSnapshot
 } from "./session.js";
+import type { VerificationRecordedPayload } from "./events.js";
 
 function buildLatestExecutionSummary(attempt: RuntimeNodeAttempt): LatestExecutionSummary {
   const status =
@@ -32,9 +33,17 @@ function buildLatestExecutionSummary(attempt: RuntimeNodeAttempt): LatestExecuti
     attempt_index: attempt.attempt_index,
     ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
     ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+    ...(attempt.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: attempt.iteration_attempt_index }
+      : {}),
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
-    ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {})
+    ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {}),
+    ...(attempt.metadata.verification &&
+    typeof attempt.metadata.verification === "object" &&
+    attempt.metadata.verification !== null
+      ? { verification: attempt.metadata.verification as VerificationRecordedPayload }
+      : {})
   };
 }
 
@@ -60,9 +69,8 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     repo: node.repo,
     deps: node.deps,
     effective_policy: node.effective_policy,
-    inputs: node.inputs,
-    context_from: node.context_from,
-    declared_outputs: node.declared_outputs,
+    context: node.context,
+    declared_artifacts: node.declared_artifacts,
     ...(node.lowered_from ? { lowered_from: node.lowered_from } : {})
   };
 
@@ -78,7 +86,9 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
       ...shared,
       command: node.command,
       args: node.args,
+      on_failure: node.on_failure,
       ...(node.cwd ? { cwd: node.cwd } : {}),
+      ...(node.env_files !== undefined ? { env_files: node.env_files } : {}),
       ...(node.env ? { env: node.env } : {})
     }));
   }
@@ -94,9 +104,11 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
   return JSON.stringify(sortJson({
     ...shared,
     check_kind: node.check_kind,
+    on_failure: node.on_failure,
     ...(node.command ? { command: node.command } : {}),
     ...(node.args ? { args: node.args } : {}),
     ...(node.cwd ? { cwd: node.cwd } : {}),
+    ...(node.env_files !== undefined ? { env_files: node.env_files } : {}),
     ...(node.env ? { env: node.env } : {}),
     ...(node.pass_if ? { pass_if: node.pass_if } : {}),
     ...(node.prompt ? { prompt: node.prompt } : {}),
@@ -267,6 +279,27 @@ function collectMaxAttemptIndexes(
   return nextAttemptIndexByCompiledId;
 }
 
+function collectMaxIterationAttemptIndexes(
+  attempts: RuntimeNodeAttempt[]
+): Map<string, number> {
+  const nextIterationAttemptIndexByKey = new Map<string, number>();
+
+  for (const attempt of attempts) {
+    if (attempt.iteration_index === undefined) {
+      continue;
+    }
+
+    const key = `${attempt.compiled_id}::iteration_${attempt.iteration_index}`;
+    const previous = nextIterationAttemptIndexByKey.get(key) ?? 0;
+    nextIterationAttemptIndexByKey.set(
+      key,
+      Math.max(previous, attempt.iteration_attempt_index ?? attempt.attempt_index)
+    );
+  }
+
+  return nextIterationAttemptIndexByKey;
+}
+
 async function buildResumeAttemptRegistry(options: {
   prior_graph: CompiledGraph;
   graph: CompiledGraph;
@@ -279,6 +312,7 @@ async function buildResumeAttemptRegistry(options: {
 }> {
   const registry = createAttemptRegistry();
   registry.next_attempt_index_by_compiled_id = collectMaxAttemptIndexes(options.attempts);
+  registry.next_iteration_attempt_index_by_key = collectMaxIterationAttemptIndexes(options.attempts);
   const attempts_by_compiled_id = new Map<string, RuntimeNodeAttempt[]>();
 
   for (const attempt of options.attempts) {

@@ -41,12 +41,13 @@ Required product surface:
 - support operator cancellation from the CLI launch surface
 - write artifacts and events incrementally during execution
 
-### Context and outputs
+### Context and artifacts
 
-- materialize declared `inputs`
-- resolve `context_from` from prior executions
+- materialize declared `context`
+- resolve `context.from = "artifact"` from prior executions
 - enforce `input_rules`
-- materialize declared outputs for downstream use
+- materialize declared `artifacts` for downstream use
+- publish reserved `agent_response` and `result_json` artifacts automatically
 - fail clearly on missing required context
 
 ### Harnesses and checks

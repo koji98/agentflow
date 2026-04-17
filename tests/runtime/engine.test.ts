@@ -153,28 +153,26 @@ describe("runtime engine", () => {
                   type: "agent",
                   id: "implement",
                   prompt: "Increment the counter.",
-                  outputs: [
-                    {
-                      name: "notes",
-                      from: "attempt",
+                  artifacts: {
+                    notes: {
+                      from: "output_dir",
                       path: "notes.md",
-                      required: true
+                      description: "Test artifact produced at notes.md."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "check",
                   id: "verify",
                   check_kind: "deterministic",
                   command: "placeholder",
-                  outputs: [
-                    {
-                      name: "verification",
-                      from: "attempt",
+                  artifacts: {
+                    verification: {
+                      from: "output_dir",
                       path: "result.json",
-                      required: true
+                      description: "Test artifact produced at result.json."
                     }
-                  ]
+                  }
                 }
               ]
             },
@@ -186,18 +184,17 @@ describe("runtime engine", () => {
             type: "exec",
             id: "finalize",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "text",
                 name: "operator_note",
+                from: "text",
                 text: "done"
-              }
-            ],
-            context_from: [
+              },
               {
+                name: "verification",
+                from: "artifact",
                 node: "verify",
-                include: "output",
-                output: "verification",
+                artifact: "verification",
                 iteration: "latest_passed"
               }
             ]
@@ -288,18 +285,27 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("passed");
     expect(maxParallel).toBe(2);
     expect(run.state.status).toBe("passed");
-    expect(run.attempts[0]?.execution_dir).toBe(
-      resolveNodeExecutionDirectory(
-        runRoot,
-        run.attempts[0]!.compiled_id,
-        run.attempts[0]!.execution_id
-      )
-    );
+    expect(run.attempts[0]?.execution_dir).toMatch(/\/nodes\/\d{3}-[^/]+-[0-9a-f]{12}\/executions\/001-exec-[0-9a-f]{16}$/);
     expect(run.state.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(2);
     expect(run.state.repeat_scopes.scope__root__retry.status).toBe("passed");
     expect(
-      run.attempts.filter((attempt) => attempt.authored_id === "implement").map((attempt) => attempt.iteration_index)
-    ).toEqual([1, 2]);
+      run.attempts.filter((attempt) => attempt.authored_id === "implement").map((attempt) => ({
+        iteration_index: attempt.iteration_index,
+        iteration_attempt_index: attempt.iteration_attempt_index,
+        execution_dir: attempt.execution_dir
+      }))
+    ).toEqual([
+      {
+        iteration_index: 1,
+        iteration_attempt_index: 1,
+        execution_dir: expect.stringMatching(/\/executions\/i001-a001-exec-[0-9a-f]{16}$/)
+      },
+      {
+        iteration_index: 2,
+        iteration_attempt_index: 1,
+        execution_dir: expect.stringMatching(/\/executions\/i002-a001-exec-[0-9a-f]{16}$/)
+      }
+    ]);
     expect(
       run.attempts.filter((attempt) => attempt.authored_id === "verify").map((attempt) => attempt.outcome)
     ).toEqual(["failed", "passed"]);
@@ -342,7 +348,262 @@ describe("runtime engine", () => {
         expect(await pathExists(join(attempt.execution_dir, "artifacts"))).toBe(false);
       })
     );
-    expect(await readFile(join(runRoot, "summary.md"), "utf8")).toContain("- Status: `passed`");
+    const summary = await readFile(join(runRoot, "summary.md"), "utf8");
+    expect(summary).toContain("- Control-flow status: `passed`");
+    expect(summary).toContain("- Evidence status: `clean`");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("continues past a soft-failing exec verifier and records evidence warnings", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-soft-exec-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-soft-exec",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "verify",
+            command: "sh",
+            args: ["-lc", "exit 7"],
+            on_failure: "continue"
+          },
+          {
+            type: "exec",
+            id: "after",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    const verifyAttempt = run.attempts.find((attempt) => attempt.authored_id === "verify");
+    expect(run.outcome).toBe("passed");
+    expect(run.state.node_statuses.root__verify).toBe("passed");
+    expect(run.state.node_statuses.root__after).toBe("passed");
+    expect(run.state.evidence_status).toBe("warnings");
+    expect(run.state.soft_verification_counts).toEqual({
+      passed: 0,
+      failed: 1
+    });
+    expect(run.state.failed_soft_verifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          authored_id: "verify",
+          verifier_kind: "exec",
+          passed: false,
+          exit_code: 7
+        })
+      ])
+    );
+    expect(JSON.parse(await readFile(verifyAttempt!.result_path!, "utf8"))).toEqual(
+      expect.objectContaining({
+        soft_verification: true,
+        verifier_kind: "exec",
+        passed: false,
+        exit_code: 7
+      })
+    );
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "verification.recorded",
+          compiled_id: "root__verify",
+          payload: expect.objectContaining({
+            verifier_kind: "exec",
+            passed: false,
+            exit_code: 7
+          })
+        })
+      ])
+    );
+
+    const summary = await readFile(join(runRoot, "summary.md"), "utf8");
+    expect(summary).toContain("- Evidence status: `warnings`");
+    expect(summary).toContain("## Failed Soft Verifications");
+    expect(summary).toContain("Command exited with code 7.");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("continues past a soft deterministic check failure and keeps check evidence visible", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-soft-check-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-soft-check",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "check",
+            id: "verify",
+            check_kind: "deterministic",
+            command: "sh",
+            args: ["-lc", "exit 2"],
+            pass_if: {
+              exit_code: 0
+            },
+            on_failure: "continue"
+          },
+          {
+            type: "exec",
+            id: "after",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    const verifyAttempt = run.attempts.find((attempt) => attempt.authored_id === "verify");
+    expect(run.outcome).toBe("passed");
+    expect(run.state.node_statuses.root__verify).toBe("passed");
+    expect(run.state.evidence_status).toBe("warnings");
+    expect(run.state.soft_verification_counts.failed).toBe(1);
+    expect(JSON.parse(await readFile(verifyAttempt!.result_path!, "utf8"))).toEqual(
+      expect.objectContaining({
+        soft_verification: true,
+        verifier_kind: "check",
+        check_kind: "deterministic",
+        passed: false,
+        exit_code: 2,
+        summary: "Deterministic check failed."
+      })
+    );
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "check.evaluated",
+          payload: expect.objectContaining({
+            check_kind: "deterministic",
+            passed: false,
+            summary: "Deterministic check failed."
+          })
+        }),
+        expect.objectContaining({
+          type: "verification.recorded",
+          payload: expect.objectContaining({
+            verifier_kind: "check",
+            check_kind: "deterministic",
+            passed: false,
+            summary: "Deterministic check failed."
+          })
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("keeps operational exec failures hard even when on_failure is continue", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-soft-exec-hard-failure-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-soft-exec-hard-failure",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "verify",
+            command: "definitely-missing-command",
+            on_failure: "continue"
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    const verifyAttempt = run.attempts.find((attempt) => attempt.authored_id === "verify");
+    expect(run.outcome).toBe("failed");
+    expect(run.state.node_statuses.root__verify).toBe("failed");
+    expect(run.state.evidence_status).toBe("clean");
+    expect(run.events.some((event) => event.type === "verification.recorded")).toBe(false);
+    expect(JSON.parse(await readFile(verifyAttempt!.result_path!, "utf8"))).toEqual(
+      expect.objectContaining({
+        error: expect.stringContaining("definitely-missing-command")
+      })
+    );
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -379,14 +640,13 @@ describe("runtime engine", () => {
             type: "exec",
             id: "produce-report",
             command: "placeholder",
-            outputs: [
-              {
-                name: "report",
+            artifacts: {
+              report: {
                 from: "workspace",
                 path: "reports/report.md",
-                required: true
+                description: "Test artifact produced at reports/report.md."
               }
-            ]
+            }
           }
         ]
       }
@@ -419,11 +679,326 @@ describe("runtime engine", () => {
     const copiedArtifactPath = join(attempt!.execution_dir, "artifacts", "reports", "report.md");
 
     expect(run.outcome).toBe("passed");
-    expect(attempt?.output_artifacts).toEqual({
+    expect(attempt?.artifacts).toEqual(expect.objectContaining({
       report: copiedArtifactPath
-    });
+    }));
     expect(await pathExists(join(attempt!.execution_dir, "artifacts"))).toBe(true);
     expect(await readFile(copiedArtifactPath, "utf8")).toBe("report for produce-report\n");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("lets exec nodes publish declared output_dir artifacts through the runtime environment", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-output-dir-env-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-output-dir-env",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "produce_handoff",
+            command: process.execPath,
+            args: [
+              "-e",
+              [
+                "const fs = require('node:fs');",
+                "const path = require('node:path');",
+                "const payload = {",
+                "  workspace: process.env.AGENTFLOW_WORKSPACE,",
+                "  packet_exists: fs.existsSync(process.env.AGENTFLOW_CONTEXT_PACKET),",
+                "  manifest_exists: fs.existsSync(process.env.AGENTFLOW_CONTEXT_MANIFEST)",
+                "};",
+                "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.json'), JSON.stringify(payload));"
+              ].join(" ")
+            ],
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.json",
+                description: "Test artifact produced at handoff.json."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    const attempt = run.attempts[0]!;
+    const handoff = JSON.parse(await readFile(attempt.artifacts.handoff!, "utf8"));
+
+    expect(run.outcome).toBe("passed");
+    expect(attempt.artifacts.handoff).toBe(join(attempt.execution_dir, "handoff.json"));
+    expect(handoff).toEqual({
+      workspace: repoDir,
+      packet_exists: true,
+      manifest_exists: true
+    });
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("passes declared artifact contracts into agent harness invocations", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-agent-artifact-contract-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-agent-artifact-contract",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "package_handoff",
+            prompt: "Write the handoff file.",
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Test artifact produced at handoff.md."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    let capturedInvocation: Parameters<HarnessAdapter["run"]>[0] | undefined;
+    const harness = createHarness("codex-cli", async (invocation) => {
+      capturedInvocation = invocation;
+      await writeFile(join(invocation.outputDir, "handoff.md"), "handoff\n");
+
+      return {
+        status: "passed",
+        exitCode: 0,
+        transcript: {
+          last_message: "published handoff"
+        }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": harness
+      }
+    });
+
+    const attempt = run.attempts[0]!;
+
+    expect(run.outcome).toBe("passed");
+    expect(capturedInvocation?.promptKind).toBe("agent");
+    expect(capturedInvocation).toEqual(
+      expect.objectContaining({
+        repoPath: repoDir,
+        outputDir: attempt.execution_dir,
+        artifacts: {
+          handoff: {
+            from: "output_dir",
+            path: "handoff.md",
+            description: "Test artifact produced at handoff.md."
+          }
+        }
+      })
+    );
+    expect(attempt.artifacts.handoff).toBe(join(attempt.execution_dir, "handoff.md"));
+    expect(attempt.artifacts.agent_response).toBe(join(attempt.execution_dir, "agent-response.md"));
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("writes a diagnostic agent response artifact when an agent returns no final text", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-empty-agent-response-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-empty-agent-response",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "silent_agent",
+            prompt: "Return nothing."
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        agent: async () => ({
+          status: "passed",
+          outcome: "passed",
+          result: { ok: true },
+          stdout: "",
+          stderr: "",
+          agent_response: ""
+        })
+      }
+    });
+
+    const attempt = run.attempts[0]!;
+
+    expect(run.outcome).toBe("passed");
+    expect(attempt.artifacts.agent_response).toBe(join(attempt.execution_dir, "agent-response.md"));
+    expect(await readFile(attempt.artifacts.agent_response!, "utf8")).toBe(
+      "Agent completed without a captured final response.\n"
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("keeps the automatic agent response artifact when declared artifact materialization fails", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-agent-response-materialization-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-agent-response-materialization",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "write_handoff",
+            prompt: "Write a handoff.",
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Test artifact produced at handoff.md."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        agent: async () => ({
+          status: "passed",
+          outcome: "passed",
+          result: { ok: true },
+          stdout: "stdout fallback",
+          stderr: "",
+          agent_response: "final response"
+        })
+      }
+    });
+
+    const attempt = run.attempts[0];
+
+    expect(run.outcome).toBe("failed");
+    expect(attempt?.status).toBe("failed");
+    expect(attempt?.artifacts).toEqual(
+      expect.objectContaining({
+        result_json: join(attempt!.execution_dir, "result.json"),
+        agent_response: join(attempt!.execution_dir, "agent-response.md")
+      })
+    );
+    expect(await readFile(attempt!.artifacts.agent_response!, "utf8")).toBe("final response\n");
+    expect(JSON.parse(await readFile(attempt!.result_path!, "utf8"))).toEqual({
+      error: 'Required output_dir artifact "handoff" is missing at handoff.md.'
+    });
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -459,25 +1034,18 @@ describe("runtime engine", () => {
           {
             type: "exec",
             id: "source",
-            command: "placeholder",
-            outputs: [
-              {
-                name: "missing_artifact",
-                from: "attempt",
-                path: "missing.json",
-                required: false
-              }
-            ]
+            command: "placeholder"
           },
           {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            context_from: [
+            context: [
               {
+                name: "missing_artifact",
+                from: "artifact",
                 node: "source",
-                include: "output",
-                output: "missing_artifact"
+                artifact: "agent_response"
               }
             ]
           }
@@ -549,9 +1117,10 @@ describe("runtime engine", () => {
             type: "agent",
             id: "reader",
             prompt: "Read the input.",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "secret",
+                from: "workspace_file",
                 path: "../secret.txt"
               }
             ]
@@ -589,7 +1158,7 @@ describe("runtime engine", () => {
       ])
     );
     expect((run.attempts[0]?.metadata as { error?: string } | undefined)?.error).toContain(
-      'Input path "../secret.txt" must be a relative path that stays within its repo or workspace root.'
+      'Context path "../secret.txt" must be a relative path that stays within its repo or workspace root.'
     );
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -1114,14 +1683,13 @@ describe("runtime engine", () => {
                   type: "exec",
                   id: "draft",
                   command: "placeholder",
-                  outputs: [
-                    {
-                      name: "draft_spec",
-                      from: "attempt",
+                  artifacts: {
+                    draft_spec: {
+                      from: "output_dir",
                       path: "draft.md",
-                      required: true
+                      description: "Test artifact produced at draft.md."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "checkpoint",
@@ -1129,8 +1697,7 @@ describe("runtime engine", () => {
                   prompt: "Review the draft.",
                   review_from: {
                     node: "draft",
-                    include: "output",
-                    output: "draft_spec"
+                    artifact: "draft_spec"
                   }
                 }
               ]
@@ -1361,7 +1928,7 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("streams agent stdout into stdout.log before the node completes", async () => {
+  it("streams agent stdout into logs/stdout.log before the node completes", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-streaming-"));
     const repoDir = join(tempRoot, "repo");
     const runRoot = join(tempRoot, "run");
@@ -1401,8 +1968,15 @@ describe("runtime engine", () => {
     const agentNode = graph.nodes.find((node) => node.authored_id === "stream_logs");
     expect(agentNode?.kind).toBe("agent");
     const executionId = buildExecutionId(agentNode!.compiled_id, 1);
+    const nodeIndex = graph.nodes.findIndex((node) => node.compiled_id === agentNode!.compiled_id);
     const stdoutLogPath = join(
-      resolveNodeExecutionDirectory(runRoot, agentNode!.compiled_id, executionId),
+      resolveNodeExecutionDirectory(runRoot, agentNode!.compiled_id, executionId, {
+        nodeIndex,
+        nodeCount: graph.nodes.length,
+        label: agentNode!.label ?? agentNode!.authored_id,
+        attemptIndex: 1
+      }),
+      "logs",
       "stdout.log"
     );
 
@@ -1489,9 +2063,10 @@ describe("runtime engine", () => {
             id: "consume",
             repo: "main",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "watched",
+                from: "workspace_file",
                 path: "watched.txt"
               }
             ]
@@ -1527,8 +2102,8 @@ describe("runtime engine", () => {
           expect(packet.omitted).toEqual(
             expect.arrayContaining([
               expect.objectContaining({
-                key: "input_1",
-                reason: 'Requested input file "watched.txt" was not found at execution time.',
+                key: "watched",
+                reason: 'Requested context workspace file "watched.txt" was not found at execution time.',
                 optional: false
               })
             ])
@@ -1588,9 +2163,10 @@ describe("runtime engine", () => {
             id: "never_runs",
             repo: "main",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "missing",
+                from: "workspace_file",
                 path: "missing.txt"
               }
             ]
@@ -1619,6 +2195,135 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("failed");
     expect(run.state.node_statuses.root__fail_first).toBe("failed");
     expect(run.state.node_statuses.root__never_runs).toBe("blocked");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("preflight-fails required prerequisites before execution begins", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-prereq-blocked-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-prereq-blocked",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      prerequisites: {
+        checks: [
+          {
+            kind: "command",
+            command: "definitely-missing-command"
+          }
+        ]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "ok",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.attempts).toEqual([]);
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run.preflight_failed",
+          payload: expect.objectContaining({
+            reason: "readiness_blocked",
+            message: expect.stringContaining("definitely-missing-command")
+          })
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("continues when prerequisites only emit readiness warnings", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-prereq-warning-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-prereq-warning",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      prerequisites: {
+        checks: [
+          {
+            kind: "env",
+            name: "AGENTFLOW_TEST_MISSING_ENV",
+            required: false
+          }
+        ]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "ok",
+            command: "sh",
+            args: ["-lc", "exit 0"]
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(run.events.some((event) => event.type === "run.preflight_failed")).toBe(false);
+    expect(run.attempts).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -1795,9 +2500,10 @@ describe("runtime engine", () => {
             id: "consume",
             repo: "main",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "escape",
+                from: "workspace_file",
                 path: "../escape.txt"
               }
             ]
@@ -1821,9 +2527,9 @@ describe("runtime engine", () => {
 
     expect(run.outcome).toBe("failed");
     expect(attempt?.context_packet_path).toBeUndefined();
-    expect(attempt?.context_summary_path).toBeUndefined();
+    expect(attempt?.context_manifest_path).toBeUndefined();
     expect(executionRecord.context_packet_path).toBeUndefined();
-    expect(executionRecord.context_summary_path).toBeUndefined();
+    expect(executionRecord.context_manifest_path).toBeUndefined();
     expect(attempt?.metadata).toEqual(
       expect.objectContaining({
         context_status: "failed"

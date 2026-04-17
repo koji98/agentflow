@@ -113,12 +113,20 @@ function resolveCheckFields(
   node: CheckNode,
   nodePolicyResolution: ReturnType<typeof resolveNodePolicy>
 ): Pick<CompiledExecutableNode, never> & {
+  env_files?: CheckNode["env_files"];
   env?: CheckNode["env"];
   pass_if?: CheckNode["pass_if"];
   rubric?: string;
 } {
   if (node.check_kind === "deterministic") {
     return {
+      ...(node.env_files !== undefined
+        ? { env_files: node.env_files }
+        : nodePolicyResolution.node_profile?.env_files !== undefined
+          ? { env_files: nodePolicyResolution.node_profile.env_files }
+          : nodePolicyResolution.launch_profile?.env_files !== undefined
+            ? { env_files: nodePolicyResolution.launch_profile.env_files }
+            : {}),
       ...(node.env ? { env: node.env } : {}),
       pass_if:
         node.pass_if ??
@@ -172,9 +180,8 @@ function compileExecutableNode(
       ? { repeat_scope_id: scopeFrame.nearest_repeat_scope_id }
       : {}),
     effective_policy: nodePolicyResolution.policy,
-    inputs: node.inputs ?? [],
-    context_from: node.context_from ?? [],
-    declared_outputs: node.outputs ?? [],
+    context: node.context ?? [],
+    declared_artifacts: node.artifacts ?? {},
     ...(lowered_from ? { lowered_from } : {})
   };
 
@@ -187,12 +194,21 @@ function compileExecutableNode(
       prompt: node.prompt
     };
   } else if (node.type === "exec") {
+    const env_files =
+      node.env_files !== undefined
+        ? node.env_files
+        : nodePolicyResolution.node_profile?.env_files !== undefined
+          ? nodePolicyResolution.node_profile.env_files
+          : nodePolicyResolution.launch_profile?.env_files;
+
     compiledNode = {
       ...compiledBase,
       kind: "exec",
       command: node.command,
       args: node.args ?? [],
+      on_failure: node.on_failure ?? "fail",
       ...(node.cwd ? { cwd: node.cwd } : {}),
+      ...(env_files !== undefined ? { env_files } : {}),
       ...(node.env ? { env: node.env } : {})
     };
   } else if (node.type === "checkpoint") {
@@ -208,9 +224,11 @@ function compileExecutableNode(
       ...compiledBase,
       kind: "check",
       check_kind: node.check_kind,
+      on_failure: node.on_failure ?? "fail",
       ...(node.command ? { command: node.command } : {}),
       ...(node.args ? { args: node.args } : {}),
       ...(node.cwd ? { cwd: node.cwd } : {}),
+      ...(resolvedCheckFields.env_files !== undefined ? { env_files: resolvedCheckFields.env_files } : {}),
       ...(resolvedCheckFields.env ? { env: resolvedCheckFields.env } : {}),
       ...(resolvedCheckFields.pass_if ? { pass_if: resolvedCheckFields.pass_if } : {}),
       ...(node.prompt ? { prompt: node.prompt } : {}),
@@ -375,9 +393,12 @@ function compileRepeatNode(
     }
 
     if (bodyRegion.exit_node_ids[0] && bodyRegion.exit_node_ids[0] !== until_compiled_id) {
+      const actualExitNode = context.compiled_node_by_id.get(bodyRegion.exit_node_ids[0]);
       context.diagnostics.push({
         path: `${path}.until.node`,
-        message: "repeat.until.node must resolve to the body exit node in this release."
+        message:
+          `repeat.until.node must resolve to the body exit node in this release. ` +
+          `The body currently exits through "${actualExitNode?.authored_id ?? bodyRegion.exit_node_ids[0]}".`
       });
     }
 
@@ -512,7 +533,7 @@ function isReachable(
   return false;
 }
 
-function validateCompiledContextReferences(
+function validateCompiledArtifactReferences(
   context: CompileContext,
   compiledGraph: CompiledGraph
 ): void {
@@ -522,10 +543,14 @@ function validateCompiledContextReferences(
 
   compiledGraph.nodes.forEach((node) => {
     const references = [
-      ...node.context_from.map((reference, index) => ({
-        reference,
-        path_suffix: `context_from[${index}]`
-      })),
+      ...node.context
+        .map((item, index) => item.from === "artifact"
+          ? {
+              reference: item,
+              path_suffix: `context[${index}]`
+            }
+          : undefined)
+        .filter((item): item is { reference: Extract<CompiledExecutableNode["context"][number], { from: "artifact" }>; path_suffix: string } => item !== undefined),
       ...(node.kind === "checkpoint"
         ? [
             {
@@ -561,7 +586,7 @@ function validateCompiledContextReferences(
       if (!allTargetsArePriorIterationReferences && orderedTargetIds.length !== targetCompiledIds.length) {
         context.diagnostics.push({
           path: `${path}.${path_suffix}.node`,
-          message: `${path_suffix === "review_from" ? "review_from" : "context_from"} node "${reference.node}" is not guaranteed to execute before "${node.authored_id}".`
+          message: `${path_suffix === "review_from" ? "review_from" : "context"} node "${reference.node}" is not guaranteed to execute before "${node.authored_id}".`
         });
       }
 
@@ -575,11 +600,40 @@ function validateCompiledContextReferences(
         ) {
           context.diagnostics.push({
             path: `${path}.${path_suffix}.iteration`,
-            message: `${path_suffix === "review_from" ? "review_from" : "context_from"} node "${reference.node}" requires an iteration selector outside repeat scope "${targetNode.repeat_scope_id}".`
+            message:
+              `${path_suffix === "review_from" ? "review_from" : "context"} node "${reference.node}" ` +
+              `requires an iteration selector outside repeat scope "${targetNode.repeat_scope_id}". ` +
+              `Use "latest_failed" or "latest_passed" when you want the most recent failed or passed iteration.`
           });
         }
       });
     });
+  });
+}
+
+function validateManagedSoftFailureRules(
+  context: CompileContext,
+  compiledGraph: CompiledGraph
+): void {
+  compiledGraph.nodes.forEach((node) => {
+    if ((node.kind !== "exec" && node.kind !== "check") || node.on_failure !== "continue") {
+      return;
+    }
+
+    if (!node.authored_id.includes("__managed__")) {
+      return;
+    }
+
+    const path = context.authored_paths.get(node.authored_id) ?? `$.graph.${node.authored_id}`;
+    const allowedManagedSoftVerifier =
+      node.authored_id.includes("__managed__pattern_generate_evaluate_fix__evaluate_");
+
+    if (!allowedManagedSoftVerifier) {
+      context.diagnostics.push({
+        path,
+        message: `Managed pattern node "${node.authored_id}" cannot use on_failure = "continue".`
+      });
+    }
   });
 }
 
@@ -619,6 +673,7 @@ export function compileAuthoredGraph(
     nodes: context.nodes,
     edges: context.edges,
     scopes: context.scopes,
+    prerequisites: document.prerequisites ?? { checks: [] },
     authored_to_compiled: Object.fromEntries(
       [...context.authored_to_compiled.entries()].map(([authoredId, compiledIds]) => [
         authoredId,
@@ -627,7 +682,8 @@ export function compileAuthoredGraph(
     )
   };
 
-  validateCompiledContextReferences(context, compiled_graph);
+  validateCompiledArtifactReferences(context, compiled_graph);
+  validateManagedSoftFailureRules(context, compiled_graph);
 
   return {
     ...(compiled_graph ? { compiled_graph } : {}),

@@ -1,3 +1,4 @@
+import { access, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
@@ -23,17 +24,19 @@ import {
   latestOutcomeForIteration,
   listAttemptsForCompiledNode,
   openNodeAttempt,
-  peekNextAttemptIndex,
+  peekNextAttemptIndexes,
   type RuntimeNodeAttempt
 } from "../attempts.js";
 import { runAiCheck } from "../checks/ai.js";
 import { runDeterministicCheck, runLocalProcess } from "../checks/deterministic.js";
 import { resolveExecutionContext } from "../context/resolve.js";
+import { evaluateGraphReadiness } from "../readiness.js";
 import {
   createRuntimeEvent,
   type CheckEvaluatedPayload,
   type RuntimeEventContext,
-  type RuntimeEventEnvelope
+  type RuntimeEventEnvelope,
+  type VerificationRecordedPayload
 } from "../events.js";
 import type { HarnessAdapter } from "../harness/types.js";
 import {
@@ -50,6 +53,7 @@ import {
 } from "../session.js";
 import { initializeInplaceWorkspace } from "../workspace/inplace.js";
 import type { WorkspaceSetup } from "../workspace/types.js";
+import { captureWorkspaceChanges } from "../workspace/changes.js";
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
 import {
   buildSchedulerTopology,
@@ -70,6 +74,8 @@ export interface RuntimeNodeExecutionResult {
   stderr: string | undefined;
   metadata?: Record<string, unknown>;
   check?: CheckEvaluatedPayload;
+  verification?: VerificationRecordedPayload;
+  agent_response?: string;
 }
 
 export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode> {
@@ -79,7 +85,7 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
   workspace_path: string;
   execution_dir: string;
   context_packet_path: string;
-  context_summary_path: string;
+  context_manifest_path: string;
   signal: AbortSignal | undefined;
   on_stdout_chunk?: (chunk: string) => void;
   on_stderr_chunk?: (chunk: string) => void;
@@ -336,6 +342,12 @@ function predictWorkspaceBindings(
         backend
       }
     ])
+  );
+}
+
+function collectSourcePathsFromWorkspace(workspace: WorkspaceSetup): Record<string, string> {
+  return Object.fromEntries(
+    Object.values(workspace.repo_workspaces).map((binding) => [binding.repo_alias, binding.source_path])
   );
 }
 
@@ -734,14 +746,66 @@ function resolveNodeWorkingDirectory(
   );
 }
 
+function resolveNodeEnvFiles(
+  workspacePath: string,
+  envFiles: string[] | undefined
+): string[] | undefined {
+  if (envFiles === undefined) {
+    return undefined;
+  }
+
+  return envFiles.map((envFile) => {
+    if (envFile.includes(":")) {
+      throw new Error(`env_files entry "${envFile}" must be a relative path that stays within its repo or workspace root.`);
+    }
+
+    return resolveSubpathWithinRoot(
+      workspacePath,
+      envFile,
+      `env_files entry "${envFile}"`
+    );
+  });
+}
+
+function buildNodeRuntimeEnv(context: RuntimeNodeExecutorContext<CompiledExecutableNode>): Record<string, string> {
+  return {
+    AGENTFLOW_WORKSPACE: context.workspace_path,
+    AGENTFLOW_OUTPUT_DIR: context.execution_dir,
+    AGENTFLOW_CONTEXT_PACKET: context.context_packet_path,
+    AGENTFLOW_CONTEXT_MANIFEST: context.context_manifest_path
+  };
+}
+
+function summarizeExecVerification(exitCode: number): string {
+  return exitCode === 0 ? "Command completed successfully." : `Command exited with code ${exitCode}.`;
+}
+
+function annotateSoftVerificationResult(
+  result: Record<string, unknown>,
+  verification: VerificationRecordedPayload
+): Record<string, unknown> {
+  return {
+    ...result,
+    soft_verification: true,
+    verifier_kind: verification.verifier_kind,
+    passed: verification.passed,
+    summary: verification.summary,
+    ...(verification.check_kind ? { check_kind: verification.check_kind } : {}),
+    ...(verification.exit_code !== undefined ? { exit_code: verification.exit_code } : {})
+  };
+}
+
 async function defaultExecExecutor(
   context: RuntimeNodeExecutorContext<CompiledExecNode>
 ): Promise<RuntimeNodeExecutionResult> {
+  const env_files = resolveNodeEnvFiles(context.workspace_path, context.node.env_files);
   const processResult = await runLocalProcess({
     command: context.node.command,
     args: context.node.args,
     cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
+    ...(env_files !== undefined ? { env_files } : {}),
     env: context.node.env,
+    runtime_env: buildNodeRuntimeEnv(context),
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal
   });
@@ -752,6 +816,27 @@ async function defaultExecExecutor(
       result: processResult,
       stdout: processResult.stdout,
       stderr: processResult.stderr
+    };
+  }
+
+  if (context.node.on_failure === "continue" && !processResult.timed_out) {
+    const verification: VerificationRecordedPayload = {
+      verifier_kind: "exec",
+      passed: processResult.exit_code === 0,
+      summary: summarizeExecVerification(processResult.exit_code),
+      exit_code: processResult.exit_code
+    };
+
+    return {
+      status: "passed",
+      outcome: "passed",
+      result: annotateSoftVerificationResult(
+        processResult as unknown as Record<string, unknown>,
+        verification
+      ),
+      stdout: processResult.stdout,
+      stderr: processResult.stderr,
+      verification
     };
   }
 
@@ -769,11 +854,14 @@ async function defaultCheckExecutor(
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>
 ): Promise<RuntimeNodeExecutionResult> {
   if (context.node.check_kind === "deterministic") {
+    const env_files = resolveNodeEnvFiles(context.workspace_path, context.node.env_files);
     const result = await runDeterministicCheck({
       command: context.node.command ?? "",
       args: context.node.args ?? [],
       cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
+      ...(env_files !== undefined ? { env_files } : {}),
       env: context.node.env,
+      runtime_env: buildNodeRuntimeEnv(context),
       timeout_sec: context.node.effective_policy.timeout_sec,
       pass_if: context.node.pass_if,
       signal: context.signal
@@ -785,6 +873,33 @@ async function defaultCheckExecutor(
         result,
         stdout: result.stdout,
         stderr: result.stderr
+      };
+    }
+
+    if (context.node.on_failure === "continue" && !result.timed_out) {
+      const verification: VerificationRecordedPayload = {
+        verifier_kind: "check",
+        passed: result.passed,
+        summary: result.summary,
+        check_kind: "deterministic",
+        exit_code: result.exit_code
+      };
+
+      return {
+        status: "passed",
+        outcome: "passed",
+        result: annotateSoftVerificationResult(
+          result as unknown as Record<string, unknown>,
+          verification
+        ),
+        stdout: result.stdout,
+        stderr: result.stderr,
+        check: {
+          check_kind: "deterministic",
+          passed: result.passed,
+          summary: result.summary
+        },
+        verification
       };
     }
 
@@ -818,9 +933,11 @@ async function defaultCheckExecutor(
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
+    ...(context.node.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
     prompt: context.node.prompt ?? "",
     rubric: context.node.rubric,
     context_packet_path: context.context_packet_path,
+    context_manifest_path: context.context_manifest_path,
     output_dir: context.execution_dir,
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
@@ -842,6 +959,38 @@ async function defaultCheckExecutor(
   }
 
   const passed = harness_result.status === "passed" && evaluation.passed;
+
+  if (context.node.on_failure === "continue" && harness_result.status === "passed") {
+    const verification: VerificationRecordedPayload = {
+      verifier_kind: "check",
+      passed,
+      summary: evaluation.summary ?? (passed ? "AI check passed." : "AI check failed."),
+      check_kind: "ai"
+    };
+
+    return {
+      status: "passed",
+      outcome: "passed",
+      result: annotateSoftVerificationResult({
+        exit_code: harness_result.exitCode,
+        passed,
+        ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
+        ...(evaluation.summary ? { summary: evaluation.summary } : {}),
+        ...(evaluation.issues ? { issues: evaluation.issues } : {}),
+        ...(evaluation.raw ? { raw: evaluation.raw } : {}),
+        metadata: harness_result.metadata ?? {}
+      }, verification),
+      stdout: harness_result.stdout,
+      stderr: harness_result.stderr,
+      check: {
+        check_kind: "ai",
+        passed,
+        ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
+        ...(evaluation.summary ? { summary: evaluation.summary } : {})
+      },
+      verification
+    };
+  }
 
   return {
     status: passed ? "passed" : "failed",
@@ -877,18 +1026,22 @@ async function defaultAgentExecutor(
   }
 
   const harnessResult = await harnesses[harnessName]!.run({
+    promptKind: "agent",
     runId: context.run_id,
     executionId: context.attempt.execution_id,
     repoAlias: context.node.repo,
     repoPath: context.workspace_path,
     sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
+    ...(context.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
     model: context.node.effective_policy.model,
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoningEffort: context.node.effective_policy.reasoning_effort }
       : {}),
     prompt: context.node.prompt,
     contextPacketPath: context.context_packet_path,
+    contextManifestPath: context.context_manifest_path,
     outputDir: context.execution_dir,
+    artifacts: context.node.declared_artifacts,
     timeoutSec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
     ...(context.on_stdout_chunk ? { onStdoutChunk: context.on_stdout_chunk } : {}),
@@ -904,8 +1057,65 @@ async function defaultAgentExecutor(
     },
     stdout: harnessResult.stdout,
     stderr: harnessResult.stderr,
+    agent_response: harnessResult.transcript?.last_message ?? harnessResult.stdout ?? "",
     ...(harnessResult.metadata ? { metadata: harnessResult.metadata } : {})
   };
+}
+
+async function writeAutomaticArtifacts(
+  node: CompiledExecutableNode,
+  attempt: RuntimeNodeAttempt,
+  executionPaths: Awaited<ReturnType<ArtifactWriter["writeExecutionStart"]>>,
+  result: RuntimeNodeExecutionResult
+): Promise<Record<string, string>> {
+  const artifacts: Record<string, string> = {
+    result_json: executionPaths.result_path
+  };
+
+  if (node.kind !== "agent") {
+    return artifacts;
+  }
+
+  const responsePath = join(attempt.execution_dir, "agent-response.md");
+  const response =
+    typeof result.agent_response === "string" && result.agent_response.trim().length > 0
+      ? result.agent_response
+      : "Agent completed without a captured final response.\n";
+
+  await writeFile(responsePath, response.endsWith("\n") ? response : `${response}\n`, "utf8");
+  artifacts.agent_response = responsePath;
+  return artifacts;
+}
+
+async function ensureCheckpointPassFeedbackArtifact(
+  node: CompiledExecutableNode,
+  attempt: RuntimeNodeAttempt,
+  result: RuntimeNodeExecutionResult
+): Promise<void> {
+  if (node.kind !== "checkpoint" || result.status !== "passed") {
+    return;
+  }
+
+  const feedbackArtifact = node.declared_artifacts.operator_feedback;
+  if (!feedbackArtifact || feedbackArtifact.from !== "output_dir") {
+    return;
+  }
+
+  const feedbackPath = resolveSubpathWithinRoot(
+    attempt.execution_dir,
+    feedbackArtifact.path,
+    'Checkpoint "operator_feedback" artifact path'
+  );
+
+  try {
+    await access(feedbackPath);
+  } catch {
+    await writeFile(
+      feedbackPath,
+      "Checkpoint passed. No operator feedback was provided.\n",
+      "utf8"
+    );
+  }
 }
 
 async function executeNode(
@@ -933,6 +1143,7 @@ async function executeNode(
     | Awaited<ReturnType<ArtifactWriter["writeExecutionStart"]>>
     | undefined;
   let logSink: StreamingLogSink | undefined;
+  let automaticArtifacts: Record<string, string> | undefined;
 
   try {
     executionPaths = await writer.writeExecutionStart(attempt);
@@ -966,7 +1177,7 @@ async function executeNode(
             workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -978,7 +1189,7 @@ async function executeNode(
             workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal
           });
     } else if (node.kind === "check") {
@@ -990,7 +1201,7 @@ async function executeNode(
             workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -1003,7 +1214,7 @@ async function executeNode(
               workspace_path: workspace.workspace_path,
               execution_dir: attempt.execution_dir,
               context_packet_path: context.packet_path,
-              context_summary_path: context.summary_path,
+              context_manifest_path: context.manifest_path,
               signal
             },
             options.harnesses ?? {}
@@ -1020,7 +1231,7 @@ async function executeNode(
         workspace_path: workspace.workspace_path,
         execution_dir: attempt.execution_dir,
         context_packet_path: context.packet_path,
-        context_summary_path: context.summary_path,
+        context_manifest_path: context.manifest_path,
         signal,
         on_stdout_chunk: logSink.on_stdout_chunk,
         on_stderr_chunk: logSink.on_stderr_chunk
@@ -1034,7 +1245,7 @@ async function executeNode(
             workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal
           })
         : await defaultAgentExecutor(
@@ -1045,7 +1256,7 @@ async function executeNode(
               workspace_path: workspace.workspace_path,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -1062,10 +1273,18 @@ async function executeNode(
       ...(result.stderr !== undefined ? { stderr: result.stderr } : {})
     });
 
-    const output_artifacts =
+    await ensureCheckpointPassFeedbackArtifact(node, attempt, result);
+
+    automaticArtifacts = await writeAutomaticArtifacts(node, attempt, executionPaths, result);
+    const artifacts =
       result.status === "canceled"
-        ? {}
-        : await writer.materializeDeclaredOutputs(node, attempt, workspace.workspace_path);
+        ? automaticArtifacts
+        : await writer.materializeDeclaredArtifacts(
+            node,
+            attempt,
+            workspace.workspace_path,
+            automaticArtifacts
+          );
 
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
       status: result.status,
@@ -1074,10 +1293,17 @@ async function executeNode(
       stderr_log_path: executionPaths.stderr_log_path,
       result_path: executionPaths.result_path,
       context_packet_path: context.packet_path,
-      context_summary_path: context.summary_path,
+      context_manifest_path: context.manifest_path,
       context_provenance_path: context.provenance_path,
-      output_artifacts,
-      ...(result.metadata ? { metadata: result.metadata } : {})
+      artifacts,
+      ...((result.metadata || result.verification)
+        ? {
+            metadata: {
+              ...(result.metadata ?? {}),
+              ...(result.verification ? { verification: result.verification } : {})
+            }
+          }
+        : {})
     });
 
     await writer.writeExecutionCompletion(completedAttempt, {
@@ -1097,6 +1323,22 @@ async function executeNode(
     }
 
     const message = error instanceof Error ? error.message : String(error);
+    const failureArtifacts: Record<string, string> | undefined = executionPaths
+      ? {
+          result_json: executionPaths.result_path,
+          ...(automaticArtifacts ?? {})
+        }
+      : undefined;
+
+    if (executionPaths && node.kind === "agent" && !failureArtifacts?.agent_response) {
+      const responsePath = join(attempt.execution_dir, "agent-response.md");
+      await writeFile(responsePath, `Agent failed before a final response was captured: ${message}\n`, "utf8");
+
+      if (failureArtifacts) {
+        failureArtifacts.agent_response = responsePath;
+      }
+    }
+
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
       status: "failed",
       outcome: "failed",
@@ -1104,13 +1346,14 @@ async function executeNode(
         ? {
             stdout_log_path: executionPaths.stdout_log_path,
             stderr_log_path: executionPaths.stderr_log_path,
-            result_path: executionPaths.result_path
+            result_path: executionPaths.result_path,
+            ...(failureArtifacts ? { artifacts: failureArtifacts } : {})
           }
         : {}),
       ...(context
         ? {
             context_packet_path: context.packet_path,
-            context_summary_path: context.summary_path,
+            context_manifest_path: context.manifest_path,
             context_provenance_path: context.provenance_path
           }
         : {}),
@@ -1180,15 +1423,27 @@ async function startReadyNode(
     readyQueue.queue.splice(index, 1);
     readyQueue.queued_keys.delete(createReadyNodeKey(readyNode));
 
-    const nextAttemptIndex = peekNextAttemptIndex(session.attempts, node.compiled_id);
-    const executionId = buildExecutionId(node.compiled_id, nextAttemptIndex, {
+    const nextAttemptIndexes = peekNextAttemptIndexes(session.attempts, node.compiled_id, {
+      ...(readyNode.iteration_index !== undefined ? { iteration_index: readyNode.iteration_index } : {})
+    });
+    const executionId = buildExecutionId(node.compiled_id, nextAttemptIndexes.attempt_index, {
       ...(readyNode.repeat_scope_id ? { repeat_scope_id: readyNode.repeat_scope_id } : {}),
       ...(readyNode.iteration_index !== undefined ? { iteration_index: readyNode.iteration_index } : {})
     });
-    const executionDir = writer.getExecutionDirectory(node.compiled_id, executionId);
+    const executionDir = writer.getExecutionDirectory(node.compiled_id, executionId, {
+      attemptIndex: nextAttemptIndexes.attempt_index,
+      ...(readyNode.iteration_index !== undefined ? { iterationIndex: readyNode.iteration_index } : {}),
+      ...(nextAttemptIndexes.iteration_attempt_index !== undefined
+        ? { iterationAttemptIndex: nextAttemptIndexes.iteration_attempt_index }
+        : {})
+    });
     const attempt = openNodeAttempt(session.attempts, node, executionDir, {
       ...(readyNode.repeat_scope_id ? { repeat_scope_id: readyNode.repeat_scope_id } : {}),
-      ...(readyNode.iteration_index !== undefined ? { iteration_index: readyNode.iteration_index } : {})
+      ...(readyNode.iteration_index !== undefined ? { iteration_index: readyNode.iteration_index } : {}),
+      attempt_index: nextAttemptIndexes.attempt_index,
+      ...(nextAttemptIndexes.iteration_attempt_index !== undefined
+        ? { iteration_attempt_index: nextAttemptIndexes.iteration_attempt_index }
+        : {})
     });
     registerActiveExecution(session, attempt);
     const abortControl = createExecutionAbortControl(options.signal);
@@ -1339,6 +1594,11 @@ async function finalizeRunWithWorkspaceCleanup(
   let finalReason = reason;
 
   if (workspace) {
+    session.workspace_change_artifacts = await captureWorkspaceChanges(
+      writer.run_root,
+      Object.values(workspace.repo_workspaces)
+    );
+
     try {
       await workspace.cleanup();
     } catch (error) {
@@ -1488,6 +1748,16 @@ async function executeRunLoop(
 
     if (result.check) {
       await emitEvent(session, writer, runOwner, events, options.on_event, "check.evaluated", result.check, {
+        compiled_id: node.compiled_id,
+        execution_id: attempt.execution_id,
+        repeat_scope_id: attempt.repeat_scope_id,
+        iteration_index: attempt.iteration_index,
+        attempt_index: attempt.attempt_index
+      });
+    }
+
+    if (result.verification) {
+      await emitEvent(session, writer, runOwner, events, options.on_event, "verification.recorded", result.verification, {
         compiled_id: node.compiled_id,
         execution_id: attempt.execution_id,
         repeat_scope_id: attempt.repeat_scope_id,
@@ -1647,7 +1917,7 @@ export async function runCompiledGraph(
   options: RunCompiledGraphOptions
 ): Promise<RunCompiledGraphResult> {
   const run_id = deriveRunId(options.run_root);
-  const writer = new ArtifactWriter(options.run_root);
+  const writer = new ArtifactWriter(options.run_root, options.compiled_graph);
   const activeRepoSources = filterActiveRepoSources(options.compiled_graph, options.repo_sources);
   const predictedBindings = predictWorkspaceBindings(
     options.compiled_graph.launch.workspace_backend,
@@ -1673,6 +1943,34 @@ export async function runCompiledGraph(
     compiled_node_count: options.compiled_graph.nodes.length,
     scope_count: options.compiled_graph.scopes.length
   });
+
+  const readiness = await evaluateGraphReadiness({
+    graph: options.compiled_graph,
+    repo_sources: activeRepoSources
+  });
+
+  if (readiness.status === "blocked") {
+    session.status = "failed";
+    session.ended_at = new Date().toISOString();
+    await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
+    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
+      reason: "readiness_blocked",
+      message: readiness.checks
+        .filter((check) => check.status === "blocked")
+        .map((check) => check.message)
+        .join(" | ")
+    });
+    const state = await writeTerminalRunSummary(session, writer, events);
+
+    return {
+      run_id,
+      run_root: writer.run_root,
+      outcome: "failed",
+      state,
+      attempts: [],
+      events: await readRunEvents(writer.run_root)
+    };
+  }
 
   try {
     workspace = await initializeWorkspace(
@@ -1722,11 +2020,38 @@ export async function runCompiledGraph(
 export async function resumeCompiledGraph(
   options: ResumeCompiledGraphOptions
 ): Promise<RunCompiledGraphResult> {
-  const writer = new ArtifactWriter(options.run_root);
+  const writer = new ArtifactWriter(options.run_root, options.compiled_graph);
   const runOwner = await createRunOwnerRecord();
   const session = options.resumed_session;
   const events = [...options.prior_events];
   const topology = buildSchedulerTopology(options.compiled_graph);
+  const readiness = await evaluateGraphReadiness({
+    graph: options.compiled_graph,
+    repo_sources: collectSourcePathsFromWorkspace(options.workspace)
+  });
+
+  if (readiness.status === "blocked") {
+    session.status = "failed";
+    session.ended_at = new Date().toISOString();
+    await writer.initializeRunArtifacts(buildInitializeArtifactsOptions(options, session, runOwner));
+    await emitEvent(session, writer, runOwner, events, options.on_event, "run.preflight_failed", {
+      reason: "readiness_blocked",
+      message: readiness.checks
+        .filter((check) => check.status === "blocked")
+        .map((check) => check.message)
+        .join(" | ")
+    });
+    const state = await writeTerminalRunSummary(session, writer, events);
+
+    return {
+      run_id: session.run_id,
+      run_root: writer.run_root,
+      outcome: "failed",
+      state,
+      attempts: await readRunExecutionAttempts(writer.run_root),
+      events: await readRunEvents(writer.run_root)
+    };
+  }
 
   session.status = "running";
   delete session.ended_at;

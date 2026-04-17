@@ -1,4 +1,5 @@
 import { compileAuthoredGraph } from "../../graph/compile.js";
+import { buildManagedExpansionSummaries } from "../../graph/managed_expansion.js";
 import { resolveLaunchConfig } from "../../graph/profiles.js";
 import { workspaceBackends } from "../../graph/schema.js";
 import { loadAuthoredGraphDocument, summarizeAuthoredGraph } from "../../graph/validate.js";
@@ -105,7 +106,21 @@ export const compileCommand = {
             })
           },
           diagnostics: compilation.diagnostics,
-          ...(compilation.compiled_graph ? { compiled_graph: compilation.compiled_graph } : {})
+          ...(compilation.compiled_graph
+            ? {
+                compiled_graph: compilation.compiled_graph,
+                compiled_summary: {
+                  entry_node_count: compilation.compiled_graph.entry_node_ids.length,
+                  node_count: compilation.compiled_graph.nodes.length,
+                  edge_count: compilation.compiled_graph.edges.length,
+                  scope_count: compilation.compiled_graph.scopes.length
+                },
+                managed_expansion: buildManagedExpansionSummaries(
+                  compilation.compiled_graph,
+                  loaded.lowered_managed_nodes
+                )
+              }
+            : {})
         }
       };
     }
@@ -121,6 +136,16 @@ export const compileCommand = {
         authored_summary: summarizeAuthoredGraph(loaded.document),
         launch,
         lowered_managed_nodes: loaded.lowered_managed_nodes,
+        compiled_summary: {
+          entry_node_count: compilation.compiled_graph!.entry_node_ids.length,
+          node_count: compilation.compiled_graph!.nodes.length,
+          edge_count: compilation.compiled_graph!.edges.length,
+          scope_count: compilation.compiled_graph!.scopes.length
+        },
+        managed_expansion: buildManagedExpansionSummaries(
+          compilation.compiled_graph!,
+          loaded.lowered_managed_nodes
+        ),
         compiled_graph: compilation.compiled_graph,
         next_steps: {
           validate: createGraphCliInvocation("validate", {

@@ -1,20 +1,20 @@
-import type { ManagedWorkflowKind } from "../graph/schema.js";
+import type { ManagedPatternKind } from "../graph/schema.js";
 
-export type ManagedWorkflowPhaseMode =
+export type ManagedPatternPhaseMode =
   | "single-agent"
   | "parallel-agents"
   | "council"
   | "deterministic-check"
   | "repair-loop";
 
-export interface ManagedWorkflowPhaseDescriptor {
+export interface ManagedPatternPhaseDescriptor {
   id: string;
   label: string;
   summary: string;
-  mode: ManagedWorkflowPhaseMode;
+  mode: ManagedPatternPhaseMode;
 }
 
-export interface ManagedWorkflowOrchestrationDescriptor {
+export interface ManagedPatternOrchestrationDescriptor {
   summary: string;
   planner: boolean;
   fan_out: boolean;
@@ -22,17 +22,17 @@ export interface ManagedWorkflowOrchestrationDescriptor {
   validation: boolean;
 }
 
-export interface ManagedWorkflowDescriptor {
-  kind: ManagedWorkflowKind;
+export interface ManagedPatternDescriptor {
+  kind: ManagedPatternKind;
   label: string;
   summary: string;
   authored_contract_status: "deferred" | "implemented";
   runtime_shape: "compiled-subgraph";
-  orchestration: ManagedWorkflowOrchestrationDescriptor;
-  phases: ManagedWorkflowPhaseDescriptor[];
+  orchestration: ManagedPatternOrchestrationDescriptor;
+  phases: ManagedPatternPhaseDescriptor[];
 }
 
-export interface ManagedWorkflowRegistry {
-  descriptors: ManagedWorkflowDescriptor[];
-  by_kind: Record<ManagedWorkflowKind, ManagedWorkflowDescriptor>;
+export interface ManagedPatternRegistry {
+  descriptors: ManagedPatternDescriptor[];
+  by_kind: Record<ManagedPatternKind, ManagedPatternDescriptor>;
 }

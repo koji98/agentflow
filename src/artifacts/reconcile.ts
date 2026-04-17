@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
 import { renderRunSummary } from "../runtime/delivery/summary.js";
 import type { RuntimeEventEnvelope } from "../runtime/events.js";
+import { summarizeSoftVerifications } from "../runtime/session.js";
 import type {
   LatestExecutionSummary,
   RuntimeNodeStatus,
@@ -117,6 +118,9 @@ function buildLatestExecutionSummary(
     attempt_index: attempt.attempt_index,
     ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
     ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+    ...(attempt.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: attempt.iteration_attempt_index }
+      : {}),
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
     ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {})
@@ -138,6 +142,9 @@ function buildSyntheticLatestExecution(
     ...(activeExecution.repeat_scope_id ? { repeat_scope_id: activeExecution.repeat_scope_id } : {}),
     ...(activeExecution.iteration_index !== undefined
       ? { iteration_index: activeExecution.iteration_index }
+      : {}),
+    ...(activeExecution.iteration_attempt_index !== undefined
+      ? { iteration_attempt_index: activeExecution.iteration_attempt_index }
       : {}),
     started_at: activeExecution.started_at,
     ended_at: endedAt,
@@ -173,6 +180,9 @@ function sealTerminalState(
         attempt_index: attempt.attempt_index,
         ...(attempt.repeat_scope_id ? { repeat_scope_id: attempt.repeat_scope_id } : {}),
         ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+        ...(attempt.iteration_attempt_index !== undefined
+          ? { iteration_attempt_index: attempt.iteration_attempt_index }
+          : {}),
         started_at: attempt.started_at,
         ended_at: endedAt,
         duration_ms: computeDurationMs(attempt.started_at, endedAt)
@@ -210,17 +220,23 @@ function sealTerminalState(
       }
     ])
   ) as RuntimeStateSnapshot["repeat_scopes"];
+  const softVerificationSummary = summarizeSoftVerifications(
+    Object.values(latest_execution_by_compiled_id)
+  );
 
   return {
     ...state,
     status: outcome,
     snapshot_seq: snapshotSeq,
     ended_at: endedAt,
+    evidence_status: softVerificationSummary.evidence_status,
     node_statuses,
     active_executions: {},
     latest_execution_by_compiled_id,
     repeat_scopes,
-    counts: countNodeStatuses(Object.values(node_statuses))
+    counts: countNodeStatuses(Object.values(node_statuses)),
+    soft_verification_counts: softVerificationSummary.soft_verification_counts,
+    failed_soft_verifications: softVerificationSummary.failed_soft_verifications
   };
 }
 

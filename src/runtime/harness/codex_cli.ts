@@ -50,6 +50,10 @@ function buildCodexArgs(
     last_message_path
   ];
 
+  if (invocation.skipGitRepoCheck) {
+    args.push("--skip-git-repo-check");
+  }
+
   if (invocation.model) {
     args.push("-m", invocation.model);
   }
@@ -88,6 +92,13 @@ export function createCodexCliHarness(
       return new Promise<HarnessResult>((resolve, reject) => {
         const child = spawn(binary, args, {
           cwd: invocation.repoPath,
+          env: {
+            ...process.env,
+            AGENTFLOW_WORKSPACE: invocation.repoPath,
+            AGENTFLOW_OUTPUT_DIR: invocation.outputDir,
+            AGENTFLOW_CONTEXT_PACKET: invocation.contextPacketPath,
+            AGENTFLOW_CONTEXT_MANIFEST: invocation.contextManifestPath
+          },
           stdio: ["pipe", "pipe", "pipe"]
         });
         const stdoutChunks: Buffer[] = [];

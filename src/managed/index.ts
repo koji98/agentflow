@@ -1,71 +1,69 @@
-export { managedWorkflowDescriptors, managedWorkflowRegistry } from "./registry.js";
+export { managedPatternDescriptors, managedPatternRegistry } from "./registry.js";
 export {
-  buildDeepResearchWorkflow
-} from "./deep_research.js";
+  buildPatternDeepResearch
+} from "./pattern_deep_research.js";
 export {
-  buildSpecDesignWorkflow
-} from "./spec_design.js";
+  buildPatternSpecDesign
+} from "./pattern_spec_design.js";
 export {
-  buildExecuteSpecWorkflow
-} from "./execute_spec.js";
+  buildPatternGenerateEvaluateFix
+} from "./pattern_generate_evaluate_fix.js";
 export {
-  buildReviewChangeWorkflow
-} from "./review_change.js";
+  buildPatternReviewChange
+} from "./pattern_review_change.js";
 export type {
-  ManagedWorkflowRuntime,
+  ManagedPatternRuntime,
   PromptSection
 } from "./foundation.js";
 export type {
-  ManagedWorkflowDescriptor,
-  ManagedWorkflowOrchestrationDescriptor,
-  ManagedWorkflowPhaseDescriptor,
-  ManagedWorkflowPhaseMode,
-  ManagedWorkflowRegistry
+  ManagedPatternDescriptor,
+  ManagedPatternOrchestrationDescriptor,
+  ManagedPatternPhaseDescriptor,
+  ManagedPatternPhaseMode,
+  ManagedPatternRegistry
 } from "./types.js";
 export type {
-  DeepResearchApprovalPolicy,
-  DeepResearchBrief,
-  DeepResearchContextPolicy,
-  DeepResearchDelivery,
-  DeepResearchStrategy,
-  DeepResearchWorkflowConfig
-} from "./deep_research.js";
+  PatternDeepResearchApprovalPolicy,
+  PatternDeepResearchBrief,
+  PatternDeepResearchContextPolicy,
+  PatternDeepResearchDelivery,
+  PatternDeepResearchStrategy,
+  PatternDeepResearchConfig
+} from "./pattern_deep_research.js";
 export type {
-  SpecDesignApprovalPolicy,
-  SpecDesignBrief,
-  SpecDesignContextPolicy,
-  SpecDesignDelivery,
-  SpecDesignScope,
-  SpecDesignStrategy,
-  SpecDesignWorkflowConfig
-} from "./spec_design.js";
+  PatternSpecDesignApprovalPolicy,
+  PatternSpecDesignBrief,
+  PatternSpecDesignContextPolicy,
+  PatternSpecDesignDelivery,
+  PatternSpecDesignScope,
+  PatternSpecDesignStrategy,
+  PatternSpecDesignConfig
+} from "./pattern_spec_design.js";
 export type {
-  ExecuteSpecApprovalPolicy,
-  ExecuteSpecArtifactBundleSource,
-  ExecuteSpecBrief,
-  ExecuteSpecContextPolicy,
-  ExecuteSpecDelivery,
-  ExecuteSpecFileSourceRef,
-  ExecuteSpecManagedNodeSource,
-  ExecuteSpecManagedOutputSourceRef,
-  ExecuteSpecScope,
-  ExecuteSpecSource,
-  ExecuteSpecSourceRef,
-  ExecuteSpecStrategy,
-  ExecuteSpecValidation,
-  ExecuteSpecWorkflowConfig
-} from "./execute_spec.js";
+  PatternGenerateEvaluateFixArtifactBundleSource,
+  PatternGenerateEvaluateFixBrief,
+  PatternGenerateEvaluateFixContextPolicy,
+  PatternGenerateEvaluateFixEvaluation,
+  PatternGenerateEvaluateFixFileSourceRef,
+  PatternGenerateEvaluateFixArtifactSourceRef,
+  PatternGenerateEvaluateFixManagedNodeSource,
+  PatternGenerateEvaluateFixScope,
+  PatternGenerateEvaluateFixSourceRef,
+  PatternGenerateEvaluateFixStrategy,
+  PatternGenerateEvaluateFixTaskSource,
+  PatternGenerateEvaluateFixConfig
+} from "./pattern_generate_evaluate_fix.js";
 export type {
-  ReviewChangeArtifactBundleSource,
-  ReviewChangeBrief,
-  ReviewChangeContextPolicy,
-  ReviewChangeDelivery,
-  ReviewChangeFileSourceRef,
-  ReviewChangeManagedNodeSource,
-  ReviewChangeManagedOutputSourceRef,
-  ReviewChangeScope,
-  ReviewChangeSource,
-  ReviewChangeSourceRef,
-  ReviewChangeStrategy,
-  ReviewChangeWorkflowConfig
-} from "./review_change.js";
+  PatternReviewChangeArtifactBundleSource,
+  PatternReviewChangeBrief,
+  PatternReviewChangeContextPolicy,
+  PatternReviewChangeDelivery,
+  PatternReviewChangeFileSourceRef,
+  PatternReviewChangeArtifactSourceRef,
+  PatternReviewChangeManagedNodeSource,
+  PatternReviewChangeScope,
+  PatternReviewChangeSource,
+  PatternReviewChangeSourceRef,
+  PatternReviewChangeStrategy,
+  PatternReviewChangeConfig
+} from "./pattern_review_change.js";

@@ -1,9 +1,11 @@
 import type {
   AuthoredNodeKind,
+  ArtifactSourceKind,
   CheckKind,
   ContextSelector,
+  FailureBehavior,
   HarnessName,
-  OutputSourceKind,
+  PrerequisiteKind,
   ReasoningEffort,
   SandboxMode,
   WorkspaceBackend
@@ -15,8 +17,8 @@ export interface RepoDefinition {
 }
 
 export interface InputRules {
-  max_total_bytes?: number;
-  max_bytes_per_item?: number;
+  max_total_tokens?: number;
+  max_tokens_per_item?: number;
 }
 
 export interface DeterministicPassIfExitCode {
@@ -45,6 +47,8 @@ export interface GraphProfile {
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
+  skip_git_repo_check?: boolean;
+  env_files?: string[];
   timeout_sec?: number;
   input_rules?: InputRules;
   deterministic_check_defaults?: DeterministicCheckDefaults;
@@ -57,38 +61,82 @@ export interface GraphDefaults {
 }
 
 export interface FileInput {
-  kind: "file";
+  name: string;
+  from: "workspace_file";
   path: string;
 }
 
 export interface GlobInput {
-  kind: "glob";
+  name: string;
+  from: "workspace_glob";
   path: string;
   max_files?: number;
 }
 
 export interface TextInput {
-  kind: "text";
   name: string;
+  from: "text";
   text: string;
 }
 
-export type InputItem = FileInput | GlobInput | TextInput;
-
-export interface ContextReference {
+export interface ArtifactContext {
+  name: string;
+  from: "artifact";
   node: string;
-  include: "summary" | "result" | "output";
-  output?: string;
+  artifact: string;
   iteration?: ContextSelector;
   attempt?: ContextSelector;
   optional?: boolean;
 }
 
-export interface OutputDefinition {
-  name: string;
-  from: OutputSourceKind;
+export type ContextItem = FileInput | GlobInput | TextInput | ArtifactContext;
+
+export interface ArtifactReference {
+  node: string;
+  artifact: string;
+  iteration?: ContextSelector;
+  attempt?: ContextSelector;
+  optional?: boolean;
+}
+
+export interface ArtifactDefinition {
+  from: ArtifactSourceKind;
+  path: string;
+  description: string;
+}
+
+export interface FilePrerequisite {
+  kind: Extract<PrerequisiteKind, "file">;
   path: string;
   required?: boolean;
+}
+
+export interface CommandPrerequisite {
+  kind: Extract<PrerequisiteKind, "command">;
+  command: string;
+  required?: boolean;
+}
+
+export interface EnvPrerequisite {
+  kind: Extract<PrerequisiteKind, "env">;
+  name: string;
+  required?: boolean;
+}
+
+export interface RepoPrerequisite {
+  kind: Extract<PrerequisiteKind, "repo">;
+  repo: string;
+  required?: boolean;
+}
+
+export type GraphPrerequisiteCheck =
+  | FilePrerequisite
+  | CommandPrerequisite
+  | EnvPrerequisite
+  | RepoPrerequisite;
+
+export interface GraphPrerequisites {
+  checks: GraphPrerequisiteCheck[];
 }
 
 export interface BaseNode {
@@ -99,9 +147,8 @@ export interface BaseNode {
 export interface BaseExecutableNode extends BaseNode {
   repo?: string;
   profile?: string;
-  inputs?: InputItem[];
-  context_from?: ContextReference[];
-  outputs?: OutputDefinition[];
+  context?: ContextItem[];
+  artifacts?: Record<string, ArtifactDefinition>;
   timeout_sec?: number;
 }
 
@@ -118,7 +165,9 @@ export interface ExecNode extends BaseExecutableNode {
   command: string;
   args?: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
+  on_failure?: FailureBehavior;
 }
 
 export interface CheckNode extends BaseExecutableNode {
@@ -127,18 +176,20 @@ export interface CheckNode extends BaseExecutableNode {
   command?: string;
   args?: string[];
   cwd?: string;
+  env_files?: string[];
   env?: Record<string, string>;
   pass_if?: DeterministicPassIf;
   prompt?: string;
   rubric?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;
+  on_failure?: FailureBehavior;
 }
 
 export interface CheckpointNode extends BaseExecutableNode {
   type: "checkpoint";
   prompt: string;
-  review_from: ContextReference;
+  review_from: ArtifactReference;
 }
 
 export interface SequenceNode extends BaseNode {
@@ -171,6 +222,7 @@ export interface AuthoredGraphDocument {
   repos: Record<string, RepoDefinition>;
   defaults?: GraphDefaults;
   profiles?: Record<string, GraphProfile>;
+  prerequisites?: GraphPrerequisites;
   graph: ContainerGraphNode;
 }
 

@@ -16,8 +16,8 @@ import { getHarnessCapabilities } from "./harness_capabilities.js";
 import { workspaceBackends } from "./schema.js";
 
 export interface EffectiveInputRules {
-  max_total_bytes: number;
-  max_bytes_per_item: number;
+  max_total_tokens: number;
+  max_tokens_per_item: number;
 }
 
 export interface EffectiveNodePolicy {
@@ -27,6 +27,7 @@ export interface EffectiveNodePolicy {
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
+  skip_git_repo_check?: boolean;
   timeout_sec: number;
   input_rules: EffectiveInputRules;
 }
@@ -44,8 +45,8 @@ export interface LaunchOverrides {
 }
 
 export const builtInInputRules: EffectiveInputRules = {
-  max_total_bytes: 524288,
-  max_bytes_per_item: 131072
+  max_total_tokens: 128000,
+  max_tokens_per_item: 32000
 };
 
 export const builtInTimeoutSeconds = 1800;
@@ -54,8 +55,8 @@ export const builtInCodexReasoningEffort: ReasoningEffort = "medium";
 function mergeInputRules(...rules: Array<InputRules | undefined>): EffectiveInputRules {
   return rules.reduce<EffectiveInputRules>(
     (current, next) => ({
-      max_total_bytes: next?.max_total_bytes ?? current.max_total_bytes,
-      max_bytes_per_item: next?.max_bytes_per_item ?? current.max_bytes_per_item
+      max_total_tokens: next?.max_total_tokens ?? current.max_total_tokens,
+      max_tokens_per_item: next?.max_tokens_per_item ?? current.max_tokens_per_item
     }),
     builtInInputRules
   );
@@ -212,6 +213,7 @@ export function resolveNodePolicy(
   let model: string | undefined;
   let reasoning_effort: ReasoningEffort | undefined;
   let sandbox: SandboxMode | undefined;
+  let skip_git_repo_check: boolean | undefined;
 
   if (node.type === "agent" || isAiCheck(node)) {
     harness = node_profile?.harness ?? launch_profile?.harness;
@@ -238,6 +240,13 @@ export function resolveNodePolicy(
       node.type === "agent"
         ? node.sandbox ?? node_profile?.sandbox ?? launch_profile?.sandbox ?? "workspace-write"
         : "read-only";
+    skip_git_repo_check =
+      harness === "codex-cli"
+        ? node_profile?.skip_git_repo_check ??
+          (canInheritLaunchModel(launch_profile, node_profile)
+            ? launch_profile?.skip_git_repo_check
+            : undefined)
+        : undefined;
 
     if (!harness) {
       diagnostics.push({
@@ -262,6 +271,7 @@ export function resolveNodePolicy(
       ...(model ? { model } : {}),
       ...(reasoning_effort ? { reasoning_effort } : {}),
       ...(sandbox ? { sandbox } : {}),
+      ...(skip_git_repo_check !== undefined ? { skip_git_repo_check } : {}),
       timeout_sec,
       input_rules
     },

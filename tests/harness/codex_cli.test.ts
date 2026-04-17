@@ -10,15 +10,18 @@ async function createMockCodexBinary(tempRoot: string): Promise<{
   binary_path: string;
   argv_path: string;
   stdin_path: string;
+  env_path: string;
 }> {
   const binary_path = join(tempRoot, "mock-codex.mjs");
   const argv_path = join(tempRoot, "argv.json");
   const stdin_path = join(tempRoot, "stdin.txt");
+  const env_path = join(tempRoot, "env.json");
   const source = `#!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 
 const argvPath = process.env.MOCK_ARGV_PATH;
 const stdinPath = process.env.MOCK_STDIN_PATH;
+const envPath = process.env.MOCK_ENV_PATH;
 
 let stdin = "";
 process.stdin.setEncoding("utf8");
@@ -31,6 +34,14 @@ process.stdin.on("end", () => {
   }
   if (stdinPath) {
     writeFileSync(stdinPath, stdin);
+  }
+  if (envPath) {
+    writeFileSync(envPath, JSON.stringify({
+      AGENTFLOW_WORKSPACE: process.env.AGENTFLOW_WORKSPACE,
+      AGENTFLOW_OUTPUT_DIR: process.env.AGENTFLOW_OUTPUT_DIR,
+      AGENTFLOW_CONTEXT_PACKET: process.env.AGENTFLOW_CONTEXT_PACKET,
+      AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST
+    }, null, 2));
   }
 
   const args = process.argv.slice(2);
@@ -51,7 +62,8 @@ process.stdin.on("end", () => {
   return {
     binary_path,
     argv_path,
-    stdin_path
+    stdin_path,
+    env_path
   };
 }
 
@@ -136,8 +148,10 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-codex",
         prompt: "Read from env override.",
-        contextPacketPath: join(executionDir, "context_packet.json"),
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
         outputDir: executionDir,
+        artifacts: {},
         timeoutSec: 10,
         signal: undefined
       });
@@ -185,8 +199,10 @@ describe("codex cli harness", () => {
 
     const previousArgvPath = process.env.MOCK_ARGV_PATH;
     const previousStdinPath = process.env.MOCK_STDIN_PATH;
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
     process.env.MOCK_ARGV_PATH = mock.argv_path;
     process.env.MOCK_STDIN_PATH = mock.stdin_path;
+    process.env.MOCK_ENV_PATH = mock.env_path;
 
     try {
       const result = await harness.run({
@@ -195,17 +211,32 @@ describe("codex cli harness", () => {
         repoAlias: "main",
         repoPath: repoDir,
         sandbox: "workspace-write",
+        skipGitRepoCheck: true,
         model: "gpt-5-codex",
         reasoningEffort: "xhigh",
         prompt: "Implement the change.",
-        contextPacketPath: join(executionDir, "context_packet.json"),
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
         outputDir: executionDir,
+        artifacts: {
+          handoff: {
+            from: "output_dir",
+            path: "handoff.md",
+            description: "Markdown handoff for downstream nodes."
+          },
+          junit: {
+            from: "workspace",
+            path: "reports/junit.xml",
+            description: "JUnit XML report written by the workspace validation command."
+          }
+        },
         timeoutSec: 10,
         signal: undefined
       });
 
       const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
       const prompt = await readFile(mock.stdin_path, "utf8");
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
 
       expect(result.status).toBe("passed");
       expect(argv).toEqual(
@@ -217,6 +248,7 @@ describe("codex cli harness", () => {
           executionDir,
           "--output-last-message",
           join(executionDir, "last_message.txt"),
+          "--skip-git-repo-check",
           "-m",
           "gpt-5-codex",
           "-c",
@@ -224,14 +256,33 @@ describe("codex cli harness", () => {
           "-"
         ])
       );
+      expect(prompt).toContain("## Agentflow Runtime Contract");
+      expect(prompt).toContain("You are executing one node in an Agentflow graph.");
+      expect(prompt).toContain("Future nodes can consume only named artifacts");
+      expect(prompt).toContain("## Node Task");
       expect(prompt).toContain("Implement the change.");
-      expect(prompt).toContain("Context packet");
-      expect(prompt).toContain(join(executionDir, "context_packet.json"));
+      expect(prompt).toContain("Exact context packet");
+      expect(prompt).toContain(join(executionDir, "context", "packet.json"));
+      expect(prompt).toContain("Read first");
+      expect(prompt).toContain(join(executionDir, "context", "manifest.md"));
       expect(prompt).toContain("Output directory");
-      expect(prompt).toContain("## Working Contract");
-      expect(prompt).toContain("default local contract");
-      expect(prompt).toContain("higher-priority instruction overrides them");
-      expect(prompt).toContain("If the context summary reports omitted or truncated items");
+      expect(prompt).toContain("## Artifact Contract");
+      expect(prompt).toContain("Every declared artifact must exist before you finish");
+      expect(prompt).toContain("`handoff` (from `output_dir`)");
+      expect(prompt).toContain("$AGENTFLOW_OUTPUT_DIR/handoff.md");
+      expect(prompt).toContain("Expected content: Markdown handoff for downstream nodes.");
+      expect(prompt).toContain("`junit` (from `workspace`)");
+      expect(prompt).toContain("$AGENTFLOW_WORKSPACE/reports/junit.xml");
+      expect(prompt).toContain("Expected content: JUnit XML report written by the workspace validation command.");
+      expect(prompt).toContain("## Final Response Requirements");
+      expect(prompt).toContain("captured by Agentflow as the reserved `agent_response` artifact");
+      expect(prompt).toContain("Artifacts produced: names and paths of declared artifacts you wrote.");
+      expect(env).toEqual({
+        AGENTFLOW_WORKSPACE: repoDir,
+        AGENTFLOW_OUTPUT_DIR: executionDir,
+        AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
+        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md")
+      });
       expect(result.outputJson).toEqual({
         passed: true,
         summary: "codex ok"
@@ -254,6 +305,12 @@ describe("codex cli harness", () => {
         delete process.env.MOCK_STDIN_PATH;
       } else {
         process.env.MOCK_STDIN_PATH = previousStdinPath;
+      }
+
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
       }
 
       await rm(tempRoot, { recursive: true, force: true });
@@ -281,8 +338,10 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-codex",
         prompt: "Hang forever.",
-        contextPacketPath: join(executionDir, "context_packet.json"),
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
         outputDir: executionDir,
+        artifacts: {},
         timeoutSec: 1,
         signal: undefined
       });
@@ -322,8 +381,10 @@ describe("codex cli harness", () => {
           sandbox: "workspace-write",
           model: "gpt-5-codex",
           prompt: "This should fail fast.",
-          contextPacketPath: join(executionDir, "context_packet.json"),
+          contextPacketPath: join(executionDir, "context", "packet.json"),
+          contextManifestPath: join(executionDir, "context", "manifest.md"),
           outputDir: executionDir,
+          artifacts: {},
           timeoutSec: 10,
           signal: undefined
         })
@@ -357,8 +418,10 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-codex",
         prompt: "Stream logs.",
-        contextPacketPath: join(executionDir, "context_packet.json"),
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
         outputDir: executionDir,
+        artifacts: {},
         timeoutSec: 10,
         signal: undefined,
         onStdoutChunk(chunk) {

@@ -119,14 +119,13 @@ describe("graph compilation", () => {
                   type: "agent",
                   id: "draft",
                   prompt: "Draft the artifact.",
-                  outputs: [
-                    {
-                      name: "draft_spec",
-                      from: "attempt",
+                  artifacts: {
+                    draft_spec: {
+                      from: "output_dir",
                       path: "draft.md",
-                      required: true
+                      description: "Test artifact produced at draft.md."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "checkpoint",
@@ -134,8 +133,7 @@ describe("graph compilation", () => {
                   prompt: "Review the draft.",
                   review_from: {
                     node: "draft",
-                    include: "output",
-                    output: "draft_spec"
+                    artifact: "draft_spec"
                   }
                 }
               ]
@@ -167,8 +165,7 @@ describe("graph compilation", () => {
           kind: "checkpoint",
           review_from: expect.objectContaining({
             node: "draft",
-            include: "output",
-            output: "draft_spec"
+            artifact: "draft_spec"
           })
         })
       ])
@@ -246,10 +243,12 @@ describe("graph compilation", () => {
             type: "agent",
             id: "handoff",
             prompt: "Summarize the run.",
-            context_from: [
+            context: [
               {
+                name: "fix_response",
+                from: "artifact",
                 node: "fix",
-                include: "summary"
+                artifact: "agent_response"
               }
             ]
           }
@@ -267,8 +266,73 @@ describe("graph compilation", () => {
     expect(compilation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: expect.stringContaining("context_from[0].iteration"),
-          message: expect.stringContaining("requires an iteration selector")
+          path: expect.stringContaining("context[0].iteration"),
+          message: expect.stringContaining("latest_failed")
+        })
+      ])
+    );
+  });
+
+  it("names the actual repeat body exit when repeat.until resolves before the body exit", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "repeat-body-exit-mismatch",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "check",
+                  id: "verify",
+                  check_kind: "deterministic",
+                  command: "sh"
+                },
+                {
+                  type: "agent",
+                  id: "summarize",
+                  prompt: "Summarize the latest attempt."
+                }
+              ]
+            },
+            until: {
+              node: "verify"
+            }
+          }
+        ]
+      }
+    });
+
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+
+    expect(compilation.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].until.node",
+          message: expect.stringContaining('currently exits through "summarize"')
         })
       ])
     );
@@ -308,10 +372,12 @@ describe("graph compilation", () => {
                 type: "agent",
                 id: "report",
                 prompt: "Write the report.",
-                context_from: [
+                context: [
                   {
+                    name: "inspect_response",
+                    from: "artifact",
                     node: "inspect",
-                    include: "summary"
+                    artifact: "agent_response"
                   }
                 ]
               }
@@ -331,7 +397,7 @@ describe("graph compilation", () => {
     expect(compilation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: expect.stringContaining("context_from[0].node"),
+          path: expect.stringContaining("context[0].node"),
           message: expect.stringContaining("not guaranteed to execute before")
         })
       ])
@@ -355,6 +421,7 @@ describe("graph compilation", () => {
           harness: "codex-cli",
           model: "gpt-5-codex",
           sandbox: "workspace-write",
+          env_files: [".env.defaults"],
           deterministic_check_defaults: {
             pass_if: {
               exit_code: 3
@@ -371,10 +438,16 @@ describe("graph compilation", () => {
         id: "root",
         steps: [
           {
+            type: "exec",
+            id: "profile_env_command",
+            command: "node"
+          },
+          {
             type: "check",
             id: "local_gate",
             check_kind: "deterministic",
             command: "npm",
+            env_files: [".env.local"],
             env: {
               ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
             }
@@ -399,13 +472,21 @@ describe("graph compilation", () => {
     expect(compilation.diagnostics).toEqual([]);
 
     const compiledGraph = compilation.compiled_graph!;
+    const profileEnvCommand = compiledGraph.nodes.find((node) => node.authored_id === "profile_env_command");
     const deterministicCheck = compiledGraph.nodes.find((node) => node.authored_id === "local_gate");
     const aiCheck = compiledGraph.nodes.find((node) => node.authored_id === "ai_gate");
 
+    expect(profileEnvCommand).toEqual(
+      expect.objectContaining({
+        kind: "exec",
+        env_files: [".env.defaults"]
+      })
+    );
     expect(deterministicCheck).toEqual(
       expect.objectContaining({
         kind: "check",
         check_kind: "deterministic",
+        env_files: [".env.local"],
         env: {
           ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
         },
@@ -449,8 +530,8 @@ describe("graph compilation", () => {
           sandbox: "workspace-write",
           timeout_sec: 900,
           input_rules: {
-            max_total_bytes: 131072,
-            max_bytes_per_item: 32768
+            max_total_tokens: 32000,
+            max_tokens_per_item: 8000
           }
         },
         review: {
@@ -459,8 +540,8 @@ describe("graph compilation", () => {
           sandbox: "read-only",
           timeout_sec: 120,
           input_rules: {
-            max_total_bytes: 65536,
-            max_bytes_per_item: 16384
+            max_total_tokens: 16000,
+            max_tokens_per_item: 4000
           }
         }
       },
@@ -524,8 +605,8 @@ describe("graph compilation", () => {
             sandbox: "read-only",
             timeout_sec: 120,
             input_rules: {
-              max_total_bytes: 65536,
-              max_bytes_per_item: 16384
+              max_total_tokens: 16000,
+              max_tokens_per_item: 4000
             }
           })
         }),
@@ -536,8 +617,8 @@ describe("graph compilation", () => {
             workspace_backend: "inplace",
             timeout_sec: 900,
             input_rules: {
-              max_total_bytes: 131072,
-              max_bytes_per_item: 32768
+              max_total_tokens: 32000,
+              max_tokens_per_item: 8000
             }
           })
         }),
@@ -716,7 +797,7 @@ describe("graph compilation", () => {
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].until.node",
-          message: "repeat.until.node must resolve to the body exit node in this release."
+          message: expect.stringContaining('currently exits through "repair"')
         })
       ])
     );

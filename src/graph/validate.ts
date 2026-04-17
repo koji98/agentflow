@@ -7,12 +7,14 @@ import type {
   AuthoredGraphNode,
   AuthoredGraphSummary,
   ContainerGraphNode,
-  ContextReference,
+  ArtifactReference,
+  ContextItem,
   ExecutableGraphNode,
-  InputItem
+  GraphPrerequisiteCheck
 } from "./authored.js";
 import { normalizeAuthoredGraphDocument } from "./normalize.js";
 import type { LoweredManagedNode } from "./normalize.js";
+import { reservedArtifactNames } from "./schema.js";
 import type { GraphDiagnostic } from "./schema.js";
 
 export type ValidationDiagnostic = GraphDiagnostic;
@@ -96,28 +98,80 @@ function readQualifiedRepoPath(pathValue: string): string {
   return separatorIndex <= 0 ? pathValue : pathValue.slice(separatorIndex + 1);
 }
 
-function validateInputPath(
-  input: InputItem,
+function validateWorkspaceContextPath(
+  item: Extract<ContextItem, { from: "workspace_file" | "workspace_glob" }>,
   path: string,
   repoAliases: Set<string>,
   diagnostics: ValidationDiagnostic[]
 ): void {
-  if (input.kind === "text") {
-    return;
-  }
-
-  const repoAlias = readQualifiedRepoAlias(input.path);
+  const repoAlias = readQualifiedRepoAlias(item.path);
   if (repoAlias && !repoAliases.has(repoAlias)) {
     diagnostics.push({
       path,
-      message: `Unknown repo alias "${repoAlias}" in input path "${input.path}".`
+      message: `Unknown repo alias "${repoAlias}" in context path "${item.path}".`
     });
   }
 
-  if (!isRelativeSubpath(readQualifiedRepoPath(input.path))) {
+  if (!isRelativeSubpath(readQualifiedRepoPath(item.path))) {
     diagnostics.push({
       path,
-      message: `Input path "${input.path}" must stay within the selected repo root.`
+      message: `Context path "${item.path}" must stay within the selected repo root.`
+    });
+  }
+}
+
+function validateArtifactPath(
+  artifactName: string,
+  artifactPath: string,
+  path: string,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  if (artifactPath.includes(":") || !isRelativeSubpath(artifactPath)) {
+    diagnostics.push({
+      path,
+      message: `Artifact "${artifactName}" path "${artifactPath}" must stay within its source root.`
+    });
+  }
+}
+
+function validatePrerequisiteCheck(
+  check: GraphPrerequisiteCheck,
+  path: string,
+  repoAliases: Set<string>,
+  repoCount: number,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  if (check.kind === "file") {
+    const repoAlias = readQualifiedRepoAlias(check.path);
+
+    if (repoAlias && !repoAliases.has(repoAlias)) {
+      diagnostics.push({
+        path: `${path}.path`,
+        message: `Unknown repo alias "${repoAlias}" in prerequisite path "${check.path}".`
+      });
+    }
+
+    if (!repoAlias && repoCount > 1) {
+      diagnostics.push({
+        path: `${path}.path`,
+        message: `Prerequisite path "${check.path}" must be repo-qualified when multiple repos exist.`
+      });
+    }
+
+    if (!isRelativeSubpath(readQualifiedRepoPath(check.path))) {
+      diagnostics.push({
+        path: `${path}.path`,
+        message: `Prerequisite path "${check.path}" must stay within the selected repo root.`
+      });
+    }
+
+    return;
+  }
+
+  if (check.kind === "repo" && !repoAliases.has(check.repo)) {
+    diagnostics.push({
+      path: `${path}.repo`,
+      message: `Unknown repo alias "${check.repo}".`
     });
   }
 }
@@ -139,8 +193,23 @@ function validateNodeCwd(
   }
 }
 
-function validateContextReference(
-  reference: ContextReference,
+function validateEnvFiles(
+  envFiles: string[] | undefined,
+  path: string,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  (envFiles ?? []).forEach((envFile, index) => {
+    if (envFile.includes(":") || !isRelativeSubpath(envFile)) {
+      diagnostics.push({
+        path: `${path}[${index}]`,
+        message: `env_files entry "${envFile}" must stay within the node workspace root.`
+      });
+    }
+  });
+}
+
+function validateArtifactReference(
+  reference: ArtifactReference,
   path: string,
   currentNodeId: string,
   nodeIndex: Map<string, NodeMetadata>,
@@ -151,7 +220,7 @@ function validateContextReference(
   if (!targetMetadata) {
     diagnostics.push({
       path: `${path}.node`,
-      message: `context_from references unknown node "${reference.node}".`
+      message: `Artifact reference points to unknown node "${reference.node}".`
     });
     return;
   }
@@ -159,7 +228,7 @@ function validateContextReference(
   if (!isExecutableNode(targetMetadata.node)) {
     diagnostics.push({
       path: `${path}.node`,
-      message: `context_from references "${reference.node}", but only executable nodes can provide context.`
+      message: `Artifact reference points to "${reference.node}", but only executable nodes can provide artifacts.`
     });
     return;
   }
@@ -167,21 +236,20 @@ function validateContextReference(
   if (reference.node === currentNodeId) {
     diagnostics.push({
       path: `${path}.node`,
-      message: "context_from cannot reference the current node."
+      message: "Artifact references cannot reference the current node."
     });
   }
 
-  if (reference.include === "output") {
-    const declaredOutputs = new Set(
-      (targetMetadata.node.outputs ?? []).map((output) => output.name)
-    );
+  const declaredArtifacts = new Set([
+    ...Object.keys(targetMetadata.node.artifacts ?? {}),
+    ...reservedArtifactNames
+  ]);
 
-    if (!reference.output || !declaredOutputs.has(reference.output)) {
-      diagnostics.push({
-        path: `${path}.output`,
-        message: `context_from.output must reference a declared output on node "${reference.node}".`
-      });
-    }
+  if (!declaredArtifacts.has(reference.artifact)) {
+    diagnostics.push({
+      path: `${path}.artifact`,
+      message: `Artifact reference must name a declared or reserved artifact on node "${reference.node}".`
+    });
   }
 }
 
@@ -191,6 +259,14 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
   const repoCount = repoAliases.size;
   const seenNodeIds = new Set<string>();
   const nodeIndex = new Map<string, NodeMetadata>();
+
+  (document.prerequisites?.checks ?? []).forEach((check, index) => {
+    validatePrerequisiteCheck(check, `$.prerequisites.checks[${index}]`, repoAliases, repoCount, diagnostics);
+  });
+
+  Object.entries(document.profiles ?? {}).forEach(([profileName, profile]) => {
+    validateEnvFiles(profile.env_files, `$.profiles.${profileName}.env_files`, diagnostics);
+  });
 
   visitNodes(document.graph, (node, metadata) => {
     if (seenNodeIds.has(node.id)) {
@@ -225,25 +301,34 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
         });
       }
 
-      (node.inputs ?? []).forEach((input, index) => {
-        validateInputPath(input, `${metadata.path}.inputs[${index}].path`, repoAliases, diagnostics);
+      const contextNames = new Set<string>();
+      (node.context ?? []).forEach((item, index) => {
+        if (contextNames.has(item.name)) {
+          diagnostics.push({
+            path: `${metadata.path}.context[${index}].name`,
+            message: `Context item name "${item.name}" is duplicated on node "${node.id}".`
+          });
+        }
+
+        contextNames.add(item.name);
+
+        if (item.from === "workspace_file" || item.from === "workspace_glob") {
+          validateWorkspaceContextPath(
+            item,
+            `${metadata.path}.context[${index}].path`,
+            repoAliases,
+            diagnostics
+          );
+        }
       });
 
       if (node.type === "exec" || (node.type === "check" && node.check_kind === "deterministic")) {
         validateNodeCwd(node.cwd, `${metadata.path}.cwd`, diagnostics);
+        validateEnvFiles(node.env_files, `${metadata.path}.env_files`, diagnostics);
       }
 
-      const declaredOutputs = new Set<string>();
-      (node.outputs ?? []).forEach((output, index) => {
-        if (declaredOutputs.has(output.name)) {
-          diagnostics.push({
-            path: `${metadata.path}.outputs[${index}].name`,
-            message: `Output name "${output.name}" is duplicated on node "${node.id}".`
-          });
-          return;
-        }
-
-        declaredOutputs.add(output.name);
+      Object.entries(node.artifacts ?? {}).forEach(([name, artifact]) => {
+        validateArtifactPath(name, artifact.path, `${metadata.path}.artifacts.${name}.path`, diagnostics);
       });
     }
   }, "$.graph");
@@ -263,14 +348,23 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
           path: `${metadata.path}.until.node`,
           message: `repeat.until.node "${node.until.node}" must reference a descendant check or checkpoint node.`
         });
+      } else if (untilTarget.type === "check" && untilTarget.on_failure === "continue") {
+        diagnostics.push({
+          path: `${metadata.path}.until.node`,
+          message: `repeat.until.node "${node.until.node}" cannot use on_failure = "continue".`
+        });
       }
     }
 
     if (isExecutableNode(node)) {
-      (node.context_from ?? []).forEach((reference, index) => {
-        validateContextReference(
-          reference,
-          `${metadata.path}.context_from[${index}]`,
+      (node.context ?? []).forEach((item, index) => {
+        if (item.from !== "artifact") {
+          return;
+        }
+
+        validateArtifactReference(
+          item,
+          `${metadata.path}.context[${index}]`,
           node.id,
           nodeIndex,
           diagnostics
@@ -285,7 +379,7 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
           });
         }
 
-        validateContextReference(
+        validateArtifactReference(
           node.review_from,
           `${metadata.path}.review_from`,
           node.id,
@@ -293,12 +387,6 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
           diagnostics
         );
 
-        if (node.review_from.include !== "output") {
-          diagnostics.push({
-            path: `${metadata.path}.review_from.include`,
-            message: "checkpoint.review_from must reference an upstream output artifact."
-          });
-        }
       }
     }
   }, "$.graph");

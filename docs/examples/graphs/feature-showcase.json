@@ -19,8 +19,8 @@
       "sandbox": "read-only",
       "timeout_sec": 900,
       "input_rules": {
-        "max_total_bytes": 393216,
-        "max_bytes_per_item": 131072
+        "max_total_tokens": 96000,
+        "max_tokens_per_item": 32000
       }
     },
     "analysis": {
@@ -30,8 +30,8 @@
       "sandbox": "read-only",
       "timeout_sec": 1200,
       "input_rules": {
-        "max_total_bytes": 524288,
-        "max_bytes_per_item": 131072
+        "max_total_tokens": 128000,
+        "max_tokens_per_item": 32000
       }
     },
     "review": {
@@ -56,30 +56,31 @@
         "repo": "main",
         "profile": "analysis",
         "prompt": "Inspect this repository and summarize the product shape, the main CLI workflow, and any operator-facing constraints. Do not modify files.",
-        "inputs": [
+        "context": [
           {
-            "kind": "file",
+            "name": "readme",
+            "from": "workspace_file",
             "path": "README.md"
           },
           {
-            "kind": "glob",
+            "name": "docs",
+            "from": "workspace_glob",
             "path": "docs/*.md",
             "max_files": 4
           },
           {
-            "kind": "text",
             "name": "demo_goal",
+            "from": "text",
             "text": "Produce a feature showcase run that stays read-only and easy to inspect."
           }
         ],
-        "outputs": [
-          {
-            "name": "survey_notes",
-            "from": "attempt",
+        "artifacts": {
+          "survey_notes": {
+            "from": "output_dir",
             "path": "survey-notes.md",
-            "required": false
+            "description": "Markdown notes from the repository survey."
           }
-        ]
+        }
       },
       {
         "type": "parallel",
@@ -110,14 +111,13 @@
               "json_path": "$.passed",
               "equals": true
             },
-            "outputs": [
-              {
-                "name": "package_contract",
-                "from": "attempt",
+            "artifacts": {
+              "package_contract": {
+                "from": "output_dir",
                 "path": "result.json",
-                "required": true
+                "description": "Structured JSON result from the package contract check."
               }
-            ]
+            }
           }
         ]
       },
@@ -127,25 +127,27 @@
         "repo": "main",
         "profile": "analysis",
         "prompt": "Using the repository survey and package contract output, write a concise set of constraints and observations that a human operator should know before running a graph in this repository. Do not modify files.",
-        "context_from": [
+        "context": [
           {
+            "name": "survey_response",
+            "from": "artifact",
             "node": "survey_repo",
-            "include": "summary"
+            "artifact": "agent_response"
           },
           {
+            "name": "package_contract",
+            "from": "artifact",
             "node": "verify_package_contract",
-            "include": "output",
-            "output": "package_contract"
+            "artifact": "package_contract"
           }
         ],
-        "outputs": [
-          {
-            "name": "constraints_brief",
-            "from": "attempt",
+        "artifacts": {
+          "constraints_brief": {
+            "from": "output_dir",
             "path": "constraints-brief.md",
-            "required": false
+            "description": "Markdown constraints and observations for running Agentflow in this repository."
           }
-        ]
+        }
       },
       {
         "type": "repeat",
@@ -161,24 +163,27 @@
               "repo": "main",
               "profile": "analysis",
               "prompt": "Draft a concise operator walkthrough for this repository that explains how to validate, compile, run, and inspect a graph. Keep it read-only and do not modify files.",
-              "context_from": [
+              "context": [
                 {
+                  "name": "constraints_response",
+                  "from": "artifact",
                   "node": "synthesize_constraints",
-                  "include": "summary"
+                  "artifact": "agent_response"
                 },
                 {
+                  "name": "survey_response",
+                  "from": "artifact",
                   "node": "survey_repo",
-                  "include": "summary"
+                  "artifact": "agent_response"
                 }
               ],
-              "outputs": [
-                {
-                  "name": "walkthrough_draft",
-                  "from": "attempt",
+              "artifacts": {
+                "walkthrough_draft": {
+                  "from": "output_dir",
                   "path": "walkthrough-draft.md",
-                  "required": false
+                  "description": "Markdown draft of the operator walkthrough."
                 }
-              ]
+              }
             },
             {
               "type": "agent",
@@ -186,24 +191,35 @@
               "repo": "main",
               "profile": "review",
               "prompt": "Review the drafted walkthrough, tighten weak spots, and make sure it clearly explains the CLI order, the role of the web UI, and the read-only nature of this showcase. Do not modify files.",
-              "context_from": [
+              "context": [
                 {
+                  "name": "draft_response",
+                  "from": "artifact",
                   "node": "draft_walkthrough",
-                  "include": "summary"
+                  "artifact": "agent_response"
                 },
                 {
+                  "name": "failed_review_report",
+                  "from": "artifact",
+                  "node": "review_walkthrough",
+                  "artifact": "review_report",
+                  "iteration": "latest_failed",
+                  "optional": true
+                },
+                {
+                  "name": "package_contract_result",
+                  "from": "artifact",
                   "node": "verify_package_contract",
-                  "include": "result"
+                  "artifact": "result_json"
                 }
               ],
-              "outputs": [
-                {
-                  "name": "walkthrough_final",
-                  "from": "attempt",
+              "artifacts": {
+                "walkthrough_final": {
+                  "from": "output_dir",
                   "path": "walkthrough-final.md",
-                  "required": false
+                  "description": "Markdown final walkthrough after review tightening."
                 }
-              ]
+              }
             },
             {
               "type": "check",
@@ -213,24 +229,27 @@
               "check_kind": "ai",
               "prompt": "Review the current walkthrough and decide whether it is clear, concrete, and sufficient for a developer to validate, compile, run, and inspect a graph in this repository.",
               "rubric": "Pass only if the walkthrough clearly mentions validate, compile, run, and ui or web monitor flow, accurately describes the repository as local-first, and does not claim the showcase edits files. Fail if any of those are missing or misleading.",
-              "context_from": [
+              "context": [
                 {
+                  "name": "walkthrough_response",
+                  "from": "artifact",
                   "node": "tighten_walkthrough",
-                  "include": "summary"
+                  "artifact": "agent_response"
                 },
                 {
+                  "name": "constraints_response",
+                  "from": "artifact",
                   "node": "synthesize_constraints",
-                  "include": "summary"
+                  "artifact": "agent_response"
                 }
               ],
-              "outputs": [
-                {
-                  "name": "review_report",
-                  "from": "attempt",
+              "artifacts": {
+                "review_report": {
+                  "from": "output_dir",
                   "path": "result.json",
-                  "required": true
+                  "description": "Structured JSON AI review result for the walkthrough."
                 }
-              ]
+              }
             }
           ]
         },
@@ -244,20 +263,24 @@
         "repo": "main",
         "profile": "default",
         "prompt": "Produce a final handoff that explains what this showcase run demonstrated. Mention the graph version, the node kinds used, the profile strategy, the deterministic package contract check, the AI walkthrough review, and the final commands a user would run next. Do not modify files.",
-        "context_from": [
+        "context": [
           {
+            "name": "survey_response",
+            "from": "artifact",
             "node": "survey_repo",
-            "include": "summary"
+            "artifact": "agent_response"
           },
           {
+            "name": "package_contract",
+            "from": "artifact",
             "node": "verify_package_contract",
-            "include": "output",
-            "output": "package_contract"
+            "artifact": "package_contract"
           },
           {
+            "name": "review_report",
+            "from": "artifact",
             "node": "review_walkthrough",
-            "include": "output",
-            "output": "review_report",
+            "artifact": "review_report",
             "iteration": "latest_passed"
           }
         ]

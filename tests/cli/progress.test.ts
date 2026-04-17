@@ -29,13 +29,12 @@ function createCompiledGraph(): CompiledGraph {
           sandbox: "read-only",
           timeout_sec: 60,
           input_rules: {
-            max_total_bytes: 65536,
-            max_bytes_per_item: 8192
+            max_total_tokens: 16000,
+            max_tokens_per_item: 2000
           }
         },
-        inputs: [],
-        context_from: [],
-        declared_outputs: [],
+        context: [],
+        declared_artifacts: {},
         prompt: "Inspect the repo."
       },
       {
@@ -55,13 +54,12 @@ function createCompiledGraph(): CompiledGraph {
           sandbox: "read-only",
           timeout_sec: 60,
           input_rules: {
-            max_total_bytes: 65536,
-            max_bytes_per_item: 8192
+            max_total_tokens: 16000,
+            max_tokens_per_item: 2000
           }
         },
-        inputs: [],
-        context_from: [],
-        declared_outputs: [],
+        context: [],
+        declared_artifacts: {},
         check_kind: "ai",
         prompt: "Check quality."
       }

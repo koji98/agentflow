@@ -19,8 +19,8 @@
       "sandbox": "read-only",
       "timeout_sec": 900,
       "input_rules": {
-        "max_total_bytes": 262144,
-        "max_bytes_per_item": 131072
+        "max_total_tokens": 64000,
+        "max_tokens_per_item": 32000
       }
     }
   },
@@ -33,17 +33,20 @@
         "id": "inspect_repo",
         "repo": "main",
         "prompt": "Inspect this repository and summarize what it does, the main CLI commands a developer would use first, and any obvious operator-facing constraints. Do not modify files.",
-        "inputs": [
+        "context": [
           {
-            "kind": "file",
+            "name": "readme",
+            "from": "workspace_file",
             "path": "README.md"
           },
           {
-            "kind": "file",
+            "name": "package",
+            "from": "workspace_file",
             "path": "package.json"
           },
           {
-            "kind": "file",
+            "name": "scope",
+            "from": "workspace_file",
             "path": "docs/SCOPE.md"
           }
         ]
@@ -68,14 +71,18 @@
         "id": "summarize_findings",
         "repo": "main",
         "prompt": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing. Do not modify files.",
-        "context_from": [
+        "context": [
           {
+            "name": "inspection_response",
+            "from": "artifact",
             "node": "inspect_repo",
-            "include": "summary"
+            "artifact": "agent_response"
           },
           {
+            "name": "package_contract_result",
+            "from": "artifact",
             "node": "verify_package_contract",
-            "include": "result"
+            "artifact": "result_json"
           }
         ]
       }

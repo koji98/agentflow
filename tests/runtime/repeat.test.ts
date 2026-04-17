@@ -192,63 +192,63 @@ describe("runtime repeat", () => {
                   type: "agent",
                   id: "revise",
                   prompt: "Revise the spec.",
-                  context_from: [
+                  context: [
                     {
+                      name: "failed_critique_merged",
+                      from: "artifact",
                       node: "merge_feedback",
-                      include: "output",
-                      output: "critique_merged",
+                      artifact: "critique_merged",
                       iteration: "latest_failed",
                       optional: true
                     },
                     {
+                      name: "failed_quality_review",
+                      from: "artifact",
                       node: "quality_review",
-                      include: "output",
-                      output: "quality_review",
+                      artifact: "quality_review",
                       iteration: "latest_failed",
                       optional: true
                     },
                     {
+                      name: "failed_operator_feedback",
+                      from: "artifact",
                       node: "human_review",
-                      include: "output",
-                      output: "operator_feedback",
+                      artifact: "operator_feedback",
                       iteration: "latest_failed",
                       optional: true
                     }
                   ],
-                  outputs: [
-                    {
-                      name: "spec_revision",
-                      from: "attempt",
+                  artifacts: {
+                    spec_revision: {
+                      from: "output_dir",
                       path: "spec-revision.md",
-                      required: true
+                      description: "Test artifact produced at spec-revision.md."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "agent",
                   id: "merge_feedback",
                   prompt: "Merge feedback.",
-                  outputs: [
-                    {
-                      name: "critique_merged",
-                      from: "attempt",
+                  artifacts: {
+                    critique_merged: {
+                      from: "output_dir",
                       path: "critique-merged.md",
-                      required: true
+                      description: "Test artifact produced at critique-merged.md."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "agent",
                   id: "quality_review",
                   prompt: "Evaluate the revision.",
-                  outputs: [
-                    {
-                      name: "quality_review",
-                      from: "attempt",
+                  artifacts: {
+                    quality_review: {
+                      from: "output_dir",
                       path: "quality-review.json",
-                      required: true
+                      description: "Test artifact produced at quality-review.json."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "checkpoint",
@@ -256,14 +256,14 @@ describe("runtime repeat", () => {
                   prompt: "Review the spec revision.",
                   review_from: {
                     node: "revise",
-                    include: "output",
-                    output: "spec_revision"
+                    artifact: "spec_revision"
                   },
-                  context_from: [
+                  context: [
                     {
+                      name: "quality_review",
+                      from: "artifact",
                       node: "quality_review",
-                      include: "output",
-                      output: "quality_review"
+                      artifact: "quality_review"
                     }
                   ]
                 }
@@ -413,14 +413,13 @@ describe("runtime repeat", () => {
                   type: "agent",
                   id: "draft",
                   prompt: "Draft the artifact.",
-                  outputs: [
-                    {
-                      name: "draft_spec",
-                      from: "attempt",
+                  artifacts: {
+                    draft_spec: {
+                      from: "output_dir",
                       path: "draft.md",
-                      required: true
+                      description: "Test artifact produced at draft.md."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "checkpoint",
@@ -428,8 +427,7 @@ describe("runtime repeat", () => {
                   prompt: "Review the draft.",
                   review_from: {
                     node: "draft",
-                    include: "output",
-                    output: "draft_spec"
+                    artifact: "draft_spec"
                   }
                 }
               ]

@@ -42,10 +42,12 @@ describe("graph normalization", () => {
                 type: "agent",
                 id: "handoff",
                 prompt: "Summarize the work.",
-                context_from: [
+                context: [
                   {
+                    name: "inspect_response",
+                    from: "artifact",
                     node: "inspect",
-                    include: "summary",
+                    artifact: "agent_response",
                     iteration: 1,
                     attempt: "latest_failed",
                     optional: true
@@ -94,16 +96,226 @@ describe("graph normalization", () => {
       expect.objectContaining({
         type: "agent",
         id: "handoff",
-        context_from: [
+        context: [
           {
+            name: "inspect_response",
+            from: "artifact",
             node: "inspect",
-            include: "summary",
+            artifact: "agent_response",
             iteration: 1,
             attempt: "latest_failed",
             optional: true
           }
         ]
       })
+    );
+  });
+
+  it("rejects legacy data-flow fields with replacement guidance", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "legacy-data-flow",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "bad",
+            prompt: "Legacy fields.",
+            inputs: [],
+            context_from: [],
+            outputs: []
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].inputs",
+          message: 'Field "inputs" has been replaced by "context".'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].context_from",
+          message: 'Field "context_from" has been replaced by context items with from = "artifact".'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].outputs",
+          message: 'Field "outputs" has been replaced by "artifacts".'
+        })
+      ])
+    );
+  });
+
+  it("rejects legacy data-flow fields on managed patterns too", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "legacy-managed-data-flow",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_generate_evaluate_fix",
+            id: "implement",
+            task_source: {
+              kind: "artifact_bundle",
+              design_packet: {
+                kind: "file",
+                path: "design-packet.json"
+              }
+            },
+            evaluation: {
+              commands: ["npm test"]
+            },
+            inputs: [],
+            context_from: [],
+            outputs: []
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].inputs",
+          message: 'Field "inputs" has been replaced by "context".'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].context_from",
+          message: 'Field "context_from" has been replaced by context items with from = "artifact".'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].outputs",
+          message: 'Field "outputs" has been replaced by "artifacts".'
+        })
+      ])
+    );
+  });
+
+  it("rejects user-declared artifacts that collide with reserved automatic artifacts", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "reserved-artifacts",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "bad",
+            prompt: "Try to redefine automatic artifacts.",
+            artifacts: {
+              agent_response: {
+                from: "output_dir",
+                path: "agent-response.md"
+              },
+              result_json: {
+                from: "output_dir",
+                path: "result.json"
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts.agent_response",
+          message: 'Artifact name "agent_response" is reserved by Agentflow.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts.result_json",
+          message: 'Artifact name "result_json" is reserved by Agentflow.'
+        })
+      ])
+    );
+  });
+
+  it("requires artifact descriptions and rejects removed artifact required flags", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "artifact-descriptions",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "bad",
+            prompt: "Write a packet.",
+            artifacts: {
+              packet: {
+                from: "output_dir",
+                path: "packet.json",
+                required: true
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts.packet.required",
+          message: 'Unknown field "required" is not part of the graph contract.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts.packet.description",
+          message: "Expected a non-empty string."
+        })
+      ])
     );
   });
 
@@ -172,7 +384,7 @@ describe("graph normalization", () => {
         expect.objectContaining({
           path: "$.graph.steps[0].type",
           message:
-            "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, deep_research, spec_design, execute_spec, review_change."
+            "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, pattern_review_change."
         })
       ])
     );
@@ -230,7 +442,254 @@ describe("graph normalization", () => {
     expect(graph.steps[0].reasoning_effort).toBe("xhigh");
   });
 
-  it("rejects input_rules.max_files and points authors to byte budgets or glob-local caps", () => {
+  it("normalizes prerequisites and soft verification settings", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "soft-verify-prereqs",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      prerequisites: {
+        checks: [
+          {
+            kind: "command",
+            command: "git"
+          },
+          {
+            kind: "file",
+            path: "main:README.md",
+            required: false
+          },
+          {
+            kind: "env",
+            name: "HOME"
+          },
+          {
+            kind: "repo",
+            repo: "main"
+          }
+        ]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "capture_command",
+            command: "sh",
+            on_failure: "continue"
+          },
+          {
+            type: "check",
+            id: "capture_check",
+            check_kind: "deterministic",
+            command: "sh",
+            on_failure: "continue"
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.prerequisites).toEqual({
+      checks: [
+        {
+          kind: "command",
+          command: "git"
+        },
+        {
+          kind: "file",
+          path: "main:README.md",
+          required: false
+        },
+        {
+          kind: "env",
+          name: "HOME"
+        },
+        {
+          kind: "repo",
+          repo: "main"
+        }
+      ]
+    });
+
+    const graph = normalized.document?.graph;
+    if (!graph || graph.type !== "sequence") {
+      throw new Error("Expected normalized graph to be a sequence.");
+    }
+
+    expect(graph.steps[0]).toEqual(
+      expect.objectContaining({
+        type: "exec",
+        id: "capture_command",
+        on_failure: "continue"
+      })
+    );
+    expect(graph.steps[1]).toEqual(
+      expect.objectContaining({
+        type: "check",
+        id: "capture_check",
+        on_failure: "continue"
+      })
+    );
+  });
+
+  it("normalizes env_files on profiles and local command nodes", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "env-files",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          env_files: [".env", ".env.development"]
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "run_script",
+            command: "npm",
+            args: ["test"],
+            env_files: [".env.test"]
+          },
+          {
+            type: "check",
+            id: "verify",
+            check_kind: "deterministic",
+            command: "npm",
+            args: ["test"],
+            env_files: []
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.profiles?.default.env_files).toEqual([".env", ".env.development"]);
+
+    const graph = normalized.document?.graph;
+    if (!graph || graph.type !== "sequence") {
+      throw new Error("Expected normalized graph to be a sequence.");
+    }
+
+    expect(graph.steps[0]).toEqual(
+      expect.objectContaining({
+        env_files: [".env.test"]
+      })
+    );
+    expect(graph.steps[1]).toEqual(
+      expect.objectContaining({
+        env_files: []
+      })
+    );
+  });
+
+  it("rejects env_files on AI checks", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "ai-env-files",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "check",
+            id: "judge",
+            check_kind: "ai",
+            prompt: "Judge it.",
+            env_files: [".env"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].env_files",
+          message: 'Field "env_files" does not apply to AI checks.'
+        })
+      ])
+    );
+  });
+
+  it("rejects byte-based input_rules fields", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "reject-byte-input-rules",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          input_rules: {
+            max_total_bytes: 262144,
+            max_bytes_per_item: 131072
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "inspect",
+            prompt: "Inspect the repo."
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.profiles.default.input_rules.max_bytes_per_item",
+          message: 'Unknown field "max_bytes_per_item" is not part of the graph contract.'
+        }),
+        expect.objectContaining({
+          path: "$.profiles.default.input_rules.max_total_bytes",
+          message: 'Unknown field "max_total_bytes" is not part of the graph contract.'
+        })
+      ])
+    );
+  });
+
+  it("rejects input_rules.max_files and points authors to token budgets or glob-local caps", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "reject-input-max-files",
@@ -244,7 +703,7 @@ describe("graph normalization", () => {
           harness: "codex-cli",
           input_rules: {
             max_files: 8,
-            max_total_bytes: 262144
+            max_total_tokens: 64000
           }
         }
       },
@@ -267,7 +726,7 @@ describe("graph normalization", () => {
         expect.objectContaining({
           path: "$.profiles.default.input_rules.max_files",
           message:
-            "input_rules.max_files is no longer supported. Use input_rules.max_total_bytes for global context budgets and glob.max_files to cap specific globs."
+            "input_rules.max_files is no longer supported. Use input_rules.max_total_tokens for global context budgets and glob.max_files to cap specific globs."
         })
       ])
     );

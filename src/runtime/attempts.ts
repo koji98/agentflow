@@ -11,6 +11,7 @@ export interface RuntimeNodeAttempt {
   attempt_index: number;
   repeat_scope_id?: string;
   iteration_index?: number;
+  iteration_attempt_index?: number;
   status: "running" | "passed" | "failed" | "canceled";
   outcome?: GraphOutcome;
   started_at: string;
@@ -20,9 +21,9 @@ export interface RuntimeNodeAttempt {
   stderr_log_path?: string;
   result_path?: string;
   context_packet_path?: string;
-  context_summary_path?: string;
+  context_manifest_path?: string;
   context_provenance_path?: string;
-  output_artifacts: Record<string, string>;
+  artifacts: Record<string, string>;
   metadata: Record<string, unknown>;
 }
 
@@ -32,14 +33,25 @@ export interface AttemptRegistry {
   by_compiled_id: Map<string, RuntimeNodeAttempt[]>;
   active_by_execution_id: Map<string, RuntimeNodeAttempt>;
   next_attempt_index_by_compiled_id: Map<string, number>;
+  next_iteration_attempt_index_by_key: Map<string, number>;
 }
 
 export function createAttemptRegistry(): AttemptRegistry {
   return {
     by_compiled_id: new Map(),
     active_by_execution_id: new Map(),
-    next_attempt_index_by_compiled_id: new Map()
+    next_attempt_index_by_compiled_id: new Map(),
+    next_iteration_attempt_index_by_key: new Map()
   };
+}
+
+function iterationAttemptKey(compiledId: string, iterationIndex: number): string {
+  return `${compiledId}::iteration_${iterationIndex}`;
+}
+
+export interface NextAttemptIndexes {
+  attempt_index: number;
+  iteration_attempt_index?: number;
 }
 
 export function buildExecutionId(
@@ -66,10 +78,33 @@ export function openNodeAttempt(
   options: {
     repeat_scope_id?: string;
     iteration_index?: number;
+    attempt_index?: number;
+    iteration_attempt_index?: number;
   } = {}
 ): RuntimeNodeAttempt {
-  const attempt_index = (registry.next_attempt_index_by_compiled_id.get(node.compiled_id) ?? 0) + 1;
-  registry.next_attempt_index_by_compiled_id.set(node.compiled_id, attempt_index);
+  const attempt_index =
+    options.attempt_index
+    ?? (registry.next_attempt_index_by_compiled_id.get(node.compiled_id) ?? 0) + 1;
+  registry.next_attempt_index_by_compiled_id.set(
+    node.compiled_id,
+    Math.max(registry.next_attempt_index_by_compiled_id.get(node.compiled_id) ?? 0, attempt_index)
+  );
+
+  const iteration_attempt_index =
+    options.iteration_index === undefined
+      ? undefined
+      : options.iteration_attempt_index
+        ?? (registry.next_iteration_attempt_index_by_key.get(
+          iterationAttemptKey(node.compiled_id, options.iteration_index)
+        ) ?? 0) + 1;
+
+  if (options.iteration_index !== undefined && iteration_attempt_index !== undefined) {
+    const key = iterationAttemptKey(node.compiled_id, options.iteration_index);
+    registry.next_iteration_attempt_index_by_key.set(
+      key,
+      Math.max(registry.next_iteration_attempt_index_by_key.get(key) ?? 0, iteration_attempt_index)
+    );
+  }
 
   const attempt: RuntimeNodeAttempt = {
     execution_id: buildExecutionId(node.compiled_id, attempt_index, options),
@@ -81,9 +116,10 @@ export function openNodeAttempt(
     attempt_index,
     ...(options.repeat_scope_id ? { repeat_scope_id: options.repeat_scope_id } : {}),
     ...(options.iteration_index !== undefined ? { iteration_index: options.iteration_index } : {}),
+    ...(iteration_attempt_index !== undefined ? { iteration_attempt_index } : {}),
     status: "running",
     started_at: new Date().toISOString(),
-    output_artifacts: {},
+    artifacts: {},
     metadata: {}
   };
 
@@ -102,6 +138,28 @@ export function peekNextAttemptIndex(
   return (registry.next_attempt_index_by_compiled_id.get(compiledId) ?? 0) + 1;
 }
 
+export function peekNextAttemptIndexes(
+  registry: AttemptRegistry,
+  compiledId: string,
+  options: {
+    iteration_index?: number;
+  } = {}
+): NextAttemptIndexes {
+  const attempt_index = peekNextAttemptIndex(registry, compiledId);
+
+  if (options.iteration_index === undefined) {
+    return { attempt_index };
+  }
+
+  return {
+    attempt_index,
+    iteration_attempt_index:
+      (registry.next_iteration_attempt_index_by_key.get(
+        iterationAttemptKey(compiledId, options.iteration_index)
+      ) ?? 0) + 1
+  };
+}
+
 export function closeNodeAttempt(
   registry: AttemptRegistry,
   executionId: string,
@@ -112,9 +170,9 @@ export function closeNodeAttempt(
     stderr_log_path?: string;
     result_path?: string;
     context_packet_path?: string;
-    context_summary_path?: string;
+    context_manifest_path?: string;
     context_provenance_path?: string;
-    output_artifacts?: Record<string, string>;
+    artifacts?: Record<string, string>;
     metadata?: Record<string, unknown>;
   }
 ): RuntimeNodeAttempt {
@@ -151,16 +209,16 @@ export function closeNodeAttempt(
     attempt.context_packet_path = update.context_packet_path;
   }
 
-  if (update.context_summary_path) {
-    attempt.context_summary_path = update.context_summary_path;
+  if (update.context_manifest_path) {
+    attempt.context_manifest_path = update.context_manifest_path;
   }
 
   if (update.context_provenance_path) {
     attempt.context_provenance_path = update.context_provenance_path;
   }
 
-  if (update.output_artifacts) {
-    attempt.output_artifacts = update.output_artifacts;
+  if (update.artifacts) {
+    attempt.artifacts = update.artifacts;
   }
 
   if (update.metadata) {

@@ -47,21 +47,18 @@ function createCheckpointNode(): CompiledCheckpointNode {
       sandbox: "workspace-write",
       timeout_sec: 60
     },
-    inputs: [],
-    context_from: [],
-    declared_outputs: [
-      {
-        name: "operator_feedback",
-        from: "attempt",
+    context: [],
+    declared_artifacts: {
+      operator_feedback: {
+        from: "output_dir",
         path: "operator-feedback.md",
-        required: false
+        description: "Test artifact produced at operator-feedback.md."
       }
-    ],
+    },
     prompt: "Review the draft.",
     review_from: {
       node: "draft",
-      include: "output",
-      output: "draft_spec"
+      artifact: "draft_spec"
     }
   };
 }
@@ -127,12 +124,12 @@ describe("checkpoint CLI helpers", () => {
   it("renders checkpoint review output to stderr and leaves no feedback file on pass", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-checkpoint-pass-"));
     const executionDir = join(tempRoot, "execution");
-    const reviewPath = join(executionDir, "context_materialized", "context_1", "spec-revision.md");
-    const packetPath = join(executionDir, "context_packet.json");
-    const summaryPath = join(executionDir, "context_summary.md");
+    const reviewPath = join(executionDir, "context", "materialized", "draft_spec", "spec-revision.md");
+    const packetPath = join(executionDir, "context", "packet.json");
+    const manifestPath = join(executionDir, "context", "manifest.md");
     const stderrChunks: string[] = [];
 
-    await mkdir(join(executionDir, "context_materialized", "context_1"), {
+    await mkdir(join(executionDir, "context", "materialized", "draft_spec"), {
       recursive: true
     });
     await writeFile(reviewPath, `${"line\n".repeat(60)}`, "utf8");
@@ -144,17 +141,18 @@ describe("checkpoint CLI helpers", () => {
         authored_id: "review",
         repo_alias: "main",
         workspace_path: "/repo",
+        tokenizer: "o200k_base",
         materials: [
           {
-            key: "context_1",
-            kind: "context",
+            key: "draft_spec",
             source: {
+              name: "draft_spec",
+              from: "artifact",
               node: "draft",
-              include: "output",
-              output: "draft_spec"
+              artifact: "draft_spec"
             },
             materialized_path: reviewPath,
-            bytes: 300,
+            tokens: 60,
             truncated: false
           }
         ],
@@ -162,12 +160,12 @@ describe("checkpoint CLI helpers", () => {
         totals: {
           material_count: 1,
           file_count: 1,
-          total_bytes: 300
+          total_tokens: 60
         }
       }),
       "utf8"
     );
-    await writeFile(summaryPath, "Context summary\n", "utf8");
+    await writeFile(manifestPath, "Context manifest\n", "utf8");
 
     const adapter = new FakePromptAdapter(["1"]);
     const executor = createInteractiveCheckpointExecutor({
@@ -214,13 +212,13 @@ describe("checkpoint CLI helpers", () => {
         attempt_index: 1,
         status: "running",
         started_at: new Date().toISOString(),
-        output_artifacts: {},
+        artifacts: {},
         metadata: {}
       },
       workspace_path: tempRoot,
       execution_dir: executionDir,
       context_packet_path: packetPath,
-      context_summary_path: summaryPath,
+      context_manifest_path: manifestPath,
       signal: undefined
     });
 
@@ -235,11 +233,11 @@ describe("checkpoint CLI helpers", () => {
   it("writes multiline feedback on deny", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-checkpoint-deny-"));
     const executionDir = join(tempRoot, "execution");
-    const reviewPath = join(executionDir, "context_materialized", "context_1", "spec-revision.md");
-    const packetPath = join(executionDir, "context_packet.json");
-    const summaryPath = join(executionDir, "context_summary.md");
+    const reviewPath = join(executionDir, "context", "materialized", "draft_spec", "spec-revision.md");
+    const packetPath = join(executionDir, "context", "packet.json");
+    const manifestPath = join(executionDir, "context", "manifest.md");
 
-    await mkdir(join(executionDir, "context_materialized", "context_1"), {
+    await mkdir(join(executionDir, "context", "materialized", "draft_spec"), {
       recursive: true
     });
     await writeFile(reviewPath, "draft\n", "utf8");
@@ -251,17 +249,18 @@ describe("checkpoint CLI helpers", () => {
         authored_id: "review",
         repo_alias: "main",
         workspace_path: "/repo",
+        tokenizer: "o200k_base",
         materials: [
           {
-            key: "context_1",
-            kind: "context",
+            key: "draft_spec",
             source: {
+              name: "draft_spec",
+              from: "artifact",
               node: "draft",
-              include: "output",
-              output: "draft_spec"
+              artifact: "draft_spec"
             },
             materialized_path: reviewPath,
-            bytes: 6,
+            tokens: 2,
             truncated: false
           }
         ],
@@ -269,12 +268,12 @@ describe("checkpoint CLI helpers", () => {
         totals: {
           material_count: 1,
           file_count: 1,
-          total_bytes: 6
+          total_tokens: 2
         }
       }),
       "utf8"
     );
-    await writeFile(summaryPath, "Context summary\n", "utf8");
+    await writeFile(manifestPath, "Context manifest\n", "utf8");
 
     const adapter = new FakePromptAdapter(["2", "", "Add rollback details", "Define owner", ""]);
     const executor = createInteractiveCheckpointExecutor({
@@ -309,13 +308,13 @@ describe("checkpoint CLI helpers", () => {
         attempt_index: 1,
         status: "running",
         started_at: new Date().toISOString(),
-        output_artifacts: {},
+        artifacts: {},
         metadata: {}
       },
       workspace_path: tempRoot,
       execution_dir: executionDir,
       context_packet_path: packetPath,
-      context_summary_path: summaryPath,
+      context_manifest_path: manifestPath,
       signal: undefined
     });
 

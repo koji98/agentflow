@@ -78,14 +78,13 @@ describe("graph validation", () => {
                   type: "agent",
                   id: "draft",
                   prompt: "Draft the artifact.",
-                  outputs: [
-                    {
-                      name: "draft_spec",
-                      from: "attempt",
+                  artifacts: {
+                    draft_spec: {
+                      from: "output_dir",
                       path: "draft.md",
-                      required: true
+                      description: "Test artifact produced at draft.md."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "checkpoint",
@@ -93,8 +92,7 @@ describe("graph validation", () => {
                   prompt: "Review the draft.",
                   review_from: {
                     node: "draft",
-                    include: "output",
-                    output: "draft_spec"
+                    artifact: "draft_spec"
                   }
                 }
               ]
@@ -164,6 +162,65 @@ describe("graph validation", () => {
     );
   });
 
+  it("rejects repeat.until checks that use soft failure semantics", () => {
+    const diagnostics = validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "invalid-soft-repeat-until",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 2,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "agent",
+                  id: "fix",
+                  prompt: "Apply the fix."
+                },
+                {
+                  type: "check",
+                  id: "verify",
+                  check_kind: "deterministic",
+                  command: "sh",
+                  on_failure: "continue"
+                }
+              ]
+            },
+            until: {
+              node: "verify"
+            }
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].until.node",
+          message: expect.stringContaining('cannot use on_failure = "continue"')
+        })
+      ])
+    );
+  });
+
   it("rejects checkpoint nodes outside repeat bodies", () => {
     const diagnostics = validateAuthoredGraphDocument({
       version: "1",
@@ -189,14 +246,13 @@ describe("graph validation", () => {
             type: "agent",
             id: "draft",
             prompt: "Draft the artifact.",
-            outputs: [
-              {
-                name: "draft_spec",
-                from: "attempt",
+            artifacts: {
+              draft_spec: {
+                from: "output_dir",
                 path: "draft.md",
-                required: true
+                description: "Test artifact produced at draft.md."
               }
-            ]
+            }
           },
           {
             type: "checkpoint",
@@ -204,8 +260,7 @@ describe("graph validation", () => {
             prompt: "Review the draft.",
             review_from: {
               node: "draft",
-              include: "output",
-              output: "draft_spec"
+              artifact: "draft_spec"
             }
           }
         ]
@@ -308,7 +363,8 @@ describe("graph validation", () => {
       },
       profiles: {
         default: {
-          harness: "codex-cli"
+          harness: "codex-cli",
+          env_files: ["../.env"]
         }
       },
       graph: {
@@ -319,13 +375,15 @@ describe("graph validation", () => {
             type: "agent",
             id: "reader",
             prompt: "Read files.",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "secret",
+                from: "workspace_file",
                 path: "../secret.txt"
               },
               {
-                kind: "glob",
+                name: "sources",
+                from: "workspace_glob",
                 path: "main:../../**/*.ts"
               }
             ]
@@ -334,14 +392,33 @@ describe("graph validation", () => {
             type: "exec",
             id: "escape_exec",
             command: "pwd",
-            cwd: "../outside"
+            cwd: "../outside",
+            env_files: ["main:.env"],
+            artifacts: {
+              absolute_report: {
+                from: "workspace",
+                path: "/tmp/report.md",
+                description: "Invalid absolute workspace artifact path."
+              },
+              parent_report: {
+                from: "output_dir",
+                path: "../report.md",
+                description: "Invalid parent output artifact path."
+              },
+              repo_qualified_report: {
+                from: "workspace",
+                path: "main:reports/report.md",
+                description: "Invalid repo-qualified workspace artifact path."
+              }
+            }
           },
           {
             type: "check",
             id: "escape_check",
             check_kind: "deterministic",
             command: "pwd",
-            cwd: "main:../outside"
+            cwd: "main:../outside",
+            env_files: ["/tmp/.env"]
           }
         ]
       }
@@ -350,12 +427,12 @@ describe("graph validation", () => {
     expect(diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "$.graph.steps[0].inputs[0].path",
-          message: 'Input path "../secret.txt" must stay within the selected repo root.'
+          path: "$.graph.steps[0].context[0].path",
+          message: 'Context path "../secret.txt" must stay within the selected repo root.'
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].inputs[1].path",
-          message: 'Input path "main:../../**/*.ts" must stay within the selected repo root.'
+          path: "$.graph.steps[0].context[1].path",
+          message: 'Context path "main:../../**/*.ts" must stay within the selected repo root.'
         }),
         expect.objectContaining({
           path: "$.graph.steps[1].cwd",
@@ -364,6 +441,30 @@ describe("graph validation", () => {
         expect.objectContaining({
           path: "$.graph.steps[2].cwd",
           message: 'cwd "main:../outside" must stay within the node workspace root.'
+        }),
+        expect.objectContaining({
+          path: "$.profiles.default.env_files[0]",
+          message: 'env_files entry "../.env" must stay within the node workspace root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].env_files[0]",
+          message: 'env_files entry "main:.env" must stay within the node workspace root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].artifacts.absolute_report.path",
+          message: 'Artifact "absolute_report" path "/tmp/report.md" must stay within its source root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].artifacts.parent_report.path",
+          message: 'Artifact "parent_report" path "../report.md" must stay within its source root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].artifacts.repo_qualified_report.path",
+          message: 'Artifact "repo_qualified_report" path "main:reports/report.md" must stay within its source root.'
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[2].env_files[0]",
+          message: 'env_files entry "/tmp/.env" must stay within the node workspace root.'
         })
       ])
     );

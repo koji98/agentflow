@@ -120,6 +120,13 @@ export async function readRunExecutionAttempts(runRoot: string): Promise<Runtime
       return leftIteration - rightIteration;
     }
 
+    const leftIterationAttempt = left.iteration_attempt_index ?? left.attempt_index;
+    const rightIterationAttempt = right.iteration_attempt_index ?? right.attempt_index;
+
+    if (leftIterationAttempt !== rightIterationAttempt) {
+      return leftIterationAttempt - rightIterationAttempt;
+    }
+
     return left.attempt_index - right.attempt_index;
   });
 }

@@ -9,6 +9,7 @@ import {
   listAttemptsForCompiledNode,
   openNodeAttempt,
   peekNextAttemptIndex,
+  peekNextAttemptIndexes,
   selectAttempt
 } from "../../src/runtime/attempts.js";
 
@@ -24,13 +25,12 @@ const execNode: CompiledExecNode = {
     workspace_backend: "inplace",
     timeout_sec: 30,
     input_rules: {
-      max_total_bytes: 4096,
-      max_bytes_per_item: 1024
+      max_total_tokens: 1000,
+      max_tokens_per_item: 250
     }
   },
-  inputs: [],
-  context_from: [],
-  declared_outputs: [],
+  context: [],
+  declared_artifacts: {},
   command: "true",
   args: []
 };
@@ -52,6 +52,12 @@ describe("runtime attempts", () => {
     })).toBe("exec__root__task__attempt_2__repeat_scope__retry__iter_3");
 
     expect(peekNextAttemptIndex(registry, execNode.compiled_id)).toBe(1);
+    expect(peekNextAttemptIndexes(registry, execNode.compiled_id, {
+      iteration_index: 1
+    })).toEqual({
+      attempt_index: 1,
+      iteration_attempt_index: 1
+    });
 
     const first = openNodeAttempt(registry, execNode, "/tmp/attempt-1", {
       repeat_scope_id: "scope__retry",
@@ -81,34 +87,44 @@ describe("runtime attempts", () => {
       status: "passed",
       outcome: "passed",
       result_path: "/tmp/result-3.json",
-      output_artifacts: {
+      artifacts: {
         report: "/tmp/report-3.md"
       }
     });
 
     expect(peekNextAttemptIndex(registry, execNode.compiled_id)).toBe(4);
+    expect(peekNextAttemptIndexes(registry, execNode.compiled_id, {
+      iteration_index: 2
+    })).toEqual({
+      attempt_index: 4,
+      iteration_attempt_index: 3
+    });
     expect(listAttemptsForCompiledNode(registry, execNode.compiled_id).map((attempt) => ({
       execution_id: attempt.execution_id,
       attempt_index: attempt.attempt_index,
       iteration_index: attempt.iteration_index,
+      iteration_attempt_index: attempt.iteration_attempt_index,
       outcome: attempt.outcome
     }))).toEqual([
       {
         execution_id: first.execution_id,
         attempt_index: 1,
         iteration_index: 1,
+        iteration_attempt_index: 1,
         outcome: "failed"
       },
       {
         execution_id: second.execution_id,
         attempt_index: 2,
         iteration_index: 2,
+        iteration_attempt_index: 1,
         outcome: "failed"
       },
       {
         execution_id: third.execution_id,
         attempt_index: 3,
         iteration_index: 2,
+        iteration_attempt_index: 2,
         outcome: "passed"
       }
     ]);

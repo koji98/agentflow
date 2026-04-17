@@ -30,6 +30,7 @@ import {
 } from "../command_support.js";
 import { createRuntimeProgressReporter } from "../progress.js";
 import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
+import { createRunTerminalFields } from "../run_output.js";
 
 function compareRepoBindings(
   expected: Record<string, string>,
@@ -372,6 +373,7 @@ export const resumeCommand = {
     });
 
     const artifactPaths = resolveRunArtifactPaths(run_root);
+    const terminalFields = createRunTerminalFields(resumed.state, resumed.attempts, resumed.events);
     const message =
       resumed.outcome === "passed"
         ? "Run resumed and completed successfully."
@@ -394,7 +396,9 @@ export const resumeCommand = {
         restarted_node_count,
         counts: resumed.state.counts,
         repo_workspaces: resumed.state.repo_workspaces,
+        workspace_change_artifacts: resumed.state.workspace_change_artifacts,
         attempt_count: resumed.attempts.length,
+        ...terminalFields,
         artifacts: {
           run_file: artifactPaths.run_file,
           authored_graph_file: artifactPaths.authored_graph_file,
@@ -403,7 +407,8 @@ export const resumeCommand = {
           compile_diagnostics_file: artifactPaths.compile_diagnostics_file,
           state_file: artifactPaths.state_file,
           events_file: artifactPaths.events_file,
-          summary_file: artifactPaths.summary_file
+          summary_file: artifactPaths.summary_file,
+          workspace_changes_dir: artifactPaths.workspace_changes_dir
         },
         cancel_note: runCancellationText,
         next_steps: {

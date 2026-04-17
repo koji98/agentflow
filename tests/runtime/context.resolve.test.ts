@@ -26,7 +26,7 @@ function compileGraph(document: Parameters<typeof normalizeAuthoredGraphDocument
 }
 
 describe("context resolution", () => {
-  it("materializes live inputs and upstream output references into a context packet", async () => {
+  it("materializes workspace context and upstream artifacts into a context packet", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-"));
     const repoDir = join(tempRoot, "repo");
     const upstreamDir = join(tempRoot, "upstream");
@@ -36,7 +36,8 @@ describe("context resolution", () => {
     await writeFile(join(repoDir, "src.txt"), "source file\n");
     await writeFile(join(repoDir, "AGENTS.md"), "Follow repo instructions.\n");
     await writeFile(join(repoDir, ".cursor", "rules", "review.mdc"), "Review rule.\n");
-    await writeFile(join(upstreamDir, "context_summary.md"), "# Summary\n");
+    await mkdir(join(upstreamDir, "context"), { recursive: true });
+    await writeFile(join(upstreamDir, "context", "manifest.md"), "# Manifest\n");
     await writeFile(join(upstreamDir, "result.json"), JSON.stringify({ passed: true }));
     await writeFile(join(upstreamDir, "artifact.json"), JSON.stringify({ passed: true }));
 
@@ -62,35 +63,34 @@ describe("context resolution", () => {
             type: "exec",
             id: "source",
             command: "placeholder",
-            outputs: [
-              {
-                name: "verification",
-                from: "attempt",
+            artifacts: {
+              verification: {
+                from: "output_dir",
                 path: "result.json",
-                required: true
+                description: "Structured verification result from the source node."
               }
-            ]
+            }
           },
           {
             type: "exec",
             id: "consume",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "source_file",
+                from: "workspace_file",
                 path: "src.txt"
               },
               {
-                kind: "text",
                 name: "note",
+                from: "text",
                 text: "operator note"
-              }
-            ],
-            context_from: [
+              },
               {
+                name: "verification",
+                from: "artifact",
                 node: "source",
-                include: "output",
-                output: "verification"
+                artifact: "verification"
               }
             ]
           }
@@ -106,8 +106,9 @@ describe("context resolution", () => {
       status: "passed",
       outcome: "passed",
       result_path: join(upstreamDir, "result.json"),
-      context_summary_path: join(upstreamDir, "context_summary.md"),
-      output_artifacts: {
+      context_manifest_path: join(upstreamDir, "context", "manifest.md"),
+      artifacts: {
+        result_json: join(upstreamDir, "result.json"),
         verification: join(upstreamDir, "artifact.json")
       }
     });
@@ -125,9 +126,15 @@ describe("context resolution", () => {
     });
 
     expect(resolved.packet.materials).toHaveLength(3);
+    expect(resolved.packet.materials.find((item) => item.key === "verification")?.description).toBe(
+      "Structured verification result from the source node."
+    );
+    expect(resolved.packet.tokenizer).toBe("o200k_base");
     expect(resolved.packet.omitted).toEqual([]);
-    expect(await readFile(resolved.summary_path, "utf8")).toContain("Materialized items");
-    expect(await readFile(resolved.summary_path, "utf8")).toContain('requested "src.txt"');
+    const manifest = await readFile(resolved.manifest_path, "utf8");
+    expect(manifest).toContain("Materialized items");
+    expect(manifest).toContain('requested "src.txt"');
+    expect(manifest).toContain("Structured verification result from the source node.");
     expect(await readFile(resolved.provenance_path, "utf8")).toContain("\"compiled_id\"");
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -165,10 +172,12 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            context_from: [
+            context: [
               {
+                name: "source_response",
+                from: "artifact",
                 node: "source",
-                include: "summary",
+                artifact: "agent_response",
                 optional: true
               }
             ]
@@ -193,12 +202,15 @@ describe("context resolution", () => {
     expect(resolved.packet.materials).toEqual([]);
     expect(resolved.packet.omitted).toEqual([
       {
-        key: "context_1",
+        key: "source_response",
         source: {
+          name: "source_response",
+          from: "artifact",
           node: "source",
-          include: "summary",
+          artifact: "agent_response",
           optional: true
         },
+        description: "Final response captured from the producer node.",
         reason: 'No execution matched "source".',
         optional: true
       }
@@ -242,14 +254,13 @@ describe("context resolution", () => {
                   type: "exec",
                   id: "produce",
                   command: "placeholder",
-                  outputs: [
-                    {
-                      name: "report",
-                      from: "attempt",
+                  artifacts: {
+                    report: {
+                      from: "output_dir",
                       path: "report.md",
-                      required: true
+                      description: "Markdown report produced by the repeat body."
                     }
-                  ]
+                  }
                 },
                 {
                   type: "check",
@@ -267,18 +278,20 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            context_from: [
+            context: [
               {
+                name: "latest_passed_report",
+                from: "artifact",
                 node: "produce",
-                include: "output",
-                output: "report",
+                artifact: "report",
                 iteration: "latest_passed",
                 attempt: "latest"
               },
               {
+                name: "iteration_2_attempt_2_report",
+                from: "artifact",
                 node: "produce",
-                include: "output",
-                output: "report",
+                artifact: "report",
                 iteration: 2,
                 attempt: 2
               }
@@ -306,7 +319,7 @@ describe("context resolution", () => {
     closeNodeAttempt(attempts, firstAttempt.execution_id, {
       status: "passed",
       outcome: "passed",
-      output_artifacts: { report: reportOne }
+      artifacts: { report: reportOne }
     });
 
     const secondAttempt = openNodeAttempt(attempts, produceNode, join(tempRoot, "attempt-2"), {
@@ -316,7 +329,7 @@ describe("context resolution", () => {
     closeNodeAttempt(attempts, secondAttempt.execution_id, {
       status: "failed",
       outcome: "failed",
-      output_artifacts: { report: reportTwoFailed }
+      artifacts: { report: reportTwoFailed }
     });
 
     const thirdAttempt = openNodeAttempt(attempts, produceNode, join(tempRoot, "attempt-3"), {
@@ -326,7 +339,7 @@ describe("context resolution", () => {
     closeNodeAttempt(attempts, thirdAttempt.execution_id, {
       status: "passed",
       outcome: "passed",
-      output_artifacts: { report: reportTwoLatest }
+      artifacts: { report: reportTwoLatest }
     });
 
     const resolved = await resolveExecutionContext({
@@ -342,6 +355,10 @@ describe("context resolution", () => {
     });
 
     expect(resolved.packet.materials).toHaveLength(2);
+    expect(resolved.packet.materials.map((item) => item.description)).toEqual([
+      "Markdown report produced by the repeat body.",
+      "Markdown report produced by the repeat body."
+    ]);
     expect(await readFile(resolved.packet.materials[0]!.materialized_path, "utf8")).toBe("iteration 2 latest\n");
     expect(await readFile(resolved.packet.materials[1]!.materialized_path, "utf8")).toBe("iteration 2 attempt 2\n");
 
@@ -359,7 +376,7 @@ describe("context resolution", () => {
         "",
         "Line one should survive.",
         "Line two should survive.",
-        "Line three should be cut off because the file is too large for the configured byte limit."
+        "Line three should be cut off because the file is too large for the configured token limit."
       ].join("\n"),
       "utf8"
     );
@@ -386,9 +403,10 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "large_note",
+                from: "workspace_file",
                 path: "large-note.md"
               }
             ]
@@ -398,7 +416,7 @@ describe("context resolution", () => {
     });
 
     const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
-    consumerNode.effective_policy.input_rules.max_bytes_per_item = 120;
+    consumerNode.effective_policy.input_rules.max_tokens_per_item = 30;
 
     const resolved = await resolveExecutionContext({
       compiled_graph: graph,
@@ -415,12 +433,13 @@ describe("context resolution", () => {
     expect(resolved.packet.materials).toHaveLength(1);
     expect(resolved.packet.materials[0]?.truncated).toBe(true);
     const materialized = await readFile(resolved.packet.materials[0]!.materialized_path, "utf8");
-    const summary = await readFile(resolved.summary_path, "utf8");
+    const summary = await readFile(resolved.manifest_path, "utf8");
 
     expect(materialized).toContain("Line one should survive.");
     expect(materialized).toContain("[Truncated by Agentflow. Read the original file for full context.]");
+    expect(resolved.packet.materials[0]?.tokens).toBeLessThanOrEqual(30);
     expect(summary).toContain("- Truncated items: `1`");
-    expect(summary).toContain("bytes, truncated");
+    expect(summary).toContain("tokens, truncated");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -450,9 +469,10 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "watched",
+                from: "workspace_file",
                 path: "watched.txt"
               }
             ]
@@ -477,16 +497,85 @@ describe("context resolution", () => {
     expect(resolved.packet.materials).toEqual([]);
     expect(resolved.packet.omitted).toEqual([
       {
-        key: "input_1",
+        key: "watched",
         source: {
-          kind: "file",
+          name: "watched",
+          from: "workspace_file",
           path: "watched.txt"
         },
-        reason: 'Requested input file "watched.txt" was not found at execution time.',
+        reason: 'Requested context workspace file "watched.txt" was not found at execution time.',
         optional: false
       }
     ]);
-    expect(await readFile(resolved.summary_path, "utf8")).toContain('Requested input file "watched.txt" was not found');
+    expect(await readFile(resolved.manifest_path, "utf8")).toContain('Requested context workspace file "watched.txt" was not found');
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("omits non-UTF-8 file inputs instead of materializing binary content", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-binary-file-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, "binary.dat"), Buffer.from([0xff, 0xfe, 0xfd]));
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-binary-file",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            context: [
+              {
+                name: "binary",
+                from: "workspace_file",
+                path: "binary.dat"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_1",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry()
+    });
+
+    expect(resolved.packet.materials).toEqual([]);
+    expect(resolved.packet.omitted).toEqual([
+      {
+        key: "binary",
+        source: {
+          name: "binary",
+          from: "workspace_file",
+          path: "binary.dat"
+        },
+        reason: "Material is not valid UTF-8 text and cannot be tokenized.",
+        optional: false
+      }
+    ]);
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -516,9 +605,10 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "glob",
+                name: "markdown",
+                from: "workspace_glob",
                 path: "*.md"
               }
             ]
@@ -543,12 +633,13 @@ describe("context resolution", () => {
     expect(resolved.packet.materials).toEqual([]);
     expect(resolved.packet.omitted).toEqual([
       {
-        key: "input_1",
+        key: "markdown",
         source: {
-          kind: "glob",
+          name: "markdown",
+          from: "workspace_glob",
           path: "*.md"
         },
-        reason: 'Requested input glob "*.md" matched no files after ignore filtering at execution time.',
+        reason: 'Requested context workspace glob "*.md" matched no files after ignore filtering at execution time.',
         optional: false
       }
     ]);
@@ -586,9 +677,10 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "glob",
+                name: "markdown",
+                from: "workspace_glob",
                 path: "*.md",
                 max_files: 2
               }
@@ -655,9 +747,10 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "glob",
+                name: "markdown",
+                from: "workspace_glob",
                 path: "**/*.md"
               }
             ]
@@ -712,9 +805,10 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "ignored",
+                from: "workspace_file",
                 path: "ignored.md"
               }
             ]
@@ -766,8 +860,8 @@ describe("context resolution", () => {
         default: {
           harness: "codex-cli",
           input_rules: {
-            max_total_bytes: 1024,
-            max_bytes_per_item: 256
+            max_total_tokens: 250,
+            max_tokens_per_item: 64
           }
         }
       },
@@ -779,9 +873,10 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "glob",
+                name: "markdown",
+                from: "workspace_glob",
                 path: "*.md"
               }
             ]
@@ -807,22 +902,22 @@ describe("context resolution", () => {
     expect(resolved.packet.totals).toEqual({
       material_count: 5,
       file_count: 5,
-      total_bytes: expect.any(Number)
+      total_tokens: expect.any(Number)
     });
 
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("fails incrementally when the next item would exceed max_total_bytes", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-byte-budget-"));
+  it("fails incrementally when the next item would exceed max_total_tokens", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-token-budget-"));
     const repoDir = join(tempRoot, "repo");
     await mkdir(repoDir, { recursive: true });
-    await writeFile(join(repoDir, "first.txt"), "abcdefghij", "utf8");
-    await writeFile(join(repoDir, "second.txt"), "klmnopqrst", "utf8");
+    await writeFile(join(repoDir, "first.txt"), "one", "utf8");
+    await writeFile(join(repoDir, "second.txt"), "two", "utf8");
 
     const graph = compileGraph({
       version: "1",
-      graph_id: "context-byte-budget",
+      graph_id: "context-token-budget",
       repos: {
         main: { path: "." }
       },
@@ -833,8 +928,8 @@ describe("context resolution", () => {
         default: {
           harness: "codex-cli",
           input_rules: {
-            max_total_bytes: 12,
-            max_bytes_per_item: 32
+            max_total_tokens: 1,
+            max_tokens_per_item: 10
           }
         }
       },
@@ -846,13 +941,15 @@ describe("context resolution", () => {
             type: "exec",
             id: "consumer",
             command: "placeholder",
-            inputs: [
+            context: [
               {
-                kind: "file",
+                name: "first",
+                from: "workspace_file",
                 path: "first.txt"
               },
               {
-                kind: "file",
+                name: "second",
+                from: "workspace_file",
                 path: "second.txt"
               }
             ]
@@ -877,11 +974,11 @@ describe("context resolution", () => {
         attempts: createAttemptRegistry()
       })
     ).rejects.toThrow(
-      'Materializing input_2 (file "second.txt") would exceed max_total_bytes 12. Current bytes: 10. Next item bytes: 10.'
+      'Materializing context_2 (workspace file "second.txt") would exceed max_total_tokens 1. Current tokens: 1. Next item tokens: 1.'
     );
 
-    await expect(readFile(join(executionDir, "context_materialized", "input_1", "first.txt"), "utf8")).resolves.toBe("abcdefghij");
-    await expect(readFile(join(executionDir, "context_materialized", "input_2", "second.txt"), "utf8")).rejects.toThrow();
+    await expect(readFile(join(executionDir, "context", "materialized", "first", "first.txt"), "utf8")).resolves.toBe("one");
+    await expect(readFile(join(executionDir, "context", "materialized", "second", "second.txt"), "utf8")).rejects.toThrow();
 
     await rm(tempRoot, { recursive: true, force: true });
   });

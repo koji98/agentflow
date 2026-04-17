@@ -1,4 +1,0 @@
-interface:
-  display_name: "Agentflow Run Debugging"
-  short_description: "Inspect runs, artifacts, and resume behavior"
-  default_prompt: "Use $agentflow-run-debugging to diagnose this Agentflow run from durable artifacts, explain resume or preservation behavior, and identify any graph-design fixes the failure suggests."

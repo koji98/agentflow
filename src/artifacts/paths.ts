@@ -18,6 +18,18 @@ export interface RunRootOptions {
   environment?: NodeJS.ProcessEnv;
 }
 
+export interface NodeArtifactDirectoryOptions {
+  nodeIndex?: number;
+  nodeCount?: number;
+  label?: string;
+}
+
+export interface ExecutionDirectoryOptions extends NodeArtifactDirectoryOptions {
+  attemptIndex?: number;
+  iterationIndex?: number;
+  iterationAttemptIndex?: number;
+}
+
 function sanitizePathSegment(value: string): string {
   const sanitized =
     value
@@ -42,12 +54,74 @@ function hashPathSegment(value: string, prefix: string): string {
   return `${prefix}-${hash}`;
 }
 
-export function resolveNodeArtifactDirectoryName(compiledId: string): string {
+function shortHash(value: string): string {
+  return createHash("sha1").update(value).digest("hex").slice(0, 12);
+}
+
+function formatNodeIndexPrefix(options: NodeArtifactDirectoryOptions): string | undefined {
+  if (options.nodeIndex === undefined) {
+    return undefined;
+  }
+
+  const nodeCount = Math.max(options.nodeCount ?? 0, options.nodeIndex + 1);
+  const width = Math.max(3, String(nodeCount).length);
+  return String(options.nodeIndex + 1).padStart(width, "0");
+}
+
+function formatExecutionOrdinal(value: number): string {
+  return String(value).padStart(3, "0");
+}
+
+function combineBoundedPathSegment(prefix: string, label: string, suffix: string): string {
+  const availableLabelLength = maxPathSegmentLength - prefix.length - suffix.length;
+
+  if (availableLabelLength <= 0) {
+    return `${prefix}${suffix}`.slice(0, maxPathSegmentLength);
+  }
+
+  if (label.length <= availableLabelLength) {
+    return `${prefix}${label}${suffix}`;
+  }
+
+  const hash = shortHash(label);
+  const trimmedLength = Math.max(1, availableLabelLength - hash.length - 1);
+  const trimmed = label.slice(0, trimmedLength).replace(/-+$/g, "") || "node";
+  return `${prefix}${trimmed}-${hash}${suffix}`;
+}
+
+export function resolveNodeArtifactDirectoryName(
+  compiledId: string,
+  options: NodeArtifactDirectoryOptions = {}
+): string {
+  const orderPrefix = formatNodeIndexPrefix(options);
+
+  if (orderPrefix) {
+    const label = sanitizePathSegment(options.label ?? compiledId);
+    return combineBoundedPathSegment(`${orderPrefix}-`, label, `-${shortHash(compiledId)}`);
+  }
+
   return hashPathSegment(compiledId, "node");
 }
 
-export function resolveExecutionDirectoryName(executionId: string): string {
-  return hashPathSegment(executionId, "exec");
+export function resolveExecutionDirectoryName(
+  executionId: string,
+  options: Pick<ExecutionDirectoryOptions, "attemptIndex" | "iterationIndex" | "iterationAttemptIndex"> = {}
+): string {
+  const hashSegment = hashPathSegment(executionId, "exec");
+
+  if (options.iterationIndex !== undefined) {
+    const attemptIndex = options.iterationAttemptIndex ?? options.attemptIndex;
+
+    if (attemptIndex !== undefined) {
+      return `i${formatExecutionOrdinal(options.iterationIndex)}-a${formatExecutionOrdinal(attemptIndex)}-${hashSegment}`;
+    }
+  }
+
+  if (options.attemptIndex !== undefined) {
+    return `${formatExecutionOrdinal(options.attemptIndex)}-${hashSegment}`;
+  }
+
+  return hashSegment;
 }
 
 function normalizeConfiguredRunsRoot(value: string, source: "runsRoot" | "environment"): string {
@@ -123,6 +197,7 @@ export interface RunArtifactPaths {
   events_file: string;
   summary_file: string;
   workspaces_dir: string;
+  workspace_changes_dir: string;
   nodes_dir: string;
 }
 
@@ -138,6 +213,7 @@ export function resolveRunArtifactPaths(runRoot: string): RunArtifactPaths {
     events_file: join(runRoot, "events.jsonl"),
     summary_file: join(runRoot, "summary.md"),
     workspaces_dir: join(runRoot, "workspaces"),
+    workspace_changes_dir: join(runRoot, "workspace-changes"),
     nodes_dir: join(runRoot, "nodes")
   };
 }
@@ -145,15 +221,20 @@ export function resolveRunArtifactPaths(runRoot: string): RunArtifactPaths {
 export function resolveNodeExecutionDirectory(
   runRoot: string,
   compiledId: string,
-  executionId: string
+  executionId: string,
+  options: ExecutionDirectoryOptions = {}
 ): string {
   return join(
-    resolveNodeArtifactDirectory(runRoot, compiledId),
+    resolveNodeArtifactDirectory(runRoot, compiledId, options),
     "executions",
-    resolveExecutionDirectoryName(executionId)
+    resolveExecutionDirectoryName(executionId, options)
   );
 }
 
-export function resolveNodeArtifactDirectory(runRoot: string, compiledId: string): string {
-  return join(resolveRunArtifactPaths(runRoot).nodes_dir, resolveNodeArtifactDirectoryName(compiledId));
+export function resolveNodeArtifactDirectory(
+  runRoot: string,
+  compiledId: string,
+  options: NodeArtifactDirectoryOptions = {}
+): string {
+  return join(resolveRunArtifactPaths(runRoot).nodes_dir, resolveNodeArtifactDirectoryName(compiledId, options));
 }

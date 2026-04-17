@@ -125,14 +125,13 @@ async function createFixtureRun() {
           type: "agent",
           id: "inspect",
           prompt: "Inspect the repository.",
-          outputs: [
-            {
-              name: "notes",
-              from: "attempt",
+          artifacts: {
+            notes: {
+              from: "output_dir",
               path: "notes.md",
-              required: true
+              description: "Test artifact produced at notes.md."
             }
-          ]
+          }
         },
         {
           type: "repeat",
@@ -146,28 +145,26 @@ async function createFixtureRun() {
                 type: "agent",
                 id: "apply-fix",
                 prompt: "Apply the fix.",
-                outputs: [
-                  {
-                    name: "patch",
-                    from: "attempt",
+                artifacts: {
+                  patch: {
+                    from: "output_dir",
                     path: "patch.md",
-                    required: true
+                    description: "Test artifact produced at patch.md."
                   }
-                ]
+                }
               },
               {
                 type: "check",
                 id: "verify-fix",
                 check_kind: "deterministic",
                 command: "placeholder",
-                outputs: [
-                  {
-                    name: "verification",
-                    from: "attempt",
+                artifacts: {
+                  verification: {
+                    from: "output_dir",
                     path: "result.json",
-                    required: true
+                    description: "Test artifact produced at result.json."
                   }
-                ]
+                }
               }
             ]
           },
@@ -179,11 +176,12 @@ async function createFixtureRun() {
           type: "exec",
           id: "finalize",
           command: "placeholder",
-          context_from: [
+          context: [
             {
+              name: "verification",
+              from: "artifact",
               node: "verify-fix",
-              include: "output",
-              output: "verification",
+              artifact: "verification",
               iteration: "latest_passed"
             }
           ]
@@ -364,6 +362,62 @@ async function createAiTimeoutRun() {
   };
 }
 
+async function createSoftVerificationRun() {
+  const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-projection-soft-verification-"));
+  const repoDir = join(tempRoot, "repo");
+  const runRoot = join(tempRoot, ".agentflow", "runs", "soft-verification-fixture");
+  await mkdir(repoDir, { recursive: true });
+  await initGitRepo(repoDir);
+
+  const document: AuthoredGraphDocument = {
+    version: "1",
+    graph_id: "soft-verification-fixture",
+    repos: {
+      main: {
+        path: "repo"
+      }
+    },
+    defaults: {
+      launch_profile: "default",
+      workspace_backend: "inplace"
+    },
+    profiles: {
+      default: {}
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "exec",
+          id: "verify",
+          repo: "main",
+          command: "sh",
+          args: ["-lc", "exit 9"],
+          on_failure: "continue"
+        }
+      ]
+    }
+  };
+
+  const { graph } = compileGraph(document);
+  const run = await runCompiledGraph({
+    run_root: runRoot,
+    compiled_graph: graph,
+    authored_graph: document,
+    repo_sources: {
+      main: repoDir
+    }
+  });
+
+  return {
+    tempRoot,
+    runRoot,
+    run,
+    compiledVerifyId: graph.authored_to_compiled.verify![0]
+  };
+}
+
 describe("artifacts projection", () => {
   it("projects run snapshots, node attempts, events, logs, and artifacts from run artifacts", async () => {
     const fixture = await createFixtureRun();
@@ -406,7 +460,7 @@ describe("artifacts projection", () => {
         nodeDetail.selected_execution_id
       );
       expect(nodeLogs.stdout?.content).toContain("\"passed\":true");
-      expect(nodeLogs.artifacts.map((artifact) => artifact.relative_path)).toContain("stdout.log");
+      expect(nodeLogs.artifacts.map((artifact) => artifact.relative_path)).toContain("logs/stdout.log");
 
       const artifact = await readProjectedArtifact(
         fixture.runRoot,
@@ -444,6 +498,56 @@ describe("artifacts projection", () => {
           })
         ])
       );
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces failed soft verifications in passed run projections and node detail", async () => {
+    const fixture = await createSoftVerificationRun();
+
+    try {
+      const snapshot = await projectRunSnapshot(fixture.runRoot);
+
+      expect(snapshot.run.status).toBe("Passed");
+      expect(snapshot.run.evidence_status).toBe("warnings");
+      expect(snapshot.run.soft_verification_counts).toEqual({
+        passed: 0,
+        failed: 1
+      });
+      expect(snapshot.run.failed_soft_verifications).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            authored_id: "verify",
+            verifier_kind: "exec",
+            passed: false,
+            exit_code: 9
+          })
+        ])
+      );
+      expect(snapshot.run_diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event_type: "verification.recorded",
+            severity: "warning",
+            compiled_id: fixture.compiledVerifyId,
+            summary: "Command exited with code 9."
+          })
+        ])
+      );
+
+      const nodeDetail = await projectNodeDetail(fixture.runRoot, fixture.compiledVerifyId);
+      expect(nodeDetail.soft_verifications).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            verifier_kind: "exec",
+            passed: false,
+            exit_code: 9,
+            result_artifact_path: expect.stringContaining("result.json")
+          })
+        ])
+      );
+      expect(nodeDetail.artifacts.map((artifact) => artifact.relative_path)).toContain("result.json");
     } finally {
       await rm(fixture.tempRoot, { recursive: true, force: true });
     }

@@ -1,0 +1,19 @@
+{
+  "version": "1",
+  "suite_id": "basic-local-agentflow-eval",
+  "target": {
+    "graph_template": "agentflow.graph.template.json"
+  },
+  "cases": "cases.jsonl",
+  "graders": [
+    {
+      "id": "trace",
+      "kind": "script",
+      "command": "node graders/trace.mjs"
+    }
+  ],
+  "thresholds": {
+    "pass_rate": 1,
+    "critical_failures": 0
+  }
+}
