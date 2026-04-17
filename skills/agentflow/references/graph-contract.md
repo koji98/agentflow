@@ -116,6 +116,8 @@ Artifact context fields:
 
 Use `if_available: true` only when the consumer can still do useful work without the material.
 
+Runtime also injects reserved `repeat_history` context for executable nodes inside `repeat.body`. It is omitted on iteration 1 and materialized on later iterations from completed prior iterations, including the retry cause, prior node outcomes, prior agent responses, failed check excerpts, checkpoint feedback, and prior artifact inventory. Do not author `repeat_history`; it is runtime context.
+
 ## Artifacts
 
 `artifacts` is a node map keyed by artifact name.

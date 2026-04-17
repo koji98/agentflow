@@ -396,7 +396,8 @@ Supported context sources:
 Context resolution rules:
 
 - authored `workspace_file` and `workspace_glob` context resolves from the live repo workspace when the node starts
-- missing live files, empty globs, and artifact context references marked `if_available: true` become explicit omitted context instead of crashing the run
+- missing live files, empty globs, first-iteration repeat history, and artifact context references marked `if_available: true` become explicit omitted context instead of crashing the run
+- executable nodes inside `repeat.body` receive automatic `repeat_history` context after iteration 1, built from completed prior iterations, retry causes, prior agent responses, failed check excerpts, checkpoint feedback, and artifact inventories
 - path escapes and unknown repo aliases are still hard errors
 - `run` and `resume` only resolve repo aliases the compiled graph actually references
 - `workspace_glob` uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`
