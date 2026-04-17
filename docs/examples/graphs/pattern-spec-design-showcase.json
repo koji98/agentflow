@@ -137,7 +137,7 @@
             "from": "artifact",
             "node": "managed_nodes_spec",
             "artifact": "implementation_readiness",
-            "optional": true
+            "if_available": true
           }
         ]
       }

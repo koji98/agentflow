@@ -57,7 +57,7 @@ Good shape:
 
 1. implement node
 2. validation node with hard pass/fail semantics
-3. optional next attempt consumes `latest_failed` artifacts from the prior failed iteration
+3. next attempt may consume `latest_failed` artifacts from the prior failed iteration with `if_available: true`
 4. repeat back-edge on failure
 
 Only use when the repair owner, gate, and maximum useful cycle count are all obvious.

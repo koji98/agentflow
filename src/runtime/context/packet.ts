@@ -21,7 +21,7 @@ export interface ContextPacketOmittedItem {
   source: ContextItem;
   description?: string;
   reason: string;
-  optional: boolean;
+  if_available: boolean;
 }
 
 export interface ContextPacket {

@@ -209,7 +209,7 @@ describe("pattern review change", () => {
             from: "artifact",
             node: "upstream_evaluation",
             artifact: "evaluation_ledger",
-            optional: true
+            if_available: true
           })
         ])
       })

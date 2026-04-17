@@ -185,11 +185,11 @@ function formatTaskSource(source: PatternGenerateEvaluateFixTaskSource): string[
 function sourceRefToContext(
   name: string,
   reference: PatternGenerateEvaluateFixSourceRef,
-  optional: boolean
+  ifAvailable: boolean
 ): ContextItem {
   return reference.kind === "file"
     ? workspaceFileContext(name, reference.path)
-    : artifactContext(name, reference.node, reference.artifact, { optional });
+    : artifactContext(name, reference.node, reference.artifact, { if_available: ifAvailable });
 }
 
 function resolveTaskSourceMaterials(source: PatternGenerateEvaluateFixTaskSource): {
@@ -199,35 +199,37 @@ function resolveTaskSourceMaterials(source: PatternGenerateEvaluateFixTaskSource
     return {
       context: [
         artifactContext("design_packet", source.node, "design_packet"),
-        artifactContext("design_spec", source.node, "design_spec", { optional: true }),
-        artifactContext("direction_proposal", source.node, "direction_proposal", { optional: true }),
-        artifactContext("tradeoff_matrix", source.node, "tradeoff_matrix", { optional: true }),
-        artifactContext("decision_log", source.node, "decision_log", { optional: true }),
-        artifactContext("implementation_readiness", source.node, "implementation_readiness", { optional: true })
+        artifactContext("design_spec", source.node, "design_spec", { if_available: true }),
+        artifactContext("direction_proposal", source.node, "direction_proposal", { if_available: true }),
+        artifactContext("tradeoff_matrix", source.node, "tradeoff_matrix", { if_available: true }),
+        artifactContext("decision_log", source.node, "decision_log", { if_available: true }),
+        artifactContext("implementation_readiness", source.node, "implementation_readiness", { if_available: true })
       ]
     };
   }
 
-  const refs: Array<{ name: string; reference: PatternGenerateEvaluateFixSourceRef; optional: boolean }> = [
-    { name: "design_packet", reference: source.design_packet, optional: false },
-    ...(source.design_spec ? [{ name: "design_spec", reference: source.design_spec, optional: true }] : []),
+  const refs: Array<{ name: string; reference: PatternGenerateEvaluateFixSourceRef; ifAvailable: boolean }> = [
+    { name: "design_packet", reference: source.design_packet, ifAvailable: false },
+    ...(source.design_spec ? [{ name: "design_spec", reference: source.design_spec, ifAvailable: true }] : []),
     ...(source.direction_proposal
-      ? [{ name: "direction_proposal", reference: source.direction_proposal, optional: true }]
+      ? [{ name: "direction_proposal", reference: source.direction_proposal, ifAvailable: true }]
       : []),
-    ...(source.tradeoff_matrix ? [{ name: "tradeoff_matrix", reference: source.tradeoff_matrix, optional: true }] : []),
-    ...(source.decision_log ? [{ name: "decision_log", reference: source.decision_log, optional: true }] : []),
+    ...(source.tradeoff_matrix
+      ? [{ name: "tradeoff_matrix", reference: source.tradeoff_matrix, ifAvailable: true }]
+      : []),
+    ...(source.decision_log ? [{ name: "decision_log", reference: source.decision_log, ifAvailable: true }] : []),
     ...(source.implementation_readiness
-      ? [{ name: "implementation_readiness", reference: source.implementation_readiness, optional: true }]
+      ? [{ name: "implementation_readiness", reference: source.implementation_readiness, ifAvailable: true }]
       : []),
     ...(source.additional_context ?? []).map((reference, index) => ({
       name: `additional_context_${zeroPad(index + 1)}`,
       reference,
-      optional: true
+      ifAvailable: true
     }))
   ];
 
   return {
-    context: refs.map(({ name, reference, optional }) => sourceRefToContext(name, reference, optional))
+    context: refs.map(({ name, reference, ifAvailable }) => sourceRefToContext(name, reference, ifAvailable))
   };
 }
 
@@ -412,7 +414,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
       artifactContext("task_packet", prepareId, "task_packet"),
       artifactContext("failed_evaluation_ledger", aggregateId, "evaluation_ledger", {
         iteration: "latest_failed",
-        optional: true
+        if_available: true
       })
     ],
     artifacts: outputDirArtifact("change_notes", "change-notes.md"),
@@ -467,7 +469,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
       }),
       artifactContext("failed_evaluation_ledger", aggregateId, "evaluation_ledger", {
         iteration: "latest_failed",
-        optional: true
+        if_available: true
       })
     ],
     artifacts: publishedArtifacts,

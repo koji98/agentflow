@@ -191,10 +191,10 @@ function formatReviewSource(source: PatternReviewChangeSource): string[] {
   ];
 }
 
-function sourceRefToContext(name: string, reference: PatternReviewChangeSourceRef, optional: boolean): ContextItem {
+function sourceRefToContext(name: string, reference: PatternReviewChangeSourceRef, ifAvailable: boolean): ContextItem {
   return reference.kind === "file"
     ? workspaceFileContext(name, reference.path)
-    : artifactContext(name, reference.node, reference.artifact, { optional });
+    : artifactContext(name, reference.node, reference.artifact, { if_available: ifAvailable });
 }
 
 function resolveReviewSourceMaterials(source: PatternReviewChangeSource): {
@@ -204,30 +204,30 @@ function resolveReviewSourceMaterials(source: PatternReviewChangeSource): {
     return {
       context: [
         artifactContext("agent_response", source.node, "agent_response"),
-        artifactContext("change_summary", source.node, "change_summary", { optional: true }),
-        artifactContext("change_packet", source.node, "change_packet", { optional: true }),
-        artifactContext("evaluation_ledger", source.node, "evaluation_ledger", { optional: true }),
-        artifactContext("fix_log", source.node, "fix_log", { optional: true })
+        artifactContext("change_summary", source.node, "change_summary", { if_available: true }),
+        artifactContext("change_packet", source.node, "change_packet", { if_available: true }),
+        artifactContext("evaluation_ledger", source.node, "evaluation_ledger", { if_available: true }),
+        artifactContext("fix_log", source.node, "fix_log", { if_available: true })
       ]
     };
   }
 
-  const refs: Array<{ name: string; reference: PatternReviewChangeSourceRef; optional: boolean }> = [
-    ...(source.diff ? [{ name: "diff", reference: source.diff, optional: false }] : []),
-    ...(source.summary ? [{ name: "summary", reference: source.summary, optional: false }] : []),
+  const refs: Array<{ name: string; reference: PatternReviewChangeSourceRef; ifAvailable: boolean }> = [
+    ...(source.diff ? [{ name: "diff", reference: source.diff, ifAvailable: false }] : []),
+    ...(source.summary ? [{ name: "summary", reference: source.summary, ifAvailable: false }] : []),
     ...(source.evaluation_ledger
-      ? [{ name: "evaluation_ledger", reference: source.evaluation_ledger, optional: true }]
+      ? [{ name: "evaluation_ledger", reference: source.evaluation_ledger, ifAvailable: true }]
       : []),
-    ...(source.files_touched ? [{ name: "files_touched", reference: source.files_touched, optional: true }] : []),
+    ...(source.files_touched ? [{ name: "files_touched", reference: source.files_touched, ifAvailable: true }] : []),
     ...(source.additional_context ?? []).map((reference, index) => ({
       name: `additional_context_${index + 1}`,
       reference,
-      optional: true
+      ifAvailable: true
     }))
   ];
 
   return {
-    context: refs.map(({ name, reference, optional }) => sourceRefToContext(name, reference, optional))
+    context: refs.map(({ name, reference, ifAvailable }) => sourceRefToContext(name, reference, ifAvailable))
   };
 }
 

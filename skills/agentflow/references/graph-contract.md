@@ -112,9 +112,9 @@ Artifact context fields:
 - `artifact`: reserved or declared artifact name
 - optional `iteration`: `latest`, `latest_passed`, `latest_failed`, or a positive integer
 - optional `attempt`: `latest`, `latest_passed`, `latest_failed`, or a positive integer
-- optional `optional`: boolean
+- optional `if_available`: boolean
 
-Use `optional: true` only when the consumer can still do useful work without the material.
+Use `if_available: true` only when the consumer can still do useful work without the material.
 
 ## Artifacts
 
@@ -125,12 +125,12 @@ Use `optional: true` only when the consumer can still do useful work without the
   "design_packet": {
     "from": "output_dir",
     "path": "design-packet.json",
-    "required": true
+    "description": "Structured implementation packet for downstream implementation nodes."
   },
   "junit": {
     "from": "workspace",
     "path": "reports/junit.xml",
-    "required": false
+    "description": "JUnit XML report copied from the workspace after validation."
   }
 }
 ```
@@ -139,6 +139,7 @@ Artifact sources:
 
 - `output_dir`: file written under `AGENTFLOW_OUTPUT_DIR`
 - `workspace`: file copied from the node repo workspace
+- `description`: required one-sentence description of the expected file contents
 
 Reserved automatic artifact names:
 
@@ -146,6 +147,8 @@ Reserved automatic artifact names:
 - `result_json`: every executable node's normalized `result.json`
 
 Do not declare artifacts with reserved names.
+
+Every declared artifact must exist when the node closes. Missing declared artifacts fail the node. Producer artifact declarations do not have `required` or `optional`; availability belongs on consumer `context.from = "artifact"` items with `if_available: true` when the consumer can still do useful work without that material.
 
 ## Runtime Environment
 
@@ -158,7 +161,7 @@ Do not declare artifacts with reserved names.
 
 Agents receive the same environment variables and the same contract through their harness prompt. Source edits happen in `AGENTFLOW_WORKSPACE`. Durable handoff files go in `AGENTFLOW_OUTPUT_DIR` and must be declared in `artifacts`.
 
-Agent harness prompts tell the model it is executing one node in a graph, list declared artifacts with required or optional status, and explain that the final response is captured as reserved `agent_response`. Treat `agent_response` as a concise narrative handoff, not a replacement for a required structured artifact.
+Agent harness prompts tell the model it is executing one node in a graph, list declared artifacts with their descriptions, and explain that the final response is captured as reserved `agent_response`. Treat `agent_response` as a concise narrative handoff, not a replacement for a declared structured artifact.
 
 ## Primitive Fields
 
@@ -194,7 +197,7 @@ Optional:
 - `env`
 - `on_failure`
 
-`on_failure` defaults to `"fail"`. Use `"continue"` for soft evidence collection. Spawn errors, timeouts, missing env files, cancellation, context failures, and required artifact failures still fail hard.
+`on_failure` defaults to `"fail"`. Use `"continue"` for soft evidence collection. Spawn errors, timeouts, missing env files, cancellation, context failures, and missing declared artifacts still fail hard.
 
 ### `check`
 
@@ -272,11 +275,7 @@ These are invalid graph syntax:
 - `context_from`
 - `outputs`
 
-Replacements:
-
-- `inputs` -> `context`
-- `context_from` -> `context` item with `from: "artifact"`
-- `outputs` -> `artifacts`
+Use the current graph contract directly: `context` for node inputs and `artifacts` for named durable outputs.
 
 ## Validation
 

@@ -252,7 +252,7 @@ describe("pattern generate evaluate fix", () => {
             from: "artifact",
             node: "upstream_decisions",
             artifact: "decision_log",
-            optional: true
+            if_available: true
           })
         ])
       })

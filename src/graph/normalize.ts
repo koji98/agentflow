@@ -704,14 +704,14 @@ function normalizeContextItem(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["name", "from", "node", "artifact", "iteration", "attempt", "optional"],
+    ["name", "from", "node", "artifact", "iteration", "attempt", "if_available"],
     diagnostics
   );
   const node = readRequiredString(record.node, `${path}.node`, diagnostics);
   const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
   const iteration = normalizeSelector(record.iteration, `${path}.iteration`, diagnostics);
   const attempt = normalizeSelector(record.attempt, `${path}.attempt`, diagnostics);
-  const optional = readBoolean(record.optional, `${path}.optional`, diagnostics);
+  const if_available = readBoolean(record.if_available, `${path}.if_available`, diagnostics);
 
   if (!node || !artifact) {
     return undefined;
@@ -724,7 +724,7 @@ function normalizeContextItem(
     artifact,
     ...(iteration !== undefined ? { iteration } : {}),
     ...(attempt !== undefined ? { attempt } : {}),
-    ...(optional !== undefined ? { optional } : {})
+    ...(if_available !== undefined ? { if_available } : {})
   };
 }
 
@@ -767,13 +767,12 @@ function normalizeArtifactReference(
     return undefined;
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["node", "artifact", "iteration", "attempt", "optional"], diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["node", "artifact", "iteration", "attempt"], diagnostics);
 
   const node = readRequiredString(record.node, `${path}.node`, diagnostics);
   const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
   const iteration = normalizeSelector(record.iteration, `${path}.iteration`, diagnostics);
   const attempt = normalizeSelector(record.attempt, `${path}.attempt`, diagnostics);
-  const optional = readBoolean(record.optional, `${path}.optional`, diagnostics);
 
   if (!node || !artifact) {
     return undefined;
@@ -783,8 +782,7 @@ function normalizeArtifactReference(
     node,
     artifact,
     ...(iteration !== undefined ? { iteration } : {}),
-    ...(attempt !== undefined ? { attempt } : {}),
-    ...(optional !== undefined ? { optional } : {})
+    ...(attempt !== undefined ? { attempt } : {})
   };
 }
 
@@ -862,33 +860,6 @@ function normalizeArtifacts(
   return artifacts;
 }
 
-function normalizeLegacyDataFlowFields(
-  record: Record<string, unknown>,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): void {
-  if (record.inputs !== undefined) {
-    diagnostics.push({
-      path: `${path}.inputs`,
-      message: 'Field "inputs" has been replaced by "context".'
-    });
-  }
-
-  if (record.context_from !== undefined) {
-    diagnostics.push({
-      path: `${path}.context_from`,
-      message: 'Field "context_from" has been replaced by context items with from = "artifact".'
-    });
-  }
-
-  if (record.outputs !== undefined) {
-    diagnostics.push({
-      path: `${path}.outputs`,
-      message: 'Field "outputs" has been replaced by "artifacts".'
-    });
-  }
-}
-
 function normalizeSelector(
   value: unknown,
   path: string,
@@ -911,23 +882,6 @@ function normalizeSelector(
   }
 
   return readEnumValue(value, path, contextSelectors, diagnostics);
-}
-
-function normalizeLegacyContextReference(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): ArtifactReference | undefined {
-  const record = asRecord(value);
-
-  if (record && ("include" in record || "output" in record)) {
-    diagnostics.push({
-      path,
-      message: 'Legacy context reference fields "include" and "output" have been replaced by "artifact".'
-    });
-  }
-
-  return normalizeArtifactReference(value, path, diagnostics);
 }
 
 function normalizeGraphPrerequisiteCheck(
@@ -1054,7 +1008,6 @@ function normalizeExecutableBase(
   const label = readOptionalString(record.label, `${path}.label`, diagnostics);
   const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
   const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
-  normalizeLegacyDataFlowFields(record, path, diagnostics);
   const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
   const artifacts = allow_artifacts
     ? normalizeArtifacts(record.artifacts, `${path}.artifacts`, diagnostics)
@@ -1099,9 +1052,6 @@ function normalizeAgentNode(
       "profile",
       "context",
       "artifacts",
-      "inputs",
-      "context_from",
-      "outputs",
       "timeout_sec",
       "prompt",
       "model",
@@ -1152,9 +1102,6 @@ function normalizeExecNode(
       "profile",
       "context",
       "artifacts",
-      "inputs",
-      "context_from",
-      "outputs",
       "timeout_sec",
       "command",
       "args",
@@ -1206,9 +1153,6 @@ function normalizeCheckNode(
       "profile",
       "context",
       "artifacts",
-      "inputs",
-      "context_from",
-      "outputs",
       "timeout_sec",
       "check_kind",
       "command",
@@ -1321,9 +1265,6 @@ function normalizeCheckpointNode(
       "profile",
       "context",
       "artifacts",
-      "inputs",
-      "context_from",
-      "outputs",
       "timeout_sec",
       "prompt",
       "review_from"
@@ -1335,7 +1276,7 @@ function normalizeCheckpointNode(
     allow_artifacts: false
   });
   const prompt = readRequiredString(record.prompt, `${path}.prompt`, diagnostics);
-  const review_from = normalizeLegacyContextReference(
+  const review_from = normalizeArtifactReference(
     record.review_from,
     `${path}.review_from`,
     diagnostics
@@ -1734,9 +1675,6 @@ function normalizePatternDeepResearchNode(
       "profile",
       "context",
       "artifacts",
-      "inputs",
-      "context_from",
-      "outputs",
       "timeout_sec",
       "brief",
       "context_policy",
@@ -2015,9 +1953,6 @@ function normalizePatternSpecDesignNode(
       "profile",
       "context",
       "artifacts",
-      "inputs",
-      "context_from",
-      "outputs",
       "timeout_sec",
       "brief",
       "context_policy",
@@ -2413,9 +2348,6 @@ function normalizePatternGenerateEvaluateFixNode(
       "profile",
       "context",
       "artifacts",
-      "inputs",
-      "context_from",
-      "outputs",
       "timeout_sec",
       "brief",
       "task_source",
@@ -2852,9 +2784,6 @@ function normalizePatternReviewChangeNode(
       "profile",
       "context",
       "artifacts",
-      "inputs",
-      "context_from",
-      "outputs",
       "timeout_sec",
       "brief",
       "review_source",

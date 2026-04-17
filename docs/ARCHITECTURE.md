@@ -286,7 +286,7 @@ There are no free-form conditions in this release.
 
 ## Context and Artifacts
 
-`context` and `artifacts` are the authored contract between graph authoring and runtime context resolution. Old public data-flow fields `inputs`, `context_from`, and `outputs` are invalid graph syntax and are rejected with replacement guidance.
+`context` and `artifacts` are the authored contract between graph authoring and runtime context resolution. Old public data-flow fields `inputs`, `context_from`, and `outputs` are invalid graph syntax.
 
 The runtime keeps two channels separate:
 
@@ -325,7 +325,7 @@ Artifact context resolves named artifacts from prior node executions:
   "artifact": "junit",
   "iteration": "latest",
   "attempt": "latest_passed",
-  "optional": false
+  "if_available": false
 }
 ```
 
@@ -335,7 +335,7 @@ Supported artifact context fields:
 - `artifact`: upstream artifact name
 - `iteration`: optional selector for repeated nodes
 - `attempt`: optional execution selector
-- `optional`: optional boolean, default `false`
+- `if_available`: optional boolean, default `false`
 
 Supported selectors:
 
@@ -434,7 +434,7 @@ Runtime context resolution fails the node when:
 - an `attempt` selector resolves to no execution
 - context material exceeds the effective limits after truncation rules are applied
 
-If `optional: true`, the missing item is omitted and the omission is recorded in `context/packet.json`.
+If `if_available: true`, the missing item is omitted and the omission is recorded in `context/packet.json`.
 
 CLI validation runs in three phases:
 
@@ -723,7 +723,7 @@ Context resolution produces:
 - materialized file path inside the execution directory
 - live-workspace binding metadata when the material came from a resolved workspace file or glob context item
 - token counts and truncation flags
-- omitted optional items
+- omitted unavailable workspace items and artifact context items marked `if_available: true`
 
 `context/provenance.json` must include:
 
@@ -735,7 +735,7 @@ Agentflow does not duplicate repository instruction files into the context packe
 
 Context materialization is incremental. The runtime enforces `max_total_tokens` while it materializes items and fails as soon as the next item would overflow the token budget.
 
-Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing workspace files, empty globs, and optional artifact context references are recorded explicitly as omitted context instead of crashing the whole run during preflight. Resolved artifact materials include the producer's description. Resolved material that is not valid UTF-8 text is also omitted because context packets are tokenized text.
+Packet items reflect what Agentflow could resolve from the live workspace when the node started. Missing workspace files, empty globs, and artifact context references marked `if_available: true` are recorded explicitly as omitted context instead of crashing the whole run during preflight. Resolved artifact materials include the producer's description. Resolved material that is not valid UTF-8 text is also omitted because context packets are tokenized text.
 
 The release does not implement retrieval, embeddings, ranking, or semantic search. Context resolution is explicit file and artifact materialization only.
 
@@ -1027,7 +1027,7 @@ The projected state must answer:
 - active executions
 - latest execution summary per compiled node
 - repeat scope iteration state
-- artifact index with clear node and execution directory records plus reverse hashed-directory lookup
+- artifact index with clear node and execution directory records plus directory lookup
 
 ### Incremental-read contract
 

@@ -449,7 +449,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
           `external_findings_${suffix}`,
           workflowNodeId(config.id, `external_research_${suffix}`),
           `external_findings_${suffix}`,
-          { optional: true }
+          { if_available: true }
         )
       );
     }
@@ -503,7 +503,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
               ...directionInputs,
               artifactContext("operator_feedback", directionCheckpointId, "operator_feedback", {
                 iteration: "latest_failed",
-                optional: true
+                if_available: true
               })
             ],
             artifacts: mergeArtifacts(
@@ -611,11 +611,11 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
             artifactContext("current_state", inspectId, "current_state"),
             artifactContext("failed_critique_merged", mergeId, "critique_merged", {
               iteration: "latest_failed",
-              optional: true
+              if_available: true
             }),
             artifactContext("failed_quality_review", qualityId, "quality_review", {
               iteration: "latest_failed",
-              optional: true
+              if_available: true
             })
           ],
           artifacts: outputDirArtifact("spec_revision", "spec-revision.md"),
@@ -688,7 +688,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
       }),
       artifactContext("critique_merged", mergeId, "critique_merged", {
         iteration: "latest_passed",
-        optional: true
+        if_available: true
       }),
       artifactContext("quality_review", qualityId, "quality_review", {
         iteration: "latest_passed"

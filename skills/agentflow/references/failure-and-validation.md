@@ -73,5 +73,5 @@ Do not add validation everywhere by reflex. Extra validation nodes add noise, ru
 - inserting `checkpoint` where no operator review is actually wanted
 - using `repeat` without a strong convergence signal
 - running destructive or environment-sensitive commands without deciding whether their failure should terminate the graph
-- declaring optional artifacts that are required for the next node to make sense
+- marking artifact context as `if_available: true` when the next node cannot make sense without it
 - using `agent_response` as a machine-readable contract when the producer should write a JSON artifact

@@ -392,7 +392,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
               ...planContext,
               artifactContext("operator_feedback", planCheckpointId, "operator_feedback", {
                 iteration: "latest_failed",
-                optional: true
+                if_available: true
               })
             ],
             artifacts: mergeArtifacts(

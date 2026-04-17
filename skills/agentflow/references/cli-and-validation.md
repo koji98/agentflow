@@ -73,10 +73,10 @@ Before handing off a graph, make sure:
 
 When validation fails, repair the graph instead of explaining around the error. Common repairs:
 
-- replace legacy `inputs`, `context_from`, or `outputs` with `context` and `artifacts`
+- remove invalid `inputs`, `context_from`, or `outputs`; use only current `context` and `artifacts`
 - add missing `repo` fields in multi-repo graphs
 - declare an artifact that a downstream node references
-- change optional context to required, or required to optional, based on whether the consumer can proceed
+- add or remove `if_available: true` on artifact context based on whether the consumer can proceed without that material
 - move env-dependent command setup into `env_files`
 - cap broad globs with `max_files`
 - replace a soft `check` in `repeat.until` with a hard gate
