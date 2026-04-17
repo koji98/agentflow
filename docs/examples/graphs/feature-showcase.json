@@ -204,7 +204,7 @@
                   "node": "review_walkthrough",
                   "artifact": "review_report",
                   "iteration": "latest_failed",
-                  "optional": true
+                  "if_available": true
                 },
                 {
                   "name": "package_contract_result",

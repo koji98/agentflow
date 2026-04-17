@@ -199,7 +199,7 @@ describe("runtime repeat", () => {
                       node: "merge_feedback",
                       artifact: "critique_merged",
                       iteration: "latest_failed",
-                      optional: true
+                      if_available: true
                     },
                     {
                       name: "failed_quality_review",
@@ -207,7 +207,7 @@ describe("runtime repeat", () => {
                       node: "quality_review",
                       artifact: "quality_review",
                       iteration: "latest_failed",
-                      optional: true
+                      if_available: true
                     },
                     {
                       name: "failed_operator_feedback",
@@ -215,7 +215,7 @@ describe("runtime repeat", () => {
                       node: "human_review",
                       artifact: "operator_feedback",
                       iteration: "latest_failed",
-                      optional: true
+                      if_available: true
                     }
                   ],
                   artifacts: {

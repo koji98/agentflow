@@ -50,7 +50,7 @@ describe("graph normalization", () => {
                     artifact: "agent_response",
                     iteration: 1,
                     attempt: "latest_failed",
-                    optional: true
+                    if_available: true
                   }
                 ]
               }
@@ -104,17 +104,17 @@ describe("graph normalization", () => {
             artifact: "agent_response",
             iteration: 1,
             attempt: "latest_failed",
-            optional: true
+            if_available: true
           }
         ]
       })
     );
   });
 
-  it("rejects legacy data-flow fields with replacement guidance", () => {
+  it("rejects removed data-flow fields as unknown graph syntax", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
-      graph_id: "legacy-data-flow",
+      graph_id: "removed-data-flow",
       repos: {
         main: {
           path: "."
@@ -146,24 +146,24 @@ describe("graph normalization", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.steps[0].inputs",
-          message: 'Field "inputs" has been replaced by "context".'
+          message: 'Unknown field "inputs" is not part of the graph contract.'
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].context_from",
-          message: 'Field "context_from" has been replaced by context items with from = "artifact".'
+          message: 'Unknown field "context_from" is not part of the graph contract.'
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].outputs",
-          message: 'Field "outputs" has been replaced by "artifacts".'
+          message: 'Unknown field "outputs" is not part of the graph contract.'
         })
       ])
     );
   });
 
-  it("rejects legacy data-flow fields on managed patterns too", () => {
+  it("rejects removed data-flow fields on managed patterns too", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
-      graph_id: "legacy-managed-data-flow",
+      graph_id: "removed-managed-data-flow",
       repos: {
         main: {
           path: "."
@@ -204,15 +204,62 @@ describe("graph normalization", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.steps[0].inputs",
-          message: 'Field "inputs" has been replaced by "context".'
+          message: 'Unknown field "inputs" is not part of the graph contract.'
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].context_from",
-          message: 'Field "context_from" has been replaced by context items with from = "artifact".'
+          message: 'Unknown field "context_from" is not part of the graph contract.'
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].outputs",
-          message: 'Field "outputs" has been replaced by "artifacts".'
+          message: 'Unknown field "outputs" is not part of the graph contract.'
+        })
+      ])
+    );
+  });
+
+  it("rejects optional on artifact context as unknown graph syntax", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "removed-artifact-context-optional",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "consume",
+            prompt: "Consume a prior response.",
+            context: [
+              {
+                name: "prior_response",
+                from: "artifact",
+                node: "inspect",
+                artifact: "agent_response",
+                optional: true
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].context[0].optional",
+          message: 'Unknown field "optional" is not part of the graph contract.'
         })
       ])
     );

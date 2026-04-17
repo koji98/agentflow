@@ -221,13 +221,13 @@ function appendNonTokenizableOmission(
   accumulator: MaterializationAccumulator,
   key: string,
   source: ContextItem,
-  optional: boolean
+  ifAvailable: boolean
 ): void {
   accumulator.omitted.push({
     key,
     source,
     reason: "Material is not valid UTF-8 text and cannot be tokenized.",
-    optional
+    if_available: ifAvailable
   });
 }
 
@@ -346,7 +346,7 @@ async function materializeWorkspaceFileContext(
         key,
         source: item,
         reason: `Requested context workspace file "${item.path}" was not found at execution time.`,
-        optional: false
+        if_available: false
       });
       return;
     }
@@ -427,7 +427,7 @@ async function materializeWorkspaceGlobContext(
       key,
       source: item,
       reason: `Requested context workspace glob "${item.path}" matched no files after ignore filtering at execution time.`,
-      optional: false
+      if_available: false
     });
     return;
   }
@@ -558,13 +558,13 @@ async function materializeArtifactContext(
   );
 
   if (attempts.length === 0) {
-    if (reference.optional) {
+    if (reference.if_available) {
       accumulator.omitted.push({
         key: reference.name,
         source: reference,
         ...(description ? { description } : {}),
         reason: `No execution matched "${reference.node}".`,
-        optional: true
+        if_available: true
       });
       return;
     }
@@ -581,13 +581,13 @@ async function materializeArtifactContext(
   const sourcePath = selected.artifacts[reference.artifact];
 
   if (!sourcePath) {
-    if (reference.optional) {
+    if (reference.if_available) {
       accumulator.omitted.push({
         key: reference.name,
         source: reference,
         ...(description ? { description } : {}),
         reason: `Selected execution for "${reference.node}" did not produce the requested artifact.`,
-        optional: true
+        if_available: true
       });
       return;
     }
@@ -599,7 +599,7 @@ async function materializeArtifactContext(
   const key = reference.name;
 
   if (!materialized) {
-    appendNonTokenizableOmission(accumulator, key, reference, reference.optional ?? false);
+    appendNonTokenizableOmission(accumulator, key, reference, reference.if_available ?? false);
     return;
   }
 

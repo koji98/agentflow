@@ -115,7 +115,7 @@ Core artifacts:
 
 Notes:
 - This pattern is intentionally narrow. It does not do spec planning, execution-plan approval, or read-only recon.
-- `task_source` replaces the old spec-ingestion surface.
+- `task_source` is the only supported source declaration for this pattern.
 - `strategy.max_fix_cycles` bounds retries after the initial generation pass.
 - `evaluation.required = false` runs one non-blocking evaluation pass and records soft evidence without the repeat loop.
 

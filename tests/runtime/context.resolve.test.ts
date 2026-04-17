@@ -140,14 +140,14 @@ describe("context resolution", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("records optional missing context references instead of failing resolution", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-optional-"));
+  it("records if_available missing context references instead of failing resolution", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-if-available-"));
     const repoDir = join(tempRoot, "repo");
     await mkdir(repoDir, { recursive: true });
 
     const graph = compileGraph({
       version: "1",
-      graph_id: "context-optional-missing",
+      graph_id: "context-if-available-missing",
       repos: {
         main: { path: "." }
       },
@@ -178,7 +178,7 @@ describe("context resolution", () => {
                 from: "artifact",
                 node: "source",
                 artifact: "agent_response",
-                optional: true
+                if_available: true
               }
             ]
           }
@@ -208,11 +208,11 @@ describe("context resolution", () => {
           from: "artifact",
           node: "source",
           artifact: "agent_response",
-          optional: true
+          if_available: true
         },
         description: "Final response captured from the producer node.",
         reason: 'No execution matched "source".',
-        optional: true
+        if_available: true
       }
     ]);
 
@@ -504,7 +504,7 @@ describe("context resolution", () => {
           path: "watched.txt"
         },
         reason: 'Requested context workspace file "watched.txt" was not found at execution time.',
-        optional: false
+        if_available: false
       }
     ]);
     expect(await readFile(resolved.manifest_path, "utf8")).toContain('Requested context workspace file "watched.txt" was not found');
@@ -573,7 +573,7 @@ describe("context resolution", () => {
           path: "binary.dat"
         },
         reason: "Material is not valid UTF-8 text and cannot be tokenized.",
-        optional: false
+        if_available: false
       }
     ]);
 
@@ -640,7 +640,7 @@ describe("context resolution", () => {
           path: "*.md"
         },
         reason: 'Requested context workspace glob "*.md" matched no files after ignore filtering at execution time.',
-        optional: false
+        if_available: false
       }
     ]);
 

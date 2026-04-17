@@ -86,7 +86,7 @@ export interface ArtifactContext {
   artifact: string;
   iteration?: ContextSelector;
   attempt?: ContextSelector;
-  optional?: boolean;
+  if_available?: boolean;
 }
 
 export type ContextItem = FileInput | GlobInput | TextInput | ArtifactContext;
@@ -96,7 +96,6 @@ export interface ArtifactReference {
   artifact: string;
   iteration?: ContextSelector;
   attempt?: ContextSelector;
-  optional?: boolean;
 }
 
 export interface ArtifactDefinition {

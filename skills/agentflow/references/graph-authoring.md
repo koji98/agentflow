@@ -86,12 +86,12 @@ Good artifact examples:
   "design_packet": {
     "from": "output_dir",
     "path": "design-packet.json",
-    "required": true
+    "description": "Structured implementation packet for downstream implementation nodes."
   },
   "junit": {
     "from": "workspace",
     "path": "reports/junit.xml",
-    "required": false
+    "description": "JUnit XML report copied from the workspace after validation."
   }
 }
 ```
@@ -106,8 +106,9 @@ Rules:
 - Source edits happen in the workspace.
 - Durable handoff files should be written to `AGENTFLOW_OUTPUT_DIR` and declared in `artifacts`.
 - Downstream nodes consume only named artifacts or authored workspace/text context.
-- Use `required: true` when the graph cannot proceed coherently without that artifact.
-- Use optional artifacts for supplementary evidence only.
+- Every declared artifact needs `description` and must exist when the node closes.
+- Do not declare an artifact unless the node is responsible for producing it.
+- Use `if_available: true` on consumer artifact context only when the consumer can still do useful work without the material.
 - The final agent response is captured as `agent_response`; use it for a concise narrative handoff with outcome, work completed, produced artifacts, validation, and next-node notes.
 - Do not rely on `agent_response` when downstream work needs a stable machine-readable packet.
 
@@ -130,7 +131,7 @@ Avoid:
 - one giant agent that discovers, edits, validates, and summarizes everything
 - broad `src/**/*` context when a smaller surface is known
 - relying on `agent_response` when a machine-readable packet is needed
-- optional artifacts that are actually required for correctness
+- `if_available: true` artifact context references that are actually required for correctness
 - `parallel` branches that mutate the same files
 - `repeat` without a clear owner, gate, and maximum useful attempt count
 - checkpoints used as generic pauses
@@ -155,6 +156,7 @@ Before handoff:
 - `agentflow validate --graph <path> --run-ready` passed when the graph is being handed off as locally runnable.
 - `agentflow compile --graph <path>` passed.
 - Every downstream artifact reference names a reserved or declared artifact.
+- Every declared artifact includes a useful `description`.
 - Every artifact path is relative and stays inside `AGENTFLOW_OUTPUT_DIR` or the workspace.
 - Every broad glob is justified and capped.
 - Every command that needs env declares `env_files`.

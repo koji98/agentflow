@@ -53,8 +53,7 @@ function artifactReferenceKey(reference: ArtifactReference): string {
     node: reference.node,
     artifact: reference.artifact,
     iteration: reference.iteration,
-    attempt: reference.attempt,
-    optional: reference.optional
+    attempt: reference.attempt
   });
 }
 

@@ -69,7 +69,7 @@ export function artifactContext(
   options: {
     iteration?: ContextSelector;
     attempt?: ContextSelector;
-    optional?: boolean;
+    if_available?: boolean;
   } = {}
 ): Extract<ContextItem, { from: "artifact" }> {
   return {
@@ -79,7 +79,7 @@ export function artifactContext(
     artifact,
     ...(options.iteration !== undefined ? { iteration: options.iteration } : {}),
     ...(options.attempt !== undefined ? { attempt: options.attempt } : {}),
-    ...(options.optional !== undefined ? { optional: options.optional } : {})
+    ...(options.if_available !== undefined ? { if_available: options.if_available } : {})
   };
 }
 

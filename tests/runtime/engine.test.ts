@@ -2096,7 +2096,7 @@ describe("runtime engine", () => {
 
           const packet = JSON.parse(await readFile(context_packet_path, "utf8")) as {
             materials: unknown[];
-            omitted: Array<{ key: string; reason: string; optional: boolean }>;
+            omitted: Array<{ key: string; reason: string; if_available: boolean }>;
           };
           expect(packet.materials).toEqual([]);
           expect(packet.omitted).toEqual(
@@ -2104,7 +2104,7 @@ describe("runtime engine", () => {
               expect.objectContaining({
                 key: "watched",
                 reason: 'Requested context workspace file "watched.txt" was not found at execution time.',
-                optional: false
+                if_available: false
               })
             ])
           );

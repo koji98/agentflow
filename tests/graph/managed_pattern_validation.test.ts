@@ -117,7 +117,7 @@ describe("managed pattern normalization edges", () => {
     );
   });
 
-  it("surfaces deprecated execute-spec style fields on pattern_generate_evaluate_fix while still lowering a valid node", () => {
+  it("surfaces unknown execute-spec style fields on pattern_generate_evaluate_fix while still lowering a valid node", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({
         type: "pattern_generate_evaluate_fix",
