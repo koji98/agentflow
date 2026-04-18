@@ -15,10 +15,11 @@ Required product surface:
 - executable node kinds: `agent`, `exec`, `check`, `checkpoint`
 - authored container kinds: `sequence`, `parallel`, `repeat`
 - profile resolution
+- Git-resolved plugin workflows that lower into normal primitive subgraphs
 - Codex CLI and Cursor CLI harness adapters
 - deterministic checks and AI checks
 - durable run artifacts, append-only events, and projected inspection state
-- CLI commands for `graph-help`, `validate`, `compile`, `run`, `resume`, and `apply`
+- CLI commands for `graph-help`, `validate`, `compile`, `plugin resolve`, `run`, `resume`, and `apply`
 
 ## Required Behavior
 
@@ -27,6 +28,7 @@ Required product surface:
 - validate authored graphs deterministically
 - resolve launch profile and workspace backend before compile
 - compile authored containers into a flat executable graph with scope metadata
+- resolve plugin workflows from the local lockfile and lower them before normal graph validation
 - preserve authored ids and emit stable compiled ids
 - emit explicit repeat edges and repeat scope metadata
 - reject ambiguous upstream references and unsupported deferred features
@@ -77,15 +79,16 @@ The release is complete only when all of the following are true:
 5. Deterministic and AI checks both produce inspectable results.
 6. A historical run can be inspected from durable artifacts alone.
 7. Automated tests cover compiler semantics, repeat execution, context resolution, harness adapters, artifact projection, and CLI contracts.
+8. A graph can resolve a Git-distributed plugin workflow, compile the lowered workflow, and consume its public artifacts from a regular downstream node.
 
 ## Out of Scope
 
 Do not build these now:
 
-- new node kinds beyond `agent`, `exec`, `check`, `checkpoint`, `sequence`, `parallel`, `repeat`
+- new runtime node kinds beyond `agent`, `exec`, `check`, `checkpoint`
 - automatic controller loops
 - remote workspace backends
-- generalized plugin APIs
+- runtime-loaded tools, MCP sidecars, or harness-specific extension semantics
 - interactive graph editing surfaces
 - resumability beyond `resume` plus reopening completed or failed runs from artifacts
 

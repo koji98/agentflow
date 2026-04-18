@@ -7,13 +7,13 @@ These areas are intentionally deferred from the current release. They should rem
 - MCP sidecars
 - native harnesses
 - a generalized custom tool platform
+- native Agent Skills installation from graph execution
 - remote-devbox backends
 - a fully featured controller
 
 Additional deferred areas:
 
 - container or VM workspace backends
-- arbitrary plugin systems
 - interactive graph editing surfaces
 - background orchestration services
 - resumable control-plane loops

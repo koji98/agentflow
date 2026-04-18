@@ -6,7 +6,7 @@ Agentflow has six runtime subsystems and one deferred control-plane stub.
 
 ### Runtime subsystems
 
-1. `graph`: parse, normalize, validate, resolve profiles, and compile authored graphs
+1. `graph`: parse, resolve plugin workflows, normalize, validate, resolve profiles, and compile authored graphs
 2. `runtime/core`: schedule compiled nodes, track state, and emit events
 3. `runtime/context`: resolve node context material and prior artifacts into a bounded context packet
 4. `runtime/harness`: execute `agent` nodes and AI `check` nodes through CLI-backed harness adapters
@@ -33,6 +33,12 @@ The authored graph is the operator-facing source document. It is nested, readabl
     "main": {
       "path": ".",
       "default_branch": "main"
+    }
+  },
+  "plugins": {
+    "team": {
+      "source": "git@github.com:acme/team-agentflow-plugin.git",
+      "ref": "v0.1.0"
     }
   },
   "defaults": {
@@ -66,6 +72,7 @@ The authored graph is the operator-facing source document. It is nested, readabl
 
 - `graph_id` is stable across runs and unique within the operator's working set.
 - `repos.<alias>.path` is resolved relative to the authored graph file location.
+- optional `plugins.<alias>` declares a Git source and ref for reusable managed workflows. The declaration is resolved by `agentflow plugin resolve --graph` into `agentflow.plugins.lock.json`.
 - `defaults.launch_profile` selects the run launch profile.
 - `defaults.workspace_backend` selects the run workspace backend.
 - optional `prerequisites.checks` declares launch-time file, command, env, or repo checks shared by `validate`, `run`, and `resume`.
@@ -82,7 +89,7 @@ The authored graph is the operator-facing source document. It is nested, readabl
 
 ### Node kinds
 
-Authoring supports seven node kinds:
+Primitive authoring supports seven node kinds:
 
 - `agent`
 - `exec`
@@ -94,12 +101,13 @@ Authoring supports seven node kinds:
 
 Only `agent`, `exec`, `check`, and `checkpoint` are executable runtime nodes.
 
-Managed-workflow authoring supports:
+Managed-workflow authoring supports built-in patterns and Git-resolved plugins:
 
 - `pattern_deep_research`
 - `pattern_spec_design`
 - `pattern_generate_evaluate_fix`
 - `pattern_review_change`
+- `plugin`
 
 Those workflows compile into internal primitive subgraphs rather than execute as direct runtime node kinds. Their authored schemas are part of the current release contract.
 
@@ -456,7 +464,7 @@ If `if_available: true`, the missing item is omitted and the omission is recorde
 CLI validation runs in three phases:
 
 1. authored validation
-2. compiled validation after lowering managed patterns
+2. compiled validation after lowering managed patterns and plugin workflows
 3. readiness validation for declared prerequisites and resolved repo sources
 
 Plain readiness validation blocks launch only for required declared checks. Optional prerequisite failures remain visible as warnings. `agentflow validate --graph <path> --run-ready` adds local machine checks for `git`, repo worktree status, executable node commands, and harness binaries so an operator can prove the graph is runnable on the current host before starting a run.
@@ -838,6 +846,7 @@ Timeouts and operator cancellations are hard-bounded in this release: the runtim
 - no MCP transport
 - no harness-specific custom tool surface
 - no harness-specific graph semantics
+- no plugin-provided runtime sidecars or hidden harness extensions
 
 ## Check Execution Model
 

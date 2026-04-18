@@ -13,6 +13,8 @@ Use this when authoring, reviewing, or handing off an Agentflow graph.
   Plain validate proves graph legality; run-ready validate proves the current machine is prepared to launch it.
 - `agentflow compile --graph <path/to/agentflow.graph.json>`
   Shows the compiled graph contract that the runtime will execute.
+- `agentflow plugin resolve --graph <path/to/agentflow.graph.json>`
+  Clones Git plugin workflows declared by the graph, pins them to commits, and writes `agentflow.plugins.lock.json` next to the graph.
 - `agentflow run --graph <path/to/agentflow.graph.json>`
   Creates a run root and executes the compiled graph.
 - `agentflow run --graph <path> --label <run-label>`
@@ -35,6 +37,7 @@ Use `agentflow --help` or `agentflow <command> --help` when the command surface 
 - `--graph` resolves from the shell current working directory.
 - `repos.<alias>.path` resolves from the graph file directory.
 - `validate` and `compile` do not create a run root.
+- `validate`, `compile`, `run`, and `resume` do not clone plugin workflows implicitly; resolve plugins first.
 - `run` and `resume` do.
 - `eval run` creates an eval root and one normal graph run root per case/variant.
 
@@ -43,12 +46,13 @@ Use `agentflow --help` or `agentflow <command> --help` when the command surface 
 Recommended order:
 
 1. draft or edit the graph
-2. run `agentflow validate --graph ...`
-3. fix diagnostics until validation passes
-4. run `agentflow validate --graph ... --run-ready` when local commands, git worktrees, Codex, or Cursor readiness matters before launch
-5. run `agentflow compile --graph ...`
-6. inspect the compiled contract for node count, dependencies, repeat scopes, managed expansion, profiles, and artifact references
-7. run `agentflow run --graph ...` when the graph is ready to execute
+2. run `agentflow plugin resolve --graph ...` if the graph declares `plugins`
+3. run `agentflow validate --graph ...`
+4. fix diagnostics until validation passes
+5. run `agentflow validate --graph ... --run-ready` when local commands, git worktrees, Codex, Cursor, or plugin scripts matter before launch
+6. run `agentflow compile --graph ...`
+7. inspect the compiled contract for node count, dependencies, repeat scopes, managed expansion, profiles, and artifact references
+8. run `agentflow run --graph ...` when the graph is ready to execute
 
 Do not skip compile for nontrivial graphs. Validation tells you the graph is legal; compile tells you what will actually run.
 
@@ -64,6 +68,7 @@ Recommended eval loop:
 Before handing off a graph, make sure:
 
 - `validate` passes
+- `plugin resolve` passes when the graph declares `plugins`
 - `validate --run-ready` passes when the handoff says the graph is ready to run on the current machine
 - `compile` passes
 - the chosen node kinds express the intended control-flow semantics
@@ -80,6 +85,7 @@ When validation fails, repair the graph instead of explaining around the error. 
 - move env-dependent command setup into `env_files`
 - cap broad globs with `max_files`
 - replace a soft `check` in `repeat.until` with a hard gate
+- run `agentflow plugin resolve --graph ...` when diagnostics say a plugin is unresolved, stale, or missing from cache
 
 Before handing off an eval suite, make sure:
 

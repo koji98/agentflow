@@ -28,6 +28,7 @@ import { managedPatternDescriptors } from "../managed/index.js";
 import { applyCommand } from "./commands/apply.js";
 import { compileCommand } from "./commands/compile.js";
 import { evalCommand } from "./commands/eval.js";
+import { pluginCommand } from "./commands/plugin.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
 import { validateCommand } from "./commands/validate.js";
@@ -115,6 +116,7 @@ function renderGraphHelp(): string {
     `Executable node kinds: ${executableNodeKinds.join(", ")}`,
     `Container node kinds: ${containerNodeKinds.join(", ")}`,
     `Managed pattern scaffolds: ${managedPatternKinds.join(", ")}`,
+    "Plugin workflow node: plugin (uses Git-resolved reusable managed workflows)",
     `Harness adapters: ${harnessNames.join(", ")}`,
     `Check kinds: ${checkKinds.join(", ")}`,
     `Workspace backends: ${workspaceBackends.join(", ")}`,
@@ -133,12 +135,14 @@ function renderGraphHelp(): string {
     "- profiles",
     "- prerequisites.checks",
     "- graph",
+    "- plugins",
     "",
     "Key rules:",
     "- The runtime executes compiled graphs only.",
     "- validate reports authored validation, compiled validation, and declared readiness; add --run-ready for local machine dependency checks.",
     "- sequence, parallel, and repeat are authoring containers, not executable runtime nodes.",
     "- pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, and pattern_review_change are implemented as managed patterns that lower into generated primitive subgraphs.",
+    "- plugin workflow nodes use type = plugin, uses = plugin_alias/workflow_id, and config = workflow-specific settings; run agentflow plugin resolve --graph first.",
     "- repeat.until.node must target a descendant check or checkpoint node.",
     "- repeat context selectors support latest, latest_passed, latest_failed, or a positive integer ordinal.",
     "- launch profile and workspace backend come from graph defaults in this release.",
@@ -254,6 +258,7 @@ const commandRegistry = {
   resume: resumeCommand,
   apply: applyCommand,
   eval: evalCommand,
+  plugin: pluginCommand,
   "graph-help": graphHelpCommand,
   control: controlCommand
 } as const satisfies Record<string, GraphCliCommand>;
@@ -421,6 +426,7 @@ function renderMainHelp(): string {
     "  5. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work",
     "  6. apply: apply captured workspace changes from a run back to a git repo",
     "  7. eval: validate or run local eval suites for Agentflow graphs",
+    "  8. plugin: resolve Git-distributed managed workflow plugins for a graph",
     "",
     "Examples:",
   "  agentflow graph-help",
@@ -431,6 +437,7 @@ function renderMainHelp(): string {
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
     "  agentflow apply --run-root .agentflow/runs/<run-id>",
     "  agentflow eval validate --suite evals/example/suite.json",
+    "  agentflow plugin resolve --graph agentflow.graph.json",
     "  agentflow control --mission mission.json",
     "",
     "Path rules:",
@@ -569,7 +576,7 @@ export async function executeCli(
     };
   }
 
-  if (positionals.length > 0 && command.name !== "eval") {
+  if (positionals.length > 0 && command.name !== "eval" && command.name !== "plugin") {
     return {
       exitCode: 2,
       stdout: renderCommandUsageError({

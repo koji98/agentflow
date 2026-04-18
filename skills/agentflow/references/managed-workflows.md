@@ -2,6 +2,8 @@
 
 Use managed patterns when the built-in lifecycle matches the work. They are fixed strategy contracts that lower into primitive subgraphs; they are not aliases for arbitrary prompts.
 
+For team-owned reusable workflows distributed through Git, use `agentflow-plugins` instead of forcing the built-in managed patterns to fit.
+
 ## Selection
 
 Choose by lifecycle:
@@ -17,6 +19,7 @@ Do not use a managed pattern when:
 - the lifecycle needs custom topology the pattern does not model
 - the pattern contract would be mostly empty
 - the user needs a one-off command gate or simple handoff
+- the workflow is organization-specific and should be packaged as a reusable plugin
 
 ## Shared Authored Model
 
@@ -148,6 +151,8 @@ For every graph with managed patterns:
 6. Confirm downstream primitive nodes reference artifacts published by the managed pattern's final publish node.
 
 If compile output surprises you, change the authored pattern contract rather than trying to depend on internal generated node ids.
+
+For plugin workflows, use the same rule: downstream nodes consume artifacts from the public plugin node id and must not depend on generated internal ids.
 
 ## Guardrails
 

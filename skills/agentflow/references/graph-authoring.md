@@ -7,6 +7,7 @@ Create Agentflow graphs that are executable, inspectable, and hard to misread.
 An Agentflow graph is local-first orchestration over one or more local git repositories.
 
 - The graph chooses repos, launch profile, workspace backend, executable nodes, control flow, context, artifacts, and validation gates.
+- Optional plugin workflows let a graph reuse Git-resolved managed subgraphs without adding runtime node kinds.
 - The workspace carries source changes during execution.
 - `context` carries authored input material into a node.
 - `artifacts` declare durable named handoff files a downstream node may consume.
@@ -19,12 +20,13 @@ The graph should make responsibility and evidence obvious. If a node fails, the 
 Use this loop before handing back any authored graph:
 
 1. Draft or edit the graph.
-2. Run `agentflow validate --graph <path>`.
-3. Fix every validation diagnostic.
-4. Run `agentflow validate --graph <path> --run-ready` when the graph is expected to launch on this machine, especially if it relies on `worktree`, local commands, Codex, or Cursor.
-5. Run `agentflow compile --graph <path>`.
-6. Inspect the compiled shape when the graph uses managed patterns, `parallel`, `repeat`, checkpoints, or artifact handoffs.
-7. If the graph is meant to execute now, run `agentflow run --graph <path>`.
+2. If the graph declares `plugins`, run `agentflow plugin resolve --graph <path>`.
+3. Run `agentflow validate --graph <path>`.
+4. Fix every validation diagnostic.
+5. Run `agentflow validate --graph <path> --run-ready` when the graph is expected to launch on this machine, especially if it relies on `worktree`, local commands, Codex, Cursor, or plugin-provided scripts.
+6. Run `agentflow compile --graph <path>`.
+7. Inspect the compiled shape when the graph uses managed patterns, plugin workflows, `parallel`, `repeat`, checkpoints, or artifact handoffs.
+8. If the graph is meant to execute now, run `agentflow run --graph <path>`.
 
 If validation or compile cannot be run, state why. If either fails, do not hand off the graph as ready; report the failing command and the diagnostics.
 
@@ -58,6 +60,8 @@ Use managed patterns when the full lifecycle matches:
 - `pattern_spec_design`
 - `pattern_generate_evaluate_fix`
 - `pattern_review_change`
+
+Use `plugin` when the graph should drop in a reusable team-owned managed workflow from Git. Plugin nodes use `uses: "alias/workflow"`, validate workflow-specific `config`, and publish only the artifacts declared by the plugin workflow's publish node.
 
 Do not use a managed pattern as a vague prompt bucket. If only one or two primitive nodes are needed, primitives are clearer.
 
@@ -139,6 +143,7 @@ Avoid:
 - `repeat` without a clear owner, gate, and maximum useful attempt count
 - checkpoints used as generic pauses
 - downstream handoff agents that only restate the previous node
+- references to plugin-generated internal node ids instead of the public plugin node id
 
 ## Validation Placement
 
@@ -156,6 +161,7 @@ Use deterministic `check` for objective pass/fail. Use AI `check` for semantic q
 Before handoff:
 
 - `agentflow validate --graph <path>` passed.
+- `agentflow plugin resolve --graph <path>` passed when the graph declares `plugins`.
 - `agentflow validate --graph <path> --run-ready` passed when the graph is being handed off as locally runnable.
 - `agentflow compile --graph <path>` passed.
 - Every downstream artifact reference names a reserved or declared artifact.

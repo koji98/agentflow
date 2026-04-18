@@ -11,6 +11,7 @@ export interface ManagedExpansionRepeatLoop {
 export interface ManagedExpansionSummary {
   authored_id: string;
   managed_kind: LoweredManagedNode["managed_kind"];
+  plugin?: NonNullable<LoweredManagedNode["plugin"]>;
   lowered_to: LoweredManagedNode["lowered_to"];
   ordered_internal_step_ids: string[];
   internal_hard_gates: string[];
@@ -26,6 +27,10 @@ function matchesManagedInternalNode(
   authoredId: string,
   loweredNode: LoweredManagedNode
 ): boolean {
+  if (loweredNode.internal_id_prefix) {
+    return authoredId.startsWith(loweredNode.internal_id_prefix);
+  }
+
   return authoredId.startsWith(`${loweredNode.authored_id}__managed__${loweredNode.managed_kind}__`);
 }
 
@@ -54,6 +59,7 @@ export function buildManagedExpansionSummaries(
     return {
       authored_id: loweredNode.authored_id,
       managed_kind: loweredNode.managed_kind,
+      ...(loweredNode.plugin ? { plugin: loweredNode.plugin } : {}),
       lowered_to: loweredNode.lowered_to,
       ordered_internal_step_ids: unique(internalNodes.map((node) => node.authored_id)),
       internal_hard_gates: unique(

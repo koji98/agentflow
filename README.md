@@ -28,7 +28,7 @@ flowchart TB
     review -- pass --> artifacts["artifacts\noutputs, logs, summary"]
 ```
 
-Managed patterns such as `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change` are authored shortcuts that lower into generated primitive subgraphs rather than introducing a separate runtime model.
+Managed patterns such as `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change` are authored shortcuts that lower into generated primitive subgraphs rather than introducing a separate runtime model. Plugins use the same idea for team-owned workflows: a graph can reference a Git-resolved plugin workflow, resolve it into a lockfile, and compile it into normal Agentflow nodes.
 
 The point is not just that Agentflow has several node kinds. It is that those node kinds compose into deliberate coding graphs: fan out when evidence gathering is independent, fan in when a plan needs synthesis, and use repair loops only where implementation and validation genuinely need iteration.
 
@@ -39,6 +39,7 @@ The point is not just that Agentflow has several node kinds. It is that those no
 - Compile author-friendly control flow into a runtime contract you can inspect before launch.
 - Preserve a durable run trail with summaries, logs, artifacts, events, and projected state.
 - Reuse structured managed patterns when you want higher-level scaffolds without inventing new runtime node kinds.
+- Reuse Git-distributed plugin workflows when a team needs its own managed graph, context files, scripts, and local conventions.
 
 ## Node Model
 
@@ -47,11 +48,12 @@ The point is not just that Agentflow has several node kinds. It is that those no
 | Primitive executable nodes | `agent`, `exec`, `check`, `checkpoint` | Executed directly by the runtime |
 | Authoring containers | `sequence`, `parallel`, `repeat` | Authoring-only control flow, compiled into primitive execution edges and scopes |
 | Managed patterns | `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, `pattern_review_change` | Authored as structured intent, lowered into generated primitive subgraphs |
+| Plugin workflows | `plugin` | Git-resolved reusable managed workflows, lowered into generated primitive subgraphs before compile |
 
 ## Release Boundary
 
 - The runtime executes compiled graphs only.
-- Agentflow does not provide a generalized tool plugin system yet.
+- Plugins package reusable managed workflows. They do not add runtime sidecars, new primitive node kinds, or harness-specific tool semantics.
 - Agentflow does not support remote devboxes or native non-CLI harnesses in this release.
 
 ## Requirements
@@ -154,6 +156,7 @@ Top-level fields:
 - `version`
 - `graph_id`
 - `repos`
+- `plugins`
 - `defaults`
 - `profiles`
 - `graph`
@@ -185,15 +188,18 @@ Profiles do not define graph structure.
 
 ### Node kinds
 
-Three authoring categories matter:
+Four authoring categories matter:
 
 - Primitive executable nodes: `agent`, `exec`, `check`, `checkpoint`
 - Authoring containers: `sequence`, `parallel`, `repeat`
 - Managed patterns: `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, `pattern_review_change`
+- Plugin workflows: `plugin`
 
-Only primitive executable nodes run directly. Containers compile into control-flow edges and scopes, and managed patterns compile into generated primitive subgraphs.
+Only primitive executable nodes run directly. Containers compile into control-flow edges and scopes. Managed patterns and plugin workflows compile into generated primitive subgraphs.
 
 `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change` are structured managed patterns that compile into generated primitive subgraphs. Start with [`docs/MANAGED_PATTERNS.md`](docs/MANAGED_PATTERNS.md). The pattern-specific contracts live in [`docs/PATTERN_DEEP_RESEARCH.md`](docs/PATTERN_DEEP_RESEARCH.md), [`docs/PATTERN_SPEC_DESIGN.md`](docs/PATTERN_SPEC_DESIGN.md), [`docs/PATTERN_GENERATE_EVALUATE_FIX.md`](docs/PATTERN_GENERATE_EVALUATE_FIX.md), and [`docs/PATTERN_REVIEW_CHANGE.md`](docs/PATTERN_REVIEW_CHANGE.md).
+
+Plugin workflows are team-authored managed graphs distributed through Git. A graph declares plugin sources at the top level, resolves them with `agentflow plugin resolve --graph`, and then uses `type = "plugin"` nodes with `uses = "alias/workflow"`. See [`docs/PLUGINS.md`](docs/PLUGINS.md).
 
 Managed patterns share a common base:
 
@@ -330,6 +336,16 @@ agentflow compile --graph ./agentflow.graph.json
 ```
 
 Use this when you want to inspect lowered managed nodes, resolved profiles, compiled ids, repeat wiring, and dependency edges.
+
+### `plugin resolve`
+
+Resolves Git-distributed plugin workflows declared by a graph and writes `agentflow.plugins.lock.json` next to that graph.
+
+```bash
+agentflow plugin resolve --graph ./agentflow.graph.json
+```
+
+Run this before `validate`, `compile`, or `run` when a graph has a top-level `plugins` block. Normal validation and execution use the lockfile and local cache; they do not clone plugins implicitly.
 
 ### `run`
 
@@ -587,3 +603,4 @@ You should not need anything else to get started. If you want deeper detail afte
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): compiler, runtime, and artifact contracts
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md): runs-root behavior, lifecycle, cleanup, and operator runbook
 - [`docs/MANAGED_PATTERNS.md`](docs/MANAGED_PATTERNS.md): managed pattern model and shipped workflow nodes
+- [`docs/PLUGINS.md`](docs/PLUGINS.md): Git-resolved plugin workflow packaging and consumption

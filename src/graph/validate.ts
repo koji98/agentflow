@@ -16,6 +16,7 @@ import { normalizeAuthoredGraphDocument } from "./normalize.js";
 import type { LoweredManagedNode } from "./normalize.js";
 import { reservedArtifactNames } from "./schema.js";
 import type { GraphDiagnostic } from "./schema.js";
+import { expandPluginWorkflows, type ResolvedPlugin } from "../plugins/workflows.js";
 
 export type ValidationDiagnostic = GraphDiagnostic;
 
@@ -24,6 +25,7 @@ export interface LoadedGraphDocument {
   diagnostics: ValidationDiagnostic[];
   absolute_path: string;
   lowered_managed_nodes: LoweredManagedNode[];
+  resolved_plugins?: ResolvedPlugin[];
 }
 
 interface NodeMetadata {
@@ -403,17 +405,24 @@ export async function loadAuthoredGraphDocument(
   try {
     const fileContents = await readFile(absolute_path, "utf8");
     const parsed = JSON.parse(fileContents) as unknown;
-    const normalized = normalizeAuthoredGraphDocument(parsed);
+    const pluginExpansion = await expandPluginWorkflows(absolute_path, parsed);
+    const normalized = normalizeAuthoredGraphDocument(pluginExpansion.document);
     const diagnostics = [
+      ...pluginExpansion.diagnostics,
       ...normalized.diagnostics,
       ...(normalized.document ? validateNormalizedDocument(normalized.document) : [])
+    ];
+    const loweredManagedNodes = [
+      ...pluginExpansion.lowered_managed_nodes,
+      ...normalized.lowered_managed_nodes
     ];
 
     if (!normalized.document || diagnostics.length > 0) {
       return {
         diagnostics,
         absolute_path,
-        lowered_managed_nodes: normalized.lowered_managed_nodes
+        lowered_managed_nodes: loweredManagedNodes,
+        resolved_plugins: pluginExpansion.resolved_plugins
       };
     }
 
@@ -421,7 +430,8 @@ export async function loadAuthoredGraphDocument(
       document: normalized.document,
       diagnostics: [],
       absolute_path,
-      lowered_managed_nodes: normalized.lowered_managed_nodes
+      lowered_managed_nodes: loweredManagedNodes,
+      resolved_plugins: pluginExpansion.resolved_plugins
     };
   } catch (error) {
     return {

@@ -96,6 +96,16 @@ export interface LoweredManagedNode {
   authored_id: string;
   managed_kind: LoweredManagedKind;
   lowered_to: "agent" | "sequence";
+  internal_id_prefix?: string;
+  plugin?: {
+    alias: string;
+    workflow: string;
+    source: string;
+    ref: string;
+    commit: string;
+    manifest_digest: string;
+    resources?: Record<string, string>;
+  };
 }
 
 export interface NormalizedGraphDocument {

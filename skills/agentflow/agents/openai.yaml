@@ -1,4 +1,4 @@
 interface:
   display_name: "Agentflow"
   short_description: "Author graphs, workflows, evals, and debug runs"
-  default_prompt: "Use $agentflow to route this Agentflow task to the right reference for graph authoring, managed workflows, local eval suites, run debugging, or CLI validation."
+  default_prompt: "Use $agentflow to route this Agentflow task to the right reference for graph authoring, managed workflows, local eval suites, run debugging, or CLI validation. Use $agentflow-plugins for plugin workflows."

@@ -13,14 +13,16 @@ Required top-level fields:
 - `profiles`
 - `graph`
 
-Optional top-level field:
+Optional top-level fields:
 
+- `plugins`
 - `prerequisites.checks`
 
 Path rules:
 
 - `--graph` resolves from the shell current working directory.
 - `repos.<alias>.path` resolves from the graph file directory.
+- `plugins.<alias>` resolves through `agentflow plugin resolve --graph`, which writes `agentflow.plugins.lock.json` next to the graph.
 - Node workspace paths must stay inside their workspace root.
 - Context workspace paths must stay inside the selected repo root.
 - Artifact paths must stay inside their source root.
@@ -80,7 +82,11 @@ Managed patterns:
 - `pattern_generate_evaluate_fix`
 - `pattern_review_change`
 
-Only executable nodes run directly. Containers compile into scopes and edges. Managed patterns lower into generated primitive subgraphs.
+Plugin workflows:
+
+- `plugin`
+
+Only executable nodes run directly. Containers compile into scopes and edges. Managed patterns and plugin workflows lower into generated primitive subgraphs.
 
 ## Common Executable Fields
 
@@ -172,7 +178,32 @@ Agent harness prompts tell the model it is executing one node in a graph, list d
 
 If an agent reports success but misses declared artifacts, Agentflow can run artifact repair: a new invocation of the same harness in the same workspace, same context, and same `AGENTFLOW_OUTPUT_DIR`, with a focused prompt to create or move the missing files. Repair prompts and logs live under `artifact-repairs/<attempt>/` in the original execution directory.
 
-## Primitive Fields
+## Node Fields
+
+### `plugin`
+
+Required:
+
+- `type: "plugin"`
+- `id`
+- `uses`: `plugin_alias/workflow_id`
+
+Optional:
+
+- `label`
+- `config`
+- `context`
+- `repo`
+- `profile`
+- `timeout_sec`
+
+Rules:
+
+- plugin aliases and workflow ids use letters, numbers, underscores, or hyphens
+- top-level `plugins` must declare each alias with `source` and `ref`
+- run `agentflow plugin resolve --graph <path>` before validate/compile/run
+- downstream nodes consume public artifacts from the plugin node id, not generated internal ids
+- plugin workflows may inject `plugin_file` context and `plugin://` script paths, but the lowered graph still uses normal runtime primitives
 
 ### `agent`
 

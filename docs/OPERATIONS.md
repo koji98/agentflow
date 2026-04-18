@@ -138,6 +138,7 @@ Each supported command returns explicit next-step hints. `compile` and non-inter
 - `graph-help`: prints the authored graph contract, supported node kinds, path rules, `prerequisites.checks`, local command `env_files`, soft verification via `on_failure`, and a minimal example.
 - `validate`: validates the authored graph, validates the compiled graph, runs declared readiness checks, and returns `path_resolution`, launch data, readiness data, compiled summary, managed expansion details, and next-step commands. Add `--run-ready` to also verify local runtime dependencies such as `git`, repo worktrees, executable node commands, and harness binaries.
 - `compile`: returns the compiled graph contract for inspection plus the same path and next-step metadata.
+- `plugin resolve`: clones Git plugin workflows declared by the graph, pins them to commits, and writes `agentflow.plugins.lock.json` next to the graph.
 - `run`: executes the compiled graph, writes durable artifacts, and returns `runs_root`, `run_root`, artifact paths, rerun or resume commands, and the cancellation note.
 - `resume`: recompiles a failed or canceled run root and resumes from durable state when the compiled contract still matches preserved work.
 - `apply`: applies captured `workspace-changes/<repo>/diff.patch` from a run back to the source repo recorded in `execution_manifest.json`, or to `--target <path>` when provided. It refuses dirty targets unless `--allow-dirty` is passed and commits only when `--commit-message <message>` is provided.
@@ -146,6 +147,7 @@ For help:
 
 ```bash
 agentflow --help
+agentflow plugin --help
 agentflow run --help
 agentflow resume --help
 ```
@@ -160,11 +162,14 @@ Symptoms:
 
 - `Graph could not be loaded or normalized from --graph.`
 - repo path diagnostics under `$.repos.<alias>.path`
+- `Plugin "<alias>" is not resolved. Run agentflow plugin resolve --graph <path>.`
+- plugin lockfile stale diagnostics under `$.plugins.<alias>`
 
 Checks:
 
 - verify the `--graph` path from the shell that launched the CLI
 - verify each `repos.*.path` from the graph file directory, not from the launch shell
+- run `agentflow plugin resolve --graph <path>` when the graph declares `plugins`
 - run `validate` before `run`
 
 ### Launch setting failures
