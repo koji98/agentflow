@@ -5,34 +5,34 @@ Use this when authoring, reviewing, or handing off an Agentflow graph.
 ## Core commands
 
 - `agentflow graph-help`
-  Prints the authored graph contract, supported node kinds, path rules, and a minimal example.
+Prints the authored graph contract, supported node kinds, path rules, and a minimal example.
 - `agentflow validate --graph <path/to/agentflow.graph.json>`
-  Validates the authored graph and resolved launch settings without running local machine dependency checks.
+Validates the authored graph and resolved launch settings without running local machine dependency checks.
 - `agentflow validate --graph <path/to/agentflow.graph.json> --run-ready`
-  Validates the graph plus local launch dependencies: `git`, referenced repo worktrees, executable node commands, and harness binaries used by agent or AI-check nodes.
-  Plain validate proves graph legality; run-ready validate proves the current machine is prepared to launch it.
+Validates the graph plus local launch dependencies: `git`, referenced repo worktrees, executable node commands, and harness binaries used by agent or AI-check nodes.
+Plain validate proves graph legality; run-ready validate proves the current machine is prepared to launch it.
 - `agentflow validate --graph <path/to/agentflow.graph.json> --show-compiled`
-  Includes the compiled graph contract and lowered managed nodes in the result so you can inspect what the runtime will execute. Replaces the old `agentflow compile` command.
+Includes the compiled graph contract and lowered managed nodes in the result so you can inspect what the runtime will execute. Replaces the old `agentflow compile` command.
 - `agentflow plugin resolve --graph <path/to/agentflow.graph.json>`
-  Clones Git plugin workflows declared by the graph, pins them to commits, and writes `agentflow.plugins.lock.json` next to the graph.
+Clones Git plugin workflows declared by the graph, pins them to commits, and writes `agentflow.plugins.lock.json` next to the graph.
 - `agentflow run --graph <path/to/agentflow.graph.json>`
-  Creates a run root and executes the compiled graph.
+Creates a run root and executes the compiled graph.
 - `agentflow run --graph <path> --label <run-label>`
-  Same as `run`, with an operator-facing label added to the run id.
+Same as `run`, with an operator-facing label added to the run id.
 - `agentflow resume --run-root <path/to/run-root>`
-  Recompiles the original graph and preserves only passed work whose compiled contract still matches.
+Recompiles the original graph and preserves only passed work whose compiled contract still matches.
 - `agentflow resume --graph <path> --latest`
-  Picks the most recent failed or canceled run for that graph automatically and resumes it.
+Picks the most recent failed or canceled run for that graph automatically and resumes it.
 - `agentflow runs list --graph <path>`
-  Lists recorded runs for a graph under the resolved runs root with status, timestamps, workspace backend, and run-root path.
+Lists recorded runs for a graph under the resolved runs root with status, timestamps, workspace backend, and run-root path.
 - `agentflow inspect <path/to/run-root>`
-  Returns terminal status, total nodes, attempt counts, summary path, and short stderr tails for each failed node in a single run root.
+Returns terminal status, total nodes, attempt counts, summary path, and short stderr tails for each failed node in a single run root.
 - `agentflow eval validate --suite <path/to/suite.json>`
-  Validates a local eval suite without running graph cases.
+Validates a local eval suite without running graph cases.
 - `agentflow eval run --suite <path/to/suite.json>`
-  Runs local eval cases through Agentflow graph templates and writes an eval ledger.
+Runs local eval cases through Agentflow graph templates and writes an eval ledger.
 - `agentflow eval report --eval-root <path/to/eval-root>`
-  Reads an existing eval root and reports the aggregate result.
+Reads an existing eval root and reports the aggregate result.
 
 Use `agentflow --help` or `agentflow <command> --help` when the command surface is unclear.
 

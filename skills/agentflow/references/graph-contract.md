@@ -176,11 +176,23 @@ Every declared artifact must exist when the node closes. Missing declared artifa
 - `AGENTFLOW_CONTEXT_MANIFEST`
 - one `AGENTFLOW_CONTEXT_<UPPER_NAME>` per resolved context item, pointing at the materialized file
 
-Agents receive the same environment variables (except `AGENTFLOW_CONTEXT_<UPPER_NAME>`) and the same contract through their harness prompt. Source edits happen in `AGENTFLOW_WORKSPACE`. Durable handoff files go in `AGENTFLOW_OUTPUT_DIR` and must be declared in `artifacts`.
+Agents receive the same first four environment variables (workspace, output dir, packet, manifest) and the same contract through their harness prompt. Source edits happen in `AGENTFLOW_WORKSPACE`. Durable handoff files go in `AGENTFLOW_OUTPUT_DIR` and must be declared in `artifacts`.
 
 When plugin tools are in scope on an agent node, the agent also receives `AGENTFLOW_TOOL_STATE`, optional `AGENTFLOW_PLUGIN_ROOT_<UPPER_ALIAS>` and `AGENTFLOW_PLUGIN_ROOT` variables, plus one `AGENTFLOW_TOOL_<UPPER_NAME>_<UPPER_KEY>` per `tool_config` entry.
 
 `AGENTFLOW_OUTPUT_DIR` points at the current execution's `artifacts/` directory. Runtime bookkeeping such as root `execution.json`, root `result.json`, `context/`, and `logs/` is inspectable but is not the graph handoff surface.
+
+### Path References In Prompts
+
+Prefer not to reference `AGENTFLOW_*` paths in `prompt` or `rubric` text at all. The harness prompt already inlines the context manifest, lists every declared artifact with an absolute path, and shows the workspace path. Tools that need a path should read it from the shell environment when the agent invokes them, not from the prompt body.
+
+If a prompt does reference an `AGENTFLOW_*` token, Agentflow substitutes it with the absolute path before sending the prompt to the model. The following forms are recognised for `AGENTFLOW_WORKSPACE`, `AGENTFLOW_OUTPUT_DIR`, `AGENTFLOW_CONTEXT_PACKET`, `AGENTFLOW_CONTEXT_MANIFEST`, and any `AGENTFLOW_CONTEXT_<UPPER_NAME>`:
+
+- `${AGENTFLOW_OUTPUT_DIR}`
+- `$AGENTFLOW_OUTPUT_DIR`
+- bare `AGENTFLOW_OUTPUT_DIR`
+
+Substitution is a forgiveness layer, not the recommended pattern. The bare form rewrites the token wherever it appears in the prompt body, including prose mentions, so prefer the `$`-prefixed forms when you must reference a token. Unknown `AGENTFLOW_*` tokens are left untouched. AI check `prompt` and `rubric` are substituted with the same rules.
 
 Agent harness prompts tell the model it is executing one node in a graph, list declared artifacts with their descriptions, and explain that the final response is captured as reserved `agent_response`. Treat `agent_response` as a concise narrative handoff, not a replacement for a declared structured artifact.
 
@@ -229,6 +241,14 @@ Optional:
 - `artifact_repair`
 
 Use agents for model-driven work. Prefer declared artifacts for structured handoffs; use reserved `agent_response` for concise narrative handoffs that include outcome, work completed, artifacts produced, validation, and handoff notes.
+
+Sandboxes:
+
+- `read-only` blocks every workspace and output write, so the node may not declare `artifacts`. Validation rejects this combination. Pair with `agent_response` only.
+- `workspace-write` is the default and lets the agent edit the repo and write declared artifacts to the output directory.
+- `danger-full-access` removes all sandbox limits.
+
+AI checks always run in `read-only` and may not declare `artifacts`; they emit `result_json` automatically.
 
 ### `exec`
 

@@ -1,11 +1,11 @@
 ---
-name: agentflow-plugins
+
+## name: agentflow-plugins
 description: Use when creating, packaging, reviewing, resolving, or consuming Agentflow Git plugin workflows, including plugin nodes, workflow manifests, plugin scripts, plugin_file context, lockfiles, and public artifact handoffs.
----
 
 # Agentflow Plugins
 
-Use this for Agentflow plugin workflow work. Plugins are Git-distributed reusable managed workflows: they package graph nodes, context files, scripts, templates, and skill-like guidance, then lower into normal Agentflow primitives before compile.
+Use this for Agentflow plugin workflow work. Plugins are Git-distributed reusable managed workflows: they package graph nodes, context files, scripts, templates, and skill-like guidance, then lower into normal Agentflow primitives during validation/compile.
 
 Do not treat plugins as runtime extensions. They do not add new primitive node kinds, hidden lifecycle hooks, MCP sidecars, or auto-installed Agent Skills.
 

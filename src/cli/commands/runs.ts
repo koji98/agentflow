@@ -252,7 +252,8 @@ export const runsCommand = {
     const runsRootDetails = createRunsRootDetails(
       currentWorkingDirectory,
       process.env,
-      context.graph_directory
+      context.graph_directory,
+      runsRootInput ? resolve(currentWorkingDirectory, runsRootInput) : undefined
     );
 
     return {

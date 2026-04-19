@@ -112,6 +112,7 @@ describe("cursor cli harness", () => {
         prompt: "Read from env override.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 10,
@@ -170,6 +171,7 @@ describe("cursor cli harness", () => {
         prompt: "Review the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "# Context Manifest: exec-1\n\n- Compiled node: `agent.review`\n- Repo: `main`\n",
         outputDir,
         artifacts: {
           review_report: {
@@ -201,22 +203,24 @@ describe("cursor cli harness", () => {
         ])
       );
       expect(argv).not.toContain("--force");
-      expect(prompt).toContain("## Agentflow Runtime Contract");
-      expect(prompt).toContain("You are executing one node in an Agentflow graph.");
-      expect(prompt).toContain("Future nodes can consume only named artifacts");
+      expect(prompt).toContain("## Role");
+      expect(prompt).toContain("You are an autonomous coding agent executing one node in an Agentflow graph.");
+      expect(prompt).toContain("future nodes consume only the named artifacts you publish here");
       expect(prompt).toContain("## Node Task");
       expect(prompt).toContain("Review the change.");
-      expect(prompt).toContain("Exact context packet");
-      expect(prompt).toContain(join(executionDir, "context", "packet.json"));
-      expect(prompt).toContain("Read first");
-      expect(prompt).toContain(join(executionDir, "context", "manifest.md"));
+      expect(prompt).toContain("## Context");
+      expect(prompt).toContain("# Context Manifest: exec-1");
+      expect(prompt).toContain("- Compiled node: `agent.review`");
+      expect(prompt).toContain(`For exact paths, provenance, omission details, or structured metadata, read: ${join(executionDir, "context", "packet.json")}`);
+      expect(prompt).toContain("Sandbox: read-only - cannot modify the workspace");
       expect(prompt).toContain("## Artifact Contract");
       expect(prompt).toContain("Every declared artifact must exist before you finish");
       expect(prompt).toContain("`review_report` (from `output_dir`)");
-      expect(prompt).toContain("$AGENTFLOW_OUTPUT_DIR/review-report.md");
+      expect(prompt).toContain(`${outputDir}/review-report.md`);
+      expect(prompt).not.toContain("$AGENTFLOW_OUTPUT_DIR/review-report.md");
       expect(prompt).toContain("Expected content: Markdown review report for downstream nodes.");
       expect(prompt).toContain("## Final Response Requirements");
-      expect(prompt).toContain("captured by Agentflow as the reserved `agent_response` artifact");
+      expect(prompt).toContain("captured automatically by Agentflow as the reserved `agent_response` artifact");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,
@@ -276,6 +280,7 @@ describe("cursor cli harness", () => {
         prompt: "Apply the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 10,
@@ -326,6 +331,7 @@ describe("cursor cli harness", () => {
         prompt: "Stream logs.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 10,

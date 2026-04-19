@@ -1,6 +1,6 @@
 # Plugin Workflows
 
-Use plugin workflows when a graph should reuse a team-owned managed graph distributed through Git. A plugin is not a runtime extension point: it lowers into normal Agentflow primitives before compile.
+Use plugin workflows when a graph should reuse a team-owned managed graph distributed through Git. A plugin is not a runtime extension point: it lowers into normal Agentflow primitives during validation/compile.
 
 ## Consumer Shape
 
@@ -28,7 +28,7 @@ Node shape:
 }
 ```
 
-Before validate, compile, run, or resume:
+Before validate, run, or resume:
 
 ```bash
 agentflow plugin resolve --graph agentflow.graph.json
@@ -41,15 +41,10 @@ agentflow plugin resolve --graph agentflow.graph.json
 The plugin node id is the public handoff boundary. Downstream nodes read declared public artifacts from that id:
 
 ```json
-{
-  "name": "task_packet",
-  "from": "artifact",
-  "node": "prepare_change",
-  "artifact": "task_packet"
-}
+{ "ref": "prepare_change.task_packet" }
 ```
 
-Do not reference generated internal ids. They are inspectable in compile output but private to the plugin workflow.
+Do not reference generated internal ids. They are inspectable in `agentflow validate --show-compiled` output but private to the plugin workflow.
 
 ## Package Layout
 
@@ -103,5 +98,5 @@ Plugins do not automatically install Agent Skills, enable MCP servers, start sid
 - Keep plugin config small and schema-backed.
 - Use aliases and workflow ids with letters, numbers, underscores, or hyphens.
 - Resolve plugins after changing `source`, `ref`, or plugin contents.
-- Inspect `managed_expansion` after compile to confirm public artifacts and generated shape.
+- Inspect `managed_expansion` after `agentflow validate --show-compiled` to confirm public artifacts and generated shape.
 - Prefer a plugin when reuse and org-specific packaging matter; prefer primitives for one-off workflows.

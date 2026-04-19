@@ -1,4 +1,4 @@
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { ArtifactDefinition } from "../../graph/authored.js";
@@ -38,6 +38,23 @@ function stringifyToolConfigValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildToolShim(executablePath: string, manifestArgs: readonly string[]): string {
+  const quotedExecutable = shellSingleQuote(executablePath);
+  const quotedArgs = manifestArgs.map(shellSingleQuote);
+  const execLine = ["exec", quotedExecutable, ...quotedArgs, '"$@"'].join(" ");
+  return [
+    "#!/usr/bin/env bash",
+    "# Agentflow plugin tool shim. Generated per execution; do not edit.",
+    "set -eu",
+    execLine,
+    ""
+  ].join("\n");
+}
+
 function serializeDeclaredArtifacts(
   artifacts: Record<string, ArtifactDefinition>
 ): Record<string, { from: string; path: string; description: string }> {
@@ -63,8 +80,9 @@ export async function prepareAgentTools(
   await mkdir(bin_dir, { recursive: true });
 
   for (const tool of options.node.tools) {
-    const linkPath = join(bin_dir, tool.callable_name);
-    await symlink(tool.executable_path, linkPath);
+    const shimPath = join(bin_dir, tool.callable_name);
+    await writeFile(shimPath, buildToolShim(tool.executable_path, tool.args ?? []), "utf8");
+    await chmod(shimPath, 0o755);
   }
 
   const state = {

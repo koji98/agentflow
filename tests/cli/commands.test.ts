@@ -2098,7 +2098,9 @@ describe("graph CLI", () => {
       const explicitPayload = JSON.parse(explicitRunsRoot.stdout);
       expect(explicitRunsRoot.exitCode).toBe(0);
       expect(explicitPayload.runs_count).toBe(2);
-      expect(explicitPayload.runs_root_source).toBe("launch-cwd-default");
+      expect(explicitPayload.runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
+      expect(explicitPayload.runs_root_source).toBe("explicit");
+      expect(explicitPayload.runs_root_input).toBe(join(tempRoot, ".agentflow", "runs"));
     } finally {
       stderrSpy.mockRestore();
       await rm(tempRoot, { recursive: true, force: true });

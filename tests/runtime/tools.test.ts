@@ -350,7 +350,7 @@ describe("prepareAgentTools", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("symlinks plugin tools, writes node-tool-state.json, and emits env vars", async () => {
+  it("installs plugin tool shims, writes node-tool-state.json, and emits env vars", async () => {
     const executionDir = join(tempRoot, "executions/001");
     const workspacePath = join(tempRoot, "workspace");
     const artifactsRoot = join(tempRoot, "executions/001/output");
@@ -400,8 +400,12 @@ describe("prepareAgentTools", () => {
     expect(setup.bin_dir).toBe(join(executionDir, "agentflow-tools/bin"));
     expect(setup.tool_state_path).toBe(join(executionDir, "agentflow-tools/state.json"));
 
-    const linkContents = await execFileAsync(join(setup.bin_dir, "babysit-poll"));
-    expect(linkContents.stdout.trim()).toBe("plugin");
+    const shimSource = await readFile(join(setup.bin_dir, "babysit-poll"), "utf8");
+    expect(shimSource.startsWith("#!/usr/bin/env bash\n")).toBe(true);
+    expect(shimSource).toContain(`exec '${pluginPath}' "$@"`);
+
+    const shimResult = await execFileAsync(join(setup.bin_dir, "babysit-poll"));
+    expect(shimResult.stdout.trim()).toBe("plugin");
 
     const state = JSON.parse(await readFile(setup.tool_state_path, "utf8")) as {
       version: string;
@@ -513,6 +517,7 @@ describe("formatToolContract", () => {
       prompt: "Do the work.",
       contextPacketPath: "/tmp/context.json",
       contextManifestPath: "/tmp/manifest.md",
+      contextManifest: "",
       outputDir: "/tmp/output",
       artifacts: {},
       timeoutSec: 1800,
@@ -542,6 +547,183 @@ describe("formatToolContract", () => {
 });
 
 describe("end-to-end runtime tool wiring", () => {
+  it("spawns the plugin tool through PATH using only the harness-provided env", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-tools-spawn-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    const pluginRoot = join(tempRoot, "plugins/babysit");
+    const pluginToolPath = "scripts/poll.sh";
+    const pluginAbsoluteToolPath = join(pluginRoot, pluginToolPath);
+
+    try {
+      await mkdir(repoDir, { recursive: true });
+      await initGitRepo(repoDir);
+
+      await writeExecutable(
+        pluginAbsoluteToolPath,
+        [
+          "#!/usr/bin/env bash",
+          "set -eu",
+          "cat <<EOF > \"$AGENTFLOW_OUTPUT_DIR/poll-call.json\"",
+          "{",
+          "  \"argv\": \"$*\",",
+          "  \"plugin_root\": \"$AGENTFLOW_PLUGIN_ROOT\",",
+          "  \"plugin_root_alias\": \"$AGENTFLOW_PLUGIN_ROOT_BABYSIT\",",
+          "  \"tool_state\": \"$AGENTFLOW_TOOL_STATE\",",
+          "  \"tool_config_token\": \"$AGENTFLOW_TOOL_BABYSIT_POLL_TOKEN\",",
+          "  \"workspace\": \"$AGENTFLOW_WORKSPACE\",",
+          "  \"output_dir\": \"$AGENTFLOW_OUTPUT_DIR\"",
+          "}",
+          "EOF",
+          "echo '{\"poll_status\":\"ok\"}'",
+          ""
+        ].join("\n")
+      );
+
+      const document: AuthoredGraphDocument = {
+        version: "1",
+        graph_id: "tools-spawn",
+        repos: { main: { path: "." } },
+        defaults: { launch_profile: "default", workspace_backend: "inplace" },
+        profiles: { default: { harness: "codex-cli" } },
+        tools: [{ from_plugin: "babysit", tool: "poll" }],
+        tool_config: { "babysit-poll": { token: "ghp_test_token" } },
+        graph: {
+          type: "sequence",
+          id: "root",
+          steps: [
+            {
+              type: "agent",
+              id: "use_tool",
+              prompt: "Run babysit-poll --pr 42 to check the PR."
+            }
+          ]
+        }
+      };
+
+      const normalized = normalizeAuthoredGraphDocument(document);
+      expect(normalized.diagnostics).toEqual([]);
+      const launch = resolveLaunchConfig(normalized.document!);
+      const compilation = compileAuthoredGraph(
+        normalized.document!,
+        launch,
+        normalized.lowered_managed_nodes,
+        {
+          graph_dir: tempRoot,
+          resolved_plugins: [buildPluginFixture(pluginRoot, pluginToolPath)]
+        }
+      );
+      expect(compilation.diagnostics).toEqual([]);
+
+      let observedInvocation: AgentInvocation | undefined;
+      let toolStdout = "";
+      let toolStderr = "";
+      let toolExitCode = -1;
+      let toolStateContents: string | undefined;
+
+      const harness: HarnessAdapter = {
+        kind: "codex-cli",
+        capabilities: getHarnessCapabilities("codex-cli")!,
+        async run(invocation) {
+          observedInvocation = invocation;
+
+          // Simulate what a real harness child process would do: spawn a tool
+          // by name, relying on PATH containing agentflow-tools/bin and the
+          // toolEnv injecting AGENTFLOW_TOOL_*, AGENTFLOW_PLUGIN_ROOT_*, etc.
+          const spawnEnv = buildHarnessSpawnEnv(invocation, {
+            PATH: process.env.PATH ?? "/usr/bin:/bin",
+            HOME: process.env.HOME ?? "/tmp"
+          });
+
+          toolStateContents = await readFile(invocation.toolEnv!.AGENTFLOW_TOOL_STATE!, "utf8");
+
+          const result = await execFileAsync(
+            "bash",
+            ["-lc", "babysit-poll --pr 42"],
+            {
+              cwd: invocation.repoPath,
+              env: spawnEnv as NodeJS.ProcessEnv
+            }
+          ).catch((error: NodeJS.ErrnoException & { stdout?: string; stderr?: string; code?: number | string }) => {
+            return {
+              stdout: error.stdout ?? "",
+              stderr: error.stderr ?? error.message,
+              code: typeof error.code === "number" ? error.code : 1
+            };
+          });
+
+          toolStdout = "stdout" in result ? result.stdout ?? "" : "";
+          toolStderr = "stderr" in result ? result.stderr ?? "" : "";
+          toolExitCode = "code" in result && typeof result.code === "number" ? result.code : 0;
+
+          return {
+            status: "passed",
+            exitCode: 0,
+            stdout: toolStdout,
+            stderr: toolStderr,
+            transcript: { last_message: "tool executed" }
+          };
+        },
+        async cancel() {}
+      };
+
+      const run = await runCompiledGraph({
+        run_root: runRoot,
+        compiled_graph: compilation.compiled_graph!,
+        repo_sources: { main: repoDir },
+        harnesses: { "codex-cli": harness }
+      });
+
+      expect(run.outcome).toBe("passed");
+      expect(observedInvocation).toBeDefined();
+      const invocation = observedInvocation!;
+
+      // 1. Tool was discoverable via PATH and exited cleanly.
+      expect(toolExitCode).toBe(0);
+      expect(toolStderr).toBe("");
+      expect(toolStdout.trim()).toBe('{"poll_status":"ok"}');
+
+      // 2. Per-execution agentflow-tools/bin dir was prepared with the symlink.
+      expect(invocation.toolBinDir).toMatch(/agentflow-tools\/bin$/);
+
+      // 3. tool_state JSON exposes the node identity, declared artifacts, and
+      //    workspace/output paths the tool needs to do useful work.
+      const toolState = JSON.parse(toolStateContents!) as {
+        version: string;
+        node_id: string;
+        compiled_id: string;
+        workspace_path: string;
+        artifacts_root: string;
+        declared_artifacts: Record<string, unknown>;
+      };
+      expect(toolState.version).toBe("1");
+      expect(toolState.node_id).toBe("use_tool");
+      expect(toolState.workspace_path).toBe(repoDir);
+      expect(toolState.artifacts_root).toBe(invocation.outputDir);
+
+      // 4. Tool sentinel proves AGENTFLOW_* env vars propagated end-to-end:
+      //    plugin root, tool config, workspace, output dir, manifest args.
+      const sentinel = JSON.parse(
+        await readFile(join(invocation.outputDir, "poll-call.json"), "utf8")
+      ) as Record<string, string>;
+      expect(sentinel.argv).toBe("--once --pr 42");
+      expect(sentinel.plugin_root).toBe(pluginRoot);
+      expect(sentinel.plugin_root_alias).toBe(pluginRoot);
+      expect(sentinel.tool_state).toBe(invocation.toolEnv!.AGENTFLOW_TOOL_STATE);
+      expect(sentinel.tool_config_token).toBe("ghp_test_token");
+      expect(sentinel.workspace).toBe(repoDir);
+      expect(sentinel.output_dir).toBe(invocation.outputDir);
+
+      // 5. The agent prompt advertises the namespaced callable name, not "poll".
+      const renderedPrompt = renderHarnessPrompt(invocation);
+      expect(renderedPrompt).toContain("### babysit-poll (from plugin \"babysit\" (tool: poll))");
+      expect(renderedPrompt).toContain("AGENTFLOW_TOOL_BABYSIT_POLL_TOKEN=ghp_test_token");
+      expect(renderedPrompt).not.toMatch(/^### poll /m);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("makes plugin tools resolvable on PATH and surfaces them in the agent prompt", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-tools-e2e-"));
     const repoDir = join(tempRoot, "repo");

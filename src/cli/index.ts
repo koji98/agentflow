@@ -59,7 +59,7 @@ interface GraphCliCommand {
 const repeatableOptionNames = new Set(["config"]);
 
 const optionDescriptions: Record<string, string> = {
-  graph: "--graph <path>               Authored graph document to validate, compile, or run.",
+  graph: "--graph <path>               Authored graph document to validate or run.",
   label: "--label <run_label>          Optional run label appended to the generated run root.",
   "run-ready": "--run-ready                  Also check local runtime dependencies during validate.",
   "run-root": "--run-root <path>            Existing run root to resume.",

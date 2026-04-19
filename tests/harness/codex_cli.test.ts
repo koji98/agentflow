@@ -150,6 +150,7 @@ describe("codex cli harness", () => {
         prompt: "Read from env override.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 10,
@@ -218,6 +219,7 @@ describe("codex cli harness", () => {
         prompt: "Implement the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "# Context Manifest: exec-1\n\n- Compiled node: `agent.demo`\n- Repo: `main`\n",
         outputDir,
         artifacts: {
           handoff: {
@@ -257,26 +259,29 @@ describe("codex cli harness", () => {
           "-"
         ])
       );
-      expect(prompt).toContain("## Agentflow Runtime Contract");
-      expect(prompt).toContain("You are executing one node in an Agentflow graph.");
-      expect(prompt).toContain("Future nodes can consume only named artifacts");
+      expect(prompt).toContain("## Role");
+      expect(prompt).toContain("You are an autonomous coding agent executing one node in an Agentflow graph.");
+      expect(prompt).toContain("future nodes consume only the named artifacts you publish here");
       expect(prompt).toContain("## Node Task");
       expect(prompt).toContain("Implement the change.");
-      expect(prompt).toContain("Exact context packet");
-      expect(prompt).toContain(join(executionDir, "context", "packet.json"));
-      expect(prompt).toContain("Read first");
-      expect(prompt).toContain(join(executionDir, "context", "manifest.md"));
+      expect(prompt).toContain("## Context");
+      expect(prompt).toContain("# Context Manifest: exec-1");
+      expect(prompt).toContain("- Compiled node: `agent.demo`");
+      expect(prompt).toContain(`For exact paths, provenance, omission details, or structured metadata, read: ${join(executionDir, "context", "packet.json")}`);
       expect(prompt).toContain("Output directory");
+      expect(prompt).toContain("Sandbox: workspace-write - edit files in the workspace");
       expect(prompt).toContain("## Artifact Contract");
       expect(prompt).toContain("Every declared artifact must exist before you finish");
       expect(prompt).toContain("`handoff` (from `output_dir`)");
-      expect(prompt).toContain("$AGENTFLOW_OUTPUT_DIR/handoff.md");
+      expect(prompt).toContain(`${outputDir}/handoff.md`);
+      expect(prompt).not.toContain("$AGENTFLOW_OUTPUT_DIR/handoff.md");
       expect(prompt).toContain("Expected content: Markdown handoff for downstream nodes.");
       expect(prompt).toContain("`junit` (from `workspace`)");
-      expect(prompt).toContain("$AGENTFLOW_WORKSPACE/reports/junit.xml");
+      expect(prompt).toContain(`${repoDir}/reports/junit.xml`);
+      expect(prompt).not.toContain("$AGENTFLOW_WORKSPACE/reports/junit.xml");
       expect(prompt).toContain("Expected content: JUnit XML report written by the workspace validation command.");
       expect(prompt).toContain("## Final Response Requirements");
-      expect(prompt).toContain("captured by Agentflow as the reserved `agent_response` artifact");
+      expect(prompt).toContain("captured automatically by Agentflow as the reserved `agent_response` artifact");
       expect(prompt).toContain("Artifacts produced: names and paths of declared artifacts you wrote.");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,

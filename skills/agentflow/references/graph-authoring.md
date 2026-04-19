@@ -124,6 +124,7 @@ Rules:
 - Agent artifact repair defaults to one same-workspace harness repair when a successful agent misses a declared artifact. Use `artifact_repair.max_attempts: 0` to disable it for a profile or agent node, or up to `3` when handoff repair is a normal part of the graph.
 - Repeat loops automatically receive `repeat_history` context after iteration 1. Do not add extra self-artifact references just to remind the next iteration what happened; use explicit prior-iteration artifact context only when the next node needs a full file.
 - Do not rely on `agent_response` when downstream work needs a stable machine-readable packet.
+- Do not reference `AGENTFLOW_*` paths in `prompt` or `rubric` text. Context is already inlined and declared artifacts already show absolute paths in the harness prompt. Tools that need a path should read it from the shell environment when the agent invokes them. Substitution exists as a forgiveness layer (see `graph-contract.md`), not the recommended pattern.
 
 ## Non-Brittle Graph Conventions
 

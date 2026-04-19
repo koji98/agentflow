@@ -527,6 +527,69 @@ describe("graph validation", () => {
     );
   });
 
+  it("rejects an agent node that combines a read-only sandbox with declared artifacts", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "readonly-with-artifacts",
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default" },
+      profiles: { default: { harness: "cursor-cli", sandbox: "read-only" } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "summarize",
+            prompt: "Summarize the change.",
+            artifacts: {
+              summary: {
+                from: "output_dir",
+                path: "summary.md",
+                description: "One-paragraph change summary."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts",
+          message: expect.stringMatching(/read-only sandbox.*declares artifacts.*"summary"/)
+        })
+      ])
+    );
+  });
+
+  it("allows a read-only agent node when it declares no artifacts", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "readonly-no-artifacts",
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default" },
+      profiles: { default: { harness: "cursor-cli", sandbox: "read-only" } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "inspect",
+            prompt: "Read the code and respond with observations only."
+          }
+        ]
+      }
+    });
+
+    const sandboxDiagnostics = diagnostics.filter((diagnostic) =>
+      /read-only sandbox/i.test(diagnostic.message)
+    );
+    expect(sandboxDiagnostics).toEqual([]);
+  });
+
   it("does not require a harness for exec-only graphs", async () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",

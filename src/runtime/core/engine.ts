@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
@@ -42,6 +42,7 @@ import {
   type VerificationRecordedPayload
 } from "../events.js";
 import type { HarnessAdapter } from "../harness/types.js";
+import { substituteAgentflowTokens } from "../harness/tokens.js";
 import {
   buildRuntimeStateSnapshot,
   completeRepeatIteration,
@@ -998,6 +999,16 @@ async function defaultCheckExecutor(
     throw new Error(`AI check "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`);
   }
 
+  const aiCheckPromptTokens = buildNodeRuntimeEnv(context);
+  const renderedAiCheckPrompt = substituteAgentflowTokens(
+    context.node.prompt ?? "",
+    aiCheckPromptTokens
+  );
+  const renderedAiCheckRubric =
+    context.node.rubric !== undefined
+      ? substituteAgentflowTokens(context.node.rubric, aiCheckPromptTokens)
+      : undefined;
+
   const aiCheckResult = await runAiCheck({
     harness: harnesses[harnessName]!,
     run_id: context.run_id,
@@ -1009,8 +1020,8 @@ async function defaultCheckExecutor(
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
     ...(context.node.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
-    prompt: context.node.prompt ?? "",
-    rubric: context.node.rubric,
+    prompt: renderedAiCheckPrompt,
+    rubric: renderedAiCheckRubric,
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
     output_dir: resolveExecutionArtifactsDirectory(context.execution_dir),
@@ -1090,6 +1101,14 @@ async function defaultCheckExecutor(
   };
 }
 
+async function readContextManifestContent(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 async function defaultAgentExecutor(
   context: RuntimeNodeExecutorContext<CompiledAgentNode>,
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>
@@ -1107,6 +1126,9 @@ async function defaultAgentExecutor(
     workspace_path: context.workspace_path,
     artifacts_root: outputDir
   });
+  const contextManifest = await readContextManifestContent(context.context_manifest_path);
+  const promptTokens = buildNodeRuntimeEnv(context);
+  const renderedPrompt = substituteAgentflowTokens(context.node.prompt, promptTokens);
 
   const harnessResult = await harnesses[harnessName]!.run({
     promptKind: "agent",
@@ -1120,9 +1142,10 @@ async function defaultAgentExecutor(
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoningEffort: context.node.effective_policy.reasoning_effort }
       : {}),
-    prompt: context.node.prompt,
+    prompt: renderedPrompt,
     contextPacketPath: context.context_packet_path,
     contextManifestPath: context.context_manifest_path,
+    contextManifest,
     outputDir,
     artifacts: context.node.declared_artifacts,
     timeoutSec: context.node.effective_policy.timeout_sec,
@@ -1300,7 +1323,14 @@ async function runArtifactRepairHarness(options: {
     String(options.repairAttempt).padStart(3, "0")
   );
   await mkdir(repairDir, { recursive: true });
-  const prompt = buildArtifactRepairPrompt({
+  const repairOutputDir = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
+  const repairPromptTokens: Record<string, string> = {
+    AGENTFLOW_WORKSPACE: options.workspacePath,
+    AGENTFLOW_OUTPUT_DIR: repairOutputDir,
+    AGENTFLOW_CONTEXT_PACKET: options.contextPacketPath,
+    AGENTFLOW_CONTEXT_MANIFEST: options.contextManifestPath
+  };
+  const composedRepairPrompt = buildArtifactRepairPrompt({
     node: options.node,
     attempt: options.attempt,
     repairAttempt: options.repairAttempt,
@@ -1311,15 +1341,16 @@ async function runArtifactRepairHarness(options: {
     contextManifestPath: options.contextManifestPath,
     runId: options.session.run_id
   });
+  const prompt = substituteAgentflowTokens(composedRepairPrompt, repairPromptTokens);
   await writeFile(join(repairDir, "prompt.md"), `${prompt}\n`, "utf8");
 
-  const repairOutputDir = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
   const repairToolSetup = await prepareAgentTools({
     node: options.node,
     execution_dir: options.attempt.execution_dir,
     workspace_path: options.workspacePath,
     artifacts_root: repairOutputDir
   });
+  const contextManifest = await readContextManifestContent(options.contextManifestPath);
 
   const result = await harness.run({
     promptKind: "agent",
@@ -1336,6 +1367,7 @@ async function runArtifactRepairHarness(options: {
     prompt,
     contextPacketPath: options.contextPacketPath,
     contextManifestPath: options.contextManifestPath,
+    contextManifest,
     outputDir: repairOutputDir,
     artifacts: options.node.declared_artifacts,
     timeoutSec: options.node.effective_policy.timeout_sec,

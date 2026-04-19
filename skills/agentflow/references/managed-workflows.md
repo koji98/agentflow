@@ -73,18 +73,8 @@ Good downstream primitive shape:
   "id": "handoff",
   "prompt": "Summarize the implementation risks for the operator.",
   "context": [
-    {
-      "name": "change_summary",
-      "from": "artifact",
-      "node": "implement",
-      "artifact": "change_summary"
-    },
-    {
-      "name": "evaluation_ledger",
-      "from": "artifact",
-      "node": "implement",
-      "artifact": "evaluation_ledger"
-    }
+    { "ref": "implement.change_summary" },
+    { "ref": "implement.evaluation_ledger" }
   ]
 }
 ```

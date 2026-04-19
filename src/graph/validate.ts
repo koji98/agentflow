@@ -420,6 +420,24 @@ async function validateNormalizedDocument(
       for (const diagnostic of resolution.diagnostics) {
         diagnostics.push(diagnostic);
       }
+
+      if (
+        resolution.policy?.sandbox === "read-only" &&
+        node.artifacts &&
+        Object.keys(node.artifacts).length > 0
+      ) {
+        const artifactNames = Object.keys(node.artifacts).sort().map((name) => `"${name}"`).join(", ");
+        const nodeKind = node.type === "agent" ? "Agent" : "AI check";
+        diagnostics.push({
+          path: `${metadata.path}.artifacts`,
+          message:
+            `${nodeKind} node "${node.id}" runs in the read-only sandbox but declares artifacts (${artifactNames}); ` +
+            "the sandbox blocks every file write so the artifact contract cannot be satisfied. " +
+            (node.type === "agent"
+              ? "Remove the artifact declarations or raise the sandbox to workspace-write."
+              : "AI checks emit result_json automatically; remove the declared artifacts.")
+        });
+      }
     }
   }, "$.graph");
 

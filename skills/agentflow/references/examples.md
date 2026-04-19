@@ -26,7 +26,7 @@ Good shape:
 2. `parallel` gather evidence
 3. each branch publishes a named artifact or relies on `agent_response`
 4. `agent` synthesize findings from explicit artifact context
-4. `check` review or verify synthesis if needed
+5. `check` review or verify synthesis if needed
 
 Good when:
 

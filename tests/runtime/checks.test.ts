@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { runAiCheck } from "../../src/runtime/checks/ai.js";
 import { runDeterministicCheck, runLocalProcess } from "../../src/runtime/checks/deterministic.js";
-import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
+import { renderHarnessPrompt, type HarnessAdapter } from "../../src/runtime/harness/types.js";
 
 function createHarness(
   kind: HarnessAdapter["kind"],
@@ -61,13 +61,43 @@ describe("runtime checks", () => {
       })
     );
     expect(capturedInvocation?.prompt).toContain("Evaluate the patch.");
-    expect(capturedInvocation?.prompt).toContain("Return JSON only with this shape:");
+    expect(capturedInvocation?.prompt).toContain("Be strict.");
     expect(result.evaluation).toEqual(
       expect.objectContaining({
         passed: false,
         summary: expect.stringContaining("structured JSON")
       })
     );
+  });
+
+  it("renders the AI check harness prompt with role, JSON output spec, and inlined manifest", () => {
+    const rendered = renderHarnessPrompt({
+      promptKind: "ai_check",
+      runId: "run-render",
+      executionId: "exec-render",
+      repoAlias: "main",
+      repoPath: "/tmp/workspace",
+      sandbox: "read-only",
+      model: "gpt-5-judge",
+      prompt: "Evaluate the change.",
+      contextPacketPath: "/tmp/context/packet.json",
+      contextManifestPath: "/tmp/context/manifest.md",
+      contextManifest: "# Context Manifest: exec-render\n\n- Materialized items: `2`\n",
+      outputDir: "/tmp",
+      artifacts: {},
+      timeoutSec: 30,
+      signal: undefined
+    });
+
+    expect(rendered).toContain("## Role");
+    expect(rendered).toContain("You are an Agentflow AI evaluator");
+    expect(rendered).toContain("Sandbox: read-only - cannot modify the workspace");
+    expect(rendered).toContain("# Context Manifest: exec-render");
+    expect(rendered).toContain("For exact paths, provenance, omission details, or structured metadata, read: /tmp/context/packet.json");
+    expect(rendered).toContain("## Output");
+    expect(rendered).toContain("Return JSON only with this exact shape:");
+    expect(rendered).toContain('{"passed":true,"score":0.0,"summary":"short summary","issues":[]}');
+    expect((rendered.match(/## Context/g) ?? []).length).toBe(1);
   });
 
   it("fails AI checks closed when cursor-cli cannot guarantee strict read-only evaluation", async () => {

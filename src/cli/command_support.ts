@@ -60,27 +60,31 @@ export function createGraphPathResolution(
 export function createRunsRootDetails(
   currentWorkingDirectory: string,
   environment: NodeJS.ProcessEnv,
-  graphDirectory?: string
+  graphDirectory?: string,
+  explicitRunsRoot?: string
 ) {
   const configuredRunsRoot = environment[runsRootEnvironmentVariable]?.trim();
   const resolvedRunsRoot = resolveRunsRoot({
     currentWorkingDirectory,
     ...(graphDirectory ? { graphDirectory } : {}),
+    ...(explicitRunsRoot ? { runsRoot: explicitRunsRoot } : {}),
     environment
   });
 
   const defaultBaseDirectory = graphDirectory ?? currentWorkingDirectory;
-  const defaultRunsRootSource = configuredRunsRoot
-    ? "environment"
-    : graphDirectory
-      ? "graph-directory-default"
-      : "launch-cwd-default";
+  const runsRootSource = explicitRunsRoot
+    ? "explicit"
+    : configuredRunsRoot
+      ? "environment"
+      : graphDirectory
+        ? "graph-directory-default"
+        : "launch-cwd-default";
 
   return {
     runs_root: resolvedRunsRoot,
     runs_root_env: runsRootEnvironmentVariable,
-    runs_root_source: defaultRunsRootSource,
-    ...(configuredRunsRoot ? { runs_root_input: configuredRunsRoot } : {}),
+    runs_root_source: runsRootSource,
+    ...(explicitRunsRoot ? { runs_root_input: explicitRunsRoot } : configuredRunsRoot ? { runs_root_input: configuredRunsRoot } : {}),
     default_runs_root: resolve(defaultBaseDirectory, ".agentflow", "runs"),
     contract: runsRootContractText
   };
