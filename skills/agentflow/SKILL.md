@@ -33,8 +33,8 @@ Prefer the repository `docs/`, `src/`, and `tests/` when available. The packaged
 4. Author or edit the graph using current fields only: `context` and `artifacts`, not `inputs`, `context_from`, or `outputs`.
 5. Run `agentflow validate --graph <path>` and fix diagnostics.
 6. Run `agentflow validate --graph <path> --run-ready` when the user needs launch assurance on this machine, or when the graph depends on local commands, git worktrees, Codex, or Cursor.
-7. Run `agentflow compile --graph <path>` and inspect lowered shape when the graph uses managed patterns, plugin workflows, `repeat`, `parallel`, or nontrivial artifact handoffs.
-8. Hand off only after validation and compile pass, or explicitly report the exact command that failed and the diagnostics that remain.
+7. Run `agentflow validate --graph <path> --show-compiled` and inspect lowered shape when the graph uses managed patterns, plugin workflows, `repeat`, `parallel`, or nontrivial artifact handoffs.
+8. Hand off only after validation passes and the compiled contract looks right, or explicitly report the exact command that failed and the diagnostics that remain.
 
 ## Authoring posture
 

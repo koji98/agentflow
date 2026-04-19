@@ -13,7 +13,7 @@ const commandTimeoutMs = 10 * 60 * 1000;
 const builtCliRelativePath = "dist/cli/index.js";
 const fixtureGraphRelativePath = "tests/graph/fixtures/repeat.graph.json";
 const fixtureGraphId = "repeat-graph";
-const builtCliFixtureCommands = ["validate", "compile"];
+const builtCliFixtureCommands = ["validate", "validate --show-compiled"];
 const builtCliRunHarnessAdapters = ["codex-cli", "cursor-cli"];
 const builtCliRunWorkspaceBackends = ["inplace", "worktree"];
 
@@ -24,6 +24,7 @@ export const canonicalDocs = [
   "docs/ARCHITECTURE.md",
   "docs/OPERATIONS.md",
   "docs/MANAGED_PATTERNS.md",
+  "docs/PLUGINS.md",
   "docs/PATTERN_DEEP_RESEARCH.md",
   "docs/PATTERN_SPEC_DESIGN.md",
   "docs/PATTERN_GENERATE_EVALUATE_FIX.md",
@@ -295,7 +296,7 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
     tempRoot,
     launchRoot,
     graphPath,
-    runsRoot: join(launchRoot, ".agentflow", "runs"),
+    runsRoot: join(tempRoot, ".agentflow", "runs"),
     harnessKind,
     workspaceBackend,
     repoDir,
@@ -393,39 +394,44 @@ async function checkBuiltCliSmoke() {
     }
   }
 
-  const compileResult = runCommand(
+  const showCompiledResult = runCommand(
     process.execPath,
-    [builtCliPath, "compile", "--graph", fixtureGraphRelativePath],
-    "built CLI compile"
+    [builtCliPath, "validate", "--graph", fixtureGraphRelativePath, "--show-compiled"],
+    "built CLI validate --show-compiled"
   );
 
-  if (!compileResult.passed) {
-    smokeFailures.push(compileResult.reason);
+  if (!showCompiledResult.passed) {
+    smokeFailures.push(showCompiledResult.reason);
   } else {
     try {
       const payload = expectRecord(
-        parseJsonOutput("built CLI compile", compileResult.stdout),
-        "compile payload"
+        parseJsonOutput("built CLI validate --show-compiled", showCompiledResult.stdout),
+        "validate --show-compiled payload"
       );
 
-      if (payload.command !== "compile") {
-        throw new Error("compile payload.command must equal \"compile\".");
+      if (payload.command !== "validate") {
+        throw new Error("validate --show-compiled payload.command must equal \"validate\".");
       }
 
       if (payload.status !== "passed") {
-        throw new Error("compile payload.status must equal \"passed\".");
+        throw new Error("validate --show-compiled payload.status must equal \"passed\".");
       }
 
-      const compiledGraph = expectRecord(payload.compiled_graph, "compile payload.compiled_graph");
+      const compiledGraph = expectRecord(
+        payload.compiled_graph,
+        "validate --show-compiled payload.compiled_graph"
+      );
 
       if (compiledGraph.graph_id !== fixtureGraphId) {
-        throw new Error(`compile payload.compiled_graph.graph_id must equal ${fixtureGraphId}.`);
+        throw new Error(
+          `validate --show-compiled payload.compiled_graph.graph_id must equal ${fixtureGraphId}.`
+        );
       }
 
       const nodes = compiledGraph.nodes;
 
       if (!Array.isArray(nodes) || nodes.length < 1) {
-        throw new Error("compile payload.compiled_graph.nodes must be a non-empty array.");
+        throw new Error("validate --show-compiled payload.compiled_graph.nodes must be a non-empty array.");
       }
     } catch (error) {
       smokeFailures.push(error instanceof Error ? error.message : String(error));
@@ -474,8 +480,8 @@ async function checkBuiltCliSmoke() {
             throw new Error(`run payload.runs_root must equal ${fixture.runsRoot} for ${harnessKind}/${workspaceBackend}.`);
           }
 
-          if (payload.runs_root_source !== "launch-cwd-default") {
-            throw new Error(`run payload.runs_root_source must equal "launch-cwd-default" for ${harnessKind}/${workspaceBackend}.`);
+          if (payload.runs_root_source !== "graph-directory-default") {
+            throw new Error(`run payload.runs_root_source must equal "graph-directory-default" for ${harnessKind}/${workspaceBackend}.`);
           }
 
           if (payload.launch?.workspace_backend !== workspaceBackend) {
@@ -587,7 +593,7 @@ async function checkBuiltCliSmoke() {
         fixture_graph: fixtureGraphRelativePath,
         commands_run: [
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
-          `node ${builtCliRelativePath} compile --graph ${fixtureGraphRelativePath}`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --show-compiled`,
           ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
             builtCliRunWorkspaceBackends.map((workspaceBackend) =>
               `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`
@@ -609,7 +615,7 @@ async function checkBuiltCliSmoke() {
         fixture_graph: fixtureGraphRelativePath,
         commands_run: [
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
-          `node ${builtCliRelativePath} compile --graph ${fixtureGraphRelativePath}`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --show-compiled`,
           ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
             builtCliRunWorkspaceBackends.map((workspaceBackend) =>
               `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`

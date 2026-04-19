@@ -146,11 +146,11 @@ For every graph with managed patterns:
 1. Run `agentflow validate --graph <path>`.
 2. Fix authored diagnostics first.
 3. Run `agentflow validate --graph <path> --run-ready` when the pattern graph is expected to launch on this machine.
-4. Run `agentflow compile --graph <path>`.
+4. Run `agentflow validate --graph <path> --show-compiled`.
 5. Inspect generated subgraph phases, publish nodes, artifact names, repeat loops, and checkpoint placement.
 6. Confirm downstream primitive nodes reference artifacts published by the managed pattern's final publish node.
 
-If compile output surprises you, change the authored pattern contract rather than trying to depend on internal generated node ids.
+If the compiled output surprises you, change the authored pattern contract rather than trying to depend on internal generated node ids.
 
 For plugin workflows, use the same rule: downstream nodes consume artifacts from the public plugin node id and must not depend on generated internal ids.
 

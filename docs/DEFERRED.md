@@ -6,10 +6,11 @@ These areas are intentionally deferred from the current release. They should rem
 
 - MCP sidecars
 - native harnesses
-- a generalized custom tool platform
 - native Agent Skills installation from graph execution
 - remote-devbox backends
 - a fully featured controller
+
+The release ships a focused tool surface for plugin-bundled CLIs only (see `docs/PLUGINS.md`). Built-in CLI tools, inline graph- or agent-defined tools, a broader long-running tool platform (sidecar processes, persistent tool state, harness-specific bindings), and a built-in artifact-publishing CLI all remain deferred.
 
 Additional deferred areas:
 

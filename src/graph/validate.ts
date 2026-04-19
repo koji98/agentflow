@@ -1,22 +1,35 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import { isRelativeSubpath } from "../path_rules.js";
 import type {
+  AgentNode,
   AuthoredGraphDocument,
   AuthoredGraphNode,
   AuthoredGraphSummary,
   ContainerGraphNode,
+  ArtifactContextRef,
   ArtifactReference,
   ContextItem,
   ExecutableGraphNode,
-  GraphPrerequisiteCheck
+  GraphPrerequisiteCheck,
+  ToolDeclaration
 } from "./authored.js";
 import { normalizeAuthoredGraphDocument } from "./normalize.js";
 import type { LoweredManagedNode } from "./normalize.js";
-import { reservedArtifactNames } from "./schema.js";
+import { resolveLaunchConfig, resolveNodePolicy } from "./profiles.js";
+import {
+  reservedArtifactNames,
+  toolNamePattern
+} from "./schema.js";
 import type { GraphDiagnostic } from "./schema.js";
 import { expandPluginWorkflows, type ResolvedPlugin } from "../plugins/workflows.js";
+import {
+  interpolateGraphConfig,
+  mergeConfig,
+  validateConfigAgainstSchema,
+  type GraphConfig
+} from "./config.js";
 
 export type ValidationDiagnostic = GraphDiagnostic;
 
@@ -33,6 +46,7 @@ interface NodeMetadata {
   path: string;
   parent_scope_ids: string[];
   nearest_repeat_id?: string;
+  in_cleanup?: boolean;
 }
 
 function isExecutableNode(node: AuthoredGraphNode): node is ExecutableGraphNode {
@@ -44,21 +58,43 @@ function visitNodes(
   visit: (node: AuthoredGraphNode, metadata: NodeMetadata) => void,
   path: string,
   parent_scope_ids: string[] = [],
-  nearest_repeat_id?: string
+  nearest_repeat_id?: string,
+  in_cleanup = false
 ): void {
   const metadata: NodeMetadata = {
     node,
     path,
     parent_scope_ids,
-    ...(nearest_repeat_id ? { nearest_repeat_id } : {})
+    ...(nearest_repeat_id ? { nearest_repeat_id } : {}),
+    ...(in_cleanup ? { in_cleanup: true } : {})
   };
 
   visit(node, metadata);
 
   if (node.type === "sequence" || node.type === "parallel") {
     node.steps.forEach((child, index) =>
-      visitNodes(child, visit, `${path}.steps[${index}]`, [...parent_scope_ids, node.id], nearest_repeat_id)
+      visitNodes(
+        child,
+        visit,
+        `${path}.steps[${index}]`,
+        [...parent_scope_ids, node.id],
+        nearest_repeat_id,
+        in_cleanup
+      )
     );
+
+    if (node.type === "sequence" && node.cleanup) {
+      node.cleanup.forEach((child, index) =>
+        visitNodes(
+          child,
+          visit,
+          `${path}.cleanup[${index}]`,
+          [...parent_scope_ids, node.id],
+          nearest_repeat_id,
+          true
+        )
+      );
+    }
     return;
   }
 
@@ -68,7 +104,8 @@ function visitNodes(
       visit,
       `${path}.body`,
       [...parent_scope_ids, node.id],
-      node.id
+      node.id,
+      in_cleanup
     );
   }
 }
@@ -211,7 +248,7 @@ function validateEnvFiles(
 }
 
 function validateArtifactReference(
-  reference: ArtifactReference,
+  reference: ArtifactReference | ArtifactContextRef,
   path: string,
   currentNodeId: string,
   nodeIndex: Map<string, NodeMetadata>,
@@ -255,12 +292,108 @@ function validateArtifactReference(
   }
 }
 
-function validateNormalizedDocument(document: AuthoredGraphDocument): ValidationDiagnostic[] {
+interface ValidateNormalizedDocumentOptions {
+  resolved_plugins?: ResolvedPlugin[];
+  graph_dir?: string;
+}
+
+function callableNameForToolDeclaration(declaration: ToolDeclaration): string {
+  return declaration.alias ?? `${declaration.from_plugin}-${declaration.tool}`;
+}
+
+function validateToolDeclarations(
+  tools: ToolDeclaration[],
+  basePath: string,
+  pluginsByAlias: Map<string, ResolvedPlugin>,
+  diagnostics: ValidationDiagnostic[]
+): { callable_names: Set<string> } {
+  const callableNames = new Set<string>();
+
+  tools.forEach((declaration, index) => {
+    const declarationPath = `${basePath}[${index}]`;
+
+    const plugin = pluginsByAlias.get(declaration.from_plugin);
+    if (!plugin) {
+      diagnostics.push({
+        path: `${declarationPath}.from_plugin`,
+        message: `Plugin "${declaration.from_plugin}" is not declared or resolved.`
+      });
+      return;
+    }
+
+    if (!plugin.manifest.tools[declaration.tool]) {
+      diagnostics.push({
+        path: `${declarationPath}.tool`,
+        message: `Plugin "${declaration.from_plugin}" does not export tool "${declaration.tool}".`
+      });
+      return;
+    }
+
+    const callable = callableNameForToolDeclaration(declaration);
+
+    if (!toolNamePattern.test(callable)) {
+      diagnostics.push({
+        path: declarationPath,
+        message: `Plugin tool callable name "${callable}" must match /^[a-z0-9][a-z0-9-]*$/.`
+      });
+      return;
+    }
+
+    if (callableNames.has(callable)) {
+      diagnostics.push({
+        path: declarationPath,
+        message: `Tool name "${callable}" is already declared in this scope.`
+      });
+      return;
+    }
+
+    callableNames.add(callable);
+  });
+
+  return { callable_names: callableNames };
+}
+
+function validateToolConfigKeys(
+  config: Record<string, Record<string, string>> | undefined,
+  basePath: string,
+  scopeNames: ReadonlySet<string>,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  if (!config) {
+    return;
+  }
+
+  for (const toolName of Object.keys(config)) {
+    if (!scopeNames.has(toolName)) {
+      diagnostics.push({
+        path: `${basePath}.${toolName}`,
+        message: `tool_config references unknown tool "${toolName}". Declare it in tools or via a plugin first.`
+      });
+    }
+  }
+}
+
+async function validateNormalizedDocument(
+  document: AuthoredGraphDocument,
+  options: ValidateNormalizedDocumentOptions = {}
+): Promise<ValidationDiagnostic[]> {
   const diagnostics: ValidationDiagnostic[] = [];
   const repoAliases = new Set(Object.keys(document.repos));
   const repoCount = repoAliases.size;
   const seenNodeIds = new Set<string>();
   const nodeIndex = new Map<string, NodeMetadata>();
+  const pluginsByAlias = new Map<string, ResolvedPlugin>(
+    (options.resolved_plugins ?? []).map((plugin) => [plugin.alias, plugin])
+  );
+
+  const graphToolValidation = validateToolDeclarations(
+    document.tools ?? [],
+    "$.tools",
+    pluginsByAlias,
+    diagnostics
+  );
+  const graphScopeToolNames = new Set<string>(graphToolValidation.callable_names);
+  validateToolConfigKeys(document.tool_config, "$.tool_config", graphScopeToolNames, diagnostics);
 
   (document.prerequisites?.checks ?? []).forEach((check, index) => {
     validatePrerequisiteCheck(check, `$.prerequisites.checks[${index}]`, repoAliases, repoCount, diagnostics);
@@ -270,7 +403,39 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
     validateEnvFiles(profile.env_files, `$.profiles.${profileName}.env_files`, diagnostics);
   });
 
+  if (document.config_schema) {
+    validateConfigAgainstSchema(
+      document.config ?? {},
+      document.config_schema,
+      "$.config_schema",
+      diagnostics
+    );
+  }
+
+  const launch = resolveLaunchConfig(document);
+
   visitNodes(document.graph, (node, metadata) => {
+    if (node.type === "agent" || (node.type === "check" && node.check_kind === "ai")) {
+      const resolution = resolveNodePolicy(document, launch, node);
+      for (const diagnostic of resolution.diagnostics) {
+        diagnostics.push(diagnostic);
+      }
+    }
+  }, "$.graph");
+
+  visitNodes(document.graph, (node, metadata) => {
+    if (
+      metadata.in_cleanup &&
+      node.type === "sequence" &&
+      node.cleanup &&
+      node.cleanup.length > 0
+    ) {
+      diagnostics.push({
+        path: `${metadata.path}.cleanup`,
+        message: "sequence.cleanup is not allowed inside another cleanup chain."
+      });
+    }
+
     if (seenNodeIds.has(node.id)) {
       diagnostics.push({
         path: `${metadata.path}.id`,
@@ -314,6 +479,10 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
 
         contextNames.add(item.name);
 
+        if ("ref" in item) {
+          return;
+        }
+
         if (item.from === "workspace_file" || item.from === "workspace_glob") {
           validateWorkspaceContextPath(
             item,
@@ -333,6 +502,40 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
         validateArtifactPath(name, artifact.path, `${metadata.path}.artifacts.${name}.path`, diagnostics);
       });
     }
+  }, "$.graph");
+
+  visitNodes(document.graph, (node, metadata) => {
+    if (node.type !== "agent") {
+      return;
+    }
+
+    const agentNode = node as AgentNode;
+    if (!agentNode.tools && !agentNode.tool_config) {
+      return;
+    }
+
+    const agentToolValidation = validateToolDeclarations(
+      agentNode.tools ?? [],
+      `${metadata.path}.tools`,
+      pluginsByAlias,
+      diagnostics
+    );
+
+    const conflictingNames = [...agentToolValidation.callable_names].filter((name) =>
+      graphToolValidation.callable_names.has(name)
+    );
+    for (const name of conflictingNames) {
+      diagnostics.push({
+        path: `${metadata.path}.tools`,
+        message: `Tool name "${name}" conflicts with a graph-level tool of the same name.`
+      });
+    }
+
+    const agentScopeToolNames = new Set<string>([
+      ...graphScopeToolNames,
+      ...agentToolValidation.callable_names
+    ]);
+    validateToolConfigKeys(agentNode.tool_config, `${metadata.path}.tool_config`, agentScopeToolNames, diagnostics);
   }, "$.graph");
 
   visitNodes(document.graph, (node, metadata) => {
@@ -360,7 +563,7 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
 
     if (isExecutableNode(node)) {
       (node.context ?? []).forEach((item, index) => {
-        if (item.from !== "artifact") {
+        if (!("ref" in item)) {
           return;
         }
 
@@ -396,21 +599,68 @@ function validateNormalizedDocument(document: AuthoredGraphDocument): Validation
   return diagnostics;
 }
 
+export interface LoadAuthoredGraphDocumentOptions {
+  config_overrides?: GraphConfig;
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 export async function loadAuthoredGraphDocument(
   currentWorkingDirectory: string,
-  graphPath: string
+  graphPath: string,
+  options: LoadAuthoredGraphDocumentOptions = {}
 ): Promise<LoadedGraphDocument> {
   const absolute_path = resolve(currentWorkingDirectory, graphPath);
 
   try {
     const fileContents = await readFile(absolute_path, "utf8");
     const parsed = JSON.parse(fileContents) as unknown;
-    const pluginExpansion = await expandPluginWorkflows(absolute_path, parsed);
+    const configDiagnostics: ValidationDiagnostic[] = [];
+    const documentRecord = asPlainRecord(parsed);
+    let interpolated: unknown = parsed;
+
+    if (documentRecord) {
+      const declaredConfig = asPlainRecord(documentRecord.config) ?? {};
+      const declaredConfigSchema = asPlainRecord(documentRecord.config_schema);
+      const overrides = options.config_overrides ?? {};
+      const mergedConfig = mergeConfig(declaredConfig, overrides);
+
+      if (declaredConfigSchema) {
+        validateConfigAgainstSchema(
+          mergedConfig,
+          declaredConfigSchema,
+          "$.config_schema",
+          configDiagnostics
+        );
+      }
+
+      const documentForInterpolation: Record<string, unknown> = {
+        ...documentRecord,
+        config: mergedConfig
+      };
+
+      const interpolation = interpolateGraphConfig(documentForInterpolation, mergedConfig);
+      configDiagnostics.push(...interpolation.diagnostics);
+      interpolated = interpolation.document;
+    }
+
+    const pluginExpansion = await expandPluginWorkflows(absolute_path, interpolated);
     const normalized = normalizeAuthoredGraphDocument(pluginExpansion.document);
+    const documentDiagnostics = normalized.document
+      ? await validateNormalizedDocument(normalized.document, {
+          resolved_plugins: pluginExpansion.resolved_plugins,
+          graph_dir: dirname(absolute_path)
+        })
+      : [];
     const diagnostics = [
+      ...configDiagnostics,
       ...pluginExpansion.diagnostics,
       ...normalized.diagnostics,
-      ...(normalized.document ? validateNormalizedDocument(normalized.document) : [])
+      ...documentDiagnostics
     ];
     const loweredManagedNodes = [
       ...pluginExpansion.lowered_managed_nodes,
@@ -447,12 +697,15 @@ export async function loadAuthoredGraphDocument(
   }
 }
 
-export function validateAuthoredGraphDocument(value: unknown): ValidationDiagnostic[] {
+export async function validateAuthoredGraphDocument(
+  value: unknown,
+  options: ValidateNormalizedDocumentOptions = {}
+): Promise<ValidationDiagnostic[]> {
   const normalized = normalizeAuthoredGraphDocument(value);
 
   return [
     ...normalized.diagnostics,
-    ...(normalized.document ? validateNormalizedDocument(normalized.document) : [])
+    ...(normalized.document ? await validateNormalizedDocument(normalized.document, options) : [])
   ];
 }
 

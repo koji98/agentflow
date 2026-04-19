@@ -7,14 +7,14 @@ This is the canonical local operator runbook for Agentflow. Keep it aligned with
 The supported surface is intentionally narrow:
 
 - local graph authoring in `1` format
-- CLI `graph-help`, `validate`, `compile`, `run`, `resume`, and `apply`
-- workspace backends `inplace` and `worktree`
-- local Codex CLI and Cursor CLI harness adapters
+- CLI `graph-help`, `validate` (with optional `--show-compiled` and `--run-ready`), `plugin resolve`, `run`, `resume` (with optional `--latest`), `apply`, `runs list`, and `inspect`
+- workspace backends `inplace` (default) and `worktree`
+- local Cursor CLI and Codex CLI harness adapters
 - durable run artifacts under one canonical runs root
 
 Replacement-ready for the supported surface means exactly this:
 
-1. The documented local workflow works without source edits: `graph-help`, `validate`, `compile`, `run`, then artifact inspection or `resume`.
+1. The documented local workflow works without source edits: `graph-help`, `validate`, `validate --show-compiled`, `run`, then artifact inspection (`runs list`, `inspect`) or `resume`.
 2. Runtime outcomes are artifact-complete for `passed`, `failed`, `canceled`, and preflight-failed runs.
 3. All CLI commands agree on the same runs-root contract.
 4. `npm run validate:smoke` passes on the exact tree being handed off.
@@ -28,8 +28,9 @@ Run artifacts belong to the runs root, not to an individual repo checkout.
 
 Resolution contract:
 
-- If `AGENTFLOW_RUNS_ROOT` is set, it must be absolute and CLI commands use that path.
-- Otherwise CLI commands use `<launch-cwd>/.agentflow/runs`.
+- If `--runs-root <path>` is passed, CLI commands use it.
+- Else if `AGENTFLOW_RUNS_ROOT` is set, it must be absolute and CLI commands use that path.
+- Otherwise CLI commands use `<graph-dir>/.agentflow/runs`, where `<graph-dir>` is the directory containing the resolved `--graph` file.
 
 Path resolution contract:
 
@@ -55,7 +56,7 @@ Expected durable artifacts under the run root:
 
 Lifecycle rules that matter operationally:
 
-- `validate` and `compile` never create a run root.
+- `validate` (with or without `--show-compiled`) never creates a run root.
 - `run` creates the run root before execution so preflight failures still leave inspectable artifacts.
 - `summary.md`, `run.json`, `state.json`, and `events.jsonl` are expected to agree on the terminal outcome.
 - `execution_manifest.json` is the single durable source of repo workspace bindings and compiled execution policy.
@@ -68,7 +69,7 @@ Cleanup and reconciliation rules:
 - On `passed`, `failed`, and `canceled` outcomes, the runtime cleans up worktree registrations before finalizing terminal artifacts.
 - If worktree initialization fails partway through, already-created worktrees are rolled back before the run is marked failed.
 - If worktree cleanup itself fails, the run is forced to terminal `failed` and the cleanup error is recorded in the terminal reason.
-- `agentflow resume --run-root <run-root>` recompiles the original graph path with the current Agentflow build, preserves only passed nodes whose compiled contract is unchanged, restarts everything else, and recreates missing worktree paths when the original failed run already cleaned them up.
+- `agentflow resume --run-root <run-root>` recompiles the original graph path with the current Agentflow build, preserves only passed nodes whose compiled contract is unchanged, restarts everything else, and recreates missing worktree paths when the original failed run already cleaned them up. Pass `--graph <graph> --latest` to resume the most recent failed or canceled run for a graph automatically.
 - When inspection tooling reopens stale `pending` or `running` artifacts, projection reconciles them from durable state or from a recorded local runtime owner fingerprint that no longer matches a live process on this host instead of leaving them live forever.
 
 What the operator should expect:
@@ -105,11 +106,14 @@ Use the CLI in this order:
 agentflow graph-help
 agentflow validate --graph ./agentflow.graph.json
 agentflow validate --graph ./agentflow.graph.json --run-ready
-agentflow compile --graph ./agentflow.graph.json
+agentflow validate --graph ./agentflow.graph.json --show-compiled
 agentflow run --graph ./agentflow.graph.json
+agentflow runs list --graph ./agentflow.graph.json
+agentflow inspect ./.agentflow/runs/<run-id>
+agentflow resume --graph ./agentflow.graph.json --latest
 ```
 
-Plain `validate` proves the authored graph and compiled contract. Add `--run-ready` when you want local machine proof before launch: it checks required runtime tools such as `git`, referenced repo worktrees, executable node commands, and harness binaries used by compiled agent or AI-check nodes.
+Plain `validate` proves the authored graph and compiled contract. Add `--run-ready` when you want local machine proof before launch: it checks required runtime tools such as `git`, referenced repo worktrees, executable node commands, and harness binaries used by compiled agent or AI-check nodes. Add `--show-compiled` when you want to inspect the compiled contract the runtime will execute, including lowered managed nodes and resolved profiles.
 
 Recommended local loop while developing Agentflow:
 
@@ -121,6 +125,7 @@ Recommended local loop while developing Agentflow:
 
 Useful overrides:
 
+- `--runs-root <path>` for an explicit per-command runs root (highest precedence)
 - `AGENTFLOW_RUNS_ROOT` for a shared absolute runs root
 - `AGENTFLOW_CODEX_CLI_BIN` and `AGENTFLOW_CURSOR_CLI_BIN` when the harness binaries are not on `PATH`
 - `AGENTFLOW_REAL_HARNESS=codex-cli`, `cursor-cli`, or `all` to narrow or widen `npm run validate:real-harness` without changing the deterministic default gates
@@ -133,15 +138,16 @@ Harness policy notes:
 
 ## CLI Entry Points
 
-Each supported command returns explicit next-step hints. `compile` and non-interactive `validate`, `run`, or `resume` remain JSON-first; interactive `validate`, `run`, and `resume` render compact terminal summaries instead of dumping full payloads.
+Each supported command returns explicit next-step hints. Non-interactive `validate`, `run`, `resume`, `runs list`, and `inspect` remain JSON-first; interactive `validate`, `run`, and `resume` render compact terminal summaries instead of dumping full payloads.
 
 - `graph-help`: prints the authored graph contract, supported node kinds, path rules, `prerequisites.checks`, local command `env_files`, soft verification via `on_failure`, and a minimal example.
-- `validate`: validates the authored graph, validates the compiled graph, runs declared readiness checks, and returns `path_resolution`, launch data, readiness data, compiled summary, managed expansion details, and next-step commands. Add `--run-ready` to also verify local runtime dependencies such as `git`, repo worktrees, executable node commands, and harness binaries.
-- `compile`: returns the compiled graph contract for inspection plus the same path and next-step metadata.
+- `validate`: validates the authored graph, validates the compiled graph, runs declared readiness checks, and returns `path_resolution`, launch data, readiness data, compiled summary, managed expansion details, and next-step commands. Add `--run-ready` to also verify local runtime dependencies such as `git`, repo worktrees, executable node commands, and harness binaries. Add `--show-compiled` to include the compiled graph contract and lowered managed nodes in the result for inspection.
 - `plugin resolve`: clones Git plugin workflows declared by the graph, pins them to commits, and writes `agentflow.plugins.lock.json` next to the graph.
 - `run`: executes the compiled graph, writes durable artifacts, and returns `runs_root`, `run_root`, artifact paths, rerun or resume commands, and the cancellation note.
-- `resume`: recompiles a failed or canceled run root and resumes from durable state when the compiled contract still matches preserved work.
+- `resume`: recompiles a failed or canceled run root and resumes from durable state when the compiled contract still matches preserved work. Pass `--graph <graph> --latest` to pick the most recent failed or canceled run for that graph automatically.
 - `apply`: applies captured `workspace-changes/<repo>/diff.patch` from a run back to the source repo recorded in `execution_manifest.json`, or to `--target <path>` when provided. It refuses dirty targets unless `--allow-dirty` is passed and commits only when `--commit-message <message>` is provided.
+- `runs list`: enumerates recorded runs for a graph under the resolved runs root and returns each run's id, status, started/finished timestamps, workspace backend, launch profile, and absolute run-root path.
+- `inspect`: returns terminal status, total nodes, attempt counts, summary path, and short stderr tails for each failed node in a single run root.
 
 For help:
 
@@ -150,6 +156,8 @@ agentflow --help
 agentflow plugin --help
 agentflow run --help
 agentflow resume --help
+agentflow runs --help
+agentflow inspect --help
 ```
 
 ## Common Failure Modes
@@ -181,8 +189,9 @@ Symptoms:
 
 Checks:
 
-- confirm `defaults.launch_profile` points at a declared profile
-- use only `inplace` or `worktree` in `defaults.workspace_backend`
+- confirm `defaults.launch_profile` points at a declared profile (default `"default"` only resolves when a profile named `default` exists)
+- use only `inplace` or `worktree` in `defaults.workspace_backend`; `inplace` is the default when omitted
+- ensure every `agent` and AI `check` node can resolve a `harness` through its profile chain; `harness` is environment-dependent and is not auto-defaulted
 - run `graph-help` if the authored contract is unclear
 
 ### Worktree preflight failures
@@ -237,7 +246,7 @@ Checks:
 
 - make sure `codex` and/or `agent` are installed and authenticated when the graph needs them
 - set `AGENTFLOW_CODEX_CLI_BIN` or `AGENTFLOW_CURSOR_CLI_BIN` to explicit binary paths if needed
-- remember that plain `validate` and `compile` do not require those binaries; `validate --run-ready` does when the compiled graph uses the harness
+- remember that plain `validate` (with or without `--show-compiled`) does not require those binaries; `validate --run-ready` does when the compiled graph uses the harness
 - use `npm run validate:real-harness -- --harness codex-cli` or `cursor-cli` for an additive real-install smoke; it reports `skipped` instead of failing when the selected binary is unavailable
 
 ### Checkpoint graphs without an interactive terminal
@@ -262,8 +271,8 @@ Symptoms:
 Checks:
 
 - compare the emitted `runs_root` with your shell environment
-- check whether `AGENTFLOW_RUNS_ROOT` is set
-- remember that the default fallback is `<launch-cwd>/.agentflow/runs`
+- check whether you passed `--runs-root <path>` or set `AGENTFLOW_RUNS_ROOT`
+- remember that the default fallback is `<graph-dir>/.agentflow/runs`, the directory containing the resolved `--graph` file
 
 ### Agent declared artifact is missing
 
@@ -288,7 +297,7 @@ Before calling the package replacement-ready for the supported surface:
 npm run validate:smoke
 ```
 
-That gate is the required proof point. It checks canonical operating-doc presence, runs `typecheck`, `test`, and `build`, and smoke-tests the built `validate` and `compile` commands against the shipped repeat fixture.
+That gate is the required proof point. It checks canonical operating-doc presence, runs `typecheck`, `test`, and `build`, and smoke-tests the built `validate --show-compiled`, `runs list`, and `inspect` commands against the shipped repeat fixture.
 It also smoke-tests built `run` through temporary Codex and Cursor mock harness binaries across both supported workspace backends so the shipped supported workflow is proven without requiring real harness installs.
 
 When you need deeper handoff confidence on the same exact tree, also run:

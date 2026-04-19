@@ -20,8 +20,8 @@ Do not treat plugins as runtime extensions. They do not add new primitive node k
 2. Keep plugin config small, schema-backed, and directly tied to workflow choices.
 3. Package guidance as context files and helpers as explicit scripts called by `exec`.
 4. Expose only stable public artifacts from the workflow `publish_node`.
-5. In consuming graphs, run `agentflow plugin resolve --graph <path>` before `validate`, `compile`, `run`, or `resume`.
-6. Inspect `managed_expansion` after compile and never depend on generated internal node ids.
+5. In consuming graphs, run `agentflow plugin resolve --graph <path>` before `validate`, `run`, or `resume`.
+6. Inspect `managed_expansion` after `validate --show-compiled` and never depend on generated internal node ids.
 
 ## Authoring Posture
 

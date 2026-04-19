@@ -248,8 +248,8 @@ describe("pattern generate evaluate fix", () => {
           expect.objectContaining({ name: "design_packet", from: "workspace_file", path: "artifacts/design-packet.json" }),
           expect.objectContaining({ name: "design_spec", from: "workspace_file", path: "docs/design-spec.md" }),
           expect.objectContaining({
+            ref: "upstream_decisions.decision_log",
             name: "decision_log",
-            from: "artifact",
             node: "upstream_decisions",
             artifact: "decision_log",
             if_available: true
@@ -270,20 +270,20 @@ describe("pattern generate evaluate fix", () => {
           prompt: "Summarize the final change package for an operator.",
           context: [
             {
+              ref: "implement_managed_nodes.agent_response",
               name: "change_agent_response",
-              from: "artifact",
               node: "implement_managed_nodes",
               artifact: "agent_response"
             },
             {
+              ref: "implement_managed_nodes.change_summary",
               name: "change_summary",
-              from: "artifact",
               node: "implement_managed_nodes",
               artifact: "change_summary"
             },
             {
+              ref: "implement_managed_nodes.evaluation_ledger",
               name: "evaluation_ledger",
-              from: "artifact",
               node: "implement_managed_nodes",
               artifact: "evaluation_ledger"
             }

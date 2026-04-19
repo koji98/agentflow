@@ -47,7 +47,7 @@ export const evalCommand = {
     "Script graders receive AGENTFLOW_EVAL_* environment variables and must emit normalized JSON."
   ] as const,
   async run(
-    options: Record<string, string | boolean | undefined>,
+    options: Record<string, string | boolean | string[] | undefined>,
     currentWorkingDirectory: string,
     signal?: AbortSignal,
     positionals: readonly string[] = []

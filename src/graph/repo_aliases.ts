@@ -8,7 +8,7 @@ export function collectReferencedRepoAliases(graph: CompiledGraph): string[] {
     repoAliases.add(node.repo);
 
     for (const item of node.context) {
-      if (item.from === "text" || item.from === "artifact") {
+      if ("ref" in item || item.from === "text") {
         continue;
       }
 

@@ -73,16 +73,12 @@
         "prompt": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing. Do not modify files.",
         "context": [
           {
-            "name": "inspection_response",
-            "from": "artifact",
-            "node": "inspect_repo",
-            "artifact": "agent_response"
+            "ref": "inspect_repo.agent_response",
+            "name": "inspection_response"
           },
           {
-            "name": "package_contract_result",
-            "from": "artifact",
-            "node": "verify_package_contract",
-            "artifact": "result_json"
+            "ref": "verify_package_contract.result_json",
+            "name": "package_contract_result"
           }
         ]
       }

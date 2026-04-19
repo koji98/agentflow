@@ -129,16 +129,12 @@
         "prompt": "Using the repository survey and package contract output, write a concise set of constraints and observations that a human operator should know before running a graph in this repository. Do not modify files.",
         "context": [
           {
-            "name": "survey_response",
-            "from": "artifact",
-            "node": "survey_repo",
-            "artifact": "agent_response"
+            "ref": "survey_repo.agent_response",
+            "name": "survey_response"
           },
           {
-            "name": "package_contract",
-            "from": "artifact",
-            "node": "verify_package_contract",
-            "artifact": "package_contract"
+            "ref": "verify_package_contract.package_contract",
+            "name": "package_contract"
           }
         ],
         "artifacts": {
@@ -165,16 +161,12 @@
               "prompt": "Draft a concise operator walkthrough for this repository that explains how to validate, compile, run, and inspect a graph. Keep it read-only and do not modify files.",
               "context": [
                 {
-                  "name": "constraints_response",
-                  "from": "artifact",
-                  "node": "synthesize_constraints",
-                  "artifact": "agent_response"
+                  "ref": "synthesize_constraints.agent_response",
+                  "name": "constraints_response"
                 },
                 {
-                  "name": "survey_response",
-                  "from": "artifact",
-                  "node": "survey_repo",
-                  "artifact": "agent_response"
+                  "ref": "survey_repo.agent_response",
+                  "name": "survey_response"
                 }
               ],
               "artifacts": {
@@ -193,24 +185,18 @@
               "prompt": "Review the drafted walkthrough, tighten weak spots, and make sure it clearly explains the CLI order, the role of the web UI, and the read-only nature of this showcase. Do not modify files.",
               "context": [
                 {
-                  "name": "draft_response",
-                  "from": "artifact",
-                  "node": "draft_walkthrough",
-                  "artifact": "agent_response"
+                  "ref": "draft_walkthrough.agent_response",
+                  "name": "draft_response"
                 },
                 {
+                  "ref": "review_walkthrough.review_report",
                   "name": "failed_review_report",
-                  "from": "artifact",
-                  "node": "review_walkthrough",
-                  "artifact": "review_report",
                   "iteration": "latest_failed",
                   "if_available": true
                 },
                 {
-                  "name": "package_contract_result",
-                  "from": "artifact",
-                  "node": "verify_package_contract",
-                  "artifact": "result_json"
+                  "ref": "verify_package_contract.result_json",
+                  "name": "package_contract_result"
                 }
               ],
               "artifacts": {
@@ -231,16 +217,12 @@
               "rubric": "Pass only if the walkthrough clearly mentions validate, compile, run, and ui or web monitor flow, accurately describes the repository as local-first, and does not claim the showcase edits files. Fail if any of those are missing or misleading.",
               "context": [
                 {
-                  "name": "walkthrough_response",
-                  "from": "artifact",
-                  "node": "tighten_walkthrough",
-                  "artifact": "agent_response"
+                  "ref": "tighten_walkthrough.agent_response",
+                  "name": "walkthrough_response"
                 },
                 {
-                  "name": "constraints_response",
-                  "from": "artifact",
-                  "node": "synthesize_constraints",
-                  "artifact": "agent_response"
+                  "ref": "synthesize_constraints.agent_response",
+                  "name": "constraints_response"
                 }
               ],
               "artifacts": {
@@ -265,22 +247,16 @@
         "prompt": "Produce a final handoff that explains what this showcase run demonstrated. Mention the graph version, the node kinds used, the profile strategy, the deterministic package contract check, the AI walkthrough review, and the final commands a user would run next. Do not modify files.",
         "context": [
           {
-            "name": "survey_response",
-            "from": "artifact",
-            "node": "survey_repo",
-            "artifact": "agent_response"
+            "ref": "survey_repo.agent_response",
+            "name": "survey_response"
           },
           {
-            "name": "package_contract",
-            "from": "artifact",
-            "node": "verify_package_contract",
-            "artifact": "package_contract"
+            "ref": "verify_package_contract.package_contract",
+            "name": "package_contract"
           },
           {
+            "ref": "review_walkthrough.review_report",
             "name": "review_report",
-            "from": "artifact",
-            "node": "review_walkthrough",
-            "artifact": "review_report",
             "iteration": "latest_passed"
           }
         ]

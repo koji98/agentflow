@@ -195,24 +195,24 @@ describe("runtime repeat", () => {
                   prompt: "Revise the spec.",
                   context: [
                     {
+                      ref: "merge_feedback.critique_merged",
                       name: "failed_critique_merged",
-                      from: "artifact",
                       node: "merge_feedback",
                       artifact: "critique_merged",
                       iteration: "latest_failed",
                       if_available: true
                     },
                     {
+                      ref: "quality_review.quality_review",
                       name: "failed_quality_review",
-                      from: "artifact",
                       node: "quality_review",
                       artifact: "quality_review",
                       iteration: "latest_failed",
                       if_available: true
                     },
                     {
+                      ref: "human_review.operator_feedback",
                       name: "failed_operator_feedback",
-                      from: "artifact",
                       node: "human_review",
                       artifact: "operator_feedback",
                       iteration: "latest_failed",
@@ -261,8 +261,8 @@ describe("runtime repeat", () => {
                   },
                   context: [
                     {
+                      ref: "quality_review.quality_review",
                       name: "quality_review",
-                      from: "artifact",
                       node: "quality_review",
                       artifact: "quality_review"
                     }

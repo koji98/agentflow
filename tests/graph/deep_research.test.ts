@@ -198,14 +198,14 @@ describe("deep research managed pattern", () => {
             prompt: "Summarize the research recommendation.",
             context: [
               {
+                ref: "market_scan.agent_response",
                 name: "research_agent_response",
-                from: "artifact",
                 node: "market_scan",
                 artifact: "agent_response"
               },
               {
+                ref: "market_scan.research_report",
                 name: "research_report",
-                from: "artifact",
                 node: "market_scan",
                 artifact: "research_report"
               }

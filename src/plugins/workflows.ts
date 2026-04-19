@@ -6,6 +6,11 @@ import { promisify } from "node:util";
 
 import { resolveSubpathWithinRoot } from "../path_rules.js";
 import type { ArtifactDefinition, ContextItem } from "../graph/authored.js";
+import {
+  readConfigValue as sharedReadConfigValue,
+  rewriteConfigPlaceholders,
+  validateConfigAgainstSchema as sharedValidateConfigAgainstSchema
+} from "../graph/config.js";
 import type { GraphDiagnostic } from "../graph/schema.js";
 import type { LoweredManagedNode } from "../graph/normalize.js";
 
@@ -22,6 +27,7 @@ export interface PluginLockEntry extends PluginDeclaration {
   commit: string;
   manifest_digest: string;
   cache_path: string;
+  tool_digests?: Record<string, string>;
 }
 
 export interface PluginLockFile {
@@ -44,11 +50,20 @@ export interface PluginManifest {
   id: string;
   version: string;
   workflows: Record<string, PluginWorkflowExport>;
+  tools: Record<string, PluginToolExport>;
 }
 
 export interface PluginWorkflowExport {
   path: string;
   description?: string;
+}
+
+export interface PluginToolExport {
+  executable: string;
+  description?: string;
+  args?: string[];
+  usage?: string;
+  config_schema?: Record<string, unknown>;
 }
 
 export interface WorkflowManifest {
@@ -229,6 +244,8 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
   const id = readStringField(record, "id", path, diagnostics);
   const version = readStringField(record, "version", path, diagnostics);
   const workflowsRecord = asRecord(record.workflows);
+  const toolsValue = record.tools;
+  const toolsRecord = toolsValue === undefined ? {} : asRecord(toolsValue);
 
   if (schema && schema !== "agentflow.plugin/1") {
     diagnostics.push({ path: `${path}.schema`, message: 'Plugin manifest schema must be "agentflow.plugin/1".' });
@@ -236,6 +253,10 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
 
   if (!workflowsRecord) {
     diagnostics.push({ path: `${path}.workflows`, message: "Plugin manifest workflows must be an object." });
+  }
+
+  if (toolsValue !== undefined && !toolsRecord) {
+    diagnostics.push({ path: `${path}.tools`, message: "Plugin manifest tools must be an object when provided." });
   }
 
   const workflows: Record<string, PluginWorkflowExport> = {};
@@ -266,6 +287,52 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
     }
   });
 
+  const tools: Record<string, PluginToolExport> = {};
+  Object.entries(toolsRecord ?? {}).forEach(([toolName, toolValue]) => {
+    const toolRecord = asRecord(toolValue);
+    if (!toolRecord) {
+      diagnostics.push({ path: `${path}.tools.${toolName}`, message: "Tool export must be an object." });
+      return;
+    }
+
+    const executable = readStringField(toolRecord, "executable", `${path}.tools.${toolName}`, diagnostics);
+    const description =
+      typeof toolRecord.description === "string" && toolRecord.description.trim().length > 0
+        ? toolRecord.description
+        : undefined;
+    const usage =
+      typeof toolRecord.usage === "string" && toolRecord.usage.trim().length > 0
+        ? toolRecord.usage
+        : undefined;
+    let args: string[] | undefined;
+    if (toolRecord.args !== undefined) {
+      if (!Array.isArray(toolRecord.args) || toolRecord.args.some((entry) => typeof entry !== "string")) {
+        diagnostics.push({ path: `${path}.tools.${toolName}.args`, message: "Tool args must be an array of strings." });
+      } else {
+        args = toolRecord.args as string[];
+      }
+    }
+    let config_schema: Record<string, unknown> | undefined;
+    if (toolRecord.config_schema !== undefined) {
+      const schemaRecord = asRecord(toolRecord.config_schema);
+      if (!schemaRecord) {
+        diagnostics.push({ path: `${path}.tools.${toolName}.config_schema`, message: "Tool config_schema must be an object." });
+      } else {
+        config_schema = schemaRecord;
+      }
+    }
+
+    if (executable) {
+      tools[toolName] = {
+        executable,
+        ...(description ? { description } : {}),
+        ...(args ? { args } : {}),
+        ...(usage ? { usage } : {}),
+        ...(config_schema ? { config_schema } : {})
+      };
+    }
+  });
+
   if (!schema || schema !== "agentflow.plugin/1" || !id || !version || !workflowsRecord) {
     return undefined;
   }
@@ -274,7 +341,8 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
     schema: "agentflow.plugin/1",
     id,
     version,
-    workflows
+    workflows,
+    tools
   };
 }
 
@@ -378,13 +446,39 @@ export async function resolvePluginsForGraph(
 
       const manifestPath = join(finalRoot, "agentflow.plugin.json");
       const manifestDigest = await digestFile(manifestPath);
+      const manifestForDigest = normalizeManifest(
+        await readJsonFile(manifestPath),
+        `$.plugins.${alias}`,
+        diagnostics
+      );
+      const toolDigests: Record<string, string> = {};
+      if (manifestForDigest) {
+        for (const [toolName, tool] of Object.entries(manifestForDigest.tools)) {
+          try {
+            const toolPath = resolvePluginSubpath(
+              finalRoot,
+              tool.executable,
+              `Plugin tool "${alias}/${toolName}" executable`
+            );
+            toolDigests[toolName] = await digestFile(toolPath);
+          } catch (toolError) {
+            diagnostics.push({
+              path: `$.plugins.${alias}.tools.${toolName}`,
+              message: toolError instanceof Error
+                ? `Failed to digest tool executable: ${toolError.message}`
+                : "Failed to digest tool executable."
+            });
+          }
+        }
+      }
       resolvedPlugins.push({
         alias,
         source: declaration.source,
         ref: declaration.ref,
         commit,
         manifest_digest: manifestDigest,
-        cache_path: `.agentflow/plugins/${alias}/${commit}`
+        cache_path: `.agentflow/plugins/${alias}/${commit}`,
+        ...(Object.keys(toolDigests).length > 0 ? { tool_digests: toolDigests } : {})
       });
     } catch (error) {
       await rm(tempRoot, { recursive: true, force: true });
@@ -473,6 +567,47 @@ async function loadResolvedPlugins(
 
     const manifest = await loadManifest(pluginRoot, `$.plugins.${alias}`, diagnostics);
     if (manifest) {
+      let toolDigestsValid = true;
+      for (const [toolName, tool] of Object.entries(manifest.tools)) {
+        const expected = entry.tool_digests?.[toolName];
+        if (!expected) {
+          diagnostics.push({
+            path: `$.plugins.${alias}.tools.${toolName}`,
+            message: `Plugin "${alias}" tool "${toolName}" is missing from lockfile. Run agentflow plugin resolve --graph ${graphPath}.`
+          });
+          toolDigestsValid = false;
+          continue;
+        }
+
+        try {
+          const toolPath = resolvePluginSubpath(
+            pluginRoot,
+            tool.executable,
+            `Plugin tool "${alias}/${toolName}" executable`
+          );
+          const actual = await digestFile(toolPath);
+          if (actual !== expected) {
+            diagnostics.push({
+              path: `$.plugins.${alias}.tools.${toolName}`,
+              message: `Plugin "${alias}" tool "${toolName}" executable digest changed. Run agentflow plugin resolve --graph ${graphPath}.`
+            });
+            toolDigestsValid = false;
+          }
+        } catch (toolError) {
+          diagnostics.push({
+            path: `$.plugins.${alias}.tools.${toolName}`,
+            message: toolError instanceof Error
+              ? `Plugin "${alias}" tool "${toolName}" is unavailable: ${toolError.message}`
+              : `Plugin "${alias}" tool "${toolName}" is unavailable.`
+          });
+          toolDigestsValid = false;
+        }
+      }
+
+      if (!toolDigestsValid) {
+        continue;
+      }
+
       resolved.push({
         alias,
         source: entry.source,
@@ -530,20 +665,11 @@ function collectNodeIds(node: unknown, ids: Set<string>): void {
 }
 
 function readConfigValue(config: Record<string, unknown>, path: string): string {
-  const value = path.split(".").reduce<unknown>((current, key) => {
-    const record = asRecord(current);
-    return record ? record[key] : undefined;
-  }, config);
-
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-    ? String(value)
-    : JSON.stringify(value);
+  return sharedReadConfigValue(config, path);
 }
 
 function rewriteString(value: string, config: Record<string, unknown>, workflowDir: string): string {
-  const withConfig = value.replace(/\{\{config\.([a-zA-Z0-9_.-]+)\}\}/g, (_match, key: string) =>
-    readConfigValue(config, key)
-  );
+  const withConfig = rewriteConfigPlaceholders(value, config);
 
   if (withConfig.startsWith("plugin://")) {
     return resolvePluginSubpath(workflowDir, withConfig.slice("plugin://".length), "plugin:// resource");
@@ -623,6 +749,23 @@ function rewriteArtifactReferenceNode(value: unknown, internalIds: Set<string>, 
   return internalIds.has(value) ? `${prefix}${value}` : value;
 }
 
+function rewriteArtifactReferenceRef(
+  ref: string,
+  internalIds: Set<string>,
+  prefix: string,
+  publishNode: string,
+  outerId: string
+): string {
+  const dotIndex = ref.indexOf(".");
+  const node = dotIndex === -1 ? ref : ref.slice(0, dotIndex);
+  const remainder = dotIndex === -1 ? "" : ref.slice(dotIndex);
+  const rewrittenNode = rewriteArtifactReferenceNode(node, internalIds, prefix, publishNode, outerId);
+  if (typeof rewrittenNode !== "string") {
+    return ref;
+  }
+  return `${rewrittenNode}${remainder}`;
+}
+
 async function rewriteWorkflowValue(
   value: unknown,
   workflowDir: string,
@@ -687,8 +830,12 @@ async function rewriteWorkflowValue(
     rewritten.id = record.id === publishNode ? outerId : `${prefix}${record.id}`;
   }
 
-  if (record.from === "artifact") {
-    rewritten.node = rewriteArtifactReferenceNode(record.node, internalIds, prefix, publishNode, outerId);
+  if (typeof record.ref === "string") {
+    const rewrittenRef = rewriteArtifactReferenceRef(record.ref, internalIds, prefix, publishNode, outerId);
+    rewritten.ref = rewrittenRef;
+    if (typeof record.node === "string") {
+      rewritten.node = rewriteArtifactReferenceNode(record.node, internalIds, prefix, publishNode, outerId);
+    }
   }
 
   if (asRecord(record.until)) {
@@ -777,51 +924,7 @@ function validateConfigAgainstSchema(
   path: string,
   diagnostics: GraphDiagnostic[]
 ): void {
-  const schemaRecord = asRecord(schema);
-  if (!schemaRecord) {
-    diagnostics.push({ path, message: "Workflow config schema must be an object." });
-    return;
-  }
-
-  if (schemaRecord.type !== undefined && schemaRecord.type !== "object") {
-    diagnostics.push({ path: `${path}.type`, message: 'Only object config schemas are supported for plugin workflows.' });
-    return;
-  }
-
-  const properties = asRecord(schemaRecord.properties) ?? {};
-  const required = Array.isArray(schemaRecord.required)
-    ? schemaRecord.required.filter((item): item is string => typeof item === "string")
-    : [];
-
-  required.forEach((key) => {
-    if (config[key] === undefined) {
-      diagnostics.push({ path: `config.${key}`, message: `Plugin workflow config is missing required property "${key}".` });
-    }
-  });
-
-  if (schemaRecord.additionalProperties === false) {
-    Object.keys(config)
-      .filter((key) => properties[key] === undefined)
-      .forEach((key) => {
-        diagnostics.push({ path: `config.${key}`, message: `Plugin workflow config does not allow property "${key}".` });
-      });
-  }
-
-  Object.entries(properties).forEach(([key, propertySchema]) => {
-    if (config[key] === undefined) {
-      return;
-    }
-
-    const expectedType = asRecord(propertySchema)?.type;
-    const actual = config[key];
-    const typeMatches =
-      expectedType === undefined ||
-      (expectedType === "array" ? Array.isArray(actual) : typeof actual === expectedType);
-
-    if (!typeMatches) {
-      diagnostics.push({ path: `config.${key}`, message: `Plugin workflow config property "${key}" must be ${String(expectedType)}.` });
-    }
-  });
+  sharedValidateConfigAgainstSchema(config, schema, path, diagnostics);
 }
 
 async function expandPluginNode(

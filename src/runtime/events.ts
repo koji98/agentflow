@@ -17,6 +17,10 @@ export const runtimeEventTypes = [
   "node.skipped",
   "node.canceled",
   "repeat.iteration.completed",
+  "sequence.cleanup.started",
+  "sequence.cleanup.step_failed",
+  "sequence.cleanup.completed",
+  "sequence.cleanup.canceled",
   "run.canceled",
   "run.completed"
 ] as const;
@@ -77,6 +81,30 @@ export interface RepeatIterationStartedPayload {
 export interface RepeatIterationCompletedPayload {
   outcome: GraphOutcome;
   iteration_index: number;
+}
+
+export interface SequenceCleanupStartedPayload {
+  sequence_authored_id: string;
+  cleanup_step_count: number;
+  body_outcome: "passed" | "failed" | "canceled";
+}
+
+export interface SequenceCleanupStepFailedPayload {
+  compiled_id: string;
+  message: string;
+}
+
+export interface SequenceCleanupCompletedPayload {
+  sequence_authored_id: string;
+  steps_attempted: number;
+  steps_passed: number;
+  steps_failed: number;
+  steps_skipped: number;
+}
+
+export interface SequenceCleanupCanceledPayload {
+  sequence_authored_id: string;
+  reason: string;
 }
 
 export function createRuntimeEvent<TPayload>(

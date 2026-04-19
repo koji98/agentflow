@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "required": ["pr_id"],
+  "properties": {
+    "pr_id": {
+      "type": "string",
+      "description": "GitHub pull request id to poll."
+    }
+  },
+  "additionalProperties": false
+}

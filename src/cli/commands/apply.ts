@@ -95,7 +95,7 @@ export const applyCommand = {
     "Passing --commit-message stages the captured changed files and creates a git commit after applying."
   ] as const,
   async run(
-    options: Record<string, string | boolean | undefined>,
+    options: Record<string, string | boolean | string[] | undefined>,
     currentWorkingDirectory: string
   ) {
     const runRootInput = typeof options["run-root"] === "string" ? options["run-root"] : undefined;

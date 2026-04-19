@@ -200,20 +200,20 @@ describe("spec design managed pattern", () => {
             prompt: "Summarize the design package for an implementer.",
             context: [
               {
+                ref: "managed_nodes_spec.agent_response",
                 name: "design_agent_response",
-                from: "artifact",
                 node: "managed_nodes_spec",
                 artifact: "agent_response"
               },
               {
+                ref: "managed_nodes_spec.design_spec",
                 name: "design_spec",
-                from: "artifact",
                 node: "managed_nodes_spec",
                 artifact: "design_spec"
               },
               {
+                ref: "managed_nodes_spec.implementation_readiness",
                 name: "implementation_readiness",
-                from: "artifact",
                 node: "managed_nodes_spec",
                 artifact: "implementation_readiness"
               }

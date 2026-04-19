@@ -48,28 +48,29 @@ describe("graph CLI", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Agentflow CLI");
     expect(result.stdout).toContain("validate");
-    expect(result.stdout).toContain("compile");
     expect(result.stdout).toContain("run");
+    expect(result.stdout).toContain("runs");
+    expect(result.stdout).toContain("inspect");
     expect(result.stdout).toContain("resume");
     expect(result.stdout).toContain("apply");
     expect(result.stdout).toContain("graph-help");
-    expect(result.stdout).toContain("control");
+    expect(result.stdout).not.toContain("control");
     expect(result.stdout).toContain("Local workflow:");
     expect(result.stdout).toContain("Path rules:");
     expect(result.stdout).toContain("graph-help: review the authored graph contract");
     expect(result.stdout).toContain("AGENTFLOW_RUNS_ROOT");
   });
 
-  it("compiles the repeat graph fixture into the compiled graph contract", async () => {
+  it("emits the compiled graph contract under validate --show-compiled", async () => {
     const graphPath = fileURLToPath(
       new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
     );
-    const result = await executeCli(["compile", "--graph", graphPath]);
+    const result = await executeCli(["validate", "--graph", graphPath, "--show-compiled"]);
     const payload = JSON.parse(result.stdout);
 
     expect(result.exitCode).toBe(0);
-    expect(payload.command).toBe("compile");
-    expect(payload.message).toContain("Compiled graph contract is ready");
+    expect(payload.command).toBe("validate");
+    expect(payload.status).toBe("passed");
     expect(payload.path_resolution.graph_path).toBe(graphPath);
     expect(payload.path_resolution.rules.repo_paths).toContain("graph file directory");
     expect(payload.compiled_graph.graph_id).toBe("repeat-graph");
@@ -106,7 +107,7 @@ describe("graph CLI", () => {
     expect(payload.compiled_validation.managed_expansion).toEqual([]);
     expect(payload.readiness_mode).toBe("declared");
     expect(payload.readiness.status).toBe("ready");
-    expect(payload.next_steps.compile).toContain("agentflow compile --graph");
+    expect(payload.next_steps.run).toContain("agentflow run --graph");
     expect(payload.next_steps.graph_help).toBe("agentflow graph-help");
   });
 
@@ -478,7 +479,7 @@ describe("graph CLI", () => {
     expect(payload.message).toContain("durable artifacts are ready");
     expect(payload.path_resolution.graph_path).toBe(graphPath);
     expect(payload.runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
-    expect(payload.runs_root_source).toBe("launch-cwd-default");
+    expect(payload.runs_root_source).toBe("graph-directory-default");
     expect(payload.default_runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
     expect(payload.runs_root_contract).toContain("AGENTFLOW_RUNS_ROOT");
     expect(payload.run_root).toBe(join(payload.runs_root, payload.run_id));
@@ -1889,7 +1890,7 @@ describe("graph CLI", () => {
         ])
       );
       expect(payload.next_steps.validate).toContain("agentflow validate --graph");
-      expect(payload.next_steps.compile).toContain("agentflow compile --graph");
+      expect(payload.next_steps).not.toHaveProperty("compile");
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -1932,26 +1933,13 @@ describe("graph CLI", () => {
       )}\n`
     );
 
-    const invalidCompile = await executeCli(["compile", "--graph", graphPath], tempRoot);
     const invalidValidate = await executeCli(["validate", "--graph", graphPath], tempRoot);
-    const invalidCompilePayload = JSON.parse(invalidCompile.stdout);
     const invalidValidatePayload = JSON.parse(invalidValidate.stdout);
-
-    expect(invalidCompile.exitCode).toBe(1);
-    expect(invalidCompilePayload.command).toBe("compile");
-    expect(invalidCompilePayload.message).toContain("Launch settings could not be resolved from the graph");
-    expect(invalidCompilePayload.available_profiles).toContain("review");
-    expect(invalidCompilePayload.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          message: expect.stringContaining("No launch profile could be resolved")
-        })
-      ])
-    );
 
     expect(invalidValidate.exitCode).toBe(1);
     expect(invalidValidatePayload.command).toBe("validate");
     expect(invalidValidatePayload.message).toContain("Launch settings could not be resolved from the graph");
+    expect(invalidValidatePayload.available_profiles).toContain("review");
     expect(invalidValidatePayload.supported_workspace_backends).toContain("worktree");
     expect(invalidValidatePayload.diagnostics).toEqual(
       expect.arrayContaining([
@@ -1964,13 +1952,8 @@ describe("graph CLI", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("prints graph help and exposes the deferred control stub", async () => {
+  it("prints graph help with the local-first contract", async () => {
     const graphHelp = await executeCli(["graph-help"]);
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-control-"));
-    const missionPath = join(tempRoot, "mission.json");
-    await writeFile(missionPath, JSON.stringify({ mission: "stub" }, null, 2));
-    const control = await executeCli(["control", "--mission", missionPath], tempRoot);
-    const controlPayload = JSON.parse(control.stdout);
 
     expect(graphHelp.exitCode).toBe(0);
     expect(graphHelp.stdout).toContain("Executable node kinds: agent, exec, check, checkpoint");
@@ -1981,19 +1964,19 @@ describe("graph CLI", () => {
     expect(graphHelp.stdout).toContain(`"version": "1"`);
     expect(graphHelp.stdout).toContain("Recommended local workflow:");
     expect(graphHelp.stdout).toContain("Repo paths in $.repos.*.path resolve relative to the graph file directory.");
+  });
 
-    expect(control.exitCode).toBe(1);
-    expect(controlPayload.command).toBe("control");
-    expect(controlPayload.status).toBe("deferred");
-    expect(controlPayload.mission_path).toBe(missionPath);
+  it("rejects the removed control command", async () => {
+    const result = await executeCli(["control", "--mission", "mission.json"]);
 
-    await rm(tempRoot, { recursive: true, force: true });
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("Unknown command: control");
   });
 
   it("renders command help and rejects unexpected positionals or options", async () => {
     const help = await executeCli(["run", "--help"]);
     const positional = await executeCli(["validate", "--graph", "agentflow.graph.json", "extra"]);
-    const unexpectedOption = await executeCli(["compile", "--label", "oops"]);
+    const unexpectedOption = await executeCli(["validate", "--graph", "agentflow.graph.json", "--label", "oops"]);
     const removedLaunchOptions = await executeCli(["run", "--graph", "agentflow.graph.json", "--profile", "default"]);
 
     expect(help.exitCode).toBe(0);
@@ -2010,41 +1993,379 @@ describe("graph CLI", () => {
 
     expect(unexpectedOption.exitCode).toBe(2);
     expect(unexpectedOption.stdout).toContain("Unexpected option(s): --label");
-    expect(unexpectedOption.stdout).toContain("Try: agentflow compile --help");
+    expect(unexpectedOption.stdout).toContain("Try: agentflow validate --help");
 
     expect(removedLaunchOptions.exitCode).toBe(2);
     expect(removedLaunchOptions.stdout).toContain("Unexpected option(s): --profile");
     expect(removedLaunchOptions.stdout).toContain("Try: agentflow run --help");
   });
 
-  it("supports explicit help entrypoints and mission-specific control usage errors", async () => {
+  it("supports explicit help entrypoints", async () => {
     const mainHelp = await executeCli(["--help"]);
     const validateHelp = await executeCli(["validate", "-h"]);
-    const compileHelp = await executeCli(["compile", "--help"]);
-    const controlHelp = await executeCli(["control", "--help"]);
-    const missingMission = await executeCli(["control"]);
+    const runsHelp = await executeCli(["runs", "--help"]);
+    const inspectHelp = await executeCli(["inspect", "--help"]);
 
     expect(mainHelp.exitCode).toBe(0);
     expect(mainHelp.stdout).toContain("Agentflow CLI");
     expect(mainHelp.stdout).toContain("Runs root contract:");
+    expect(mainHelp.stdout).not.toContain("control");
 
     expect(validateHelp.exitCode).toBe(0);
     expect(validateHelp.stdout).toContain("validate: Validate and compile an authored graph without launching a run.");
-    expect(validateHelp.stdout).toContain("Use compile next");
+    expect(validateHelp.stdout).toContain("--show-compiled");
 
-    expect(compileHelp.exitCode).toBe(0);
-    expect(compileHelp.stdout).toContain("compile: Resolve launch settings and emit the compiled graph contract.");
-    expect(compileHelp.stdout).toContain("Use run when you want durable artifacts");
+    expect(runsHelp.exitCode).toBe(0);
+    expect(runsHelp.stdout).toContain("runs: Inspect previously recorded run roots");
+    expect(runsHelp.stdout).toContain("--graph");
 
-    expect(controlHelp.exitCode).toBe(0);
-    expect(controlHelp.stdout).toContain("control: Reserved controller stub");
-    expect(controlHelp.stdout).toContain("--mission <path>");
-    expect(controlHelp.stdout).not.toContain("--graph <path>");
+    expect(inspectHelp.exitCode).toBe(0);
+    expect(inspectHelp.stdout).toContain("inspect: Inspect a recorded run root");
+    expect(inspectHelp.stdout).toContain("Usage: agentflow inspect <run-root>");
+  });
 
-    expect(missingMission.exitCode).toBe(2);
-    expect(missingMission.stdout).toContain("Missing required option: --mission");
-    expect(missingMission.stdout).toContain("Try: agentflow control --help");
-    expect(missingMission.stdout).not.toContain("Graph contract: agentflow graph-help");
+  it("lists recorded run summaries for a graph through agentflow runs list", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-runs-list-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-runs-list-graph",
+          repos: { main: { path: "./repo" } },
+          defaults: { launch_profile: "default", workspace_backend: "inplace" },
+          profiles: { default: {} },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "noop",
+                repo: "main",
+                command: "node",
+                args: ["-e", "process.stdout.write('ok\\n');"]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const firstRun = await executeCli(["run", "--graph", graphPath], tempRoot);
+      const secondRun = await executeCli(["run", "--graph", graphPath], tempRoot);
+      expect(firstRun.exitCode).toBe(0);
+      expect(secondRun.exitCode).toBe(0);
+
+      const listResult = await executeCli(["runs", "list", "--graph", graphPath], tempRoot);
+      const listPayload = JSON.parse(listResult.stdout);
+
+      expect(listResult.exitCode).toBe(0);
+      expect(listPayload.command).toBe("runs list");
+      expect(listPayload.status).toBe("passed");
+      expect(listPayload.runs_root).toBe(join(tempRoot, ".agentflow", "runs"));
+      expect(listPayload.runs_root_source).toBe("graph-directory-default");
+      expect(listPayload.graph_path).toBe(graphPath);
+      expect(listPayload.runs_count).toBe(2);
+      expect(listPayload.runs).toHaveLength(2);
+      for (const summary of listPayload.runs) {
+        expect(summary.graph_id).toBe("cli-runs-list-graph");
+        expect(summary.graph_path).toBe(graphPath);
+        expect(summary.status).toBe("passed");
+        expect(summary.workspace_backend).toBe("inplace");
+        expect(summary.launch_profile).toBe("default");
+        expect(typeof summary.run_id).toBe("string");
+        expect(typeof summary.started_at).toBe("string");
+      }
+
+      const firstParsed = JSON.parse(firstRun.stdout);
+      const secondParsed = JSON.parse(secondRun.stdout);
+      expect(listPayload.runs[0]!.run_id).toBe(secondParsed.run_id);
+      expect(listPayload.runs[1]!.run_id).toBe(firstParsed.run_id);
+
+      const explicitRunsRoot = await executeCli(
+        ["runs", "list", "--runs-root", join(tempRoot, ".agentflow", "runs")],
+        tempRoot
+      );
+      const explicitPayload = JSON.parse(explicitRunsRoot.stdout);
+      expect(explicitRunsRoot.exitCode).toBe(0);
+      expect(explicitPayload.runs_count).toBe(2);
+      expect(explicitPayload.runs_root_source).toBe("launch-cwd-default");
+    } finally {
+      stderrSpy.mockRestore();
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid runs subcommands and combinations", async () => {
+    const missing = await executeCli(["runs"]);
+    const conflicting = await executeCli([
+      "runs",
+      "list",
+      "--graph",
+      "agentflow.graph.json",
+      "--runs-root",
+      "/tmp/runs"
+    ]);
+    const wrongSubcommand = await executeCli(["runs", "show"]);
+
+    expect(missing.exitCode).toBe(2);
+    expect(missing.stdout).toContain("Missing runs subcommand");
+
+    expect(conflicting.exitCode).toBe(2);
+    expect(conflicting.stdout).toContain("Provide either --graph or --runs-root, not both.");
+
+    expect(wrongSubcommand.exitCode).toBe(2);
+    expect(wrongSubcommand.stdout).toContain("Unexpected runs subcommand");
+  });
+
+  it("inspects a recorded run root and surfaces stderr tails for failures", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-inspect-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-inspect-graph",
+          repos: { main: { path: "./repo" } },
+          defaults: { launch_profile: "default", workspace_backend: "inplace" },
+          profiles: { default: {} },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "boom",
+                repo: "main",
+                command: "node",
+                args: [
+                  "-e",
+                  "process.stderr.write('failure-marker-12345\\n'); process.exit(1);"
+                ]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const runResult = await executeCli(["run", "--graph", graphPath], tempRoot);
+      const runPayload = JSON.parse(runResult.stdout);
+      expect(runResult.exitCode).toBe(1);
+      expect(runPayload.status).toBe("failed");
+
+      const inspectResult = await executeCli(["inspect", runPayload.run_root], tempRoot);
+      const inspectPayload = JSON.parse(inspectResult.stdout);
+
+      expect(inspectResult.exitCode).toBe(0);
+      expect(inspectPayload.command).toBe("inspect");
+      expect(inspectPayload.status).toBe("passed");
+      expect(inspectPayload.run_root).toBe(runPayload.run_root);
+      expect(inspectPayload.run_id).toBe(runPayload.run_id);
+      expect(inspectPayload.graph_id).toBe("cli-inspect-graph");
+      expect(inspectPayload.graph_path).toBe(graphPath);
+      expect(inspectPayload.run_status).toBe("failed");
+      expect(inspectPayload.failed_node_count).toBeGreaterThan(0);
+      expect(inspectPayload.failed_node_stderr_tails).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            authored_id: "boom",
+            status: "failed",
+            stderr_tail: expect.stringContaining("failure-marker-12345")
+          })
+        ])
+      );
+      expect(inspectPayload.artifacts.run_file).toBe(join(runPayload.run_root, "run.json"));
+      expect(inspectPayload.artifacts.state_file).toBe(join(runPayload.run_root, "state.json"));
+    } finally {
+      stderrSpy.mockRestore();
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports missing run roots for inspect and rejects unexpected positionals", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-inspect-missing-"));
+    try {
+      const missing = await executeCli(["inspect"]);
+      expect(missing.exitCode).toBe(2);
+      expect(missing.stdout).toContain("Missing required positional argument: <run-root>");
+
+      const extras = await executeCli(["inspect", "a", "b"]);
+      expect(extras.exitCode).toBe(2);
+      expect(extras.stdout).toContain("Unexpected positional arguments: b");
+
+      const nonexistent = await executeCli(
+        ["inspect", join(tempRoot, "missing-run-root")],
+        tempRoot
+      );
+      const nonexistentPayload = JSON.parse(nonexistent.stdout);
+      expect(nonexistent.exitCode).toBe(1);
+      expect(nonexistentPayload.command).toBe("inspect");
+      expect(nonexistentPayload.status).toBe("failed");
+      expect(nonexistentPayload.message).toContain("Run root could not be resolved");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("resumes the latest failed run for a graph via resume --graph --latest", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-latest-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-resume-latest-graph",
+          repos: { main: { path: "./repo" } },
+          defaults: { launch_profile: "default", workspace_backend: "inplace" },
+          profiles: { default: {} },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "check",
+                id: "gate",
+                repo: "main",
+                check_kind: "deterministic",
+                command: "node",
+                args: [
+                  "-e",
+                  "const fs=require('node:fs'); const passed=fs.existsSync('latest-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                ],
+                pass_if: { json_path: "$.passed", equals: true }
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const firstRun = await executeCli(["run", "--graph", graphPath], tempRoot);
+      const firstPayload = JSON.parse(firstRun.stdout);
+      expect(firstRun.exitCode).toBe(1);
+      expect(firstPayload.status).toBe("failed");
+
+      const secondRun = await executeCli(["run", "--graph", graphPath], tempRoot);
+      const secondPayload = JSON.parse(secondRun.stdout);
+      expect(secondRun.exitCode).toBe(1);
+      expect(secondPayload.status).toBe("failed");
+      expect(secondPayload.run_id).not.toBe(firstPayload.run_id);
+
+      await writeFile(join(repoDir, "latest-ok.txt"), "ok\n");
+
+      const resumed = await executeCli(
+        ["resume", "--graph", graphPath, "--latest"],
+        tempRoot
+      );
+      const resumedPayload = JSON.parse(resumed.stdout);
+
+      expect(resumed.exitCode).toBe(0);
+      expect(resumedPayload.command).toBe("resume");
+      expect(resumedPayload.status).toBe("passed");
+      expect(resumedPayload.run_root).toBe(secondPayload.run_root);
+      expect(resumedPayload.run_id).toBe(secondPayload.run_id);
+    } finally {
+      stderrSpy.mockRestore();
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a friendly message when resume --latest finds no resumable runs", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-latest-empty-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-resume-latest-empty-graph",
+          repos: { main: { path: "./repo" } },
+          defaults: { launch_profile: "default", workspace_backend: "inplace" },
+          profiles: { default: {} },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "noop",
+                repo: "main",
+                command: "node",
+                args: ["-e", "process.exit(0);"]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    try {
+      const conflicting = await executeCli([
+        "resume",
+        "--run-root",
+        "/tmp/some/run-root",
+        "--graph",
+        graphPath,
+        "--latest"
+      ]);
+      expect(conflicting.exitCode).toBe(2);
+      expect(conflicting.stdout).toContain(
+        "Provide either --run-root or --latest with --graph, not both."
+      );
+
+      const missingGraph = await executeCli(["resume", "--latest"]);
+      expect(missingGraph.exitCode).toBe(2);
+      expect(missingGraph.stdout).toContain("--latest requires --graph to locate the runs root.");
+
+      const missingAll = await executeCli(["resume"]);
+      expect(missingAll.exitCode).toBe(2);
+      expect(missingAll.stdout).toContain(
+        "Missing required option: --run-root (or --graph with --latest)"
+      );
+
+      const noRunsRoot = await executeCli(
+        ["resume", "--graph", graphPath, "--latest"],
+        tempRoot
+      );
+      const noRunsRootPayload = JSON.parse(noRunsRoot.stdout);
+      expect(noRunsRoot.exitCode).toBe(1);
+      expect(noRunsRootPayload.command).toBe("resume");
+      expect(noRunsRootPayload.status).toBe("failed");
+      expect(noRunsRootPayload.message).toContain("No runs root found for the supplied graph.");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("returns usage errors for missing required options and unknown commands", async () => {

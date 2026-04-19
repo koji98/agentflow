@@ -14,6 +14,8 @@ export interface LocalProcessInvocation {
   runtime_env?: Record<string, string>;
   timeout_sec: number;
   signal: AbortSignal | undefined;
+  on_stdout_chunk?: (chunk: string) => void;
+  on_stderr_chunk?: (chunk: string) => void;
 }
 
 export interface LocalProcessResult {
@@ -215,9 +217,11 @@ export async function runLocalProcess(
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutChunks.push(chunk);
+      invocation.on_stdout_chunk?.(chunk.toString("utf8"));
     });
     child.stderr.on("data", (chunk: Buffer) => {
       stderrChunks.push(chunk);
+      invocation.on_stderr_chunk?.(chunk.toString("utf8"));
     });
     child.on("error", (error) => {
       if (timeout) {

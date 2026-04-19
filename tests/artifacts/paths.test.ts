@@ -11,13 +11,37 @@ import {
 } from "../../src/artifacts/paths.js";
 
 describe("runs root resolution", () => {
-  it("defaults to <launch-cwd>/.agentflow/runs when no override is set", () => {
+  it("defaults to <graph-directory>/.agentflow/runs when a graph directory is provided", () => {
+    expect(
+      resolveRunsRoot({
+        currentWorkingDirectory: "/tmp/agentflow-launch",
+        graphDirectory: "/tmp/agentflow-graphs/demo",
+        environment: {}
+      })
+    ).toBe("/tmp/agentflow-graphs/demo/.agentflow/runs");
+  });
+
+  it("falls back to <launch-cwd>/.agentflow/runs when no graph directory or override is set", () => {
     expect(
       resolveRunsRoot({
         currentWorkingDirectory: "/tmp/agentflow-launch",
         environment: {}
       })
     ).toBe("/tmp/agentflow-launch/.agentflow/runs");
+  });
+
+  it("prefers an absolute AGENTFLOW_RUNS_ROOT override over the graph directory default", () => {
+    const runsRoot = join("/tmp", "agentflow-shared-runs");
+
+    expect(
+      resolveRunsRoot({
+        currentWorkingDirectory: "/tmp/agentflow-launch",
+        graphDirectory: "/tmp/agentflow-graphs/demo",
+        environment: {
+          [runsRootEnvironmentVariable]: runsRoot
+        }
+      })
+    ).toBe(runsRoot);
   });
 
   it("uses an absolute AGENTFLOW_RUNS_ROOT override verbatim", () => {

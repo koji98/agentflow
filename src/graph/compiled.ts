@@ -28,11 +28,36 @@ export interface CompiledExecutableNodeBase {
   context: ContextItem[];
   declared_artifacts: Record<string, ArtifactDefinition>;
   lowered_from?: LoweredManagedKind;
+  is_cleanup?: boolean;
+  cleanup_scope_id?: string;
+}
+
+export interface ResolvedToolPluginSource {
+  kind: "plugin";
+  alias: string;
+  tool: string;
+  plugin_root: string;
+  declared_at: "graph" | "agent";
+  declaration_path: string;
+}
+
+export type ResolvedToolSource = ResolvedToolPluginSource;
+
+export interface ResolvedTool {
+  callable_name: string;
+  description?: string;
+  usage?: string;
+  executable_path: string;
+  args: string[];
+  config: Record<string, string>;
+  config_schema?: Record<string, unknown>;
+  source: ResolvedToolSource;
 }
 
 export interface CompiledAgentNode extends CompiledExecutableNodeBase {
   kind: "agent";
   prompt: string;
+  tools: ResolvedTool[];
 }
 
 export interface CompiledExecNode extends CompiledExecutableNodeBase {
@@ -78,6 +103,8 @@ export interface CompiledEdge {
   on: GraphOutcome;
   kind: "flow" | "repeat-back";
   repeat_scope_id?: string;
+  is_cleanup?: boolean;
+  cleanup_scope_id?: string;
 }
 
 export interface CompiledScopeBase {
@@ -93,6 +120,9 @@ export interface CompiledScopeBase {
 
 export interface CompiledSequenceScope extends CompiledScopeBase {
   kind: "sequence";
+  cleanup_entry_node_ids?: string[];
+  cleanup_exit_node_ids?: string[];
+  cleanup_compiled_node_ids?: string[];
 }
 
 export interface CompiledParallelScope extends CompiledScopeBase {

@@ -49,8 +49,16 @@
             "operator ergonomics"
           ],
           "scope": {
-            "paths": ["src/**", "docs/**", "web-app/**"],
-            "areas": ["graph", "runtime", "ui"]
+            "paths": [
+              "src/**",
+              "docs/**",
+              "web-app/**"
+            ],
+            "areas": [
+              "graph",
+              "runtime",
+              "ui"
+            ]
           }
         },
         "context": [
@@ -91,7 +99,11 @@
         },
         "strategy": {
           "alternatives": 3,
-          "critique_profiles": ["architecture", "implementation", "ux"],
+          "critique_profiles": [
+            "architecture",
+            "implementation",
+            "ux"
+          ],
           "max_revision_cycles": 2
         },
         "delivery": {
@@ -121,22 +133,16 @@
         "prompt": "Summarize the final design package for a human operator. Mention the problem, the recommendation, and the artifacts a follow-on pattern_generate_evaluate_fix pattern would likely consume.",
         "context": [
           {
-            "name": "design_response",
-            "from": "artifact",
-            "node": "managed_nodes_spec",
-            "artifact": "agent_response"
+            "ref": "managed_nodes_spec.agent_response",
+            "name": "design_response"
           },
           {
-            "name": "design_spec",
-            "from": "artifact",
-            "node": "managed_nodes_spec",
-            "artifact": "design_spec"
+            "ref": "managed_nodes_spec.design_spec",
+            "name": "design_spec"
           },
           {
+            "ref": "managed_nodes_spec.implementation_readiness",
             "name": "implementation_readiness",
-            "from": "artifact",
-            "node": "managed_nodes_spec",
-            "artifact": "implementation_readiness",
             "if_available": true
           }
         ]

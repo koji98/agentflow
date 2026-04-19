@@ -134,7 +134,7 @@ export function resolveLaunchConfig(
     document.defaults?.launch_profile ?? ("default" in profiles ? "default" : undefined);
   const launch_profile = overrides.launchProfile ?? fallbackLaunchProfile;
   const requestedWorkspaceBackend =
-    overrides.workspaceBackend ?? document.defaults?.workspace_backend ?? "worktree";
+    overrides.workspaceBackend ?? document.defaults?.workspace_backend ?? "inplace";
 
   if (!launch_profile) {
     diagnostics.push({
@@ -151,7 +151,7 @@ export function resolveLaunchConfig(
 
   const workspace_backend = workspaceBackends.includes(requestedWorkspaceBackend as WorkspaceBackend)
     ? (requestedWorkspaceBackend as WorkspaceBackend)
-    : "worktree";
+    : "inplace";
 
   if (!workspaceBackends.includes(requestedWorkspaceBackend as WorkspaceBackend)) {
     diagnostics.push({

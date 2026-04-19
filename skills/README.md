@@ -32,7 +32,7 @@ The `agentflow-plugins` skill owns plugin-specific packaging and consumption gui
 
 What the skills are optimized for:
 
-- the real `agentflow` CLI surface: `graph-help`, `validate`, `compile`, `plugin resolve`, `run`, `resume`, and `eval`
+- the real `agentflow` CLI surface: `graph-help`, `validate` (with `--show-compiled` and `--run-ready`), `plugin resolve`, `run`, `resume` (with `--latest`), `apply`, `runs list`, `inspect`, and `eval`
 - explicit graph authoring choices around context, artifacts, validation, and failure propagation
 - managed-pattern field authoring and downstream handoffs
 - Git-resolved plugin workflow consumption, packaging, lockfiles, and public artifact handoffs

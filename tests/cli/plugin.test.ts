@@ -114,8 +114,8 @@ async function createFixturePlugin(root: string): Promise<string> {
             prompt: "Publish the public packet.",
             context: [
               {
+                ref: "inspect.notes",
                 name: "notes",
-                from: "artifact",
                 node: "inspect",
                 artifact: "notes"
               }
@@ -190,8 +190,8 @@ describe("plugin workflows", () => {
                 prompt: "Consume the plugin packet.",
                 context: [
                   {
+                    ref: "handoff.packet",
                     name: "packet",
-                    from: "artifact",
                     node: "handoff",
                     artifact: "packet"
                   }
@@ -230,7 +230,10 @@ describe("plugin workflows", () => {
     const lock = JSON.parse(await readFile(join(tempRoot, "agentflow.plugins.lock.json"), "utf8"));
     expect(lock.plugins.mathboard.commit).toEqual(expect.any(String));
 
-    const compiled = await executeCli(["compile", "--graph", graphPath], tempRoot);
+    const compiled = await executeCli(
+      ["validate", "--graph", graphPath, "--show-compiled"],
+      tempRoot
+    );
     const payload = JSON.parse(compiled.stdout);
     expect(compiled.exitCode, compiled.stdout).toBe(0);
     expect(payload.lowered_managed_nodes).toEqual([

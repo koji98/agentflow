@@ -1,0 +1,14 @@
+{
+  "schema": "agentflow.workflow/1",
+  "id": "poll-pr",
+  "config_schema": "./config.schema.json",
+  "graph": "./workflow.graph.json",
+  "publish_node": "publish_status",
+  "published_artifacts": {
+    "pr_status": {
+      "from": "output_dir",
+      "path": "pr-status.json",
+      "description": "Machine-readable status report for the polled pull request."
+    }
+  }
+}

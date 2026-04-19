@@ -1,10 +1,21 @@
-import type { CheckNode, ExecutableGraphNode, AuthoredGraphNode, ContainerGraphNode } from "./authored.js";
+import { resolveSubpathWithinRoot } from "../path_rules.js";
+import type { ResolvedPlugin } from "../plugins/workflows.js";
+import type {
+  AgentNode,
+  CheckNode,
+  ExecutableGraphNode,
+  AuthoredGraphNode,
+  ContainerGraphNode,
+  ToolDeclaration
+} from "./authored.js";
 import type {
   CompileGraphResult,
   CompiledEdge,
   CompiledExecutableNode,
   CompiledGraph,
-  CompiledScope
+  CompiledScope,
+  ResolvedTool,
+  ResolvedToolSource
 } from "./compiled.js";
 import type { LoweredManagedNode } from "./normalize.js";
 import {
@@ -23,6 +34,7 @@ interface ScopeFrame {
   scope_stack: string[];
   parent_scope_id: string | null;
   nearest_repeat_scope_id?: string;
+  cleanup_scope_id?: string;
 }
 
 interface CompiledRegion {
@@ -43,6 +55,9 @@ interface CompileContext {
   authored_paths: Map<string, string>;
   lowered_managed_kind_by_id: Map<string, LoweredManagedKind>;
   edge_counter: number;
+  plugins_by_alias: Map<string, ResolvedPlugin>;
+  graph_dir: string | undefined;
+  graph_scope_tools: ResolvedTool[];
 }
 
 function isExecutableNode(node: AuthoredGraphNode): node is ExecutableGraphNode {
@@ -105,8 +120,187 @@ function createScopeFrame(
       ? { nearest_repeat_scope_id: scope_id }
       : parentScopeFrame?.nearest_repeat_scope_id
         ? { nearest_repeat_scope_id: parentScopeFrame.nearest_repeat_scope_id }
-        : {})
+        : {}),
+    ...(parentScopeFrame?.cleanup_scope_id
+      ? { cleanup_scope_id: parentScopeFrame.cleanup_scope_id }
+      : {})
   };
+}
+
+function callableNameForToolDeclaration(declaration: ToolDeclaration): string {
+  return declaration.alias ?? `${declaration.from_plugin}-${declaration.tool}`;
+}
+
+function resolveToolDeclaration(
+  declaration: ToolDeclaration,
+  options: {
+    declared_at: "graph" | "agent";
+    declaration_path: string;
+    plugins_by_alias: Map<string, ResolvedPlugin>;
+    diagnostics: GraphDiagnostic[];
+  }
+): ResolvedTool | undefined {
+  const plugin = options.plugins_by_alias.get(declaration.from_plugin);
+  if (!plugin) {
+    options.diagnostics.push({
+      path: `${options.declaration_path}.from_plugin`,
+      message: `Plugin "${declaration.from_plugin}" is not declared or resolved.`
+    });
+    return undefined;
+  }
+
+  const exported = plugin.manifest.tools[declaration.tool];
+  if (!exported) {
+    options.diagnostics.push({
+      path: `${options.declaration_path}.tool`,
+      message: `Plugin "${declaration.from_plugin}" does not export tool "${declaration.tool}".`
+    });
+    return undefined;
+  }
+
+  const callable = callableNameForToolDeclaration(declaration);
+  let executablePath: string;
+  try {
+    executablePath = resolveSubpathWithinRoot(
+      plugin.root,
+      exported.executable,
+      "Plugin tool executable path"
+    );
+  } catch (error) {
+    options.diagnostics.push({
+      path: options.declaration_path,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Plugin tool executable path is invalid."
+    });
+    return undefined;
+  }
+
+  const source: ResolvedToolSource = {
+    kind: "plugin",
+    alias: declaration.from_plugin,
+    tool: declaration.tool,
+    plugin_root: plugin.root,
+    declared_at: options.declared_at,
+    declaration_path: options.declaration_path
+  };
+
+  return {
+    callable_name: callable,
+    ...(exported.description ? { description: exported.description } : {}),
+    ...(exported.usage ? { usage: exported.usage } : {}),
+    executable_path: executablePath,
+    args: [...(exported.args ?? [])],
+    config: {},
+    ...(exported.config_schema ? { config_schema: exported.config_schema } : {}),
+    source
+  };
+}
+
+function buildGraphScopeTools(
+  document: AuthoredGraphDocument,
+  options: {
+    plugins_by_alias: Map<string, ResolvedPlugin>;
+    diagnostics: GraphDiagnostic[];
+  }
+): ResolvedTool[] {
+  const tools: ResolvedTool[] = [];
+  const seenNames = new Set<string>();
+
+  (document.tools ?? []).forEach((declaration, index) => {
+    const declarationPath = `$.tools[${index}]`;
+    const resolved = resolveToolDeclaration(declaration, {
+      declared_at: "graph",
+      declaration_path: declarationPath,
+      plugins_by_alias: options.plugins_by_alias,
+      diagnostics: options.diagnostics
+    });
+
+    if (!resolved) {
+      return;
+    }
+
+    if (seenNames.has(resolved.callable_name)) {
+      options.diagnostics.push({
+        path: declarationPath,
+        message: `Tool name "${resolved.callable_name}" is already declared in the graph scope.`
+      });
+      return;
+    }
+
+    seenNames.add(resolved.callable_name);
+    tools.push(resolved);
+  });
+
+  return tools;
+}
+
+function applyToolConfigOverrides(
+  tools: ResolvedTool[],
+  overrides: Record<string, Record<string, string>> | undefined
+): ResolvedTool[] {
+  if (!overrides) {
+    return tools;
+  }
+  return tools.map((tool) => {
+    const override = overrides[tool.callable_name];
+    if (!override) {
+      return tool;
+    }
+    return {
+      ...tool,
+      config: { ...tool.config, ...override }
+    };
+  });
+}
+
+function buildAgentResolvedTools(
+  context: CompileContext,
+  agentNode: AgentNode,
+  agentPath: string
+): ResolvedTool[] {
+  const baseTools = applyToolConfigOverrides(
+    context.graph_scope_tools,
+    context.document.tool_config
+  );
+
+  const baseNames = new Set<string>(baseTools.map((tool) => tool.callable_name));
+  const effectiveTools: ResolvedTool[] = [...baseTools];
+
+  (agentNode.tools ?? []).forEach((declaration, index) => {
+    const declarationPath = `${agentPath}.tools[${index}]`;
+    const resolved = resolveToolDeclaration(declaration, {
+      declared_at: "agent",
+      declaration_path: declarationPath,
+      plugins_by_alias: context.plugins_by_alias,
+      diagnostics: context.diagnostics
+    });
+
+    if (!resolved) {
+      return;
+    }
+
+    if (baseNames.has(resolved.callable_name)) {
+      context.diagnostics.push({
+        path: declarationPath,
+        message: `Tool name "${resolved.callable_name}" conflicts with a graph-level tool of the same name.`
+      });
+      return;
+    }
+
+    if (effectiveTools.some((existing) => existing.callable_name === resolved.callable_name)) {
+      context.diagnostics.push({
+        path: declarationPath,
+        message: `Tool name "${resolved.callable_name}" is already declared on this agent.`
+      });
+      return;
+    }
+
+    effectiveTools.push(resolved);
+  });
+
+  return applyToolConfigOverrides(effectiveTools, agentNode.tool_config);
 }
 
 function resolveCheckFields(
@@ -182,16 +376,21 @@ function compileExecutableNode(
     effective_policy: nodePolicyResolution.policy,
     context: node.context ?? [],
     declared_artifacts: node.artifacts ?? {},
-    ...(lowered_from ? { lowered_from } : {})
+    ...(lowered_from ? { lowered_from } : {}),
+    ...(scopeFrame.cleanup_scope_id
+      ? { is_cleanup: true as const, cleanup_scope_id: scopeFrame.cleanup_scope_id }
+      : {})
   };
 
   let compiledNode: CompiledExecutableNode;
 
   if (node.type === "agent") {
+    const resolvedTools = buildAgentResolvedTools(context, node, path);
     compiledNode = {
       ...compiledBase,
       kind: "agent",
-      prompt: node.prompt
+      prompt: node.prompt,
+      tools: resolvedTools
     };
   } else if (node.type === "exec") {
     const env_files =
@@ -297,6 +496,11 @@ function compileSequenceNode(
     compiled_node_ids: dedupe(compiled_node_ids)
   };
 
+  let cleanupRegion: CompiledRegion | undefined;
+  if (node.cleanup && node.cleanup.length > 0) {
+    cleanupRegion = compileCleanupSteps(context, scopeFrame, node.cleanup, path);
+  }
+
   context.scopes.push({
     scope_id: scopeFrame.scope_id,
     authored_id: node.id,
@@ -305,10 +509,75 @@ function compileSequenceNode(
     scope_stack: scopeFrame.scope_stack,
     entry_node_ids: region.entry_node_ids,
     exit_node_ids: region.exit_node_ids,
-    compiled_node_ids: region.compiled_node_ids
+    compiled_node_ids: dedupe([
+      ...region.compiled_node_ids,
+      ...(cleanupRegion?.compiled_node_ids ?? [])
+    ]),
+    ...(cleanupRegion
+      ? {
+          cleanup_entry_node_ids: cleanupRegion.entry_node_ids,
+          cleanup_exit_node_ids: cleanupRegion.exit_node_ids,
+          cleanup_compiled_node_ids: cleanupRegion.compiled_node_ids
+        }
+      : {})
   });
 
   return region;
+}
+
+function compileCleanupSteps(
+  context: CompileContext,
+  parentScopeFrame: ScopeFrame,
+  cleanupSteps: AuthoredGraphNode[],
+  path: string
+): CompiledRegion {
+  const cleanupScopeFrame: ScopeFrame = {
+    ...parentScopeFrame,
+    cleanup_scope_id: parentScopeFrame.scope_id
+  };
+
+  const childRegions = cleanupSteps.map((child, index) =>
+    compileGraphNode(context, cleanupScopeFrame, child, `${path}.cleanup[${index}]`)
+  );
+
+  const entry_node_ids: string[] = [];
+  let priorExitNodeIds: string[] = [];
+  const compiled_node_ids: string[] = [];
+
+  childRegions.forEach((childRegion) => {
+    compiled_node_ids.push(...childRegion.compiled_node_ids);
+
+    if (childRegion.entry_node_ids.length === 0) {
+      return;
+    }
+
+    if (entry_node_ids.length === 0) {
+      entry_node_ids.push(...childRegion.entry_node_ids);
+    }
+
+    if (priorExitNodeIds.length > 0) {
+      priorExitNodeIds.forEach((from) => {
+        childRegion.entry_node_ids.forEach((to) => {
+          addEdge(context, {
+            from,
+            to,
+            on: "passed",
+            kind: "flow",
+            is_cleanup: true,
+            cleanup_scope_id: parentScopeFrame.scope_id
+          });
+        });
+      });
+    }
+
+    priorExitNodeIds = childRegion.exit_node_ids;
+  });
+
+  return {
+    entry_node_ids,
+    exit_node_ids: priorExitNodeIds,
+    compiled_node_ids: dedupe(compiled_node_ids)
+  };
 }
 
 function compileParallelNode(
@@ -544,13 +813,13 @@ function validateCompiledArtifactReferences(
   compiledGraph.nodes.forEach((node) => {
     const references = [
       ...node.context
-        .map((item, index) => item.from === "artifact"
+        .map((item, index) => "ref" in item
           ? {
               reference: item,
               path_suffix: `context[${index}]`
             }
           : undefined)
-        .filter((item): item is { reference: Extract<CompiledExecutableNode["context"][number], { from: "artifact" }>; path_suffix: string } => item !== undefined),
+        .filter((item): item is { reference: Extract<CompiledExecutableNode["context"][number], { ref: string }>; path_suffix: string } => item !== undefined),
       ...(node.kind === "checkpoint"
         ? [
             {
@@ -637,19 +906,34 @@ function validateManagedSoftFailureRules(
   });
 }
 
+export interface CompileAuthoredGraphOptions {
+  resolved_plugins?: ResolvedPlugin[];
+  graph_dir?: string;
+}
+
 export function compileAuthoredGraph(
   document: AuthoredGraphDocument,
   launch: LaunchResolution,
-  loweredManagedNodes: LoweredManagedNode[] = []
+  loweredManagedNodes: LoweredManagedNode[] = [],
+  options: CompileAuthoredGraphOptions = {}
 ): CompileGraphResult {
   const lowered_managed_kind_by_id = new Map<string, LoweredManagedKind>(
     loweredManagedNodes.map((item) => [item.authored_id, item.managed_kind])
   );
 
+  const plugins_by_alias = new Map<string, ResolvedPlugin>(
+    (options.resolved_plugins ?? []).map((plugin) => [plugin.alias, plugin])
+  );
+  const compileDiagnostics: GraphDiagnostic[] = [...launch.diagnostics];
+  const graph_scope_tools = buildGraphScopeTools(document, {
+    plugins_by_alias,
+    diagnostics: compileDiagnostics
+  });
+
   const context: CompileContext = {
     document,
     launch,
-    diagnostics: [...launch.diagnostics],
+    diagnostics: compileDiagnostics,
     nodes: [],
     edges: [],
     scopes: [],
@@ -657,7 +941,10 @@ export function compileAuthoredGraph(
     compiled_node_by_id: new Map<string, CompiledExecutableNode>(),
     authored_paths: new Map<string, string>(),
     lowered_managed_kind_by_id,
-    edge_counter: 0
+    edge_counter: 0,
+    plugins_by_alias,
+    graph_dir: options.graph_dir,
+    graph_scope_tools
   };
 
   const rootRegion = compileGraphNode(context, undefined, document.graph, "$.graph");

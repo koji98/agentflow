@@ -195,22 +195,16 @@
         "prompt": "Summarize the final review for an implementer. Focus on the highest-priority findings, their likely impact, and any evaluation or residual-risk context from upstream stages.",
         "context": [
           {
-            "name": "review_response",
-            "from": "artifact",
-            "node": "review_managed_nodes",
-            "artifact": "agent_response"
+            "ref": "review_managed_nodes.agent_response",
+            "name": "review_response"
           },
           {
-            "name": "review_summary",
-            "from": "artifact",
-            "node": "review_managed_nodes",
-            "artifact": "review_summary"
+            "ref": "review_managed_nodes.review_summary",
+            "name": "review_summary"
           },
           {
-            "name": "calibrated_findings",
-            "from": "artifact",
-            "node": "review_managed_nodes",
-            "artifact": "calibrated_findings"
+            "ref": "review_managed_nodes.calibrated_findings",
+            "name": "calibrated_findings"
           }
         ]
       }

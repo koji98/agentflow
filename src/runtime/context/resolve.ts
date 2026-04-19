@@ -143,7 +143,11 @@ async function writePreparedMaterialization(
   await writeFile(destinationPath, materialized.text, "utf8");
 }
 
-type ArtifactContextItem = Extract<ContextItem, { from: "artifact" }>;
+type ArtifactContextItem = Extract<ContextItem, { ref: string }>;
+
+function isArtifactContextItem(item: ContextItem): item is ArtifactContextItem {
+  return "ref" in item;
+}
 
 function describeReservedArtifact(artifact: string): string | undefined {
   if (artifact === "agent_response") {
@@ -152,6 +156,14 @@ function describeReservedArtifact(artifact: string): string | undefined {
 
   if (artifact === "result_json") {
     return "Normalized result.json captured from the producer node.";
+  }
+
+  if (artifact === "stdout") {
+    return "Captured stdout log from the producer node.";
+  }
+
+  if (artifact === "stderr") {
+    return "Captured stderr log from the producer node.";
   }
 
   return undefined;
@@ -173,6 +185,10 @@ function describeArtifactReference(
 function describeContextItem(item: ContextItem, index: number): string {
   const key = `context_${index + 1}`;
 
+  if (isArtifactContextItem(item)) {
+    return `${key} (artifact "${item.ref}")`;
+  }
+
   if (item.from === "text") {
     return `${key} (text "${item.name}")`;
   }
@@ -181,11 +197,7 @@ function describeContextItem(item: ContextItem, index: number): string {
     return `${key} (workspace file "${item.path}")`;
   }
 
-  if (item.from === "workspace_glob") {
-    return `${key} (workspace glob "${item.path}")`;
-  }
-
-  return `${key} (artifact "${item.node}.${item.artifact}")`;
+  return `${key} (workspace glob "${item.path}")`;
 }
 
 function createBudgetOverflowError(
@@ -296,11 +308,35 @@ async function materializeRepeatHistoryContext(
   );
 }
 
+interface SelectAttemptsContext {
+  consumer_node: CompiledExecutableNode;
+  consumer_execution_id: string;
+}
+
+function resolveConsumerIteration(
+  registry: AttemptRegistry,
+  context: SelectAttemptsContext
+): number | undefined {
+  const active = registry.active_by_execution_id.get(context.consumer_execution_id);
+
+  if (active?.iteration_index !== undefined) {
+    return active.iteration_index;
+  }
+
+  const consumerAttempts = listAttemptsForCompiledNode(registry, context.consumer_node.compiled_id);
+  const matched = consumerAttempts.find(
+    (attempt) => attempt.execution_id === context.consumer_execution_id
+  );
+
+  return matched?.iteration_index;
+}
+
 function selectAttemptsForReference(
   registry: AttemptRegistry,
   graph: CompiledGraph,
   compiledIds: string[],
-  reference: ArtifactContextItem
+  reference: ArtifactContextItem,
+  context: SelectAttemptsContext
 ): RuntimeNodeAttempt[] {
   const attempts = compiledIds.flatMap((compiledId) => listAttemptsForCompiledNode(registry, compiledId));
 
@@ -316,30 +352,40 @@ function selectAttemptsForReference(
       ? attempts
       : typeof iterationSelector === "number"
         ? attempts.filter((attempt) => attempt.iteration_index === iterationSelector)
-        : (() => {
-            const repeatScopeId = compiledIds
-              .map((compiledId) => graph.nodes.find((node) => node.compiled_id === compiledId)?.repeat_scope_id)
-              .find((scopeId): scopeId is string => scopeId !== undefined);
-            const repeatScope =
-              repeatScopeId === undefined
-                ? undefined
-                : graph.scopes.find(
-                    (scope) => scope.kind === "repeat" && scope.scope_id === repeatScopeId
-                  );
-            const repeatSelectorAttempts =
-              repeatScope?.kind === "repeat"
-                ? listAttemptsForCompiledNode(registry, repeatScope.until_compiled_id).filter(
-                    (attempt) => attempt.iteration_index !== undefined
-                  )
-                : [];
-            const selectorAttempts =
-              repeatSelectorAttempts.length > 0
-                ? repeatSelectorAttempts
-                : attempts.filter((attempt) => attempt.iteration_index !== undefined);
-            const candidate = selectAttempt(selectorAttempts, iterationSelector);
+        : iterationSelector === "previous"
+          ? (() => {
+              const consumerIteration = resolveConsumerIteration(registry, context);
 
-            return candidate ? attempts.filter((attempt) => attempt.iteration_index === candidate.iteration_index) : [];
-          })();
+              if (consumerIteration === undefined || consumerIteration <= 1) {
+                return [];
+              }
+
+              return attempts.filter((attempt) => attempt.iteration_index === consumerIteration - 1);
+            })()
+          : (() => {
+              const repeatScopeId = compiledIds
+                .map((compiledId) => graph.nodes.find((node) => node.compiled_id === compiledId)?.repeat_scope_id)
+                .find((scopeId): scopeId is string => scopeId !== undefined);
+              const repeatScope =
+                repeatScopeId === undefined
+                  ? undefined
+                  : graph.scopes.find(
+                      (scope) => scope.kind === "repeat" && scope.scope_id === repeatScopeId
+                    );
+              const repeatSelectorAttempts =
+                repeatScope?.kind === "repeat"
+                  ? listAttemptsForCompiledNode(registry, repeatScope.until_compiled_id).filter(
+                      (attempt) => attempt.iteration_index !== undefined
+                    )
+                  : [];
+              const selectorAttempts =
+                repeatSelectorAttempts.length > 0
+                  ? repeatSelectorAttempts
+                  : attempts.filter((attempt) => attempt.iteration_index !== undefined);
+              const candidate = selectAttempt(selectorAttempts, iterationSelector);
+
+              return candidate ? attempts.filter((attempt) => attempt.iteration_index === candidate.iteration_index) : [];
+            })();
 
   const selected = selectAttempt(filteredByIteration, attemptSelector);
   return selected ? [selected] : [];
@@ -566,6 +612,17 @@ async function materializeContextItem(
   contextProvenance: ContextInputProvenance[],
   maxTokensPerItem: number
 ): Promise<void> {
+  if (isArtifactContextItem(item)) {
+    await materializeArtifactContext(
+      item,
+      index,
+      options,
+      accumulator,
+      maxTokensPerItem
+    );
+    return;
+  }
+
   if (item.from === "text") {
     await materializeTextContext(item, index, options, accumulator, maxTokensPerItem);
     return;
@@ -584,24 +641,13 @@ async function materializeContextItem(
     return;
   }
 
-  if (item.from === "workspace_glob") {
-    await materializeWorkspaceGlobContext(
-      item,
-      index,
-      options,
-      cache,
-      accumulator,
-      contextProvenance,
-      maxTokensPerItem
-    );
-    return;
-  }
-
-  await materializeArtifactContext(
+  await materializeWorkspaceGlobContext(
     item,
     index,
     options,
+    cache,
     accumulator,
+    contextProvenance,
     maxTokensPerItem
   );
 }
@@ -619,7 +665,11 @@ async function materializeArtifactContext(
     options.attempts,
     options.compiled_graph,
     compiledIds,
-    reference
+    reference,
+    {
+      consumer_node: options.node,
+      consumer_execution_id: options.execution_id
+    }
   );
 
   if (attempts.length === 0) {

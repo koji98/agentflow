@@ -1,3 +1,5 @@
+import { dirname } from "node:path";
+
 import { compileAuthoredGraph } from "../../graph/compile.js";
 import { buildManagedExpansionSummaries } from "../../graph/managed_expansion.js";
 import { resolveLaunchConfig } from "../../graph/profiles.js";
@@ -7,6 +9,7 @@ import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
 import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import { evaluateGraphReadiness } from "../../runtime/readiness.js";
 import {
+  collectGraphConfigOverrides,
   createGraphCliInvocation,
   createGraphPathResolution,
   renderCommandUsageError
@@ -16,20 +19,28 @@ import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_source
 export const validateCommand = {
   name: "validate",
   summary: "Validate and compile an authored graph without launching a run.",
-  usage: "agentflow validate --graph <path/to/agentflow.graph.json> [--run-ready]",
+  usage:
+    "agentflow validate --graph <path/to/agentflow.graph.json> [--run-ready] [--show-compiled]",
   examples: [
     "agentflow validate --graph ./agentflow.graph.json",
-    "agentflow validate --graph ./agentflow.graph.json --run-ready"
+    "agentflow validate --graph ./agentflow.graph.json --run-ready",
+    "agentflow validate --graph ./agentflow.graph.json --show-compiled"
   ] as const,
-  optionNames: ["graph", "run-ready", "help"] as const,
+  optionNames: ["graph", "run-ready", "show-compiled", "config", "config-file", "help"] as const,
   helpNotes: [
     "--graph validation resolves from the launch shell current working directory.",
     "--run-ready also checks local runtime dependencies such as git, node commands, and harness binaries.",
-    "Use compile next when you want the full compiled graph contract, or run when you want durable artifacts."
+    "--show-compiled emits the full compiled graph payload alongside the summary.",
+    "Use run when you want durable artifacts after validation passes.",
+    "Use --config key=value (repeatable) and --config-file <path> to override top-level graph config; values like 1, true, [\"a\"] parse as JSON, others stay strings."
   ] as const,
-  async run(options: Record<string, string | boolean | undefined>, currentWorkingDirectory: string) {
+  async run(
+    options: Record<string, string | boolean | string[] | undefined>,
+    currentWorkingDirectory: string
+  ) {
     const graphPath = typeof options.graph === "string" ? options.graph : undefined;
     const runReady = options["run-ready"] === true;
+    const showCompiled = options["show-compiled"] === true;
 
     if (!graphPath) {
       return {
@@ -43,7 +54,25 @@ export const validateCommand = {
       };
     }
 
-    const loaded = await loadAuthoredGraphDocument(currentWorkingDirectory, graphPath);
+    const configCollection = await collectGraphConfigOverrides(options, currentWorkingDirectory);
+
+    if (configCollection.diagnostics.length > 0) {
+      return {
+        exitCode: 2,
+        output: {
+          command: "validate",
+          status: "failed",
+          message: "Graph config overrides could not be parsed.",
+          diagnostics: configCollection.diagnostics
+        }
+      };
+    }
+
+    const loaded = await loadAuthoredGraphDocument(currentWorkingDirectory, graphPath, {
+      ...(configCollection.config_overrides
+        ? { config_overrides: configCollection.config_overrides }
+        : {})
+    });
     const pathResolution = createGraphPathResolution(
       currentWorkingDirectory,
       graphPath,
@@ -106,7 +135,11 @@ export const validateCommand = {
     const compilation = compileAuthoredGraph(
       loaded.document,
       launch,
-      loaded.lowered_managed_nodes
+      loaded.lowered_managed_nodes,
+      {
+        ...(loaded.resolved_plugins ? { resolved_plugins: loaded.resolved_plugins } : {}),
+        graph_dir: dirname(loaded.absolute_path)
+      }
     );
 
     if (compilation.diagnostics.length > 0) {
@@ -155,9 +188,12 @@ export const validateCommand = {
                 )
               }
             : {}),
+          ...(showCompiled && compilation.compiled_graph
+            ? { compiled_graph: compilation.compiled_graph }
+            : {}),
           next_steps: {
             graph_help: "agentflow graph-help",
-            inspect_compile: createGraphCliInvocation("compile", {
+            retry_validate: createGraphCliInvocation("validate", {
               graphPath: loaded.absolute_path
             })
           }
@@ -225,10 +261,13 @@ export const validateCommand = {
         },
         compiled_validation: compiledValidation,
         readiness,
+        ...(showCompiled
+          ? {
+              compiled_graph: compilation.compiled_graph!,
+              lowered_managed_nodes: loaded.lowered_managed_nodes
+            }
+          : {}),
         next_steps: {
-          compile: createGraphCliInvocation("compile", {
-            graphPath: loaded.absolute_path
-          }),
           run: createGraphCliInvocation("run", {
             graphPath: loaded.absolute_path
           }),

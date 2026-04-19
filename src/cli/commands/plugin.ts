@@ -24,7 +24,7 @@ export const pluginCommand = {
     "resolve clones declared plugins, pins them to commits, and writes agentflow.plugins.lock.json next to the graph."
   ] as const,
   async run(
-    options: Record<string, string | boolean | undefined>,
+    options: Record<string, string | boolean | string[] | undefined>,
     currentWorkingDirectory: string,
     _signal?: AbortSignal,
     positionals: readonly string[] = []

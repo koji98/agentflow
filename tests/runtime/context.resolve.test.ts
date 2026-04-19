@@ -90,8 +90,8 @@ describe("context resolution", () => {
                 text: "operator note"
               },
               {
+                ref: "source.verification",
                 name: "verification",
-                from: "artifact",
                 node: "source",
                 artifact: "verification"
               }
@@ -177,8 +177,8 @@ describe("context resolution", () => {
             command: "placeholder",
             context: [
               {
+                ref: "source.agent_response",
                 name: "source_response",
-                from: "artifact",
                 node: "source",
                 artifact: "agent_response",
                 if_available: true
@@ -207,8 +207,8 @@ describe("context resolution", () => {
       {
         key: "source_response",
         source: {
+          ref: "source.agent_response",
           name: "source_response",
-          from: "artifact",
           node: "source",
           artifact: "agent_response",
           if_available: true
@@ -532,16 +532,16 @@ describe("context resolution", () => {
             command: "placeholder",
             context: [
               {
+                ref: "produce.report",
                 name: "latest_passed_report",
-                from: "artifact",
                 node: "produce",
                 artifact: "report",
                 iteration: "latest_passed",
                 attempt: "latest"
               },
               {
+                ref: "produce.report",
                 name: "iteration_2_attempt_2_report",
-                from: "artifact",
                 node: "produce",
                 artifact: "report",
                 iteration: 2,
@@ -613,6 +613,168 @@ describe("context resolution", () => {
     ]);
     expect(await readFile(resolved.packet.materials[0]!.materialized_path, "utf8")).toBe("iteration 2 latest\n");
     expect(await readFile(resolved.packet.materials[1]!.materialized_path, "utf8")).toBe("iteration 2 attempt 2\n");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("resolves the previous-iteration selector relative to the consumer iteration", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-previous-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-previous-selector",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "repeat",
+            id: "retry",
+            max_attempts: 3,
+            body: {
+              type: "sequence",
+              id: "body",
+              steps: [
+                {
+                  type: "exec",
+                  id: "produce",
+                  command: "placeholder",
+                  artifacts: {
+                    report: {
+                      from: "output_dir",
+                      path: "report.md",
+                      description: "Markdown report produced by the repeat body."
+                    }
+                  }
+                },
+                {
+                  type: "exec",
+                  id: "diff",
+                  command: "placeholder",
+                  context: [
+                    {
+                      ref: "produce.report",
+                      name: "previous_report",
+                      node: "produce",
+                      artifact: "report",
+                      iteration: "previous",
+                      if_available: true
+                    }
+                  ]
+                },
+                {
+                  type: "check",
+                  id: "verify",
+                  check_kind: "deterministic",
+                  command: "placeholder"
+                }
+              ]
+            },
+            until: {
+              node: "verify"
+            }
+          }
+        ]
+      }
+    });
+
+    const produceNode = graph.nodes.find((node) => node.authored_id === "produce")!;
+    const diffNode = graph.nodes.find((node) => node.authored_id === "diff")!;
+    const attempts = createAttemptRegistry();
+    const repeatScopeId = produceNode.repeat_scope_id!;
+    const reportOne = join(tempRoot, "iter-1.md");
+    const reportTwo = join(tempRoot, "iter-2.md");
+    await writeFile(reportOne, "iteration 1 output\n");
+    await writeFile(reportTwo, "iteration 2 output\n");
+
+    const produceIter1 = openNodeAttempt(attempts, produceNode, join(tempRoot, "produce-1"), {
+      repeat_scope_id: repeatScopeId,
+      iteration_index: 1
+    });
+    closeNodeAttempt(attempts, produceIter1.execution_id, {
+      status: "passed",
+      outcome: "passed",
+      artifacts: { report: reportOne }
+    });
+
+    const produceIter2 = openNodeAttempt(attempts, produceNode, join(tempRoot, "produce-2"), {
+      repeat_scope_id: repeatScopeId,
+      iteration_index: 2
+    });
+    closeNodeAttempt(attempts, produceIter2.execution_id, {
+      status: "passed",
+      outcome: "passed",
+      artifacts: { report: reportTwo }
+    });
+
+    const diffIter2 = openNodeAttempt(attempts, diffNode, join(tempRoot, "diff-2"), {
+      repeat_scope_id: repeatScopeId,
+      iteration_index: 2
+    });
+
+    const resolvedSecond = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: diffNode,
+      execution_id: diffIter2.execution_id,
+      execution_dir: join(tempRoot, "diff-context-2"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts
+    });
+
+    const previousMaterial = resolvedSecond.packet.materials.find(
+      (item) => item.key === "previous_report"
+    );
+    expect(previousMaterial).toBeDefined();
+    expect(await readFile(previousMaterial!.materialized_path, "utf8")).toBe("iteration 1 output\n");
+
+    closeNodeAttempt(attempts, diffIter2.execution_id, {
+      status: "passed",
+      outcome: "passed",
+      artifacts: {}
+    });
+
+    const diffIter1 = openNodeAttempt(attempts, diffNode, join(tempRoot, "diff-1"), {
+      repeat_scope_id: repeatScopeId,
+      iteration_index: 1
+    });
+
+    const resolvedFirst = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: diffNode,
+      execution_id: diffIter1.execution_id,
+      execution_dir: join(tempRoot, "diff-context-1"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts
+    });
+
+    expect(
+      resolvedFirst.packet.materials.find((item) => item.key === "previous_report")
+    ).toBeUndefined();
+    expect(
+      resolvedFirst.packet.omitted.some(
+        (item) =>
+          item.key === "previous_report" && item.if_available === true
+      )
+    ).toBe(true);
 
     await rm(tempRoot, { recursive: true, force: true });
   });

@@ -194,8 +194,8 @@ describe("runtime engine", () => {
                 text: "done"
               },
               {
+                ref: "verify.verification",
                 name: "verification",
-                from: "artifact",
                 node: "verify",
                 artifact: "verification",
                 iteration: "latest_passed"
@@ -772,6 +772,92 @@ describe("runtime engine", () => {
       manifest_exists: true
     });
     await expect(access(join(attempt.execution_dir, "handoff.json"))).rejects.toThrow();
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("exposes per-context AGENTFLOW_CONTEXT_<UPPER_NAME> env vars to exec nodes", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-context-env-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-context-env",
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: { default: {} },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "produce_seed",
+            command: process.execPath,
+            args: [
+              "-e",
+              [
+                "const fs = require('node:fs');",
+                "const path = require('node:path');",
+                "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'seed.txt'), 'hello-context');"
+              ].join(" ")
+            ],
+            artifacts: {
+              seed: {
+                from: "output_dir",
+                path: "seed.txt",
+                description: "Seed payload for the consumer."
+              }
+            }
+          },
+          {
+            type: "exec",
+            id: "consume_seed",
+            command: process.execPath,
+            args: [
+              "-e",
+              [
+                "const fs = require('node:fs');",
+                "const path = require('node:path');",
+                "const seedPath = process.env.AGENTFLOW_CONTEXT_SEED_PAYLOAD;",
+                "const payload = {",
+                "  seed_path: seedPath,",
+                "  seed_text: seedPath ? fs.readFileSync(seedPath, 'utf8') : null",
+                "};",
+                "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'consume.json'), JSON.stringify(payload));"
+              ].join(" ")
+            ],
+            context: [
+              { ref: "produce_seed.seed", name: "seed_payload", node: "produce_seed", artifact: "seed" }
+            ],
+            artifacts: {
+              consume: {
+                from: "output_dir",
+                path: "consume.json",
+                description: "Consumer payload that captures the materialized context path."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir }
+    });
+
+    expect(run.outcome).toBe("passed");
+    const consumeAttempt = run.attempts.find((attempt) => attempt.authored_id === "consume_seed");
+    expect(consumeAttempt).toBeDefined();
+    const consume = JSON.parse(await readFile(consumeAttempt!.artifacts.consume!, "utf8"));
+    expect(typeof consume.seed_path).toBe("string");
+    expect(consume.seed_path.length).toBeGreaterThan(0);
+    expect(consume.seed_text).toBe("hello-context");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -1362,8 +1448,8 @@ describe("runtime engine", () => {
             command: "placeholder",
             context: [
               {
+                ref: "source.agent_response",
                 name: "missing_artifact",
-                from: "artifact",
                 node: "source",
                 artifact: "agent_response"
               }

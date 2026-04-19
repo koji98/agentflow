@@ -24,22 +24,22 @@ Use this loop before handing back any authored graph:
 3. Run `agentflow validate --graph <path>`.
 4. Fix every validation diagnostic.
 5. Run `agentflow validate --graph <path> --run-ready` when the graph is expected to launch on this machine, especially if it relies on `worktree`, local commands, Codex, Cursor, or plugin-provided scripts.
-6. Run `agentflow compile --graph <path>`.
+6. Run `agentflow validate --graph <path> --show-compiled`.
 7. Inspect the compiled shape when the graph uses managed patterns, plugin workflows, `parallel`, `repeat`, checkpoints, or artifact handoffs.
 8. If the graph is meant to execute now, run `agentflow run --graph <path>`.
 
-If validation or compile cannot be run, state why. If either fails, do not hand off the graph as ready; report the failing command and the diagnostics.
+If validation cannot be run, state why. If validation or `--show-compiled` fails, do not hand off the graph as ready; report the failing command and the diagnostics.
 
 ## Top-Level Choices
 
 Set launch behavior in the graph:
 
-- `defaults.launch_profile`
-- `defaults.workspace_backend`
+- `defaults.launch_profile` (defaults to `"default"` only when a profile named `default` exists)
+- `defaults.workspace_backend` (defaults to `"inplace"` when omitted)
 
 Do not invent CLI profile or workspace-backend overrides. Node-level `profile` is only for a real policy exception, such as one high-reasoning review node or one command profile with `env_files`.
 
-Use `worktree` when source changes should be isolated and patch delivery matters. Use `inplace` only when the user intentionally wants the source checkout used directly.
+Use `inplace` for the fast local-first authoring loop (this is the default). Use `worktree` when source changes should be isolated and patch delivery matters.
 
 ## Node Choice
 
@@ -80,8 +80,11 @@ Good context examples:
 { "name": "goal", "from": "text", "text": "Keep the CLI contract stable." }
 { "name": "readme", "from": "workspace_file", "path": "README.md" }
 { "name": "sources", "from": "workspace_glob", "path": "src/**/*.ts", "max_files": 20 }
-{ "name": "packet", "from": "artifact", "node": "design", "artifact": "design_packet", "attempt": "latest_passed" }
+{ "ref": "design.design_packet", "attempt": "latest_passed" }
+{ "ref": "design" }
 ```
+
+Artifact context items use a single `ref` field. `"<node>.<artifact>"` selects a declared artifact; bare `"<node>"` resolves to the canonical artifact for that node kind (`agent_response` for `agent`, `stdout` for `exec`, `result_json` for `check`). `name` defaults to the rightmost `.` segment of `ref`, or to the node id when `ref` is bare.
 
 Good artifact examples:
 
@@ -100,10 +103,13 @@ Good artifact examples:
 }
 ```
 
-Reserved artifacts:
+Reserved canonical artifacts (one per node kind):
 
 - `agent_response`: every agent final response, saved as `artifacts/agent-response.md`.
-- `result_json`: every executable node's normalized result, saved as `artifacts/result.json`.
+- `stdout`: every exec node's stdout stream, saved as `logs/stdout.log`.
+- `result_json`: every check node's normalized result, saved as `artifacts/result.json`.
+
+Declared artifact keys cannot contain `.` because `.` is reserved as the `ref` path separator.
 
 Rules:
 
@@ -163,7 +169,7 @@ Before handoff:
 - `agentflow validate --graph <path>` passed.
 - `agentflow plugin resolve --graph <path>` passed when the graph declares `plugins`.
 - `agentflow validate --graph <path> --run-ready` passed when the graph is being handed off as locally runnable.
-- `agentflow compile --graph <path>` passed.
+- `agentflow validate --graph <path> --show-compiled` passed.
 - Every downstream artifact reference names a reserved or declared artifact.
 - Every declared artifact includes a useful `description`.
 - Every artifact path is relative and stays inside `AGENTFLOW_OUTPUT_DIR` or the workspace. `AGENTFLOW_OUTPUT_DIR` points at the execution `artifacts/` directory.

@@ -6,12 +6,14 @@ const maxPathSegmentLength = 120;
 
 export interface RunsRootOptions {
   currentWorkingDirectory: string;
+  graphDirectory?: string;
   runsRoot?: string;
   environment?: NodeJS.ProcessEnv;
 }
 
 export interface RunRootOptions {
   currentWorkingDirectory: string;
+  graphDirectory?: string;
   graphId: string;
   runLabel?: string;
   runsRoot?: string;
@@ -165,9 +167,12 @@ export function resolveLaunchWorkingDirectory(options: {
 export function resolveRunsRoot(options: RunsRootOptions): string {
   const configuredRunsRoot = readConfiguredRunsRoot(options);
 
-  return configuredRunsRoot
-    ? configuredRunsRoot
-    : resolve(options.currentWorkingDirectory, ".agentflow", "runs");
+  if (configuredRunsRoot) {
+    return configuredRunsRoot;
+  }
+
+  const baseDirectory = options.graphDirectory ?? options.currentWorkingDirectory;
+  return resolve(baseDirectory, ".agentflow", "runs");
 }
 
 export function createRunRootPath(options: RunRootOptions): string {
@@ -179,6 +184,7 @@ export function createRunRootPath(options: RunRootOptions): string {
   return resolve(
     resolveRunsRoot({
       currentWorkingDirectory: options.currentWorkingDirectory,
+      ...(options.graphDirectory ? { graphDirectory: options.graphDirectory } : {}),
       ...(options.runsRoot ? { runsRoot: options.runsRoot } : {}),
       ...(options.environment ? { environment: options.environment } : {})
     }),

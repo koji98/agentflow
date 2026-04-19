@@ -245,8 +245,8 @@ describe("graph compilation", () => {
             prompt: "Summarize the run.",
             context: [
               {
+                ref: "fix.agent_response",
                 name: "fix_response",
-                from: "artifact",
                 node: "fix",
                 artifact: "agent_response"
               }
@@ -374,8 +374,8 @@ describe("graph compilation", () => {
                 prompt: "Write the report.",
                 context: [
                   {
+                    ref: "inspect.agent_response",
                     name: "inspect_response",
-                    from: "artifact",
                     node: "inspect",
                     artifact: "agent_response"
                   }

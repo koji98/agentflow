@@ -41,14 +41,9 @@ The authored graph is the operator-facing source document. It is nested, readabl
       "ref": "v0.1.0"
     }
   },
-  "defaults": {
-    "launch_profile": "default",
-    "workspace_backend": "worktree"
-  },
   "profiles": {
     "default": {
-      "harness": "codex-cli",
-      "model": "gpt-5-codex",
+      "harness": "cursor-cli",
       "sandbox": "workspace-write",
       "timeout_sec": 1800,
       "input_rules": {
@@ -71,17 +66,21 @@ The authored graph is the operator-facing source document. It is nested, readabl
 ### Top-level rules
 
 - `graph_id` is stable across runs and unique within the operator's working set.
-- `repos.<alias>.path` is resolved relative to the authored graph file location.
+- `repos.<alias>.path` is resolved relative to the authored graph file location. When `repos` is omitted, normalization injects a single `main` repo whose path is the directory containing the resolved `--graph` file.
 - optional `plugins.<alias>` declares a Git source and ref for reusable managed workflows. The declaration is resolved by `agentflow plugin resolve --graph` into `agentflow.plugins.lock.json`.
-- `defaults.launch_profile` selects the run launch profile.
-- `defaults.workspace_backend` selects the run workspace backend.
+- optional `defaults.launch_profile` selects the run launch profile. When omitted, normalization defaults it to `"default"` only when a profile named `default` exists; if it does not, the graph must reference a profile explicitly per node and `launch_profile` stays unset.
+- optional `defaults.workspace_backend` selects the run workspace backend. When omitted, normalization defaults it to `"inplace"`.
 - optional `prerequisites.checks` declares launch-time file, command, env, or repo checks shared by `validate`, `run`, and `resume`.
-- The run root is not authored inside the graph. It is launch-time configuration owned by the CLI and resolved from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
+- optional `config` declares default values for graph parameters. Strings anywhere in the document can interpolate values with `{{config.key}}` or `{{config.nested.key}}`.
+- optional `config_schema` validates the merged config (declared `config` plus CLI overrides via `--config key=value` / `--config-file <path>`). The supported subset matches the plugin workflow `config_schema`. See `docs/PARAMETERIZED_GRAPHS.md` for full semantics, merge order, and JSON-vs-string parsing rules.
+- optional `tools` declares plugin-bundled CLI commands that should appear on every agent's `PATH` in this graph. Each entry is a plugin reference (`from_plugin`, `tool`, optional `alias`). There is no built-in tool surface and no inline tool declarations: tools must come from a resolved plugin. See `docs/PLUGINS.md` for the full contract.
+- optional `tool_config` maps a tool name to a flat string-only object whose entries are exported per agent as `AGENTFLOW_TOOL_<UPPER_NAME>_<UPPER_KEY>`. Agent-level `tool_config` shallowly overrides graph-level `tool_config` for that tool on that agent.
+- The run root is not authored inside the graph. It is launch-time configuration owned by the CLI and resolved from `--runs-root <path>` when passed, else from an absolute `AGENTFLOW_RUNS_ROOT` when set, else from `<graph-dir>/.agentflow/runs` where `<graph-dir>` is the directory containing the resolved `--graph` file.
 
 ### Multi-repo ownership
 
-- The runs root defaults to `<launch-cwd>/.agentflow/runs/`; each run root lives under `<runs-root>/<run_id>/`.
-- CLI commands use the same rule: prefer an absolute `AGENTFLOW_RUNS_ROOT`, otherwise fall back to the command launch directory.
+- The runs root defaults to `<graph-dir>/.agentflow/runs/`; each run root lives under `<runs-root>/<run_id>/`.
+- CLI commands use the same rule: prefer `--runs-root <path>` when passed, then an absolute `AGENTFLOW_RUNS_ROOT`, otherwise fall back to the resolved graph directory.
 - The run root is the only owner of run artifacts, events, and projected state.
 - Each repo alias resolves to both a source path and an effective workspace path for the current run.
 - Cross-repo reads are allowed only through explicit repo-qualified workspace context paths or run-artifact references in `context`.
@@ -143,8 +142,12 @@ Optional node-specific fields:
 - `reasoning_effort`
 - `sandbox`
 - `artifact_repair`
+- `tools`
+- `tool_config`
 
-`agent` nodes are the only nodes that may modify repository state through a harness.
+`agent` nodes are the only nodes that may modify repository state through a harness. `harness` is required (resolved through profiles) and is environment-dependent: validation fails if a node cannot resolve a harness through its profile chain.
+
+`tools` declares plugin-bundled CLI commands that should appear on this agent's `PATH` in addition to any graph-level tools. Each entry is a plugin reference (`from_plugin`, `tool`, optional `alias`). There is no built-in or inline tool surface. Tool name collisions inside the effective agent toolkit are hard validation errors. `tool_config` maps a tool name to a flat string-only object whose entries are exported as `AGENTFLOW_TOOL_<UPPER_NAME>_<UPPER_KEY>` for that node. See `docs/PLUGINS.md` for the full contract.
 
 ### `exec`
 
@@ -253,7 +256,36 @@ Required fields:
 - `id`
 - `steps`
 
+Optional fields:
+
+- `cleanup`
+
 Execution rule: child nodes become ordered dependencies.
+
+Cleanup rules:
+
+- `cleanup` is an ordered list of authored nodes that always run after the sequence body finishes, regardless of whether the body passed, failed, was blocked, was skipped, or was canceled by the operator.
+- Cleanup steps run serially. Each step waits for the prior cleanup step to finish before starting.
+- A failure inside a cleanup step is recorded as that step's outcome but does not change the run-level outcome that the body produced. Subsequent cleanup steps continue to run so resource hygiene is preserved.
+- Operator cancellation during cleanup cancels the in-flight cleanup step, marks remaining cleanup nodes as `skipped`, and finalizes the run as `canceled`.
+- For nested sequences, cleanup chains run deepest-first so inner cleanup completes before the outer cleanup. Within a single sequence, cleanup steps run in their authored order.
+- Cleanup nodes are validated like normal nodes (id, repo, profile, context, artifacts, etc.) but a cleanup step cannot itself declare a `cleanup` array. Use a nested `sequence` with its own `cleanup` if a cleanup step needs its own teardown.
+
+Example:
+
+```json
+{
+  "type": "sequence",
+  "id": "with_local_env",
+  "steps": [
+    { "type": "exec", "id": "build_features", "command": "scripts/ship.sh" }
+  ],
+  "cleanup": [
+    { "type": "exec", "id": "stop_dev_server", "command": "scripts/stop-dev.sh" },
+    { "type": "exec", "id": "drop_local_db", "command": "scripts/drop-db.sh" }
+  ]
+}
+```
 
 ### `parallel`
 
@@ -304,9 +336,9 @@ There are no free-form conditions in this release.
 The runtime keeps two channels separate:
 
 - Workspace state is mutable repo state. Agents and commands read and edit it through their selected workspace backend.
-- Artifacts are durable named handoff files. They are the only execution-produced material that downstream nodes can consume through `context.from = "artifact"`.
+- Artifacts are durable named handoff files. They are the only execution-produced material that downstream nodes can consume through artifact `ref` context items.
 
-This separation is intentional. A graph may modify source files in a worktree, but a later node should not depend on guessing which execution directory or scratch file mattered. If a later node needs material, the producer must publish a named artifact or rely on the reserved automatic artifacts.
+This separation is intentional. A graph may modify source files in a worktree, but a later node should not depend on guessing which execution directory or scratch file mattered. If a later node needs material, the producer must publish a named artifact or rely on the reserved canonical artifacts.
 
 ### `context`
 
@@ -319,23 +351,15 @@ This separation is intentional. A graph may modify source files in a worktree, b
 { "name": "acceptance", "from": "text", "text": "Keep the CLI surface unchanged." }
 ```
 
-Artifact context resolves named artifacts from prior node executions:
+Artifact context resolves named artifacts from prior node executions through a path-style `ref`:
 
 ```json
-{
-  "name": "agent_notes",
-  "from": "artifact",
-  "node": "understand_codebase",
-  "artifact": "agent_response"
-}
+{ "ref": "understand_codebase" }
 ```
 
 ```json
 {
-  "name": "junit",
-  "from": "artifact",
-  "node": "run_tests",
-  "artifact": "junit",
+  "ref": "run_tests.junit",
   "iteration": "latest",
   "attempt": "latest_passed",
   "if_available": false
@@ -344,18 +368,23 @@ Artifact context resolves named artifacts from prior node executions:
 
 Supported artifact context fields:
 
-- `node`: upstream authored node id
-- `artifact`: upstream artifact name
+- `ref`: required path-style string. `"<node>.<artifact>"` selects a declared artifact; bare `"<node>"` resolves to the node's canonical artifact (`agent_response` for `agent`, `stdout` for `exec`, `result_json` for both deterministic and AI `check`).
+- optional `name`: defaults to the rightmost `.` segment of `ref`, or to the node id when `ref` is bare. Explicit `name` always wins. Conflicting names across `ref` items inside a single node fail validation.
 - `iteration`: optional selector for repeated nodes
 - `attempt`: optional execution selector
 - `if_available`: optional boolean, default `false`
+
+The `.` character is reserved as the `ref` path separator: declared artifact keys cannot contain `.`.
 
 Supported selectors:
 
 - `latest`
 - `latest_passed`
 - `latest_failed`
+- `previous`
 - positive integer ordinal
+
+`previous` is intended for cross-iteration comparisons (diff-based checks, regression detection). When applied to `iteration`, it resolves to the consumer's current iteration index minus one, so an `exec` or `check` inside iteration `N` of a `repeat` body can pull the matching upstream artifact from iteration `N - 1`. Pair it with `if_available: true` so the first iteration omits the reference cleanly. When applied to `attempt`, it selects the second-most-recent attempt for the resolved iteration.
 
 Resolution rules:
 
@@ -364,18 +393,29 @@ Resolution rules:
 - Workspace file and glob paths must stay within the selected repo root.
 - `workspace_glob` enumeration uses a deterministic sorted recursive filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`.
 - `workspace_glob.max_files` is a local cap for that glob only.
-- `name` is required and stable inside the materialized context packet.
-- `node` always references an authored id. The compiler resolves it to one or more compiled nodes.
+- `name` is required and stable inside the materialized context packet. For artifact `ref` items, `name` is derived from `ref` when omitted as described above.
+- The node id parsed from `ref` always references an authored id. The compiler resolves it to one or more compiled nodes.
 - For nodes outside any `repeat`, `iteration` is omitted and treated as `0`.
 - For nodes inside a `repeat`, cross-scope references must specify `iteration` when more than one iteration could satisfy the reference.
 - `attempt` is evaluated after `iteration` is resolved.
 - `agent_response` resolves to `artifacts/agent-response.md` for agent nodes.
-- `result_json` resolves to `artifacts/result.json` for every executable node.
+- `stdout` resolves to `logs/stdout.log` for exec nodes.
+- `result_json` resolves to `artifacts/result.json` for check nodes.
 - other artifact names resolve to declared artifacts on the selected execution.
 - declared artifact descriptions are carried from the producer into the consumer's context packet and manifest.
 - Executable nodes inside a `repeat.body` receive automatic runtime `repeat_history` context. It is omitted on iteration 1 and materialized on later iterations from completed prior iterations in the same repeat scope.
+- For `exec` and deterministic `check` nodes, every materialized context item also exports an `AGENTFLOW_CONTEXT_<UPPER_NAME>` environment variable that points at the materialized file inside the run root.
 
 `repeat_history` is not authored graph syntax. It is a reserved runtime context material that summarizes repeat metadata, the retry cause, prior node outcomes, prior agent responses, checkpoint feedback, failed check output excerpts, and prior artifact inventories. It is deterministic and bounded by the same context token limits as authored context.
+
+`repeat_history` follows a most-recent-N truncation policy. The packet always includes:
+
+- a header listing the repeat authored id, current iteration, and configured `max_attempts`
+- the explicit retry cause derived from the previous iteration's gate node
+- detailed sections for the most recent five completed prior iterations only
+- a `Earlier iterations omitted from this history: <count>` line whenever older iterations exist
+
+This makes the packet bounded and predictable even at iteration 100, 1000, or higher: only the last five iterations are materialized in detail, and per-section excerpts are themselves capped (4000 chars for agent responses and operator feedback, 8000 chars for failed exec/check stdout and stderr tails). The total packet still respects the effective `input_rules` token budget; repeat history does not bypass `max_total_tokens` enforcement.
 
 ### `artifacts`
 
@@ -411,7 +451,8 @@ Supported release fields:
 Rules:
 
 - Artifact names are unique per node.
-- User-declared artifact names must not collide with reserved automatic artifacts: `agent_response` and `result_json`.
+- Artifact names cannot contain `.` because `.` is reserved as the `ref` path separator.
+- User-declared artifact names must not collide with reserved canonical artifacts: `agent_response`, `stdout`, and `result_json`.
 - `from = "workspace"` copies a file from the node workspace into the execution `artifacts/` directory when the node closes.
 - `from = "output_dir"` reads a file from `AGENTFLOW_OUTPUT_DIR`, which is the execution `artifacts/` directory.
 - Every declared artifact must exist when the node closes. Missing declared artifacts fail the node after any configured agent artifact repair attempts are exhausted.
@@ -419,6 +460,8 @@ Rules:
 - Downstream artifact context must reference either a declared artifact or a reserved automatic artifact.
 - Agent harness prompts explain that the model is executing one node in a graph, list declared artifacts with descriptions, and state that the final response is captured as `agent_response`.
 - Harness subprocesses receive `AGENTFLOW_WORKSPACE`, `AGENTFLOW_OUTPUT_DIR`, `AGENTFLOW_CONTEXT_PACKET`, and `AGENTFLOW_CONTEXT_MANIFEST`, matching command nodes.
+- `exec` and deterministic `check` subprocesses also receive one `AGENTFLOW_CONTEXT_<UPPER_NAME>` environment variable per resolved context item, pointing at the materialized file path inside the run root.
+- When tools are in scope on the node, harness subprocesses also receive `AGENTFLOW_TOOL_STATE`, optional `AGENTFLOW_PLUGIN_ROOT_<UPPER_ALIAS>` and `AGENTFLOW_PLUGIN_ROOT` variables, plus one `AGENTFLOW_TOOL_<UPPER_NAME>_<UPPER_KEY>` variable per `tool_config` entry. See `docs/PLUGINS.md` for the env table and prompt rendering contract.
 - Source edits happen in the workspace, durable handoff artifacts go in `AGENTFLOW_OUTPUT_DIR`, and downstream nodes consume only named artifacts.
 
 Artifact repair rules:
@@ -452,6 +495,11 @@ The compiler rejects:
 - artifact references to undeclared names
 - cross-repo direct file reads without explicit repo qualification when the source repo is not the consumer repo
 - `repeat.until.node` targets that use `on_failure = "continue"`
+- `sequence.cleanup` arrays nested inside another `sequence.cleanup` (cleanup steps cannot themselves declare `cleanup`)
+- `agent` or AI `check` nodes that cannot resolve a `harness` through the profile chain
+- declared artifact keys that contain `.`
+- two artifact `ref` context items on a single node that resolve to the same `name`
+- inline tool declarations or built-in tool references; only plugin-bundled tools are allowed
 
 Runtime context resolution fails the node when:
 
@@ -494,8 +542,8 @@ Launch resolution happens before node policy resolution.
 
 | Setting | Resolution order |
 | --- | --- |
-| `launch_profile` | graph `defaults.launch_profile` -> `"default"` if present -> validation error |
-| `workspace_backend` | graph `defaults.workspace_backend` -> runtime built-in `worktree` |
+| `launch_profile` | graph `defaults.launch_profile` -> `"default"` only when a profile named `default` exists -> validation error |
+| `workspace_backend` | graph `defaults.workspace_backend` -> runtime built-in `inplace` |
 
 `workspace_backend` is run-scoped. The compiler writes the same resolved backend to every node manifest entry.
 
@@ -521,6 +569,29 @@ Applicability rules:
 - `timeout_sec` and `input_rules` may apply to any executable node
 
 Inline or profile fields that do not apply to a node kind are rejected at compile time.
+
+#### `timeout_sec`
+
+`timeout_sec` is an integer count of seconds. The runtime accepts any value `>= 1` and the schema does not enforce an upper bound, so long-running polling or wait-loop nodes may set values up to a full day (`86400`) or longer when the operator deliberately wants the run to keep waiting. The built-in default is `1800` (30 minutes); without an explicit override every executable node terminates after 30 minutes whether it is making progress or not.
+
+Recommended values for long-running graphs:
+
+- short verifiers (build, lint, unit tests): `300` to `1800`
+- agent steps that may iterate or call models: `1800` to `7200`
+- polling `exec` loops (CI watchers, PR babysitters, integration suites): `7200` to `86400`
+- bespoke local environment setup that must wait on slow downstream services: choose a budget you would accept as a failure if it elapsed and set `timeout_sec` to that value
+
+Cleanup steps inherit the same `timeout_sec` resolution. Set a generous bound on cleanup `exec` nodes that need to drain queues, stop containers, or return databases to a clean state.
+
+Agentflow does not run a silent-process watchdog. Long-running `exec` and `check` nodes that emit no output for minutes or hours are not killed for being quiet. The only conditions that terminate a child process are:
+
+- the configured `timeout_sec` deadline elapses
+- the operator cancels the run (Ctrl-C or caller-provided `AbortSignal`)
+- the parent run finalizes and the runtime tears workspaces down
+
+Termination always sends `SIGTERM` first and escalates to `SIGKILL` after a short grace window. This makes it safe to author polling `exec` loops that sleep between iterations without worrying that idle stdout periods will trigger a kill.
+
+`exec`, `agent`, and `check` nodes stream stdout and stderr to `logs/stdout.log` and `logs/stderr.log` inside the execution directory as the child process emits data. The runtime queues append writes per stream so chunks land in `logs/*.log` in source order without blocking the child. This means an operator can `tail -f` the log file of a long-running polling exec and see live progress instead of waiting for the node to terminate.
 
 ### `artifact_repair`
 
@@ -847,6 +918,9 @@ Timeouts and operator cancellations are hard-bounded in this release: the runtim
 - no harness-specific custom tool surface
 - no harness-specific graph semantics
 - no plugin-provided runtime sidecars or hidden harness extensions
+- no built-in CLI tools and no inline graph- or agent-defined tools
+
+Tool capabilities are added exclusively through plugin-bundled CLIs described in `docs/PLUGINS.md`, not through harness-specific extensions. Tools run in the agent's sandbox as ordinary CLIs on `PATH` and share the agent node's `timeout_sec`.
 
 ## Check Execution Model
 
@@ -974,7 +1048,7 @@ Run artifacts live under the run root:
             <declared-artifacts>
 ```
 
-`<runs-root>` resolves from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<launch-cwd>/.agentflow/runs`.
+`<runs-root>` resolves from `--runs-root <path>` when passed, else from an absolute `AGENTFLOW_RUNS_ROOT` when set, otherwise from `<graph-dir>/.agentflow/runs` where `<graph-dir>` is the directory containing the resolved `--graph` file.
 
 ### Artifact rules
 
@@ -1001,9 +1075,9 @@ Run artifacts live under the run root:
 
 ### Failure and partial-output rules
 
-- `validate` and `compile` actions outside `run` do not create a run directory
+- `validate` (including `validate --show-compiled`) outside `run` does not create a run directory
 - validation failure returns diagnostics only
-- compile failure returns diagnostics plus optional partial compiled payload to the caller, but does not create a run directory
+- compile failure during `validate --show-compiled` returns diagnostics plus optional partial compiled payload to the caller, but does not create a run directory
 - once `run` passes validation and compilation, the run directory is created before preflight
 - preflight failure writes `run.json`, `authored_graph.json`, `compiled_graph.json`, `execution_manifest.json`, `compile_diagnostics.json`, `state.json`, `events.jsonl`, and `summary.md`
 - canceled runs keep all completed execution directories and final state
@@ -1047,6 +1121,10 @@ Every event record contains:
 | `node.skipped` | `reason` |
 | `node.canceled` | `reason` |
 | `repeat.iteration.completed` | `outcome`, `iteration_index` |
+| `sequence.cleanup.started` | `sequence_authored_id`, `cleanup_step_count`, `body_outcome` |
+| `sequence.cleanup.step_failed` | `compiled_id`, `message` |
+| `sequence.cleanup.completed` | `sequence_authored_id`, `steps_attempted`, `steps_passed`, `steps_failed`, `steps_skipped` |
+| `sequence.cleanup.canceled` | `sequence_authored_id`, `reason` |
 | `run.canceled` | `reason` |
 | `run.completed` | `outcome`, `duration_ms` |
 

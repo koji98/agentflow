@@ -56,7 +56,7 @@ describe("graph profile resolution", () => {
 
     expect(launch).toEqual({
       launch_profile: "default",
-      workspace_backend: "worktree",
+      workspace_backend: "inplace",
       profile: document.profiles!.default,
       diagnostics: []
     });
@@ -64,7 +64,7 @@ describe("graph profile resolution", () => {
     expect(resolution.policy).toEqual(
       expect.objectContaining({
         profile_name: "default",
-        workspace_backend: "worktree",
+        workspace_backend: "inplace",
         harness: "codex-cli",
         reasoning_effort: builtInCodexReasoningEffort,
         timeout_sec: builtInTimeoutSeconds,
@@ -88,7 +88,7 @@ describe("graph profile resolution", () => {
     });
 
     expect(launch.launch_profile).toBe("missing");
-    expect(launch.workspace_backend).toBe("worktree");
+    expect(launch.workspace_backend).toBe("inplace");
     expect(launch.profile).toBeUndefined();
     expect(launch.diagnostics).toEqual(
       expect.arrayContaining([

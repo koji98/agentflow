@@ -7,19 +7,19 @@ The current release is a runnable local-first graph executor with a graph-native
 Required product surface:
 
 - graph file authoring in `1` format
-- graph validation without execution
-- graph compilation with authored and compiled inspection payloads
+- graph validation without execution, with optional compiled-contract inspection through `validate --show-compiled`
 - run execution against one or more local git repositories
-- run resume from failed or canceled run roots
-- workspace backends: `inplace` and `worktree`
+- run resume from failed or canceled run roots, including `resume --graph --latest`
+- workspace backends: `inplace` (default) and `worktree`
 - executable node kinds: `agent`, `exec`, `check`, `checkpoint`
 - authored container kinds: `sequence`, `parallel`, `repeat`
 - profile resolution
 - Git-resolved plugin workflows that lower into normal primitive subgraphs
-- Codex CLI and Cursor CLI harness adapters
+- plugin-bundled CLI tools and per-tool environment configuration; no built-in or inline graph- or agent-defined tools
+- Cursor CLI and Codex CLI harness adapters
 - deterministic checks and AI checks
 - durable run artifacts, append-only events, and projected inspection state
-- CLI commands for `graph-help`, `validate`, `compile`, `plugin resolve`, `run`, `resume`, and `apply`
+- CLI commands for `graph-help`, `validate`, `plugin resolve`, `run`, `resume`, `apply`, `runs list`, and `inspect`
 
 ## Required Behavior
 
@@ -46,10 +46,11 @@ Required product surface:
 ### Context and artifacts
 
 - materialize declared `context`
-- resolve `context.from = "artifact"` from prior executions
+- resolve artifact context items by `ref` (`"node.artifact"` or bare `"node"` for the canonical artifact of that node kind) from prior executions
 - enforce `input_rules`
 - materialize declared `artifacts` for downstream use
-- publish reserved `agent_response` and `result_json` artifacts automatically
+- publish reserved `agent_response`, `stdout`, and `result_json` canonical artifacts automatically per node kind
+- expose `AGENTFLOW_CONTEXT_<UPPER_NAME>` env vars for `exec` and deterministic `check` nodes
 - run bounded agent artifact repair when a successful agent misses declared artifacts
 - fail clearly on missing required context
 
@@ -73,13 +74,14 @@ Required product surface:
 The release is complete only when all of the following are true:
 
 1. A graph can be validated from the CLI without launching a run.
-2. A graph can be compiled from the CLI and inspected from the emitted contract.
+2. A graph's compiled contract can be inspected from the CLI through `validate --show-compiled`.
 3. A multi-step graph with `repeat` can run locally end to end.
 4. Both supported harness adapters can execute at least one `agent` node.
 5. Deterministic and AI checks both produce inspectable results.
-6. A historical run can be inspected from durable artifacts alone.
+6. A historical run can be inspected from durable artifacts alone, including through `runs list` and `inspect`.
 7. Automated tests cover compiler semantics, repeat execution, context resolution, harness adapters, artifact projection, and CLI contracts.
 8. A graph can resolve a Git-distributed plugin workflow, compile the lowered workflow, and consume its public artifacts from a regular downstream node.
+9. A graph can declare and consume a plugin-bundled CLI tool from an `agent` node.
 
 ## Out of Scope
 
@@ -88,7 +90,7 @@ Do not build these now:
 - new runtime node kinds beyond `agent`, `exec`, `check`, `checkpoint`
 - automatic controller loops
 - remote workspace backends
-- runtime-loaded tools, MCP sidecars, or harness-specific extension semantics
+- MCP sidecars or harness-specific extension semantics. Plugin-bundled CLI tools are supported (see `docs/PLUGINS.md`); built-in CLI tools, inline graph- or agent-defined tools, long-running tool sidecars, and harness-specific tool bindings remain deferred.
 - interactive graph editing surfaces
 - resumability beyond `resume` plus reopening completed or failed runs from artifacts
 

@@ -27,7 +27,12 @@ export interface RuntimeNodeAttempt {
   metadata: Record<string, unknown>;
 }
 
-export type AttemptSelector = "latest" | "latest_passed" | "latest_failed" | number;
+export type AttemptSelector =
+  | "latest"
+  | "latest_passed"
+  | "latest_failed"
+  | "previous"
+  | number;
 
 export interface AttemptRegistry {
   by_compiled_id: Map<string, RuntimeNodeAttempt[]>;
@@ -254,6 +259,10 @@ export function selectAttempt(
 
   if (selector === "latest_passed") {
     return [...attempts].reverse().find((attempt) => attempt.outcome === "passed");
+  }
+
+  if (selector === "previous") {
+    return attempts.length >= 2 ? attempts.at(-2) : undefined;
   }
 
   return [...attempts].reverse().find((attempt) => attempt.outcome === "failed");
