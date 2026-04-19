@@ -28,11 +28,13 @@ Included examples:
   Managed pattern example showing the `pattern_spec_design -> pattern_generate_evaluate_fix` path with the narrow generate/evaluate/fix contract.
 - `pattern-review-change-showcase.json`
   Managed pattern example showing the `pattern_generate_evaluate_fix -> pattern_review_change` path with structured review packets and calibrated findings.
+- `ship-feature.graph.json`
+  End-to-end example showing how to declare and use the `babysit-poll` plugin tool from the example plugin under `../plugins/babysit/`. See [`../plugins/babysit/README.md`](../plugins/babysit/README.md) for the one-time `git init` step required to resolve the plugin locally.
 
 Run any example from the repository root with:
 
 ```bash
 agentflow validate --graph docs/examples/graphs/feature-showcase.json
-agentflow compile --graph docs/examples/graphs/feature-showcase.json
+agentflow validate --graph docs/examples/graphs/feature-showcase.json --show-compiled
 agentflow run --graph docs/examples/graphs/feature-showcase.json
 ```

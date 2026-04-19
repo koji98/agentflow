@@ -9,15 +9,15 @@ Choose node kinds based on control-flow semantics, not just on what tool happens
 ## Primitive semantics
 
 - `agent`
-  Use for model-driven coding, synthesis, planning, or review work.
+Use for model-driven coding, synthesis, planning, or review work.
 - `exec`
-  Use to run a concrete command and capture its logs, result, and declared artifacts.
+Use to run a concrete command and capture its logs, result, and declared artifacts.
 - deterministic `check`
-  Use when pass or fail should immediately decide whether the graph continues.
+Use when pass or fail should immediately decide whether the graph continues.
 - AI `check`
-  Use when the gate is semantic or judgment-based rather than command-based.
+Use when the gate is semantic or judgment-based rather than command-based.
 - `checkpoint`
-  Use only when an operator intentionally needs to review and decide how the graph proceeds.
+Use only when an operator intentionally needs to review and decide how the graph proceeds.
 
 ## Hard versus soft verification
 

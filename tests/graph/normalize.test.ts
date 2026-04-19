@@ -44,8 +44,8 @@ describe("graph normalization", () => {
                 prompt: "Summarize the work.",
                 context: [
                   {
+                    ref: "inspect.agent_response",
                     name: "inspect_response",
-                    from: "artifact",
                     node: "inspect",
                     artifact: "agent_response",
                     iteration: 1,
@@ -98,8 +98,8 @@ describe("graph normalization", () => {
         id: "handoff",
         context: [
           {
+            ref: "inspect.agent_response",
             name: "inspect_response",
-            from: "artifact",
             node: "inspect",
             artifact: "agent_response",
             iteration: 1,
@@ -242,10 +242,11 @@ describe("graph normalization", () => {
             prompt: "Consume a prior response.",
             context: [
               {
+                ref: "inspect.agent_response",
                 name: "prior_response",
-                from: "artifact",
                 node: "inspect",
                 artifact: "agent_response",
+                // @ts-expect-error optional was removed from the artifact context contract
                 optional: true
               }
             ]
@@ -882,6 +883,235 @@ describe("graph normalization", () => {
           path: "$.profiles.default.input_rules.max_files",
           message:
             "input_rules.max_files is no longer supported. Use input_rules.max_total_tokens for global context budgets and glob.max_files to cap specific globs."
+        })
+      ])
+    );
+  });
+
+  it("synthesizes a default repos block when omitted", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "default-repos",
+      profiles: {
+        default: {
+          harness: "cursor-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [{ type: "exec", id: "noop", command: "true" }]
+      }
+    } as never);
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.repos).toEqual({ main: { path: "." } });
+  });
+
+  it("defaults workspace_backend to inplace when omitted", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "default-workspace-backend",
+      repos: { main: { path: "." } },
+      profiles: {
+        default: {
+          harness: "cursor-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [{ type: "exec", id: "noop", command: "true" }]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.defaults?.workspace_backend).toBe("inplace");
+  });
+
+  it("defaults launch_profile to default when a default profile exists", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "default-launch-profile",
+      repos: { main: { path: "." } },
+      profiles: {
+        default: {
+          harness: "cursor-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [{ type: "exec", id: "noop", command: "true" }]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.defaults?.launch_profile).toBe("default");
+  });
+
+  it("does not synthesize launch_profile when no default profile exists", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "no-default-profile",
+      repos: { main: { path: "." } },
+      profiles: {
+        review: {
+          harness: "cursor-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [{ type: "exec", id: "noop", command: "true" }]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.defaults?.launch_profile).toBeUndefined();
+  });
+
+  it("derives node and artifact from a dotted ref while accepting bare-node refs", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "ref-derivation",
+      repos: { main: { path: "." } },
+      profiles: { default: { harness: "cursor-cli" } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "produce",
+            command: "true"
+          },
+          {
+            type: "agent",
+            id: "consume",
+            prompt: "Consume earlier outputs.",
+            context: [
+              { ref: "produce.stdout" } as never,
+              { ref: "produce" } as never
+            ]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    const consume = (normalized.document?.graph as { steps: Array<{ context?: unknown }> }).steps[1];
+    expect((consume as { context: unknown[] }).context).toEqual([
+      expect.objectContaining({
+        ref: "produce.stdout",
+        node: "produce",
+        artifact: "stdout",
+        name: "stdout"
+      }),
+      expect.objectContaining({
+        ref: "produce",
+        node: "produce",
+        artifact: "stdout",
+        name: "produce"
+      })
+    ]);
+  });
+
+  it("rejects bare-node context refs that point at a missing node", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "ref-missing-node",
+      repos: { main: { path: "." } },
+      profiles: { default: { harness: "cursor-cli" } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "consume",
+            prompt: "Consume.",
+            context: [
+              { ref: "ghost" } as never
+            ]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining('unknown node "ghost"')
+        })
+      ])
+    );
+  });
+
+  it("rejects two context items that resolve to the same default name", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "ref-collision",
+      repos: { main: { path: "." } },
+      profiles: { default: { harness: "cursor-cli" } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          { type: "exec", id: "left", command: "true" },
+          { type: "exec", id: "right", command: "true" },
+          {
+            type: "agent",
+            id: "merge",
+            prompt: "Merge both stdouts.",
+            context: [
+              { ref: "left.stdout" } as never,
+              { ref: "right.stdout" } as never
+            ]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringMatching(/duplicate context item name|collision/i)
+        })
+      ])
+    );
+  });
+
+  it("rejects artifact keys that contain a dot", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "dot-in-artifact",
+      repos: { main: { path: "." } },
+      profiles: { default: { harness: "cursor-cli" } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "produce",
+            prompt: "Write artifacts.",
+            artifacts: {
+              "bad.name": {
+                from: "output_dir",
+                path: "bad.json",
+                description: "An artifact whose key contains a dot."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringMatching(/dot|reserved|separator/i)
         })
       ])
     );

@@ -194,8 +194,8 @@ describe("runtime engine", () => {
                 text: "done"
               },
               {
+                ref: "verify.verification",
                 name: "verification",
-                from: "artifact",
                 node: "verify",
                 artifact: "verification",
                 iteration: "latest_passed"
@@ -776,6 +776,92 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("exposes per-context AGENTFLOW_CONTEXT_<UPPER_NAME> env vars to exec nodes", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-context-env-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-context-env",
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: { default: {} },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "produce_seed",
+            command: process.execPath,
+            args: [
+              "-e",
+              [
+                "const fs = require('node:fs');",
+                "const path = require('node:path');",
+                "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'seed.txt'), 'hello-context');"
+              ].join(" ")
+            ],
+            artifacts: {
+              seed: {
+                from: "output_dir",
+                path: "seed.txt",
+                description: "Seed payload for the consumer."
+              }
+            }
+          },
+          {
+            type: "exec",
+            id: "consume_seed",
+            command: process.execPath,
+            args: [
+              "-e",
+              [
+                "const fs = require('node:fs');",
+                "const path = require('node:path');",
+                "const seedPath = process.env.AGENTFLOW_CONTEXT_SEED_PAYLOAD;",
+                "const payload = {",
+                "  seed_path: seedPath,",
+                "  seed_text: seedPath ? fs.readFileSync(seedPath, 'utf8') : null",
+                "};",
+                "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'consume.json'), JSON.stringify(payload));"
+              ].join(" ")
+            ],
+            context: [
+              { ref: "produce_seed.seed", name: "seed_payload", node: "produce_seed", artifact: "seed" }
+            ],
+            artifacts: {
+              consume: {
+                from: "output_dir",
+                path: "consume.json",
+                description: "Consumer payload that captures the materialized context path."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir }
+    });
+
+    expect(run.outcome).toBe("passed");
+    const consumeAttempt = run.attempts.find((attempt) => attempt.authored_id === "consume_seed");
+    expect(consumeAttempt).toBeDefined();
+    const consume = JSON.parse(await readFile(consumeAttempt!.artifacts.consume!, "utf8"));
+    expect(typeof consume.seed_path).toBe("string");
+    expect(consume.seed_path.length).toBeGreaterThan(0);
+    expect(consume.seed_text).toBe("hello-context");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("does not accept legacy execution-root files as output_dir artifacts", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-output-dir-root-"));
     const repoDir = join(tempRoot, "repo");
@@ -945,6 +1031,91 @@ describe("runtime engine", () => {
     expect(attempt.artifacts.agent_response).toBe(
       join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md")
     );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("substitutes AGENTFLOW_ tokens in agent prompts before invoking the harness", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-agent-prompt-substitution-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-agent-prompt-substitution",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "write_with_paths",
+            prompt: [
+              "Save your draft to ${AGENTFLOW_OUTPUT_DIR}/draft.md.",
+              "The workspace lives at $AGENTFLOW_WORKSPACE.",
+              "The packet path is AGENTFLOW_CONTEXT_PACKET.",
+              "An unrelated identifier $AGENTFLOW_WORKSPACE_OTHER must remain literal.",
+              "Unknown tokens like $AGENTFLOW_DOES_NOT_EXIST must remain literal."
+            ].join("\n"),
+            artifacts: {
+              draft: {
+                from: "output_dir",
+                path: "draft.md",
+                description: "Draft written to the output directory."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    let capturedInvocation: Parameters<HarnessAdapter["run"]>[0] | undefined;
+    const harness = createHarness("codex-cli", async (invocation) => {
+      capturedInvocation = invocation;
+      await writeFile(join(invocation.outputDir, "draft.md"), "draft\n");
+      return {
+        status: "passed",
+        exitCode: 0,
+        transcript: { last_message: "wrote draft" }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: { "codex-cli": harness }
+    });
+
+    const attempt = run.attempts[0]!;
+    const expectedOutputDir = resolveExecutionArtifactsDirectory(attempt.execution_dir);
+
+    expect(run.outcome).toBe("passed");
+    expect(capturedInvocation).toBeDefined();
+    const renderedPrompt = capturedInvocation!.prompt;
+    expect(renderedPrompt).toContain(`Save your draft to ${expectedOutputDir}/draft.md.`);
+    expect(renderedPrompt).toContain(`The workspace lives at ${repoDir}.`);
+    expect(renderedPrompt).toMatch(/The packet path is .+\/context\/packet\.json\./);
+    expect(renderedPrompt).toContain("$AGENTFLOW_WORKSPACE_OTHER must remain literal.");
+    expect(renderedPrompt).toContain("$AGENTFLOW_DOES_NOT_EXIST must remain literal.");
+    expect(renderedPrompt).not.toContain("$AGENTFLOW_OUTPUT_DIR");
+    expect(renderedPrompt).not.toContain("${AGENTFLOW_OUTPUT_DIR}");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -1362,8 +1533,8 @@ describe("runtime engine", () => {
             command: "placeholder",
             context: [
               {
+                ref: "source.agent_response",
                 name: "missing_artifact",
-                from: "artifact",
                 node: "source",
                 artifact: "agent_response"
               }

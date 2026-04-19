@@ -14,10 +14,23 @@ export const harnessNames = ["codex-cli", "cursor-cli"] as const;
 export const sandboxModes = ["read-only", "workspace-write", "danger-full-access"] as const;
 export const reasoningEfforts = ["none", "low", "medium", "high", "xhigh"] as const;
 export const checkKinds = ["deterministic", "ai"] as const;
-export const contextSelectors = ["latest", "latest_passed", "latest_failed"] as const;
-export const contextSourceKinds = ["text", "workspace_file", "workspace_glob", "artifact"] as const;
+export const contextSelectors = [
+  "latest",
+  "latest_passed",
+  "latest_failed",
+  "previous"
+] as const;
+export const contextSourceKinds = ["text", "workspace_file", "workspace_glob"] as const;
 export const artifactSourceKinds = ["output_dir", "workspace"] as const;
-export const reservedArtifactNames = ["agent_response", "result_json"] as const;
+export const reservedArtifactNames = ["agent_response", "result_json", "stdout", "stderr"] as const;
+export const canonicalNodeArtifacts = {
+  agent: "agent_response",
+  exec: "stdout",
+  check: "result_json",
+  checkpoint: "agent_response"
+} as const;
+export const reservedToolNames: readonly string[] = [];
+export const toolNamePattern = /^[a-z0-9][a-z0-9-]*$/;
 export const edgeOutcomes = ["passed", "failed"] as const;
 export const failureBehaviors = ["fail", "continue"] as const;
 export const prerequisiteKinds = ["file", "command", "env", "repo"] as const;
@@ -27,7 +40,7 @@ export type ExecutableNodeKind = (typeof executableNodeKinds)[number];
 export type ContainerNodeKind = (typeof containerNodeKinds)[number];
 export type AuthoredNodeKind = (typeof authoredNodeKinds)[number];
 export type ManagedPatternKind = (typeof managedPatternKinds)[number];
-export type LoweredManagedKind = ManagedPatternKind;
+export type LoweredManagedKind = ManagedPatternKind | `plugin:${string}`;
 export type WorkspaceBackend = (typeof workspaceBackends)[number];
 export type HarnessName = (typeof harnessNames)[number];
 export type SandboxMode = (typeof sandboxModes)[number];
@@ -37,6 +50,7 @@ export type ContextSelector = (typeof contextSelectors)[number] | number;
 export type ContextSourceKind = (typeof contextSourceKinds)[number];
 export type ArtifactSourceKind = (typeof artifactSourceKinds)[number];
 export type ReservedArtifactName = (typeof reservedArtifactNames)[number];
+export type CanonicalNodeArtifactKind = keyof typeof canonicalNodeArtifacts;
 export type GraphOutcome = (typeof edgeOutcomes)[number];
 export type FailureBehavior = (typeof failureBehaviors)[number];
 export type PrerequisiteKind = (typeof prerequisiteKinds)[number];

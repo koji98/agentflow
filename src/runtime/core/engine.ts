@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
@@ -31,7 +31,9 @@ import {
 import { runAiCheck } from "../checks/ai.js";
 import { runDeterministicCheck, runLocalProcess } from "../checks/deterministic.js";
 import { resolveExecutionContext } from "../context/resolve.js";
+import type { ContextPacketMaterializedItem } from "../context/packet.js";
 import { evaluateGraphReadiness } from "../readiness.js";
+import { prepareAgentTools } from "../tools/setup.js";
 import {
   createRuntimeEvent,
   type CheckEvaluatedPayload,
@@ -40,6 +42,7 @@ import {
   type VerificationRecordedPayload
 } from "../events.js";
 import type { HarnessAdapter } from "../harness/types.js";
+import { substituteAgentflowTokens } from "../harness/tokens.js";
 import {
   buildRuntimeStateSnapshot,
   completeRepeatIteration,
@@ -87,6 +90,7 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
   execution_dir: string;
   context_packet_path: string;
   context_manifest_path: string;
+  context_materials?: ContextPacketMaterializedItem[];
   signal: AbortSignal | undefined;
   on_stdout_chunk?: (chunk: string) => void;
   on_stderr_chunk?: (chunk: string) => void;
@@ -668,6 +672,10 @@ async function refreshReadyNodes(
   }
 
   for (const node of session.graph.nodes) {
+    if (node.is_cleanup) {
+      continue;
+    }
+
     if (node.repeat_scope_id) {
       const repeatScope = session.repeat_scopes.get(node.repeat_scope_id);
 
@@ -793,12 +801,50 @@ function resolveNodeEnvFiles(
   });
 }
 
+function contextEnvVarName(name: string): string | undefined {
+  const upper = name.toUpperCase();
+  if (!/^[A-Z][A-Z0-9_]*$/.test(upper)) {
+    return undefined;
+  }
+  return `AGENTFLOW_CONTEXT_${upper}`;
+}
+
+function buildContextMaterialEnv(
+  materials: ContextPacketMaterializedItem[] | undefined
+): Record<string, string> {
+  if (!materials || materials.length === 0) {
+    return {};
+  }
+
+  const env: Record<string, string> = {};
+  for (const material of materials) {
+    const source = material.source;
+    if ("from" in source && source.from === "runtime_repeat_history") {
+      continue;
+    }
+
+    const envName = contextEnvVarName(material.key);
+    if (!envName) {
+      continue;
+    }
+
+    if (env[envName] !== undefined) {
+      continue;
+    }
+
+    env[envName] = material.materialized_path;
+  }
+
+  return env;
+}
+
 function buildNodeRuntimeEnv(context: RuntimeNodeExecutorContext<CompiledExecutableNode>): Record<string, string> {
   return {
     AGENTFLOW_WORKSPACE: context.workspace_path,
     AGENTFLOW_OUTPUT_DIR: resolveExecutionArtifactsDirectory(context.execution_dir),
     AGENTFLOW_CONTEXT_PACKET: context.context_packet_path,
-    AGENTFLOW_CONTEXT_MANIFEST: context.context_manifest_path
+    AGENTFLOW_CONTEXT_MANIFEST: context.context_manifest_path,
+    ...buildContextMaterialEnv(context.context_materials)
   };
 }
 
@@ -833,7 +879,9 @@ async function defaultExecExecutor(
     env: context.node.env,
     runtime_env: buildNodeRuntimeEnv(context),
     timeout_sec: context.node.effective_policy.timeout_sec,
-    signal: context.signal
+    signal: context.signal,
+    ...(context.on_stdout_chunk ? { on_stdout_chunk: context.on_stdout_chunk } : {}),
+    ...(context.on_stderr_chunk ? { on_stderr_chunk: context.on_stderr_chunk } : {})
   });
 
   if (processResult.canceled) {
@@ -890,7 +938,9 @@ async function defaultCheckExecutor(
       runtime_env: buildNodeRuntimeEnv(context),
       timeout_sec: context.node.effective_policy.timeout_sec,
       pass_if: context.node.pass_if,
-      signal: context.signal
+      signal: context.signal,
+      ...(context.on_stdout_chunk ? { on_stdout_chunk: context.on_stdout_chunk } : {}),
+      ...(context.on_stderr_chunk ? { on_stderr_chunk: context.on_stderr_chunk } : {})
     });
 
     if (result.canceled) {
@@ -949,6 +999,16 @@ async function defaultCheckExecutor(
     throw new Error(`AI check "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`);
   }
 
+  const aiCheckPromptTokens = buildNodeRuntimeEnv(context);
+  const renderedAiCheckPrompt = substituteAgentflowTokens(
+    context.node.prompt ?? "",
+    aiCheckPromptTokens
+  );
+  const renderedAiCheckRubric =
+    context.node.rubric !== undefined
+      ? substituteAgentflowTokens(context.node.rubric, aiCheckPromptTokens)
+      : undefined;
+
   const aiCheckResult = await runAiCheck({
     harness: harnesses[harnessName]!,
     run_id: context.run_id,
@@ -960,8 +1020,8 @@ async function defaultCheckExecutor(
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
     ...(context.node.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
-    prompt: context.node.prompt ?? "",
-    rubric: context.node.rubric,
+    prompt: renderedAiCheckPrompt,
+    rubric: renderedAiCheckRubric,
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
     output_dir: resolveExecutionArtifactsDirectory(context.execution_dir),
@@ -1041,6 +1101,14 @@ async function defaultCheckExecutor(
   };
 }
 
+async function readContextManifestContent(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 async function defaultAgentExecutor(
   context: RuntimeNodeExecutorContext<CompiledAgentNode>,
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>
@@ -1050,6 +1118,17 @@ async function defaultAgentExecutor(
   if (!harnessName || !harnesses[harnessName]) {
     throw new Error(`Agent "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`);
   }
+
+  const outputDir = resolveExecutionArtifactsDirectory(context.execution_dir);
+  const toolSetup = await prepareAgentTools({
+    node: context.node,
+    execution_dir: context.execution_dir,
+    workspace_path: context.workspace_path,
+    artifacts_root: outputDir
+  });
+  const contextManifest = await readContextManifestContent(context.context_manifest_path);
+  const promptTokens = buildNodeRuntimeEnv(context);
+  const renderedPrompt = substituteAgentflowTokens(context.node.prompt, promptTokens);
 
   const harnessResult = await harnesses[harnessName]!.run({
     promptKind: "agent",
@@ -1063,15 +1142,19 @@ async function defaultAgentExecutor(
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoningEffort: context.node.effective_policy.reasoning_effort }
       : {}),
-    prompt: context.node.prompt,
+    prompt: renderedPrompt,
     contextPacketPath: context.context_packet_path,
     contextManifestPath: context.context_manifest_path,
-    outputDir: resolveExecutionArtifactsDirectory(context.execution_dir),
+    contextManifest,
+    outputDir,
     artifacts: context.node.declared_artifacts,
     timeoutSec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
     ...(context.on_stdout_chunk ? { onStdoutChunk: context.on_stdout_chunk } : {}),
-    ...(context.on_stderr_chunk ? { onStderrChunk: context.on_stderr_chunk } : {})
+    ...(context.on_stderr_chunk ? { onStderrChunk: context.on_stderr_chunk } : {}),
+    toolBinDir: toolSetup.bin_dir,
+    toolEnv: toolSetup.env,
+    tools: toolSetup.resolved_tools
   });
 
   return {
@@ -1240,7 +1323,14 @@ async function runArtifactRepairHarness(options: {
     String(options.repairAttempt).padStart(3, "0")
   );
   await mkdir(repairDir, { recursive: true });
-  const prompt = buildArtifactRepairPrompt({
+  const repairOutputDir = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
+  const repairPromptTokens: Record<string, string> = {
+    AGENTFLOW_WORKSPACE: options.workspacePath,
+    AGENTFLOW_OUTPUT_DIR: repairOutputDir,
+    AGENTFLOW_CONTEXT_PACKET: options.contextPacketPath,
+    AGENTFLOW_CONTEXT_MANIFEST: options.contextManifestPath
+  };
+  const composedRepairPrompt = buildArtifactRepairPrompt({
     node: options.node,
     attempt: options.attempt,
     repairAttempt: options.repairAttempt,
@@ -1251,7 +1341,16 @@ async function runArtifactRepairHarness(options: {
     contextManifestPath: options.contextManifestPath,
     runId: options.session.run_id
   });
+  const prompt = substituteAgentflowTokens(composedRepairPrompt, repairPromptTokens);
   await writeFile(join(repairDir, "prompt.md"), `${prompt}\n`, "utf8");
+
+  const repairToolSetup = await prepareAgentTools({
+    node: options.node,
+    execution_dir: options.attempt.execution_dir,
+    workspace_path: options.workspacePath,
+    artifacts_root: repairOutputDir
+  });
+  const contextManifest = await readContextManifestContent(options.contextManifestPath);
 
   const result = await harness.run({
     promptKind: "agent",
@@ -1268,10 +1367,14 @@ async function runArtifactRepairHarness(options: {
     prompt,
     contextPacketPath: options.contextPacketPath,
     contextManifestPath: options.contextManifestPath,
-    outputDir: resolveExecutionArtifactsDirectory(options.attempt.execution_dir),
+    contextManifest,
+    outputDir: repairOutputDir,
     artifacts: options.node.declared_artifacts,
     timeoutSec: options.node.effective_policy.timeout_sec,
-    signal: options.signal
+    signal: options.signal,
+    toolBinDir: repairToolSetup.bin_dir,
+    toolEnv: repairToolSetup.env,
+    tools: repairToolSetup.resolved_tools
   });
 
   await Promise.all([
@@ -1581,6 +1684,7 @@ async function executeNode(
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
+            context_materials: context.packet.materials,
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -1593,7 +1697,10 @@ async function executeNode(
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
-            signal
+            context_materials: context.packet.materials,
+            signal,
+            on_stdout_chunk: logSink.on_stdout_chunk,
+            on_stderr_chunk: logSink.on_stderr_chunk
           });
     } else if (node.kind === "check") {
       result = options.executors?.check
@@ -1605,6 +1712,7 @@ async function executeNode(
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
+            context_materials: context.packet.materials,
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -1618,7 +1726,10 @@ async function executeNode(
               execution_dir: attempt.execution_dir,
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
-              signal
+              context_materials: context.packet.materials,
+              signal,
+              on_stdout_chunk: logSink.on_stdout_chunk,
+              on_stderr_chunk: logSink.on_stderr_chunk
             },
             options.harnesses ?? {}
           );
@@ -1666,6 +1777,7 @@ async function executeNode(
             },
             options.harnesses ?? {}
           );
+
     }
 
     await logSink.flush();
@@ -1929,8 +2041,14 @@ async function markPendingNodesBlocked(
   onEvent: RunCompiledGraphOptions["on_event"],
   failedNode: CompiledExecutableNode
 ): Promise<void> {
+  const cleanupNodeIds = collectCleanupNodeIds(session.graph);
+
   for (const [compiledId, status] of session.node_statuses.entries()) {
     if (!["pending", "ready"].includes(status)) {
+      continue;
+    }
+
+    if (cleanupNodeIds.has(compiledId)) {
       continue;
     }
 
@@ -1956,8 +2074,14 @@ async function markPendingNodesSkipped(
   onEvent: RunCompiledGraphOptions["on_event"],
   reason: string
 ): Promise<void> {
+  const cleanupNodeIds = collectCleanupNodeIds(session.graph);
+
   for (const [compiledId, status] of session.node_statuses.entries()) {
     if (!["pending", "ready"].includes(status)) {
+      continue;
+    }
+
+    if (cleanupNodeIds.has(compiledId)) {
       continue;
     }
 
@@ -1972,6 +2096,323 @@ async function markPendingNodesSkipped(
       attempt_index: undefined
     });
   }
+}
+
+function collectCleanupNodeIds(graph: CompiledGraph): Set<string> {
+  const ids = new Set<string>();
+  for (const node of graph.nodes) {
+    if (node.is_cleanup) {
+      ids.add(node.compiled_id);
+    }
+  }
+  return ids;
+}
+
+interface CleanupChain {
+  sequence_scope_id: string;
+  sequence_authored_id: string;
+  scope_depth: number;
+  cleanup_compiled_node_ids: string[];
+}
+
+function buildCleanupChains(graph: CompiledGraph): CleanupChain[] {
+  const chains: CleanupChain[] = [];
+
+  for (const scope of graph.scopes) {
+    if (scope.kind !== "sequence") {
+      continue;
+    }
+
+    const cleanupIds = scope.cleanup_compiled_node_ids ?? [];
+
+    if (cleanupIds.length === 0) {
+      continue;
+    }
+
+    chains.push({
+      sequence_scope_id: scope.scope_id,
+      sequence_authored_id: scope.authored_id,
+      scope_depth: scope.scope_stack.length,
+      cleanup_compiled_node_ids: cleanupIds
+    });
+  }
+
+  chains.sort((left, right) => right.scope_depth - left.scope_depth);
+  return chains;
+}
+
+async function runCleanupChains(
+  options: RunCompiledGraphOptions,
+  session: RuntimeSession,
+  writer: ArtifactWriter,
+  runOwner: RunOwnerRecord,
+  events: RuntimeEventEnvelope[],
+  topology: SchedulerTopology,
+  readinessCache: NodeReadinessCache,
+  bodyOutcome: "passed" | "failed" | "canceled"
+): Promise<{ canceled: boolean }> {
+  const chains = buildCleanupChains(session.graph);
+
+  if (chains.length === 0) {
+    return { canceled: false };
+  }
+
+  let canceledDuringCleanup = false;
+
+  for (const chain of chains) {
+    if (canceledDuringCleanup) {
+      await markRemainingCleanupSkipped(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        chain.cleanup_compiled_node_ids,
+        "operator_cancel"
+      );
+      continue;
+    }
+
+    await emitEvent(
+      session,
+      writer,
+      runOwner,
+      events,
+      options.on_event,
+      "sequence.cleanup.started",
+      {
+        sequence_authored_id: chain.sequence_authored_id,
+        cleanup_step_count: chain.cleanup_compiled_node_ids.length,
+        body_outcome: bodyOutcome
+      },
+      {
+        compiled_id: undefined,
+        execution_id: undefined,
+        repeat_scope_id: undefined,
+        iteration_index: undefined,
+        attempt_index: undefined
+      }
+    );
+
+    const counts = { steps_attempted: 0, steps_passed: 0, steps_failed: 0, steps_skipped: 0 };
+
+    for (const compiledId of chain.cleanup_compiled_node_ids) {
+      const node = topology.nodes_by_id.get(compiledId);
+
+      if (!node) {
+        counts.steps_skipped += 1;
+        continue;
+      }
+
+      if (options.signal?.aborted) {
+        canceledDuringCleanup = true;
+        counts.steps_skipped += 1;
+        setNodeStatus(session, compiledId, "skipped");
+        await emitEvent(
+          session,
+          writer,
+          runOwner,
+          events,
+          options.on_event,
+          "node.skipped",
+          { reason: "operator_cancel" },
+          {
+            compiled_id: compiledId,
+            execution_id: undefined,
+            repeat_scope_id: undefined,
+            iteration_index: undefined,
+            attempt_index: undefined
+          }
+        );
+        continue;
+      }
+
+      counts.steps_attempted += 1;
+
+      const stepResult = await runSingleCleanupNode(
+        options,
+        session,
+        writer,
+        runOwner,
+        events,
+        node,
+        readinessCache
+      );
+
+      if (stepResult.status === "passed") {
+        counts.steps_passed += 1;
+      } else if (stepResult.status === "canceled") {
+        canceledDuringCleanup = true;
+      } else {
+        counts.steps_failed += 1;
+        await emitEvent(
+          session,
+          writer,
+          runOwner,
+          events,
+          options.on_event,
+          "sequence.cleanup.step_failed",
+          {
+            compiled_id: compiledId,
+            message: stepResult.message ?? "cleanup step failed"
+          },
+          {
+            compiled_id: compiledId,
+            execution_id: undefined,
+            repeat_scope_id: undefined,
+            iteration_index: undefined,
+            attempt_index: undefined
+          }
+        );
+      }
+    }
+
+    if (canceledDuringCleanup) {
+      await emitEvent(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        "sequence.cleanup.canceled",
+        {
+          sequence_authored_id: chain.sequence_authored_id,
+          reason: "operator_cancel"
+        },
+        {
+          compiled_id: undefined,
+          execution_id: undefined,
+          repeat_scope_id: undefined,
+          iteration_index: undefined,
+          attempt_index: undefined
+        }
+      );
+    } else {
+      await emitEvent(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        "sequence.cleanup.completed",
+        {
+          sequence_authored_id: chain.sequence_authored_id,
+          ...counts
+        },
+        {
+          compiled_id: undefined,
+          execution_id: undefined,
+          repeat_scope_id: undefined,
+          iteration_index: undefined,
+          attempt_index: undefined
+        }
+      );
+    }
+  }
+
+  return { canceled: canceledDuringCleanup };
+}
+
+async function markRemainingCleanupSkipped(
+  session: RuntimeSession,
+  writer: ArtifactWriter,
+  runOwner: RunOwnerRecord,
+  events: RuntimeEventEnvelope[],
+  onEvent: RunCompiledGraphOptions["on_event"],
+  cleanupCompiledIds: string[],
+  reason: string
+): Promise<void> {
+  for (const compiledId of cleanupCompiledIds) {
+    const status = session.node_statuses.get(compiledId);
+    if (status && !["pending", "ready"].includes(status)) {
+      continue;
+    }
+    setNodeStatus(session, compiledId, "skipped");
+    await emitEvent(session, writer, runOwner, events, onEvent, "node.skipped", { reason }, {
+      compiled_id: compiledId,
+      execution_id: undefined,
+      repeat_scope_id: undefined,
+      iteration_index: undefined,
+      attempt_index: undefined
+    });
+  }
+}
+
+async function runSingleCleanupNode(
+  options: RunCompiledGraphOptions,
+  session: RuntimeSession,
+  writer: ArtifactWriter,
+  runOwner: RunOwnerRecord,
+  events: RuntimeEventEnvelope[],
+  node: CompiledExecutableNode,
+  readinessCache: NodeReadinessCache
+): Promise<{ status: "passed" | "failed" | "canceled"; message?: string }> {
+  const nextAttemptIndexes = peekNextAttemptIndexes(session.attempts, node.compiled_id, {});
+  const executionId = buildExecutionId(node.compiled_id, nextAttemptIndexes.attempt_index, {});
+  const executionDir = writer.getExecutionDirectory(node.compiled_id, executionId, {
+    attemptIndex: nextAttemptIndexes.attempt_index
+  });
+  const attempt = openNodeAttempt(session.attempts, node, executionDir, {
+    attempt_index: nextAttemptIndexes.attempt_index
+  });
+  registerActiveExecution(session, attempt);
+  const abortControl = createExecutionAbortControl(options.signal);
+
+  await emitEvent(session, writer, runOwner, events, options.on_event, "node.started", {
+    kind: node.kind,
+    repo_alias: node.repo,
+    profile_name: node.effective_policy.profile_name
+  }, {
+    compiled_id: node.compiled_id,
+    execution_id: attempt.execution_id,
+    repeat_scope_id: undefined,
+    iteration_index: undefined,
+    attempt_index: attempt.attempt_index
+  });
+
+  let result;
+  try {
+    const completion = await executeNode(
+      options,
+      session,
+      writer,
+      runOwner,
+      events,
+      node,
+      attempt,
+      abortControl.signal,
+      readinessCache
+    );
+    result = completion.result;
+    finalizeExecutionSummary(session, completion.attempt);
+  } catch (error) {
+    abortControl.dispose();
+    const message = error instanceof Error ? error.message : String(error);
+    return { status: "failed", message };
+  }
+
+  abortControl.dispose();
+
+  await emitEvent(session, writer, runOwner, events, options.on_event, "node.completed", {
+    outcome: result.outcome ?? (result.status === "passed" ? "passed" : "failed"),
+    duration_ms: attempt.duration_ms ?? 0
+  }, {
+    compiled_id: node.compiled_id,
+    execution_id: attempt.execution_id,
+    repeat_scope_id: undefined,
+    iteration_index: undefined,
+    attempt_index: attempt.attempt_index
+  });
+
+  if (result.status === "canceled") {
+    return { status: "canceled" };
+  }
+
+  if (result.status === "passed") {
+    return { status: "passed" };
+  }
+
+  return { status: "failed", message: "cleanup step did not pass" };
 }
 
 async function finalizeRun(
@@ -2044,6 +2485,77 @@ async function finalizeRunWithWorkspaceCleanup(
   return finalizeRun(session, writer, runOwner, events, onEvent, finalOutcome, finalReason);
 }
 
+async function finalizeRunAfterCleanup(
+  options: RunCompiledGraphOptions,
+  session: RuntimeSession,
+  writer: ArtifactWriter,
+  runOwner: RunOwnerRecord,
+  events: RuntimeEventEnvelope[],
+  workspace: WorkspaceSetup | undefined,
+  topology: SchedulerTopology,
+  readinessCache: NodeReadinessCache,
+  outcome: RuntimeRunStatus,
+  reason?: string
+): Promise<RunCompiledGraphResult> {
+  const bodyOutcome: "passed" | "failed" | "canceled" =
+    outcome === "passed" || outcome === "failed" || outcome === "canceled"
+      ? outcome
+      : "failed";
+  const previousStatus = session.status;
+  session.status = "running";
+
+  let finalOutcome = outcome;
+  let finalReason = reason;
+
+  try {
+    const cleanupResult = await runCleanupChains(
+      options,
+      session,
+      writer,
+      runOwner,
+      events,
+      topology,
+      readinessCache,
+      bodyOutcome
+    );
+
+    if (cleanupResult.canceled && finalOutcome !== "canceled") {
+      finalOutcome = "canceled";
+      finalReason = finalReason
+        ? `${finalReason} | cleanup canceled by operator`
+        : "cleanup canceled by operator";
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    finalReason = finalReason
+      ? `${finalReason} | cleanup failed: ${message}`
+      : `cleanup failed: ${message}`;
+  }
+
+  session.status = previousStatus;
+
+  await markRemainingCleanupSkipped(
+    session,
+    writer,
+    runOwner,
+    events,
+    options.on_event,
+    [...collectCleanupNodeIds(session.graph)],
+    finalOutcome === "canceled" ? "operator_cancel" : "cleanup_complete"
+  );
+
+  return finalizeRunWithWorkspaceCleanup(
+    session,
+    writer,
+    runOwner,
+    events,
+    options.on_event,
+    workspace,
+    finalOutcome,
+    finalReason
+  );
+}
+
 async function executeRunLoop(
   options: RunCompiledGraphOptions,
   session: RuntimeSession,
@@ -2086,44 +2598,53 @@ async function executeRunLoop(
     }
 
     if (session.status === "canceled" && activeExecutions.size === 0) {
-      return finalizeRunWithWorkspaceCleanup(
+      return finalizeRunAfterCleanup(
+        options,
         session,
         writer,
         runOwner,
         events,
-        options.on_event,
         workspace,
+        topology,
+        readinessCache,
         "canceled",
         "operator_cancel"
       );
     }
 
     if (session.status === "failed" && activeExecutions.size === 0) {
-      return finalizeRunWithWorkspaceCleanup(
+      return finalizeRunAfterCleanup(
+        options,
         session,
         writer,
         runOwner,
         events,
-        options.on_event,
         workspace,
+        topology,
+        readinessCache,
         "failed"
       );
     }
 
     if (session.status === "running" && activeExecutions.size === 0) {
       const remainingReady = readyQueue.queue.length > 0;
-      const unfinishedNodes = [...session.node_statuses.values()].some((status) =>
-        ["pending", "ready", "running"].includes(status)
+      const cleanupNodeIds = collectCleanupNodeIds(session.graph);
+      const unfinishedNodes = [...session.node_statuses.entries()].some(
+        ([compiledId, status]) =>
+          !cleanupNodeIds.has(compiledId) &&
+          ["pending", "ready", "running"].includes(status)
       );
 
       if (!remainingReady && !unfinishedNodes) {
-        return finalizeRunWithWorkspaceCleanup(
+        return finalizeRunAfterCleanup(
+          options,
           session,
           writer,
           runOwner,
           events,
-          options.on_event,
           workspace,
+          topology,
+          readinessCache,
           "passed"
         );
       }
@@ -2135,13 +2656,15 @@ async function executeRunLoop(
           session.graph.nodes[0];
 
         if (!failedNode) {
-          return finalizeRunWithWorkspaceCleanup(
+          return finalizeRunAfterCleanup(
+            options,
             session,
             writer,
             runOwner,
             events,
-            options.on_event,
             workspace,
+            topology,
+            readinessCache,
             "failed"
           );
         }
@@ -2154,13 +2677,15 @@ async function executeRunLoop(
           options.on_event,
           failedNode
         );
-        return finalizeRunWithWorkspaceCleanup(
+        return finalizeRunAfterCleanup(
+          options,
           session,
           writer,
           runOwner,
           events,
-          options.on_event,
           workspace,
+          topology,
+          readinessCache,
           "failed"
         );
       }

@@ -11,6 +11,7 @@ describe("validate:smoke contract", () => {
       "docs/ARCHITECTURE.md",
       "docs/OPERATIONS.md",
       "docs/MANAGED_PATTERNS.md",
+      "docs/PLUGINS.md",
       "docs/PATTERN_DEEP_RESEARCH.md",
       "docs/PATTERN_SPEC_DESIGN.md",
       "docs/PATTERN_GENERATE_EVALUATE_FIX.md",
@@ -26,7 +27,7 @@ describe("validate:smoke contract", () => {
       builtCliRelativePath: "dist/cli/index.js",
       fixtureGraphRelativePath: "tests/graph/fixtures/repeat.graph.json",
       fixtureGraphId: "repeat-graph",
-      fixtureCommands: ["validate", "compile"],
+      fixtureCommands: ["validate", "validate --show-compiled"],
       runHarnessAdapters: ["codex-cli", "cursor-cli"],
       runWorkspaceBackends: ["inplace", "worktree"]
     });

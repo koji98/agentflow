@@ -2,6 +2,8 @@
 
 Use managed patterns when the built-in lifecycle matches the work. They are fixed strategy contracts that lower into primitive subgraphs; they are not aliases for arbitrary prompts.
 
+For team-owned reusable workflows distributed through Git, use `agentflow-plugins` instead of forcing the built-in managed patterns to fit.
+
 ## Selection
 
 Choose by lifecycle:
@@ -17,6 +19,7 @@ Do not use a managed pattern when:
 - the lifecycle needs custom topology the pattern does not model
 - the pattern contract would be mostly empty
 - the user needs a one-off command gate or simple handoff
+- the workflow is organization-specific and should be packaged as a reusable plugin
 
 ## Shared Authored Model
 
@@ -70,18 +73,8 @@ Good downstream primitive shape:
   "id": "handoff",
   "prompt": "Summarize the implementation risks for the operator.",
   "context": [
-    {
-      "name": "change_summary",
-      "from": "artifact",
-      "node": "implement",
-      "artifact": "change_summary"
-    },
-    {
-      "name": "evaluation_ledger",
-      "from": "artifact",
-      "node": "implement",
-      "artifact": "evaluation_ledger"
-    }
+    { "ref": "implement.change_summary" },
+    { "ref": "implement.evaluation_ledger" }
   ]
 }
 ```
@@ -143,11 +136,13 @@ For every graph with managed patterns:
 1. Run `agentflow validate --graph <path>`.
 2. Fix authored diagnostics first.
 3. Run `agentflow validate --graph <path> --run-ready` when the pattern graph is expected to launch on this machine.
-4. Run `agentflow compile --graph <path>`.
+4. Run `agentflow validate --graph <path> --show-compiled`.
 5. Inspect generated subgraph phases, publish nodes, artifact names, repeat loops, and checkpoint placement.
 6. Confirm downstream primitive nodes reference artifacts published by the managed pattern's final publish node.
 
-If compile output surprises you, change the authored pattern contract rather than trying to depend on internal generated node ids.
+If the compiled output surprises you, change the authored pattern contract rather than trying to depend on internal generated node ids.
+
+For plugin workflows, use the same rule: downstream nodes consume artifacts from the public plugin node id and must not depend on generated internal ids.
 
 ## Guardrails
 

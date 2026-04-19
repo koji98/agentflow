@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
 import { realpathSync } from "node:fs";
-import { stat } from "node:fs/promises";
-import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { runsRootEnvironmentVariable } from "../artifacts/paths.js";
@@ -26,10 +24,12 @@ import {
 } from "../graph/schema.js";
 import { managedPatternDescriptors } from "../managed/index.js";
 import { applyCommand } from "./commands/apply.js";
-import { compileCommand } from "./commands/compile.js";
 import { evalCommand } from "./commands/eval.js";
+import { inspectCommand } from "./commands/inspect.js";
+import { pluginCommand } from "./commands/plugin.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
+import { runsCommand } from "./commands/runs.js";
 import { validateCommand } from "./commands/validate.js";
 import { formatDuration } from "./progress.js";
 
@@ -39,6 +39,8 @@ interface GraphCliCommandResult {
   stdout?: string;
 }
 
+export type CliOptionValue = string | boolean | string[] | undefined;
+
 interface GraphCliCommand {
   name: string;
   summary: string;
@@ -47,18 +49,23 @@ interface GraphCliCommand {
   examples?: readonly string[];
   helpNotes?: readonly string[];
   run: (
-    options: Record<string, string | boolean | undefined>,
+    options: Record<string, CliOptionValue>,
     currentWorkingDirectory: string,
     signal?: AbortSignal,
     positionals?: readonly string[]
   ) => Promise<GraphCliCommandResult>;
 }
 
+const repeatableOptionNames = new Set(["config"]);
+
 const optionDescriptions: Record<string, string> = {
-  graph: "--graph <path>               Authored graph document to validate, compile, or run.",
+  graph: "--graph <path>               Authored graph document to validate or run.",
   label: "--label <run_label>          Optional run label appended to the generated run root.",
   "run-ready": "--run-ready                  Also check local runtime dependencies during validate.",
   "run-root": "--run-root <path>            Existing run root to resume.",
+  "runs-root": "--runs-root <path>           Absolute runs root directory to enumerate.",
+  latest: "--latest                     Resume the most recent resumable run discovered for the supplied --graph.",
+  "show-compiled": "--show-compiled              Include the compiled graph payload in the validate output.",
   repo: "--repo <alias>                Repo alias to select from run workspace changes.",
   target: "--target <path>              Git worktree where captured workspace changes should be applied.",
   "allow-dirty": "--allow-dirty                Apply onto a target repo that already has local changes.",
@@ -69,6 +76,12 @@ const optionDescriptions: Record<string, string> = {
   "evals-root": "--evals-root <path>          Absolute eval artifact root for a new eval run.",
   "eval-root": "--eval-root <path>           Existing eval artifact root to report.",
   mission: "--mission <path>             Mission state file reserved for the deferred controller surface.",
+  config:
+    "--config key=value           Override top-level graph config (repeatable). JSON-typed values like 1, true, [\"a\"] parse as JSON; everything else stays a string. Use dotted keys for nested paths.",
+  "config-file":
+    "--config-file <path>         Load graph config overrides from a JSON file. Merged before --config entries.",
+  "resume-on-fail":
+    "--resume-on-fail [N]         After a failed run, automatically resume up to N times in the same process (default 3).",
   help: "--help, -h                   Show command help."
 };
 
@@ -81,13 +94,6 @@ function renderGraphHelp(): string {
     "{",
     `  "version": "${graphVersion}",`,
     '  "graph_id": "example-graph",',
-    '  "repos": {',
-    '    "main": { "path": "." }',
-    "  },",
-    '  "defaults": {',
-    '    "launch_profile": "default",',
-    '    "workspace_backend": "worktree"',
-    "  },",
     '  "profiles": {',
     '    "default": { "harness": "codex-cli" }',
     "  },",
@@ -99,7 +105,7 @@ function renderGraphHelp(): string {
     '        "type": "agent",',
     '        "id": "implement",',
     '        "prompt": "Implement the requested change and write a concise handoff artifact.",',
-    '        "context": [{ "name": "goal", "from": "text", "text": "Keep the change small." }],',
+    '        "context": [{ "from": "text", "name": "goal", "text": "Keep the change small." }],',
     '        "artifacts": { "handoff": { "from": "output_dir", "path": "handoff.md", "description": "Markdown handoff from this node." } }',
     "      },",
     '      { "type": "check", "id": "verify", "check_kind": "deterministic", "command": "npm", "args": ["test"] }',
@@ -115,6 +121,7 @@ function renderGraphHelp(): string {
     `Executable node kinds: ${executableNodeKinds.join(", ")}`,
     `Container node kinds: ${containerNodeKinds.join(", ")}`,
     `Managed pattern scaffolds: ${managedPatternKinds.join(", ")}`,
+    "Plugin workflow node: plugin (uses Git-resolved reusable managed workflows)",
     `Harness adapters: ${harnessNames.join(", ")}`,
     `Check kinds: ${checkKinds.join(", ")}`,
     `Workspace backends: ${workspaceBackends.join(", ")}`,
@@ -127,18 +134,20 @@ function renderGraphHelp(): string {
     "",
     "Top-level document fields:",
     "- graph_id",
-    "- repos",
-    "- defaults.launch_profile",
-    "- defaults.workspace_backend",
+    "- repos (defaults to { main: { path: \".\" } } when omitted)",
+    "- defaults.launch_profile (defaults to \"default\" when a profile of that name exists)",
+    "- defaults.workspace_backend (defaults to \"inplace\")",
     "- profiles",
     "- prerequisites.checks",
     "- graph",
+    "- plugins",
     "",
     "Key rules:",
     "- The runtime executes compiled graphs only.",
     "- validate reports authored validation, compiled validation, and declared readiness; add --run-ready for local machine dependency checks.",
     "- sequence, parallel, and repeat are authoring containers, not executable runtime nodes.",
     "- pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, and pattern_review_change are implemented as managed patterns that lower into generated primitive subgraphs.",
+    "- plugin workflow nodes use type = plugin, uses = plugin_alias/workflow_id, and config = workflow-specific settings; run agentflow plugin resolve --graph first.",
     "- repeat.until.node must target a descendant check or checkpoint node.",
     "- repeat context selectors support latest, latest_passed, latest_failed, or a positive integer ordinal.",
     "- launch profile and workspace backend come from graph defaults in this release.",
@@ -163,9 +172,10 @@ function renderGraphHelp(): string {
     "Recommended local workflow:",
     "1. agentflow validate --graph agentflow.graph.json",
     "2. agentflow validate --graph agentflow.graph.json --run-ready when local launch readiness matters",
-    "3. agentflow compile --graph agentflow.graph.json",
+    "3. agentflow validate --graph agentflow.graph.json --show-compiled to inspect the compiled graph",
     "4. agentflow run --graph agentflow.graph.json",
-    "5. inspect summary.md, state.json, and compiled_graph.json under the emitted run root"
+    "5. agentflow runs list --graph agentflow.graph.json to discover prior run roots",
+    "6. agentflow inspect <run-root> for failure stderr tails and summaries"
   ].join("\n");
 }
 
@@ -183,79 +193,16 @@ const graphHelpCommand: GraphCliCommand = {
   }
 };
 
-const controlCommand: GraphCliCommand = {
-  name: "control",
-  summary: "Reserved controller stub for future mission-oriented control-plane flows.",
-  usage: "agentflow control --mission <path/to/mission.json>",
-  optionNames: ["mission", "help"] as const,
-  examples: ["agentflow control --mission mission.json"] as const,
-  async run(options, currentWorkingDirectory) {
-    const missionPath = typeof options.mission === "string" ? options.mission : undefined;
-
-    if (!missionPath) {
-      return {
-        exitCode: 2,
-        stdout: renderCommandUsageError({
-          message: "Missing required option: --mission",
-          commandName: this.name,
-          usage: this.usage
-        })
-      };
-    }
-
-    const absoluteMissionPath = resolve(currentWorkingDirectory, missionPath);
-
-    try {
-      const entry = await stat(absoluteMissionPath);
-
-      if (!entry.isFile()) {
-        return {
-          exitCode: 1,
-          output: {
-            command: "control",
-            status: "failed",
-            mission_path: absoluteMissionPath,
-            message: "Mission path exists but is not a file."
-          }
-        };
-      }
-    } catch (error) {
-      return {
-        exitCode: 1,
-        output: {
-          command: "control",
-          status: "failed",
-          mission_path: absoluteMissionPath,
-          message:
-            error instanceof Error
-              ? `Mission file could not be resolved: ${error.message}`
-              : "Mission file could not be resolved."
-        }
-      };
-    }
-
-    return {
-      exitCode: 1,
-      output: {
-        command: "control",
-        status: "deferred",
-        mission_path: absoluteMissionPath,
-        message:
-          "The controller boundary is intentionally deferred in this build. Mission orchestration does not execute in this release."
-      }
-    };
-  }
-};
-
 const commandRegistry = {
   validate: validateCommand,
-  compile: compileCommand,
   run: runCommand,
+  runs: runsCommand,
+  inspect: inspectCommand,
   resume: resumeCommand,
   apply: applyCommand,
   eval: evalCommand,
-  "graph-help": graphHelpCommand,
-  control: controlCommand
+  plugin: pluginCommand,
+  "graph-help": graphHelpCommand
 } as const satisfies Record<string, GraphCliCommand>;
 
 export type GraphCliCommandName = keyof typeof commandRegistry;
@@ -415,23 +362,28 @@ function renderMainHelp(): string {
     "",
     "Local workflow:",
     "  1. graph-help: review the authored graph contract and minimal example",
-    "  2. validate: check authored, compiled, and optional run-ready phases without running the graph",
-    "  3. compile: inspect the compiled graph contract before execution",
-    "  4. run: execute the compiled graph and write durable artifacts under the run root",
-    "  5. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work",
-    "  6. apply: apply captured workspace changes from a run back to a git repo",
-    "  7. eval: validate or run local eval suites for Agentflow graphs",
+    "  2. validate: check authored, compiled, and optional run-ready phases without running the graph (use --show-compiled to print the compiled payload)",
+    "  3. run: execute the compiled graph and write durable artifacts under the run root",
+    "  4. runs list: enumerate previous run roots for a graph",
+    "  5. inspect: review a single recorded run root",
+    "  6. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work (use --latest with --graph to pick the most recent resumable run)",
+    "  7. apply: apply captured workspace changes from a run back to a git repo",
+    "  8. eval: validate or run local eval suites for Agentflow graphs",
+    "  9. plugin: resolve Git-distributed managed workflow plugins for a graph",
     "",
     "Examples:",
-  "  agentflow graph-help",
-  "  agentflow validate --graph agentflow.graph.json",
-  "  agentflow validate --graph agentflow.graph.json --run-ready",
-  "  agentflow compile --graph agentflow.graph.json",
+    "  agentflow graph-help",
+    "  agentflow validate --graph agentflow.graph.json",
+    "  agentflow validate --graph agentflow.graph.json --run-ready",
+    "  agentflow validate --graph agentflow.graph.json --show-compiled",
     "  agentflow run --graph agentflow.graph.json",
+    "  agentflow runs list --graph agentflow.graph.json",
+    "  agentflow inspect .agentflow/runs/<run-id>",
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
+    "  agentflow resume --graph agentflow.graph.json --latest",
     "  agentflow apply --run-root .agentflow/runs/<run-id>",
     "  agentflow eval validate --suite evals/example/suite.json",
-    "  agentflow control --mission mission.json",
+    "  agentflow plugin resolve --graph agentflow.graph.json",
     "",
     "Path rules:",
     `  ${graphPathRuleText}`,
@@ -467,7 +419,7 @@ function renderCommandHelp(command: GraphCliCommand): string {
 function parseArgs(argv: string[]): {
   commandName: GraphCliCommandName | undefined;
   unknownCommand: string | undefined;
-  options: Record<string, string | boolean>;
+  options: Record<string, CliOptionValue>;
   positionals: string[];
 } {
   const [commandCandidate, ...rest] = argv;
@@ -479,8 +431,24 @@ function parseArgs(argv: string[]): {
   const unknownCommand =
     hasExplicitCommand && !commandName && commandCandidate ? commandCandidate : undefined;
   const optionTokens = commandName ? rest : hasExplicitCommand ? rest : argv;
-  const options: Record<string, string | boolean> = {};
+  const options: Record<string, CliOptionValue> = {};
   const positionals: string[] = [];
+
+  function appendValue(name: string, value: string): void {
+    if (repeatableOptionNames.has(name)) {
+      const existing = options[name];
+      if (Array.isArray(existing)) {
+        existing.push(value);
+      } else if (typeof existing === "string") {
+        options[name] = [existing, value];
+      } else {
+        options[name] = [value];
+      }
+      return;
+    }
+
+    options[name] = value;
+  }
 
   for (let index = 0; index < optionTokens.length; index += 1) {
     const token = optionTokens[index];
@@ -507,7 +475,7 @@ function parseArgs(argv: string[]): {
       continue;
     }
 
-    options[optionName] = nextToken;
+    appendValue(optionName, nextToken);
     index += 1;
   }
 
@@ -525,7 +493,7 @@ function renderUnknownCommand(commandName: string): string {
 
 function validateOptionNames(
   command: GraphCliCommand,
-  options: Record<string, string | boolean>
+  options: Record<string, CliOptionValue>
 ): string[] {
   return Object.keys(options).filter((optionName) => !command.optionNames.includes(optionName));
 }
@@ -569,7 +537,13 @@ export async function executeCli(
     };
   }
 
-  if (positionals.length > 0 && command.name !== "eval") {
+  if (
+    positionals.length > 0 &&
+    command.name !== "eval" &&
+    command.name !== "plugin" &&
+    command.name !== "runs" &&
+    command.name !== "inspect"
+  ) {
     return {
       exitCode: 2,
       stdout: renderCommandUsageError({
@@ -629,10 +603,15 @@ export async function runCli(argv = process.argv.slice(2)): Promise<number> {
   const abortController = new AbortController();
   const onSignal = (signalName: NodeJS.Signals) => {
     if (abortController.signal.aborted) {
-      return;
+      process.stderr.write(
+        `\n${signalName} received again. Forcing immediate exit; cleanup steps will be skipped.\n`
+      );
+      process.exit(130);
     }
 
-    process.stderr.write(`\n${signalName} received. Canceling the active graph run and waiting for cleanup.\n`);
+    process.stderr.write(
+      `\n${signalName} received. Canceling the active graph run and waiting for cleanup. Press Ctrl-C again to force exit.\n`
+    );
     abortController.abort();
   };
 

@@ -71,10 +71,10 @@ export function artifactContext(
     attempt?: ContextSelector;
     if_available?: boolean;
   } = {}
-): Extract<ContextItem, { from: "artifact" }> {
+): Extract<ContextItem, { ref: string }> {
   return {
+    ref: `${node}.${artifact}`,
     name,
-    from: "artifact",
     node,
     artifact,
     ...(options.iteration !== undefined ? { iteration: options.iteration } : {}),

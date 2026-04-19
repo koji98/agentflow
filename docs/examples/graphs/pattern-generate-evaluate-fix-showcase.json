@@ -153,22 +153,16 @@
         "prompt": "Summarize the final change package for an operator who needs the outcome, evaluation status, and residual risks.",
         "context": [
           {
-            "name": "implementation_response",
-            "from": "artifact",
-            "node": "implement_managed_nodes",
-            "artifact": "agent_response"
+            "ref": "implement_managed_nodes.agent_response",
+            "name": "implementation_response"
           },
           {
-            "name": "change_summary",
-            "from": "artifact",
-            "node": "implement_managed_nodes",
-            "artifact": "change_summary"
+            "ref": "implement_managed_nodes.change_summary",
+            "name": "change_summary"
           },
           {
-            "name": "evaluation_ledger",
-            "from": "artifact",
-            "node": "implement_managed_nodes",
-            "artifact": "evaluation_ledger"
+            "ref": "implement_managed_nodes.evaluation_ledger",
+            "name": "evaluation_ledger"
           }
         ]
       }

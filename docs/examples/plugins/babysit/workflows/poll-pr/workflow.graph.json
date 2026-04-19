@@ -1,0 +1,36 @@
+{
+  "type": "sequence",
+  "id": "workflow",
+  "steps": [
+    {
+      "type": "exec",
+      "id": "poll_status",
+      "repo": "main",
+      "command": "plugin://scripts/poll-pr.sh",
+      "args": [
+        "--pr",
+        "{{config.pr_id}}",
+        "--once"
+      ],
+      "artifacts": {
+        "pr_status_raw": {
+          "from": "output_dir",
+          "path": "pr-status-raw.txt",
+          "description": "Raw stdout from the babysit poll-pr script for PR {{config.pr_id}}."
+        }
+      }
+    },
+    {
+      "type": "agent",
+      "id": "publish_status",
+      "repo": "main",
+      "prompt": "Read the polled status from the pr_status_raw artifact and publish a clean JSON report by writing it to $AGENTFLOW_OUTPUT_DIR/pr-status.json.",
+      "context": [
+        {
+          "ref": "poll_status.pr_status_raw",
+          "name": "pr_status_raw"
+        }
+      ]
+    }
+  ]
+}

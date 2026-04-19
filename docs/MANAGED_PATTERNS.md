@@ -1,12 +1,15 @@
 # Managed Patterns
 
-Agentflow has three authoring categories:
+Agentflow has four authoring categories:
 
 - Primitive executable nodes: `agent`, `exec`, `check`, `checkpoint`
 - Primitive control-flow containers: `sequence`, `parallel`, `repeat`
 - Managed patterns: `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, `pattern_review_change`
+- Plugin workflows: `plugin`
 
 Managed patterns are authored shortcuts. They compile into generated primitive subgraphs and run on the same runtime as the rest of the graph.
+
+Plugin workflows follow the same lowering model for team-owned workflows distributed through Git. Built-in managed patterns are part of Agentflow itself; plugins are resolved from `agentflow.plugins.lock.json` and are documented in [`PLUGINS.md`](PLUGINS.md).
 
 ## Canonical Chain
 
@@ -20,6 +23,8 @@ The intended high-level composition is:
 Patterns can also hand off to primitive nodes directly when the graph only needs a narrower follow-on step.
 
 Managed patterns still use the same graph contract as primitive nodes. They accept authored `context`, lower into primitive subgraphs, and publish named artifacts from their final publish phase. A downstream node should consume those artifacts explicitly rather than scrape intermediate execution directories.
+
+Plugin workflows use the same handoff rule: consume artifacts from the public plugin node id, not from generated internal node ids.
 
 ## Shared Model
 
@@ -150,6 +155,7 @@ Shipped in this release:
 - normalization support that lowers managed patterns into primitive subgraphs
 - registry metadata in `src/managed/registry.ts`
 - example graphs in [`docs/examples/graphs/`](examples/graphs/README.md)
+- plugin workflow lowering in `src/plugins/`
 
 Deferred:
 

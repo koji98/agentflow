@@ -46,6 +46,16 @@ export interface ArtifactRepairPolicy {
   max_attempts?: number;
 }
 
+export interface PluginToolReference {
+  from_plugin: string;
+  tool: string;
+  alias?: string;
+}
+
+export type ToolDeclaration = PluginToolReference;
+
+export type ToolConfigMap = Record<string, Record<string, string>>;
+
 export interface GraphProfile {
   harness?: HarnessName;
   model?: string;
@@ -84,9 +94,9 @@ export interface TextInput {
   text: string;
 }
 
-export interface ArtifactContext {
+export interface ArtifactContextRef {
+  ref: string;
   name: string;
-  from: "artifact";
   node: string;
   artifact: string;
   iteration?: ContextSelector;
@@ -94,7 +104,7 @@ export interface ArtifactContext {
   if_available?: boolean;
 }
 
-export type ContextItem = FileInput | GlobInput | TextInput | ArtifactContext;
+export type ContextItem = FileInput | GlobInput | TextInput | ArtifactContextRef;
 
 export interface ArtifactReference {
   node: string;
@@ -163,6 +173,8 @@ export interface AgentNode extends BaseExecutableNode {
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
   artifact_repair?: ArtifactRepairPolicy;
+  tools?: ToolDeclaration[];
+  tool_config?: ToolConfigMap;
 }
 
 export interface ExecNode extends BaseExecutableNode {
@@ -200,6 +212,7 @@ export interface CheckpointNode extends BaseExecutableNode {
 export interface SequenceNode extends BaseNode {
   type: "sequence";
   steps: AuthoredGraphNode[];
+  cleanup?: AuthoredGraphNode[];
 }
 
 export interface ParallelNode extends BaseNode {
@@ -228,6 +241,10 @@ export interface AuthoredGraphDocument {
   defaults?: GraphDefaults;
   profiles?: Record<string, GraphProfile>;
   prerequisites?: GraphPrerequisites;
+  config?: Record<string, unknown>;
+  config_schema?: Record<string, unknown>;
+  tools?: ToolDeclaration[];
+  tool_config?: ToolConfigMap;
   graph: ContainerGraphNode;
 }
 

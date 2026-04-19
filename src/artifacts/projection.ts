@@ -500,6 +500,23 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: `Iteration ${payload.iteration_index ?? event.iteration_index ?? "?"} ${String(payload.outcome ?? "completed")}.`
       };
+    case "sequence.cleanup.started":
+      return {
+        summary: `Cleanup started for sequence "${String(payload.sequence_authored_id ?? "?")}" (${payload.cleanup_step_count ?? "?"} steps after body ${String(payload.body_outcome ?? "?")}).`
+      };
+    case "sequence.cleanup.step_failed":
+      return {
+        ...(event.compiled_id ? { authored_id: event.compiled_id } : {}),
+        summary: `Cleanup step failed: ${String(payload.message ?? "unknown error")}.`
+      };
+    case "sequence.cleanup.completed":
+      return {
+        summary: `Cleanup completed for sequence "${String(payload.sequence_authored_id ?? "?")}" (passed ${payload.steps_passed ?? 0}, failed ${payload.steps_failed ?? 0}, skipped ${payload.steps_skipped ?? 0}).`
+      };
+    case "sequence.cleanup.canceled":
+      return {
+        summary: `Cleanup canceled for sequence "${String(payload.sequence_authored_id ?? "?")}": ${String(payload.reason ?? "operator_cancel")}.`
+      };
     case "run.canceled":
       return {
         summary: String(payload.reason ?? "Run canceled.")

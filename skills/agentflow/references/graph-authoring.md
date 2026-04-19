@@ -7,6 +7,7 @@ Create Agentflow graphs that are executable, inspectable, and hard to misread.
 An Agentflow graph is local-first orchestration over one or more local git repositories.
 
 - The graph chooses repos, launch profile, workspace backend, executable nodes, control flow, context, artifacts, and validation gates.
+- Optional plugin workflows let a graph reuse Git-resolved managed subgraphs without adding runtime node kinds.
 - The workspace carries source changes during execution.
 - `context` carries authored input material into a node.
 - `artifacts` declare durable named handoff files a downstream node may consume.
@@ -19,25 +20,26 @@ The graph should make responsibility and evidence obvious. If a node fails, the 
 Use this loop before handing back any authored graph:
 
 1. Draft or edit the graph.
-2. Run `agentflow validate --graph <path>`.
-3. Fix every validation diagnostic.
-4. Run `agentflow validate --graph <path> --run-ready` when the graph is expected to launch on this machine, especially if it relies on `worktree`, local commands, Codex, or Cursor.
-5. Run `agentflow compile --graph <path>`.
-6. Inspect the compiled shape when the graph uses managed patterns, `parallel`, `repeat`, checkpoints, or artifact handoffs.
-7. If the graph is meant to execute now, run `agentflow run --graph <path>`.
+2. If the graph declares `plugins`, run `agentflow plugin resolve --graph <path>`.
+3. Run `agentflow validate --graph <path>`.
+4. Fix every validation diagnostic.
+5. Run `agentflow validate --graph <path> --run-ready` when the graph is expected to launch on this machine, especially if it relies on `worktree`, local commands, Codex, Cursor, or plugin-provided scripts.
+6. Run `agentflow validate --graph <path> --show-compiled`.
+7. Inspect the compiled shape when the graph uses managed patterns, plugin workflows, `parallel`, `repeat`, checkpoints, or artifact handoffs.
+8. If the graph is meant to execute now, run `agentflow run --graph <path>`.
 
-If validation or compile cannot be run, state why. If either fails, do not hand off the graph as ready; report the failing command and the diagnostics.
+If validation cannot be run, state why. If validation or `--show-compiled` fails, do not hand off the graph as ready; report the failing command and the diagnostics.
 
 ## Top-Level Choices
 
 Set launch behavior in the graph:
 
-- `defaults.launch_profile`
-- `defaults.workspace_backend`
+- `defaults.launch_profile` (defaults to `"default"` only when a profile named `default` exists)
+- `defaults.workspace_backend` (defaults to `"inplace"` when omitted)
 
 Do not invent CLI profile or workspace-backend overrides. Node-level `profile` is only for a real policy exception, such as one high-reasoning review node or one command profile with `env_files`.
 
-Use `worktree` when source changes should be isolated and patch delivery matters. Use `inplace` only when the user intentionally wants the source checkout used directly.
+Use `inplace` for the fast local-first authoring loop (this is the default). Use `worktree` when source changes should be isolated and patch delivery matters.
 
 ## Node Choice
 
@@ -59,6 +61,8 @@ Use managed patterns when the full lifecycle matches:
 - `pattern_generate_evaluate_fix`
 - `pattern_review_change`
 
+Use `plugin` when the graph should drop in a reusable team-owned managed workflow from Git. Plugin nodes use `uses: "alias/workflow"`, validate workflow-specific `config`, and publish only the artifacts declared by the plugin workflow's publish node.
+
 Do not use a managed pattern as a vague prompt bucket. If only one or two primitive nodes are needed, primitives are clearer.
 
 ## Context And Artifacts
@@ -76,8 +80,11 @@ Good context examples:
 { "name": "goal", "from": "text", "text": "Keep the CLI contract stable." }
 { "name": "readme", "from": "workspace_file", "path": "README.md" }
 { "name": "sources", "from": "workspace_glob", "path": "src/**/*.ts", "max_files": 20 }
-{ "name": "packet", "from": "artifact", "node": "design", "artifact": "design_packet", "attempt": "latest_passed" }
+{ "ref": "design.design_packet", "attempt": "latest_passed" }
+{ "ref": "design" }
 ```
+
+Artifact context items use a single `ref` field. `"<node>.<artifact>"` selects a declared artifact; bare `"<node>"` resolves to the canonical artifact for that node kind (`agent_response` for `agent`, `stdout` for `exec`, `result_json` for `check`). `name` defaults to the rightmost `.` segment of `ref`, or to the node id when `ref` is bare.
 
 Good artifact examples:
 
@@ -96,10 +103,13 @@ Good artifact examples:
 }
 ```
 
-Reserved artifacts:
+Reserved canonical artifacts (one per node kind):
 
 - `agent_response`: every agent final response, saved as `artifacts/agent-response.md`.
-- `result_json`: every executable node's normalized result, saved as `artifacts/result.json`.
+- `stdout`: every exec node's stdout stream, saved as `logs/stdout.log`.
+- `result_json`: every check node's normalized result, saved as `artifacts/result.json`.
+
+Declared artifact keys cannot contain `.` because `.` is reserved as the `ref` path separator.
 
 Rules:
 
@@ -114,6 +124,7 @@ Rules:
 - Agent artifact repair defaults to one same-workspace harness repair when a successful agent misses a declared artifact. Use `artifact_repair.max_attempts: 0` to disable it for a profile or agent node, or up to `3` when handoff repair is a normal part of the graph.
 - Repeat loops automatically receive `repeat_history` context after iteration 1. Do not add extra self-artifact references just to remind the next iteration what happened; use explicit prior-iteration artifact context only when the next node needs a full file.
 - Do not rely on `agent_response` when downstream work needs a stable machine-readable packet.
+- Do not reference `AGENTFLOW_*` paths in `prompt` or `rubric` text. Context is already inlined and declared artifacts already show absolute paths in the harness prompt. Tools that need a path should read it from the shell environment when the agent invokes them. Substitution exists as a forgiveness layer (see `graph-contract.md`), not the recommended pattern.
 
 ## Non-Brittle Graph Conventions
 
@@ -139,6 +150,7 @@ Avoid:
 - `repeat` without a clear owner, gate, and maximum useful attempt count
 - checkpoints used as generic pauses
 - downstream handoff agents that only restate the previous node
+- references to plugin-generated internal node ids instead of the public plugin node id
 
 ## Validation Placement
 
@@ -156,8 +168,9 @@ Use deterministic `check` for objective pass/fail. Use AI `check` for semantic q
 Before handoff:
 
 - `agentflow validate --graph <path>` passed.
+- `agentflow plugin resolve --graph <path>` passed when the graph declares `plugins`.
 - `agentflow validate --graph <path> --run-ready` passed when the graph is being handed off as locally runnable.
-- `agentflow compile --graph <path>` passed.
+- `agentflow validate --graph <path> --show-compiled` passed.
 - Every downstream artifact reference names a reserved or declared artifact.
 - Every declared artifact includes a useful `description`.
 - Every artifact path is relative and stays inside `AGENTFLOW_OUTPUT_DIR` or the workspace. `AGENTFLOW_OUTPUT_DIR` points at the execution `artifacts/` directory.

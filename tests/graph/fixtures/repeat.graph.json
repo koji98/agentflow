@@ -55,14 +55,20 @@
             "id": "lint",
             "repo": "main",
             "command": "npm",
-            "args": ["run", "lint"]
+            "args": [
+              "run",
+              "lint"
+            ]
           },
           {
             "type": "exec",
             "id": "typecheck",
             "repo": "main",
             "command": "npm",
-            "args": ["run", "typecheck"]
+            "args": [
+              "run",
+              "typecheck"
+            ]
           }
         ]
       },
@@ -87,10 +93,8 @@
                   "max_files": 4
                 },
                 {
-                  "name": "understand_response",
-                  "from": "artifact",
-                  "node": "understand",
-                  "artifact": "agent_response"
+                  "ref": "understand.agent_response",
+                  "name": "understand_response"
                 }
               ]
             },
@@ -102,10 +106,8 @@
               "prompt": "Review the fix and tighten any rough edges.",
               "context": [
                 {
-                  "name": "implementation_response",
-                  "from": "artifact",
-                  "node": "implement_fix",
-                  "artifact": "agent_response"
+                  "ref": "implement_fix.agent_response",
+                  "name": "implementation_response"
                 }
               ]
             },
@@ -115,7 +117,9 @@
               "repo": "main",
               "check_kind": "deterministic",
               "command": "npm",
-              "args": ["test"],
+              "args": [
+                "test"
+              ],
               "pass_if": {
                 "exit_code": 0
               },
@@ -140,10 +144,8 @@
         "prompt": "Summarize the fix and remaining risks.",
         "context": [
           {
+            "ref": "verify_fix.verification",
             "name": "verification",
-            "from": "artifact",
-            "node": "verify_fix",
-            "artifact": "verification",
             "iteration": "latest_passed"
           }
         ]

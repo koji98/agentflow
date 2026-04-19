@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createProcessTerminationController } from "../process_control.js";
 import {
+  buildHarnessSpawnEnv,
   collectMissingHarnessBinaryDiagnostics,
   normalizeHarnessLaunchError,
   renderHarnessPrompt,
@@ -93,13 +94,7 @@ export function createCodexCliHarness(
       return new Promise<HarnessResult>((resolve, reject) => {
         const child = spawn(binary, args, {
           cwd: invocation.repoPath,
-          env: {
-            ...process.env,
-            AGENTFLOW_WORKSPACE: invocation.repoPath,
-            AGENTFLOW_OUTPUT_DIR: invocation.outputDir,
-            AGENTFLOW_CONTEXT_PACKET: invocation.contextPacketPath,
-            AGENTFLOW_CONTEXT_MANIFEST: invocation.contextManifestPath
-          },
+          env: buildHarnessSpawnEnv(invocation),
           stdio: ["pipe", "pipe", "pipe"]
         });
         const stdoutChunks: Buffer[] = [];

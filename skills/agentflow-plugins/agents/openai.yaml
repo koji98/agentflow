@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentflow Plugins"
+  short_description: "Package and consume Agentflow plugin workflows"
+  default_prompt: "Use $agentflow-plugins for Agentflow Git plugin workflows, including plugin nodes, workflow manifests, plugin scripts, plugin_file context, lockfiles, and public artifact handoffs."

@@ -45,8 +45,8 @@ describe("graph validation", () => {
     });
   });
 
-  it("accepts checkpoint nodes inside repeat bodies and as repeat.until targets", () => {
-    const diagnostics = validateAuthoredGraphDocument({
+  it("accepts checkpoint nodes inside repeat bodies and as repeat.until targets", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "checkpoint-repeat",
       repos: {
@@ -108,8 +108,8 @@ describe("graph validation", () => {
     expect(diagnostics).toEqual([]);
   });
 
-  it("rejects repeat.until references that do not resolve to descendant checks or checkpoints", () => {
-    const diagnostics = validateAuthoredGraphDocument({
+  it("rejects repeat.until references that do not resolve to descendant checks or checkpoints", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-repeat",
       repos: {
@@ -162,8 +162,8 @@ describe("graph validation", () => {
     );
   });
 
-  it("rejects repeat.until checks that use soft failure semantics", () => {
-    const diagnostics = validateAuthoredGraphDocument({
+  it("rejects repeat.until checks that use soft failure semantics", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-soft-repeat-until",
       repos: {
@@ -221,8 +221,8 @@ describe("graph validation", () => {
     );
   });
 
-  it("rejects checkpoint nodes outside repeat bodies", () => {
-    const diagnostics = validateAuthoredGraphDocument({
+  it("rejects checkpoint nodes outside repeat bodies", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-checkpoint-placement",
       repos: {
@@ -277,8 +277,8 @@ describe("graph validation", () => {
     );
   });
 
-  it("rejects check fields that do not apply to the selected check kind", () => {
-    const diagnostics = validateAuthoredGraphDocument({
+  it("rejects check fields that do not apply to the selected check kind", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-check-fields",
       repos: {
@@ -349,8 +349,8 @@ describe("graph validation", () => {
     );
   });
 
-  it("rejects input paths and cwd values that escape the repo or workspace root", () => {
-    const diagnostics = validateAuthoredGraphDocument({
+  it("rejects input paths and cwd values that escape the repo or workspace root", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-path-boundaries",
       repos: {
@@ -468,5 +468,149 @@ describe("graph validation", () => {
         })
       ])
     );
+  });
+
+  it("rejects an agent graph that has no profile and therefore no resolvable harness", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "missing-harness-agent",
+      repos: { main: { path: "." } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            prompt: "Implement the requested change."
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.implement.profile",
+          message: expect.stringMatching(/agent.*require.*harness/i)
+        })
+      ])
+    );
+  });
+
+  it("rejects an AI check that cannot resolve a harness through the profile chain", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "missing-harness-ai-check",
+      repos: { main: { path: "." } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "check",
+            id: "judge",
+            check_kind: "ai",
+            prompt: "Judge the current state."
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.judge.profile",
+          message: expect.stringMatching(/check.*require.*harness/i)
+        })
+      ])
+    );
+  });
+
+  it("rejects an agent node that combines a read-only sandbox with declared artifacts", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "readonly-with-artifacts",
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default" },
+      profiles: { default: { harness: "cursor-cli", sandbox: "read-only" } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "summarize",
+            prompt: "Summarize the change.",
+            artifacts: {
+              summary: {
+                from: "output_dir",
+                path: "summary.md",
+                description: "One-paragraph change summary."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts",
+          message: expect.stringMatching(/read-only sandbox.*declares artifacts.*"summary"/)
+        })
+      ])
+    );
+  });
+
+  it("allows a read-only agent node when it declares no artifacts", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "readonly-no-artifacts",
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default" },
+      profiles: { default: { harness: "cursor-cli", sandbox: "read-only" } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "inspect",
+            prompt: "Read the code and respond with observations only."
+          }
+        ]
+      }
+    });
+
+    const sandboxDiagnostics = diagnostics.filter((diagnostic) =>
+      /read-only sandbox/i.test(diagnostic.message)
+    );
+    expect(sandboxDiagnostics).toEqual([]);
+  });
+
+  it("does not require a harness for exec-only graphs", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "exec-only",
+      repos: { main: { path: "." } },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "noop",
+            command: "true"
+          }
+        ]
+      }
+    });
+
+    const harnessDiagnostics = diagnostics.filter((diagnostic) =>
+      /require.*harness/i.test(diagnostic.message)
+    );
+    expect(harnessDiagnostics).toEqual([]);
   });
 });

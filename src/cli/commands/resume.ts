@@ -1,7 +1,9 @@
-import { resolve } from "node:path";
+import type { Dirent } from "node:fs";
+import { readdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 
 import { isRecordedRunOwnerActive } from "../../artifacts/owner.js";
-import { resolveRunArtifactPaths } from "../../artifacts/paths.js";
+import { resolveRunArtifactPaths, resolveRunsRoot } from "../../artifacts/paths.js";
 import { reconcileRunArtifacts } from "../../artifacts/reconcile.js";
 import {
   readCompiledGraph,
@@ -31,6 +33,96 @@ import {
 import { createRuntimeProgressReporter } from "../progress.js";
 import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
 import { createRunTerminalFields } from "../run_output.js";
+
+async function selectLatestResumableRunRoot(
+  currentWorkingDirectory: string,
+  graphInput: string
+): Promise<
+  | { ok: true; run_root: string; graph_path: string; runs_root: string }
+  | {
+      ok: false;
+      message: string;
+      runs_root?: string;
+      graph_path?: string;
+      diagnostics?: Array<{ path: string; message: string }>;
+    }
+> {
+  const loaded = await loadAuthoredGraphDocument(currentWorkingDirectory, graphInput);
+
+  if (!loaded.document) {
+    return {
+      ok: false,
+      message: "Graph could not be loaded or normalized from --graph.",
+      diagnostics: loaded.diagnostics
+    };
+  }
+
+  const runsRoot = resolveRunsRoot({
+    currentWorkingDirectory,
+    graphDirectory: dirname(loaded.absolute_path),
+    environment: process.env
+  });
+
+  let entries: Dirent[];
+  try {
+    entries = await readdir(runsRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        ok: false,
+        message: "No runs root found for the supplied graph.",
+        runs_root: runsRoot,
+        graph_path: loaded.absolute_path
+      };
+    }
+    throw error;
+  }
+
+  const candidateRoots = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `${runsRoot}/${entry.name}`);
+
+  const records = await Promise.all(
+    candidateRoots.map(async (runRoot) => {
+      try {
+        const record = await readRunRecord(runRoot);
+        return { runRoot, record };
+      } catch {
+        return undefined;
+      }
+    })
+  );
+
+  const resumableEntries = records
+    .filter((entry): entry is { runRoot: string; record: Awaited<ReturnType<typeof readRunRecord>> } =>
+      Boolean(entry) &&
+      ["failed", "canceled"].includes(entry!.record.status) &&
+      entry!.record.graph_path === loaded.absolute_path
+    )
+    .sort((left, right) => {
+      const leftStarted = Date.parse(left.record.started_at) || 0;
+      const rightStarted = Date.parse(right.record.started_at) || 0;
+      return rightStarted - leftStarted;
+    });
+
+  const latest = resumableEntries[0];
+  if (!latest) {
+    return {
+      ok: false,
+      message:
+        "No failed or canceled runs were found for the supplied graph in the resolved runs root.",
+      runs_root: runsRoot,
+      graph_path: loaded.absolute_path
+    };
+  }
+
+  return {
+    ok: true,
+    run_root: latest.runRoot,
+    graph_path: loaded.absolute_path,
+    runs_root: runsRoot
+  };
+}
 
 function compareRepoBindings(
   expected: Record<string, string>,
@@ -75,35 +167,82 @@ function compareRepoBindings(
 export const resumeCommand = {
   name: "resume",
   summary: "Recompile the original graph for a failed or canceled run root and preserve only unchanged passed work.",
-  usage: "agentflow resume --run-root <path/to/run-root>",
+  usage: "agentflow resume (--run-root <path/to/run-root> | --graph <path/to/graph> --latest)",
   examples: [
     "agentflow resume --run-root .agentflow/runs/<run-id>",
-    "agentflow resume --run-root /absolute/path/to/.agentflow/runs/<run-id>"
+    "agentflow resume --run-root /absolute/path/to/.agentflow/runs/<run-id>",
+    "agentflow resume --graph ./agentflow.graph.json --latest"
   ] as const,
-  optionNames: ["run-root", "help"] as const,
+  optionNames: ["run-root", "graph", "latest", "help"] as const,
   helpNotes: [
     "Resume recompiles from the original graph path using the current Agentflow build.",
     "Only passed nodes whose compiled contract still matches are preserved.",
-    "Repeat scopes restart from iteration 1 when they were unfinished or their compiled contract changed."
+    "Repeat scopes restart from iteration 1 when they were unfinished or their compiled contract changed.",
+    "Pass --graph with --latest to resume the most recent failed or canceled run discovered under the graph's runs root."
   ] as const,
   async run(
-    options: Record<string, string | boolean | undefined>,
+    options: Record<string, string | boolean | string[] | undefined>,
     currentWorkingDirectory: string
   ) {
     const runRootInput = typeof options["run-root"] === "string" ? options["run-root"] : undefined;
+    const graphInput = typeof options.graph === "string" ? options.graph : undefined;
+    const latestRequested = options.latest === true;
 
-    if (!runRootInput) {
+    if (latestRequested && runRootInput) {
       return {
         exitCode: 2,
         stdout: renderCommandUsageError({
-          message: "Missing required option: --run-root",
+          message: "Provide either --run-root or --latest with --graph, not both.",
           commandName: this.name,
           usage: this.usage
         })
       };
     }
 
-    const run_root = resolve(currentWorkingDirectory, runRootInput);
+    if (!runRootInput && !latestRequested) {
+      return {
+        exitCode: 2,
+        stdout: renderCommandUsageError({
+          message: "Missing required option: --run-root (or --graph with --latest)",
+          commandName: this.name,
+          usage: this.usage
+        })
+      };
+    }
+
+    if (latestRequested && !graphInput) {
+      return {
+        exitCode: 2,
+        stdout: renderCommandUsageError({
+          message: "--latest requires --graph to locate the runs root.",
+          commandName: this.name,
+          usage: this.usage
+        })
+      };
+    }
+
+    let run_root: string;
+
+    if (runRootInput) {
+      run_root = resolve(currentWorkingDirectory, runRootInput);
+    } else {
+      const latest = await selectLatestResumableRunRoot(currentWorkingDirectory, graphInput!);
+      if (!latest.ok) {
+        return {
+          exitCode: 1,
+          output: {
+            command: "resume",
+            status: "failed",
+            message: latest.message,
+            ...(latest.runs_root ? { runs_root: latest.runs_root } : {}),
+            ...(latest.graph_path ? { graph_path: latest.graph_path } : {}),
+            ...(latest.diagnostics ? { diagnostics: latest.diagnostics } : {})
+          }
+        };
+      }
+      run_root = latest.run_root;
+    }
+
     await reconcileRunArtifacts(run_root);
 
     const [
@@ -225,9 +364,6 @@ export const resumeCommand = {
             graph_help: "agentflow graph-help",
             validate: createGraphCliInvocation("validate", {
               graphPath: loaded.absolute_path
-            }),
-            compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path
             })
           },
           diagnostics: launch.diagnostics
@@ -238,7 +374,11 @@ export const resumeCommand = {
     const compilation = compileAuthoredGraph(
       loaded.document,
       launch,
-      loaded.lowered_managed_nodes
+      loaded.lowered_managed_nodes,
+      {
+        ...(loaded.resolved_plugins ? { resolved_plugins: loaded.resolved_plugins } : {}),
+        graph_dir: dirname(loaded.absolute_path)
+      }
     );
 
     if (compilation.diagnostics.length > 0) {
@@ -255,9 +395,6 @@ export const resumeCommand = {
           next_steps: {
             graph_help: "agentflow graph-help",
             validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path
-            }),
-            compile: createGraphCliInvocation("compile", {
               graphPath: loaded.absolute_path
             })
           },
@@ -287,9 +424,6 @@ export const resumeCommand = {
           path_resolution: pathResolution,
           next_steps: {
             validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path
-            }),
-            compile: createGraphCliInvocation("compile", {
               graphPath: loaded.absolute_path
             })
           },

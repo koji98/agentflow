@@ -147,8 +147,8 @@ describe("checkpoint CLI helpers", () => {
           {
             key: "draft_spec",
             source: {
+              ref: "draft.draft_spec",
               name: "draft_spec",
-              from: "artifact",
               node: "draft",
               artifact: "draft_spec"
             },
@@ -255,8 +255,8 @@ describe("checkpoint CLI helpers", () => {
           {
             key: "draft_spec",
             source: {
+              ref: "draft.draft_spec",
               name: "draft_spec",
-              from: "artifact",
               node: "draft",
               artifact: "draft_spec"
             },

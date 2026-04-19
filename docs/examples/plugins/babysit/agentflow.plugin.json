@@ -1,0 +1,26 @@
+{
+  "schema": "agentflow.plugin/1",
+  "id": "babysit",
+  "version": "0.1.0",
+  "workflows": {
+    "poll-pr": {
+      "path": "workflows/poll-pr/workflow.json",
+      "description": "Repeatedly poll a pull request URL until it reports a final state."
+    }
+  },
+  "tools": {
+    "poll": {
+      "executable": "scripts/poll-pr.sh",
+      "description": "Polls a GitHub pull request URL once and prints a JSON status object to stdout.",
+      "args": ["--once"],
+      "usage": "poll [--pr <id>]",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

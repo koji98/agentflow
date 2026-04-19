@@ -13,6 +13,7 @@ import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
 import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import { createInteractiveCheckpointExecutor } from "../checkpoint.js";
 import {
+  collectGraphConfigOverrides,
   createGraphCliInvocation,
   createGraphPathResolution,
   createResumeCliInvocation,
@@ -32,14 +33,15 @@ export const runCommand = {
     "agentflow run --graph ./agentflow.graph.json",
     "AGENTFLOW_RUNS_ROOT=/absolute/path/to/.agentflow/runs agentflow run --graph ./agentflow.graph.json"
   ] as const,
-  optionNames: ["graph", "label", "help"] as const,
+  optionNames: ["graph", "label", "config", "config-file", "help"] as const,
   helpNotes: [
     "Runs default to <launch-cwd>/.agentflow/runs/<run-id> unless AGENTFLOW_RUNS_ROOT is set to an absolute path.",
     "Press Ctrl-C in the launching terminal to cancel. The runtime waits for cleanup and durable artifacts capture the terminal Canceled state.",
-    "Repo paths inside the graph resolve from the graph file directory even when --graph is passed relative to the launch shell."
+    "Repo paths inside the graph resolve from the graph file directory even when --graph is passed relative to the launch shell.",
+    "Use --config key=value (repeatable) and --config-file <path> to override top-level graph config; values like 1, true, [\"a\"] parse as JSON, others stay strings."
   ] as const,
   async run(
-    options: Record<string, string | boolean | undefined>,
+    options: Record<string, string | boolean | string[] | undefined>,
     currentWorkingDirectory: string,
     signal?: AbortSignal
   ) {
@@ -57,7 +59,25 @@ export const runCommand = {
       };
     }
 
-    const loaded = await loadAuthoredGraphDocument(currentWorkingDirectory, graphPath);
+    const configCollection = await collectGraphConfigOverrides(options, currentWorkingDirectory);
+
+    if (configCollection.diagnostics.length > 0) {
+      return {
+        exitCode: 2,
+        output: {
+          command: "run",
+          status: "failed",
+          message: "Graph config overrides could not be parsed.",
+          diagnostics: configCollection.diagnostics
+        }
+      };
+    }
+
+    const loaded = await loadAuthoredGraphDocument(currentWorkingDirectory, graphPath, {
+      ...(configCollection.config_overrides
+        ? { config_overrides: configCollection.config_overrides }
+        : {})
+    });
     const pathResolution = createGraphPathResolution(
       currentWorkingDirectory,
       graphPath,
@@ -101,9 +121,6 @@ export const runCommand = {
             graph_help: "agentflow graph-help",
             validate: createGraphCliInvocation("validate", {
               graphPath: loaded.absolute_path
-            }),
-            compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path
             })
           },
           diagnostics: launch.diagnostics
@@ -114,7 +131,11 @@ export const runCommand = {
     const compilation = compileAuthoredGraph(
       loaded.document,
       launch,
-      loaded.lowered_managed_nodes
+      loaded.lowered_managed_nodes,
+      {
+        ...(loaded.resolved_plugins ? { resolved_plugins: loaded.resolved_plugins } : {}),
+        graph_dir: dirname(loaded.absolute_path)
+      }
     );
 
     if (compilation.diagnostics.length > 0) {
@@ -128,9 +149,6 @@ export const runCommand = {
           path_resolution: pathResolution,
           next_steps: {
             validate: createGraphCliInvocation("validate", {
-              graphPath: loaded.absolute_path
-            }),
-            compile: createGraphCliInvocation("compile", {
               graphPath: loaded.absolute_path
             }),
             graph_help: "agentflow graph-help"
@@ -159,9 +177,6 @@ export const runCommand = {
           next_steps: {
             validate: createGraphCliInvocation("validate", {
               graphPath: loaded.absolute_path
-            }),
-            compile: createGraphCliInvocation("compile", {
-              graphPath: loaded.absolute_path
             })
           },
           diagnostics: repoResolution.diagnostics
@@ -176,6 +191,7 @@ export const runCommand = {
       },
       run_root: createRunRootPath({
         currentWorkingDirectory,
+        graphDirectory: dirname(loaded.absolute_path),
         graphId: loaded.document.graph_id,
         ...(typeof options.label === "string" ? { runLabel: options.label } : {}),
         environment: process.env
@@ -196,7 +212,11 @@ export const runCommand = {
     });
     const artifactPaths = resolveRunArtifactPaths(run.run_root);
     const runsRoot = dirname(run.run_root);
-    const runsRootDetails = createRunsRootDetails(currentWorkingDirectory, process.env);
+    const runsRootDetails = createRunsRootDetails(
+      currentWorkingDirectory,
+      process.env,
+      dirname(loaded.absolute_path)
+    );
     const terminalFields = createRunTerminalFields(run.state, run.attempts, run.events);
     const runMessage =
       run.outcome === "passed"

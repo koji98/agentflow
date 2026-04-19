@@ -179,8 +179,8 @@ async function createFixtureRun() {
           command: "placeholder",
           context: [
             {
+              ref: "verify-fix.verification",
               name: "verification",
-              from: "artifact",
               node: "verify-fix",
               artifact: "verification",
               iteration: "latest_passed"

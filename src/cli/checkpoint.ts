@@ -63,15 +63,11 @@ function artifactReferenceKey(reference: ArtifactReference): string {
 }
 
 function describeContextSource(source: ContextPacketSource): string {
-  if (source.from === "runtime_repeat_history") {
-    return source.name;
+  if ("ref" in source) {
+    return source.ref;
   }
 
-  if (source.from !== "artifact") {
-    return source.name;
-  }
-
-  return `${source.node}:${source.artifact}`;
+  return source.name;
 }
 
 function truncatePreview(
@@ -205,7 +201,7 @@ function findReviewMaterial(
   const key = artifactReferenceKey(reviewFrom);
   return packet.materials.find(
     (item) =>
-      item.source.from === "artifact" &&
+      "ref" in item.source &&
       artifactReferenceKey(item.source) === key
   );
 }

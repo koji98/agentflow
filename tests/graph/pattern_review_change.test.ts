@@ -205,8 +205,8 @@ describe("pattern review change", () => {
           expect.objectContaining({ name: "summary", from: "workspace_file", path: "artifacts/change-summary.md" }),
           expect.objectContaining({ name: "additional_context_1", from: "workspace_file", path: "artifacts/notes.md" }),
           expect.objectContaining({
+            ref: "upstream_evaluation.evaluation_ledger",
             name: "evaluation_ledger",
-            from: "artifact",
             node: "upstream_evaluation",
             artifact: "evaluation_ledger",
             if_available: true
@@ -234,20 +234,20 @@ describe("pattern review change", () => {
           prompt: "Summarize the review result for an engineer.",
           context: [
             {
+              ref: "review_managed_nodes.agent_response",
               name: "review_agent_response",
-              from: "artifact",
               node: "review_managed_nodes",
               artifact: "agent_response"
             },
             {
+              ref: "review_managed_nodes.review_summary",
               name: "review_summary",
-              from: "artifact",
               node: "review_managed_nodes",
               artifact: "review_summary"
             },
             {
+              ref: "review_managed_nodes.review_bundle",
               name: "review_bundle",
-              from: "artifact",
               node: "review_managed_nodes",
               artifact: "review_bundle"
             }

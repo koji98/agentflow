@@ -1,0 +1,110 @@
+{
+  "version": "1",
+  "graph_id": "ship-feature-tools-demo",
+  "repos": {
+    "main": {
+      "path": "../../..",
+      "default_branch": "main"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "inplace"
+  },
+  "profiles": {
+    "default": {
+      "harness": "cursor-cli",
+      "model": "auto",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 900,
+      "input_rules": {
+        "max_total_tokens": 96000,
+        "max_tokens_per_item": 32000
+      }
+    },
+    "review": {
+      "harness": "cursor-cli",
+      "model": "auto",
+      "reasoning_effort": "medium",
+      "sandbox": "read-only",
+      "timeout_sec": 900
+    }
+  },
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "github_token": {
+        "type": "string",
+        "description": "Optional GitHub token used by the babysit-poll plugin tool."
+      }
+    },
+    "additionalProperties": false
+  },
+  "config": {
+    "github_token": "ghp_example_replace_me"
+  },
+  "plugins": {
+    "babysit": {
+      "source": "../plugins/babysit",
+      "ref": "HEAD"
+    }
+  },
+  "tools": [
+    {
+      "from_plugin": "babysit",
+      "tool": "poll"
+    }
+  ],
+  "tool_config": {
+    "babysit-poll": {
+      "token": "{{config.github_token}}"
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "draft_release_notes",
+        "repo": "main",
+        "prompt": "Draft a tight, well-structured release-notes section that covers the most recent changes summarized from the README. Write the markdown body to `release-notes.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR). Do not modify files in the repository.",
+        "context": [
+          {
+            "name": "readme",
+            "from": "workspace_file",
+            "path": "README.md"
+          }
+        ],
+        "artifacts": {
+          "release_notes": {
+            "from": "output_dir",
+            "path": "release-notes.md",
+            "description": "Draft release-notes section produced by the agent."
+          }
+        }
+      },
+      {
+        "type": "agent",
+        "id": "watch_pr",
+        "repo": "main",
+        "profile": "review",
+        "prompt": "Use the `babysit-poll` plugin tool to fetch the current state of pull request `123` (call `babysit-poll --pr 123`). Combine the polled JSON with the release-notes draft to produce a short ship-readiness handoff. Write it to `ship-handoff.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR). Do not modify files in the repository.",
+        "context": [
+          {
+            "ref": "draft_release_notes.release_notes",
+            "name": "release_notes"
+          }
+        ],
+        "artifacts": {
+          "ship_handoff": {
+            "from": "output_dir",
+            "path": "ship-handoff.md",
+            "description": "Final ship-readiness handoff combining release notes and PR status."
+          }
+        }
+      }
+    ]
+  }
+}
