@@ -51,7 +51,21 @@ export interface ResolvedTool {
   args: string[];
   config: Record<string, string>;
   config_schema?: Record<string, unknown>;
+  credentials_required?: string[];
   source: ResolvedToolSource;
+}
+
+export interface CompiledCredentialFieldSpec {
+  key: string;
+  secret: boolean;
+  required: boolean;
+  default?: string;
+}
+
+export interface CompiledCredentialSpec {
+  scope: string;
+  description?: string;
+  fields: CompiledCredentialFieldSpec[];
 }
 
 export interface CompiledAgentNode extends CompiledExecutableNodeBase {
@@ -149,6 +163,7 @@ export interface CompiledGraph {
   scopes: CompiledScope[];
   authored_to_compiled: Record<string, string[]>;
   prerequisites: GraphPrerequisites;
+  credential_specs: Record<string, CompiledCredentialSpec>;
 }
 
 export interface CompileGraphResult {

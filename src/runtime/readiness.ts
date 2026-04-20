@@ -3,7 +3,12 @@ import { stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js";
+import { resolveScope, type StoreOptions } from "../auth/store.js";
+import type {
+  CompiledCredentialSpec,
+  CompiledExecutableNode,
+  CompiledGraph
+} from "../graph/compiled.js";
 import type { HarnessName } from "../graph/schema.js";
 import { resolveSubpathWithinRoot } from "../path_rules.js";
 import type { HarnessAdapter } from "./harness/types.js";
@@ -12,7 +17,7 @@ export type ReadinessCheckStatus = "passed" | "warning" | "blocked";
 export type ReadinessStatus = "ready" | "warnings" | "blocked";
 
 export interface ReadinessCheckResult {
-  kind: "file" | "command" | "env" | "repo" | "harness";
+  kind: "file" | "command" | "env" | "repo" | "harness" | "credential";
   required: boolean;
   status: ReadinessCheckStatus;
   target: string;
@@ -391,6 +396,93 @@ async function evaluateHarnessReadiness(
   );
 }
 
+function collectScopeUsageFromGraph(
+  graph: Pick<CompiledGraph, "nodes">
+): Map<string, string[]> {
+  const usage = new Map<string, string[]>();
+  for (const node of graph.nodes) {
+    if (node.kind !== "agent") {
+      continue;
+    }
+    for (const tool of node.tools) {
+      for (const scope of tool.credentials_required ?? []) {
+        const callers = usage.get(scope) ?? [];
+        const label = `${node.compiled_id} (${tool.callable_name})`;
+        if (!callers.includes(label)) {
+          callers.push(label);
+        }
+        usage.set(scope, callers);
+      }
+    }
+  }
+  return usage;
+}
+
+async function evaluateCredentialReadiness(options: {
+  graph: Pick<CompiledGraph, "nodes">;
+  credential_specs: Record<string, CompiledCredentialSpec>;
+  env: NodeJS.ProcessEnv;
+  store_options?: StoreOptions;
+}): Promise<ReadinessCheckResult[]> {
+  const usage = collectScopeUsageFromGraph(options.graph);
+  if (usage.size === 0) {
+    return [];
+  }
+
+  const checks: ReadinessCheckResult[] = [];
+  const sortedScopes = [...usage.keys()].sort();
+  const baseStoreOptions = options.store_options ?? {};
+
+  for (const scope of sortedScopes) {
+    const usedBy = usage.get(scope) ?? [];
+    const usedByText = usedBy.length > 0 ? ` (used by ${usedBy.join(", ")})` : "";
+    const spec = options.credential_specs[scope];
+
+    if (!spec) {
+      checks.push(
+        buildIssue(
+          "credential",
+          true,
+          scope,
+          false,
+          `Credential scope "${scope}" is required${usedByText} but no plugin declares it.`
+        )
+      );
+      continue;
+    }
+
+    const result = await resolveScope(
+      { scope, fields: spec.fields },
+      { ...baseStoreOptions, env: options.env }
+    );
+
+    if (result.missing_required.length === 0) {
+      checks.push(
+        buildIssue(
+          "credential",
+          true,
+          scope,
+          true,
+          `Credential scope "${scope}" is satisfied${usedByText}.`
+        )
+      );
+      continue;
+    }
+
+    checks.push(
+      buildIssue(
+        "credential",
+        true,
+        scope,
+        false,
+        `Credential scope "${scope}" is missing required field(s): ${result.missing_required.join(", ")}${usedByText}. Run: agentflow auth login ${scope}`
+      )
+    );
+  }
+
+  return checks;
+}
+
 async function evaluateMachineReadiness(options: {
   graph: Pick<CompiledGraph, "launch" | "nodes">;
   repo_sources: Record<string, string>;
@@ -439,12 +531,14 @@ async function evaluateMachineReadiness(options: {
 }
 
 export async function evaluateGraphReadiness(options: {
-  graph: Pick<CompiledGraph, "prerequisites"> & Partial<Pick<CompiledGraph, "launch" | "nodes">>;
+  graph: Pick<CompiledGraph, "prerequisites"> &
+    Partial<Pick<CompiledGraph, "launch" | "nodes" | "credential_specs">>;
   repo_sources: Record<string, string>;
   repo_source_diagnostics?: Array<{ path: string; message: string }>;
   env?: NodeJS.ProcessEnv;
   machine_checks?: boolean;
   harnesses?: Partial<Record<HarnessName, HarnessAdapter>>;
+  credential_store_options?: StoreOptions;
 }): Promise<GraphReadinessResult> {
   const checks: ReadinessCheckResult[] = [];
   const environment = options.env ?? process.env;
@@ -500,6 +594,17 @@ export async function evaluateGraphReadiness(options: {
         repo_sources: options.repo_sources,
         env: environment,
         ...(options.harnesses ? { harnesses: options.harnesses } : {})
+      }))
+    );
+
+    checks.push(
+      ...(await evaluateCredentialReadiness({
+        graph: { nodes: options.graph.nodes },
+        credential_specs: options.graph.credential_specs ?? {},
+        env: environment,
+        ...(options.credential_store_options
+          ? { store_options: options.credential_store_options }
+          : {})
       }))
     );
   }

@@ -361,6 +361,46 @@ Use plugin tools when the same capability is needed across many agent prompts an
 
 A good heuristic: if it would help an agent to know the tool exists, ship it as a plugin tool. If the runtime should always run it at a known point in the graph, model it as an `exec` node.
 
+### Plugin Tool Credentials
+
+Plugin tools that need upstream API access declare the credentials they require in `agentflow.plugin.json`. The runtime resolves credentials per agent node, exports them as `AGENTFLOW_CREDENTIAL_<UPPER_SCOPE>_<UPPER_KEY>` environment variables, and fails the run with `MissingCredentialsError` if a required field is missing.
+
+Authoring sketch:
+
+```json
+{
+  "tools": {
+    "poll": {
+      "executable": "scripts/poll-pr.sh",
+      "credentials": ["babysit_pat"]
+    }
+  },
+  "credentials": {
+    "babysit_pat": {
+      "scope": "babysit",
+      "fields": [
+        { "key": "token", "secret": true, "required": true }
+      ],
+      "login": {
+        "type": "pat-paste",
+        "verify": {
+          "method": "GET",
+          "url": "https://api.example.com/whoami",
+          "auth": {
+            "kind": "header",
+            "header_name": "Authorization",
+            "header_value_template": "Bearer {token}"
+          },
+          "ok_when_status": 200
+        }
+      }
+    }
+  }
+}
+```
+
+Operators run `agentflow auth login --graph <path> --scope babysit` once per host. After that, `agentflow validate --run-ready` and `agentflow run` resolve and inject the credential automatically. See `docs/AUTH.md` for the full credential contract, the `agentflow auth` CLI, and the resolution order (env override > stored value > manifest default).
+
 ## Skills
 
 Plugins can package skill-like instructions under `context/` or `skills/` and inject them through `plugin_file` context. That covers two common cases:

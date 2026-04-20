@@ -69,7 +69,32 @@ function buildPluginFixture(pluginRoot: string, pluginToolPath: string): Resolve
           description: "Poll a PR.",
           usage: "babysit-poll [--once]",
           args: ["--once"],
-          config_schema: {}
+          config_schema: {},
+          credentials: ["babysit_pat"]
+        }
+      },
+      credentials: {
+        babysit_pat: {
+          scope: "babysit",
+          description: "Babysit personal access token.",
+          fields: [
+            { key: "token", secret: true, required: true },
+            { key: "host", secret: false, required: false, default: "https://example.com" }
+          ],
+          login: {
+            type: "pat-paste",
+            instructions: "Paste the babysit PAT.",
+            verify: {
+              method: "GET",
+              url: "https://example.com/whoami",
+              auth: {
+                kind: "header",
+                header_name: "Authorization",
+                header_value_template: "Bearer {token}"
+              },
+              ok_when_status: 200
+            }
+          }
         }
       }
     }
@@ -131,6 +156,40 @@ describe("plugin tool compilation", () => {
     expect(compilation.diagnostics).toEqual([]);
     const draft = findAgentNode(compilation.compiled_graph!.nodes, "draft");
     expect(draft.tools).toEqual([]);
+  });
+
+  it("threads plugin credential declarations into resolved tools and credential_specs", () => {
+    const document: AuthoredGraphDocument = {
+      version: "1",
+      graph_id: "tools-plugin-credentials",
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: { default: { harness: "codex-cli" } },
+      tools: [{ from_plugin: "babysit", tool: "poll" }],
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [{ type: "agent", id: "watch", prompt: "Watch the PR." }]
+      }
+    };
+
+    const compilation = compileWith(document);
+    expect(compilation.diagnostics).toEqual([]);
+
+    const watch = findAgentNode(compilation.compiled_graph!.nodes, "watch");
+    const pollTool = watch.tools.find((tool) => tool.callable_name === "babysit-poll");
+    expect(pollTool?.credentials_required).toEqual(["babysit"]);
+
+    expect(compilation.compiled_graph!.credential_specs).toEqual({
+      babysit: {
+        scope: "babysit",
+        description: "Babysit personal access token.",
+        fields: [
+          { key: "token", secret: true, required: true },
+          { key: "host", secret: false, required: false, default: "https://example.com" }
+        ]
+      }
+    });
   });
 
   it("namespaces plugin tools and exposes them on agent nodes via plugin_root", () => {
@@ -448,6 +507,125 @@ describe("prepareAgentTools", () => {
     expect(spawnEnv.AGENTFLOW_TOOL_STATE).toBe(setup.tool_state_path);
     expect(spawnEnv.AGENTFLOW_TOOL_BABYSIT_POLL_TOKEN).toBe("abc123");
   });
+
+  it("injects credential env vars from env overrides when the node tools require credentials", async () => {
+    const executionDir = join(tempRoot, "executions/cred-env");
+    const workspacePath = join(tempRoot, "workspace-cred-env");
+    const artifactsRoot = join(tempRoot, "executions/cred-env/output");
+    await mkdir(executionDir, { recursive: true });
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(artifactsRoot, { recursive: true });
+
+    const pluginPath = join(tempRoot, "plugins/babysit/scripts/poll.sh");
+    await writeExecutable(pluginPath, "#!/usr/bin/env bash\necho plugin\n");
+
+    const node = {
+      authored_id: "watch",
+      compiled_id: "main__watch",
+      declared_artifacts: {},
+      tools: [
+        {
+          callable_name: "babysit-poll",
+          executable_path: pluginPath,
+          args: [],
+          config: {},
+          credentials_required: ["babysit"],
+          source: {
+            kind: "plugin",
+            alias: "babysit",
+            tool: "poll",
+            plugin_root: join(tempRoot, "plugins/babysit"),
+            declared_at: "graph",
+            declaration_path: "$.tools[0]"
+          }
+        }
+      ]
+    } satisfies Pick<CompiledAgentNode, "authored_id" | "compiled_id" | "declared_artifacts" | "tools">;
+
+    const setup = await prepareAgentTools({
+      node: node as unknown as CompiledAgentNode,
+      execution_dir: executionDir,
+      workspace_path: workspacePath,
+      artifacts_root: artifactsRoot,
+      credential_specs: {
+        babysit: {
+          scope: "babysit",
+          fields: [
+            { key: "token", secret: true, required: true },
+            { key: "host", secret: false, required: false, default: "https://example.com" }
+          ]
+        }
+      },
+      credential_store_options: { index_path: join(tempRoot, "missing-index.json") },
+      credential_env: {
+        AGENTFLOW_CREDENTIAL_BABYSIT_TOKEN: "env-token-value"
+      }
+    });
+
+    expect(setup.env.AGENTFLOW_CREDENTIAL_BABYSIT_TOKEN).toBe("env-token-value");
+    expect(setup.env.AGENTFLOW_CREDENTIAL_BABYSIT_HOST).toBe("https://example.com");
+  });
+
+  it("throws MissingCredentialsError when a required credential field is unresolved", async () => {
+    const executionDir = join(tempRoot, "executions/cred-missing");
+    const workspacePath = join(tempRoot, "workspace-cred-missing");
+    const artifactsRoot = join(tempRoot, "executions/cred-missing/output");
+    await mkdir(executionDir, { recursive: true });
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(artifactsRoot, { recursive: true });
+
+    const pluginPath = join(tempRoot, "plugins/babysit/scripts/poll.sh");
+    await writeExecutable(pluginPath, "#!/usr/bin/env bash\necho plugin\n");
+
+    const node = {
+      authored_id: "watch",
+      compiled_id: "main__watch",
+      declared_artifacts: {},
+      tools: [
+        {
+          callable_name: "babysit-poll",
+          executable_path: pluginPath,
+          args: [],
+          config: {},
+          credentials_required: ["babysit"],
+          source: {
+            kind: "plugin",
+            alias: "babysit",
+            tool: "poll",
+            plugin_root: join(tempRoot, "plugins/babysit"),
+            declared_at: "graph",
+            declaration_path: "$.tools[0]"
+          }
+        }
+      ]
+    } satisfies Pick<CompiledAgentNode, "authored_id" | "compiled_id" | "declared_artifacts" | "tools">;
+
+    await expect(
+      prepareAgentTools({
+        node: node as unknown as CompiledAgentNode,
+        execution_dir: executionDir,
+        workspace_path: workspacePath,
+        artifacts_root: artifactsRoot,
+        credential_specs: {
+          babysit: {
+            scope: "babysit",
+            fields: [{ key: "token", secret: true, required: true }]
+          }
+        },
+        credential_store_options: { index_path: join(tempRoot, "missing-index.json") },
+        credential_env: {}
+      })
+    ).rejects.toMatchObject({
+      name: "MissingCredentialsError",
+      missing: [
+        {
+          scope: "babysit",
+          missing_keys: ["token"],
+          used_by: ["main__watch (babysit-poll)"]
+        }
+      ]
+    });
+  });
 });
 
 describe("formatToolContract", () => {
@@ -547,6 +725,20 @@ describe("formatToolContract", () => {
 });
 
 describe("end-to-end runtime tool wiring", () => {
+  const previousBabysitToken = process.env.AGENTFLOW_CREDENTIAL_BABYSIT_TOKEN;
+
+  beforeEach(() => {
+    process.env.AGENTFLOW_CREDENTIAL_BABYSIT_TOKEN = "test-babysit-token";
+  });
+
+  afterEach(() => {
+    if (previousBabysitToken === undefined) {
+      delete process.env.AGENTFLOW_CREDENTIAL_BABYSIT_TOKEN;
+    } else {
+      process.env.AGENTFLOW_CREDENTIAL_BABYSIT_TOKEN = previousBabysitToken;
+    }
+  });
+
   it("spawns the plugin tool through PATH using only the harness-provided env", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-tools-spawn-"));
     const repoDir = join(tempRoot, "repo");

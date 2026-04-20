@@ -7,6 +7,7 @@ import type {
   CompiledAgentNode,
   CompiledCheckNode,
   CompiledCheckpointNode,
+  CompiledCredentialSpec,
   CompiledExecNode,
   CompiledExecutableNode,
   CompiledGraph
@@ -94,6 +95,7 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
   signal: AbortSignal | undefined;
   on_stdout_chunk?: (chunk: string) => void;
   on_stderr_chunk?: (chunk: string) => void;
+  credential_specs?: Record<string, CompiledCredentialSpec>;
 }
 
 export type RuntimeNodeExecutor<TNode extends CompiledExecutableNode> = (
@@ -1124,7 +1126,8 @@ async function defaultAgentExecutor(
     node: context.node,
     execution_dir: context.execution_dir,
     workspace_path: context.workspace_path,
-    artifacts_root: outputDir
+    artifacts_root: outputDir,
+    ...(context.credential_specs ? { credential_specs: context.credential_specs } : {})
   });
   const contextManifest = await readContextManifestContent(context.context_manifest_path);
   const promptTokens = buildNodeRuntimeEnv(context);
@@ -1309,6 +1312,7 @@ async function runArtifactRepairHarness(options: {
   contextManifestPath: string;
   signal: AbortSignal | undefined;
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
+  credentialSpecs?: Record<string, CompiledCredentialSpec>;
 }): Promise<"passed" | "failed" | "canceled" | "unavailable"> {
   const harnessName = options.node.effective_policy.harness;
   const harness = harnessName ? options.harnesses[harnessName] : undefined;
@@ -1348,7 +1352,8 @@ async function runArtifactRepairHarness(options: {
     node: options.node,
     execution_dir: options.attempt.execution_dir,
     workspace_path: options.workspacePath,
-    artifacts_root: repairOutputDir
+    artifacts_root: repairOutputDir,
+    ...(options.credentialSpecs ? { credential_specs: options.credentialSpecs } : {})
   });
   const contextManifest = await readContextManifestContent(options.contextManifestPath);
 
@@ -1411,6 +1416,7 @@ async function materializeDeclaredArtifactsWithRepair(options: {
   contextManifestPath: string;
   signal: AbortSignal | undefined;
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
+  credentialSpecs?: Record<string, CompiledCredentialSpec>;
 }): Promise<{
   artifacts: Record<string, string>;
   repair_metadata?: ArtifactRepairMetadata;
@@ -1486,7 +1492,8 @@ async function materializeDeclaredArtifactsWithRepair(options: {
         contextPacketPath: options.contextPacketPath,
         contextManifestPath: options.contextManifestPath,
         signal: options.signal,
-        harnesses: options.harnesses
+        harnesses: options.harnesses,
+        ...(options.credentialSpecs ? { credentialSpecs: options.credentialSpecs } : {})
       });
 
       if (repairStatus === "canceled") {
@@ -1760,6 +1767,7 @@ async function executeNode(
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
+            credential_specs: options.compiled_graph.credential_specs,
             signal
           })
         : await defaultAgentExecutor(
@@ -1771,6 +1779,7 @@ async function executeNode(
               execution_dir: attempt.execution_dir,
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
+              credential_specs: options.compiled_graph.credential_specs,
               signal,
               on_stdout_chunk: logSink.on_stdout_chunk,
               on_stderr_chunk: logSink.on_stderr_chunk
@@ -1808,7 +1817,10 @@ async function executeNode(
             contextPacketPath: context.packet_path,
             contextManifestPath: context.manifest_path,
             signal,
-            harnesses: options.harnesses ?? {}
+            harnesses: options.harnesses ?? {},
+            ...(options.compiled_graph.credential_specs
+              ? { credentialSpecs: options.compiled_graph.credential_specs }
+              : {})
           });
     const artifacts = materialized.artifacts;
     artifactRepairMetadata = materialized.repair_metadata;

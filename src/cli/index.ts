@@ -24,6 +24,7 @@ import {
 } from "../graph/schema.js";
 import { managedPatternDescriptors } from "../managed/index.js";
 import { applyCommand } from "./commands/apply.js";
+import { authCommand } from "./commands/auth.js";
 import { evalCommand } from "./commands/eval.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { pluginCommand } from "./commands/plugin.js";
@@ -82,6 +83,8 @@ const optionDescriptions: Record<string, string> = {
     "--config-file <path>         Load graph config overrides from a JSON file. Merged before --config entries.",
   "resume-on-fail":
     "--resume-on-fail [N]         After a failed run, automatically resume up to N times in the same process (default 3).",
+  scope: "--scope <scope>              Credential scope id declared by a plugin (e.g. reddit-drone).",
+  key: "--key <key>                  Credential field key declared on the scope (e.g. token).",
   help: "--help, -h                   Show command help."
 };
 
@@ -202,6 +205,7 @@ const commandRegistry = {
   apply: applyCommand,
   eval: evalCommand,
   plugin: pluginCommand,
+  auth: authCommand,
   "graph-help": graphHelpCommand
 } as const satisfies Record<string, GraphCliCommand>;
 
@@ -370,6 +374,7 @@ function renderMainHelp(): string {
     "  7. apply: apply captured workspace changes from a run back to a git repo",
     "  8. eval: validate or run local eval suites for Agentflow graphs",
     "  9. plugin: resolve Git-distributed managed workflow plugins for a graph",
+    "  10. auth: log in to plugin-declared credential scopes (macOS keychain)",
     "",
     "Examples:",
     "  agentflow graph-help",
@@ -384,6 +389,7 @@ function renderMainHelp(): string {
     "  agentflow apply --run-root .agentflow/runs/<run-id>",
     "  agentflow eval validate --suite evals/example/suite.json",
     "  agentflow plugin resolve --graph agentflow.graph.json",
+    "  agentflow auth login reddit-drone --graph agentflow.graph.json",
     "",
     "Path rules:",
     `  ${graphPathRuleText}`,
@@ -542,7 +548,8 @@ export async function executeCli(
     command.name !== "eval" &&
     command.name !== "plugin" &&
     command.name !== "runs" &&
-    command.name !== "inspect"
+    command.name !== "inspect" &&
+    command.name !== "auth"
   ) {
     return {
       exitCode: 2,

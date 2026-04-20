@@ -2,7 +2,7 @@
 
 ## System Boundary
 
-Agentflow has six runtime subsystems and one deferred control-plane stub.
+Agentflow has seven runtime subsystems and one deferred control-plane stub.
 
 ### Runtime subsystems
 
@@ -12,6 +12,7 @@ Agentflow has six runtime subsystems and one deferred control-plane stub.
 4. `runtime/harness`: execute `agent` nodes and AI `check` nodes through CLI-backed harness adapters
 5. `runtime/checks`: execute deterministic `check` nodes and normalize AI evaluator results
 6. `artifacts`: persist run files, append events, and project a stable read model for inspection tooling
+7. `auth`: store and resolve plugin credentials from the local OS keychain and inject them into agent harness env vars at runtime
 
 ### Deferred stub
 
@@ -739,6 +740,39 @@ Repeat scopes additionally record:
 - `until_compiled_id`
 - `body_entry_node_ids`
 - `body_exit_node_ids`
+
+### Compiled credential specs
+
+The compiled graph also carries `credential_specs`, a map keyed by scope id. The compiler populates it from resolved plugin manifests by walking every tool reachable from the graph, reading the `credentials` array on each `PluginToolExport`, and looking up the matching `PluginCredentialDecl`. Each entry captures the scope id, optional description, and the field metadata (`key`, `secret`, `required`, `default`) the runtime needs to resolve and inject values.
+
+Each `ResolvedTool` independently records `credentials_required: string[]` listing the scope ids needed by that tool. Per-node tools and the graph-scope tool list both contribute to `credential_specs`; the map is deduplicated so a credential reused across many tools is only described once.
+
+The runtime never re-reads plugin manifests. The compiled graph is a self-contained description of which credentials must be resolved and how their fields are shaped.
+
+## Auth Subsystem
+
+`src/auth/` owns credential storage, resolution, and verification. It is intentionally small and independent of the runtime so the CLI and the runtime share one source of truth.
+
+Modules:
+
+- `keychain.ts` wraps the macOS `security` CLI for `getSecret`, `setSecret`, and `deleteSecret`. The service name is `agentflow:<scope>` and the account is the field key. There is no fallback storage on this release; non-macOS hosts will fail fast.
+- `store.ts` owns `~/.agentflow/credentials.index.json` (mode `0600`). The index records the declared scope, non-secret field values, secret field keys (not values), identity, and timestamps. `resolveScope` returns the resolved value for each field along with its source (`env`, `keychain`, `index`, `default`, or `missing`).
+- `verify.ts` runs the declared `verify` HTTP request, supports `header` and `basic` auth, substitutes `{field_key}` template tokens, and optionally extracts an identity string with a tiny JSONPath subset (`$`, `.field`, `[index]`).
+- `required_scopes.ts` walks a compiled graph plus its resolved plugins to build the deduplicated list of scopes the graph needs and which compiled nodes use each one. The CLI uses this for `agentflow auth list` and for readiness reporting.
+- `errors.ts` defines `MissingCredentialsError`, the canonical error raised when validation or runtime cannot resolve a required field.
+
+Resolution order for any field is:
+
+1. `AGENTFLOW_CREDENTIAL_<UPPER_SCOPE>_<UPPER_KEY>` env var
+2. Stored value (Keychain for secrets, index for non-secrets)
+3. Manifest `default`
+4. Otherwise missing
+
+Runtime injection happens in `runtime/tools/setup.ts`. Before each agent execution, `prepareAgentTools` walks `node.tools[].credentials_required`, resolves each scope through `auth/store.ts`, and exports `AGENTFLOW_CREDENTIAL_*` env vars into the harness subprocess env. If any required field is missing, `prepareAgentTools` throws `MissingCredentialsError` before the harness is spawned, so the failure is observed before any token-bearing API call could happen.
+
+The same resolution logic feeds `evaluateGraphReadiness`. With `--run-ready`, `agentflow validate` reports each scope as a `kind: "credential"` check that is `passed` when every required field resolves and `blocked` when any required field is missing.
+
+See `docs/AUTH.md` for the operator-facing CLI surface, the manifest schema, and storage layout.
 
 ## Runtime Core
 

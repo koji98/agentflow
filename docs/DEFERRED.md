@@ -21,6 +21,9 @@ Additional deferred areas:
 - generalized human-in-the-loop control flow beyond the shipped repeat-scoped `checkpoint` node, including arbitrary workflow pauses, richer operator UIs, and resume semantics outside the current execution contract
 - delivery automation beyond a minimal run summary
 - branch, commit, or pull-request orchestration features
+- non-macOS credential backends (Linux Secret Service, Windows Credential Manager) and any non-interactive CI credential issuance flow
+- non-`pat-paste` credential login types (OAuth device flow, SSO, machine-to-machine credential exchange) and shared remote secret managers
+- credential rotation policy, expiry enforcement, and cross-host credential sync
 
 ## Harness And Workflow Revisit Ideas
 

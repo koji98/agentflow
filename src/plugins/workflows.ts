@@ -51,6 +51,7 @@ export interface PluginManifest {
   version: string;
   workflows: Record<string, PluginWorkflowExport>;
   tools: Record<string, PluginToolExport>;
+  credentials?: Record<string, PluginCredentialDecl>;
 }
 
 export interface PluginWorkflowExport {
@@ -64,6 +65,50 @@ export interface PluginToolExport {
   args?: string[];
   usage?: string;
   config_schema?: Record<string, unknown>;
+  credentials?: string[];
+}
+
+export interface PluginCredentialField {
+  key: string;
+  secret: boolean;
+  required: boolean;
+  prompt?: string;
+  default?: string;
+}
+
+export type PluginCredentialVerifyAuth =
+  | {
+      kind: "header";
+      header_name: string;
+      header_value_template: string;
+    }
+  | {
+      kind: "basic";
+      username_template: string;
+      password_template: string;
+    };
+
+export interface PluginCredentialVerify {
+  method: "GET" | "POST" | "HEAD";
+  url: string;
+  auth: PluginCredentialVerifyAuth;
+  extra_headers?: Record<string, string>;
+  ok_when_status: number;
+  extract_identity?: string;
+}
+
+export interface PluginCredentialLogin {
+  type: "pat-paste";
+  open_url?: string;
+  instructions?: string;
+  verify: PluginCredentialVerify;
+}
+
+export interface PluginCredentialDecl {
+  scope: string;
+  description?: string;
+  fields: PluginCredentialField[];
+  login: PluginCredentialLogin;
 }
 
 export interface WorkflowManifest {
@@ -94,6 +139,9 @@ export interface PluginLockEntryWithAlias extends PluginLockEntry {
 }
 
 const pluginIdentifierPattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+const credentialScopePattern = /^[a-z0-9][a-z0-9-]*$/;
+const credentialFieldKeyPattern = /^[a-z][a-z0-9_]*$/;
+const templateTokenPattern = /\{([a-z][a-z0-9_]*)\}/g;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -232,7 +280,350 @@ async function readLockFile(graphPath: string): Promise<PluginLockFile | undefin
   }
 }
 
-function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagnostic[]): PluginManifest | undefined {
+function collectTemplateTokens(template: string): string[] {
+  const tokens: string[] = [];
+  let match: RegExpExecArray | null;
+  templateTokenPattern.lastIndex = 0;
+  while ((match = templateTokenPattern.exec(template)) !== null) {
+    tokens.push(match[1]!);
+  }
+  return tokens;
+}
+
+function normalizeCredentialField(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PluginCredentialField | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({ path, message: "Credential field must be an object." });
+    return undefined;
+  }
+
+  const key = readStringField(record, "key", path, diagnostics);
+  if (!key) {
+    return undefined;
+  }
+  if (!credentialFieldKeyPattern.test(key)) {
+    diagnostics.push({
+      path: `${path}.key`,
+      message: `Credential field key "${key}" must match /^[a-z][a-z0-9_]*$/.`
+    });
+    return undefined;
+  }
+
+  if (typeof record.secret !== "boolean") {
+    diagnostics.push({ path: `${path}.secret`, message: "Credential field secret must be a boolean." });
+    return undefined;
+  }
+  if (typeof record.required !== "boolean") {
+    diagnostics.push({ path: `${path}.required`, message: "Credential field required must be a boolean." });
+    return undefined;
+  }
+
+  const prompt =
+    typeof record.prompt === "string" && record.prompt.trim().length > 0
+      ? record.prompt
+      : undefined;
+
+  let defaultValue: string | undefined;
+  if (record.default !== undefined) {
+    if (typeof record.default !== "string") {
+      diagnostics.push({ path: `${path}.default`, message: "Credential field default must be a string." });
+      return undefined;
+    }
+    defaultValue = record.default;
+  }
+
+  return {
+    key,
+    secret: record.secret,
+    required: record.required,
+    ...(prompt ? { prompt } : {}),
+    ...(defaultValue !== undefined ? { default: defaultValue } : {})
+  };
+}
+
+function normalizeCredentialVerifyAuth(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PluginCredentialVerifyAuth | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({ path, message: "Credential verify.auth must be an object." });
+    return undefined;
+  }
+
+  const kind = record.kind;
+  if (kind === "header") {
+    const header_name = readStringField(record, "header_name", path, diagnostics);
+    const header_value_template = readStringField(record, "header_value_template", path, diagnostics);
+    if (!header_name || !header_value_template) {
+      return undefined;
+    }
+    return { kind: "header", header_name, header_value_template };
+  }
+
+  if (kind === "basic") {
+    const username_template = readStringField(record, "username_template", path, diagnostics);
+    const password_template = readStringField(record, "password_template", path, diagnostics);
+    if (!username_template || !password_template) {
+      return undefined;
+    }
+    return { kind: "basic", username_template, password_template };
+  }
+
+  diagnostics.push({
+    path: `${path}.kind`,
+    message: 'Credential verify.auth.kind must be "header" or "basic".'
+  });
+  return undefined;
+}
+
+function normalizeCredentialVerify(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PluginCredentialVerify | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({ path, message: "Credential login.verify must be an object." });
+    return undefined;
+  }
+
+  const method = record.method;
+  if (method !== "GET" && method !== "POST" && method !== "HEAD") {
+    diagnostics.push({
+      path: `${path}.method`,
+      message: 'Credential verify.method must be "GET", "POST", or "HEAD".'
+    });
+    return undefined;
+  }
+
+  const url = readStringField(record, "url", path, diagnostics);
+  if (!url) {
+    return undefined;
+  }
+
+  const auth = normalizeCredentialVerifyAuth(record.auth, `${path}.auth`, diagnostics);
+  if (!auth) {
+    return undefined;
+  }
+
+  let extra_headers: Record<string, string> | undefined;
+  if (record.extra_headers !== undefined) {
+    const headersRecord = asRecord(record.extra_headers);
+    if (!headersRecord) {
+      diagnostics.push({ path: `${path}.extra_headers`, message: "Credential verify.extra_headers must be an object." });
+      return undefined;
+    }
+    const validated: Record<string, string> = {};
+    let ok = true;
+    for (const [headerName, headerValue] of Object.entries(headersRecord)) {
+      if (typeof headerValue !== "string") {
+        diagnostics.push({
+          path: `${path}.extra_headers.${headerName}`,
+          message: "Extra header value must be a string."
+        });
+        ok = false;
+        continue;
+      }
+      validated[headerName] = headerValue;
+    }
+    if (!ok) {
+      return undefined;
+    }
+    extra_headers = validated;
+  }
+
+  if (typeof record.ok_when_status !== "number" || !Number.isInteger(record.ok_when_status)) {
+    diagnostics.push({
+      path: `${path}.ok_when_status`,
+      message: "Credential verify.ok_when_status must be an integer HTTP status code."
+    });
+    return undefined;
+  }
+
+  let extract_identity: string | undefined;
+  if (record.extract_identity !== undefined) {
+    if (typeof record.extract_identity !== "string" || record.extract_identity.length === 0) {
+      diagnostics.push({
+        path: `${path}.extract_identity`,
+        message: "Credential verify.extract_identity must be a non-empty string when provided."
+      });
+      return undefined;
+    }
+    if (!record.extract_identity.startsWith("$.")) {
+      diagnostics.push({
+        path: `${path}.extract_identity`,
+        message: 'Credential verify.extract_identity must be a JSONPath starting with "$.".'
+      });
+      return undefined;
+    }
+    extract_identity = record.extract_identity;
+  }
+
+  return {
+    method,
+    url,
+    auth,
+    ...(extra_headers ? { extra_headers } : {}),
+    ok_when_status: record.ok_when_status,
+    ...(extract_identity ? { extract_identity } : {})
+  };
+}
+
+function normalizeCredentialLogin(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PluginCredentialLogin | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({ path, message: "Credential login must be an object." });
+    return undefined;
+  }
+
+  if (record.type !== "pat-paste") {
+    diagnostics.push({
+      path: `${path}.type`,
+      message: 'Credential login.type must be "pat-paste".'
+    });
+    return undefined;
+  }
+
+  let open_url: string | undefined;
+  if (record.open_url !== undefined) {
+    if (typeof record.open_url !== "string" || record.open_url.length === 0) {
+      diagnostics.push({ path: `${path}.open_url`, message: "Credential login.open_url must be a non-empty string." });
+      return undefined;
+    }
+    open_url = record.open_url;
+  }
+
+  let instructions: string | undefined;
+  if (record.instructions !== undefined) {
+    if (typeof record.instructions !== "string") {
+      diagnostics.push({ path: `${path}.instructions`, message: "Credential login.instructions must be a string." });
+      return undefined;
+    }
+    instructions = record.instructions;
+  }
+
+  const verify = normalizeCredentialVerify(record.verify, `${path}.verify`, diagnostics);
+  if (!verify) {
+    return undefined;
+  }
+
+  return {
+    type: "pat-paste",
+    ...(open_url ? { open_url } : {}),
+    ...(instructions !== undefined ? { instructions } : {}),
+    verify
+  };
+}
+
+function normalizeCredentialDecl(
+  credentialId: string,
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PluginCredentialDecl | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({ path, message: "Credential declaration must be an object." });
+    return undefined;
+  }
+
+  const scope = readStringField(record, "scope", path, diagnostics);
+  if (!scope) {
+    return undefined;
+  }
+  if (!credentialScopePattern.test(scope)) {
+    diagnostics.push({
+      path: `${path}.scope`,
+      message: `Credential scope "${scope}" must match /^[a-z0-9][a-z0-9-]*$/.`
+    });
+    return undefined;
+  }
+
+  const description =
+    typeof record.description === "string" && record.description.trim().length > 0
+      ? record.description
+      : undefined;
+
+  if (!Array.isArray(record.fields) || record.fields.length === 0) {
+    diagnostics.push({
+      path: `${path}.fields`,
+      message: "Credential declaration must include a non-empty fields array."
+    });
+    return undefined;
+  }
+
+  const fields: PluginCredentialField[] = [];
+  const seenFieldKeys = new Set<string>();
+  let fieldsOk = true;
+  record.fields.forEach((fieldValue: unknown, index: number) => {
+    const fieldPath = `${path}.fields[${index}]`;
+    const field = normalizeCredentialField(fieldValue, fieldPath, diagnostics);
+    if (!field) {
+      fieldsOk = false;
+      return;
+    }
+    if (seenFieldKeys.has(field.key)) {
+      diagnostics.push({
+        path: `${fieldPath}.key`,
+        message: `Credential field key "${field.key}" is duplicated within credential "${credentialId}".`
+      });
+      fieldsOk = false;
+      return;
+    }
+    seenFieldKeys.add(field.key);
+    fields.push(field);
+  });
+
+  if (!fieldsOk) {
+    return undefined;
+  }
+
+  const login = normalizeCredentialLogin(record.login, `${path}.login`, diagnostics);
+  if (!login) {
+    return undefined;
+  }
+
+  const tokensToCheck: string[] = [];
+  if (login.verify.auth.kind === "header") {
+    tokensToCheck.push(...collectTemplateTokens(login.verify.auth.header_value_template));
+  } else {
+    tokensToCheck.push(...collectTemplateTokens(login.verify.auth.username_template));
+    tokensToCheck.push(...collectTemplateTokens(login.verify.auth.password_template));
+  }
+
+  let templatesOk = true;
+  for (const token of tokensToCheck) {
+    if (!seenFieldKeys.has(token)) {
+      diagnostics.push({
+        path: `${path}.login.verify.auth`,
+        message: `Template token "{${token}}" does not name a declared field on credential "${credentialId}".`
+      });
+      templatesOk = false;
+    }
+  }
+  if (!templatesOk) {
+    return undefined;
+  }
+
+  return {
+    scope,
+    ...(description ? { description } : {}),
+    fields,
+    login
+  };
+}
+
+export function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagnostic[]): PluginManifest | undefined {
   const record = asRecord(value);
 
   if (!record) {
@@ -246,6 +637,9 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
   const workflowsRecord = asRecord(record.workflows);
   const toolsValue = record.tools;
   const toolsRecord = toolsValue === undefined ? {} : asRecord(toolsValue);
+  const credentialsValue = record.credentials;
+  const credentialsRecord =
+    credentialsValue === undefined ? undefined : asRecord(credentialsValue);
 
   if (schema && schema !== "agentflow.plugin/1") {
     diagnostics.push({ path: `${path}.schema`, message: 'Plugin manifest schema must be "agentflow.plugin/1".' });
@@ -258,6 +652,34 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
   if (toolsValue !== undefined && !toolsRecord) {
     diagnostics.push({ path: `${path}.tools`, message: "Plugin manifest tools must be an object when provided." });
   }
+
+  if (credentialsValue !== undefined && !credentialsRecord) {
+    diagnostics.push({
+      path: `${path}.credentials`,
+      message: "Plugin manifest credentials must be an object when provided."
+    });
+  }
+
+  const credentials: Record<string, PluginCredentialDecl> = {};
+  let credentialsOk = true;
+  Object.entries(credentialsRecord ?? {}).forEach(([credentialId, credentialValue]) => {
+    const credentialPath = `${path}.credentials.${credentialId}`;
+    if (!isPluginIdentifier(credentialId)) {
+      diagnostics.push({
+        path: credentialPath,
+        message:
+          "Credential ids must use letters, numbers, underscores, or hyphens, and must start with a letter or number."
+      });
+      credentialsOk = false;
+      return;
+    }
+    const decl = normalizeCredentialDecl(credentialId, credentialValue, credentialPath, diagnostics);
+    if (!decl) {
+      credentialsOk = false;
+      return;
+    }
+    credentials[credentialId] = decl;
+  });
 
   const workflows: Record<string, PluginWorkflowExport> = {};
   Object.entries(workflowsRecord ?? {}).forEach(([workflowId, workflowValue]) => {
@@ -322,18 +744,60 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
       }
     }
 
+    let toolCredentials: string[] | undefined;
+    if (toolRecord.credentials !== undefined) {
+      if (
+        !Array.isArray(toolRecord.credentials) ||
+        toolRecord.credentials.some((entry) => typeof entry !== "string")
+      ) {
+        diagnostics.push({
+          path: `${path}.tools.${toolName}.credentials`,
+          message: "Tool credentials must be an array of credential id strings."
+        });
+      } else {
+        const seen = new Set<string>();
+        const validRefs: string[] = [];
+        let refsOk = true;
+        (toolRecord.credentials as string[]).forEach((credentialId, index) => {
+          const refPath = `${path}.tools.${toolName}.credentials[${index}]`;
+          if (seen.has(credentialId)) {
+            diagnostics.push({
+              path: refPath,
+              message: `Tool "${toolName}" references credential "${credentialId}" more than once.`
+            });
+            refsOk = false;
+            return;
+          }
+          if (!credentials[credentialId]) {
+            diagnostics.push({
+              path: refPath,
+              message: `Tool "${toolName}" references credential "${credentialId}" which is not declared on this plugin.`
+            });
+            refsOk = false;
+            return;
+          }
+          seen.add(credentialId);
+          validRefs.push(credentialId);
+        });
+        if (refsOk && validRefs.length > 0) {
+          toolCredentials = validRefs;
+        }
+      }
+    }
+
     if (executable) {
       tools[toolName] = {
         executable,
         ...(description ? { description } : {}),
         ...(args ? { args } : {}),
         ...(usage ? { usage } : {}),
-        ...(config_schema ? { config_schema } : {})
+        ...(config_schema ? { config_schema } : {}),
+        ...(toolCredentials ? { credentials: toolCredentials } : {})
       };
     }
   });
 
-  if (!schema || schema !== "agentflow.plugin/1" || !id || !version || !workflowsRecord) {
+  if (!schema || schema !== "agentflow.plugin/1" || !id || !version || !workflowsRecord || !credentialsOk) {
     return undefined;
   }
 
@@ -342,7 +806,8 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
     id,
     version,
     workflows,
-    tools
+    tools,
+    ...(Object.keys(credentials).length > 0 ? { credentials } : {})
   };
 }
 

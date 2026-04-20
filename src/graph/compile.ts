@@ -10,6 +10,7 @@ import type {
 } from "./authored.js";
 import type {
   CompileGraphResult,
+  CompiledCredentialSpec,
   CompiledEdge,
   CompiledExecutableNode,
   CompiledGraph,
@@ -186,6 +187,15 @@ function resolveToolDeclaration(
     declaration_path: options.declaration_path
   };
 
+  const credentialScopeSet = new Set<string>();
+  (exported.credentials ?? []).forEach((credentialId) => {
+    const decl = plugin.manifest.credentials?.[credentialId];
+    if (decl) {
+      credentialScopeSet.add(decl.scope);
+    }
+  });
+  const credentialScopes = [...credentialScopeSet].sort();
+
   return {
     callable_name: callable,
     ...(exported.description ? { description: exported.description } : {}),
@@ -194,6 +204,7 @@ function resolveToolDeclaration(
     args: [...(exported.args ?? [])],
     config: {},
     ...(exported.config_schema ? { config_schema: exported.config_schema } : {}),
+    ...(credentialScopes.length > 0 ? { credentials_required: credentialScopes } : {}),
     source
   };
 }
@@ -906,6 +917,59 @@ function validateManagedSoftFailureRules(
   });
 }
 
+function buildCredentialSpecs(
+  context: CompileContext,
+  pluginsByAlias: Map<string, ResolvedPlugin>
+): Record<string, CompiledCredentialSpec> {
+  const scopesNeeded = new Set<string>();
+  const collectScopes = (tools: ResolvedTool[]): void => {
+    for (const tool of tools) {
+      for (const scope of tool.credentials_required ?? []) {
+        scopesNeeded.add(scope);
+      }
+    }
+  };
+
+  collectScopes(context.graph_scope_tools);
+  for (const node of context.nodes) {
+    if (node.kind === "agent") {
+      collectScopes(node.tools);
+    }
+  }
+
+  if (scopesNeeded.size === 0) {
+    return {};
+  }
+
+  const declByScope = new Map<string, CompiledCredentialSpec>();
+  for (const plugin of pluginsByAlias.values()) {
+    for (const decl of Object.values(plugin.manifest.credentials ?? {})) {
+      if (!scopesNeeded.has(decl.scope) || declByScope.has(decl.scope)) {
+        continue;
+      }
+      declByScope.set(decl.scope, {
+        scope: decl.scope,
+        ...(decl.description ? { description: decl.description } : {}),
+        fields: decl.fields.map((field) => ({
+          key: field.key,
+          secret: field.secret,
+          required: field.required,
+          ...(field.default !== undefined ? { default: field.default } : {})
+        }))
+      });
+    }
+  }
+
+  const result: Record<string, CompiledCredentialSpec> = {};
+  for (const scope of [...scopesNeeded].sort()) {
+    const spec = declByScope.get(scope);
+    if (spec) {
+      result[scope] = spec;
+    }
+  }
+  return result;
+}
+
 export interface CompileAuthoredGraphOptions {
   resolved_plugins?: ResolvedPlugin[];
   graph_dir?: string;
@@ -950,6 +1014,8 @@ export function compileAuthoredGraph(
   const rootRegion = compileGraphNode(context, undefined, document.graph, "$.graph");
   finalizeNodeDependencies(context);
 
+  const credential_specs = buildCredentialSpecs(context, plugins_by_alias);
+
   const compiled_graph: CompiledGraph = {
     graph_id: document.graph_id,
     launch: {
@@ -966,7 +1032,8 @@ export function compileAuthoredGraph(
         authoredId,
         dedupe(compiledIds)
       ])
-    )
+    ),
+    credential_specs
   };
 
   validateCompiledArtifactReferences(context, compiled_graph);

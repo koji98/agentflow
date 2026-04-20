@@ -1,8 +1,21 @@
 import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  MissingCredentialsError,
+  type MissingCredentialsScope
+} from "../../auth/errors.js";
+import {
+  credentialEnvVarName,
+  resolveScope,
+  type StoreOptions
+} from "../../auth/store.js";
 import type { ArtifactDefinition } from "../../graph/authored.js";
-import type { CompiledAgentNode, ResolvedTool } from "../../graph/compiled.js";
+import type {
+  CompiledAgentNode,
+  CompiledCredentialSpec,
+  ResolvedTool
+} from "../../graph/compiled.js";
 
 export interface AgentToolSetupResult {
   bin_dir: string;
@@ -16,6 +29,9 @@ interface PrepareAgentToolsOptions {
   execution_dir: string;
   workspace_path: string;
   artifacts_root: string;
+  credential_specs?: Record<string, CompiledCredentialSpec>;
+  credential_store_options?: StoreOptions;
+  credential_env?: NodeJS.ProcessEnv;
 }
 
 function toEnvSegment(value: string): string {
@@ -135,10 +151,76 @@ export async function prepareAgentTools(
     }
   }
 
+  await injectCredentialEnv(env, options);
+
   return {
     bin_dir,
     tool_state_path,
     env,
     resolved_tools: options.node.tools
   };
+}
+
+function collectScopeUsage(node: CompiledAgentNode): Map<string, string[]> {
+  const usage = new Map<string, string[]>();
+  for (const tool of node.tools) {
+    for (const scope of tool.credentials_required ?? []) {
+      const callers = usage.get(scope) ?? [];
+      const label = `${node.compiled_id} (${tool.callable_name})`;
+      if (!callers.includes(label)) {
+        callers.push(label);
+      }
+      usage.set(scope, callers);
+    }
+  }
+  return usage;
+}
+
+async function injectCredentialEnv(
+  env: Record<string, string>,
+  options: PrepareAgentToolsOptions
+): Promise<void> {
+  const scopeUsage = collectScopeUsage(options.node);
+  if (scopeUsage.size === 0) {
+    return;
+  }
+
+  const specs = options.credential_specs ?? {};
+  const storeOptions: StoreOptions = options.credential_store_options ?? {};
+  const credentialEnv = options.credential_env ?? process.env;
+
+  const missingScopes: MissingCredentialsScope[] = [];
+
+  for (const [scope, usedBy] of [...scopeUsage.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const spec = specs[scope];
+    if (!spec) {
+      missingScopes.push({
+        scope,
+        missing_keys: ["*"],
+        used_by: usedBy
+      });
+      continue;
+    }
+
+    const result = await resolveScope(
+      { scope, fields: spec.fields },
+      { ...storeOptions, env: credentialEnv }
+    );
+
+    for (const [key, value] of Object.entries(result.resolved)) {
+      env[credentialEnvVarName(scope, key)] = value;
+    }
+
+    if (result.missing_required.length > 0) {
+      missingScopes.push({
+        scope,
+        missing_keys: [...result.missing_required],
+        used_by: usedBy
+      });
+    }
+  }
+
+  if (missingScopes.length > 0) {
+    throw new MissingCredentialsError(missingScopes);
+  }
 }
