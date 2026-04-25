@@ -20,6 +20,7 @@ import type { LoweredManagedNode } from "./normalize.js";
 import { resolveLaunchConfig, resolveNodePolicy } from "./profiles.js";
 import {
   reservedArtifactNames,
+  reservedToolNames,
   toolNamePattern
 } from "./schema.js";
 import type { GraphDiagnostic } from "./schema.js";
@@ -360,6 +361,14 @@ function validateToolDeclarations(
       diagnostics.push({
         path: declarationPath,
         message: `Plugin tool callable name "${callable}" must match /^[a-z0-9][a-z0-9-]*$/.`
+      });
+      return;
+    }
+
+    if ((reservedToolNames as readonly string[]).includes(callable)) {
+      diagnostics.push({
+        path: declarationPath,
+        message: `Plugin tool callable name "${callable}" is reserved for Agentflow runtime commands.`
       });
       return;
     }

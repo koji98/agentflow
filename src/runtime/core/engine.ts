@@ -92,7 +92,9 @@ export interface RuntimeNodeExecutionResult {
 }
 
 export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode> {
+  run_root: string;
   run_id: string;
+  graph_id: string;
   graph_intent: CompiledGraph["intent"];
   credential_specs?: CompiledGraph["credential_specs"];
   node: TNode;
@@ -1167,6 +1169,14 @@ function buildContextMaterialEnv(
 
 function buildNodeRuntimeEnv(context: RuntimeNodeExecutorContext<CompiledExecutableNode>): Record<string, string> {
   return {
+    AGENTFLOW_RUN_ROOT: context.run_root,
+    AGENTFLOW_RUN_ID: context.run_id,
+    AGENTFLOW_GRAPH_ID: context.graph_id,
+    AGENTFLOW_AGENT_ID: context.attempt.execution_id,
+    AGENTFLOW_EXECUTION_ID: context.attempt.execution_id,
+    AGENTFLOW_NODE_ID: context.node.authored_id,
+    AGENTFLOW_COMPILED_ID: context.node.compiled_id,
+    AGENTFLOW_REPO_ALIAS: context.node.repo,
     AGENTFLOW_WORKSPACE: context.workspace_path,
     AGENTFLOW_OUTPUT_DIR: resolveExecutionArtifactsDirectory(context.execution_dir),
     AGENTFLOW_CONTEXT_PACKET: context.context_packet_path,
@@ -1502,11 +1512,27 @@ async function defaultAgentExecutor(
   }
 
   const outputDir = resolveExecutionArtifactsDirectory(context.execution_dir);
+  const runtimeDir = join(context.run_root, "runtime");
   const toolSetup = await prepareAgentTools({
     node: context.node,
     execution_dir: context.execution_dir,
     workspace_path: context.workspace_path,
     artifacts_root: outputDir,
+    run_root: context.run_root,
+    runtime_dir: runtimeDir,
+    run_id: context.run_id,
+    graph_id: context.graph_id,
+    execution_id: context.attempt.execution_id,
+    repo_alias: context.node.repo,
+    ...(context.node.effective_policy.harness ? { harness: context.node.effective_policy.harness } : {}),
+    ...(context.node.effective_policy.model ? { model: context.node.effective_policy.model } : {}),
+    ...(context.node.effective_policy.reasoning_effort
+      ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
+      : {}),
+    sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
+    timeout_sec: context.node.effective_policy.timeout_sec,
+    context_packet_path: context.context_packet_path,
+    context_manifest_path: context.context_manifest_path,
     credential_specs: context.credential_specs ?? {}
   });
   const contextManifest = await readContextManifestContent(context.context_manifest_path);
@@ -1519,6 +1545,7 @@ async function defaultAgentExecutor(
     executionId: context.attempt.execution_id,
     repoAlias: context.node.repo,
     repoPath: context.workspace_path,
+    runtimeDir,
     sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
     ...(context.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
     model: context.node.effective_policy.model,
@@ -2232,7 +2259,9 @@ async function executeNode(
     if (node.kind === "exec") {
       result = options.executors?.exec
         ? await options.executors.exec({
+            run_root: options.run_root,
             run_id: session.run_id,
+            graph_id: session.graph.graph_id,
             graph_intent: session.graph.intent,
             credential_specs: session.graph.credential_specs ?? {},
             node,
@@ -2247,7 +2276,9 @@ async function executeNode(
             on_stderr_chunk: logSink.on_stderr_chunk
           })
         : await defaultExecExecutor({
+            run_root: options.run_root,
             run_id: session.run_id,
+            graph_id: session.graph.graph_id,
             graph_intent: session.graph.intent,
             credential_specs: session.graph.credential_specs ?? {},
             node,
@@ -2264,7 +2295,9 @@ async function executeNode(
     } else if (node.kind === "check") {
       result = options.executors?.check
         ? await options.executors.check({
+            run_root: options.run_root,
             run_id: session.run_id,
+            graph_id: session.graph.graph_id,
             graph_intent: session.graph.intent,
             credential_specs: session.graph.credential_specs ?? {},
             node,
@@ -2280,7 +2313,9 @@ async function executeNode(
           })
         : await defaultCheckExecutor(
             {
+              run_root: options.run_root,
               run_id: session.run_id,
+              graph_id: session.graph.graph_id,
               graph_intent: session.graph.intent,
               credential_specs: session.graph.credential_specs ?? {},
               node,
@@ -2302,7 +2337,9 @@ async function executeNode(
       }
 
       result = await options.executors.checkpoint({
+        run_root: options.run_root,
         run_id: session.run_id,
+        graph_id: session.graph.graph_id,
         graph_intent: session.graph.intent,
         credential_specs: session.graph.credential_specs ?? {},
         node,
@@ -2318,7 +2355,9 @@ async function executeNode(
     } else {
       result = options.executors?.agent
         ? await options.executors.agent({
+            run_root: options.run_root,
             run_id: session.run_id,
+            graph_id: session.graph.graph_id,
             graph_intent: session.graph.intent,
             credential_specs: session.graph.credential_specs ?? {},
             node,
@@ -2331,7 +2370,9 @@ async function executeNode(
           })
         : await defaultAgentExecutor(
             {
+              run_root: options.run_root,
               run_id: session.run_id,
+              graph_id: session.graph.graph_id,
               graph_intent: session.graph.intent,
               credential_specs: session.graph.credential_specs ?? {},
               node,

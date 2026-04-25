@@ -51,7 +51,10 @@ npm run validate -- --graph agentflow.graph.json
 npm run run -- --graph agentflow.graph.json
 ```
 
-After `npm run build`, the packaged CLI entry is `dist/cli/index.js`. The npm binary name is `agentflow`.
+After `npm run build`, the packaged CLI entries are `dist/cli/index.js` and `dist/af/index.js`. The npm binary names are:
+
+- `agentflow`: human/operator CLI for validation, launch, resume, inspection, plugin resolution, and auth.
+- `af`: agent-facing runtime CLI. Agentflow injects this into every agent node on `PATH`; humans normally do not use it outside a running node.
 
 ## Minimal Graph
 
@@ -179,7 +182,7 @@ After `npm run build`, the packaged CLI entry is `dist/cli/index.js`. The npm bi
 }
 ```
 
-Switching from Codex CLI to Cursor CLI is a graph-level launch-profile choice, not a different graph language. Both harnesses receive the same context packet, tool contract, artifact contract, output directory, and timeout budget.
+Switching from Codex CLI to Cursor CLI is a graph-level launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, tool contract, artifact contract, output directory, and timeout budget. `model: "auto"` means "do not pass an explicit model flag to the selected harness"; it does not select or fall back between Codex CLI and Cursor CLI.
 
 ## Graph Contract
 
@@ -244,7 +247,24 @@ Plugins expose team capabilities as ordinary CLI tools. Each tool declares:
 - `capability`: `context`, `verification`, `mutation`, or `reporting`.
 - `impact`: `read`, `write`, `external`, or `secret`.
 
-Agentflow resolves plugin tools, places generated launch shims on the node `PATH`, and renders the tool contract into the harness prompt without exposing configured values. Non-secret `tool_config` values and secret credentials are resolved only inside the generated launcher when it starts the plugin tool subprocess. Secret-impact tools must declare plugin `credentials`; `agentflow auth` stores secret fields in macOS Keychain and requires `--value-stdin` for secret values. Credential and tool-config values are not exported into the Codex CLI or Cursor CLI harness environment. Mutation tools and write-impact tools are not exposed to read-only agents. External-impact tools require exact approval tokens in `intent.approval_boundaries`, such as `tool:babysit-poll` or `external:babysit/poll`.
+Agentflow resolves plugin tools, places generated launch wrappers on the node `PATH`, and renders the tool contract into the harness prompt without exposing configured values. Non-secret `tool_config` values and secret credentials are resolved only inside the generated launcher when it starts the plugin tool subprocess. Secret-impact tools must declare plugin `credentials`; `agentflow auth` stores secret fields in macOS Keychain and requires `--value-stdin` for secret values. Credential and tool-config values are not exported into the Codex CLI or Cursor CLI harness environment. Mutation tools and write-impact tools are not exposed to read-only agents. External-impact tools require exact approval tokens in `intent.approval_boundaries`, such as `tool:babysit-poll` or `external:babysit/poll`. The tool name `af` is reserved for Agentflow's runtime CLI.
+
+## Agent Runtime CLI
+
+Every agent node receives a generated `af` command on `PATH`. It is a local runtime broker backed by files under the run root; it does not expose credentials to the harness. The command gives agents a concrete way to inspect their contract, publish artifacts, communicate through durable messages, request supervisor help, and spawn focused helpers.
+
+Core commands available inside an agent node:
+
+- `af status`: show run id, agent id, node id, workspace, output directory, required artifacts, and granted tools.
+- `af tools list`: show plugin tools granted to this node.
+- `af context show`: show the materialized context manifest and packet path.
+- `af artifact list|write|read`: inspect and publish declared artifacts.
+- `af channel post|read`: write and read typed run-level messages.
+- `af agents list`, `af inbox read`, `af send`, `af parent post`: inspect agent sessions and use durable mailboxes.
+- `af spawn --brief ... --artifact ... --wait`: request a supervised helper with selected skills/tools and wait for its artifact.
+- `af supervisor request --action ... --reason ...`: record a bounded supervisor request.
+
+Messages are coordination; artifacts are the durable handoff. If an agent has ended, other agents should read its artifacts or ask the supervisor to resume or replace it rather than assuming it can receive live messages.
 
 ## Delivery Package
 

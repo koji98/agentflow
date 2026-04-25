@@ -115,12 +115,32 @@ Codex CLI and Cursor CLI are adapters behind one Agentflow harness contract. Bot
 
 - the same rendered prompt envelope
 - the same context packet references
+- the same generated `af` runtime CLI
 - the same artifact contract
 - the same plugin tool contract
 - the same sandbox and timeout policy
 - the same `$AGENTFLOW_OUTPUT_DIR`
 
 Continuity comes from Agentflow artifacts and resume logic, not from assuming persistent harness chat state.
+
+## Agent Runtime CLI
+
+`af` is Agentflow's in-node runtime CLI. It is generated into the same per-execution `agentflow-tools/bin` directory as plugin tool wrappers, then injected onto the harness `PATH`. The package also exposes `af` as a binary after build, but the primary contract is the generated in-run command.
+
+The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes run id, graph id, agent id, node id, workspace path, output directory, context paths, declared artifacts, granted plugin tool metadata, and non-secret credential metadata. It does not contain credential values. Secret fields stay in macOS Keychain and are resolved only by plugin tool launchers inside the plugin subprocess.
+
+`af` commands are file-backed against the run root:
+
+- `af status`, `af tools list`, and `af context show` read the node contract.
+- `af artifact write|read|list` publish and inspect declared artifacts.
+- `af channel post|read` append and read typed run-level messages.
+- `af send`, `af parent post`, and `af inbox read` use durable mailboxes.
+- `af agents list` reads graph-agent attempts and helper sessions.
+- `af spawn` creates a helper session with its own runtime metadata, selected plugin tools, output directory, logs, and artifact contract.
+- `af wait` waits for helper completion.
+- `af supervisor request` records a supervisor request and mirrors it to the channel.
+
+Agents never talk directly to another process. Delivery is explicit: a message is stored, and if the recipient is not running the response reports that it was not live-delivered. Durable work should move through artifacts, with messages used to notify or coordinate.
 
 ## Supervision
 
@@ -191,7 +211,7 @@ Policy rules:
 - read-only agents can receive read or external-impact tools, but never mutation tools or write-impact tools
 - `impact: "secret"` requires plugin-declared `credentials`
 - `impact: "external"` requires exact approval tokens in `intent.approval_boundaries`
-- tool shims run inside the same node sandbox and timeout
+- tool wrappers run inside the same node sandbox and timeout
 - credential values and non-secret `tool_config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
 
 ## Delivery Package

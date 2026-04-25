@@ -14,6 +14,7 @@ export interface AgentInvocation {
   executionId: string;
   repoAlias: string;
   repoPath: string;
+  runtimeDir?: string;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   skipGitRepoCheck?: boolean;
   model: string | undefined;
@@ -161,6 +162,7 @@ export function buildHarnessSpawnEnv(
     AGENTFLOW_OUTPUT_DIR: invocation.outputDir,
     AGENTFLOW_CONTEXT_PACKET: invocation.contextPacketPath,
     AGENTFLOW_CONTEXT_MANIFEST: invocation.contextManifestPath,
+    ...(invocation.runtimeDir ? { AGENTFLOW_RUNTIME_DIR: invocation.runtimeDir } : {}),
     ...(invocation.toolEnv ?? {})
   };
 
@@ -248,6 +250,18 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
   }
 
   return lines;
+}
+
+function formatRuntimeCliContract(): string[] {
+  return [
+    "## Agentflow Runtime CLI",
+    "`af` is on PATH for this node. It is the runtime broker for status, artifacts, messages, helper sessions, and supervised requests.",
+    "- Use `af status` to inspect your run, node, declared artifacts, and granted tools.",
+    "- Use `af artifact write <name> --file <path>` or `af artifact write <name> --content <text>` to publish declared artifacts.",
+    "- Use `af channel post --type <type> --summary <text>` for durable run-level findings, blockers, decisions, and test results.",
+    "- Use `af parent post ...`, `af inbox read`, `af agents list`, `af spawn ...`, and `af wait ...` for supervised helper coordination.",
+    "- Messages are coordination; artifacts are the durable handoff. Do not rely on another agent being online."
+  ];
 }
 
 function describeSandbox(sandbox: AgentInvocation["sandbox"]): string {
@@ -403,6 +417,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     formatInlineContextManifest(invocation.contextManifest),
     "",
     `For exact paths, provenance, omission details, or structured metadata, read: ${invocation.contextPacketPath}`,
+    "",
+    ...formatRuntimeCliContract(),
     "",
     ...formatArtifactContract(invocation.artifacts, invocation.outputDir, invocation.repoPath),
     ...(toolContract.length > 0

@@ -294,7 +294,7 @@ describe("graph normalization", () => {
     );
   });
 
-  it("rejects removed data-flow fields as unknown graph syntax", () => {
+  it("rejects unsupported data-flow fields as unknown graph syntax", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "removed-data-flow",
@@ -343,7 +343,7 @@ describe("graph normalization", () => {
     );
   });
 
-  it("rejects removed data-flow fields on managed patterns too", () => {
+  it("rejects unsupported data-flow fields on managed patterns too", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "removed-managed-data-flow",

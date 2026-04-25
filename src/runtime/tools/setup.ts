@@ -1,5 +1,7 @@
 import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { defaultCredentialIndexPath } from "../../auth/store.js";
 import type { CredentialSpecMap } from "../../auth/types.js";
@@ -18,6 +20,20 @@ interface PrepareAgentToolsOptions {
   execution_dir: string;
   workspace_path: string;
   artifacts_root: string;
+  run_root?: string;
+  runtime_dir?: string;
+  run_id?: string;
+  graph_id?: string;
+  execution_id?: string;
+  parent_agent_id?: string;
+  repo_alias?: string;
+  harness?: "codex-cli" | "cursor-cli";
+  model?: string;
+  reasoning_effort?: string;
+  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  timeout_sec?: number;
+  context_packet_path?: string;
+  context_manifest_path?: string;
   credential_specs?: CredentialSpecMap;
   credential_index_path?: string;
   keychain_account?: string;
@@ -47,18 +63,57 @@ function shellSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function buildToolShim(launcherPath: string, callableName: string): string {
+function buildToolWrapper(launcherPath: string, callableName: string): string {
   const quotedNode = shellSingleQuote(process.execPath);
   const quotedLauncher = shellSingleQuote(launcherPath);
   const quotedCallable = shellSingleQuote(callableName);
   const execLine = ["exec", quotedNode, quotedLauncher, quotedCallable, '"$@"'].join(" ");
   return [
     "#!/usr/bin/env bash",
-    "# Agentflow plugin tool shim. Generated per execution; do not edit.",
+    "# Agentflow plugin tool wrapper. Generated per execution; do not edit.",
     "set -eu",
     execLine,
     ""
   ].join("\n");
+}
+
+function currentPackageRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+}
+
+function currentAfCliPath(): string {
+  const modulePath = fileURLToPath(import.meta.url);
+  const root = currentPackageRoot();
+  return modulePath.endsWith(".ts")
+    ? resolve(root, "src/af/index.ts")
+    : resolve(root, "dist/af/index.js");
+}
+
+function buildAfWrapper(): string {
+  const afCliPath = currentAfCliPath();
+  const quotedNode = shellSingleQuote(process.execPath);
+  const quotedAfCli = shellSingleQuote(afCliPath);
+  const tsxPath = resolve(currentPackageRoot(), "node_modules/.bin/tsx");
+  const quotedTsx = shellSingleQuote(tsxPath);
+  const execLine = afCliPath.endsWith(".ts") && existsSync(tsxPath)
+    ? ["exec", quotedTsx, quotedAfCli, '"$@"'].join(" ")
+    : ["exec", quotedNode, quotedAfCli, '"$@"'].join(" ");
+
+  return [
+    "#!/usr/bin/env bash",
+    "# Agentflow runtime CLI wrapper. Generated per execution; do not edit.",
+    "set -eu",
+    execLine,
+    ""
+  ].join("\n");
+}
+
+function currentAfRunnerPath(): string {
+  const afCliPath = currentAfCliPath();
+  const tsxPath = resolve(currentPackageRoot(), "node_modules/.bin/tsx");
+  return afCliPath.endsWith(".ts") && existsSync(tsxPath)
+    ? tsxPath
+    : process.execPath;
 }
 
 function buildToolLauncher(): string {
@@ -235,15 +290,24 @@ export async function prepareAgentTools(
   const tool_state_path = join(tools_dir, "state.json");
   const launcher_path = join(tools_dir, "launcher.mjs");
   const credential_config_path = join(tools_dir, "credential-config.json");
+  const runtime_metadata_path = join(tools_dir, "runtime.json");
 
   await rm(tools_dir, { recursive: true, force: true });
+  const runRoot = options.run_root ?? options.execution_dir;
+  const runtimeDir = options.runtime_dir ?? join(runRoot, "runtime");
+  await mkdir(runtimeDir, { recursive: true });
   await mkdir(bin_dir, { recursive: true });
   await writeFile(launcher_path, buildToolLauncher(), "utf8");
+  await writeFile(join(bin_dir, "af"), buildAfWrapper(), "utf8");
+  await chmod(join(bin_dir, "af"), 0o755);
 
   for (const tool of options.node.tools) {
-    const shimPath = join(bin_dir, tool.callable_name);
-    await writeFile(shimPath, buildToolShim(launcher_path, tool.callable_name), "utf8");
-    await chmod(shimPath, 0o755);
+    if (tool.callable_name === "af") {
+      throw new Error('Plugin tool callable name "af" is reserved for the Agentflow runtime CLI.');
+    }
+    const wrapperPath = join(bin_dir, tool.callable_name);
+    await writeFile(wrapperPath, buildToolWrapper(launcher_path, tool.callable_name), "utf8");
+    await chmod(wrapperPath, 0o755);
   }
 
   const state = {
@@ -256,6 +320,46 @@ export async function prepareAgentTools(
   };
 
   await writeFile(tool_state_path, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  const runId = options.run_id ?? "unknown-run";
+  const graphId = options.graph_id ?? "unknown-graph";
+  const executionId = options.execution_id ?? options.node.compiled_id;
+  const repoAlias = options.repo_alias ?? options.node.repo;
+  const sandbox = options.sandbox ?? options.node.effective_policy?.sandbox ?? "workspace-write";
+  const timeoutSec = options.timeout_sec ?? options.node.effective_policy?.timeout_sec ?? 0;
+  const runtimeMetadata = {
+    version: "1",
+    run_root: runRoot,
+    run_id: runId,
+    graph_id: graphId,
+    agent_id: executionId,
+    ...(options.parent_agent_id ? { parent_agent_id: options.parent_agent_id } : {}),
+    execution_id: executionId,
+    node_id: options.node.authored_id,
+    compiled_id: options.node.compiled_id,
+    repo_alias: repoAlias,
+    workspace_path: options.workspace_path,
+    output_dir: options.artifacts_root,
+    runtime_dir: runtimeDir,
+    context_packet_path: options.context_packet_path ?? "",
+    context_manifest_path: options.context_manifest_path ?? "",
+    tool_state_path,
+    tool_bin_dir: bin_dir,
+    credential_index_path: options.credential_index_path ?? defaultCredentialIndexPath,
+    ...(options.keychain_account ? { keychain_account: options.keychain_account } : {}),
+    credential_specs: options.credential_specs ?? {},
+    declared_artifacts: options.node.declared_artifacts,
+    tools: options.node.tools,
+    ...(options.harness ? { harness: options.harness } : {}),
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.reasoning_effort ? { reasoning_effort: options.reasoning_effort } : {}),
+    sandbox,
+    timeout_sec: timeoutSec
+  };
+  await writeFile(runtime_metadata_path, `${JSON.stringify(runtimeMetadata, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
+  await chmod(runtime_metadata_path, 0o600);
   await writeFile(
     credential_config_path,
     `${JSON.stringify({
@@ -280,8 +384,24 @@ export async function prepareAgentTools(
   await chmod(credential_config_path, 0o600);
 
   const env: Record<string, string> = {
-    AGENTFLOW_TOOL_STATE: tool_state_path
+    AGENTFLOW_TOOL_STATE: tool_state_path,
+    AGENTFLOW_RUNTIME_METADATA: runtime_metadata_path,
+    AGENTFLOW_AF_CLI: currentAfCliPath(),
+    AGENTFLOW_AF_RUNNER: currentAfRunnerPath(),
+    AGENTFLOW_SPAWN_MODE: "broker",
+    AGENTFLOW_RUN_ROOT: runRoot,
+    AGENTFLOW_RUNTIME_DIR: runtimeDir,
+    AGENTFLOW_RUN_ID: runId,
+    AGENTFLOW_GRAPH_ID: graphId,
+    AGENTFLOW_AGENT_ID: executionId,
+    AGENTFLOW_EXECUTION_ID: executionId,
+    AGENTFLOW_NODE_ID: options.node.authored_id,
+    AGENTFLOW_COMPILED_ID: options.node.compiled_id,
+    AGENTFLOW_REPO_ALIAS: repoAlias
   };
+  if (options.parent_agent_id) {
+    env.AGENTFLOW_PARENT_AGENT_ID = options.parent_agent_id;
+  }
 
   const pluginRoots = new Map<string, string>();
   for (const tool of options.node.tools) {

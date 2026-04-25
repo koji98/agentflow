@@ -250,7 +250,7 @@ Consumer graph:
 Runtime behavior:
 
 - Agentflow generates per-execution tool launchers under the node runtime directory.
-- The launcher directory is prepended to `PATH`.
+- The launcher directory is prepended to `PATH` and also contains Agentflow's reserved `af` runtime CLI wrapper.
 - `AGENTFLOW_TOOL_<NAME>_<KEY>` env vars carry non-secret tool config only inside the plugin tool subprocess.
 - Credential values are not exported to the Codex CLI or Cursor CLI harness environment.
 - Generated tool launchers resolve credentials just before starting the plugin tool subprocess and inject `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into that child process.
@@ -278,6 +278,7 @@ Tool impact is part of the supervision and validation contract.
 - `impact: "write"` requires a write-capable sandbox.
 - `impact: "external"` requires exact approval tokens in `intent.approval_boundaries`, such as `tool:babysit-poll`, `tool:babysit/poll`, `external:babysit-poll`, or `external:babysit/poll`.
 - `impact: "secret"` requires the plugin tool to declare `credentials`.
+- `af` is a reserved callable name for Agentflow's runtime CLI and cannot be used as a plugin tool alias.
 - `tool_config` is for non-secret string options only. Secret-looking keys such as `token`, `secret`, `password`, or `api_key` are rejected; put those in plugin `credentials` and configure them with `agentflow auth`.
 
 These rules keep tool authority visible in the graph and consistent across Codex CLI and Cursor CLI.

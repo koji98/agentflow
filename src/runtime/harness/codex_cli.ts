@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createProcessTerminationController } from "../process_control.js";
+import { startSpawnBroker } from "./spawn_broker.js";
 import {
   buildHarnessSpawnEnv,
   collectMissingHarnessBinaryDiagnostics,
@@ -50,6 +51,9 @@ function buildCodexArgs(
     "--output-last-message",
     last_message_path
   ];
+  if (invocation.runtimeDir) {
+    args.push("--add-dir", invocation.runtimeDir);
+  }
 
   if (invocation.skipGitRepoCheck) {
     args.push("--skip-git-repo-check");
@@ -90,6 +94,7 @@ export function createCodexCliHarness(
       await mkdir(invocation.outputDir, { recursive: true });
       const { args, last_message_path } = buildCodexArgs(invocation);
       const prompt = renderHarnessPrompt(invocation);
+      const spawnBroker = startSpawnBroker(invocation);
 
       return new Promise<HarnessResult>((resolve, reject) => {
         const child = spawn(binary, args, {
@@ -126,6 +131,7 @@ export function createCodexCliHarness(
           }
 
           termination.dispose();
+          spawnBroker.stop();
           invocation.signal?.removeEventListener("abort", onAbort);
           active_processes.delete(invocation.executionId);
           reject(
@@ -143,6 +149,7 @@ export function createCodexCliHarness(
           }
 
           termination.dispose();
+          spawnBroker.stop();
           invocation.signal?.removeEventListener("abort", onAbort);
           active_processes.delete(invocation.executionId);
           const stdout = Buffer.concat(stdoutChunks).toString("utf8");

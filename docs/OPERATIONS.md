@@ -11,6 +11,8 @@ npm run build
 
 For source-mode development, use `npm run <script> -- ...`. For packaged CLI checks after build, use `node dist/cli/index.js ...` or the linked `agentflow` binary.
 
+The package also includes `af`, but that command is for agents inside a running node. Agentflow injects a generated `af` wrapper into each agent node's `PATH` with `$AGENTFLOW_RUNTIME_METADATA` pointing at that node's runtime contract.
+
 ## Validate A Graph
 
 ```bash
@@ -54,7 +56,8 @@ Important launch behavior:
 
 - `workspace_backend: "worktree"` creates isolated git worktrees and cleans them up at terminal state.
 - `workspace_backend: "inplace"` runs directly against the configured repo path.
-- Codex CLI and Cursor CLI receive the same Agentflow context, tool, artifact, timeout, and sandbox contract.
+- Codex CLI and Cursor CLI receive the same Agentflow context, `af` runtime CLI, plugin tool, artifact, timeout, and sandbox contract.
+- `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.
 - Terminal runs write the delivery package after run completion.
 
 Use `--resume-on-fail N` when a local automation should retry the same run root after failure using Agentflow resume semantics.
@@ -102,6 +105,15 @@ Manual files worth opening:
 - `<run-root>/delivery/manifest.json`
 - `<run-root>/delivery/reviewer-guide.md`
 - `<run-root>/delivery/evaluation-ledger.json`
+
+Runtime coordination files are under `<run-root>/runtime/`. They are useful when debugging agent-to-agent coordination:
+
+- `channel.jsonl`: typed shared channel messages and delivery notices.
+- `mailboxes/<agent-id>.jsonl`: durable direct messages for an agent.
+- `helpers/<helper-id>/session.json`: helper lifecycle, logs, output directory, and artifact paths.
+- `supervisor-requests.jsonl`: requests recorded through `af supervisor request`.
+
+Agents should publish durable results with `af artifact write` and then notify with `af channel post` or `af parent post`. A completed agent is not an online collaborator; inspect its artifacts or ask the supervisor to resume or replace it.
 
 ## Resume
 

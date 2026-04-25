@@ -482,6 +482,33 @@ describe("plugin tool compilation", () => {
     expect(diagnostics).toEqual([]);
   });
 
+  it("rejects plugin tools that try to use the reserved af command name", async () => {
+    const document: AuthoredGraphDocument = {
+      version: "1",
+      graph_id: "tools-af-reserved-name",
+      repos: { main: { path: "." } },
+      intent: {
+        goal: "Validate reserved runtime command names."
+      },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: { default: { harness: "codex-cli" } },
+      tools: [{ from_plugin: "babysit", tool: "poll", alias: "af" }],
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [{ type: "agent", id: "use_tool", prompt: "Use tool." }]
+      }
+    };
+
+    await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
+      .resolves.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.tools[0]",
+          message: expect.stringContaining("reserved for Agentflow runtime commands")
+        })
+      ]));
+  });
+
   it("requires declared credentials for secret-impact tools", async () => {
     resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath, {
       capability: "context",
@@ -634,7 +661,7 @@ describe("prepareAgentTools", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("installs plugin tool shims, writes node-tool-state.json, and emits env vars", async () => {
+  it("installs plugin tool wrappers, writes node-tool-state.json, and emits env vars", async () => {
     const executionDir = join(tempRoot, "executions/001");
     const workspacePath = join(tempRoot, "workspace");
     const artifactsRoot = join(tempRoot, "executions/001/output");
@@ -680,19 +707,33 @@ describe("prepareAgentTools", () => {
       node: node as unknown as CompiledAgentNode,
       execution_dir: executionDir,
       workspace_path: workspacePath,
-      artifacts_root: artifactsRoot
+      artifacts_root: artifactsRoot,
+      run_root: tempRoot,
+      runtime_dir: join(tempRoot, "runtime"),
+      run_id: "run-tools",
+      graph_id: "tools-runtime",
+      execution_id: "exec-draft",
+      repo_alias: "main",
+      harness: "codex-cli",
+      model: "auto",
+      sandbox: "workspace-write",
+      timeout_sec: 30,
+      context_packet_path: join(executionDir, "context.json"),
+      context_manifest_path: join(executionDir, "manifest.md")
     });
 
     expect(setup.bin_dir).toBe(join(executionDir, "agentflow-tools/bin"));
     expect(setup.tool_state_path).toBe(join(executionDir, "agentflow-tools/state.json"));
 
-    const shimSource = await readFile(join(setup.bin_dir, "babysit-poll"), "utf8");
-    expect(shimSource.startsWith("#!/usr/bin/env bash\n")).toBe(true);
-    expect(shimSource).toContain("launcher.mjs");
-    expect(shimSource).toContain("babysit-poll");
+    const wrapperSource = await readFile(join(setup.bin_dir, "babysit-poll"), "utf8");
+    expect(wrapperSource.startsWith("#!/usr/bin/env bash\n")).toBe(true);
+    expect(wrapperSource).toContain("launcher.mjs");
+    expect(wrapperSource).toContain("babysit-poll");
+    const afSource = await readFile(join(setup.bin_dir, "af"), "utf8");
+    expect(afSource).toContain("Agentflow runtime CLI wrapper");
 
-    const shimResult = await execFileAsync(join(setup.bin_dir, "babysit-poll"));
-    expect(shimResult.stdout.trim()).toBe("plugin");
+    const wrapperResult = await execFileAsync(join(setup.bin_dir, "babysit-poll"));
+    expect(wrapperResult.stdout.trim()).toBe("plugin");
 
     const state = JSON.parse(await readFile(setup.tool_state_path, "utf8")) as {
       version: string;
@@ -715,9 +756,31 @@ describe("prepareAgentTools", () => {
     });
 
     expect(setup.env.AGENTFLOW_TOOL_STATE).toBe(setup.tool_state_path);
+    expect(setup.env.AGENTFLOW_RUNTIME_METADATA).toBe(join(executionDir, "agentflow-tools/runtime.json"));
+    expect(setup.env.AGENTFLOW_RUN_ROOT).toBe(tempRoot);
+    expect(setup.env.AGENTFLOW_RUNTIME_DIR).toBe(join(tempRoot, "runtime"));
+    expect(setup.env.AGENTFLOW_RUN_ID).toBe("run-tools");
+    expect(setup.env.AGENTFLOW_AGENT_ID).toBe("exec-draft");
     expect(setup.env.AGENTFLOW_PLUGIN_ROOT).toBe(join(tempRoot, "plugins/babysit"));
     expect(setup.env.AGENTFLOW_PLUGIN_ROOT_BABYSIT).toBe(join(tempRoot, "plugins/babysit"));
     expect(setup.env.AGENTFLOW_TOOL_BABYSIT_POLL_MODE).toBeUndefined();
+
+    const runtimeMetadata = JSON.parse(await readFile(setup.env.AGENTFLOW_RUNTIME_METADATA, "utf8")) as {
+      agent_id: string;
+      run_id: string;
+      tool_bin_dir: string;
+      runtime_dir: string;
+      declared_artifacts: Record<string, { path: string }>;
+    };
+    expect(runtimeMetadata).toMatchObject({
+      agent_id: "exec-draft",
+      run_id: "run-tools",
+      runtime_dir: join(tempRoot, "runtime"),
+      tool_bin_dir: setup.bin_dir,
+      declared_artifacts: {
+        summary: { path: "summary.md" }
+      }
+    });
 
     const spawnEnv = buildHarnessSpawnEnv(
       {
@@ -733,6 +796,7 @@ describe("prepareAgentTools", () => {
 
     expect(spawnEnv.PATH).toBe(`${setup.bin_dir}${delimiter}/usr/local/bin`);
     expect(spawnEnv.AGENTFLOW_TOOL_STATE).toBe(setup.tool_state_path);
+    expect(spawnEnv.AGENTFLOW_RUNTIME_METADATA).toBe(setup.env.AGENTFLOW_RUNTIME_METADATA);
     expect(spawnEnv.AGENTFLOW_TOOL_BABYSIT_POLL_MODE).toBeUndefined();
   });
 

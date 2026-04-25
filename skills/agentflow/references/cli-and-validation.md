@@ -14,6 +14,22 @@ agentflow resume --run-root <run-root>
 agentflow runs list --graph agentflow.graph.json
 ```
 
+Agent-facing runtime commands are available as `af` inside agent nodes only. Agentflow injects the generated `af` wrapper on `PATH` with `$AGENTFLOW_RUNTIME_METADATA` pointing at the node contract.
+
+Useful in-node commands:
+
+```bash
+af status
+af tools list
+af context show
+af artifact list
+af artifact write <name> --file <path>
+af channel post --type finding --summary "..."
+af agents list
+af inbox read
+af spawn --brief "..." --artifact helper-report.md --wait
+```
+
 ## Validation Levels
 
 - `validate`: authored graph, normalization, compilation, graph diagnostics, plugin lockfile shape.

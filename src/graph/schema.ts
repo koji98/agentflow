@@ -29,7 +29,7 @@ export const canonicalNodeArtifacts = {
   check: "verification_json",
   checkpoint: "agent_response"
 } as const;
-export const reservedToolNames: readonly string[] = [];
+export const reservedToolNames = ["af"] as const;
 export const toolNamePattern = /^[a-z0-9][a-z0-9-]*$/;
 export const edgeOutcomes = ["passed", "failed"] as const;
 export const failureBehaviors = ["fail", "continue"] as const;

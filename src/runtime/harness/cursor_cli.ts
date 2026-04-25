@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createProcessTerminationController } from "../process_control.js";
+import { startSpawnBroker } from "./spawn_broker.js";
 import {
   buildHarnessSpawnEnv,
   collectMissingHarnessBinaryDiagnostics,
@@ -80,6 +81,7 @@ export function createCursorCliHarness(
     },
     async run(invocation: AgentInvocation): Promise<HarnessResult> {
       const args = buildCursorArgs(invocation);
+      const spawnBroker = startSpawnBroker(invocation);
 
       return new Promise<HarnessResult>((resolve, reject) => {
         const child = spawn(binary, args, {
@@ -116,6 +118,7 @@ export function createCursorCliHarness(
           }
 
           termination.dispose();
+          spawnBroker.stop();
           invocation.signal?.removeEventListener("abort", onAbort);
           active_processes.delete(invocation.executionId);
           reject(
@@ -133,6 +136,7 @@ export function createCursorCliHarness(
           }
 
           termination.dispose();
+          spawnBroker.stop();
           invocation.signal?.removeEventListener("abort", onAbort);
           active_processes.delete(invocation.executionId);
           const stdout = Buffer.concat(stdoutChunks).toString("utf8");

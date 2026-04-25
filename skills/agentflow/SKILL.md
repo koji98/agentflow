@@ -39,3 +39,12 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Use deterministic checks for hard facts and AI checks for semantic judgment.
 - Make approval boundaries explicit before granting external, secret, or mutation tools.
 - Do not widen scope through supervisor behavior; use checkpoints or graph edits for human decisions.
+
+## Runtime CLI Posture
+
+- Humans use `agentflow`; agents inside running nodes use `af`.
+- `af` is injected into agent nodes on `PATH` and reads `$AGENTFLOW_RUNTIME_METADATA`.
+- Prefer `af status`, `af tools list`, and `af context show` when debugging what a node actually received.
+- Prefer `af artifact write` for declared handoffs instead of ad hoc output files.
+- Use `af channel post` and `af parent post` for coordination, but keep durable conclusions in artifacts.
+- Treat `af spawn` helpers as supervised sessions with their own artifacts, not persistent coworkers.

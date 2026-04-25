@@ -20,6 +20,10 @@ Then inspect the run files directly.
 - `summary.md`: human run summary.
 - `events.jsonl`: ordered runtime event log for debugging.
 - `interventions.jsonl`: supervisor decisions and intervention records for debugging.
+- `runtime/channel.jsonl`: typed coordination messages posted through `af`.
+- `runtime/mailboxes/`: durable direct messages for agent sessions.
+- `runtime/helpers/`: helper session metadata, logs, outputs, and artifacts created through `af spawn`.
+- `runtime/supervisor-requests.jsonl`: requests recorded through `af supervisor request`.
 
 `delivery/manifest.json` labels human entrypoints, evidence files, and internal runtime artifacts. Use delivery files first; use raw JSONL/state/node attempt files when resume or low-level debugging requires them.
 
@@ -42,8 +46,9 @@ Each node attempt records execution-specific context, logs, result, and artifact
 3. Check `interventions.jsonl` for supervisor actions.
 4. Check failed node `result.json` and stderr.
 5. Check missing artifact diagnostics against the node's declared `artifacts`.
-6. Check context omissions in `context/packet.json`.
-7. Re-run `agentflow validate --graph <graph> --run-ready` if the failure suggests local environment drift.
+6. Check `runtime/channel.jsonl` and helper sessions when the failure involves agent coordination.
+7. Check context omissions in `context/packet.json`.
+8. Re-run `agentflow validate --graph <graph> --run-ready` if the failure suggests local environment drift.
 
 ## Resume
 

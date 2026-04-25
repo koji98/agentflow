@@ -978,7 +978,7 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("does not accept legacy execution-root files as output_dir artifacts", async () => {
+  it("does not accept execution directory files as output_dir artifacts", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-output-dir-root-"));
     const repoDir = join(tempRoot, "repo");
     const runRoot = join(tempRoot, "run");
@@ -1006,7 +1006,7 @@ describe("runtime engine", () => {
         steps: [
           {
             type: "exec",
-            id: "legacy_writer",
+            id: "execution_root_writer",
             command: "placeholder",
             artifacts: {
               handoff: {
@@ -1028,7 +1028,7 @@ describe("runtime engine", () => {
       },
       executors: {
         exec: async ({ execution_dir }) => {
-          await writeFile(join(execution_dir, "handoff.md"), "legacy root handoff\n");
+          await writeFile(join(execution_dir, "handoff.md"), "execution root handoff\n");
           return {
             status: "passed",
             outcome: "passed",
@@ -1043,7 +1043,7 @@ describe("runtime engine", () => {
     const attempt = run.attempts[0]!;
 
     expect(run.outcome).toBe("failed");
-    expect(await readFile(join(attempt.execution_dir, "handoff.md"), "utf8")).toBe("legacy root handoff\n");
+    expect(await readFile(join(attempt.execution_dir, "handoff.md"), "utf8")).toBe("execution root handoff\n");
     expect(attempt.artifacts.handoff).toBeUndefined();
     expect(attempt.artifacts.result_json).toBeUndefined();
     expect(JSON.parse(await readFile(attempt.result_path!, "utf8"))).toEqual({
