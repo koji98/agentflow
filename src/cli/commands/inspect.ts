@@ -196,6 +196,11 @@ export const inspectCommand = {
           ? {
               counts: state.counts,
               evidence_status: state.evidence_status,
+              supervisor_status: state.supervisor.status,
+              intervention_count: state.supervisor.intervention_count,
+              supervisor_budget_remaining: state.supervisor.budget_remaining,
+              delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
+              reviewer_guide: `${artifactPaths.delivery_dir}/reviewer-guide.md`,
               soft_verification_counts: state.soft_verification_counts,
               repo_workspaces: state.repo_workspaces,
               workspace_change_artifacts: state.workspace_change_artifacts
@@ -214,7 +219,9 @@ export const inspectCommand = {
           compile_diagnostics_file: artifactPaths.compile_diagnostics_file,
           state_file: artifactPaths.state_file,
           events_file: artifactPaths.events_file,
+          interventions_file: artifactPaths.interventions_file,
           summary_file: artifactPaths.summary_file,
+          delivery_dir: artifactPaths.delivery_dir,
           workspaces_dir: artifactPaths.workspaces_dir,
           workspace_changes_dir: artifactPaths.workspace_changes_dir,
           nodes_dir: artifactPaths.nodes_dir

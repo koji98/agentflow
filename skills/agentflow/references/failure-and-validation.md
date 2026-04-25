@@ -1,77 +1,59 @@
-# Failure And Validation Semantics
+# Failure And Validation
 
-Use this reference when a graph contains `exec`, `check`, `checkpoint`, or `repeat`.
+Agentflow treats failures as evidence for supervision and delivery. Do not hide failures with ad hoc recovery outside the graph contract.
 
-## Core rule
+## Failure Classes
 
-Choose node kinds based on control-flow semantics, not just on what tool happens to run.
+Supervisor classification includes:
 
-## Primitive semantics
+- `environment`
+- `workspace`
+- `context`
+- `artifact`
+- `harness`
+- `timeout`
+- `deterministic_evaluation`
+- `semantic_evaluation`
+- `scope_drift`
+- `policy_breach`
+- `operator`
+- `unknown`
 
-- `agent`
-Use for model-driven coding, synthesis, planning, or review work.
-- `exec`
-Use to run a concrete command and capture its logs, result, and declared artifacts.
-- deterministic `check`
-Use when pass or fail should immediately decide whether the graph continues.
-- AI `check`
-Use when the gate is semantic or judgment-based rather than command-based.
-- `checkpoint`
-Use only when an operator intentionally needs to review and decide how the graph proceeds.
+## Hard Failures
 
-## Hard versus soft verification
+These remain hard failures even when a verifier uses soft failure behavior:
 
-Use a deterministic `check` when failure should stop the graph:
+- spawn errors
+- timeouts
+- cancellation
+- invalid context
+- missing required env files
+- missing declared artifacts after allowed repair
+- workspace cleanup failures
+- delivery package creation failure
 
-- fixture reset must succeed before anything meaningful can continue
-- a targeted test must pass before merge-ready completion
-- a release artifact must exist before deployment handoff
+## Soft Verification
 
-Use an `exec` followed by a review node when failure should be documented rather than terminate the run:
+`on_failure: "continue"` records failed deterministic verification evidence while allowing control flow to proceed. Use it for evidence collection, not for required gates.
 
-- you want to run Playwright or a long integration test and capture logs either way
-- you want an agent to inspect failures and summarize likely root causes
-- you want a graph to keep collecting evidence even if one command fails
+## Repeat
 
-Good soft-verifier shape:
+`repeat.until.node` must target a descendant `check` or `checkpoint`. The until node decides whether the repeat scope exits or runs another iteration.
 
-1. `exec` runs the command with `on_failure: "continue"`.
-2. The command writes any durable report to `AGENTFLOW_OUTPUT_DIR` or the workspace.
-3. The node declares those files in `artifacts`.
-4. A downstream `agent` consumes the named artifacts and explains success, failure, or cleanup needed.
+Use repeat context selectors for iterative repair evidence:
 
-Do not rely on a downstream node reading raw stdout by convention. It can consume `result_json`, but a purposeful report artifact is clearer when the evidence matters.
+- `latest`
+- `latest_passed`
+- `latest_failed`
+- `previous`
+- positive integer ordinal
 
-## `repeat` discipline
+## Artifact Repair
 
-Use `repeat` only when:
+When a required agent artifact is missing and policy allows repair, the supervisor can run a bounded repair intervention. The intervention includes graph intent, node intent, and the original prompt, then uses the node's same harness authority and sandbox boundary. It writes durable records under the node attempt plus `interventions.jsonl`.
 
-- there is a bounded implementation, revision, or repair loop
-- a descendant `check` or `checkpoint` decides whether to continue
-- the loop has a coherent owner and a clear stopping condition
+If no harness is available and exactly one missing artifact is a human-readable text handoff, the supervisor may synthesize that artifact from the captured `agent_response`. It does not synthesize JSON, other machine-readable artifacts, or multi-artifact contracts from prose; those remain failed until real artifacts exist.
 
-Avoid `repeat` when the graph really wants:
+## Delivery Failure
 
-- a one-time retry inside the command itself
-- a straight `sequence`
-- a managed pattern that already includes bounded revision behavior
-
-## Validation placement
-
-Put validation after the boundary whose quality actually matters:
-
-- after a mutation phase
-- after a synthesis phase that produces a handoff artifact
-- after a setup phase that must succeed for the rest of the graph to be meaningful
-
-Do not add validation everywhere by reflex. Extra validation nodes add noise, runtime, and more failure surfaces.
-
-## Common mistakes
-
-- using deterministic `check` for a command whose failure should have been inspected later
-- using `exec` for a true gate and then forgetting to make downstream control flow depend on it
-- inserting `checkpoint` where no operator review is actually wanted
-- using `repeat` without a strong convergence signal
-- running destructive or environment-sensitive commands without deciding whether their failure should terminate the graph
-- marking artifact context as `if_available: true` when the next node cannot make sense without it
-- using `agent_response` as a machine-readable contract when the producer should write a JSON artifact
+Terminal delivery is mandatory for serious runs. If Agentflow cannot write the delivery package, the run is marked failed so the operator does not mistake raw logs for a reviewable handoff.

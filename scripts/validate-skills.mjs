@@ -10,7 +10,6 @@ const jsonMode = process.argv.includes("--json");
 const requiredReferences = [
   "graph-authoring.md",
   "managed-workflows.md",
-  "evals.md",
   "run-debugging.md",
   "graph-contract.md",
   "cli-and-validation.md",
@@ -50,6 +49,26 @@ const staleSkillContractPatterns = [
   {
     pattern: /hashed names/u,
     reason: "node and execution directories now use readable ordered names"
+  },
+  {
+    pattern: /\bmissing_artifact\b/u,
+    reason: 'current supervisor failure class is "artifact"'
+  },
+  {
+    pattern: /\bcontext_resolution\b/u,
+    reason: 'current supervisor failure class is "context"'
+  },
+  {
+    pattern: /\bcheck_failed\b/u,
+    reason: 'current supervisor failure classes are "deterministic_evaluation" and "semantic_evaluation"'
+  },
+  {
+    pattern: /every missing artifact/u,
+    reason: "artifact synthesis only handles exactly one human-readable text artifact"
+  },
+  {
+    pattern: /local eval suites|workflows, evals,/u,
+    reason: "packaged skills no longer include local eval-suite guidance"
   }
 ];
 
@@ -128,7 +147,6 @@ async function validateSkills() {
     "skills/agentflow-plugins/SKILL.md",
     "skills/agentflow-plugins/agents/openai.yaml",
     "skills/README.md",
-    "docs/EVALS.md",
     ...requiredReferences.map((reference) => `skills/agentflow/references/${reference}`),
     ...requiredAgentflowPluginReferences.map((reference) => `skills/agentflow-plugins/references/${reference}`)
   ];
@@ -227,26 +245,6 @@ async function validateSkills() {
       ? "Packaged skill references use the current graph contract terms."
       : `Stale skill contract guidance found: ${staleSkillContractMatches.join("; ")}`
   );
-
-  if (await fileExists("skills/agentflow/references/evals.md")) {
-    const evals = await readText("skills/agentflow/references/evals.md");
-    const requiredTerms = [
-      "agentflow eval validate",
-      "agentflow eval run",
-      "agentflow eval report",
-      "AGENTFLOW_EVAL_TRACE_FILE",
-      "evaluation-ledger.json"
-    ];
-    const missingTerms = requiredTerms.filter((term) => !evals.includes(term));
-
-    record(
-      "eval reference contract",
-      missingTerms.length === 0,
-      missingTerms.length === 0
-        ? "Eval reference includes the local eval command and artifact contract."
-        : `Eval reference is missing: ${missingTerms.join(", ")}`
-    );
-  }
 
   const passed = failures.length === 0;
 

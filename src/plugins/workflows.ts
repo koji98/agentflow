@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { resolveSubpathWithinRoot } from "../path_rules.js";
+import type { CredentialScopeSpec } from "../auth/types.js";
 import type { ArtifactDefinition, ContextItem } from "../graph/authored.js";
 import {
   readConfigValue as sharedReadConfigValue,
@@ -18,16 +19,29 @@ const execFileAsync = promisify(execFile);
 
 export const pluginLockFileName = "agentflow.plugins.lock.json";
 
-export interface PluginDeclaration {
+export type PluginDeclaration = GitPluginDeclaration | LocalPluginDeclaration;
+
+export interface GitPluginDeclaration {
+  kind: "git";
   source: string;
   ref: string;
 }
 
-export interface PluginLockEntry extends PluginDeclaration {
+export interface LocalPluginDeclaration {
+  kind: "local";
+  path: string;
+}
+
+export interface PluginLockEntry {
+  kind: "git" | "local";
+  source: string;
+  ref: string;
   commit: string;
   manifest_digest: string;
   cache_path: string;
+  path?: string;
   tool_digests?: Record<string, string>;
+  content_digest?: string;
 }
 
 export interface PluginLockFile {
@@ -37,6 +51,7 @@ export interface PluginLockFile {
 
 export interface ResolvedPlugin {
   alias: string;
+  kind: "git" | "local";
   source: string;
   ref: string;
   commit: string;
@@ -51,6 +66,7 @@ export interface PluginManifest {
   version: string;
   workflows: Record<string, PluginWorkflowExport>;
   tools: Record<string, PluginToolExport>;
+  credentials: Record<string, CredentialScopeSpec>;
 }
 
 export interface PluginWorkflowExport {
@@ -60,10 +76,13 @@ export interface PluginWorkflowExport {
 
 export interface PluginToolExport {
   executable: string;
+  capability: "context" | "verification" | "mutation" | "reporting";
+  impact: "read" | "write" | "external" | "secret";
   description?: string;
   args?: string[];
   usage?: string;
   config_schema?: Record<string, unknown>;
+  credentials?: string[];
 }
 
 export interface WorkflowManifest {
@@ -106,7 +125,7 @@ function digestText(value: string): string {
 }
 
 async function digestFile(path: string): Promise<string> {
-  return digestText(await readFile(path, "utf8"));
+  return `sha256:${createHash("sha256").update(await readFile(path)).digest("hex")}`;
 }
 
 async function readJsonFile(path: string): Promise<unknown> {
@@ -119,6 +138,46 @@ function lockfilePathForGraph(graphPath: string): string {
 
 function pluginCacheRootForGraph(graphPath: string): string {
   return join(dirname(graphPath), ".agentflow", "plugins");
+}
+
+async function digestDirectory(root: string): Promise<string> {
+  const hash = createHash("sha256");
+  const files: string[] = [];
+
+  async function walk(directory: string): Promise<void> {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (
+        entry.name === ".git" ||
+        entry.name === "node_modules" ||
+        entry.name === ".agentflow" ||
+        entry.name === pluginLockFileName
+      ) {
+        continue;
+      }
+
+      const absolutePath = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolutePath);
+        continue;
+      }
+
+      if (entry.isFile()) {
+        files.push(absolutePath);
+      }
+    }
+  }
+
+  await walk(root);
+  for (const file of files.sort((left, right) => left.localeCompare(right))) {
+    const relativePath = relative(root, file);
+    hash.update(relativePath);
+    hash.update("\0");
+    hash.update(await readFile(file));
+    hash.update("\0");
+  }
+
+  return `sha256:${hash.digest("hex")}`;
 }
 
 function readStringField(
@@ -138,6 +197,30 @@ function readStringField(
   }
 
   return value;
+}
+
+function readEnumField<TValue extends string>(
+  record: Record<string, unknown>,
+  field: string,
+  allowed: readonly TValue[],
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): TValue | undefined {
+  const value = readStringField(record, field, path, diagnostics);
+
+  if (!value) {
+    return undefined;
+  }
+
+  if (!allowed.includes(value as TValue)) {
+    diagnostics.push({
+      path: `${path}.${field}`,
+      message: `Expected one of: ${allowed.join(", ")}.`
+    });
+    return undefined;
+  }
+
+  return value as TValue;
 }
 
 function pushUnknownFieldDiagnostics(
@@ -204,12 +287,31 @@ export function readPluginDeclarations(
       return;
     }
 
-    pushUnknownFieldDiagnostics(record, path, ["source", "ref"], diagnostics);
+    pushUnknownFieldDiagnostics(record, path, ["source", "ref", "path"], diagnostics);
+    const hasPath = record.path !== undefined;
+    const hasGitSource = record.source !== undefined || record.ref !== undefined;
+
+    if (hasPath && hasGitSource) {
+      diagnostics.push({
+        path,
+        message: "Plugin declaration must use either { path } for a local folder or { source, ref } for a git plugin, not both."
+      });
+      return;
+    }
+
+    if (hasPath) {
+      const localPath = readStringField(record, "path", path, diagnostics);
+      if (localPath) {
+        declarations[alias] = { kind: "local", path: localPath };
+      }
+      return;
+    }
+
     const source = readStringField(record, "source", path, diagnostics);
     const ref = readStringField(record, "ref", path, diagnostics);
 
     if (source && ref) {
-      declarations[alias] = { source, ref };
+      declarations[alias] = { kind: "git", source, ref };
     }
   });
 
@@ -244,6 +346,7 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
   const id = readStringField(record, "id", path, diagnostics);
   const version = readStringField(record, "version", path, diagnostics);
   const workflowsRecord = asRecord(record.workflows);
+  const credentialsRecord = record.credentials === undefined ? {} : asRecord(record.credentials);
   const toolsValue = record.tools;
   const toolsRecord = toolsValue === undefined ? {} : asRecord(toolsValue);
 
@@ -257,6 +360,10 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
 
   if (toolsValue !== undefined && !toolsRecord) {
     diagnostics.push({ path: `${path}.tools`, message: "Plugin manifest tools must be an object when provided." });
+  }
+
+  if (record.credentials !== undefined && !credentialsRecord) {
+    diagnostics.push({ path: `${path}.credentials`, message: "Plugin manifest credentials must be an object when provided." });
   }
 
   const workflows: Record<string, PluginWorkflowExport> = {};
@@ -287,6 +394,77 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
     }
   });
 
+  const credentials: Record<string, CredentialScopeSpec> = {};
+  Object.entries(credentialsRecord ?? {}).forEach(([scopeName, scopeValue]) => {
+    const scopePath = `${path}.credentials.${scopeName}`;
+    const scopeRecord = asRecord(scopeValue);
+    if (!scopeRecord) {
+      diagnostics.push({ path: scopePath, message: "Credential scope must be an object." });
+      return;
+    }
+    if (!isPluginIdentifier(scopeName)) {
+      diagnostics.push({
+        path: scopePath,
+        message: "Credential scope ids must use letters, numbers, underscores, or hyphens, and must start with a letter or number."
+      });
+      return;
+    }
+
+    const fieldsRecord = asRecord(scopeRecord.fields);
+    if (!fieldsRecord) {
+      diagnostics.push({ path: `${scopePath}.fields`, message: "Credential scope fields must be an object." });
+      return;
+    }
+
+    const fields: CredentialScopeSpec["fields"] = {};
+    for (const [fieldName, fieldValue] of Object.entries(fieldsRecord)) {
+      const fieldPath = `${scopePath}.fields.${fieldName}`;
+      const fieldRecord = asRecord(fieldValue);
+      if (!fieldRecord) {
+        diagnostics.push({ path: fieldPath, message: "Credential field must be an object." });
+        continue;
+      }
+      if (!isPluginIdentifier(fieldName)) {
+        diagnostics.push({
+          path: fieldPath,
+          message: "Credential field ids must use letters, numbers, underscores, or hyphens, and must start with a letter or number."
+        });
+        continue;
+      }
+
+      const secret = fieldRecord.secret === undefined ? true : fieldRecord.secret;
+      const required = fieldRecord.required === undefined ? true : fieldRecord.required;
+      if (typeof secret !== "boolean") {
+        diagnostics.push({ path: `${fieldPath}.secret`, message: "Credential field secret must be a boolean." });
+        continue;
+      }
+      if (typeof required !== "boolean") {
+        diagnostics.push({ path: `${fieldPath}.required`, message: "Credential field required must be a boolean." });
+        continue;
+      }
+      if (secret && fieldRecord.default !== undefined) {
+        diagnostics.push({ path: `${fieldPath}.default`, message: "Secret credential fields cannot declare default values." });
+        continue;
+      }
+
+      fields[fieldName] = {
+        secret,
+        required,
+        ...(typeof fieldRecord.description === "string" && fieldRecord.description.trim().length > 0
+          ? { description: fieldRecord.description }
+          : {}),
+        ...(typeof fieldRecord.default === "string" ? { default: fieldRecord.default } : {})
+      };
+    }
+
+    credentials[scopeName] = {
+      ...(typeof scopeRecord.description === "string" && scopeRecord.description.trim().length > 0
+        ? { description: scopeRecord.description }
+        : {}),
+      fields
+    };
+  });
+
   const tools: Record<string, PluginToolExport> = {};
   Object.entries(toolsRecord ?? {}).forEach(([toolName, toolValue]) => {
     const toolRecord = asRecord(toolValue);
@@ -296,6 +474,20 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
     }
 
     const executable = readStringField(toolRecord, "executable", `${path}.tools.${toolName}`, diagnostics);
+    const capability = readEnumField(
+      toolRecord,
+      "capability",
+      ["context", "verification", "mutation", "reporting"],
+      `${path}.tools.${toolName}`,
+      diagnostics
+    );
+    const impact = readEnumField(
+      toolRecord,
+      "impact",
+      ["read", "write", "external", "secret"],
+      `${path}.tools.${toolName}`,
+      diagnostics
+    );
     const description =
       typeof toolRecord.description === "string" && toolRecord.description.trim().length > 0
         ? toolRecord.description
@@ -321,14 +513,33 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
         config_schema = schemaRecord;
       }
     }
+    let credentialScopes: string[] | undefined;
+    if (toolRecord.credentials !== undefined) {
+      if (!Array.isArray(toolRecord.credentials) || toolRecord.credentials.some((entry) => typeof entry !== "string")) {
+        diagnostics.push({ path: `${path}.tools.${toolName}.credentials`, message: "Tool credentials must be an array of credential scope strings." });
+      } else {
+        credentialScopes = [...new Set(toolRecord.credentials as string[])];
+        credentialScopes.forEach((scopeName, credentialIndex) => {
+          if (!credentials[scopeName]) {
+            diagnostics.push({
+              path: `${path}.tools.${toolName}.credentials[${credentialIndex}]`,
+              message: `Tool credential reference uses unknown credential scope "${scopeName}".`
+            });
+          }
+        });
+      }
+    }
 
-    if (executable) {
+    if (executable && capability && impact) {
       tools[toolName] = {
         executable,
+        capability,
+        impact,
         ...(description ? { description } : {}),
         ...(args ? { args } : {}),
         ...(usage ? { usage } : {}),
-        ...(config_schema ? { config_schema } : {})
+        ...(config_schema ? { config_schema } : {}),
+        ...(credentialScopes && credentialScopes.length > 0 ? { credentials: credentialScopes } : {})
       };
     }
   });
@@ -342,7 +553,8 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
     id,
     version,
     workflows,
-    tools
+    tools,
+    credentials
   };
 }
 
@@ -403,6 +615,10 @@ function resolvePluginSubpath(root: string, subpath: string, label: string): str
   return resolveSubpathWithinRoot(root, subpath, label);
 }
 
+function resolveLocalPluginPath(graphPath: string, localPath: string): string {
+  return isAbsolute(localPath) ? localPath : resolve(dirname(graphPath), localPath);
+}
+
 async function git(args: string[], cwd?: string): Promise<string> {
   const result = await execFileAsync("git", args, cwd ? { cwd } : undefined);
   return String(result.stdout).trim();
@@ -435,6 +651,51 @@ export async function resolvePluginsForGraph(
     const tempRoot = join(aliasRoot, "_resolving");
 
     try {
+      if (declaration.kind === "local") {
+        const pluginRoot = resolveLocalPluginPath(absoluteGraphPath, declaration.path);
+        const manifestPath = join(pluginRoot, "agentflow.plugin.json");
+        const manifestDigest = await digestFile(manifestPath);
+        const manifestForDigest = normalizeManifest(
+          await readJsonFile(manifestPath),
+          `$.plugins.${alias}`,
+          diagnostics
+        );
+        const toolDigests: Record<string, string> = {};
+        if (manifestForDigest) {
+          for (const [toolName, tool] of Object.entries(manifestForDigest.tools)) {
+            try {
+              const toolPath = resolvePluginSubpath(
+                pluginRoot,
+                tool.executable,
+                `Plugin tool "${alias}/${toolName}" executable`
+              );
+              toolDigests[toolName] = await digestFile(toolPath);
+            } catch (toolError) {
+              diagnostics.push({
+                path: `$.plugins.${alias}.tools.${toolName}`,
+                message: toolError instanceof Error
+                  ? `Failed to digest tool executable: ${toolError.message}`
+                  : "Failed to digest tool executable."
+              });
+            }
+          }
+        }
+
+        resolvedPlugins.push({
+          alias,
+          kind: "local",
+          source: declaration.path,
+          ref: "local",
+          commit: "local",
+          path: declaration.path,
+          manifest_digest: manifestDigest,
+          cache_path: declaration.path,
+          content_digest: await digestDirectory(pluginRoot),
+          ...(Object.keys(toolDigests).length > 0 ? { tool_digests: toolDigests } : {})
+        });
+        continue;
+      }
+
       await mkdir(aliasRoot, { recursive: true });
       await rm(tempRoot, { recursive: true, force: true });
       await git(["clone", declaration.source, tempRoot]);
@@ -473,6 +734,7 @@ export async function resolvePluginsForGraph(
       }
       resolvedPlugins.push({
         alias,
+        kind: "git",
         source: declaration.source,
         ref: declaration.ref,
         commit,
@@ -534,7 +796,26 @@ async function loadResolvedPlugins(
       continue;
     }
 
-    if (entry.source !== declaration.source || entry.ref !== declaration.ref) {
+    if (entry.kind !== declaration.kind) {
+      diagnostics.push({
+        path: `$.plugins.${alias}`,
+        message: `Plugin "${alias}" lockfile entry is stale. Run agentflow plugin resolve --graph ${graphPath}.`
+      });
+      continue;
+    }
+
+    if (
+      declaration.kind === "git" &&
+      (entry.source !== declaration.source || entry.ref !== declaration.ref)
+    ) {
+      diagnostics.push({
+        path: `$.plugins.${alias}`,
+        message: `Plugin "${alias}" lockfile entry is stale. Run agentflow plugin resolve --graph ${graphPath}.`
+      });
+      continue;
+    }
+
+    if (declaration.kind === "local" && entry.path !== declaration.path) {
       diagnostics.push({
         path: `$.plugins.${alias}`,
         message: `Plugin "${alias}" lockfile entry is stale. Run agentflow plugin resolve --graph ${graphPath}.`
@@ -545,7 +826,9 @@ async function loadResolvedPlugins(
     let pluginRoot: string;
     let manifestDigest: string;
     try {
-      pluginRoot = resolvePluginSubpath(dirname(graphPath), entry.cache_path, `Plugin "${alias}" cache_path`);
+      pluginRoot = entry.kind === "local"
+        ? resolveLocalPluginPath(graphPath, entry.path ?? entry.cache_path)
+        : resolvePluginSubpath(dirname(graphPath), entry.cache_path, `Plugin "${alias}" cache_path`);
       manifestDigest = await digestFile(join(pluginRoot, "agentflow.plugin.json"));
     } catch (error) {
       diagnostics.push({
@@ -555,6 +838,27 @@ async function loadResolvedPlugins(
           : `Plugin "${alias}" cache is unavailable. Run agentflow plugin resolve --graph ${graphPath}.`
       });
       continue;
+    }
+
+    if (entry.kind === "local" && entry.content_digest) {
+      try {
+        const contentDigest = await digestDirectory(pluginRoot);
+        if (contentDigest !== entry.content_digest) {
+          diagnostics.push({
+            path: `$.plugins.${alias}`,
+            message: `Plugin "${alias}" local folder digest changed. Run agentflow plugin resolve --graph ${graphPath}.`
+          });
+          continue;
+        }
+      } catch (error) {
+        diagnostics.push({
+          path: `$.plugins.${alias}`,
+          message: error instanceof Error
+            ? `Plugin "${alias}" local folder is unavailable. Run agentflow plugin resolve --graph ${graphPath}. ${error.message}`
+            : `Plugin "${alias}" local folder is unavailable. Run agentflow plugin resolve --graph ${graphPath}.`
+        });
+        continue;
+      }
     }
 
     if (manifestDigest !== entry.manifest_digest) {
@@ -610,6 +914,7 @@ async function loadResolvedPlugins(
 
       resolved.push({
         alias,
+        kind: entry.kind,
         source: entry.source,
         ref: entry.ref,
         commit: entry.commit,
@@ -668,11 +973,29 @@ function readConfigValue(config: Record<string, unknown>, path: string): string 
   return sharedReadConfigValue(config, path);
 }
 
-function rewriteString(value: string, config: Record<string, unknown>, workflowDir: string): string {
+function resolveWorkflowResourcePath(
+  workflowDir: string,
+  pluginRoot: string,
+  resourcePath: string,
+  label: string
+): string {
+  if (resourcePath.startsWith("plugin://")) {
+    return resolvePluginSubpath(pluginRoot, resourcePath.slice("plugin://".length), label);
+  }
+
+  return resolvePluginSubpath(workflowDir, resourcePath, label);
+}
+
+function rewriteString(
+  value: string,
+  config: Record<string, unknown>,
+  workflowDir: string,
+  pluginRoot: string
+): string {
   const withConfig = rewriteConfigPlaceholders(value, config);
 
   if (withConfig.startsWith("plugin://")) {
-    return resolvePluginSubpath(workflowDir, withConfig.slice("plugin://".length), "plugin:// resource");
+    return resolvePluginSubpath(pluginRoot, withConfig.slice("plugin://".length), "plugin:// resource");
   }
 
   return withConfig;
@@ -681,6 +1004,7 @@ function rewriteString(value: string, config: Record<string, unknown>, workflowD
 async function rewriteContextItems(
   value: unknown,
   workflowDir: string,
+  pluginRoot: string,
   config: Record<string, unknown>,
   internalIds: Set<string>,
   prefix: string,
@@ -706,6 +1030,7 @@ async function rewriteContextItems(
       rewritten.push(await rewriteWorkflowValue(
         item,
         workflowDir,
+        pluginRoot,
         config,
         internalIds,
         prefix,
@@ -724,7 +1049,12 @@ async function rewriteContextItems(
       continue;
     }
 
-    const resolvedPath = resolvePluginSubpath(workflowDir, pluginPath, `plugin_file context "${name}"`);
+    const resolvedPath = resolveWorkflowResourcePath(
+      workflowDir,
+      pluginRoot,
+      pluginPath,
+      `plugin_file context "${name}"`
+    );
     const text = await readFile(resolvedPath, "utf8");
     resourceDigests[pluginPath] = digestText(text);
     rewritten.push({
@@ -769,6 +1099,7 @@ function rewriteArtifactReferenceRef(
 async function rewriteWorkflowValue(
   value: unknown,
   workflowDir: string,
+  pluginRoot: string,
   config: Record<string, unknown>,
   internalIds: Set<string>,
   prefix: string,
@@ -778,12 +1109,12 @@ async function rewriteWorkflowValue(
   outerId = ""
 ): Promise<unknown> {
   if (typeof value === "string") {
-    return rewriteString(value, config, workflowDir);
+    return rewriteString(value, config, workflowDir, pluginRoot);
   }
 
   if (Array.isArray(value)) {
     return Promise.all(value.map((item) =>
-      rewriteWorkflowValue(item, workflowDir, config, internalIds, prefix, resourceDigests, diagnostics, publishNode, outerId)
+      rewriteWorkflowValue(item, workflowDir, pluginRoot, config, internalIds, prefix, resourceDigests, diagnostics, publishNode, outerId)
     ));
   }
 
@@ -799,6 +1130,7 @@ async function rewriteWorkflowValue(
       const context = await rewriteContextItems(
         itemValue,
         workflowDir,
+        pluginRoot,
         config,
         internalIds,
         prefix,
@@ -816,6 +1148,7 @@ async function rewriteWorkflowValue(
     rewritten[key] = await rewriteWorkflowValue(
       itemValue,
       workflowDir,
+      pluginRoot,
       config,
       internalIds,
       prefix,
@@ -1013,6 +1346,7 @@ async function expandPluginNode(
   const rewritten = await rewriteWorkflowValue(
     workflowGraph,
     workflowDir,
+    plugin.root,
     config,
     internalIds,
     internalPrefix,

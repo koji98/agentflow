@@ -23,7 +23,7 @@ import {
   toolNamePattern
 } from "./schema.js";
 import type { GraphDiagnostic } from "./schema.js";
-import { expandPluginWorkflows, type ResolvedPlugin } from "../plugins/workflows.js";
+import { expandPluginWorkflows, type PluginToolExport, type ResolvedPlugin } from "../plugins/workflows.js";
 import {
   interpolateGraphConfig,
   mergeConfig,
@@ -301,13 +301,37 @@ function callableNameForToolDeclaration(declaration: ToolDeclaration): string {
   return declaration.alias ?? `${declaration.from_plugin}-${declaration.tool}`;
 }
 
+interface ValidatedToolDeclaration {
+  exported: PluginToolExport;
+  declaration: ToolDeclaration;
+}
+
+interface ToolDeclarationValidationResult {
+  callable_names: Set<string>;
+  tools_by_callable: Map<string, ValidatedToolDeclaration>;
+}
+
+function toolApprovalTokens(declaration: ToolDeclaration, callable: string): string[] {
+  return [
+    `tool:${callable}`,
+    `tool:${declaration.from_plugin}/${declaration.tool}`,
+    `external:${callable}`,
+    `external:${declaration.from_plugin}/${declaration.tool}`
+  ].map((token) => token.toLowerCase());
+}
+
 function validateToolDeclarations(
   tools: ToolDeclaration[],
   basePath: string,
   pluginsByAlias: Map<string, ResolvedPlugin>,
-  diagnostics: ValidationDiagnostic[]
-): { callable_names: Set<string> } {
+  diagnostics: ValidationDiagnostic[],
+  options: {
+    approval_boundaries?: string[];
+    sandbox?: string;
+  } = {}
+): ToolDeclarationValidationResult {
   const callableNames = new Set<string>();
+  const toolsByCallable = new Map<string, ValidatedToolDeclaration>();
 
   tools.forEach((declaration, index) => {
     const declarationPath = `${basePath}[${index}]`;
@@ -321,7 +345,8 @@ function validateToolDeclarations(
       return;
     }
 
-    if (!plugin.manifest.tools[declaration.tool]) {
+    const exported = plugin.manifest.tools[declaration.tool];
+    if (!exported) {
       diagnostics.push({
         path: `${declarationPath}.tool`,
         message: `Plugin "${declaration.from_plugin}" does not export tool "${declaration.tool}".`
@@ -339,6 +364,37 @@ function validateToolDeclarations(
       return;
     }
 
+    if (
+      options.sandbox === "read-only" &&
+      (exported.capability === "mutation" || exported.impact === "write")
+    ) {
+      diagnostics.push({
+        path: declarationPath,
+        message: `Plugin tool "${callable}" cannot be exposed to a read-only agent because it declares capability "${exported.capability}" and impact "${exported.impact}".`
+      });
+    }
+
+    if (exported.impact === "secret" && (!exported.credentials || exported.credentials.length === 0)) {
+      diagnostics.push({
+        path: declarationPath,
+        message: `Plugin tool "${callable}" has secret impact and must declare credentials in its plugin manifest.`
+      });
+    }
+
+    if (exported.impact === "external") {
+      const approvedTokens = new Set(
+        (options.approval_boundaries ?? []).map((boundary) => boundary.trim().toLowerCase())
+      );
+      const approved = toolApprovalTokens(declaration, callable).some((token) => approvedTokens.has(token));
+
+      if (!approved) {
+        diagnostics.push({
+          path: declarationPath,
+          message: `Plugin tool "${callable}" has external impact and must be explicitly approved in intent.approval_boundaries using "tool:${callable}", "tool:${declaration.from_plugin}/${declaration.tool}", "external:${callable}", or "external:${declaration.from_plugin}/${declaration.tool}".`
+        });
+      }
+    }
+
     if (callableNames.has(callable)) {
       diagnostics.push({
         path: declarationPath,
@@ -348,27 +404,109 @@ function validateToolDeclarations(
     }
 
     callableNames.add(callable);
+    toolsByCallable.set(callable, { exported, declaration });
   });
 
-  return { callable_names: callableNames };
+  return {
+    callable_names: callableNames,
+    tools_by_callable: toolsByCallable
+  };
 }
 
-function validateToolConfigKeys(
+const sensitiveToolConfigKeyPattern =
+  /(^|[_-])(token|secret|password|passwd|api[_-]?key|credential|authorization|bearer)([_-]|$)/i;
+
+function asToolSchemaRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function validateToolConfigSchema(
+  config: Record<string, string>,
+  schema: Record<string, unknown>,
+  basePath: string,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  if (schema.type !== undefined && schema.type !== "object") {
+    diagnostics.push({
+      path: `${basePath}.config_schema.type`,
+      message: "Only object tool config schemas are supported."
+    });
+    return;
+  }
+
+  const properties = asToolSchemaRecord(schema.properties) ?? {};
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((item): item is string => typeof item === "string")
+    : [];
+
+  required.forEach((key) => {
+    if (config[key] === undefined) {
+      diagnostics.push({
+        path: `${basePath}.${key}`,
+        message: `tool_config is missing required property "${key}".`
+      });
+    }
+  });
+
+  if (schema.additionalProperties === false) {
+    Object.keys(config)
+      .filter((key) => properties[key] === undefined)
+      .forEach((key) => {
+        diagnostics.push({
+          path: `${basePath}.${key}`,
+          message: `tool_config does not allow property "${key}".`
+        });
+      });
+  }
+
+  Object.entries(properties).forEach(([key, propertySchema]) => {
+    if (config[key] === undefined) {
+      return;
+    }
+
+    const expectedType = asToolSchemaRecord(propertySchema)?.type;
+    if (expectedType !== undefined && expectedType !== "string") {
+      diagnostics.push({
+        path: `${basePath}.${key}`,
+        message: `tool_config property "${key}" must be ${String(expectedType)}, but tool_config values are strings.`
+      });
+    }
+  });
+}
+
+function validateToolConfig(
   config: Record<string, Record<string, string>> | undefined,
   basePath: string,
-  scopeNames: ReadonlySet<string>,
+  scopeToolsByName: ReadonlyMap<string, ValidatedToolDeclaration>,
   diagnostics: ValidationDiagnostic[]
 ): void {
   if (!config) {
     return;
   }
 
-  for (const toolName of Object.keys(config)) {
-    if (!scopeNames.has(toolName)) {
+  for (const [toolName, toolConfig] of Object.entries(config)) {
+    const scopeTool = scopeToolsByName.get(toolName);
+    if (!scopeTool) {
       diagnostics.push({
         path: `${basePath}.${toolName}`,
         message: `tool_config references unknown tool "${toolName}". Declare it in tools or via a plugin first.`
       });
+      continue;
+    }
+
+    for (const key of Object.keys(toolConfig)) {
+      if (sensitiveToolConfigKeyPattern.test(key)) {
+        diagnostics.push({
+          path: `${basePath}.${toolName}.${key}`,
+          message: `tool_config key "${key}" looks secret-bearing. Put secret values in plugin credentials and configure them with agentflow auth instead.`
+        });
+      }
+    }
+
+    if (scopeTool.exported.config_schema) {
+      validateToolConfigSchema(toolConfig, scopeTool.exported.config_schema, `${basePath}.${toolName}`, diagnostics);
     }
   }
 }
@@ -390,10 +528,14 @@ async function validateNormalizedDocument(
     document.tools ?? [],
     "$.tools",
     pluginsByAlias,
-    diagnostics
+    diagnostics,
+    {
+      ...(document.intent.approval_boundaries
+        ? { approval_boundaries: document.intent.approval_boundaries }
+        : {})
+    }
   );
-  const graphScopeToolNames = new Set<string>(graphToolValidation.callable_names);
-  validateToolConfigKeys(document.tool_config, "$.tool_config", graphScopeToolNames, diagnostics);
+  validateToolConfig(document.tool_config, "$.tool_config", graphToolValidation.tools_by_callable, diagnostics);
 
   (document.prerequisites?.checks ?? []).forEach((check, index) => {
     validatePrerequisiteCheck(check, `$.prerequisites.checks[${index}]`, repoAliases, repoCount, diagnostics);
@@ -435,7 +577,7 @@ async function validateNormalizedDocument(
             "the sandbox blocks every file write so the artifact contract cannot be satisfied. " +
             (node.type === "agent"
               ? "Remove the artifact declarations or raise the sandbox to workspace-write."
-              : "AI checks emit result_json automatically; remove the declared artifacts.")
+              : "AI checks emit verification_json automatically; remove the declared artifacts.")
         });
       }
     }
@@ -528,32 +670,50 @@ async function validateNormalizedDocument(
     }
 
     const agentNode = node as AgentNode;
-    if (!agentNode.tools && !agentNode.tool_config) {
-      return;
-    }
-
-    const agentToolValidation = validateToolDeclarations(
-      agentNode.tools ?? [],
-      `${metadata.path}.tools`,
-      pluginsByAlias,
-      diagnostics
-    );
-
-    const conflictingNames = [...agentToolValidation.callable_names].filter((name) =>
-      graphToolValidation.callable_names.has(name)
-    );
-    for (const name of conflictingNames) {
-      diagnostics.push({
-        path: `${metadata.path}.tools`,
-        message: `Tool name "${name}" conflicts with a graph-level tool of the same name.`
+    const sandbox = resolveNodePolicy(document, launch, agentNode).policy?.sandbox;
+    if (sandbox === "read-only") {
+      (document.tools ?? []).forEach((declaration, index) => {
+        const exported = pluginsByAlias.get(declaration.from_plugin)?.manifest.tools[declaration.tool];
+        const callable = callableNameForToolDeclaration(declaration);
+        if (exported && (exported.capability === "mutation" || exported.impact === "write")) {
+          diagnostics.push({
+            path: `$.tools[${index}]`,
+            message: `Plugin tool "${callable}" cannot be exposed to a read-only agent because it declares capability "${exported.capability}" and impact "${exported.impact}".`
+          });
+        }
       });
     }
 
-    const agentScopeToolNames = new Set<string>([
-      ...graphScopeToolNames,
-      ...agentToolValidation.callable_names
-    ]);
-    validateToolConfigKeys(agentNode.tool_config, `${metadata.path}.tool_config`, agentScopeToolNames, diagnostics);
+    if (agentNode.tools || agentNode.tool_config) {
+      const agentToolValidation = validateToolDeclarations(
+        agentNode.tools ?? [],
+        `${metadata.path}.tools`,
+        pluginsByAlias,
+        diagnostics,
+        {
+          ...(document.intent.approval_boundaries
+            ? { approval_boundaries: document.intent.approval_boundaries }
+            : {}),
+          ...(sandbox ? { sandbox } : {})
+        }
+      );
+
+      const conflictingNames = [...agentToolValidation.callable_names].filter((name) =>
+        graphToolValidation.callable_names.has(name)
+      );
+      for (const name of conflictingNames) {
+        diagnostics.push({
+          path: `${metadata.path}.tools`,
+          message: `Tool name "${name}" conflicts with a graph-level tool of the same name.`
+        });
+      }
+
+      const agentScopeToolsByName = new Map<string, ValidatedToolDeclaration>([
+        ...graphToolValidation.tools_by_callable,
+        ...agentToolValidation.tools_by_callable
+      ]);
+      validateToolConfig(agentNode.tool_config, `${metadata.path}.tool_config`, agentScopeToolsByName, diagnostics);
+    }
   }, "$.graph");
 
   visitNodes(document.graph, (node, metadata) => {

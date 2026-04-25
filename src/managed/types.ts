@@ -26,7 +26,7 @@ export interface ManagedPatternDescriptor {
   kind: ManagedPatternKind;
   label: string;
   summary: string;
-  authored_contract_status: "deferred" | "implemented";
+  contract_status: "implemented";
   runtime_shape: "compiled-subgraph";
   orchestration: ManagedPatternOrchestrationDescriptor;
   phases: ManagedPatternPhaseDescriptor[];

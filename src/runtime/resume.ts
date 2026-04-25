@@ -68,6 +68,8 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     kind: node.kind,
     repo: node.repo,
     deps: node.deps,
+    ...(node.goal ? { goal: node.goal } : {}),
+    ...(node.acceptance_criteria ? { acceptance_criteria: node.acceptance_criteria } : {}),
     effective_policy: node.effective_policy,
     context: node.context,
     declared_artifacts: node.declared_artifacts,
@@ -131,6 +133,14 @@ function fingerprintRepeatScope(scope: CompiledRepeatScope): string {
   }));
 }
 
+function fingerprintGraphRunContract(graph: CompiledGraph): string {
+  return JSON.stringify(sortJson({
+    intent: graph.intent,
+    supervision: graph.supervision,
+    delivery: graph.delivery
+  }));
+}
+
 async function collectInvalidatedCompiledIds(options: {
   prior_graph: CompiledGraph;
   graph: CompiledGraph;
@@ -153,6 +163,8 @@ async function collectInvalidatedCompiledIds(options: {
   );
   const invalidated_compiled_ids = new Set<string>();
   const restarted_repeat_scope_ids = new Set<string>();
+  const runContractChanged =
+    fingerprintGraphRunContract(options.prior_graph) !== fingerprintGraphRunContract(options.graph);
 
   const restartRepeatScope = (scope: CompiledRepeatScope): boolean => {
     if (restarted_repeat_scope_ids.has(scope.scope_id)) {
@@ -171,7 +183,11 @@ async function collectInvalidatedCompiledIds(options: {
   for (const node of options.graph.nodes) {
     const priorNode = priorNodesById.get(node.compiled_id);
 
-    if (!priorNode || fingerprintCompiledNode(priorNode) !== fingerprintCompiledNode(node)) {
+    if (
+      runContractChanged ||
+      !priorNode ||
+      fingerprintCompiledNode(priorNode) !== fingerprintCompiledNode(node)
+    ) {
       invalidated_compiled_ids.add(node.compiled_id);
     }
   }
@@ -186,7 +202,7 @@ async function collectInvalidatedCompiledIds(options: {
       !priorScope ||
       fingerprintRepeatScope(priorScope) !== fingerprintRepeatScope(scope);
 
-    if (changed || priorStatus !== "passed" || hasIncompletePriorNodeState) {
+    if (runContractChanged || changed || priorStatus !== "passed" || hasIncompletePriorNodeState) {
       restartRepeatScope(scope);
     }
   }
@@ -403,6 +419,13 @@ export async function createResumedRuntimeSession(options: {
 
   session.manifest = options.manifest;
   session.started_at = options.prior_state.started_at;
+  if (fingerprintGraphRunContract(options.prior_graph) === fingerprintGraphRunContract(options.graph)) {
+    session.supervisor = {
+      ...options.prior_state.supervisor,
+      budget_remaining: { ...options.prior_state.supervisor.budget_remaining },
+      escalations: options.prior_state.supervisor.escalations.map((escalation) => ({ ...escalation }))
+    };
+  }
   session.next_event_seq = Math.max(
     options.prior_state.snapshot_seq + 1,
     (options.events.at(-1)?.seq ?? 0) + 1

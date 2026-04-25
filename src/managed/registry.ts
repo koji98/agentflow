@@ -12,7 +12,7 @@ export const managedPatternDescriptors = [
     label: "Pattern Deep Research",
     summary:
       "Plan-led research pattern that clarifies the ask, builds a research plan, fans out investigators, consolidates evidence, and publishes a sourced report plus machine packet.",
-    authored_contract_status: "implemented",
+    contract_status: "implemented",
     runtime_shape: "compiled-subgraph",
     orchestration: {
       summary:
@@ -36,7 +36,7 @@ export const managedPatternDescriptors = [
     label: "Pattern Spec Design",
     summary:
       "Repo-first design pattern that clarifies the problem, inspects the current system, chooses a direction, and publishes an implementation-ready design package plus machine packet.",
-    authored_contract_status: "implemented",
+    contract_status: "implemented",
     runtime_shape: "compiled-subgraph",
     orchestration: {
       summary:
@@ -62,7 +62,7 @@ export const managedPatternDescriptors = [
     label: "Pattern Generate Evaluate Fix",
     summary:
       "Narrow implementation pattern that consumes a prepared task packet, generates or fixes code changes, evaluates concrete commands independently, and publishes a change summary plus machine packet.",
-    authored_contract_status: "implemented",
+    contract_status: "implemented",
     runtime_shape: "compiled-subgraph",
     orchestration: {
       summary:
@@ -86,7 +86,7 @@ export const managedPatternDescriptors = [
     label: "Pattern Review Change",
     summary:
       "Structured review pattern that prepares a review packet, fans out reviewer roles, calibrates findings, and publishes a final review summary plus machine bundle.",
-    authored_contract_status: "implemented",
+    contract_status: "implemented",
     runtime_shape: "compiled-subgraph",
     orchestration: {
       summary:

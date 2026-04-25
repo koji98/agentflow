@@ -154,8 +154,8 @@ function describeReservedArtifact(artifact: string): string | undefined {
     return "Final response captured from the producer node.";
   }
 
-  if (artifact === "result_json") {
-    return "Normalized result.json captured from the producer node.";
+  if (artifact === "verification_json") {
+    return "Structured verification record captured from the producer node.";
   }
 
   if (artifact === "stdout") {

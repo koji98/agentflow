@@ -400,7 +400,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       id: prepareId,
       label: "Prepare Review Packet",
       ...shared,
-      sandbox: "read-only",
+      sandbox: "workspace-write",
       context: [...(config.context ?? []), ...sourceMaterials.context],
       artifacts: mergeArtifacts(
         outputDirArtifact("review_packet", "review-packet.json"),
@@ -413,7 +413,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       id: planId,
       label: "Plan Review",
       ...shared,
-      sandbox: "read-only",
+      sandbox: "workspace-write",
       context: [
         artifactContext("review_packet", prepareId, "review_packet")
       ],
@@ -433,7 +433,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
         id: workflowNodeId(config.id, `reviewer_${slugValue(profile)}`),
         label: `${profile} Reviewer`,
         ...shared,
-        sandbox: "read-only",
+        sandbox: "workspace-write",
         context: [
           artifactContext("review_packet", prepareId, "review_packet"),
           artifactContext("workflow_plan_json", planId, "workflow_plan_json")
@@ -447,7 +447,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       id: rawId,
       label: "Aggregate Raw Findings",
       ...shared,
-      sandbox: "read-only",
+      sandbox: "workspace-write",
       context: reviewerProfiles.map((profile): ContextItem =>
         artifactContext(
           `findings_${slugValue(profile)}`,
@@ -463,7 +463,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       id: mergeId,
       label: "Merge Findings",
       ...shared,
-      sandbox: "read-only",
+      sandbox: "workspace-write",
       context: [
         artifactContext("review_packet", prepareId, "review_packet"),
         artifactContext("raw_findings", rawId, "raw_findings")
@@ -476,7 +476,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       id: calibrateId,
       label: "Calibrate Findings",
       ...shared,
-      sandbox: "read-only",
+      sandbox: "workspace-write",
       context: [
         artifactContext("review_packet", prepareId, "review_packet"),
         artifactContext("workflow_plan_json", planId, "workflow_plan_json"),
@@ -500,7 +500,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
     id: config.id,
     ...(config.label ? { label: config.label } : { label: "Publish Review" }),
     ...shared,
-    sandbox: "read-only",
+    sandbox: "workspace-write",
     context: [
       artifactContext("review_packet", prepareId, "review_packet"),
       artifactContext("workflow_plan_json", planId, "workflow_plan_json"),

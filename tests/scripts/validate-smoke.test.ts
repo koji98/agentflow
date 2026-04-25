@@ -7,7 +7,6 @@ describe("validate:smoke contract", () => {
     expect(scriptModule.canonicalDocs).toEqual([
       "README.md",
       "docs/SCOPE.md",
-      "docs/DEFERRED.md",
       "docs/ARCHITECTURE.md",
       "docs/OPERATIONS.md",
       "docs/MANAGED_PATTERNS.md",
@@ -31,7 +30,7 @@ describe("validate:smoke contract", () => {
       runHarnessAdapters: ["codex-cli", "cursor-cli"],
       runWorkspaceBackends: ["inplace", "worktree"]
     });
-    expect(scriptModule.alphaResidualRisks).toEqual([
+    expect(scriptModule.smokeResidualRisks).toEqual([
       "measured coverage floors are not part of validate:smoke",
       "manual run-artifact inspection is not part of validate:smoke",
       "real Codex or Cursor installs are not exercised by validate:smoke",

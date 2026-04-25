@@ -4,6 +4,11 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 
+const TEST_INTENT = {
+  goal: "Review an accountable implementation slice.",
+  acceptance_criteria: ["The review package identifies high-signal risks."]
+};
+
 function buildReviewStep(stepOverrides = {}) {
   return {
     type: "pattern_review_change",
@@ -48,6 +53,7 @@ function buildDocument(steps) {
   return {
     version: "1",
     graph_id: "pattern-review-change-test",
+    intent: TEST_INTENT,
     repos: {
       main: {
         path: "."

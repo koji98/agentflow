@@ -290,7 +290,7 @@ function buildCritiquePrompt(profile: string, config: PatternSpecDesignConfig): 
 
 function buildMergePrompt(): string {
   return renderPrompt([
-    body("Merge the critique outputs into one revision brief."),
+    body("Merge the critique artifacts into one revision brief."),
     section("Quality Bar", [
       "De-duplicate overlap, preserve the strongest blockers, and separate blockers from non-blocking improvements."
     ]),
@@ -613,7 +613,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
               iteration: "latest_failed",
               if_available: true
             }),
-            artifactContext("failed_quality_review", qualityId, "quality_review", {
+            artifactContext("failed_quality_review", qualityId, "verification_json", {
               iteration: "latest_failed",
               if_available: true
             })
@@ -651,7 +651,6 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
             latestDirectionRef,
             artifactContext("current_state", inspectId, "current_state")
           ],
-          artifacts: outputDirArtifact("quality_review", "quality-review.json"),
           prompt: buildQualityPrompt(config),
           rubric: buildQualityRubric(config)
         }
@@ -690,7 +689,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
         iteration: "latest_passed",
         if_available: true
       }),
-      artifactContext("quality_review", qualityId, "quality_review", {
+      artifactContext("quality_review", qualityId, "verification_json", {
         iteration: "latest_passed"
       })
     ],

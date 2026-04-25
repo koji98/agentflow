@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
-import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
+import { normalizeAuthoredGraphDocument as normalizeRawAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { builtInCodexReasoningEffort, resolveLaunchConfig } from "../../src/graph/profiles.js";
 
 const fixturePath = fileURLToPath(
@@ -16,7 +16,159 @@ async function readFixture(): Promise<unknown> {
   return JSON.parse(contents) as unknown;
 }
 
+function normalizeAuthoredGraphDocument(value: unknown) {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || "intent" in value) {
+    return normalizeRawAuthoredGraphDocument(value);
+  }
+
+  return normalizeRawAuthoredGraphDocument({
+    intent: {
+      goal: "Test supervised graph contract."
+    },
+    ...value
+  });
+}
+
 describe("graph compilation", () => {
+  it("carries supervised v1 intent, supervision, and delivery into the compiled contract", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "compiled-supervised-contract",
+      intent: {
+        goal: "Ship the supervised runtime.",
+        acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
+      },
+      supervision: {
+        allowed_actions: ["retry_node", "escalate"],
+        retry_budget: {
+          max_total_interventions: 3,
+          max_node_retries: 1,
+          max_artifact_repairs: 0,
+          max_context_rebuilds: 0,
+          max_workspace_refreshes: 0,
+          max_diagnostic_runs: 1,
+          max_semantic_evaluations: 1
+        },
+        drift_detection: {
+          score_threshold: 0.9
+        },
+        escalation: {
+          require_human_on_policy_breach: true,
+          require_human_on_scope_drift: true
+        }
+      },
+      delivery: {
+        required_sections: ["task_brief", "reviewer_guide", "intervention_trace"]
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "version",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+
+    expect(compilation.diagnostics).toEqual([]);
+    expect(compilation.compiled_graph).toEqual(
+      expect.objectContaining({
+        intent: expect.objectContaining({
+          goal: "Ship the supervised runtime.",
+          acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
+        }),
+        supervision: expect.objectContaining({
+          allowed_actions: ["retry_node", "escalate"],
+          drift_detection: {
+            score_threshold: 0.9
+          }
+        }),
+        delivery: {
+          required_sections: ["task_brief", "reviewer_guide", "intervention_trace"]
+        }
+      })
+    );
+  });
+
+  it("compiles node goals and acceptance criteria into the executable contract", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "compiled-node-intent",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            goal: "Implement timeout handling with a reviewable handoff.",
+            acceptance_criteria: [
+              "Timeout behavior is tested.",
+              "The handoff lists changed files and risk."
+            ]
+          }
+        ]
+      }
+    });
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+
+    expect(compilation.diagnostics).toEqual([]);
+    expect(compilation.compiled_graph?.nodes).toEqual([
+      expect.objectContaining({
+        kind: "agent",
+        authored_id: "implement",
+        goal: "Implement timeout handling with a reviewable handoff.",
+        acceptance_criteria: [
+          "Timeout behavior is tested.",
+          "The handoff lists changed files and risk."
+        ],
+        prompt: "Implement timeout handling with a reviewable handoff."
+      })
+    ]);
+  });
+
   it("compiles the repeat fixture into explicit nodes, scopes, and repeat edges", async () => {
     const normalized = normalizeAuthoredGraphDocument(await readFixture());
     const launch = resolveLaunchConfig(normalized.document!);

@@ -7,9 +7,11 @@ export const runtimeEventTypes = [
   "node.ready",
   "repeat.iteration.started",
   "node.started",
-  "artifact_repair.started",
-  "artifact_repair.completed",
-  "artifact_repair.failed",
+  "supervisor.decision",
+  "supervisor.intervention.started",
+  "supervisor.intervention.completed",
+  "supervisor.intervention.failed",
+  "supervisor.escalated",
   "check.evaluated",
   "verification.recorded",
   "node.completed",
@@ -21,6 +23,7 @@ export const runtimeEventTypes = [
   "sequence.cleanup.step_failed",
   "sequence.cleanup.completed",
   "sequence.cleanup.canceled",
+  "delivery.package.completed",
   "run.canceled",
   "run.completed"
 ] as const;

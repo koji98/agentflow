@@ -15,6 +15,11 @@ import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 
 const execFileAsync = promisify(execFile);
 
+const TEST_INTENT = {
+  goal: "Exercise repeat runtime behavior for supervised execution.",
+  acceptance_criteria: ["Repeat scopes pass, fail, or stop according to their checks."]
+};
+
 async function initGitRepo(repoDir: string): Promise<void> {
   await execFileAsync("git", ["init"], { cwd: repoDir });
   await execFileAsync("git", ["config", "user.email", "agentflow@example.com"], { cwd: repoDir });
@@ -25,7 +30,10 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument(document);
+  const normalized = normalizeAuthoredGraphDocument({
+    intent: TEST_INTENT,
+    ...document
+  });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -148,7 +156,8 @@ describe("runtime repeat", () => {
     expect(run.state.repeat_scopes.scope__root__retry.status).toBe("failed");
     expect(run.state.node_statuses.root__finalize).toBe("blocked");
     expect(run.attempts.filter((attempt) => attempt.authored_id === "verify")).toHaveLength(2);
-    expect(run.events.at(-1)?.type).toBe("run.completed");
+    expect(run.events.some((event) => event.type === "run.completed")).toBe(true);
+    expect(run.events.at(-1)?.type).toBe("delivery.package.completed");
 
     await rm(tempRoot, { recursive: true, force: true });
   });

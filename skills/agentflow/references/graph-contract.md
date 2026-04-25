@@ -1,359 +1,193 @@
-# Agentflow Graph Contract
+# Graph Contract
 
-Use this as the compact syntax reference for the current Agentflow graph surface.
+Use graph version `"1"`.
 
-## Document Shape
+## Top-Level Fields
 
-Required top-level fields:
+Required:
 
-- `version`: always `"1"`
+- `version`
 - `graph_id`
-- `profiles`
+- `intent`
 - `graph`
 
-Optional top-level fields:
+Common:
 
-- `repos` (defaults to a single `main` repo whose path is the graph file directory)
-- `defaults` (`launch_profile` defaults to `"default"` only when a profile named `default` exists; `workspace_backend` defaults to `"inplace"`)
+- `repos`
+- `defaults`
+- `profiles`
+- `supervision`
+- `delivery`
+- `prerequisites`
 - `plugins`
-- `prerequisites.checks`
-- `tools` (plugin-bundled CLI tools only)
+- `tools`
 - `tool_config`
+- `config_schema`
+- `config`
 
-Path rules:
+## Intent
 
-- `--graph` resolves from the shell current working directory.
-- `repos.<alias>.path` resolves from the graph file directory.
-- `plugins.<alias>` resolves through `agentflow plugin resolve --graph`, which writes `agentflow.plugins.lock.json` next to the graph.
-- Node workspace paths must stay inside their workspace root.
-- Context workspace paths must stay inside the selected repo root.
-- Artifact paths must stay inside their source root.
+```json
+{
+  "goal": "Ship checkout timeout handling.",
+  "scope": {
+    "paths": ["src/checkout/**", "tests/checkout/**"],
+    "out_of_scope": ["provider migration"]
+  },
+  "constraints": ["Keep public APIs stable."],
+  "acceptance_criteria": ["Timeouts return typed errors.", "Tests cover retry behavior."],
+  "approval_boundaries": ["Do not modify payment provider configuration."]
+}
+```
 
-Launch rules:
+`intent.goal` is required. Approval boundaries are required when the graph exposes external-impact tools. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; `intent.scope` is governance, not a replacement for executable `repo` or `profile` settings.
 
-- `defaults.launch_profile` selects a named profile. When omitted, normalization defaults to `"default"` only when such a profile exists; otherwise every node must reference a profile explicitly.
-- `defaults.workspace_backend` is `inplace` (default when omitted) or `worktree`.
-- `harness` is environment-dependent and required on every `agent` and AI `check` node through the profile chain. Validation fails if a node cannot resolve a harness.
-- The graph owns launch settings. Do not expect CLI overrides for profile or workspace backend.
+Executable nodes can also carry intent:
 
-## Profiles
+```json
+{
+  "type": "agent",
+  "id": "implement_timeout",
+  "repo": "main",
+  "profile": "coder",
+  "goal": "Implement timeout handling and publish reviewer evidence.",
+  "acceptance_criteria": ["Tests pass.", "The handoff names changed files and risks."]
+}
+```
 
-Profiles hold runtime policy, not graph structure.
+Agent nodes require either `prompt` or `goal`. When `prompt` is omitted, `goal` becomes the executable task prompt. Node goals and acceptance criteria are rendered to Codex CLI and Cursor CLI prompts, supervisor repair prompts, and resume fingerprints.
 
-Common fields:
+## Supervision
 
-- `harness`: `codex-cli` or `cursor-cli`
-- `model`
-- `reasoning_effort`: `none`, `low`, `medium`, `high`, `xhigh`
-- `sandbox`: `read-only`, `workspace-write`, `danger-full-access`
-- `skip_git_repo_check`
-- `env_files`
-- `timeout_sec`
-- `input_rules`
-- `deterministic_check_defaults`
-- `ai_check_defaults`
-- `artifact_repair`
+Allowed action kinds:
 
-`env_files` applies to `exec` and deterministic `check` nodes. It does not apply to agent harnesses or AI checks.
+- `retry_node`
+- `repair_artifact`
+- `rebuild_context`
+- `refresh_workspace`
+- `run_diagnostic`
+- `semantic_evaluation`
+- `escalate`
 
-`input_rules` fields:
+Retry budget fields:
 
-- `max_total_tokens`
-- `max_tokens_per_item`
+- `max_total_interventions`
+- `max_node_retries`
+- `max_artifact_repairs`
+- `max_context_rebuilds`
+- `max_workspace_refreshes`
+- `max_diagnostic_runs`
+- `max_semantic_evaluations`
 
-`artifact_repair.max_attempts` applies only to agent nodes. It defaults to `1`, accepts integers from `0` through `3`, and `0` disables repair.
+Escalation fields:
 
-## Node Kinds
+- `require_human_on_policy_breach`
+- `require_human_on_scope_drift`
 
-Primitive executable nodes:
+## Delivery
+
+```json
+{
+  "required_sections": [
+    "task_brief",
+    "implementation_summary",
+    "grouped_change_map",
+    "decision_log",
+    "evaluation_ledger",
+    "reviewer_guide",
+    "risk_notes",
+    "follow_up_items",
+    "intervention_trace"
+  ]
+}
+```
+
+## Nodes
+
+Executable node kinds:
 
 - `agent`
 - `exec`
 - `check`
 - `checkpoint`
 
-Authoring containers:
+Container node kinds:
 
 - `sequence`
 - `parallel`
 - `repeat`
 
-Managed patterns:
+Managed pattern node kinds:
 
 - `pattern_deep_research`
 - `pattern_spec_design`
 - `pattern_generate_evaluate_fix`
 - `pattern_review_change`
 
-Plugin workflows:
-
-- `plugin`
-
-Only executable nodes run directly. Containers compile into scopes and edges. Managed patterns and plugin workflows lower into generated primitive subgraphs.
-
-## Common Executable Fields
-
-Executable nodes may define:
-
-- `id`
-- optional `label`
-- optional `repo`
-- optional `profile`
-- optional `context`
-- optional `artifacts`
-- optional `timeout_sec`
-
-When multiple repos are declared, executable nodes must declare `repo`.
-
 ## Context
 
-`context` is a node array. Every item needs a stable `name`.
+Context item sources:
 
-Supported context sources:
+- `text`
+- `workspace_file`
+- `workspace_glob`
+- artifact references with `ref`, `node`, and `artifact`
 
-```json
-{ "name": "goal", "from": "text", "text": "..." }
-{ "name": "readme", "from": "workspace_file", "path": "README.md" }
-{ "name": "sources", "from": "workspace_glob", "path": "src/**/*.ts", "max_files": 20 }
-{ "ref": "design.design_packet" }
-{ "ref": "design" }
-```
-
-Artifact context fields:
-
-- `ref`: required path-style string. `"<node>.<artifact>"` selects a declared artifact; bare `"<node>"` resolves to the canonical artifact for that node kind (`agent_response` for `agent`, `stdout` for `exec`, `result_json` for `check`).
-- optional `name`: defaults to the rightmost `.` segment of `ref`, or to the node id when `ref` is bare. Conflicting names across `ref` items inside a single node fail validation.
-- optional `iteration`: `latest`, `latest_passed`, `latest_failed`, `previous`, or a positive integer
-- optional `attempt`: `latest`, `latest_passed`, `latest_failed`, `previous`, or a positive integer
-- optional `if_available`: boolean
-
-Use `if_available: true` only when the consumer can still do useful work without the material. The `.` character is reserved as the `ref` path separator; declared artifact keys cannot contain `.`.
-
-Runtime also injects reserved `repeat_history` context for executable nodes inside `repeat.body`. It is omitted on iteration 1 and materialized on later iterations from completed prior iterations, including the retry cause, prior node outcomes, prior agent responses, failed check excerpts, checkpoint feedback, and prior artifact inventory. Do not author `repeat_history`; it is runtime context.
+Artifact references may use `iteration` or `attempt` selectors: `latest`, `latest_passed`, `latest_failed`, `previous`, or a positive integer. Use `if_available: true` when omission is acceptable.
 
 ## Artifacts
 
-`artifacts` is a node map keyed by artifact name.
-
-```json
-{
-  "design_packet": {
-    "from": "output_dir",
-    "path": "design-packet.json",
-    "description": "Structured implementation packet for downstream implementation nodes."
-  },
-  "junit": {
-    "from": "workspace",
-    "path": "reports/junit.xml",
-    "description": "JUnit XML report copied from the workspace after validation."
-  }
-}
-```
-
 Artifact sources:
 
-- `output_dir`: file written under `AGENTFLOW_OUTPUT_DIR`
-- `workspace`: file copied from the node repo workspace
-- `description`: required one-sentence description of the expected file contents
+- `output_dir`: file under `$AGENTFLOW_OUTPUT_DIR`
+- `workspace`: file under the node workspace
 
-Reserved canonical artifact names (one per node kind):
+Every artifact declaration needs `description`.
 
-- `agent_response`: every agent final response, persisted as `artifacts/agent-response.md`
-- `stdout`: every exec node's stdout stream, persisted as `logs/stdout.log`
-- `result_json`: every check node's normalized result, persisted as `artifacts/result.json`
+Reserved automatic artifacts:
 
-Do not declare artifacts with reserved names. Declared artifact keys also cannot contain `.`.
+- `agent_response`
+- `verification_json`
+- `stdout`
+- `stderr`
 
-Every declared artifact must exist when the node closes. Missing declared artifacts fail the node after any configured agent artifact repair attempts are exhausted. Producer artifact declarations do not have `required` or `optional`; availability belongs on consumer `context.from = "artifact"` items with `if_available: true` when the consumer can still do useful work without that material.
+## Harness Profiles
 
-## Runtime Environment
+Supported harnesses:
 
-`exec` and deterministic `check` nodes receive:
+- `codex-cli`
+- `cursor-cli`
 
-- `AGENTFLOW_WORKSPACE`
-- `AGENTFLOW_OUTPUT_DIR`
-- `AGENTFLOW_CONTEXT_PACKET`
-- `AGENTFLOW_CONTEXT_MANIFEST`
-- one `AGENTFLOW_CONTEXT_<UPPER_NAME>` per resolved context item, pointing at the materialized file
+Common profile fields:
 
-Agents receive the same first four environment variables (workspace, output dir, packet, manifest) and the same contract through their harness prompt. Source edits happen in `AGENTFLOW_WORKSPACE`. Durable handoff files go in `AGENTFLOW_OUTPUT_DIR` and must be declared in `artifacts`.
-
-When plugin tools are in scope on an agent node, the agent also receives `AGENTFLOW_TOOL_STATE`, optional `AGENTFLOW_PLUGIN_ROOT_<UPPER_ALIAS>` and `AGENTFLOW_PLUGIN_ROOT` variables, plus one `AGENTFLOW_TOOL_<UPPER_NAME>_<UPPER_KEY>` per `tool_config` entry.
-
-`AGENTFLOW_OUTPUT_DIR` points at the current execution's `artifacts/` directory. Runtime bookkeeping such as root `execution.json`, root `result.json`, `context/`, and `logs/` is inspectable but is not the graph handoff surface.
-
-### Path References In Prompts
-
-Prefer not to reference `AGENTFLOW_*` paths in `prompt` or `rubric` text at all. The harness prompt already inlines the context manifest, lists every declared artifact with an absolute path, and shows the workspace path. Tools that need a path should read it from the shell environment when the agent invokes them, not from the prompt body.
-
-If a prompt does reference an `AGENTFLOW_*` token, Agentflow substitutes it with the absolute path before sending the prompt to the model. The following forms are recognised for `AGENTFLOW_WORKSPACE`, `AGENTFLOW_OUTPUT_DIR`, `AGENTFLOW_CONTEXT_PACKET`, `AGENTFLOW_CONTEXT_MANIFEST`, and any `AGENTFLOW_CONTEXT_<UPPER_NAME>`:
-
-- `${AGENTFLOW_OUTPUT_DIR}`
-- `$AGENTFLOW_OUTPUT_DIR`
-- bare `AGENTFLOW_OUTPUT_DIR`
-
-Substitution is a forgiveness layer, not the recommended pattern. The bare form rewrites the token wherever it appears in the prompt body, including prose mentions, so prefer the `$`-prefixed forms when you must reference a token. Unknown `AGENTFLOW_*` tokens are left untouched. AI check `prompt` and `rubric` are substituted with the same rules.
-
-Agent harness prompts tell the model it is executing one node in a graph, list declared artifacts with their descriptions, and explain that the final response is captured as reserved `agent_response`. Treat `agent_response` as a concise narrative handoff, not a replacement for a declared structured artifact.
-
-If an agent reports success but misses declared artifacts, Agentflow can run artifact repair: a new invocation of the same harness in the same workspace, same context, and same `AGENTFLOW_OUTPUT_DIR`, with a focused prompt to create or move the missing files. Repair prompts and logs live under `artifact-repairs/<attempt>/` in the original execution directory.
-
-## Node Fields
-
-### `plugin`
-
-Required:
-
-- `type: "plugin"`
-- `id`
-- `uses`: `plugin_alias/workflow_id`
-
-Optional:
-
-- `label`
-- `config`
-- `context`
-- `repo`
-- `profile`
-- `timeout_sec`
-
-Rules:
-
-- plugin aliases and workflow ids use letters, numbers, underscores, or hyphens
-- top-level `plugins` must declare each alias with `source` and `ref`
-- run `agentflow plugin resolve --graph <path>` before validate/compile/run
-- downstream nodes consume public artifacts from the plugin node id, not generated internal ids
-- plugin workflows may inject `plugin_file` context and `plugin://` script paths, but the lowered graph still uses normal runtime primitives
-
-### `agent`
-
-Required:
-
-- `type: "agent"`
-- `id`
-- `prompt`
-
-Optional:
-
+- `harness`
 - `model`
 - `reasoning_effort`
 - `sandbox`
-- `artifact_repair`
-
-Use agents for model-driven work. Prefer declared artifacts for structured handoffs; use reserved `agent_response` for concise narrative handoffs that include outcome, work completed, artifacts produced, validation, and handoff notes.
-
-Sandboxes:
-
-- `read-only` blocks every workspace and output write, so the node may not declare `artifacts`. Validation rejects this combination. Pair with `agent_response` only.
-- `workspace-write` is the default and lets the agent edit the repo and write declared artifacts to the output directory.
-- `danger-full-access` removes all sandbox limits.
-
-AI checks always run in `read-only` and may not declare `artifacts`; they emit `result_json` automatically.
-
-### `exec`
-
-Required:
-
-- `type: "exec"`
-- `id`
-- `command`
-
-Optional:
-
-- `args`
-- `cwd`
+- `timeout_sec`
+- `input_rules`
 - `env_files`
-- `env`
-- `on_failure`
+- `artifact_repair`
+- `deterministic_check_defaults`
+- `ai_check_defaults`
 
-`on_failure` defaults to `"fail"`. Use `"continue"` for soft evidence collection. Spawn errors, timeouts, missing env files, cancellation, context failures, and missing declared artifacts still fail hard.
+Set `model` to a concrete harness-supported model only when the team needs that exact model. Omit it, or use `"auto"`, to let the installed Codex CLI or Cursor CLI choose its default.
 
-### `check`
+Sandboxes: `read-only`, `workspace-write`, `danger-full-access`.
 
-Required:
+Agents that declare artifacts need a write-capable sandbox.
 
-- `type: "check"`
-- `id`
-- `check_kind`
+## Plugin Tools
 
-Deterministic checks use:
+Tool exports declare `capability` and `impact`.
 
-- `command`
-- optional `args`
-- optional `cwd`
-- optional `env_files`
-- optional `env`
-- optional `pass_if`
+Capabilities: `context`, `verification`, `mutation`, `reporting`.
 
-AI checks use:
+Impacts: `read`, `write`, `external`, `secret`.
 
-- `prompt`
-- optional `rubric`
-- optional `model`
-- optional `reasoning_effort`
+Validation enforces:
 
-Supported `pass_if`:
-
-```json
-{ "exit_code": 0 }
-{ "json_path": "$.passed", "equals": true }
-```
-
-### `checkpoint`
-
-Required:
-
-- `type: "checkpoint"`
-- `id`
-- `prompt`
-- `review_from`
-
-Rules:
-
-- valid only inside `repeat.body`
-- `review_from` must target an upstream named artifact
-- interactive operator gate, not a passive pause
-
-## Containers
-
-`sequence`:
-
-- ordered child dependencies
-- default topology
-
-`parallel`:
-
-- independent branches
-- optional `max_concurrency`
-- should have explicit fan-in after branches
-
-`repeat`:
-
-- `max_attempts`
-- `body`
-- `until.node`
-- `until.node` must be a descendant `check` or `checkpoint`
-
-Use `repeat` only for bounded repair or revision where the gate genuinely decides convergence.
-
-## Removed Fields
-
-These are invalid graph syntax:
-
-- `inputs`
-- `context_from`
-- `outputs`
-
-Use the current graph contract directly: `context` for node inputs and `artifacts` for named durable outputs.
-
-## Validation
-
-Always run:
-
-```bash
-agentflow validate --graph <path>
-agentflow validate --graph <path> --run-ready
-agentflow validate --graph <path> --show-compiled
-```
-
-Fix validation first. Use `--run-ready` when the user needs proof that this machine has required runtime tools, repo worktrees, node commands, and harness binaries. Use `--show-compiled` to inspect lowered managed patterns, profile resolution, dependency edges, repeat scopes, and artifact references.
+- mutation tools and write-impact tools are withheld from read-only agents
+- secret-impact tools require plugin-declared `credentials`
+- external-impact tools require exact tokens in `intent.approval_boundaries`, such as `tool:<callable>` or `external:<plugin>/<tool>`
+- `tool_config` is for non-secret string options and is resolved only inside the plugin tool subprocess

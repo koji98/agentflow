@@ -43,8 +43,8 @@ function describeReservedArtifact(artifact: string): string | undefined {
     return "Final response captured from the producer node.";
   }
 
-  if (artifact === "result_json") {
-    return "Normalized result.json captured from the producer node.";
+  if (artifact === "verification_json") {
+    return "Structured verification record captured from the producer node.";
   }
 
   return undefined;
@@ -240,7 +240,11 @@ async function renderAttemptSection(
     }
   }
 
-  const result = await readJsonRecord(attempt.result_path ?? attempt.artifacts.result_json);
+  const result = await readJsonRecord(
+    attempt.kind === "check"
+      ? (attempt.artifacts.verification_json ?? attempt.result_path)
+      : attempt.result_path
+  );
   const resultLines = resultSummaryLines(result);
 
   if (resultLines.length > 0) {

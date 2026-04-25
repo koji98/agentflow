@@ -22,6 +22,11 @@ export interface RunAiCheckInvocation {
   skip_git_repo_check?: boolean;
   prompt: string;
   rubric: string | undefined;
+  graph_goal?: string;
+  graph_acceptance_criteria?: string[];
+  graph_constraints?: string[];
+  node_goal?: string;
+  node_acceptance_criteria?: string[];
   context_packet_path: string;
   context_manifest_path: string;
   output_dir: string;
@@ -230,6 +235,15 @@ export async function runAiCheck(
         prompt: invocation.prompt,
         ...(invocation.rubric ? { rubric: invocation.rubric } : {})
       }),
+      ...(invocation.graph_goal ? { graphGoal: invocation.graph_goal } : {}),
+      ...(invocation.graph_acceptance_criteria
+        ? { graphAcceptanceCriteria: invocation.graph_acceptance_criteria }
+        : {}),
+      ...(invocation.graph_constraints ? { graphConstraints: invocation.graph_constraints } : {}),
+      ...(invocation.node_goal ? { nodeGoal: invocation.node_goal } : {}),
+      ...(invocation.node_acceptance_criteria
+        ? { nodeAcceptanceCriteria: invocation.node_acceptance_criteria }
+        : {}),
       contextPacketPath: invocation.context_packet_path,
       contextManifestPath: invocation.context_manifest_path,
       contextManifest,

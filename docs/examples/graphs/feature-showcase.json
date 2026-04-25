@@ -16,7 +16,7 @@
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "medium",
-      "sandbox": "read-only",
+      "sandbox": "workspace-write",
       "timeout_sec": 900,
       "input_rules": {
         "max_total_tokens": 96000,
@@ -27,7 +27,7 @@
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "high",
-      "sandbox": "read-only",
+      "sandbox": "workspace-write",
       "timeout_sec": 1200,
       "input_rules": {
         "max_total_tokens": 128000,
@@ -38,7 +38,7 @@
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "medium",
-      "sandbox": "read-only",
+      "sandbox": "workspace-write",
       "timeout_sec": 900,
       "ai_check_defaults": {
         "model": "gpt-5-codex",
@@ -114,7 +114,7 @@
             "artifacts": {
               "package_contract": {
                 "from": "output_dir",
-                "path": "result.json",
+                "path": "verification.json",
                 "description": "Structured JSON result from the package contract check."
               }
             }
@@ -189,13 +189,13 @@
                   "name": "draft_response"
                 },
                 {
-                  "ref": "review_walkthrough.review_report",
-                  "name": "failed_review_report",
+                  "ref": "review_walkthrough.verification_json",
+                  "name": "failed_review_verification",
                   "iteration": "latest_failed",
                   "if_available": true
                 },
                 {
-                  "ref": "verify_package_contract.result_json",
+                  "ref": "verify_package_contract.verification_json",
                   "name": "package_contract_result"
                 }
               ],
@@ -224,14 +224,7 @@
                   "ref": "synthesize_constraints.agent_response",
                   "name": "constraints_response"
                 }
-              ],
-              "artifacts": {
-                "review_report": {
-                  "from": "output_dir",
-                  "path": "result.json",
-                  "description": "Structured JSON AI review result for the walkthrough."
-                }
-              }
+              ]
             }
           ]
         },
@@ -255,12 +248,72 @@
             "name": "package_contract"
           },
           {
-            "ref": "review_walkthrough.review_report",
+            "ref": "review_walkthrough.verification_json",
             "name": "review_report",
             "iteration": "latest_passed"
           }
         ]
       }
+    ]
+  },
+  "intent": {
+    "goal": "Demonstrate a supervised Agentflow feature workflow over this repository.",
+    "scope": {
+      "repos": [
+        "main"
+      ],
+      "paths": [
+        "README.md",
+        "docs/**",
+        "src/**",
+        "tests/**"
+      ]
+    },
+    "acceptance_criteria": [
+      "The graph validates and compiles.",
+      "Artifacts explain survey, verification, and review outcomes."
+    ],
+    "approval_boundaries": [
+      "Stay within the Agentflow repository."
+    ]
+  },
+  "supervision": {
+    "allowed_actions": [
+      "retry_node",
+      "repair_artifact",
+      "rebuild_context",
+      "run_diagnostic",
+      "semantic_evaluation",
+      "escalate"
+    ],
+    "retry_budget": {
+      "max_total_interventions": 6,
+      "max_node_retries": 2,
+      "max_artifact_repairs": 2,
+      "max_context_rebuilds": 1,
+      "max_workspace_refreshes": 1,
+      "max_diagnostic_runs": 2,
+      "max_semantic_evaluations": 1
+    },
+    "drift_detection": {
+      "score_threshold": 0.8
+    },
+    "escalation": {
+      "require_human_on_policy_breach": true,
+      "require_human_on_scope_drift": true
+    }
+  },
+  "delivery": {
+    "required_sections": [
+      "task_brief",
+      "implementation_summary",
+      "grouped_change_map",
+      "decision_log",
+      "evaluation_ledger",
+      "reviewer_guide",
+      "risk_notes",
+      "follow_up_items",
+      "intervention_trace"
     ]
   }
 }

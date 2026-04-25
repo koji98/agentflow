@@ -156,11 +156,11 @@ function iconForStatus(status) {
 
 async function main() {
   const checks = [];
-  const alphaCheck = confidenceCommandChecks[0];
-  const alphaResult = runJsonCheck(alphaCheck);
-  checks.push(alphaResult);
+  const smokeCheck = confidenceCommandChecks[0];
+  const smokeResult = runJsonCheck(smokeCheck);
+  checks.push(smokeResult);
 
-  if (alphaResult.status !== "passed") {
+  if (smokeResult.status !== "passed") {
     checks.push({
       name: confidenceCommandChecks[1].name,
       script: confidenceCommandChecks[1].script,

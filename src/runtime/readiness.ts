@@ -7,12 +7,14 @@ import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js
 import type { HarnessName } from "../graph/schema.js";
 import { resolveSubpathWithinRoot } from "../path_rules.js";
 import type { HarnessAdapter } from "./harness/types.js";
+import { createCredentialStore } from "../auth/store.js";
+import type { CredentialScopeSpec } from "../auth/types.js";
 
 export type ReadinessCheckStatus = "passed" | "warning" | "blocked";
 export type ReadinessStatus = "ready" | "warnings" | "blocked";
 
 export interface ReadinessCheckResult {
-  kind: "file" | "command" | "env" | "repo" | "harness";
+  kind: "file" | "command" | "env" | "repo" | "harness" | "credential";
   required: boolean;
   status: ReadinessCheckStatus;
   target: string;
@@ -362,6 +364,26 @@ function collectRequiredHarnesses(graph: Pick<CompiledGraph, "nodes">): HarnessN
   return [...harnesses].sort();
 }
 
+function collectRequiredCredentialScopes(
+  graph: Pick<CompiledGraph, "nodes">
+): string[] {
+  const scopes = new Set<string>();
+
+  for (const node of graph.nodes) {
+    if (node.kind !== "agent") {
+      continue;
+    }
+
+    for (const tool of node.tools) {
+      for (const scope of tool.credentials ?? []) {
+        scopes.add(scope);
+      }
+    }
+  }
+
+  return [...scopes].sort();
+}
+
 async function evaluateHarnessReadiness(
   harnessName: HarnessName,
   harnesses: Partial<Record<HarnessName, HarnessAdapter>> | undefined
@@ -391,8 +413,34 @@ async function evaluateHarnessReadiness(
   );
 }
 
+async function evaluateCredentialReadiness(
+  scope: string,
+  spec: CredentialScopeSpec
+): Promise<ReadinessCheckResult> {
+  try {
+    await createCredentialStore().resolveScope(spec, scope);
+    return buildIssue(
+      "credential",
+      true,
+      scope,
+      true,
+      `Credential scope "${scope}" is configured.`
+    );
+  } catch (error) {
+    return buildIssue(
+      "credential",
+      true,
+      scope,
+      false,
+      error instanceof Error
+        ? error.message
+        : `Credential scope "${scope}" is not configured.`
+    );
+  }
+}
+
 async function evaluateMachineReadiness(options: {
-  graph: Pick<CompiledGraph, "launch" | "nodes">;
+  graph: Pick<CompiledGraph, "launch" | "nodes"> & Partial<Pick<CompiledGraph, "credential_specs">>;
   repo_sources: Record<string, string>;
   env: NodeJS.ProcessEnv;
   harnesses?: Partial<Record<HarnessName, HarnessAdapter>>;
@@ -435,11 +483,29 @@ async function evaluateMachineReadiness(options: {
     checks.push(await evaluateHarnessReadiness(harnessName, options.harnesses));
   }
 
+  const credentialSpecs = options.graph.credential_specs ?? {};
+  for (const scope of collectRequiredCredentialScopes(options.graph)) {
+    const spec = credentialSpecs[scope];
+    if (!spec) {
+      checks.push(
+        buildIssue(
+          "credential",
+          true,
+          scope,
+          false,
+          `Credential scope "${scope}" is required by a tool but missing from the compiled credential contract.`
+        )
+      );
+      continue;
+    }
+    checks.push(await evaluateCredentialReadiness(scope, spec));
+  }
+
   return checks;
 }
 
 export async function evaluateGraphReadiness(options: {
-  graph: Pick<CompiledGraph, "prerequisites"> & Partial<Pick<CompiledGraph, "launch" | "nodes">>;
+  graph: Pick<CompiledGraph, "prerequisites"> & Partial<Pick<CompiledGraph, "launch" | "nodes" | "credential_specs">>;
   repo_sources: Record<string, string>;
   repo_source_diagnostics?: Array<{ path: string; message: string }>;
   env?: NodeJS.ProcessEnv;
@@ -495,7 +561,8 @@ export async function evaluateGraphReadiness(options: {
       ...(await evaluateMachineReadiness({
         graph: {
           launch: options.graph.launch,
-          nodes: options.graph.nodes
+          nodes: options.graph.nodes,
+          credential_specs: options.graph.credential_specs ?? {}
         },
         repo_sources: options.repo_sources,
         env: environment,

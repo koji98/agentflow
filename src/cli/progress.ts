@@ -132,6 +132,51 @@ export function createRuntimeProgressReporter(
           return;
         }
 
+        case "supervisor.decision": {
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          const payload = event.payload as { kind?: string; action?: string; reason?: string };
+          writeLine(
+            `agentflow: supervisor ${payload.kind ?? "decision"} ${summarizeNode(node)}${payload.action ? ` · ${payload.action}` : ""}${payload.reason ? ` · ${payload.reason}` : ""}`
+          );
+          return;
+        }
+
+        case "supervisor.intervention.started": {
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          const payload = event.payload as { action?: string; summary?: string };
+          writeLine(
+            `agentflow: intervention started ${summarizeNode(node)}${payload.action ? ` · ${payload.action}` : ""}${payload.summary ? ` · ${payload.summary}` : ""}`
+          );
+          return;
+        }
+
+        case "supervisor.intervention.completed": {
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          const payload = event.payload as { action?: string; summary?: string };
+          writeLine(
+            `agentflow: intervention completed ${summarizeNode(node)}${payload.action ? ` · ${payload.action}` : ""}${payload.summary ? ` · ${payload.summary}` : ""}`
+          );
+          return;
+        }
+
+        case "supervisor.intervention.failed": {
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          const payload = event.payload as { action?: string; summary?: string };
+          writeLine(
+            `agentflow: intervention failed ${summarizeNode(node)}${payload.action ? ` · ${payload.action}` : ""}${payload.summary ? ` · ${payload.summary}` : ""}`
+          );
+          return;
+        }
+
+        case "supervisor.escalated": {
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          const payload = event.payload as { reason?: string; summary?: string };
+          writeLine(
+            `agentflow: supervisor escalated ${summarizeNode(node)}${payload.summary ? ` · ${payload.summary}` : payload.reason ? ` · ${payload.reason}` : ""}`
+          );
+          return;
+        }
+
         case "check.evaluated": {
           const payload = event.payload as { passed?: boolean; score?: number; summary?: string };
 
@@ -227,6 +272,14 @@ export function createRuntimeProgressReporter(
           const payload = event.payload as { outcome?: string; duration_ms?: number; reason?: string };
           writeLine(
             `agentflow: run ${payload.outcome ?? "completed"} · ${countTerminalNodes()}/${totalNodes} terminal nodes · ${formatDuration(payload.duration_ms)}${payload.reason ? ` · ${payload.reason}` : ""}`
+          );
+          return;
+        }
+
+        case "delivery.package.completed": {
+          const payload = event.payload as { manifest_path?: string; reviewer_guide?: string };
+          writeLine(
+            `agentflow: delivery package ready${payload.manifest_path ? ` · ${payload.manifest_path}` : ""}${payload.reviewer_guide ? ` · reviewer=${payload.reviewer_guide}` : ""}`
           );
           return;
         }

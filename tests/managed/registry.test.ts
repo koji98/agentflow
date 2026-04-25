@@ -10,7 +10,7 @@ describe("managed pattern registry", () => {
 
   it("tracks implementation status while exposing orchestration metadata", () => {
     const statuses = Object.fromEntries(
-      managedPatternDescriptors.map((descriptor) => [descriptor.kind, descriptor.authored_contract_status])
+      managedPatternDescriptors.map((descriptor) => [descriptor.kind, descriptor.contract_status])
     );
 
     expect(statuses).toEqual({

@@ -24,6 +24,7 @@ import {
 } from "../graph/schema.js";
 import { managedPatternDescriptors } from "../managed/index.js";
 import { applyCommand } from "./commands/apply.js";
+import { authCommand } from "./commands/auth.js";
 import { evalCommand } from "./commands/eval.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { pluginCommand } from "./commands/plugin.js";
@@ -75,7 +76,12 @@ const optionDescriptions: Record<string, string> = {
   variant: "--variant <id>              Eval variant id filter.",
   "evals-root": "--evals-root <path>          Absolute eval artifact root for a new eval run.",
   "eval-root": "--eval-root <path>           Existing eval artifact root to report.",
-  mission: "--mission <path>             Mission state file reserved for the deferred controller surface.",
+  scope: "--scope <scope>              Credential scope for auth commands.",
+  key: "--key <field>                 Credential field key for auth commands.",
+  value: "--value <value>              Non-secret credential field value for auth set.",
+  "value-stdin": "--value-stdin                Read the auth value from stdin; required with --secret.",
+  secret: "--secret                     Store the auth value in macOS Keychain instead of the local metadata index.",
+  index: "--index <path>               Override the credential metadata index path.",
   config:
     "--config key=value           Override top-level graph config (repeatable). JSON-typed values like 1, true, [\"a\"] parse as JSON; everything else stays a string. Use dotted keys for nested paths.",
   "config-file":
@@ -94,9 +100,18 @@ function renderGraphHelp(): string {
     "{",
     `  "version": "${graphVersion}",`,
     '  "graph_id": "example-graph",',
+    '  "intent": {',
+    '    "goal": "Implement a reviewable change in the selected repository.",',
+    '    "scope": { "paths": ["src/**", "tests/**"] },',
+    '    "acceptance_criteria": ["The implementation is understandable, tested, and ready for review."],',
+    '    "approval_boundaries": ["Do not expand repository scope without an explicit checkpoint."]',
+    "  },",
+    '  "repos": { "main": { "path": "." } },',
     '  "profiles": {',
     '    "default": { "harness": "codex-cli" }',
     "  },",
+    '  "supervision": { "retry_budget": { "max_total_interventions": 2, "max_node_retries": 1 } },',
+    '  "delivery": { "required_sections": ["task_brief", "implementation_summary", "evaluation_ledger", "reviewer_guide", "intervention_trace"] },',
     '  "graph": {',
     '    "type": "sequence",',
     '    "id": "root",',
@@ -104,6 +119,10 @@ function renderGraphHelp(): string {
     '      {',
     '        "type": "agent",',
     '        "id": "implement",',
+    '        "repo": "main",',
+    '        "profile": "default",',
+    '        "goal": "Implement the requested change and publish reviewer evidence.",',
+    '        "acceptance_criteria": ["The handoff names changed files, validation, and risks."],',
     '        "prompt": "Implement the requested change and write a concise handoff artifact.",',
     '        "context": [{ "from": "text", "name": "goal", "text": "Keep the change small." }],',
     '        "artifacts": { "handoff": { "from": "output_dir", "path": "handoff.md", "description": "Markdown handoff from this node." } }',
@@ -121,7 +140,7 @@ function renderGraphHelp(): string {
     `Executable node kinds: ${executableNodeKinds.join(", ")}`,
     `Container node kinds: ${containerNodeKinds.join(", ")}`,
     `Managed pattern scaffolds: ${managedPatternKinds.join(", ")}`,
-    "Plugin workflow node: plugin (uses Git-resolved reusable managed workflows)",
+    "Plugin workflow node: plugin (uses resolved reusable managed workflows from Git or local plugin folders)",
     `Harness adapters: ${harnessNames.join(", ")}`,
     `Check kinds: ${checkKinds.join(", ")}`,
     `Workspace backends: ${workspaceBackends.join(", ")}`,
@@ -137,6 +156,9 @@ function renderGraphHelp(): string {
     "- repos (defaults to { main: { path: \".\" } } when omitted)",
     "- defaults.launch_profile (defaults to \"default\" when a profile of that name exists)",
     "- defaults.workspace_backend (defaults to \"inplace\")",
+    "- intent",
+    "- supervision",
+    "- delivery",
     "- profiles",
     "- prerequisites.checks",
     "- graph",
@@ -150,7 +172,7 @@ function renderGraphHelp(): string {
     "- plugin workflow nodes use type = plugin, uses = plugin_alias/workflow_id, and config = workflow-specific settings; run agentflow plugin resolve --graph first.",
     "- repeat.until.node must target a descendant check or checkpoint node.",
     "- repeat context selectors support latest, latest_passed, latest_failed, or a positive integer ordinal.",
-    "- launch profile and workspace backend come from graph defaults in this release.",
+    "- launch profile and workspace backend come from graph defaults.",
     "- executable nodes may still select node-level profiles inside the authored graph.",
     "- codex-cli profiles may set skip_git_repo_check for intentional non-git workspace roots.",
     "- profiles, exec nodes, and deterministic check nodes may set env_files for repo-local dotenv-style command environment.",
@@ -158,8 +180,9 @@ function renderGraphHelp(): string {
     "- exec and check support on_failure = fail | continue; soft verification still records the true verifier result.",
     "- executable nodes use context for text, workspace files, workspace globs, and prior artifacts.",
     "- executable nodes use artifacts to declare durable handoff files from AGENTFLOW_OUTPUT_DIR (execution artifacts/) or the workspace.",
-    "- inputs, context_from, and outputs are invalid graph syntax; use context and artifacts.",
-    "- agent_response is automatically written for agent nodes; result_json is automatically available for every executable node.",
+    "- plugin tools must declare capability and impact; secret-impact tools must declare credentials and use agentflow auth.",
+    "- terminal runs write interventions.jsonl and delivery/manifest.json for review.",
+    "- agent_response is automatically written for agent nodes; verification_json is automatically available for check nodes.",
     "- prerequisites.checks may assert required files, commands, env vars, or repos before launch.",
     "- agent and ai check nodes require a resolved harness; deterministic checks do not.",
     `- ${graphPathRuleText}`,
@@ -200,6 +223,7 @@ const commandRegistry = {
   inspect: inspectCommand,
   resume: resumeCommand,
   apply: applyCommand,
+  auth: authCommand,
   eval: evalCommand,
   plugin: pluginCommand,
   "graph-help": graphHelpCommand
@@ -368,8 +392,9 @@ function renderMainHelp(): string {
     "  5. inspect: review a single recorded run root",
     "  6. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work (use --latest with --graph to pick the most recent resumable run)",
     "  7. apply: apply captured workspace changes from a run back to a git repo",
-    "  8. eval: validate or run local eval suites for Agentflow graphs",
-    "  9. plugin: resolve Git-distributed managed workflow plugins for a graph",
+    "  8. auth: configure plugin-tool credentials without exposing secret values to agent harnesses",
+    "  9. eval: validate or run local eval suites for Agentflow graphs",
+    "  10. plugin: resolve Git or local plugin packages for a graph",
     "",
     "Examples:",
     "  agentflow graph-help",
@@ -382,6 +407,7 @@ function renderMainHelp(): string {
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
     "  agentflow resume --graph agentflow.graph.json --latest",
     "  agentflow apply --run-root .agentflow/runs/<run-id>",
+    "  agentflow auth list",
     "  agentflow eval validate --suite evals/example/suite.json",
     "  agentflow plugin resolve --graph agentflow.graph.json",
     "",
@@ -540,6 +566,7 @@ export async function executeCli(
   if (
     positionals.length > 0 &&
     command.name !== "eval" &&
+    command.name !== "auth" &&
     command.name !== "plugin" &&
     command.name !== "runs" &&
     command.name !== "inspect"

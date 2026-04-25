@@ -14,6 +14,11 @@ import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 
 const execFileAsync = promisify(execFile);
 
+const TEST_INTENT = {
+  goal: "Exercise workspace preparation and cleanup for supervised execution.",
+  acceptance_criteria: ["Workspace backends create and clean up the expected repository state."]
+};
+
 async function initGitRepo(repoDir: string): Promise<void> {
   await execFileAsync("git", ["init"], { cwd: repoDir });
   await execFileAsync("git", ["config", "user.email", "agentflow@example.com"], { cwd: repoDir });
@@ -24,7 +29,10 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument(document);
+  const normalized = normalizeAuthoredGraphDocument({
+    intent: TEST_INTENT,
+    ...document
+  });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -65,6 +73,7 @@ function createWorkspaceDocument(
   return {
     version: "1",
     graph_id: "workspace-backends",
+    intent: TEST_INTENT,
     repos,
     defaults: {
       launch_profile: "default",
@@ -250,7 +259,8 @@ describe("workspace backends", () => {
       expect(run.state.status).toBe("failed");
       expect(run.state.node_statuses.root__write_marker).toBe("passed");
       expect(runRecord.status).toBe("failed");
-      expect(run.events.at(-1)).toEqual(
+      const completedEvent = run.events.find((event) => event.type === "run.completed");
+      expect(completedEvent).toEqual(
         expect.objectContaining({
           type: "run.completed",
           payload: expect.objectContaining({
@@ -259,6 +269,7 @@ describe("workspace backends", () => {
           })
         })
       );
+      expect(run.events.at(-1)?.type).toBe("delivery.package.completed");
       expect(summary).toContain("Workspace cleanup failed:");
       expect(summary).toContain("not a git repository");
       await expect(access(run.state.repo_workspaces.main.workspace_path)).rejects.toThrow();
@@ -349,7 +360,8 @@ describe("workspace backends", () => {
         ])
       );
       expect(run.events.some((event) => event.type === "run.canceled")).toBe(false);
-      expect(run.events.at(-1)).toEqual(
+      const completedEvent = run.events.find((event) => event.type === "run.completed");
+      expect(completedEvent).toEqual(
         expect.objectContaining({
           type: "run.completed",
           payload: expect.objectContaining({
@@ -358,6 +370,7 @@ describe("workspace backends", () => {
           })
         })
       );
+      expect(run.events.at(-1)?.type).toBe("delivery.package.completed");
       expect(summary).toContain("operator_cancel | Workspace cleanup failed:");
       expect(summary).toContain("not a git repository");
       await expect(access(run.state.repo_workspaces.main.workspace_path)).rejects.toThrow();

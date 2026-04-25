@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import type { DeterministicPassIf } from "../../graph/authored.js";
 import { createProcessTerminationController } from "../process_control.js";
@@ -34,7 +34,10 @@ export interface DeterministicCheckInvocation extends LocalProcessInvocation {
 export interface DeterministicCheckResult extends LocalProcessResult {
   passed: boolean;
   summary: string;
+  verification_json: Record<string, unknown>;
 }
+
+const verificationArtifactFilename = "verification.json";
 
 async function buildLocalProcessEnv(
   cwd: string,
@@ -147,38 +150,144 @@ async function loadEnvFiles(
   return merged;
 }
 
-function evaluateDeterministicPassIf(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeVerificationPayload(
+  payload: Record<string, unknown> | undefined,
+  processResult: LocalProcessResult,
+  defaults: {
+    passed: boolean;
+    summary: string;
+    check_kind: "deterministic";
+  }
+): Record<string, unknown> {
+  return {
+    ...(payload ?? {}),
+    ...(typeof payload?.passed === "boolean" ? {} : { passed: defaults.passed }),
+    ...(typeof payload?.summary === "string" && payload.summary.trim().length > 0
+      ? {}
+      : { summary: defaults.summary }),
+    ...(typeof payload?.check_kind === "string" ? {} : { check_kind: defaults.check_kind }),
+    ...(typeof payload?.exit_code === "number" ? {} : { exit_code: processResult.exit_code })
+  };
+}
+
+async function readVerificationPayload(
+  outputDir: string | undefined
+): Promise<{
+  payload?: Record<string, unknown>;
+  error?: string;
+}> {
+  if (!outputDir) {
+    return {
+      error: "Deterministic verification.json checks require AGENTFLOW_OUTPUT_DIR."
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(
+      await readFile(join(outputDir, verificationArtifactFilename), "utf8")
+    ) as unknown;
+
+    if (!isRecord(parsed)) {
+      return {
+        error: "Deterministic verification.json must contain a top-level JSON object."
+      };
+    }
+
+    return {
+      payload: parsed
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      return {
+        error: "Deterministic verification.json checks require artifacts/verification.json."
+      };
+    }
+
+    return {
+      error: "Deterministic verification.json was not valid JSON."
+    };
+  }
+}
+
+async function evaluateDeterministicPassIf(
   passIf: DeterministicPassIf | undefined,
-  processResult: LocalProcessResult
-): {
+  processResult: LocalProcessResult,
+  outputDir: string | undefined
+): Promise<{
   passed: boolean;
   error?: string;
-} {
+  verification_json: Record<string, unknown>;
+}> {
   if (!passIf || "exit_code" in passIf) {
     const expectedExitCode = passIf?.exit_code ?? 0;
+    const passed = processResult.exit_code === expectedExitCode;
+    const defaultSummary = passed
+      ? "Deterministic check passed."
+      : `Deterministic check failed: expected exit code ${expectedExitCode}, received ${processResult.exit_code}.`;
+    const verificationPayload = await readVerificationPayload(outputDir);
+
     return {
-      passed: processResult.exit_code === expectedExitCode
+      passed,
+      ...(verificationPayload.error ? { error: verificationPayload.error } : {}),
+      verification_json: normalizeVerificationPayload(
+        verificationPayload.payload,
+        processResult,
+        {
+          passed,
+          summary: defaultSummary,
+          check_kind: "deterministic"
+        }
+      )
     };
   }
 
   if (passIf.json_path !== "$.passed") {
     return {
       passed: false,
-      error: `Unsupported deterministic json_path "${passIf.json_path}" in this release.`
+      error: `Unsupported deterministic json_path "${passIf.json_path}" in this release.`,
+      verification_json: normalizeVerificationPayload(undefined, processResult, {
+        passed: false,
+        summary: `Unsupported deterministic json_path "${passIf.json_path}" in this release.`,
+        check_kind: "deterministic"
+      })
     };
   }
 
-  try {
-    const parsed = JSON.parse(processResult.stdout || "{}") as Record<string, unknown>;
-    return {
-      passed: parsed.passed === passIf.equals
-    };
-  } catch {
+  const verificationPayload = await readVerificationPayload(outputDir);
+
+  if (!verificationPayload.payload) {
     return {
       passed: false,
-      error: "Deterministic check stdout was not valid JSON."
+      ...(verificationPayload.error ? { error: verificationPayload.error } : {}),
+      verification_json: normalizeVerificationPayload(undefined, processResult, {
+        passed: false,
+        summary: verificationPayload.error ?? "Deterministic verification artifact is missing.",
+        check_kind: "deterministic"
+      })
     };
   }
+
+  const passed = verificationPayload.payload.passed === passIf.equals;
+  const defaultSummary = passed
+    ? "Deterministic check passed."
+    : "Deterministic check failed.";
+
+  return {
+    passed,
+    verification_json: normalizeVerificationPayload(
+      verificationPayload.payload,
+      processResult,
+      {
+        passed,
+        summary: defaultSummary,
+        check_kind: "deterministic"
+      }
+    )
+  };
 }
 
 export async function runLocalProcess(
@@ -265,23 +374,45 @@ export async function runDeterministicCheck(
   const processResult = await runLocalProcess(invocation);
   const evaluation =
     !processResult.canceled && !processResult.timed_out
-      ? evaluateDeterministicPassIf(invocation.pass_if, processResult)
+      ? await evaluateDeterministicPassIf(
+          invocation.pass_if,
+          processResult,
+          invocation.runtime_env?.AGENTFLOW_OUTPUT_DIR
+        )
       : {
-          passed: false
+          passed: false,
+          verification_json: normalizeVerificationPayload(undefined, processResult, {
+            passed: false,
+            summary: processResult.canceled
+              ? "Deterministic check canceled."
+              : "Deterministic check timed out.",
+            check_kind: "deterministic"
+          })
         };
   const passed = evaluation.passed;
+  const summary =
+    processResult.canceled
+      ? "Deterministic check canceled."
+      : processResult.timed_out
+        ? "Deterministic check timed out."
+        : (typeof evaluation.verification_json.summary === "string"
+          ? evaluation.verification_json.summary
+          : undefined)
+          ?? evaluation.error
+          ?? (passed ? "Deterministic check passed." : "Deterministic check failed.");
 
   return {
     ...processResult,
     passed,
-    summary: passed
-      ? "Deterministic check passed."
-      : processResult.canceled
-        ? "Deterministic check canceled."
-        : processResult.timed_out
-          ? "Deterministic check timed out."
-          : evaluation.error
-            ? evaluation.error
-          : "Deterministic check failed."
+    summary,
+    verification_json: normalizeVerificationPayload(
+      evaluation.verification_json,
+      processResult,
+      {
+        passed,
+        summary,
+        check_kind: "deterministic"
+      }
+    )
   };
 }

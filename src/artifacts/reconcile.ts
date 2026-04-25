@@ -341,7 +341,11 @@ export async function reconcileRunArtifacts(runRoot: string): Promise<void> {
   let endedAt = state.ended_at
     ?? runRecord.ended_at
     ?? terminalEvent?.ts;
-  let snapshotSeq = Math.max(state.snapshot_seq, terminalEvent?.seq ?? state.snapshot_seq);
+  let snapshotSeq = Math.max(
+    state.snapshot_seq,
+    terminalEvent?.seq ?? state.snapshot_seq,
+    events.at(-1)?.seq ?? state.snapshot_seq
+  );
   let reason: string | undefined;
   let syntheticTerminalEvent: RuntimeEventEnvelope | undefined;
   let attempts: RuntimeNodeAttempt[] = [];

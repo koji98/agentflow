@@ -9,6 +9,7 @@ import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
 import type { RuntimeEventEnvelope } from "../runtime/events.js";
 import type { ExecutionManifest, RuntimeStateSnapshot } from "../runtime/session.js";
 import type { RunOwnerRecord } from "./owner.js";
+import type { SupervisorInterventionRecord } from "../supervisor/types.js";
 
 export interface RunRecord extends RunOwnerRecord {
   run_id: string;
@@ -58,6 +59,23 @@ export async function readRunEvents(runRoot: string): Promise<RuntimeEventEnvelo
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => JSON.parse(line) as RuntimeEventEnvelope);
+}
+
+export async function readSupervisorInterventions(
+  runRoot: string
+): Promise<SupervisorInterventionRecord[]> {
+  let contents: string;
+  try {
+    contents = await readFile(resolveRunArtifactPaths(runRoot).interventions_file, "utf8");
+  } catch {
+    return [];
+  }
+
+  return contents
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as SupervisorInterventionRecord);
 }
 
 async function collectFiles(rootDir: string): Promise<string[]> {

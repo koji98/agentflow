@@ -351,7 +351,7 @@ function buildEvaluatorNode(
     context: [
       artifactContext("change_notes", generateId, "change_notes")
     ],
-    artifacts: outputDirArtifact(`evaluation_result_${suffix}`, "result.json")
+    artifacts: outputDirArtifact(`evaluation_result_${suffix}`, "verification.json")
   };
 }
 
@@ -395,7 +395,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     id: prepareId,
     label: "Prepare Task Packet",
     ...shared,
-    sandbox: "read-only",
+    sandbox: "workspace-write",
     context: [...(config.context ?? []), ...sourceMaterials.context],
     artifacts: mergeArtifacts(
       outputDirArtifact("task_packet", "task-packet.json"),
@@ -426,7 +426,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     id: aggregateId,
     label: "Aggregate Evaluations",
     ...shared,
-    sandbox: "read-only",
+    sandbox: "workspace-write",
     context: buildAggregateContext(config, prepareId, changeId),
     artifacts: outputDirArtifact("evaluation_ledger", "evaluation-ledger.json"),
     prompt: buildAggregatePrompt(config.evaluation)
@@ -441,7 +441,6 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     context: [
       artifactContext("evaluation_ledger", aggregateId, "evaluation_ledger")
     ],
-    artifacts: outputDirArtifact("gate_result", "result.json"),
     prompt: buildGatePrompt(),
     rubric: buildGateRubric()
   };
@@ -458,7 +457,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     id: config.id,
     ...(config.label ? { label: config.label } : { label: "Publish Change Package" }),
     ...shared,
-    sandbox: "read-only",
+    sandbox: "workspace-write",
     context: [
       artifactContext("task_packet", prepareId, "task_packet"),
       artifactContext("change_notes", changeId, "change_notes", {

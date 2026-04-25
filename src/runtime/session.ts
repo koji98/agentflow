@@ -1,5 +1,6 @@
 import type { CompiledExecutableNode, CompiledGraph, CompiledRepeatScope } from "../graph/compiled.js";
 import type { WorkspaceBackend } from "../graph/schema.js";
+import type { SupervisionRetryBudget } from "../graph/authored.js";
 import type { AttemptRegistry, RuntimeNodeAttempt } from "./attempts.js";
 import type { VerificationRecordedPayload } from "./events.js";
 
@@ -114,6 +115,18 @@ export interface FailedSoftVerificationSummary extends VerificationRecordedPaylo
   execution_id: string;
 }
 
+export interface RuntimeSupervisorState {
+  status: "healthy" | "intervening" | "escalated" | "exhausted";
+  intervention_count: number;
+  budget_remaining: SupervisionRetryBudget;
+  last_decision_id?: string;
+  escalations: Array<{
+    decision_id: string;
+    reason: string;
+    target_compiled_id?: string;
+  }>;
+}
+
 export interface RuntimeStateSnapshot {
   run_id: string;
   graph_id: string;
@@ -126,6 +139,7 @@ export interface RuntimeStateSnapshot {
   counts: RuntimeCounts;
   soft_verification_counts: SoftVerificationCounts;
   failed_soft_verifications: FailedSoftVerificationSummary[];
+  supervisor: RuntimeSupervisorState;
   node_statuses: Record<string, RuntimeNodeStatus>;
   active_executions: Record<string, ActiveExecutionSummary>;
   latest_execution_by_compiled_id: Record<string, LatestExecutionSummary>;
@@ -147,6 +161,7 @@ export interface RuntimeSession {
   latest_execution_by_compiled_id: Map<string, LatestExecutionSummary>;
   active_executions: Map<string, ActiveExecutionSummary>;
   repeat_scopes: Map<string, RepeatScopeState>;
+  supervisor: RuntimeSupervisorState;
   workspace_change_artifacts: Record<string, WorkspaceChangeArtifacts>;
   started_at: string;
   ended_at?: string;
@@ -265,6 +280,12 @@ export function createRuntimeSession(
     latest_execution_by_compiled_id: new Map(),
     active_executions: new Map(),
     repeat_scopes,
+    supervisor: {
+      status: "healthy",
+      intervention_count: 0,
+      budget_remaining: { ...graph.supervision.retry_budget },
+      escalations: []
+    },
     workspace_change_artifacts: {},
     started_at
   };
@@ -379,6 +400,11 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     counts: createCounts(session.node_statuses.values()),
     soft_verification_counts: softVerificationSummary.soft_verification_counts,
     failed_soft_verifications: softVerificationSummary.failed_soft_verifications,
+    supervisor: {
+      ...session.supervisor,
+      budget_remaining: { ...session.supervisor.budget_remaining },
+      escalations: session.supervisor.escalations.map((escalation) => ({ ...escalation }))
+    },
     node_statuses: Object.fromEntries(session.node_statuses),
     active_executions: Object.fromEntries(session.active_executions),
     latest_execution_by_compiled_id: Object.fromEntries(session.latest_execution_by_compiled_id),

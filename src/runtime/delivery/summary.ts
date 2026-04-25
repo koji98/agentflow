@@ -1,6 +1,7 @@
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { RuntimeEventEnvelope } from "../events.js";
 import type { RuntimeStateSnapshot } from "../session.js";
+import type { DeliveryPackageManifest } from "./package.js";
 
 export interface RunDiagnostic {
   label: string;
@@ -39,8 +40,14 @@ function readEventSummary(event: RuntimeEventEnvelope): string | undefined {
         : payload.passed === false
           ? "Soft verification failed."
           : undefined;
-    case "artifact_repair.failed":
-      return typeof payload.summary === "string" ? payload.summary : "Artifact repair failed.";
+    case "supervisor.intervention.failed":
+      return typeof payload.summary === "string" ? payload.summary : "Supervisor intervention failed.";
+    case "supervisor.escalated":
+      return typeof payload.summary === "string"
+        ? payload.summary
+        : typeof payload.reason === "string"
+          ? payload.reason
+          : "Supervisor escalated.";
     case "run.canceled":
       return typeof payload.reason === "string" ? `Run canceled: ${payload.reason}` : "Run canceled.";
     case "run.completed":
@@ -155,7 +162,8 @@ export function selectPrimaryRunDiagnostic(
 export function renderRunSummary(
   state: RuntimeStateSnapshot,
   attempts: RuntimeNodeAttempt[],
-  events: RuntimeEventEnvelope[]
+  events: RuntimeEventEnvelope[],
+  deliveryManifest?: DeliveryPackageManifest
 ): string {
   const lines = [
     `# Run Summary: ${state.run_id}`,
@@ -170,6 +178,18 @@ export function renderRunSummary(
     ""
   ];
   const diagnostics = collectRunDiagnostics(attempts, events, state);
+
+  if (deliveryManifest) {
+    lines.push(
+      "## Delivery Package",
+      "",
+      `- Manifest: \`${deliveryManifest.manifest_path}\``,
+      `- Reviewer guide: \`${deliveryManifest.sections.reviewer_guide}\``,
+      `- Intervention count: \`${deliveryManifest.intervention_count}\``,
+      `- Failed evidence count: \`${deliveryManifest.failed_check_count}\``,
+      ""
+    );
+  }
 
   if (diagnostics.length > 0) {
     lines.push("## Diagnostics", "", ...diagnostics.map(formatRunDiagnostic), "");

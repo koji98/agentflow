@@ -55,7 +55,7 @@ function buildCodexArgs(
     args.push("--skip-git-repo-check");
   }
 
-  if (invocation.model) {
+  if (invocation.model && invocation.model !== "auto") {
     args.push("-m", invocation.model);
   }
 

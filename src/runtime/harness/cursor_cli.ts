@@ -54,7 +54,7 @@ function buildCursorArgs(invocation: AgentInvocation): string[] {
     args.push("--force");
   }
 
-  if (invocation.model) {
+  if (invocation.model && invocation.model !== "auto") {
     args.push("--model", invocation.model);
   }
 

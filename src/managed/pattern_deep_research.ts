@@ -630,7 +630,6 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         artifactContext("uncertainties", config.id, "uncertainties"),
         latestPlanRef
       ],
-      artifacts: outputDirArtifact("final_critique", "result.json"),
       prompt: buildFinalCritiquePrompt(config),
       rubric: buildFinalCritiqueRubric(config)
     } satisfies CheckNode);

@@ -29,10 +29,12 @@ import {
   readExecutionManifest,
   readRunEvents,
   readRunExecutionAttempts,
-  readRunRecord,
-  readRunState
+  readRunState,
+  readSupervisorInterventions
 } from "./reader.js";
+import { resolveRunArtifactPaths } from "./paths.js";
 import { reconcileRunArtifacts } from "./reconcile.js";
+import type { SupervisorInterventionRecord } from "../supervisor/types.js";
 
 const defaultRecentEventLimit = 50;
 const maxTextArtifactBytes = 262144;
@@ -63,6 +65,10 @@ export interface ProjectedRunSummary {
   counts: RuntimeStateSnapshot["counts"];
   soft_verification_counts: RuntimeStateSnapshot["soft_verification_counts"];
   failed_soft_verifications: RuntimeStateSnapshot["failed_soft_verifications"];
+  supervisor_status: RuntimeStateSnapshot["supervisor"]["status"];
+  intervention_count: number;
+  delivery_manifest: string;
+  reviewer_guide: string;
   started_at: string;
   ended_at?: string;
 }
@@ -229,6 +235,7 @@ export interface ProjectedRunSnapshot {
   snapshot_seq: number;
   overlay_nodes: ProjectedRunNode[];
   run_diagnostics: ProjectedRunDiagnostic[];
+  recent_interventions: SupervisorInterventionRecord[];
   recent_events: ProjectedRunEvent[];
 }
 
@@ -239,6 +246,7 @@ interface RunProjectionContext {
   execution_manifest: ExecutionManifest;
   state: RuntimeStateSnapshot;
   events: RuntimeEventEnvelope[];
+  interventions: SupervisorInterventionRecord[];
 }
 
 function toProjectionStatus(status: RuntimeNodeStatus | RuntimeRunStatus): ProjectionStatus {
@@ -277,6 +285,8 @@ function buildRunSummary(
   state: RuntimeStateSnapshot,
   manifest: ExecutionManifest
 ): ProjectedRunSummary {
+  const deliveryDir = resolveRunArtifactPaths(runRoot).delivery_dir;
+
   return {
     run_id: state.run_id,
     graph_id: state.graph_id,
@@ -293,6 +303,10 @@ function buildRunSummary(
     counts: state.counts,
     soft_verification_counts: state.soft_verification_counts,
     failed_soft_verifications: state.failed_soft_verifications,
+    supervisor_status: state.supervisor.status,
+    intervention_count: state.supervisor.intervention_count,
+    delivery_manifest: `${deliveryDir}/manifest.json`,
+    reviewer_guide: `${deliveryDir}/reviewer-guide.md`,
     started_at: state.started_at,
     ...(state.ended_at ? { ended_at: state.ended_at } : {})
   };
@@ -441,23 +455,35 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: `${String(payload.kind ?? "node")} started in repo ${String(payload.repo_alias ?? "unknown")}.`
       };
-    case "artifact_repair.started":
+    case "supervisor.decision":
       return {
         ...(authored_id ? { authored_id } : {}),
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
-        summary: `Artifact repair attempt ${payload.repair_attempt ?? "?"} started for ${formatPayloadList(payload.missing_artifacts, "missing artifacts")}.`
+        summary: `Supervisor ${String(payload.kind ?? "decision")}${payload.action ? `: ${String(payload.action)}` : ""} - ${String(payload.reason ?? "no reason recorded")}.`
       };
-    case "artifact_repair.completed":
+    case "supervisor.intervention.started":
       return {
         ...(authored_id ? { authored_id } : {}),
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
-        summary: `Artifact repair attempt ${payload.repair_attempt ?? "?"} completed.`
+        summary: String(payload.summary ?? `Supervisor intervention ${String(payload.intervention_id ?? "?")} started.`)
       };
-    case "artifact_repair.failed":
+    case "supervisor.intervention.completed":
       return {
         ...(authored_id ? { authored_id } : {}),
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
-        summary: String(payload.summary ?? `Artifact repair attempt ${payload.repair_attempt ?? "?"} failed.`)
+        summary: String(payload.summary ?? `Supervisor intervention ${String(payload.intervention_id ?? "?")} completed.`)
+      };
+    case "supervisor.intervention.failed":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: String(payload.summary ?? `Supervisor intervention ${String(payload.intervention_id ?? "?")} failed.`)
+      };
+    case "supervisor.escalated":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: String(payload.summary ?? payload.reason ?? "Supervisor escalated.")
       };
     case "check.evaluated":
       return {
@@ -516,6 +542,10 @@ function buildEventSummary(
     case "sequence.cleanup.canceled":
       return {
         summary: `Cleanup canceled for sequence "${String(payload.sequence_authored_id ?? "?")}": ${String(payload.reason ?? "operator_cancel")}.`
+      };
+    case "delivery.package.completed":
+      return {
+        summary: `Delivery package completed at ${String(payload.manifest_path ?? "delivery/manifest.json")}.`
       };
     case "run.canceled":
       return {
@@ -605,11 +635,23 @@ function buildRunDiagnostic(
         : undefined;
     case "node.blocked":
     case "node.canceled":
-    case "artifact_repair.failed":
+    case "supervisor.intervention.failed":
       return {
         seq: event.seq,
         ts: event.ts,
         severity: "warning",
+        event_type: event.type,
+        summary: event.summary,
+        ...(event.compiled_id ? { compiled_id: event.compiled_id } : {}),
+        ...(event.authored_id ? { authored_id: event.authored_id } : {}),
+        ...(event.execution_id ? { execution_id: event.execution_id } : {}),
+        ...(event.node_label ? { node_label: event.node_label } : {})
+      };
+    case "supervisor.escalated":
+      return {
+        seq: event.seq,
+        ts: event.ts,
+        severity: "error",
         event_type: event.type,
         summary: event.summary,
         ...(event.compiled_id ? { compiled_id: event.compiled_id } : {}),
@@ -738,7 +780,11 @@ function classifyArtifactKind(relativePath: string): ProjectedArtifactItem["kind
     return "context";
   }
 
-  if (relativePath === "result.json") {
+  if (
+    relativePath === "result.json"
+    || relativePath === "artifacts/verification.json"
+    || relativePath === "verification.json"
+  ) {
     return "result";
   }
 
@@ -916,11 +962,19 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
 
 async function loadRunProjectionContext(runRoot: string): Promise<RunProjectionContext> {
   await reconcileRunArtifacts(runRoot);
-  const [compiled_graph, execution_manifest, state, events, authored_graph_result] = await Promise.all([
+  const [
+    compiled_graph,
+    execution_manifest,
+    state,
+    events,
+    interventions,
+    authored_graph_result
+  ] = await Promise.all([
     readCompiledGraph(runRoot),
     readExecutionManifest(runRoot),
     readRunState(runRoot),
     readRunEvents(runRoot),
+    readSupervisorInterventions(runRoot),
     readAuthoredGraph(runRoot).then((authored_graph) => ({ authored_graph })).catch(() => ({}))
   ]);
   const authored_graph =
@@ -932,7 +986,8 @@ async function loadRunProjectionContext(runRoot: string): Promise<RunProjectionC
     compiled_graph,
     execution_manifest,
     state,
-    events
+    events,
+    interventions
   };
 }
 
@@ -976,31 +1031,12 @@ export async function listProjectedRuns(runsRoot: string): Promise<ProjectedRunS
 
         try {
           await reconcileRunArtifacts(runRoot);
-          const [runRecord, state, manifest] = await Promise.all([
-            readRunRecord(runRoot),
+          const [state, manifest] = await Promise.all([
             readRunState(runRoot),
             readExecutionManifest(runRoot)
           ]);
 
-          return {
-            run_id: runRecord.run_id,
-            graph_id: runRecord.graph_id,
-            run_root: runRoot,
-            status: toProjectionStatus(state.status),
-            evidence_status: state.evidence_status,
-            launch_profile: manifest.launch_profile,
-            workspace_backend: state.workspace_backend,
-            snapshot_seq: state.snapshot_seq,
-            active_nodes: state.counts.running,
-            passed_nodes: state.counts.passed,
-            failed_nodes: state.counts.failed,
-            current_repeat_depth: countActiveRepeatScopes(state),
-            counts: state.counts,
-            soft_verification_counts: state.soft_verification_counts,
-            failed_soft_verifications: state.failed_soft_verifications,
-            started_at: state.started_at,
-            ...(state.ended_at ? { ended_at: state.ended_at } : {})
-          } satisfies ProjectedRunSummary;
+          return buildRunSummary(runRoot, state, manifest);
         } catch {
           return undefined;
         }
@@ -1026,6 +1062,7 @@ export async function projectRunSnapshot(runRoot: string): Promise<ProjectedRunS
     snapshot_seq: context.state.snapshot_seq,
     overlay_nodes: context.compiled_graph.nodes.map((node) => buildRunNode(node, context.state)),
     run_diagnostics: buildRunDiagnostics(context),
+    recent_interventions: context.interventions.slice(-5),
     recent_events: recentEvents.events
   };
 }

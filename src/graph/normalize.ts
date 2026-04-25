@@ -12,6 +12,7 @@ import type {
   ArtifactDefinition,
   ArtifactReference,
   ContextItem,
+  DeliveryContract,
   DeterministicCheckDefaults,
   DeterministicPassIf,
   EnvPrerequisite,
@@ -21,6 +22,7 @@ import type {
   GraphPrerequisiteCheck,
   GraphPrerequisites,
   GraphDefaults,
+  GraphIntent,
   GraphProfile,
   InputRules,
   ParallelNode,
@@ -29,6 +31,7 @@ import type {
   RepoPrerequisite,
   RepoDefinition,
   SequenceNode,
+  SupervisionPolicy,
   ToolConfigMap,
   ToolDeclaration
 } from "./authored.js";
@@ -39,6 +42,7 @@ import {
   checkKinds,
   contextSourceKinds,
   contextSelectors,
+  deliverySections,
   failureBehaviors,
   graphVersion,
   harnessNames,
@@ -47,6 +51,7 @@ import {
   reasoningEfforts,
   reservedArtifactNames,
   sandboxModes,
+  supervisorActionKinds,
   toolNamePattern,
   workspaceBackends
 } from "./schema.js";
@@ -124,6 +129,48 @@ const checkpointOperatorFeedbackArtifact: ArtifactDefinition = {
   from: "output_dir",
   path: "operator-feedback.md",
   description: "Operator feedback captured when a checkpoint is reviewed."
+};
+
+export const defaultSupervisionPolicy: SupervisionPolicy = {
+  allowed_actions: [
+    "retry_node",
+    "repair_artifact",
+    "rebuild_context",
+    "refresh_workspace",
+    "run_diagnostic",
+    "semantic_evaluation",
+    "escalate"
+  ],
+  retry_budget: {
+    max_total_interventions: 8,
+    max_node_retries: 2,
+    max_artifact_repairs: 2,
+    max_context_rebuilds: 1,
+    max_workspace_refreshes: 1,
+    max_diagnostic_runs: 3,
+    max_semantic_evaluations: 2
+  },
+  drift_detection: {
+    score_threshold: 0.8
+  },
+  escalation: {
+    require_human_on_policy_breach: true,
+    require_human_on_scope_drift: true
+  }
+};
+
+export const defaultDeliveryContract: DeliveryContract = {
+  required_sections: [
+    "task_brief",
+    "implementation_summary",
+    "grouped_change_map",
+    "decision_log",
+    "evaluation_ledger",
+    "reviewer_guide",
+    "risk_notes",
+    "follow_up_items",
+    "intervention_trace"
+  ]
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -254,6 +301,42 @@ function readBoundedInteger(
   return value as number;
 }
 
+function readBoundedNumber(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  options: {
+    minimum: number;
+    maximum: number;
+    required?: boolean;
+  }
+): number | undefined {
+  if (value === undefined) {
+    if (options.required) {
+      diagnostics.push({
+        path,
+        message: `Expected a number between ${options.minimum} and ${options.maximum}.`
+      });
+    }
+    return undefined;
+  }
+
+  if (
+    typeof value !== "number" ||
+    Number.isNaN(value) ||
+    value < options.minimum ||
+    value > options.maximum
+  ) {
+    diagnostics.push({
+      path,
+      message: `Expected a number between ${options.minimum} and ${options.maximum}.`
+    });
+    return undefined;
+  }
+
+  return value;
+}
+
 function readBoolean(
   value: unknown,
   path: string,
@@ -357,6 +440,29 @@ function readEnumValue<T extends readonly string[]>(
   }
 
   return value as T[number];
+}
+
+function readEnumArray<T extends readonly string[]>(
+  value: unknown,
+  path: string,
+  allowed: T,
+  diagnostics: GraphDiagnostic[]
+): T[number][] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    diagnostics.push({
+      path,
+      message: `Expected an array containing only: ${allowed.join(", ")}.`
+    });
+    return undefined;
+  }
+
+  return value
+    .map((item, index) => readEnumValue(item, `${path}[${index}]`, allowed, diagnostics, { required: true }))
+    .filter((item): item is T[number] => item !== undefined);
 }
 
 function normalizeInputRules(
@@ -725,6 +831,282 @@ function normalizeGraphDefaults(
   return {
     ...(launch_profile ? { launch_profile } : {}),
     ...(workspace_backend ? { workspace_backend } : {})
+  };
+}
+
+function normalizeGraphIntent(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): GraphIntent | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path: `${path}.goal`,
+      message: "Expected a non-empty string."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["goal", "scope", "constraints", "acceptance_criteria", "approval_boundaries"],
+    diagnostics
+  );
+
+  const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
+  const scopeRecord = record.scope === undefined ? undefined : asRecord(record.scope);
+  let scope: GraphIntent["scope"] | undefined;
+
+  if (record.scope !== undefined && !scopeRecord) {
+    diagnostics.push({
+      path: `${path}.scope`,
+      message: "intent.scope must be an object when provided."
+    });
+  } else if (scopeRecord) {
+    pushUnknownKeyDiagnostics(scopeRecord, `${path}.scope`, ["repos", "paths", "out_of_scope"], diagnostics);
+    const repos = readStringArray(scopeRecord.repos, `${path}.scope.repos`, diagnostics);
+    const paths = readStringArray(scopeRecord.paths, `${path}.scope.paths`, diagnostics);
+    const out_of_scope = readStringArray(scopeRecord.out_of_scope, `${path}.scope.out_of_scope`, diagnostics);
+    scope = {
+      ...(repos ? { repos } : {}),
+      ...(paths ? { paths } : {}),
+      ...(out_of_scope ? { out_of_scope } : {})
+    };
+  }
+
+  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
+  const acceptance_criteria = readStringArray(
+    record.acceptance_criteria,
+    `${path}.acceptance_criteria`,
+    diagnostics
+  );
+  const approval_boundaries = readStringArray(
+    record.approval_boundaries,
+    `${path}.approval_boundaries`,
+    diagnostics
+  );
+
+  if (!goal) {
+    return undefined;
+  }
+
+  return {
+    goal,
+    ...(scope && Object.keys(scope).length > 0 ? { scope } : {}),
+    ...(constraints ? { constraints } : {}),
+    ...(acceptance_criteria ? { acceptance_criteria } : {}),
+    ...(approval_boundaries ? { approval_boundaries } : {})
+  };
+}
+
+function normalizeSupervisionPolicy(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): SupervisionPolicy {
+  if (value === undefined) {
+    return {
+      ...defaultSupervisionPolicy,
+      allowed_actions: [...defaultSupervisionPolicy.allowed_actions],
+      retry_budget: { ...defaultSupervisionPolicy.retry_budget },
+      drift_detection: { ...defaultSupervisionPolicy.drift_detection },
+      escalation: { ...defaultSupervisionPolicy.escalation }
+    };
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "supervision must be an object when provided."
+    });
+    return defaultSupervisionPolicy;
+  }
+
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["allowed_actions", "retry_budget", "drift_detection", "escalation"],
+    diagnostics
+  );
+
+  const allowed_actions =
+    readEnumArray(record.allowed_actions, `${path}.allowed_actions`, supervisorActionKinds, diagnostics) ??
+    [...defaultSupervisionPolicy.allowed_actions];
+
+  const budgetRecord = record.retry_budget === undefined ? undefined : asRecord(record.retry_budget);
+  if (record.retry_budget !== undefined && !budgetRecord) {
+    diagnostics.push({
+      path: `${path}.retry_budget`,
+      message: "supervision.retry_budget must be an object when provided."
+    });
+  }
+  if (budgetRecord) {
+    pushUnknownKeyDiagnostics(
+      budgetRecord,
+      `${path}.retry_budget`,
+      [
+        "max_total_interventions",
+        "max_node_retries",
+        "max_artifact_repairs",
+        "max_context_rebuilds",
+        "max_workspace_refreshes",
+        "max_diagnostic_runs",
+        "max_semantic_evaluations"
+      ],
+      diagnostics
+    );
+  }
+  const retry_budget = {
+    max_total_interventions:
+      readBoundedInteger(
+        budgetRecord?.max_total_interventions,
+        `${path}.retry_budget.max_total_interventions`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultSupervisionPolicy.retry_budget.max_total_interventions,
+    max_node_retries:
+      readBoundedInteger(
+        budgetRecord?.max_node_retries,
+        `${path}.retry_budget.max_node_retries`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultSupervisionPolicy.retry_budget.max_node_retries,
+    max_artifact_repairs:
+      readBoundedInteger(
+        budgetRecord?.max_artifact_repairs,
+        `${path}.retry_budget.max_artifact_repairs`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultSupervisionPolicy.retry_budget.max_artifact_repairs,
+    max_context_rebuilds:
+      readBoundedInteger(
+        budgetRecord?.max_context_rebuilds,
+        `${path}.retry_budget.max_context_rebuilds`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultSupervisionPolicy.retry_budget.max_context_rebuilds,
+    max_workspace_refreshes:
+      readBoundedInteger(
+        budgetRecord?.max_workspace_refreshes,
+        `${path}.retry_budget.max_workspace_refreshes`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultSupervisionPolicy.retry_budget.max_workspace_refreshes,
+    max_diagnostic_runs:
+      readBoundedInteger(
+        budgetRecord?.max_diagnostic_runs,
+        `${path}.retry_budget.max_diagnostic_runs`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultSupervisionPolicy.retry_budget.max_diagnostic_runs,
+    max_semantic_evaluations:
+      readBoundedInteger(
+        budgetRecord?.max_semantic_evaluations,
+        `${path}.retry_budget.max_semantic_evaluations`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultSupervisionPolicy.retry_budget.max_semantic_evaluations
+  };
+
+  const driftRecord = record.drift_detection === undefined ? undefined : asRecord(record.drift_detection);
+  if (record.drift_detection !== undefined && !driftRecord) {
+    diagnostics.push({
+      path: `${path}.drift_detection`,
+      message: "supervision.drift_detection must be an object when provided."
+    });
+  }
+  if (driftRecord) {
+    pushUnknownKeyDiagnostics(
+      driftRecord,
+      `${path}.drift_detection`,
+      ["score_threshold", "evaluator_profile"],
+      diagnostics
+    );
+  }
+  const score_threshold =
+    readBoundedNumber(
+      driftRecord?.score_threshold,
+      `${path}.drift_detection.score_threshold`,
+      diagnostics,
+      { minimum: 0, maximum: 1 }
+    ) ?? defaultSupervisionPolicy.drift_detection.score_threshold;
+  const evaluator_profile = readOptionalString(
+    driftRecord?.evaluator_profile,
+    `${path}.drift_detection.evaluator_profile`,
+    diagnostics
+  );
+
+  const escalationRecord = record.escalation === undefined ? undefined : asRecord(record.escalation);
+  if (record.escalation !== undefined && !escalationRecord) {
+    diagnostics.push({
+      path: `${path}.escalation`,
+      message: "supervision.escalation must be an object when provided."
+    });
+  }
+  if (escalationRecord) {
+    pushUnknownKeyDiagnostics(
+      escalationRecord,
+      `${path}.escalation`,
+      ["require_human_on_policy_breach", "require_human_on_scope_drift"],
+      diagnostics
+    );
+  }
+  const escalation = {
+    require_human_on_policy_breach:
+      readBoolean(
+        escalationRecord?.require_human_on_policy_breach,
+        `${path}.escalation.require_human_on_policy_breach`,
+        diagnostics
+      ) ?? defaultSupervisionPolicy.escalation.require_human_on_policy_breach,
+    require_human_on_scope_drift:
+      readBoolean(
+        escalationRecord?.require_human_on_scope_drift,
+        `${path}.escalation.require_human_on_scope_drift`,
+        diagnostics
+      ) ?? defaultSupervisionPolicy.escalation.require_human_on_scope_drift
+  };
+
+  return {
+    allowed_actions,
+    retry_budget,
+    drift_detection: {
+      score_threshold,
+      ...(evaluator_profile ? { evaluator_profile } : {})
+    },
+    escalation
+  };
+}
+
+function normalizeDeliveryContract(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): DeliveryContract {
+  if (value === undefined) {
+    return {
+      required_sections: [...defaultDeliveryContract.required_sections]
+    };
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "delivery must be an object when provided."
+    });
+    return defaultDeliveryContract;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["required_sections"], diagnostics);
+
+  return {
+    required_sections:
+      readEnumArray(record.required_sections, `${path}.required_sections`, deliverySections, diagnostics) ??
+      [...defaultDeliveryContract.required_sections]
   };
 }
 
@@ -1224,6 +1606,12 @@ function normalizeExecutableBase(
   const label = readOptionalString(record.label, `${path}.label`, diagnostics);
   const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
   const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
+  const goal = readOptionalString(record.goal, `${path}.goal`, diagnostics);
+  const acceptance_criteria = readStringArray(
+    record.acceptance_criteria,
+    `${path}.acceptance_criteria`,
+    diagnostics
+  );
   const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
   const artifacts = allow_artifacts
     ? normalizeArtifacts(record.artifacts, `${path}.artifacts`, diagnostics)
@@ -1246,6 +1634,8 @@ function normalizeExecutableBase(
     ...(label ? { label } : {}),
     ...(repo ? { repo } : {}),
     ...(profile ? { profile } : {}),
+    ...(goal ? { goal } : {}),
+    ...(acceptance_criteria ? { acceptance_criteria } : {}),
     ...(context ? { context } : {}),
     ...(artifacts ? { artifacts } : {}),
     ...(timeout_sec !== undefined ? { timeout_sec } : {})
@@ -1354,6 +1744,8 @@ function normalizeAgentNode(
       "label",
       "repo",
       "profile",
+      "goal",
+      "acceptance_criteria",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1369,7 +1761,7 @@ function normalizeAgentNode(
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const prompt = readRequiredString(record.prompt, `${path}.prompt`, diagnostics);
+  const prompt = readOptionalString(record.prompt, `${path}.prompt`, diagnostics);
   const model = readOptionalString(record.model, `${path}.model`, diagnostics);
   const reasoning_effort = readEnumValue(
     record.reasoning_effort,
@@ -1386,14 +1778,21 @@ function normalizeAgentNode(
   const tools = normalizeToolDeclarations(record.tools, `${path}.tools`, diagnostics);
   const tool_config = normalizeToolConfig(record.tool_config, `${path}.tool_config`, diagnostics);
 
-  if (!base || !prompt) {
+  if (base && !prompt && !base.goal) {
+    diagnostics.push({
+      path: `${path}.prompt`,
+      message: "Agent nodes require either prompt or goal."
+    });
+  }
+
+  if (!base || (!prompt && !base.goal)) {
     return undefined;
   }
 
   return {
     type: "agent",
     ...base,
-    prompt,
+    ...(prompt ? { prompt } : {}),
     ...(model ? { model } : {}),
     ...(reasoning_effort ? { reasoning_effort } : {}),
     ...(sandbox ? { sandbox } : {}),
@@ -1417,6 +1816,8 @@ function normalizeExecNode(
       "label",
       "repo",
       "profile",
+      "goal",
+      "acceptance_criteria",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1468,6 +1869,8 @@ function normalizeCheckNode(
       "label",
       "repo",
       "profile",
+      "goal",
+      "acceptance_criteria",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1580,6 +1983,8 @@ function normalizeCheckpointNode(
       "label",
       "repo",
       "profile",
+      "goal",
+      "acceptance_criteria",
       "context",
       "artifacts",
       "timeout_sec",
@@ -3267,6 +3672,9 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     [
       "version",
       "graph_id",
+      "intent",
+      "supervision",
+      "delivery",
       "repos",
       "defaults",
       "profiles",
@@ -3289,6 +3697,9 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
   }
 
   const graph_id = readRequiredString(documentRecord.graph_id, "$.graph_id", diagnostics);
+  const intent = normalizeGraphIntent(documentRecord.intent, "$.intent", diagnostics);
+  const supervision = normalizeSupervisionPolicy(documentRecord.supervision, "$.supervision", diagnostics);
+  const delivery = normalizeDeliveryContract(documentRecord.delivery, "$.delivery", diagnostics);
   const defaults = normalizeGraphDefaults(documentRecord.defaults, "$.defaults", diagnostics);
   const prerequisites = normalizeGraphPrerequisites(
     documentRecord.prerequisites,
@@ -3390,7 +3801,19 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     resolveArtifactContextRefs(normalizedGraph, "$.graph", diagnostics);
   }
 
-  if (diagnostics.length > 0 || !graph_id || !normalizedGraph || Object.keys(repos).length === 0) {
+  if (intent?.scope?.repos) {
+    const repoAliases = new Set(Object.keys(repos));
+    intent.scope.repos.forEach((repoAlias, index) => {
+      if (!repoAliases.has(repoAlias)) {
+        diagnostics.push({
+          path: `$.intent.scope.repos[${index}]`,
+          message: `intent.scope.repos references unknown repo "${repoAlias}".`
+        });
+      }
+    });
+  }
+
+  if (diagnostics.length > 0 || !graph_id || !intent || !normalizedGraph || Object.keys(repos).length === 0) {
     return {
       diagnostics,
       lowered_managed_nodes
@@ -3400,6 +3823,9 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
   const document: AuthoredGraphDocument = {
     version: graphVersion,
     graph_id,
+    intent,
+    supervision,
+    delivery,
     repos,
     defaults: effectiveDefaults,
     ...(Object.keys(profiles).length > 0 ? { profiles } : {}),
