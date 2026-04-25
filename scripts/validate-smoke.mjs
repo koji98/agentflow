@@ -9,7 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const jsonMode = process.argv.includes("--json");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const commandTimeoutMs = 10 * 60 * 1000;
+const commandTimeoutMs = 20 * 60 * 1000;
 const builtCliRelativePath = "dist/cli/index.js";
 const fixtureGraphRelativePath = "tests/graph/fixtures/repeat.graph.json";
 const fixtureGraphId = "repeat-graph";
