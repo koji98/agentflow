@@ -4,6 +4,11 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 
+const TEST_INTENT = {
+  goal: "Generate, evaluate, and fix an accountable implementation slice.",
+  acceptance_criteria: ["The managed pattern emits implementation, evaluation, and repair evidence."]
+};
+
 function buildPatternSpecDesignStep() {
   return {
     type: "pattern_spec_design",
@@ -66,6 +71,7 @@ function buildDocument(steps) {
   return {
     version: "1",
     graph_id: "pattern-generate-evaluate-fix-test",
+    intent: TEST_INTENT,
     repos: {
       main: {
         path: "."

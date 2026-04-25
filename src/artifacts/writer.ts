@@ -20,6 +20,7 @@ import type {
   WorkspaceBinding
 } from "../runtime/session.js";
 import type { RunOwnerRecord } from "./owner.js";
+import type { SupervisorInterventionRecord } from "../supervisor/types.js";
 
 async function writeJson(filePath: string, payload: unknown): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
@@ -129,10 +130,25 @@ export class ArtifactWriter {
     } catch {
       await writeText(this.paths.events_file, "");
     }
+
+    await this.initializeSupervisorLedger();
   }
 
   async appendEvent(event: RuntimeEventEnvelope): Promise<void> {
     await appendFile(this.paths.events_file, `${JSON.stringify(event)}\n`);
+  }
+
+  async initializeSupervisorLedger(): Promise<void> {
+    try {
+      await access(this.paths.interventions_file);
+    } catch {
+      await writeText(this.paths.interventions_file, "");
+    }
+  }
+
+  async appendSupervisorIntervention(record: SupervisorInterventionRecord): Promise<void> {
+    await mkdir(dirname(this.paths.interventions_file), { recursive: true });
+    await appendFile(this.paths.interventions_file, `${JSON.stringify(record)}\n`);
   }
 
   async writeState(state: RuntimeStateSnapshot): Promise<void> {

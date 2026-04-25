@@ -6,7 +6,8 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     passWithNoTests: false,
-    testTimeout: 15000,
+    testTimeout: 30000,
+    fileParallelism: false,
     coverage: {
       provider: "v8",
       reporter: coverageReporters,

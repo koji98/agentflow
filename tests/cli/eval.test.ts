@@ -37,6 +37,10 @@ async function writeEvalFixture(tempRoot: string): Promise<{
       {
         version: "1",
         graph_id: "eval-cli-{{case.id}}",
+        intent: {
+          goal: "Run the eval case task and preserve execution evidence.",
+          acceptance_criteria: ["The eval case completes and emits a run trace."]
+        },
         repos: {
           main: {
             path: "{{case.repos.main.path}}"

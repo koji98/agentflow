@@ -1,8 +1,191 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
+import { normalizeAuthoredGraphDocument as normalizeRawAuthoredGraphDocument } from "../../src/graph/normalize.js";
+
+function normalizeAuthoredGraphDocument(value: unknown) {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || "intent" in value) {
+    return normalizeRawAuthoredGraphDocument(value);
+  }
+
+  return normalizeRawAuthoredGraphDocument({
+    intent: {
+      goal: "Test supervised graph contract."
+    },
+    ...value
+  });
+}
 
 describe("graph normalization", () => {
+  it("normalizes supervised v1 intent, supervision, and delivery defaults", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "ship-trusted-change",
+      intent: {
+        goal: "Ship checkout timeout handling.",
+        scope: {
+          repos: ["main"],
+          paths: ["src/checkout/**", "tests/checkout/**"],
+          out_of_scope: ["billing provider migration"]
+        },
+        constraints: ["Keep public API names stable inside this repo."],
+        acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."],
+        approval_boundaries: ["Do not change payment provider credentials."]
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "echo",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document).toEqual(
+      expect.objectContaining({
+        intent: {
+          goal: "Ship checkout timeout handling.",
+          scope: {
+            repos: ["main"],
+            paths: ["src/checkout/**", "tests/checkout/**"],
+            out_of_scope: ["billing provider migration"]
+          },
+          constraints: ["Keep public API names stable inside this repo."],
+          acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."],
+          approval_boundaries: ["Do not change payment provider credentials."]
+        },
+        supervision: {
+          allowed_actions: [
+            "retry_node",
+            "repair_artifact",
+            "rebuild_context",
+            "refresh_workspace",
+            "run_diagnostic",
+            "semantic_evaluation",
+            "escalate"
+          ],
+          retry_budget: {
+            max_total_interventions: 8,
+            max_node_retries: 2,
+            max_artifact_repairs: 2,
+            max_context_rebuilds: 1,
+            max_workspace_refreshes: 1,
+            max_diagnostic_runs: 3,
+            max_semantic_evaluations: 2
+          },
+          drift_detection: {
+            score_threshold: 0.8
+          },
+          escalation: {
+            require_human_on_policy_breach: true,
+            require_human_on_scope_drift: true
+          }
+        },
+        delivery: {
+          required_sections: [
+            "task_brief",
+            "implementation_summary",
+            "grouped_change_map",
+            "decision_log",
+            "evaluation_ledger",
+            "reviewer_guide",
+            "risk_notes",
+            "follow_up_items",
+            "intervention_trace"
+          ]
+        }
+      })
+    );
+  });
+
+  it("rejects graphs without supervised intent", () => {
+    const normalized = normalizeRawAuthoredGraphDocument({
+      version: "1",
+      graph_id: "missing-intent",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: []
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.intent.goal",
+          message: "Expected a non-empty string."
+        }
+      ])
+    );
+  });
+
+  it("normalizes agent node goals and acceptance criteria without requiring a prompt", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "node-intent-contract",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            goal: "Implement timeout handling with clear reviewer evidence.",
+            acceptance_criteria: [
+              "Checkout timeout tests pass.",
+              "The handoff explains changed files and residual risks."
+            ],
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Human review handoff."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.graph).toEqual(
+      expect.objectContaining({
+        steps: [
+          expect.objectContaining({
+            type: "agent",
+            id: "implement",
+            goal: "Implement timeout handling with clear reviewer evidence.",
+            acceptance_criteria: [
+              "Checkout timeout tests pass.",
+              "The handoff explains changed files and residual risks."
+            ]
+          })
+        ]
+      })
+    );
+  });
+
   it("preserves primitive agent nodes and authored selectors", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
@@ -111,7 +294,7 @@ describe("graph normalization", () => {
     );
   });
 
-  it("rejects removed data-flow fields as unknown graph syntax", () => {
+  it("rejects unsupported data-flow fields as unknown graph syntax", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "removed-data-flow",
@@ -160,7 +343,7 @@ describe("graph normalization", () => {
     );
   });
 
-  it("rejects removed data-flow fields on managed patterns too", () => {
+  it("rejects unsupported data-flow fields on managed patterns too", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "removed-managed-data-flow",
@@ -293,9 +476,10 @@ describe("graph normalization", () => {
                 from: "output_dir",
                 path: "agent-response.md"
               },
-              result_json: {
+              verification_json: {
                 from: "output_dir",
-                path: "result.json"
+                path: "verification.json",
+                description: "Reserved verification payload."
               }
             }
           }
@@ -311,8 +495,8 @@ describe("graph normalization", () => {
           message: 'Artifact name "agent_response" is reserved by Agentflow.'
         }),
         expect.objectContaining({
-          path: "$.graph.steps[0].artifacts.result_json",
-          message: 'Artifact name "result_json" is reserved by Agentflow.'
+          path: "$.graph.steps[0].artifacts.verification_json",
+          message: 'Artifact name "verification_json" is reserved by Agentflow.'
         })
       ])
     );

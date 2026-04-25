@@ -1,164 +1,132 @@
 # Managed Patterns
 
-Agentflow has four authoring categories:
+Managed patterns are authored shortcuts for common outcome-oriented workflows. They compile into normal Agentflow primitive nodes, preserve a public authored node id, and publish named artifacts that fit the delivery package.
 
-- Primitive executable nodes: `agent`, `exec`, `check`, `checkpoint`
-- Primitive control-flow containers: `sequence`, `parallel`, `repeat`
-- Managed patterns: `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, `pattern_review_change`
-- Plugin workflows: `plugin`
+Use a managed pattern when the operator wants a known lifecycle rather than hand-authoring every phase. Use primitive nodes when the workflow is one-off or needs very specific control.
 
-Managed patterns are authored shortcuts. They compile into generated primitive subgraphs and run on the same runtime as the rest of the graph.
+## Pattern Principles
 
-Plugin workflows follow the same lowering model for team-owned workflows distributed through Git. Built-in managed patterns are part of Agentflow itself; plugins are resolved from `agentflow.plugins.lock.json` and are documented in [`PLUGINS.md`](PLUGINS.md).
+- Patterns publish reviewable artifacts, not just final text.
+- Patterns lower to inspectable primitive subgraphs.
+- The public pattern node id remains the downstream handoff boundary.
+- Generated internal node ids are private to the compiled shape.
+- Pattern nodes should remain large enough to represent real engineering outcomes.
 
-## Canonical Chain
-
-The intended high-level composition is:
-
-1. `pattern_deep_research`
-2. `pattern_spec_design`
-3. `pattern_generate_evaluate_fix`
-4. `pattern_review_change`
-
-Patterns can also hand off to primitive nodes directly when the graph only needs a narrower follow-on step.
-
-Managed patterns still use the same graph contract as primitive nodes. They accept authored `context`, lower into primitive subgraphs, and publish named artifacts from their final publish phase. A downstream node should consume those artifacts explicitly rather than scrape intermediate execution directories.
-
-Plugin workflows use the same handoff rule: consume artifacts from the public plugin node id, not from generated internal node ids.
-
-## Shared Model
-
-Every managed pattern uses this base:
-
-- `brief`
-- `context_policy`
-- `strategy`
-- optional `runtime`
-
-Pattern-specific fields are intentional:
-
-- `pattern_deep_research`: optional `approval_policy`, `delivery`
-- `pattern_spec_design`: optional `approval_policy`, `delivery`
-- `pattern_generate_evaluate_fix`: `task_source`, `evaluation`
-- `pattern_review_change`: `review_source`, `delivery`
-
-Shared executable fields still apply:
-
-- `label`
-- `repo`
-- `profile`
-- `context`
-- `timeout_sec`
-
-Rules:
-
-- Managed patterns are fixed strategy contracts, not prompt buckets.
-- Only the patterns that explicitly define `delivery` accept it. `delivery` can shape format or sections, but it does not toggle core artifacts on or off.
-- Only `pattern_deep_research` and `pattern_spec_design` expose `approval_policy` in this release.
-- Runtime truth lives in run artifacts. Managed patterns do not publish fake runtime-status or workflow-event files.
-
-Handoff rule:
-
-- Prefer the machine-readable packet when another pattern or deterministic command consumes the result.
-- Prefer the human-readable summary/report when the next step is operator review.
-- Add a downstream primitive `agent` only when it has a new responsibility, such as translating a packet into a release note or combining multiple pattern artifacts.
-- Do not add a handoff node that merely repeats the previous pattern's final answer.
-
-## Pattern Inventory
+## Canonical Patterns
 
 ### `pattern_deep_research`
 
-Purpose:
-- Clarify a research question, plan the investigation, fan out researchers, consolidate findings, and publish a sourced report plus machine-readable packet.
+Research an open question and publish a sourced package.
 
-Core artifacts:
-- `research-report.md`
-- `research-packet.json`
-- `source-ledger.json`
-- `uncertainties.md`
-- `interim-findings.jsonl`
+Primary artifacts:
 
-Notes:
-- Optional plan approval is supported through `approval_policy.require_plan_approval`.
-- `runtime.max_concurrency` only caps execution concurrency.
+- `research_report`
+- `research_packet`
+- `source_ledger`
+- `uncertainties`
+- `interim_findings`
 
-Reference:
-- [`PATTERN_DEEP_RESEARCH.md`](PATTERN_DEEP_RESEARCH.md)
+Use for strategy, technical discovery, comparison, risk mapping, and recommendation work.
 
 ### `pattern_spec_design`
 
-Purpose:
-- Turn a repo-grounded problem statement into an implementation-ready design package that downstream primitives or patterns can consume.
+Turn a problem into an implementation-ready design package.
 
-Core artifacts:
-- `design-spec.md`
-- `design-packet.json`
-- `direction-proposal.md`
-- `tradeoff-matrix.md`
-- `decision-log.md`
-- `implementation-readiness.md`
-- `critique-merged.md`
-- `quality-review.json`
+Primary artifacts:
 
-Notes:
-- Optional direction approval is supported through `approval_policy.require_direction_approval`.
-- The revision loop is bounded by `strategy.max_revision_cycles`.
+- `design_spec`
+- `design_packet`
+- `direction_proposal`
+- `tradeoff_matrix`
+- `decision_log`
+- `implementation_readiness`
+- `critique_merged`
+- `quality_review`
 
-Reference:
-- [`PATTERN_SPEC_DESIGN.md`](PATTERN_SPEC_DESIGN.md)
+Use for architecture and product design that should feed a later implementation node or generate/evaluate/fix pattern.
 
 ### `pattern_generate_evaluate_fix`
 
-Purpose:
-- Consume a prepared task packet, generate or fix a change, evaluate concrete commands independently, aggregate the evidence, and optionally repeat until the hard evaluation gate passes.
+Implement an accountable slice, run independent evaluators, and iterate within a bounded repair loop.
 
-Core artifacts:
-- `change-summary.md`
-- `change-packet.json`
-- `evaluation-ledger.json`
-- `fix-log.md`
+Primary artifacts:
 
-Notes:
-- This pattern is intentionally narrow. It does not do spec planning, execution-plan approval, or read-only recon.
-- `task_source` is the only supported source declaration for this pattern.
-- `strategy.max_fix_cycles` bounds retries after the initial generation pass.
-- `evaluation.required = false` runs one non-blocking evaluation pass and records soft evidence without the repeat loop.
+- `change_summary`
+- `change_packet`
+- `evaluation_ledger`
+- `fix_log`
 
-Reference:
-- [`PATTERN_GENERATE_EVALUATE_FIX.md`](PATTERN_GENERATE_EVALUATE_FIX.md)
+Use when the task source is already clear enough to implement and the evaluation criteria can be expressed as commands or structured review checks.
 
 ### `pattern_review_change`
 
-Purpose:
-- Prepare a review packet, plan reviewer focus, fan out specialized reviewers, merge and calibrate findings, and publish a final review package.
+Review a change package with specialized reviewer roles and publish calibrated findings.
 
-Core artifacts:
-- `review-summary.md`
-- `review-bundle.json`
-- `raw-findings.json`
-- `merged-findings.json`
-- `calibrated-findings.json`
+Primary artifacts:
 
-Notes:
-- This pattern is read-only.
-- Reviewer fan-out is task-specific. There is no generic council pattern in this release.
+- `review_summary`
+- `review_bundle`
+- `raw_findings`
+- `calibrated_findings`
+- `recommended_actions`
 
-Reference:
-- [`PATTERN_REVIEW_CHANGE.md`](PATTERN_REVIEW_CHANGE.md)
+Use when the goal is review quality: correctness, tests, regressions, maintainability, security, or release risk.
 
-## Implementation Surface
+## Example Chain
 
-Shipped in this release:
+```json
+{
+  "type": "sequence",
+  "id": "root",
+  "steps": [
+    {
+      "type": "pattern_spec_design",
+      "id": "checkout_timeout_design",
+      "brief": {
+        "problem": "Checkout requests can hang without a clear timeout path.",
+        "goal": "Design a typed timeout flow that keeps public APIs stable."
+      }
+    },
+    {
+      "type": "pattern_generate_evaluate_fix",
+      "id": "checkout_timeout_impl",
+      "task_source": {
+        "kind": "managed_node",
+        "node": "checkout_timeout_design"
+      },
+      "evaluation": {
+        "commands": ["npm test -- tests/checkout"],
+        "required": true
+      }
+    },
+    {
+      "type": "pattern_review_change",
+      "id": "checkout_timeout_review",
+      "review_source": {
+        "kind": "managed_node",
+        "node": "checkout_timeout_impl"
+      }
+    }
+  ]
+}
+```
 
-- canonical pattern kinds in `src/graph/schema.ts`
-- pattern builders in `src/managed/`
-- normalization support that lowers managed patterns into primitive subgraphs
-- registry metadata in `src/managed/registry.ts`
-- example graphs in [`docs/examples/graphs/`](examples/graphs/README.md)
-- plugin workflow lowering in `src/plugins/`
+Downstream context should reference public artifacts from `checkout_timeout_design`, `checkout_timeout_impl`, or `checkout_timeout_review`, not generated internal ids.
 
-Deferred:
+## Validation
 
-- UI-native collapsed pattern views
-- controller-managed orchestration
-- a generic debate or council pattern
+Use:
+
+```bash
+agentflow validate --graph agentflow.graph.json --show-compiled
+```
+
+Inspect:
+
+- `lowered_managed_nodes`
+- generated primitive node kinds
+- public artifact declarations
+- repeat limits
+- evaluator commands
+- checkpoint placement
+- delivery-compatible artifacts

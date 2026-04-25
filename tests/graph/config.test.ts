@@ -166,6 +166,10 @@ describe("loadAuthoredGraphDocument with config", () => {
     return {
       version: "1",
       graph_id: "config-test",
+      intent: {
+        goal: "Validate config interpolation for an Agentflow graph.",
+        acceptance_criteria: ["Config values resolve before graph validation."]
+      },
       repos: { main: { path: "." } },
       defaults: { launch_profile: "default" },
       profiles: { default: { harness: "codex-cli" } },

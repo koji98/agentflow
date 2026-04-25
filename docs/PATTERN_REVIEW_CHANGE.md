@@ -1,113 +1,88 @@
-# `pattern_review_change`
+# Pattern Review Change
 
-`pattern_review_change` turns a diff, change summary, or change package into a calibrated review package.
+`pattern_review_change` reviews a change package with specialized reviewer roles, merges duplicate findings, calibrates severity, and publishes a low-noise review package.
 
-## Workflow Shape
+Use it when review quality matters more than a single generic critique.
 
-```mermaid
-flowchart TD
-    prepare["prepare_review_packet"]
-    plan["plan_review"]
-    panel["reviewer_panel"]
-    raw["aggregate_raw_findings"]
-    merge["merge_findings"]
-    calibrate["calibrate_findings"]
-    publish["publish review package"]
-
-    prepare --> plan --> panel --> raw --> merge --> calibrate --> publish
-```
-
-## Authored Contract
+## Contract
 
 Required fields:
 
-- `type: "pattern_review_change"`
+- `type`: `"pattern_review_change"`
 - `id`
 - `review_source`
+- `brief.review_goal`
 
-Optional fields:
+Review source options:
 
-- `brief`
+- `review_source.kind: "managed_node"` with `node`
+- `review_source.kind: "artifact_bundle"` with file or artifact entries
+
+Common fields:
+
+- `repo`
+- `profile`
+- `context`
 - `context_policy`
-- `strategy`
-- `delivery`
-- `runtime`
+- `strategy.reviewer_profiles`
+- `strategy.severity_policy`
+- `strategy.false_positive_challenge`
+- `strategy.require_file_references`
+- `delivery.sections`
+- `runtime.max_concurrency`
 
-## `review_source`
+## Published Artifacts
 
-### `managed_node`
+- `review_summary`: human-readable review result.
+- `review_bundle`: machine-readable review packet.
+- `raw_findings`: unmerged reviewer findings.
+- `calibrated_findings`: deduplicated and severity-calibrated findings.
+- `recommended_actions`: next actions for the operator.
 
-Use a prior pattern node, usually `pattern_generate_evaluate_fix`:
+## Runtime Shape
 
-```json
-{
-  "kind": "managed_node",
-  "node": "implement_managed_nodes"
-}
-```
+The pattern lowers into a sequence that:
 
-When available, the pattern consumes:
-
-- optional `change_summary`
-- optional `change_packet`
-- optional `evaluation_ledger`
-- optional `fix_log`
-
-### `artifact_bundle`
-
-Use files or prior artifacts directly:
-
-```json
-{
-  "kind": "artifact_bundle",
-  "diff": { "kind": "file", "path": "artifacts/change.patch" },
-  "summary": { "kind": "file", "path": "artifacts/change-summary.md" },
-  "evaluation_ledger": {
-    "kind": "artifact",
-    "node": "upstream_evaluation",
-    "artifact": "evaluation_ledger"
-  }
-}
-```
-
-Supported bundle keys:
-
-- optional `diff`
-- optional `summary`
-- optional `evaluation_ledger`
-- optional `files_touched`
-- optional `additional_context`
-
-## Core Artifacts
-
-- `review-summary.md`
-- `review-bundle.json`
-- `raw-findings.json`
-- `merged-findings.json`
-- `calibrated-findings.json`
-
-## Notes
-
-- This pattern is read-only.
-- `runtime.max_concurrency` caps reviewer fan-out concurrency.
-- `delivery` only shapes review presentation. It does not toggle the core output set.
+1. Prepares the review packet.
+2. Plans reviewer focus.
+3. Fans out reviewer profiles.
+4. Aggregates raw findings.
+5. Merges duplicates.
+6. Calibrates severity and confidence.
+7. Publishes the review package.
 
 ## Example
 
 ```json
 {
   "type": "pattern_review_change",
-  "id": "review_managed_nodes",
+  "id": "checkout_timeout_review",
+  "repo": "main",
+  "profile": "review",
   "review_source": {
     "kind": "managed_node",
-    "node": "implement_managed_nodes"
+    "node": "checkout_timeout_impl"
   },
   "brief": {
-    "review_goal": "Find the highest-signal defects and missing tests."
+    "review_goal": "Find correctness, test, and maintainability risks before handoff.",
+    "focus": ["correctness", "tests", "maintainability"],
+    "audience": "engineering",
+    "scope": {
+      "paths": ["src/checkout/**", "tests/checkout/**"],
+      "areas": ["timeout behavior", "retry behavior"]
+    }
   },
   "strategy": {
     "reviewer_profiles": ["correctness", "testing", "maintainability"],
-    "severity_policy": "balanced"
+    "severity_policy": "balanced",
+    "false_positive_challenge": true,
+    "require_file_references": true
+  },
+  "delivery": {
+    "format": "review_summary",
+    "sections": ["findings", "severity_summary", "recommended_actions"]
   }
 }
 ```
+
+Review findings should include precise file references when the source material supports them.

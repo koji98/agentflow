@@ -28,7 +28,13 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument(document);
+  const normalized = normalizeAuthoredGraphDocument({
+    intent: {
+      goal: `Resume ${document.graph_id}.`,
+      acceptance_criteria: ["Resume preserves only compatible completed work."]
+    },
+    ...document
+  });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -384,6 +390,54 @@ describe("runtime resume", () => {
             args: ["--changed"]
           }
         ]
+      }
+    });
+
+    const resumed = await buildResumedSession(fixture, changedGraph);
+
+    expect(resumed.preserved_node_count).toBe(0);
+    expect(resumed.restarted_node_count).toBe(1);
+
+    await rm(fixture.tempRoot, { recursive: true, force: true });
+  });
+
+  it("restarts passed nodes when the graph intent contract changes", async () => {
+    const baseDocument: AuthoredGraphDocument = {
+      version: "1",
+      graph_id: "resume-intent-change",
+      intent: {
+        goal: "Ship the original goal.",
+        acceptance_criteria: ["Original acceptance criteria."]
+      },
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            repo: "main",
+            command: "placeholder"
+          }
+        ]
+      }
+    };
+    const fixture = await createResumeFixture({ document: baseDocument });
+    const changedGraph = compileGraph({
+      ...baseDocument,
+      intent: {
+        goal: "Ship the changed goal.",
+        acceptance_criteria: ["Changed acceptance criteria."]
       }
     });
 

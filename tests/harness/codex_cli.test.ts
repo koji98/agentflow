@@ -323,6 +323,62 @@ describe("codex cli harness", () => {
     }
   });
 
+  it("treats model auto as harness default instead of passing a brittle model flag", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-auto-model-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCodexBinary(tempRoot);
+    const harness = createCodexCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    const previousStdinPath = process.env.MOCK_STDIN_PATH;
+    process.env.MOCK_ARGV_PATH = mock.argv_path;
+    process.env.MOCK_STDIN_PATH = mock.stdin_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-auto",
+        executionId: "exec-auto",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "auto",
+        prompt: "Use the harness default model.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      expect(result.status).toBe("passed");
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+      expect(argv).not.toContain("-m");
+      expect(argv).not.toContain("auto");
+    } finally {
+      if (previousArgvPath === undefined) {
+        delete process.env.MOCK_ARGV_PATH;
+      } else {
+        process.env.MOCK_ARGV_PATH = previousArgvPath;
+      }
+
+      if (previousStdinPath === undefined) {
+        delete process.env.MOCK_STDIN_PATH;
+      } else {
+        process.env.MOCK_STDIN_PATH = previousStdinPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("forces timed-out codex executions to exit if the child ignores SIGTERM", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-timeout-"));
     const repoDir = join(tempRoot, "repo");

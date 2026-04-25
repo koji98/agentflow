@@ -1,82 +1,84 @@
-# `pattern_deep_research`
+# Pattern Deep Research
 
-`pattern_deep_research` turns a research question into a sourced report plus a machine-readable research packet.
+`pattern_deep_research` turns a research question into a sourced, reviewable research package.
 
-## Workflow Shape
+Use it when a team needs grounded discovery before design or implementation: technical comparison, roadmap shaping, architecture research, operational risk analysis, or product behavior investigation.
 
-```mermaid
-flowchart TD
-    brief["clarify_brief"]
-    plan["plan_research"]
-    approve{"require_plan_approval?"}
-    tracks["derive_tracks"]
-    fanout["investigation_fanout"]
-    contradictions["scan_contradictions"]
-    followup["followup passes"]
-    consolidate["consolidate_findings"]
-    publish["publish research package"]
-    critique["final_critique (optional)"]
-
-    brief --> plan --> approve
-    approve --> tracks --> fanout --> contradictions --> followup --> consolidate --> publish --> critique
-```
-
-## Authored Contract
+## Contract
 
 Required fields:
 
-- `type: "pattern_deep_research"`
+- `type`: `"pattern_deep_research"`
 - `id`
 - `brief.question`
 - `brief.objective`
 
-Optional fields:
+Common fields:
 
-- `brief.audience`
-- `brief.scope_cues`
-- `brief.success_bar`
+- `repo`
+- `profile`
+- `context`
 - `context_policy`
-- `approval_policy`
-- `strategy`
-- `delivery`
-- `runtime`
+- `approval_policy.require_plan_approval`
+- `strategy.depth`
+- `strategy.coverage_mode`
+- `strategy.followup_passes`
+- `strategy.final_critique`
+- `delivery.sections`
+- `runtime.max_concurrency`
 
-## Core Outputs
+## Published Artifacts
 
-- `research-report.md`
-- `research-packet.json`
-- `source-ledger.json`
-- `uncertainties.md`
-- `interim-findings.jsonl`
+- `research_report`: human-readable recommendation.
+- `research_packet`: machine-readable summary of question, findings, evidence, and recommendation.
+- `source_ledger`: cited or inspected source list.
+- `uncertainties`: remaining unknowns and confidence limits.
+- `interim_findings`: JSONL trail of investigator findings.
 
-## Notes
+## Runtime Shape
 
-- `approval_policy.require_plan_approval` is opt-in.
-- `strategy.depth` controls the breadth of the track fan-out.
-- `runtime.max_concurrency` only caps execution concurrency.
-- `strategy.final_critique` adds one final AI quality check after publication.
+The pattern lowers into a sequence that:
+
+1. Clarifies the brief.
+2. Plans research.
+3. Optionally pauses for plan approval.
+4. Fans out investigator tracks.
+5. Runs follow-up passes for gaps or contradictions.
+6. Consolidates evidence.
+7. Optionally runs a final critique.
+8. Publishes the research package.
 
 ## Example
 
 ```json
 {
   "type": "pattern_deep_research",
-  "id": "market_scan",
+  "id": "storage_research",
+  "repo": "main",
+  "profile": "research",
   "brief": {
-    "question": "What should Agentflow's first managed patterns be?",
-    "objective": "Produce a grounded recommendation for the managed pattern surface.",
-    "scope_cues": ["pattern contracts", "compiled subgraphs"]
+    "question": "Which storage design best supports resumable supervised runs?",
+    "objective": "Recommend an implementation path with tradeoffs and uncertainty.",
+    "audience": "engineering",
+    "scope_cues": ["runtime artifacts", "resume", "event projection"],
+    "success_bar": ["compare alternatives", "preserve uncertainty"]
   },
   "context_policy": {
     "web": true,
     "files": true,
-    "apps": false
+    "apps": false,
+    "allow_domains": ["openai.com", "developers.openai.com"]
   },
   "strategy": {
     "depth": "standard",
     "coverage_mode": "balanced",
     "followup_passes": 1,
     "final_critique": true
+  },
+  "delivery": {
+    "sections": ["findings", "recommendation", "uncertainties"]
   }
 }
 ```
+
+Validate with `agentflow validate --graph <path> --show-compiled` and inspect the lowered research phases before launch.

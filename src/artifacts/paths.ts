@@ -201,7 +201,9 @@ export interface RunArtifactPaths {
   compile_diagnostics_file: string;
   state_file: string;
   events_file: string;
+  interventions_file: string;
   summary_file: string;
+  delivery_dir: string;
   workspaces_dir: string;
   workspace_changes_dir: string;
   nodes_dir: string;
@@ -217,7 +219,9 @@ export function resolveRunArtifactPaths(runRoot: string): RunArtifactPaths {
     compile_diagnostics_file: join(runRoot, "compile_diagnostics.json"),
     state_file: join(runRoot, "state.json"),
     events_file: join(runRoot, "events.jsonl"),
+    interventions_file: join(runRoot, "interventions.jsonl"),
     summary_file: join(runRoot, "summary.md"),
+    delivery_dir: join(runRoot, "delivery"),
     workspaces_dir: join(runRoot, "workspaces"),
     workspace_changes_dir: join(runRoot, "workspace-changes"),
     nodes_dir: join(runRoot, "nodes")

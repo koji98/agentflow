@@ -3,11 +3,13 @@ import type {
   ArtifactSourceKind,
   CheckKind,
   ContextSelector,
+  DeliverySection,
   FailureBehavior,
   HarnessName,
   PrerequisiteKind,
   ReasoningEffort,
   SandboxMode,
+  SupervisorActionKind,
   WorkspaceBackend
 } from "./schema.js";
 
@@ -73,6 +75,45 @@ export interface GraphProfile {
 export interface GraphDefaults {
   launch_profile?: string;
   workspace_backend?: WorkspaceBackend;
+}
+
+export interface GraphIntent {
+  goal: string;
+  scope?: {
+    repos?: string[];
+    paths?: string[];
+    out_of_scope?: string[];
+  };
+  constraints?: string[];
+  acceptance_criteria?: string[];
+  approval_boundaries?: string[];
+}
+
+export interface SupervisionRetryBudget {
+  max_total_interventions: number;
+  max_node_retries: number;
+  max_artifact_repairs: number;
+  max_context_rebuilds: number;
+  max_workspace_refreshes: number;
+  max_diagnostic_runs: number;
+  max_semantic_evaluations: number;
+}
+
+export interface SupervisionPolicy {
+  allowed_actions: SupervisorActionKind[];
+  retry_budget: SupervisionRetryBudget;
+  drift_detection: {
+    score_threshold: number;
+    evaluator_profile?: string;
+  };
+  escalation: {
+    require_human_on_policy_breach: boolean;
+    require_human_on_scope_drift: boolean;
+  };
+}
+
+export interface DeliveryContract {
+  required_sections: DeliverySection[];
 }
 
 export interface FileInput {
@@ -161,6 +202,8 @@ export interface BaseNode {
 export interface BaseExecutableNode extends BaseNode {
   repo?: string;
   profile?: string;
+  goal?: string;
+  acceptance_criteria?: string[];
   context?: ContextItem[];
   artifacts?: Record<string, ArtifactDefinition>;
   timeout_sec?: number;
@@ -168,7 +211,7 @@ export interface BaseExecutableNode extends BaseNode {
 
 export interface AgentNode extends BaseExecutableNode {
   type: "agent";
-  prompt: string;
+  prompt?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
@@ -237,6 +280,9 @@ export type AuthoredGraphNode = ExecutableGraphNode | ContainerGraphNode;
 export interface AuthoredGraphDocument {
   version: "1";
   graph_id: string;
+  intent: GraphIntent;
+  supervision: SupervisionPolicy;
+  delivery: DeliveryContract;
   repos: Record<string, RepoDefinition>;
   defaults?: GraphDefaults;
   profiles?: Record<string, GraphProfile>;

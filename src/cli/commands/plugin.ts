@@ -13,15 +13,15 @@ function renderPluginUsageError(message: string): string {
 
 export const pluginCommand = {
   name: "plugin",
-  summary: "Resolve Git-distributed plugin workflows for an authored graph.",
+  summary: "Resolve Git or local plugin packages for an authored graph.",
   usage: "agentflow plugin <resolve> --graph <path/to/agentflow.graph.json>",
   examples: [
     "agentflow plugin resolve --graph ./agentflow.graph.json"
   ] as const,
   optionNames: ["graph", "help"] as const,
   helpNotes: [
-    "Plugins package reusable managed workflows that lower into normal Agentflow graph primitives.",
-    "resolve clones declared plugins, pins them to commits, and writes agentflow.plugins.lock.json next to the graph."
+    "Plugins package reusable managed workflows, CLI tools, and credential metadata.",
+    "resolve clones Git plugins or fingerprints local plugin folders, then writes agentflow.plugins.lock.json next to the graph."
   ] as const,
   async run(
     options: Record<string, string | boolean | string[] | undefined>,

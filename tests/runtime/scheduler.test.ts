@@ -13,9 +13,19 @@ import {
   getRepeatScopeForBodyEntryNode,
   isRepeatBodyEntryNode
 } from "../../src/runtime/core/scheduler.js";
+import { createRuntimeEvent } from "../../src/runtime/core/events.js";
+import { createRuntimeSession } from "../../src/runtime/core/state.js";
+
+const TEST_INTENT = {
+  goal: "Exercise scheduler topology for supervised graph execution.",
+  acceptance_criteria: ["Scheduler topology preserves sequence, parallel, and repeat flow edges."]
+};
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument(document);
+  const normalized = normalizeAuthoredGraphDocument({
+    intent: TEST_INTENT,
+    ...document
+  });
   expect(normalized.diagnostics).toEqual([]);
 
   const launch = resolveLaunchConfig(normalized.document!);
@@ -176,5 +186,47 @@ describe("runtime scheduler topology", () => {
       repeat_scope_id: "scope__retry",
       iteration_index: 3
     })).toBe("root__task::3");
+  });
+
+  it("returns empty topology lookups for unknown compiled ids", () => {
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "scheduler-empty-lookups",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {}
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "only",
+            command: "placeholder"
+          }
+        ]
+      }
+    });
+
+    const topology = buildSchedulerTopology(graph);
+
+    expect(getIncomingEdges(topology, "missing")).toEqual([]);
+    expect(getOutgoingEdges(topology, "missing")).toEqual([]);
+    expect(getNodeParallelScopes(topology, "missing")).toEqual([]);
+    expect(getRepeatScopeForBodyEntryNode(topology, "missing")).toBeUndefined();
+    expect(isRepeatBodyEntryNode(topology, "missing", "scope__missing")).toBe(false);
+  });
+
+  it("keeps runtime core event and state barrels executable", () => {
+    expect(createRuntimeEvent(1, "run-test", "run.started", {}).run_id).toBe("run-test");
+    expect(typeof createRuntimeSession).toBe("function");
   });
 });

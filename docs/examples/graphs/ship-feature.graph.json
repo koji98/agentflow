@@ -16,7 +16,7 @@
       "harness": "cursor-cli",
       "model": "auto",
       "reasoning_effort": "medium",
-      "sandbox": "read-only",
+      "sandbox": "workspace-write",
       "timeout_sec": 900,
       "input_rules": {
         "max_total_tokens": 96000,
@@ -27,27 +27,13 @@
       "harness": "cursor-cli",
       "model": "auto",
       "reasoning_effort": "medium",
-      "sandbox": "read-only",
+      "sandbox": "workspace-write",
       "timeout_sec": 900
     }
   },
-  "config_schema": {
-    "type": "object",
-    "properties": {
-      "github_token": {
-        "type": "string",
-        "description": "Optional GitHub token used by the babysit-poll plugin tool."
-      }
-    },
-    "additionalProperties": false
-  },
-  "config": {
-    "github_token": "ghp_example_replace_me"
-  },
   "plugins": {
     "babysit": {
-      "source": "../plugins/babysit",
-      "ref": "HEAD"
+      "path": "../plugins/babysit"
     }
   },
   "tools": [
@@ -56,11 +42,6 @@
       "tool": "poll"
     }
   ],
-  "tool_config": {
-    "babysit-poll": {
-      "token": "{{config.github_token}}"
-    }
-  },
   "graph": {
     "type": "sequence",
     "id": "root",
@@ -105,6 +86,64 @@
           }
         }
       }
+    ]
+  },
+  "intent": {
+    "goal": "Draft and verify release notes using Codex/Cursor-compatible plugin tooling.",
+    "scope": {
+      "repos": [
+        "main"
+      ],
+      "paths": [
+        "README.md",
+        "docs/**"
+      ]
+    },
+    "acceptance_criteria": [
+      "Release notes are produced as a named artifact.",
+      "The plugin tool contract is visible to the agent."
+    ],
+    "approval_boundaries": [
+      "Do not publish or mutate remote services from this demo graph."
+    ]
+  },
+  "supervision": {
+    "allowed_actions": [
+      "retry_node",
+      "repair_artifact",
+      "rebuild_context",
+      "run_diagnostic",
+      "semantic_evaluation",
+      "escalate"
+    ],
+    "retry_budget": {
+      "max_total_interventions": 6,
+      "max_node_retries": 2,
+      "max_artifact_repairs": 2,
+      "max_context_rebuilds": 1,
+      "max_workspace_refreshes": 1,
+      "max_diagnostic_runs": 2,
+      "max_semantic_evaluations": 1
+    },
+    "drift_detection": {
+      "score_threshold": 0.8
+    },
+    "escalation": {
+      "require_human_on_policy_breach": true,
+      "require_human_on_scope_drift": true
+    }
+  },
+  "delivery": {
+    "required_sections": [
+      "task_brief",
+      "implementation_summary",
+      "grouped_change_map",
+      "decision_log",
+      "evaluation_ledger",
+      "reviewer_guide",
+      "risk_notes",
+      "follow_up_items",
+      "intervention_trace"
     ]
   }
 }

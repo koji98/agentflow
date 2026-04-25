@@ -2,8 +2,11 @@ import type {
   ArtifactDefinition,
   ArtifactReference,
   ContextItem,
+  DeliveryContract,
   DeterministicPassIf,
-  GraphPrerequisites
+  GraphIntent,
+  GraphPrerequisites,
+  SupervisionPolicy
 } from "./authored.js";
 import type {
   ContainerNodeKind,
@@ -14,12 +17,15 @@ import type {
 } from "./schema.js";
 import type { CheckKind, ExecutableNodeKind } from "./schema.js";
 import type { EffectiveNodePolicy, LaunchResolution } from "./profiles.js";
+import type { CredentialSpecMap } from "../auth/types.js";
 
 export interface CompiledExecutableNodeBase {
   compiled_id: string;
   authored_id: string;
   kind: ExecutableNodeKind;
   label?: string;
+  goal?: string;
+  acceptance_criteria?: string[];
   repo: string;
   deps: string[];
   scope_stack: string[];
@@ -45,12 +51,15 @@ export type ResolvedToolSource = ResolvedToolPluginSource;
 
 export interface ResolvedTool {
   callable_name: string;
+  capability: "context" | "verification" | "mutation" | "reporting";
+  impact: "read" | "write" | "external" | "secret";
   description?: string;
   usage?: string;
   executable_path: string;
   args: string[];
   config: Record<string, string>;
   config_schema?: Record<string, unknown>;
+  credentials?: string[];
   source: ResolvedToolSource;
 }
 
@@ -142,6 +151,9 @@ export type CompiledScope = CompiledSequenceScope | CompiledParallelScope | Comp
 
 export interface CompiledGraph {
   graph_id: string;
+  intent: GraphIntent;
+  supervision: SupervisionPolicy;
+  delivery: DeliveryContract;
   launch: Pick<LaunchResolution, "launch_profile" | "workspace_backend">;
   entry_node_ids: string[];
   nodes: CompiledExecutableNode[];
@@ -149,6 +161,7 @@ export interface CompiledGraph {
   scopes: CompiledScope[];
   authored_to_compiled: Record<string, string[]>;
   prerequisites: GraphPrerequisites;
+  credential_specs?: CredentialSpecMap;
 }
 
 export interface CompileGraphResult {

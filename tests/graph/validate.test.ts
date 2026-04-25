@@ -15,6 +15,11 @@ async function readFixture(): Promise<unknown> {
   return JSON.parse(contents) as unknown;
 }
 
+const TEST_INTENT = {
+  goal: "Validate an Agentflow graph contract.",
+  acceptance_criteria: ["Graph diagnostics reflect the targeted contract behavior."]
+};
+
 describe("graph validation", () => {
   it("normalizes and summarizes the repeat fixture", async () => {
     const normalized = normalizeAuthoredGraphDocument(await readFixture());
@@ -49,6 +54,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "checkpoint-repeat",
+      intent: TEST_INTENT,
       repos: {
         main: {
           path: "."
@@ -112,6 +118,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-repeat",
+      intent: TEST_INTENT,
       repos: {
         main: {
           path: "."
@@ -166,6 +173,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-soft-repeat-until",
+      intent: TEST_INTENT,
       repos: {
         main: {
           path: "."
@@ -225,6 +233,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-checkpoint-placement",
+      intent: TEST_INTENT,
       repos: {
         main: {
           path: "."
@@ -281,6 +290,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-check-fields",
+      intent: TEST_INTENT,
       repos: {
         main: {
           path: "."
@@ -353,6 +363,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "invalid-path-boundaries",
+      intent: TEST_INTENT,
       repos: {
         main: {
           path: "."
@@ -474,6 +485,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "missing-harness-agent",
+      intent: TEST_INTENT,
       repos: { main: { path: "." } },
       graph: {
         type: "sequence",
@@ -502,6 +514,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "missing-harness-ai-check",
+      intent: TEST_INTENT,
       repos: { main: { path: "." } },
       graph: {
         type: "sequence",
@@ -531,6 +544,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "readonly-with-artifacts",
+      intent: TEST_INTENT,
       repos: { main: { path: "." } },
       defaults: { launch_profile: "default" },
       profiles: { default: { harness: "cursor-cli", sandbox: "read-only" } },
@@ -568,6 +582,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "readonly-no-artifacts",
+      intent: TEST_INTENT,
       repos: { main: { path: "." } },
       defaults: { launch_profile: "default" },
       profiles: { default: { harness: "cursor-cli", sandbox: "read-only" } },
@@ -594,6 +609,7 @@ describe("graph validation", () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "exec-only",
+      intent: TEST_INTENT,
       repos: { main: { path: "." } },
       graph: {
         type: "sequence",

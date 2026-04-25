@@ -2,8 +2,8 @@
 # Sample polling script for the babysit plugin example.
 #
 # This is a demonstration helper, not a production tool. It reads its
-# configuration from the AGENTFLOW_TOOL_BABYSIT_POLL_TOKEN environment
-# variable that the Agentflow runtime exports for the babysit-poll tool,
+# credential from the AGENTFLOW_CREDENTIAL_GITHUB_TOKEN environment
+# variable that the Agentflow tool launcher exports only for this subprocess,
 # accepts an optional --pr <id> argument, and prints a JSON status line
 # to stdout.
 
@@ -30,7 +30,7 @@ Usage:
   poll-pr.sh [--pr <id>] [--once]
 
 Reads:
-  AGENTFLOW_TOOL_BABYSIT_POLL_TOKEN  Optional GitHub token for higher rate limits.
+  AGENTFLOW_CREDENTIAL_GITHUB_TOKEN  GitHub token resolved by Agentflow auth for this subprocess.
 
 Prints a JSON object describing the simulated PR status.
 USAGE
@@ -44,7 +44,7 @@ USAGE
 done
 
 TOKEN_PRESENT="false"
-if [[ -n "${AGENTFLOW_TOOL_BABYSIT_POLL_TOKEN:-}" ]]; then
+if [[ -n "${AGENTFLOW_CREDENTIAL_GITHUB_TOKEN:-}" ]]; then
   TOKEN_PRESENT="true"
 fi
 

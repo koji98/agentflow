@@ -5,22 +5,30 @@
   "workflows": {
     "poll-pr": {
       "path": "workflows/poll-pr/workflow.json",
-      "description": "Repeatedly poll a pull request URL until it reports a final state."
+      "description": "Poll a pull request and publish a machine-readable status artifact."
+    }
+  },
+  "credentials": {
+    "github": {
+      "description": "GitHub API access for PR polling.",
+      "fields": {
+        "token": {
+          "secret": true,
+          "required": true,
+          "description": "GitHub token used only by the babysit poll subprocess."
+        }
+      }
     }
   },
   "tools": {
     "poll": {
       "executable": "scripts/poll-pr.sh",
+      "capability": "verification",
+      "impact": "secret",
       "description": "Polls a GitHub pull request URL once and prints a JSON status object to stdout.",
       "args": ["--once"],
       "usage": "poll [--pr <id>]",
-      "config_schema": {
-        "type": "object",
-        "properties": {
-          "token": { "type": "string" }
-        },
-        "additionalProperties": false
-      }
+      "credentials": ["github"]
     }
   }
 }

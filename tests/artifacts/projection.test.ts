@@ -41,7 +41,13 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument(document);
+  const normalized = normalizeAuthoredGraphDocument({
+    intent: {
+      goal: `Project ${document.graph_id}.`,
+      acceptance_criteria: ["Projection exposes durable run state."]
+    },
+    ...document
+  });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -162,8 +168,8 @@ async function createFixtureRun() {
                 artifacts: {
                   verification: {
                     from: "output_dir",
-                    path: "result.json",
-                    description: "Test artifact produced at result.json."
+                    path: "verification.json",
+                    description: "Test artifact produced at verification.json."
                   }
                 }
               }
@@ -446,9 +452,13 @@ describe("artifacts projection", () => {
 
       const snapshot = await projectRunSnapshot(fixture.runRoot);
       expect(snapshot.run.run_id).toBe(fixture.run.run_id);
+      expect(snapshot.run.supervisor_status).toBe("healthy");
+      expect(snapshot.run.intervention_count).toBe(0);
+      expect(snapshot.run.delivery_manifest).toBe(join(fixture.runRoot, "delivery", "manifest.json"));
+      expect(snapshot.run.reviewer_guide).toBe(join(fixture.runRoot, "delivery", "reviewer-guide.md"));
       expect(snapshot.overlay_nodes.some((node) => node.compiled_id === fixture.compiledVerifyId)).toBe(true);
       expect(snapshot.run_diagnostics).toEqual([]);
-      expect(snapshot.recent_events.at(-1)?.type).toBe("run.completed");
+      expect(snapshot.recent_events.at(-1)?.type).toBe("delivery.package.completed");
 
       const events = await projectRunEvents(fixture.runRoot, {
         compiled_id: fixture.compiledVerifyId
@@ -459,7 +469,7 @@ describe("artifacts projection", () => {
       expect(nodeDetail.executions).toHaveLength(2);
       expect(nodeDetail.check_evaluations.at(-1)?.passed).toBe(true);
       expect(nodeDetail.selected_execution_id).toBeDefined();
-      expect(nodeDetail.artifacts.map((artifact) => artifact.relative_path)).toContain("artifacts/result.json");
+      expect(nodeDetail.artifacts.map((artifact) => artifact.relative_path)).toContain("artifacts/verification.json");
 
       const nodeLogs = await projectNodeLogs(
         fixture.runRoot,
@@ -473,7 +483,7 @@ describe("artifacts projection", () => {
         fixture.runRoot,
         fixture.compiledVerifyId,
         nodeDetail.selected_execution_id!,
-        "artifacts/result.json"
+        "artifacts/verification.json"
       );
       expect(JSON.parse(artifact.content)).toMatchObject({
         currentCounter: 2,
@@ -582,7 +592,7 @@ describe("artifacts projection", () => {
       const repairedState = await readRunState(fixture.runRoot);
 
       expect(snapshot.run.status).toBe("Passed");
-      expect(snapshot.recent_events.at(-1)?.type).toBe("run.completed");
+      expect(snapshot.recent_events.at(-1)?.type).toBe("delivery.package.completed");
       expect(repairedState.status).toBe("passed");
       expect(repairedState.ended_at).toBeDefined();
       expect(repairedState.snapshot_seq).toBeGreaterThanOrEqual(state.snapshot_seq);

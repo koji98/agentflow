@@ -4,10 +4,16 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 
+const TEST_INTENT = {
+  goal: "Design an implementation-ready Agentflow workflow surface.",
+  acceptance_criteria: ["The design package is reviewable and implementation ready."]
+};
+
 function buildDocument(stepOverrides = {}) {
   return {
     version: "1",
     graph_id: "spec-design-test",
+    intent: TEST_INTENT,
     repos: {
       main: {
         path: "."

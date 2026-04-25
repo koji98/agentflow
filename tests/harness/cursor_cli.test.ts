@@ -254,6 +254,54 @@ describe("cursor cli harness", () => {
     }
   });
 
+  it("treats model auto as harness default instead of passing a brittle model flag", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-auto-model-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCursorBinary(tempRoot);
+    const harness = createCursorCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    process.env.MOCK_ARGV_PATH = mock.argv_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-auto",
+        executionId: "exec-auto",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "read-only",
+        model: "auto",
+        prompt: "Use the harness default model.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      expect(result.status).toBe("passed");
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+      expect(argv).not.toContain("--model");
+      expect(argv).not.toContain("auto");
+    } finally {
+      if (previousArgvPath === undefined) {
+        delete process.env.MOCK_ARGV_PATH;
+      } else {
+        process.env.MOCK_ARGV_PATH = previousArgvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("forces cursor writes only for writable sandboxes", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-harness-force-"));
     const repoDir = join(tempRoot, "repo");

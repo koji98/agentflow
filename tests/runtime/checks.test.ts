@@ -245,7 +245,7 @@ describe("runtime checks", () => {
     );
   });
 
-  it("parses fenced AI evaluator JSON and deterministic JSON-path checks without throwing", async () => {
+  it("parses fenced AI evaluator JSON and deterministic verification artifacts without throwing", async () => {
     const harness = createHarness("codex-cli", async () => {
       return {
         status: "passed",
@@ -278,21 +278,67 @@ describe("runtime checks", () => {
       })
     );
 
-    const deterministicResult = await runDeterministicCheck({
-      command: process.execPath,
-      args: ["-e", "process.stdout.write('not json')"],
-      cwd: process.cwd(),
-      env: undefined,
-      timeout_sec: 30,
-      pass_if: {
-        json_path: "$.passed",
-        equals: true
-      },
-      signal: undefined
-    });
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deterministic-verification-"));
 
-    expect(deterministicResult.passed).toBe(false);
-    expect(deterministicResult.summary).toContain("not valid JSON");
+    try {
+      const deterministicResult = await runDeterministicCheck({
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            "const fs = require('node:fs');",
+            "const path = require('node:path');",
+            "const outputDir = process.env.AGENTFLOW_OUTPUT_DIR;",
+            "fs.writeFileSync(path.join(outputDir, 'verification.json'), JSON.stringify({ passed: true, summary: 'ok' }));",
+            "process.stdout.write('not json');"
+          ].join(" ")
+        ],
+        cwd: process.cwd(),
+        env: undefined,
+        runtime_env: {
+          AGENTFLOW_OUTPUT_DIR: tempRoot
+        },
+        timeout_sec: 30,
+        pass_if: {
+          json_path: "$.passed",
+          equals: true
+        },
+        signal: undefined
+      });
+
+      expect(deterministicResult.passed).toBe(true);
+      expect(deterministicResult.summary).toBe("ok");
+      expect(deterministicResult.stdout).toBe("not json");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails deterministic verification artifact checks when verification.json is missing", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deterministic-missing-verification-"));
+
+    try {
+      const deterministicResult = await runDeterministicCheck({
+        command: process.execPath,
+        args: ["-e", "process.stdout.write('not json')"],
+        cwd: process.cwd(),
+        env: undefined,
+        runtime_env: {
+          AGENTFLOW_OUTPUT_DIR: tempRoot
+        },
+        timeout_sec: 30,
+        pass_if: {
+          json_path: "$.passed",
+          equals: true
+        },
+        signal: undefined
+      });
+
+      expect(deterministicResult.passed).toBe(false);
+      expect(deterministicResult.summary).toContain("verification.json");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("forces timed-out deterministic checks to exit if the child ignores SIGTERM", async () => {

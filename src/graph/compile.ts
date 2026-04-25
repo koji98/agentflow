@@ -25,6 +25,7 @@ import {
 import type { LaunchResolution } from "./profiles.js";
 import type { GraphDiagnostic, LoweredManagedKind } from "./schema.js";
 import type { AuthoredGraphDocument } from "./authored.js";
+import type { CredentialSpecMap } from "../auth/types.js";
 
 interface ScopeFrame {
   authored_id: string;
@@ -58,6 +59,7 @@ interface CompileContext {
   plugins_by_alias: Map<string, ResolvedPlugin>;
   graph_dir: string | undefined;
   graph_scope_tools: ResolvedTool[];
+  credential_specs: Map<string, CredentialSpecMap[string]>;
 }
 
 function isExecutableNode(node: AuthoredGraphNode): node is ExecutableGraphNode {
@@ -137,6 +139,7 @@ function resolveToolDeclaration(
     declared_at: "graph" | "agent";
     declaration_path: string;
     plugins_by_alias: Map<string, ResolvedPlugin>;
+    credential_specs: Map<string, CredentialSpecMap[string]>;
     diagnostics: GraphDiagnostic[];
   }
 ): ResolvedTool | undefined {
@@ -159,6 +162,27 @@ function resolveToolDeclaration(
   }
 
   const callable = callableNameForToolDeclaration(declaration);
+  for (const credentialScope of exported.credentials ?? []) {
+    const spec = plugin.manifest.credentials[credentialScope];
+    if (!spec) {
+      options.diagnostics.push({
+        path: `${options.declaration_path}.tool`,
+        message: `Plugin tool "${declaration.from_plugin}/${declaration.tool}" references unknown credential scope "${credentialScope}".`
+      });
+      return undefined;
+    }
+
+    const existing = options.credential_specs.get(credentialScope);
+    if (existing && JSON.stringify(existing) !== JSON.stringify(spec)) {
+      options.diagnostics.push({
+        path: `${options.declaration_path}.tool`,
+        message: `Credential scope "${credentialScope}" is declared by multiple plugins with different field contracts.`
+      });
+      return undefined;
+    }
+    options.credential_specs.set(credentialScope, spec);
+  }
+
   let executablePath: string;
   try {
     executablePath = resolveSubpathWithinRoot(
@@ -188,12 +212,15 @@ function resolveToolDeclaration(
 
   return {
     callable_name: callable,
+    capability: exported.capability,
+    impact: exported.impact,
     ...(exported.description ? { description: exported.description } : {}),
     ...(exported.usage ? { usage: exported.usage } : {}),
     executable_path: executablePath,
     args: [...(exported.args ?? [])],
     config: {},
     ...(exported.config_schema ? { config_schema: exported.config_schema } : {}),
+    ...(exported.credentials && exported.credentials.length > 0 ? { credentials: [...exported.credentials] } : {}),
     source
   };
 }
@@ -202,6 +229,7 @@ function buildGraphScopeTools(
   document: AuthoredGraphDocument,
   options: {
     plugins_by_alias: Map<string, ResolvedPlugin>;
+    credential_specs: Map<string, CredentialSpecMap[string]>;
     diagnostics: GraphDiagnostic[];
   }
 ): ResolvedTool[] {
@@ -214,6 +242,7 @@ function buildGraphScopeTools(
       declared_at: "graph",
       declaration_path: declarationPath,
       plugins_by_alias: options.plugins_by_alias,
+      credential_specs: options.credential_specs,
       diagnostics: options.diagnostics
     });
 
@@ -274,6 +303,7 @@ function buildAgentResolvedTools(
       declared_at: "agent",
       declaration_path: declarationPath,
       plugins_by_alias: context.plugins_by_alias,
+      credential_specs: context.credential_specs,
       diagnostics: context.diagnostics
     });
 
@@ -367,6 +397,8 @@ function compileExecutableNode(
     authored_id: node.id,
     kind: node.type,
     ...(node.label ? { label: node.label } : {}),
+    ...(node.goal ? { goal: node.goal } : {}),
+    ...(node.acceptance_criteria ? { acceptance_criteria: node.acceptance_criteria } : {}),
     repo: repo ?? "unknown",
     deps: [],
     scope_stack: scopeFrame.scope_stack,
@@ -389,7 +421,7 @@ function compileExecutableNode(
     compiledNode = {
       ...compiledBase,
       kind: "agent",
-      prompt: node.prompt,
+      prompt: node.prompt ?? node.goal ?? "",
       tools: resolvedTools
     };
   } else if (node.type === "exec") {
@@ -925,8 +957,10 @@ export function compileAuthoredGraph(
     (options.resolved_plugins ?? []).map((plugin) => [plugin.alias, plugin])
   );
   const compileDiagnostics: GraphDiagnostic[] = [...launch.diagnostics];
+  const credential_specs = new Map<string, CredentialSpecMap[string]>();
   const graph_scope_tools = buildGraphScopeTools(document, {
     plugins_by_alias,
+    credential_specs,
     diagnostics: compileDiagnostics
   });
 
@@ -944,7 +978,8 @@ export function compileAuthoredGraph(
     edge_counter: 0,
     plugins_by_alias,
     graph_dir: options.graph_dir,
-    graph_scope_tools
+    graph_scope_tools,
+    credential_specs
   };
 
   const rootRegion = compileGraphNode(context, undefined, document.graph, "$.graph");
@@ -952,6 +987,9 @@ export function compileAuthoredGraph(
 
   const compiled_graph: CompiledGraph = {
     graph_id: document.graph_id,
+    intent: document.intent,
+    supervision: document.supervision,
+    delivery: document.delivery,
     launch: {
       launch_profile: launch.launch_profile,
       workspace_backend: launch.workspace_backend
@@ -961,6 +999,9 @@ export function compileAuthoredGraph(
     edges: context.edges,
     scopes: context.scopes,
     prerequisites: document.prerequisites ?? { checks: [] },
+    credential_specs: Object.fromEntries(
+      [...context.credential_specs.entries()].sort(([left], [right]) => left.localeCompare(right))
+    ),
     authored_to_compiled: Object.fromEntries(
       [...context.authored_to_compiled.entries()].map(([authoredId, compiledIds]) => [
         authoredId,

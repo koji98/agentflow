@@ -1,47 +1,50 @@
 ---
 name: agentflow
-description: Work with Agentflow graphs, managed workflows, local eval suites, run artifacts, and CLI validation. Use when authoring or reviewing Agentflow graph JSON, choosing managed patterns, designing or running agentic workflow evals, debugging failed runs, or inspecting resume/artifact behavior.
+description: Use when authoring, validating, running, inspecting, or debugging supervised Agentflow graphs, managed patterns, plugin tools, delivery packages, supervisor interventions, or Codex/Cursor harness behavior.
 ---
 
 # Agentflow
 
-Use this as the router for Agentflow work. Agentflow is a local-first graph executor for agentic workflows over local repositories. A graph is executable control flow: nodes run, context is materialized, artifacts are published, validation gates decide outcomes, and durable run artifacts explain what happened.
+Agentflow is a supervised local runtime for long-running coding work. Humans author a graph with intent and outcome boundaries; Codex CLI or Cursor CLI executes substantial nodes; the supervisor records bounded interventions; terminal runs produce a delivery package.
 
-Do not treat an Agentflow graph as a prose plan. It must validate, compile, and have intentional handoffs.
+## Route By Task
 
-## Route by task
+- Author or review a graph: read [references/graph-authoring.md](references/graph-authoring.md).
+- Need exact fields: read [references/graph-contract.md](references/graph-contract.md).
+- Choose managed patterns: read [references/managed-workflows.md](references/managed-workflows.md).
+- Need CLI validation or launch behavior: read [references/cli-and-validation.md](references/cli-and-validation.md).
+- Debug failures, resume, or inspect delivery: read [references/run-debugging.md](references/run-debugging.md).
+- Need failure semantics: read [references/failure-and-validation.md](references/failure-and-validation.md).
+- Need examples: read [references/examples.md](references/examples.md).
+- Need reusable plugin workflows or tools: use `agentflow-plugins`.
 
-- Author or review graph JSON: read [references/graph-authoring.md](references/graph-authoring.md).
-- Choose or fill managed patterns: read [references/managed-workflows.md](references/managed-workflows.md).
-- Use or package Git-resolved plugin workflows: use `agentflow-plugins`.
-- Design, validate, run, or grade local eval suites: read [references/evals.md](references/evals.md).
-- Debug a failed run or inspect resume behavior: read [references/run-debugging.md](references/run-debugging.md).
-- Need exact graph syntax or node fields: read [references/graph-contract.md](references/graph-contract.md).
-- Need CLI behavior or validation order: read [references/cli-and-validation.md](references/cli-and-validation.md).
-- Need failure semantics for `exec`, `check`, `checkpoint`, or `repeat`: read [references/failure-and-validation.md](references/failure-and-validation.md).
-- Need graph topology examples: read [references/examples.md](references/examples.md).
+## Default Workflow
 
-## Grounding rule
+1. Confirm the graph has `intent.goal`, acceptance criteria, scope, approval boundaries, explicit `repos`, and explicit `profiles`.
+2. Prefer fewer, larger outcome nodes with named artifacts and node-level `goal` plus `acceptance_criteria`.
+3. Set `supervision` budgets and delivery sections appropriate to the task.
+4. Use plugin-bundled CLI tools for team capabilities; verify each tool's `capability`, `impact`, and credential requirements.
+5. Run `agentflow plugin resolve --graph <path>` when plugins are declared.
+6. Run `agentflow validate --graph <path>`.
+7. Run `agentflow validate --graph <path> --run-ready` before launch on this machine.
+8. Run `agentflow validate --graph <path> --show-compiled` for managed patterns, plugin workflows, repeat scopes, or nontrivial artifact handoffs.
+9. After a run, inspect `summary.md`, `interventions.jsonl`, `delivery/manifest.json`, and `delivery/reviewer-guide.md`.
 
-Prefer the repository `docs/`, `src/`, and `tests/` when available. The packaged references are compact agent-facing guidance for installed use and may trail the repo docs during active development.
+## Authoring Posture
 
-## Default workflow
+- Treat the authored DAG as the human contract, not a prose plan.
+- Use `context` for node material and `artifacts` for durable handoffs.
+- Treat `repos` and `profiles` as operational authority; treat `intent.scope` as governance.
+- Keep downstream references on named artifacts from public node ids.
+- Use deterministic checks for hard facts and AI checks for semantic judgment.
+- Make approval boundaries explicit before granting external, secret, or mutation tools.
+- Do not widen scope through supervisor behavior; use checkpoints or graph edits for human decisions.
 
-1. Identify whether the user needs authoring, managed patterns, evals, or run debugging.
-2. Read the smallest relevant reference.
-3. Use `agentflow graph-help` or the relevant `agentflow <command> --help` when the CLI surface matters.
-4. Author or edit the graph using current fields only: `context` and `artifacts`, not `inputs`, `context_from`, or `outputs`.
-5. Run `agentflow validate --graph <path>` and fix diagnostics.
-6. Run `agentflow validate --graph <path> --run-ready` when the user needs launch assurance on this machine, or when the graph depends on local commands, git worktrees, Codex, or Cursor.
-7. Run `agentflow validate --graph <path> --show-compiled` and inspect lowered shape when the graph uses managed patterns, plugin workflows, `repeat`, `parallel`, or nontrivial artifact handoffs.
-8. Hand off only after validation passes and the compiled contract looks right, or explicitly report the exact command that failed and the diagnostics that remain.
+## Runtime CLI Posture
 
-## Authoring posture
-
-- Keep nodes narrow enough that a failure tells the operator what broke.
-- Use named artifacts for durable handoffs. Do not rely on downstream nodes rediscovering scratch files.
-- Treat an agent node's final response as the `agent_response` handoff summary, but declare structured artifacts when downstream work needs stable data.
-- Use deterministic `check` for real gates and `exec` for evidence collection.
-- Use managed patterns only when the task lifecycle matches the pattern contract.
-- Use plugin workflows when a graph needs a reusable team-owned managed graph from Git; resolve them before validation.
-- Prefer smaller explicit graphs over clever graphs with ambiguous context or hidden dependencies.
+- Humans use `agentflow`; agents inside running nodes use `af`.
+- `af` is injected into agent nodes on `PATH` and reads `$AGENTFLOW_RUNTIME_METADATA`.
+- Prefer `af status`, `af tools list`, and `af context show` when debugging what a node actually received.
+- Prefer `af artifact write` for declared handoffs instead of ad hoc output files.
+- Use `af channel post` and `af parent post` for coordination, but keep durable conclusions in artifacts.
+- Treat `af spawn` helpers as supervised sessions with their own artifacts, not persistent coworkers.

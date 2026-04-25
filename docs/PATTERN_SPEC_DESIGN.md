@@ -1,83 +1,88 @@
-# `pattern_spec_design`
+# Pattern Spec Design
 
-`pattern_spec_design` turns a repo-grounded problem statement into an implementation-ready design package.
+`pattern_spec_design` turns a problem statement into an implementation-ready design package.
 
-## Workflow Shape
+Use it when the implementation should not start until the current system, constraints, alternatives, tradeoffs, and readiness criteria are explicit.
 
-```mermaid
-flowchart TD
-    brief["clarify_brief"]
-    inspect["inspect_current_state"]
-    gaps["identify_information_gaps"]
-    research["targeted_external_research (optional)"]
-    options["generate_options"]
-    direction["propose_direction"]
-    approve{"require_direction_approval?"}
-    draft["draft_spec"]
-    revise["revision_loop"]
-    publish["publish design package"]
-
-    brief --> inspect --> gaps --> research --> options --> direction --> approve --> draft --> revise --> publish
-```
-
-## Authored Contract
+## Contract
 
 Required fields:
 
-- `type: "pattern_spec_design"`
+- `type`: `"pattern_spec_design"`
 - `id`
 - `brief.problem`
 - `brief.goal`
 
-Optional fields:
+Common fields:
 
-- `brief.audience`
-- `brief.constraints`
-- `brief.decision_drivers`
-- `brief.scope`
-- `context_policy`
-- `approval_policy`
-- `strategy`
-- `delivery`
-- `runtime`
+- `repo`
+- `profile`
+- `context`
+- `context_policy.repo_first`
+- `context_policy.allow_web_fallback`
+- `approval_policy.require_direction_approval`
+- `strategy.alternatives`
+- `strategy.critique_profiles`
+- `strategy.max_revision_cycles`
+- `delivery.sections`
+- `runtime.max_concurrency`
 
-## Core Outputs
+## Published Artifacts
 
-- `design-spec.md`
-- `design-packet.json`
-- `direction-proposal.md`
-- `tradeoff-matrix.md`
-- `decision-log.md`
-- `implementation-readiness.md`
-- `critique-merged.md`
-- `quality-review.json`
+- `design_spec`: final human-readable design.
+- `design_packet`: machine-readable design summary.
+- `direction_proposal`: selected direction and rationale.
+- `tradeoff_matrix`: alternatives and tradeoffs.
+- `decision_log`: decisions made during design.
+- `implementation_readiness`: concrete readiness checklist.
+- `critique_merged`: merged critique evidence.
+- `quality_review`: final quality gate result.
 
-## Notes
+## Runtime Shape
 
-- `approval_policy.require_direction_approval` is opt-in.
-- `context_policy.repo_first` defaults to repo-first behavior.
-- `strategy.max_revision_cycles` bounds the critique and quality loop.
-- The design packet is the main machine-readable downstream handoff for `pattern_generate_evaluate_fix` or primitive graphs.
+The pattern lowers into a sequence that:
+
+1. Clarifies the brief.
+2. Inspects the repository first.
+3. Runs targeted research when the policy allows it.
+4. Fans out design options.
+5. Chooses a direction.
+6. Optionally pauses for direction approval.
+7. Drafts the spec.
+8. Runs critique and revision cycles.
+9. Publishes the design package.
 
 ## Example
 
 ```json
 {
   "type": "pattern_spec_design",
-  "id": "managed_nodes_spec",
+  "id": "supervisor_design",
+  "repo": "main",
+  "profile": "design",
   "brief": {
-    "problem": "Managed patterns need a clearer authored contract.",
-    "goal": "Produce an implementation-ready managed pattern model.",
-    "constraints": ["Keep primitive graph nodes stable."]
+    "problem": "Agent runs can fail without enough structured recovery evidence.",
+    "goal": "Design supervisor intervention records and delivery package integration.",
+    "constraints": ["Keep the authored graph readable."],
+    "decision_drivers": ["traceability", "operator control", "maintainability"],
+    "scope": {
+      "paths": ["src/runtime/**", "src/supervisor/**", "docs/**"],
+      "areas": ["runtime", "supervision", "delivery"]
+    }
   },
   "context_policy": {
     "repo_first": true,
     "allow_web_fallback": false
   },
   "strategy": {
-    "alternatives": 3,
+    "alternatives": 2,
     "critique_profiles": ["architecture", "implementation"],
     "max_revision_cycles": 2
+  },
+  "delivery": {
+    "sections": ["problem", "architecture", "implementation_readiness"]
   }
 }
 ```
+
+Use the published `design_packet` or `implementation_readiness` artifact as the task source for implementation.

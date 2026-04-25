@@ -20,7 +20,6 @@ const builtCliRunWorkspaceBackends = ["inplace", "worktree"];
 export const canonicalDocs = [
   "README.md",
   "docs/SCOPE.md",
-  "docs/DEFERRED.md",
   "docs/ARCHITECTURE.md",
   "docs/OPERATIONS.md",
   "docs/MANAGED_PATTERNS.md",
@@ -47,7 +46,7 @@ export const builtCliSmokeContract = {
   runWorkspaceBackends: builtCliRunWorkspaceBackends
 };
 
-export const alphaResidualRisks = [
+export const smokeResidualRisks = [
   "measured coverage floors are not part of validate:smoke",
   "manual run-artifact inspection is not part of validate:smoke",
   "real Codex or Cursor installs are not exercised by validate:smoke",
@@ -259,6 +258,14 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
   const graphDocument = {
     version: "1",
     graph_id: `validate-smoke-${harnessKind}`,
+    intent: {
+      goal: `Run the built CLI smoke graph through ${harnessKind}.`,
+      acceptance_criteria: [
+        "The harness adapter launches successfully.",
+        "The runtime writes terminal run and delivery artifacts."
+      ],
+      approval_boundaries: ["Do not perform external side effects during smoke validation."]
+    },
     repos: {
       main: {
         path: "./repo"
@@ -687,7 +694,7 @@ async function main() {
       ...(typeof check.command === "string" ? { command: check.command } : {}),
       ...(check.details ? { details: check.details } : {})
     })),
-    residual_risks: alphaResidualRisks,
+    residual_risks: smokeResidualRisks,
     reasons: reasons.length > 0 ? reasons : [`Smoke validation passed across ${checks.length} checks.`]
   };
 

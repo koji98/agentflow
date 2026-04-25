@@ -14,11 +14,17 @@ export interface AgentInvocation {
   executionId: string;
   repoAlias: string;
   repoPath: string;
+  runtimeDir?: string;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   skipGitRepoCheck?: boolean;
   model: string | undefined;
   reasoningEffort?: ReasoningEffort;
   prompt: string;
+  graphGoal?: string;
+  graphAcceptanceCriteria?: string[];
+  graphConstraints?: string[];
+  nodeGoal?: string;
+  nodeAcceptanceCriteria?: string[];
   contextPacketPath: string;
   contextManifestPath: string;
   contextManifest: string;
@@ -144,17 +150,24 @@ export function buildHarnessSpawnEnv(
   invocation: AgentInvocation,
   baseEnv: NodeJS.ProcessEnv = process.env
 ): NodeJS.ProcessEnv {
+  const scrubbedBaseEnv = Object.fromEntries(
+    Object.entries(baseEnv).filter(([key]) =>
+      !key.startsWith("AGENTFLOW_CREDENTIAL_") &&
+      !key.startsWith("AGENTFLOW_TOOL_")
+    )
+  ) as NodeJS.ProcessEnv;
   const merged: NodeJS.ProcessEnv = {
-    ...baseEnv,
+    ...scrubbedBaseEnv,
     AGENTFLOW_WORKSPACE: invocation.repoPath,
     AGENTFLOW_OUTPUT_DIR: invocation.outputDir,
     AGENTFLOW_CONTEXT_PACKET: invocation.contextPacketPath,
     AGENTFLOW_CONTEXT_MANIFEST: invocation.contextManifestPath,
+    ...(invocation.runtimeDir ? { AGENTFLOW_RUNTIME_DIR: invocation.runtimeDir } : {}),
     ...(invocation.toolEnv ?? {})
   };
 
   if (invocation.toolBinDir) {
-    const existingPath = baseEnv.PATH ?? "";
+    const existingPath = scrubbedBaseEnv.PATH ?? "";
     merged.PATH = existingPath.length > 0
       ? `${invocation.toolBinDir}${delimiter}${existingPath}`
       : invocation.toolBinDir;
@@ -207,8 +220,14 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
     const origin = describeToolOrigin(tool);
     lines.push("");
     lines.push(`### ${tool.callable_name}${origin ? ` (${origin})` : ""}`);
+    lines.push(`Capability: ${tool.capability}`);
+    lines.push(`Impact: ${tool.impact}`);
     if (tool.description) {
       lines.push(tool.description);
+    }
+    if (tool.credentials && tool.credentials.length > 0) {
+      lines.push(`Credentials: ${tool.credentials.join(", ")}`);
+      lines.push("Credential values are resolved only inside the tool subprocess and are not exported to the agent environment.");
     }
     if (tool.usage) {
       lines.push("");
@@ -220,17 +239,29 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
     const configEntries = Object.entries(tool.config);
     if (configEntries.length > 0) {
       lines.push("");
-      lines.push("Configuration (already exported in this node's environment):");
+      lines.push("Configuration keys are resolved only inside the tool subprocess and are not exported to the agent environment:");
       const nameSegment = envSegmentForToolName(tool.callable_name);
-      for (const [key, value] of configEntries.sort(([left], [right]) => left.localeCompare(right))) {
+      for (const [key] of configEntries.sort(([left], [right]) => left.localeCompare(right))) {
         const keySegment = envSegmentForToolKey(key);
         const envName = nameSegment && keySegment ? `AGENTFLOW_TOOL_${nameSegment}_${keySegment}` : key;
-        lines.push(`  - ${envName}=${value}`);
+        lines.push(`  - ${envName}=<configured>`);
       }
     }
   }
 
   return lines;
+}
+
+function formatRuntimeCliContract(): string[] {
+  return [
+    "## Agentflow Runtime CLI",
+    "`af` is on PATH for this node. It is the runtime broker for status, artifacts, messages, helper sessions, and supervised requests.",
+    "- Use `af status` to inspect your run, node, declared artifacts, and granted tools.",
+    "- Use `af artifact write <name> --file <path>` or `af artifact write <name> --content <text>` to publish declared artifacts.",
+    "- Use `af channel post --type <type> --summary <text>` for durable run-level findings, blockers, decisions, and test results.",
+    "- Use `af parent post ...`, `af inbox read`, `af agents list`, `af spawn ...`, and `af wait ...` for supervised helper coordination.",
+    "- Messages are coordination; artifacts are the durable handoff. Do not rely on another agent being online."
+  ];
 }
 
 function describeSandbox(sandbox: AgentInvocation["sandbox"]): string {
@@ -255,7 +286,7 @@ function formatArtifactContract(
     return [
       "## Artifact Contract",
       "This node has no declared handoff artifacts.",
-      "- Agentflow writes the reserved `result_json` artifact automatically.",
+      "- Agentflow captures your final response automatically as `agent_response`.",
       "- Do not create durable handoff files unless the task explicitly asks for additional evidence."
     ];
   }
@@ -281,13 +312,60 @@ function formatInlineContextManifest(manifest: string | undefined): string {
   return trimmed.length > 0 ? trimmed : "_(No materialized context items.)_";
 }
 
+function formatBullets(values: string[] | undefined, emptyText: string): string[] {
+  if (!values || values.length === 0) {
+    return [`- ${emptyText}`];
+  }
+
+  return values.map((value) => `- ${value}`);
+}
+
+function formatGraphIntent(invocation: AgentInvocation): string[] {
+  if (!invocation.graphGoal && !invocation.graphAcceptanceCriteria && !invocation.graphConstraints) {
+    return [];
+  }
+
+  return [
+    "## Graph Intent",
+    ...(invocation.graphGoal ? ["", invocation.graphGoal] : []),
+    "",
+    "Acceptance criteria:",
+    ...formatBullets(invocation.graphAcceptanceCriteria, "No graph-level acceptance criteria were authored."),
+    "",
+    "Constraints:",
+    ...formatBullets(invocation.graphConstraints, "No graph-level constraints were authored.")
+  ];
+}
+
+function formatNodeIntent(invocation: AgentInvocation): string[] {
+  if (!invocation.nodeGoal && !invocation.nodeAcceptanceCriteria) {
+    return [];
+  }
+
+  return [
+    "## Node Intent",
+    ...(invocation.nodeGoal ? ["", invocation.nodeGoal] : []),
+    "",
+    "Acceptance criteria:",
+    ...formatBullets(invocation.nodeAcceptanceCriteria, "No node-level acceptance criteria were authored.")
+  ];
+}
+
 export function renderHarnessPrompt(invocation: AgentInvocation): string {
+  const graphIntent = formatGraphIntent(invocation);
+  const nodeIntent = formatNodeIntent(invocation);
+  const toolContract = formatToolContract(invocation.tools);
+
   if (invocation.promptKind === "ai_check") {
     return [
       "## Role",
       "You are an Agentflow AI evaluator running as one read-only node in a coding workflow.",
       "You evaluate prior work and never modify the workspace. Your only output is structured JSON describing your judgment.",
       "",
+      ...graphIntent,
+      ...(graphIntent.length > 0 ? [""] : []),
+      ...nodeIntent,
+      ...(nodeIntent.length > 0 ? [""] : []),
       "## Check Task",
       invocation.prompt,
       "",
@@ -320,6 +398,10 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "Agentflow is a local graph runner; previous nodes built up the context inlined below, and future nodes consume only the named artifacts you publish here.",
     "Complete this node's task, keep source edits in the workspace, publish any declared artifacts, and leave a useful final response for downstream agents and humans.",
     "",
+    ...graphIntent,
+    ...(graphIntent.length > 0 ? [""] : []),
+    ...nodeIntent,
+    ...(nodeIntent.length > 0 ? [""] : []),
     "## Node Task",
     invocation.prompt,
     "",
@@ -336,9 +418,11 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "",
     `For exact paths, provenance, omission details, or structured metadata, read: ${invocation.contextPacketPath}`,
     "",
+    ...formatRuntimeCliContract(),
+    "",
     ...formatArtifactContract(invocation.artifacts, invocation.outputDir, invocation.repoPath),
-    ...(formatToolContract(invocation.tools).length > 0
-      ? ["", ...formatToolContract(invocation.tools)]
+    ...(toolContract.length > 0
+      ? ["", ...toolContract]
       : []),
     "",
     "## Validation",

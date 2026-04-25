@@ -77,11 +77,70 @@
             "name": "inspection_response"
           },
           {
-            "ref": "verify_package_contract.result_json",
+            "ref": "verify_package_contract.verification_json",
             "name": "package_contract_result"
           }
         ]
       }
+    ]
+  },
+  "intent": {
+    "goal": "Inspect the Agentflow repository and return a concise, reviewable handoff.",
+    "scope": {
+      "repos": [
+        "main"
+      ],
+      "paths": [
+        "README.md",
+        "package.json",
+        "docs/SCOPE.md"
+      ]
+    },
+    "acceptance_criteria": [
+      "Repository purpose and first validation commands are clear.",
+      "The run remains read-only."
+    ],
+    "approval_boundaries": [
+      "Do not modify repository files."
+    ]
+  },
+  "supervision": {
+    "allowed_actions": [
+      "retry_node",
+      "repair_artifact",
+      "rebuild_context",
+      "run_diagnostic",
+      "semantic_evaluation",
+      "escalate"
+    ],
+    "retry_budget": {
+      "max_total_interventions": 6,
+      "max_node_retries": 2,
+      "max_artifact_repairs": 2,
+      "max_context_rebuilds": 1,
+      "max_workspace_refreshes": 1,
+      "max_diagnostic_runs": 2,
+      "max_semantic_evaluations": 1
+    },
+    "drift_detection": {
+      "score_threshold": 0.8
+    },
+    "escalation": {
+      "require_human_on_policy_breach": true,
+      "require_human_on_scope_drift": true
+    }
+  },
+  "delivery": {
+    "required_sections": [
+      "task_brief",
+      "implementation_summary",
+      "grouped_change_map",
+      "decision_log",
+      "evaluation_ledger",
+      "reviewer_guide",
+      "risk_notes",
+      "follow_up_items",
+      "intervention_trace"
     ]
   }
 }

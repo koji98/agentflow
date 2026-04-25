@@ -1,101 +1,64 @@
-# CLI And Validation Reference
+# CLI And Validation
 
-Use this when authoring, reviewing, or handing off an Agentflow graph.
+Core commands:
 
-## Core commands
+```bash
+agentflow graph-help
+agentflow plugin resolve --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow run --graph agentflow.graph.json
+agentflow inspect <run-root>
+agentflow resume --run-root <run-root>
+agentflow runs list --graph agentflow.graph.json
+```
 
-- `agentflow graph-help`
-Prints the authored graph contract, supported node kinds, path rules, and a minimal example.
-- `agentflow validate --graph <path/to/agentflow.graph.json>`
-Validates the authored graph and resolved launch settings without running local machine dependency checks.
-- `agentflow validate --graph <path/to/agentflow.graph.json> --run-ready`
-Validates the graph plus local launch dependencies: `git`, referenced repo worktrees, executable node commands, and harness binaries used by agent or AI-check nodes.
-Plain validate proves graph legality; run-ready validate proves the current machine is prepared to launch it.
-- `agentflow validate --graph <path/to/agentflow.graph.json> --show-compiled`
-Includes the compiled graph contract and lowered managed nodes in the result so you can inspect what the runtime will execute. Replaces the old `agentflow compile` command.
-- `agentflow plugin resolve --graph <path/to/agentflow.graph.json>`
-Clones Git plugin workflows declared by the graph, pins them to commits, and writes `agentflow.plugins.lock.json` next to the graph.
-- `agentflow run --graph <path/to/agentflow.graph.json>`
-Creates a run root and executes the compiled graph.
-- `agentflow run --graph <path> --label <run-label>`
-Same as `run`, with an operator-facing label added to the run id.
-- `agentflow resume --run-root <path/to/run-root>`
-Recompiles the original graph and preserves only passed work whose compiled contract still matches.
-- `agentflow resume --graph <path> --latest`
-Picks the most recent failed or canceled run for that graph automatically and resumes it.
-- `agentflow runs list --graph <path>`
-Lists recorded runs for a graph under the resolved runs root with status, timestamps, workspace backend, and run-root path.
-- `agentflow inspect <path/to/run-root>`
-Returns terminal status, total nodes, attempt counts, summary path, and short stderr tails for each failed node in a single run root.
-- `agentflow eval validate --suite <path/to/suite.json>`
-Validates a local eval suite without running graph cases.
-- `agentflow eval run --suite <path/to/suite.json>`
-Runs local eval cases through Agentflow graph templates and writes an eval ledger.
-- `agentflow eval report --eval-root <path/to/eval-root>`
-Reads an existing eval root and reports the aggregate result.
+Agent-facing runtime commands are available as `af` inside agent nodes only. Agentflow injects the generated `af` wrapper on `PATH` with `$AGENTFLOW_RUNTIME_METADATA` pointing at the node contract.
 
-Use `agentflow --help` or `agentflow <command> --help` when the command surface is unclear.
+Useful in-node commands:
 
-## Important rules
+```bash
+af status
+af tools list
+af context show
+af artifact list
+af artifact write <name> --file <path>
+af channel post --type finding --summary "..."
+af agents list
+af inbox read
+af spawn --brief "..." --artifact helper-report.md --wait
+```
 
-- The graph is the source of truth for `defaults.launch_profile` and `defaults.workspace_backend`.
-- Do not invent CLI launch overrides for profile or workspace backend.
-- `--graph` resolves from the shell current working directory.
-- `repos.<alias>.path` resolves from the graph file directory.
-- `validate` (with or without `--show-compiled`) does not create a run root.
-- `validate`, `run`, `resume`, `runs list`, and `inspect` do not clone plugin workflows implicitly; resolve plugins first.
-- `run` and `resume` do create run roots.
-- `eval run` creates an eval root and one normal graph run root per case/variant.
+## Validation Levels
 
-## Authoring loop
+- `validate`: authored graph, normalization, compilation, graph diagnostics, plugin lockfile shape.
+- `--run-ready`: local repos, command availability, env files, plugin executables, and harness readiness.
+- `--show-compiled`: compiled primitive graph, managed expansions, tool contracts, profile resolution, delivery and supervision contracts.
 
-Recommended order:
+## Before Launch
 
-1. draft or edit the graph
-2. run `agentflow plugin resolve --graph ...` if the graph declares `plugins`
-3. run `agentflow validate --graph ...`
-4. fix diagnostics until validation passes
-5. run `agentflow validate --graph ... --run-ready` when local commands, git worktrees, Codex, Cursor, or plugin scripts matter before launch
-6. run `agentflow validate --graph ... --show-compiled`
-7. inspect the compiled contract for node count, dependencies, repeat scopes, managed expansion, profiles, and artifact references
-8. run `agentflow run --graph ...` when the graph is ready to execute
+Confirm:
 
-Do not skip `validate --show-compiled` for nontrivial graphs. Plain validate tells you the graph is legal; `--show-compiled` tells you what will actually run.
+- `intent.goal` and acceptance criteria match the requested work.
+- scope and approval boundaries are explicit.
+- write-capable nodes use a write-capable sandbox.
+- plugin tools have the expected `capability` and `impact`.
+- managed patterns publish the artifacts downstream nodes reference.
+- `supervision.retry_budget` is intentionally bounded.
+- `delivery.required_sections` includes reviewer-facing sections.
 
-Recommended eval loop:
+## Command Results
 
-1. draft or edit the eval suite and cases
-2. run `agentflow eval validate --suite ...`
-3. run `agentflow eval run --suite ...`
-4. inspect `evaluation-ledger.json`, `benchmark.json`, and case-level `grading.json`
+Run and resume output include:
 
-## Review standard
+- run root
+- status and outcome
+- supervisor status
+- intervention count
+- remaining supervisor budget
+- delivery package manifest
+- reviewer guide
+- interventions ledger
 
-Before handing off a graph, make sure:
-
-- `validate` passes
-- `plugin resolve` passes when the graph declares `plugins`
-- `validate --run-ready` passes when the handoff says the graph is ready to run on the current machine
-- `validate --show-compiled` passes
-- the chosen node kinds express the intended control-flow semantics
-- declared artifacts and artifact context references line up
-- hard-stop versus soft-review failure boundaries are deliberate
-- launch settings live in the graph, not in imagined CLI flags
-
-When validation fails, repair the graph instead of explaining around the error. Common repairs:
-
-- remove invalid `inputs`, `context_from`, or `outputs`; use only current `context` and `artifacts`
-- add missing `repo` fields in multi-repo graphs
-- declare an artifact that a downstream node references
-- add or remove `if_available: true` on artifact context based on whether the consumer can proceed without that material
-- move env-dependent command setup into `env_files`
-- cap broad globs with `max_files`
-- replace a soft `check` in `repeat.until` with a hard gate
-- run `agentflow plugin resolve --graph ...` when diagnostics say a plugin is unresolved, stale, or missing from cache
-
-Before handing off an eval suite, make sure:
-
-- `eval validate` passes
-- graph templates use `{{case.repos.<alias>.path}}` for repo paths
-- required graders emit normalized JSON with boolean `passed`
-- thresholds express the intended release bar
+Inspect output also includes recent events, failed node summaries, stderr tails, and delivery paths.

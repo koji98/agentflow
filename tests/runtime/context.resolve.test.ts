@@ -11,8 +11,16 @@ import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js
 import { closeNodeAttempt, createAttemptRegistry, openNodeAttempt } from "../../src/runtime/attempts.js";
 import { resolveExecutionContext } from "../../src/runtime/context/resolve.js";
 
+const TEST_INTENT = {
+  goal: "Resolve runtime context for an accountable Agentflow node.",
+  acceptance_criteria: ["Context materials are resolved correctly."]
+};
+
 function compileGraph(document: Parameters<typeof normalizeAuthoredGraphDocument>[0]) {
-  const normalized = normalizeAuthoredGraphDocument(document);
+  const normalized = normalizeAuthoredGraphDocument({
+    intent: TEST_INTENT,
+    ...(document as object)
+  });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -41,7 +49,10 @@ describe("context resolution", () => {
     await mkdir(join(upstreamDir, "context"), { recursive: true });
     await writeFile(join(upstreamDir, "context", "manifest.md"), "# Manifest\n");
     await writeFile(join(upstreamDir, "result.json"), JSON.stringify({ passed: true }));
-    await writeFile(join(resolveExecutionArtifactsDirectory(upstreamDir), "result.json"), JSON.stringify({ passed: true }));
+    await writeFile(
+      join(resolveExecutionArtifactsDirectory(upstreamDir), "verification.json"),
+      JSON.stringify({ passed: true })
+    );
     await writeFile(join(resolveExecutionArtifactsDirectory(upstreamDir), "artifact.json"), JSON.stringify({ passed: true }));
 
     const graph = compileGraph({
@@ -69,7 +80,7 @@ describe("context resolution", () => {
             artifacts: {
               verification: {
                 from: "output_dir",
-                path: "result.json",
+                path: "verification.json",
                 description: "Structured verification result from the source node."
               }
             }
@@ -111,8 +122,7 @@ describe("context resolution", () => {
       result_path: join(upstreamDir, "result.json"),
       context_manifest_path: join(upstreamDir, "context", "manifest.md"),
       artifacts: {
-        result_json: join(resolveExecutionArtifactsDirectory(upstreamDir), "result.json"),
-        verification: join(resolveExecutionArtifactsDirectory(upstreamDir), "artifact.json")
+        verification: join(resolveExecutionArtifactsDirectory(upstreamDir), "verification.json")
       }
     });
 
@@ -299,16 +309,15 @@ describe("context resolution", () => {
     );
     await writeFile(join(implementDir, "result.json"), JSON.stringify({ exit_code: 0 }));
     await writeFile(
-      join(resolveExecutionArtifactsDirectory(implementDir), "result.json"),
-      JSON.stringify({ exit_code: 0 })
+      join(resolveExecutionArtifactsDirectory(implementDir), "fix-log.md"),
+      "Changed parser branch.\n"
     );
-    await writeFile(join(resolveExecutionArtifactsDirectory(implementDir), "fix-log.md"), "Changed parser branch.\n");
     await writeFile(join(verifyDir, "result.json"), JSON.stringify({
       passed: false,
       summary: "parser.test.ts still fails",
       exit_code: 1
     }));
-    await writeFile(join(resolveExecutionArtifactsDirectory(verifyDir), "result.json"), JSON.stringify({
+    await writeFile(join(resolveExecutionArtifactsDirectory(verifyDir), "verification.json"), JSON.stringify({
       passed: false,
       summary: "parser.test.ts still fails",
       exit_code: 1
@@ -326,7 +335,6 @@ describe("context resolution", () => {
       result_path: join(implementDir, "result.json"),
       artifacts: {
         agent_response: join(resolveExecutionArtifactsDirectory(implementDir), "agent-response.md"),
-        result_json: join(resolveExecutionArtifactsDirectory(implementDir), "result.json"),
         fix_log: join(resolveExecutionArtifactsDirectory(implementDir), "fix-log.md")
       }
     });
@@ -341,7 +349,7 @@ describe("context resolution", () => {
       stdout_log_path: join(verifyDir, "stdout.log"),
       stderr_log_path: join(verifyDir, "stderr.log"),
       artifacts: {
-        result_json: join(resolveExecutionArtifactsDirectory(verifyDir), "result.json")
+        verification_json: join(resolveExecutionArtifactsDirectory(verifyDir), "verification.json")
       }
     });
     const currentAttempt = openNodeAttempt(attempts, implementNode, currentDir, {

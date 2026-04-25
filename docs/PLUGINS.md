@@ -1,295 +1,238 @@
 # Plugins
 
-Plugins are Git-distributed reusable managed workflows.
+Agentflow plugins package reusable team workflows and CLI tool capabilities. They resolve from Git or local folders, pin through `agentflow.plugins.lock.json`, and compile into normal Agentflow runtime behavior.
 
-They let a team package a full Agentflow subgraph with context files, scripts, templates, and workflow-specific instructions, then drop that workflow into another graph through one authored `plugin` node. The plugin lowers before compile, so the runtime still executes only normal `agent`, `exec`, `check`, and `checkpoint` nodes.
+Plugins provide two surfaces:
 
-Plugins are intentionally narrow in this release:
+- workflow nodes that lower into primitive graph subgraphs
+- tool exports that place vetted CLIs on an agent node `PATH`
 
-- A plugin packages managed workflows and optional tool CLIs, not new primitive node kinds.
-- A plugin is resolved from Git and pinned in `agentflow.plugins.lock.json`.
-- `validate`, `run`, and `resume` require the lockfile and local cache; they do not clone plugins implicitly.
-- Packaged files can be injected as context or referenced by generated nodes.
-- MCP sidecars and native skill installation remain outside the runtime contract. Plugin-bundled CLIs are the supported way to give agents extra capabilities.
+## Plugin Resolution
 
-## Consumer Graph
-
-Declare plugin sources at the top level:
+Consumer graph:
 
 ```json
 {
-  "version": "1",
-  "graph_id": "repo-dev-flow",
   "plugins": {
     "team": {
-      "source": "git@github.com:acme/team-agentflow-plugin.git",
-      "ref": "v0.1.0"
+      "source": "git@github.com:acme/agentflow-team-plugin.git",
+      "ref": "v1.2.0"
     }
-  },
-  "repos": {
-    "main": {
-      "path": "."
-    }
-  },
-  "graph": {
-    "type": "sequence",
-    "id": "root",
-    "steps": [
-      {
-        "type": "plugin",
-        "id": "prepare_change",
-        "uses": "team/dev-change-prep",
-        "config": {
-          "app": "web-app",
-          "test_command": "npm test -- --runInBand"
-        }
-      },
-      {
-        "type": "agent",
-        "id": "implement",
-        "repo": "main",
-        "prompt": "Implement the change from the prepared packet.",
-        "context": [
-          {
-            "ref": "prepare_change.task_packet"
-          }
-        ]
-      }
-    ]
   }
 }
 ```
 
-Resolve the plugin before normal graph operations:
+Local plugin folder:
+
+```json
+{
+  "plugins": {
+    "team": {
+      "path": "../agentflow-team-plugin"
+    }
+  }
+}
+```
+
+Resolve before validate, run, or resume:
 
 ```bash
 agentflow plugin resolve --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json --show-compiled
 ```
 
-Resolution clones each plugin under `.agentflow/plugins/<alias>/<commit>` next to the graph and writes `agentflow.plugins.lock.json`. Commit pins make the graph reproducible, while the authored `source` and `ref` stay readable.
+Resolution clones Git plugins into `.agentflow/plugins`, checks out the requested ref, pins the commit, and writes `agentflow.plugins.lock.json` next to the graph. Local plugins keep their local path in the lockfile and store content digests so validation can detect changed local files.
 
-## Plugin Node
+## Authoring Checklist
 
-A plugin node has a small authored surface:
+1. Create `agentflow.plugin.json` with `schema`, `id`, `version`, and explicit `workflows`, `tools`, and `credentials` objects.
+2. Add workflow exports for reusable graph templates and tool exports for executable team capabilities.
+3. Keep workflow config small and schema-backed.
+4. Publish workflow handoff artifacts from one `publish_node`.
+5. Classify every tool with `capability` and `impact`; declare `credentials` for secret-impact tools.
+6. Keep `tool_config` for non-secret string options only.
+7. Resolve the plugin from a consumer graph and inspect `validate --show-compiled`.
+
+Minimal package:
+
+```text
+agentflow.plugin.json
+tools/
+  poll-pr.sh
+workflows/
+  release-prep/
+    workflow.json
+    workflow.graph.json
+    config.schema.json
+    context/
+      release-guide.md
+```
+
+Minimal `agentflow.plugin.json`:
+
+```json
+{
+  "schema": "agentflow.plugin/1",
+  "id": "team-tools",
+  "version": "1.0.0",
+  "credentials": {
+    "github": {
+      "description": "GitHub API access.",
+      "fields": {
+        "token": {
+          "secret": true,
+          "required": true,
+          "description": "Token resolved only inside plugin tool subprocesses."
+        }
+      }
+    }
+  },
+  "workflows": {
+    "release-prep": {
+      "path": "workflows/release-prep/workflow.json",
+      "description": "Prepare a release readiness package."
+    }
+  },
+  "tools": {
+    "poll": {
+      "executable": "tools/poll-pr.sh",
+      "usage": "poll --pr <number>",
+      "capability": "verification",
+      "impact": "secret",
+      "credentials": ["github"],
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "poll_interval_ms": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
+```
+
+## Workflow Plugins
+
+Workflow node:
 
 ```json
 {
   "type": "plugin",
-  "id": "prepare_change",
-  "uses": "team/dev-change-prep",
+  "id": "prepare_release",
+  "uses": "team/release-prep",
   "config": {
-    "test_command": "npm test -- --runInBand"
-  },
-  "context": [
-    {
-      "name": "request",
-      "from": "text",
-      "text": "Fix checkout arithmetic."
-    }
-  ]
+    "test_command": "npm test"
+  }
 }
 ```
 
-Fields:
+The plugin node id is the public handoff boundary. Downstream nodes consume artifacts from `prepare_release.<artifact>`, not generated internal ids.
 
-- `id`: the public node id. Downstream nodes reference this id.
-- `label`: optional public label for the plugin workflow publish node.
-- `uses`: `plugin_alias/workflow_id`.
-- `config`: workflow-specific settings validated by the plugin workflow schema.
-- `context`: optional caller-provided context forwarded to executable nodes generated by the plugin workflow.
-- `repo`, `profile`, and `timeout_sec`: optional defaults forwarded to executable nodes generated by the plugin workflow when they do not set their own values.
-
-The plugin workflow decides which artifacts are public. Regular nodes read those artifacts exactly like artifacts from any other prior node:
-
-```json
-{
-  "ref": "prepare_change.task_packet"
-}
-```
-
-A bare `ref` of `prepare_change` resolves to the plugin publish node's canonical artifact (`agent_response` for an `agent` node, `stdout` for an `exec`, `result_json` for a `check`).
-
-Generated internal node ids are stable but private. Consumers should not depend on them.
-
-## Plugin Repository Layout
-
-Recommended layout:
+Recommended workflow package layout:
 
 ```text
 agentflow.plugin.json
 workflows/
-  dev-change-prep/
+  release-prep/
     workflow.json
     config.schema.json
     workflow.graph.json
     context/
       repo-guide.md
-      review-rubric.md
     scripts/
-      setup.sh
-      validate.sh
-    skills/
-      worker-guidance.md
+      verify.sh
 ```
 
-`agentflow.plugin.json` exports workflows:
+Workflow manifest fields:
 
-```json
-{
-  "schema": "agentflow.plugin/1",
-  "id": "team",
-  "version": "0.1.0",
-  "workflows": {
-    "dev-change-prep": {
-      "path": "workflows/dev-change-prep/workflow.json",
-      "description": "Prepare an implementation packet for this team's repo."
-    }
-  }
-}
-```
+- `schema: "agentflow.workflow/1"`
+- `id`
+- optional `config_schema`
+- `graph`
+- `publish_node`
+- `published_artifacts`
 
-Each workflow manifest describes the workflow graph and public artifacts:
+Minimal `workflow.json`:
 
 ```json
 {
   "schema": "agentflow.workflow/1",
-  "id": "dev-change-prep",
-  "config_schema": "config.schema.json",
-  "graph": "workflow.graph.json",
-  "publish_node": "publish_packet",
+  "id": "release-prep",
+  "config_schema": "./config.schema.json",
+  "graph": "./workflow.graph.json",
+  "publish_node": "package_release",
   "published_artifacts": {
-    "task_packet": {
+    "release_handoff": {
       "from": "output_dir",
-      "path": "task-packet.json",
-      "description": "Machine-readable packet for the implementation node."
+      "path": "release-handoff.md",
+      "description": "Release readiness handoff produced by the workflow."
     }
   }
 }
 ```
 
-`workflow.graph.json` is a normal Agentflow node or container, not a full top-level graph document. It can contain primitive executable nodes and authoring containers. The `publish_node` becomes the public plugin node id during lowering, and its `published_artifacts` become the plugin node artifacts.
+Inside workflow graphs:
 
-## Packaged Files And Scripts
+- `context.from = "plugin_file"` embeds plugin-owned text.
+- Plain relative paths such as `./context/guidance.md` resolve inside the workflow directory.
+- `plugin://...` strings resolve from the plugin package root, which lets workflows reuse package-level scripts and shared context without wrapper files.
+- config placeholders use `{{config.key}}`.
 
-Workflow graphs can include plugin-owned files as context:
+## Tool Plugins
 
-```json
-{
-  "name": "repo_guide",
-  "from": "plugin_file",
-  "path": "context/repo-guide.md"
-}
-```
+Tool exports let teams expose stable CLI capabilities to agent nodes.
 
-`plugin_file` is only valid inside a plugin workflow. During lowering it becomes normal text context with the file contents embedded.
+Each tool declares:
 
-Any string beginning with `plugin://` is rewritten to an absolute path inside the resolved workflow directory. Use that for scripts and templates:
+- `executable`
+- `usage`
+- `capability`: `context`, `verification`, `mutation`, or `reporting`
+- `impact`: `read`, `write`, `external`, or `secret`
+- optional `args`
+- optional `config_schema` for non-secret runtime options
+- optional `credentials` for secure auth scopes
 
-```json
-{
-  "type": "exec",
-  "id": "validate_repo",
-  "repo": "main",
-  "command": "bash",
-  "args": ["plugin://scripts/validate.sh", "{{config.test_command}}"]
-}
-```
-
-Scripts run through normal `exec` semantics in the node workspace. A plugin can package setup and teardown scripts, but Agentflow does not run hidden lifecycle hooks. If setup or teardown matters, model it as explicit workflow nodes.
-
-## Config And Authoring
-
-Config interpolation is intentionally simple. Strings in the workflow graph can use `{{config.key}}` or `{{config.nested.key}}`.
-
-`config.schema.json` supports the object subset Agentflow validates today:
-
-- `type: "object"`
-- `required`
-- `properties` with primitive JSON Schema `type` values
-- `additionalProperties: false`
-
-This keeps plugin authoring friendly for humans and LLMs. A plugin should expose a small config surface with names that map directly to workflow intent.
-
-### Cascading From Top-Level Graph Config
-
-The same `{{config.x}}` interpolation also resolves against the **top-level graph config** (`$.config`) before plugins are expanded. That means a plugin node's `config` block can forward values that came from the consumer graph's top-level config or a CLI override:
+Example:
 
 ```json
 {
-  "version": "1",
-  "graph_id": "ship-feature",
-  "config_schema": {
-    "type": "object",
-    "properties": { "branch": { "type": "string" } },
-    "required": ["branch"]
-  },
-  "config": { "branch": "main" },
-  "plugins": {
-    "team": { "source": "git@github.com:acme/team-agentflow-plugin.git", "ref": "v0.1.0" }
-  },
-  "repos": { "main": { "path": "." } },
-  "graph": {
-    "type": "sequence",
-    "id": "root",
-    "steps": [
-      {
-        "type": "plugin",
-        "id": "prepare_change",
-        "uses": "team/dev-change-prep",
-        "config": {
-          "branch": "{{config.branch}}",
-          "test_command": "npm test -- --runInBand"
+  "credentials": {
+    "github": {
+      "description": "GitHub API access.",
+      "fields": {
+        "token": {
+          "secret": true,
+          "required": true,
+          "description": "GitHub token used only by the plugin tool subprocess."
+        },
+        "host": {
+          "secret": false,
+          "required": false,
+          "default": "api.github.com"
         }
       }
-    ]
-  }
-}
-```
-
-When the consumer runs `agentflow run --config branch=feature/login --graph agentflow.graph.json`, the loader merges the override on top of `document.config`, validates against `document.config_schema`, rewrites `{{config.branch}}` to `feature/login`, and only then expands the plugin. The plugin sees its own `config.branch` field already set to `feature/login`. See `docs/PARAMETERIZED_GRAPHS.md` for the full top-level config contract and CLI rules.
-
-## Plugin Tools
-
-Plugins are the only supported way to ship reusable CLI tools to agents. There is no built-in tool surface and no inline graph-defined or agent-defined tools: tools are CLIs that Agentflow places on a node's `PATH` by resolving plugin-bundled executables. Modeling tools as CLIs gives one stdout/stderr/exit-code contract, sandbox alignment with the agent node, and reproducible pinning via `agentflow.plugins.lock.json`.
-
-### Authoring Plugin Tools
-
-Declare tools in `agentflow.plugin.json` alongside workflows:
-
-```json
-{
-  "schema": "agentflow.plugin/1",
-  "id": "babysit",
-  "version": "1.0.0",
-  "workflows": {},
+    }
+  },
   "tools": {
     "poll": {
-      "executable": "scripts/poll-pr.sh",
-      "description": "Poll a GitHub PR for review or merge status.",
-      "args": ["--once"],
-      "usage": "poll [--pr <id>]",
+      "executable": "bin/babysit-poll.js",
+      "usage": "babysit-poll --pr <number>",
+      "capability": "verification",
+      "impact": "secret",
+      "credentials": ["github"],
       "config_schema": {
         "type": "object",
-        "properties": { "token": { "type": "string" } }
+        "properties": {
+          "poll_interval_ms": { "type": "string" }
+        },
+        "additionalProperties": false
       }
     }
   }
 }
 ```
 
-Tool fields:
-
-- `executable`: relative path inside the plugin checkout. Must exist with the executable bit set (`chmod +x`).
-- `description`: short summary rendered into the agent prompt.
-- `usage`: optional multi-line block rendered after the description.
-- `args`: optional default arguments prepended to every invocation.
-- `config_schema`: optional JSON-Schema-style object describing keys consumed by the tool.
-
-### Consuming Plugin Tools
-
-A consumer graph references plugin tools with `from_plugin` and `tool`. The default callable name is `<alias>-<tool>`; pass `alias` to rename it.
+Consumer graph:
 
 ```json
 {
@@ -297,83 +240,64 @@ A consumer graph references plugin tools with `from_plugin` and `tool`. The defa
     { "from_plugin": "babysit", "tool": "poll" }
   ],
   "tool_config": {
-    "babysit-poll": { "token": "{{config.github_token}}" }
+    "babysit-poll": {
+      "poll_interval_ms": "15000"
+    }
   }
 }
 ```
 
-Tools declared at the top level are visible to every agent in the graph. An agent can also declare extra plugin tools that only apply to that node:
+Runtime behavior:
 
-```json
-{
-  "type": "agent",
-  "id": "watch_pr",
-  "prompt": "Use babysit-poll to check PR 123.",
-  "tools": [
-    { "from_plugin": "babysit", "tool": "poll" }
-  ]
-}
+- Agentflow generates per-execution tool launchers under the node runtime directory.
+- The launcher directory is prepended to `PATH` and also contains Agentflow's reserved `af` runtime CLI wrapper.
+- `AGENTFLOW_TOOL_<NAME>_<KEY>` env vars carry non-secret tool config only inside the plugin tool subprocess.
+- Credential values are not exported to the Codex CLI or Cursor CLI harness environment.
+- Generated tool launchers resolve credentials just before starting the plugin tool subprocess and inject `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into that child process.
+- The harness prompt includes each tool's capability, impact, usage, origin, and config env var names, but never configured values.
+- Tools share the node sandbox and timeout.
+
+## Auth
+
+Configure credential fields with `agentflow auth`:
+
+```bash
+printf %s "$GITHUB_TOKEN" | agentflow auth set --scope github --key token --secret --value-stdin
+agentflow auth set --scope github --key host --value api.github.com
+agentflow auth list
 ```
 
-`tool_config` maps a tool name to a flat string-only object. The runtime exports each entry as `AGENTFLOW_TOOL_<UPPER_NAME>_<UPPER_KEY>=<value>`. Agent-level `tool_config` shallowly overrides graph-level `tool_config` for that tool on that agent.
+Secret fields are stored in macOS Keychain. Secret values must be supplied through `--value-stdin`, not `--value`, so they do not appear in the CLI argv. The local index at `~/.agentflow/credentials.index.json` stores metadata and non-secret fields only. Auth command output never prints credential values.
 
-### Conflict Rules
+## Tool Policy
 
-Validation rejects:
+Tool impact is part of the supervision and validation contract.
 
-- Any tool callable name outside `^[a-z0-9][a-z0-9-]*$`.
-- Two graph-level tool declarations with the same callable name.
-- An agent-level tool declaration with the same callable name as a graph-level tool.
-- Two agent-level tool declarations on the same agent with the same callable name.
-- A `from_plugin` value that is not a declared plugin alias, or a `tool` value not exported by that plugin.
-- A `tool_config` key that does not match any tool in scope on its node.
+- `impact: "read"` can be exposed to read-only agents unless `capability` is `mutation`.
+- `capability: "mutation"` is withheld from read-only agents.
+- `impact: "write"` requires a write-capable sandbox.
+- `impact: "external"` requires exact approval tokens in `intent.approval_boundaries`, such as `tool:babysit-poll`, `tool:babysit/poll`, `external:babysit-poll`, or `external:babysit/poll`.
+- `impact: "secret"` requires the plugin tool to declare `credentials`.
+- `af` is a reserved callable name for Agentflow's runtime CLI and cannot be used as a plugin tool alias.
+- `tool_config` is for non-secret string options only. Secret-looking keys such as `token`, `secret`, `password`, or `api_key` are rejected; put those in plugin `credentials` and configure them with `agentflow auth`.
 
-Plugin tool callable names are namespaced by alias, so two plugins exporting `lint` produce `babysit-lint` and `quality-lint` automatically when the default alias is used.
+These rules keep tool authority visible in the graph and consistent across Codex CLI and Cursor CLI.
 
-### Runtime Environment
+## Validation
 
-Before each agent execution, Agentflow:
+Use:
 
-1. Creates `<execution_dir>/agentflow-tools/bin/` and symlinks every resolved tool there with its callable name.
-2. Writes `<execution_dir>/agentflow-tools/state.json` with the node id, workspace path, artifact root, and declared artifact map.
-3. Prepends the bin directory to `PATH` for the harness subprocess.
-4. Exports the per-tool environment described below.
+```bash
+agentflow plugin resolve --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json --show-compiled
+```
 
-| Variable | Meaning |
-| --- | --- |
-| `AGENTFLOW_TOOL_STATE` | Absolute path to the per-node tool state JSON file. Plugin tools that need declared-artifact context can read it. |
-| `AGENTFLOW_PLUGIN_ROOT_<UPPER_ALIAS>` | Absolute root of a resolved plugin whose tools are visible on this node. Exported once per alias. |
-| `AGENTFLOW_PLUGIN_ROOT` | Same as `AGENTFLOW_PLUGIN_ROOT_<UPPER_ALIAS>`, but exported only when exactly one plugin contributes tools to the node. |
-| `AGENTFLOW_TOOL_<UPPER_NAME>_<UPPER_KEY>` | One variable per `tool_config` entry. The name segment derives from the callable tool name (uppercased, non-alphanumerics replaced with `_`). |
+Inspect:
 
-Agent prompts also receive an auto-rendered `## Available Tools` section that lists each tool's callable name, source plugin, description, usage, and configured environment variables. Agents do not need to memorize tool names: they can read the contract directly in the prompt and call `<tool> --help` if anything is unclear.
-
-### Sandboxing And Safety
-
-- Plugin tools inherit the agent node's sandbox policy. A `read-only` agent will only have read-only tool capabilities because the harness subprocess itself runs read-only.
-- Tools never bypass `path_rules`: declared executables must stay inside the plugin root.
-- Tools do not have a separate timeout: they share the agent node's `timeout_sec`. Long-running tools should accept early-exit flags or honor `SIGTERM`.
-- Plugin tool executables are pinned by content digest in `agentflow.plugins.lock.json`. Changing a tool script without rerunning `agentflow plugin resolve` fails validation with a stale-digest diagnostic.
-
-### When To Use Tools Vs `exec` Nodes
-
-Use plugin tools when the same capability is needed across many agent prompts and you want the agent to discover and invoke it from a prompt. Use `exec` nodes when the capability is part of the graph's control flow (for example a build step), not something the agent decides to call.
-
-A good heuristic: if it would help an agent to know the tool exists, ship it as a plugin tool. If the runtime should always run it at a known point in the graph, model it as an `exec` node.
-
-## Skills
-
-Plugins can package skill-like instructions under `context/` or `skills/` and inject them through `plugin_file` context. That covers two common cases:
-
-- instructions that teach the generated workflow nodes how to use the plugin
-- worker guidance that a generated `agent` node should follow for an org-specific task
-
-This release does not automatically install Agent Skills or enable MCP servers from a plugin. If a workflow needs a local helper that the agent should call, ship it as a plugin tool. If the runtime should always run it at a known point, model it as an explicit `exec` node. If a workflow needs agent guidance, package it as a context file and make the generated node consume it.
-
-## Validation Rules
-
-- Plugin aliases and workflow ids must use letters, numbers, underscores, or hyphens, and must start with a letter or number.
-- Plugin manifest paths and workflow paths must stay inside the resolved plugin checkout.
-- A plugin node cannot compile until its declared plugin is present in `agentflow.plugins.lock.json`.
-- If `source`, `ref`, or the plugin manifest digest no longer matches the lockfile, run `agentflow plugin resolve --graph` again.
-- Downstream nodes should consume only artifacts declared by the plugin workflow's publish node.
+- lockfile commit pins
+- resolved workflow public artifacts
+- generated managed expansion
+- tool capability and impact
+- read-only agent write/mutation policy
+- secret and external-impact policy diagnostics

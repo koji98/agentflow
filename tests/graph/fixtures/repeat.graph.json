@@ -1,6 +1,12 @@
 {
   "version": "1",
   "graph_id": "repeat-graph",
+  "intent": {
+    "goal": "Exercise repeat graph compilation and runtime behavior.",
+    "acceptance_criteria": [
+      "The repeat graph compiles with supervised v1 contract fields."
+    ]
+  },
   "repos": {
     "main": {
       "path": ".",
@@ -126,7 +132,7 @@
               "artifacts": {
                 "verification": {
                   "from": "output_dir",
-                  "path": "result.json",
+                  "path": "verification.json",
                   "description": "Structured JSON verification result for the repair loop."
                 }
               }

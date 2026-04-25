@@ -4,10 +4,16 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 
+const TEST_INTENT = {
+  goal: "Research an accountable technical recommendation.",
+  acceptance_criteria: ["The research package explains findings, uncertainty, and recommended action."]
+};
+
 function buildDocument(stepOverrides = {}) {
   return {
     version: "1",
     graph_id: "deep-research-test",
+    intent: TEST_INTENT,
     repos: {
       main: {
         path: "."

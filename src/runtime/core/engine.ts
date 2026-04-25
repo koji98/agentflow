@@ -13,11 +13,16 @@ import type {
 } from "../../graph/compiled.js";
 import { collectReferencedRepoAliases } from "../../graph/repo_aliases.js";
 import { createRunOwnerRecord, type RunOwnerRecord } from "../../artifacts/owner.js";
-import type { GraphDiagnostic, GraphOutcome, HarnessName } from "../../graph/schema.js";
+import type { GraphDiagnostic, GraphOutcome, HarnessName, SupervisorActionKind } from "../../graph/schema.js";
 import { ArtifactWriter } from "../../artifacts/writer.js";
-import { readRunEvents, readRunExecutionAttempts } from "../../artifacts/reader.js";
+import {
+  readRunEvents,
+  readRunExecutionAttempts,
+  readSupervisorInterventions
+} from "../../artifacts/reader.js";
 import { resolveExecutionArtifactsDirectory } from "../../artifacts/paths.js";
 import { renderRunSummary } from "../delivery/summary.js";
+import { writeDeliveryPackage, type DeliveryPackageManifest } from "../delivery/package.js";
 import {
   buildExecutionId,
   closeNodeAttempt,
@@ -59,6 +64,9 @@ import { initializeInplaceWorkspace } from "../workspace/inplace.js";
 import type { WorkspaceSetup } from "../workspace/types.js";
 import { captureWorkspaceChanges } from "../workspace/changes.js";
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
+import { runRepairArtifactIntervention } from "../../supervisor/actions.js";
+import { classifyNodeFailure, type FailureClassification } from "../../supervisor/classifier.js";
+import type { SupervisorDecision, SupervisorInterventionRecord } from "../../supervisor/types.js";
 import {
   buildSchedulerTopology,
   createReadyNodeKey,
@@ -79,11 +87,16 @@ export interface RuntimeNodeExecutionResult {
   metadata?: Record<string, unknown>;
   check?: CheckEvaluatedPayload;
   verification?: VerificationRecordedPayload;
+  verification_artifact?: Record<string, unknown>;
   agent_response?: string;
 }
 
 export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode> {
+  run_root: string;
   run_id: string;
+  graph_id: string;
+  graph_intent: CompiledGraph["intent"];
+  credential_specs?: CompiledGraph["credential_specs"];
   node: TNode;
   attempt: RuntimeNodeAttempt;
   workspace_path: string;
@@ -542,10 +555,13 @@ async function syncRunArtifacts(
 async function writeTerminalRunSummary(
   session: RuntimeSession,
   writer: ArtifactWriter,
-  events: RuntimeEventEnvelope[]
+  events: RuntimeEventEnvelope[],
+  deliveryManifest?: DeliveryPackageManifest
 ): Promise<ReturnType<typeof buildRuntimeStateSnapshot>> {
   const state = buildRuntimeStateSnapshot(session);
-  await writer.writeRunSummary(renderRunSummary(state, await readRunExecutionAttempts(writer.run_root), events));
+  await writer.writeRunSummary(
+    renderRunSummary(state, await readRunExecutionAttempts(writer.run_root), events, deliveryManifest)
+  );
   return state;
 }
 
@@ -584,6 +600,319 @@ async function emitEvent(
     }
   }
   return event;
+}
+
+function supervisorActionBudgetField(action: SupervisorActionKind): keyof RuntimeSession["supervisor"]["budget_remaining"] | undefined {
+  switch (action) {
+    case "retry_node":
+      return "max_node_retries";
+    case "repair_artifact":
+      return "max_artifact_repairs";
+    case "rebuild_context":
+      return "max_context_rebuilds";
+    case "refresh_workspace":
+      return "max_workspace_refreshes";
+    case "run_diagnostic":
+      return "max_diagnostic_runs";
+    case "semantic_evaluation":
+      return "max_semantic_evaluations";
+    default:
+      return undefined;
+  }
+}
+
+function canSpendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): boolean {
+  if (action === "escalate") {
+    return true;
+  }
+
+  const budgetField = supervisorActionBudgetField(action);
+  return (
+    session.graph.supervision.allowed_actions.includes(action) &&
+    budgetField !== undefined &&
+    session.supervisor.budget_remaining.max_total_interventions > 0 &&
+    session.supervisor.budget_remaining[budgetField] > 0
+  );
+}
+
+function spendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): void {
+  const budgetField = supervisorActionBudgetField(action);
+  if (action === "escalate" || !budgetField) {
+    return;
+  }
+
+  session.supervisor.budget_remaining.max_total_interventions = Math.max(
+    0,
+    session.supervisor.budget_remaining.max_total_interventions - 1
+  );
+  session.supervisor.budget_remaining[budgetField] = Math.max(
+    0,
+    session.supervisor.budget_remaining[budgetField] - 1
+  );
+}
+
+function createSupervisorDecisionId(attempt: RuntimeNodeAttempt, action: SupervisorActionKind): string {
+  return `${attempt.execution_id}__${action}_decision`;
+}
+
+function createSupervisorInterventionId(attempt: RuntimeNodeAttempt, action: SupervisorActionKind): string {
+  return `${attempt.execution_id}__${action}`;
+}
+
+function retryActionForClassification(classification: FailureClassification): SupervisorActionKind | undefined {
+  if (!classification.retryable) {
+    return undefined;
+  }
+
+  switch (classification.recommended_action) {
+    case "retry_node":
+    case "rebuild_context":
+    case "refresh_workspace":
+    case "run_diagnostic":
+    case "semantic_evaluation":
+      return classification.recommended_action;
+    default:
+      return undefined;
+  }
+}
+
+function actionRetrySummary(action: SupervisorActionKind): string {
+  switch (action) {
+    case "rebuild_context":
+      return "Supervisor will retry the node with a freshly materialized context packet.";
+    case "refresh_workspace":
+      return "Supervisor will retry the node after reusing the current workspace binding.";
+    case "run_diagnostic":
+      return "Supervisor will retry the node after recording the diagnostic classification.";
+    case "semantic_evaluation":
+      return "Supervisor will rerun the semantic evaluation node.";
+    default:
+      return "Supervisor will retry the node.";
+  }
+}
+
+async function handleFailedNodeWithSupervisor(options: {
+  runOptions: RunCompiledGraphOptions;
+  session: RuntimeSession;
+  writer: ArtifactWriter;
+  runOwner: RunOwnerRecord;
+  events: RuntimeEventEnvelope[];
+  readyQueue: ReturnType<typeof createReadyQueueState>;
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  result: RuntimeNodeExecutionResult;
+  readyNode: ReadyNode;
+}): Promise<boolean> {
+  const classification = classifyNodeFailure({
+    node: options.node,
+    attempt: options.attempt,
+    result: options.result,
+    policy: options.session.graph.supervision
+  });
+  const action = retryActionForClassification(classification);
+
+  if (!action) {
+    if (
+      options.session.graph.supervision.allowed_actions.includes("escalate") &&
+      (classification.recommended_action === "escalate" || !classification.retryable)
+    ) {
+      const decisionId = createSupervisorDecisionId(options.attempt, "escalate");
+      options.session.supervisor.status = "escalated";
+      options.session.supervisor.last_decision_id = decisionId;
+      options.session.supervisor.escalations.push({
+        decision_id: decisionId,
+        reason: classification.summary,
+        target_compiled_id: options.node.compiled_id
+      });
+      await emitEvent(
+        options.session,
+        options.writer,
+        options.runOwner,
+        options.events,
+        options.runOptions.on_event,
+        "supervisor.escalated",
+        {
+          decision_id: decisionId,
+          classification: classification.class,
+          action: "escalate",
+          target_compiled_id: options.node.compiled_id,
+          target_execution_id: options.attempt.execution_id,
+          reason: classification.summary,
+          evidence: classification.evidence
+        },
+        {
+          compiled_id: options.node.compiled_id,
+          execution_id: options.attempt.execution_id,
+          repeat_scope_id: options.attempt.repeat_scope_id,
+          iteration_index: options.attempt.iteration_index,
+          attempt_index: options.attempt.attempt_index
+        }
+      );
+    }
+    return false;
+  }
+
+  if (
+    !options.session.graph.supervision.allowed_actions.includes(action) ||
+    !canSpendRuntimeSupervisorAction(options.session, action)
+  ) {
+    options.session.supervisor.status = "exhausted";
+    const decisionId = createSupervisorDecisionId(options.attempt, action);
+    options.session.supervisor.last_decision_id = decisionId;
+    await emitEvent(
+      options.session,
+      options.writer,
+      options.runOwner,
+      options.events,
+      options.runOptions.on_event,
+      "supervisor.decision",
+      {
+        decision_id: decisionId,
+        kind: "escalate",
+        classification: classification.class,
+        action: "escalate",
+        requested_action: action,
+        target_compiled_id: options.node.compiled_id,
+        target_execution_id: options.attempt.execution_id,
+        reason: `Supervisor cannot run action "${action}" because it is not allowed or its budget is exhausted.`,
+        evidence: classification.evidence,
+        budget_cost: {}
+      },
+      {
+        compiled_id: options.node.compiled_id,
+        execution_id: options.attempt.execution_id,
+        repeat_scope_id: options.attempt.repeat_scope_id,
+        iteration_index: options.attempt.iteration_index,
+        attempt_index: options.attempt.attempt_index
+      }
+    );
+    return false;
+  }
+
+  spendRuntimeSupervisorAction(options.session, action);
+  options.session.supervisor.status = "intervening";
+  options.session.supervisor.intervention_count += 1;
+  const decisionId = createSupervisorDecisionId(options.attempt, action);
+  const interventionId = createSupervisorInterventionId(options.attempt, action);
+  options.session.supervisor.last_decision_id = decisionId;
+  const budgetCost = {
+    total: 1,
+    [action]: 1
+  };
+  const decision: SupervisorDecision = {
+    decision_id: decisionId,
+    kind: "retry_node",
+    classification: classification.class,
+    target_compiled_id: options.node.compiled_id,
+    target_execution_id: options.attempt.execution_id,
+    action,
+    reason: classification.summary,
+    budget_cost: budgetCost,
+    created_at: new Date().toISOString()
+  };
+  const intervention: SupervisorInterventionRecord = {
+    intervention_id: interventionId,
+    decision_id: decisionId,
+    action,
+    status: "passed",
+    target_compiled_id: options.node.compiled_id,
+    target_execution_id: options.attempt.execution_id,
+    started_at: decision.created_at,
+    ended_at: new Date().toISOString(),
+    reason: actionRetrySummary(action),
+    evidence: {
+      ...classification.evidence,
+      retry_attempt_index: options.attempt.attempt_index + 1
+    },
+    artifact_paths: {
+      failed_execution_dir: options.attempt.execution_dir
+    }
+  };
+
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.runOptions.on_event,
+    "supervisor.decision",
+    decision,
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.attempt.repeat_scope_id,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
+    }
+  );
+  const runningIntervention: SupervisorInterventionRecord = {
+    ...intervention,
+    status: "running"
+  };
+  delete runningIntervention.ended_at;
+  await options.writer.appendSupervisorIntervention(runningIntervention);
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.runOptions.on_event,
+    "supervisor.intervention.started",
+    {
+      intervention_id: interventionId,
+      decision_id: decisionId,
+      action,
+      target_compiled_id: options.node.compiled_id,
+      summary: actionRetrySummary(action)
+    },
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.attempt.repeat_scope_id,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
+    }
+  );
+  await options.writer.appendSupervisorIntervention(intervention);
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.runOptions.on_event,
+    "supervisor.intervention.completed",
+    {
+      intervention_id: interventionId,
+      decision_id: decisionId,
+      action,
+      target_compiled_id: options.node.compiled_id,
+      summary: intervention.reason,
+      retry_attempt_index: options.attempt.attempt_index + 1
+    },
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.attempt.repeat_scope_id,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
+    }
+  );
+
+  options.session.supervisor.status = "healthy";
+  await queueReadyNode(
+    options.readyQueue,
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.runOptions.on_event,
+    {
+      ...options.readyNode,
+      deps_satisfied: [...options.readyNode.deps_satisfied]
+    }
+  );
+
+  return true;
 }
 
 async function queueReadyNode(
@@ -840,6 +1169,14 @@ function buildContextMaterialEnv(
 
 function buildNodeRuntimeEnv(context: RuntimeNodeExecutorContext<CompiledExecutableNode>): Record<string, string> {
   return {
+    AGENTFLOW_RUN_ROOT: context.run_root,
+    AGENTFLOW_RUN_ID: context.run_id,
+    AGENTFLOW_GRAPH_ID: context.graph_id,
+    AGENTFLOW_AGENT_ID: context.attempt.execution_id,
+    AGENTFLOW_EXECUTION_ID: context.attempt.execution_id,
+    AGENTFLOW_NODE_ID: context.node.authored_id,
+    AGENTFLOW_COMPILED_ID: context.node.compiled_id,
+    AGENTFLOW_REPO_ALIAS: context.node.repo,
     AGENTFLOW_WORKSPACE: context.workspace_path,
     AGENTFLOW_OUTPUT_DIR: resolveExecutionArtifactsDirectory(context.execution_dir),
     AGENTFLOW_CONTEXT_PACKET: context.context_packet_path,
@@ -864,6 +1201,38 @@ function annotateSoftVerificationResult(
     summary: verification.summary,
     ...(verification.check_kind ? { check_kind: verification.check_kind } : {}),
     ...(verification.exit_code !== undefined ? { exit_code: verification.exit_code } : {})
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function buildCheckVerificationArtifact(
+  result: RuntimeNodeExecutionResult,
+  defaults: {
+    passed: boolean;
+    summary: string;
+    check_kind?: "deterministic" | "ai";
+    exit_code?: number;
+  }
+): Record<string, unknown> {
+  const payload = isRecord(result.verification_artifact)
+    ? result.verification_artifact
+    : (isRecord(result.result) ? result.result : undefined);
+
+  return {
+    ...(payload ?? {}),
+    ...(typeof payload?.passed === "boolean" ? {} : { passed: defaults.passed }),
+    ...(typeof payload?.summary === "string" && payload.summary.trim().length > 0
+      ? {}
+      : { summary: defaults.summary }),
+    ...(typeof payload?.check_kind === "string" || defaults.check_kind === undefined
+      ? {}
+      : { check_kind: defaults.check_kind }),
+    ...(typeof payload?.exit_code === "number" || defaults.exit_code === undefined
+      ? {}
+      : { exit_code: defaults.exit_code })
   };
 }
 
@@ -975,7 +1344,8 @@ async function defaultCheckExecutor(
           passed: result.passed,
           summary: result.summary
         },
-        verification
+        verification,
+        verification_artifact: result.verification_json
       };
     }
 
@@ -989,7 +1359,8 @@ async function defaultCheckExecutor(
         check_kind: "deterministic",
         passed: result.passed,
         summary: result.summary
-      }
+      },
+      verification_artifact: result.verification_json
     };
   }
 
@@ -1022,6 +1393,13 @@ async function defaultCheckExecutor(
     ...(context.node.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
     prompt: renderedAiCheckPrompt,
     rubric: renderedAiCheckRubric,
+    graph_goal: context.graph_intent.goal,
+    ...(context.graph_intent.acceptance_criteria
+      ? { graph_acceptance_criteria: context.graph_intent.acceptance_criteria }
+      : {}),
+    ...(context.graph_intent.constraints ? { graph_constraints: context.graph_intent.constraints } : {}),
+    ...(context.node.goal ? { node_goal: context.node.goal } : {}),
+    ...(context.node.acceptance_criteria ? { node_acceptance_criteria: context.node.acceptance_criteria } : {}),
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
     output_dir: resolveExecutionArtifactsDirectory(context.execution_dir),
@@ -1074,7 +1452,14 @@ async function defaultCheckExecutor(
         ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
         ...(evaluation.summary ? { summary: evaluation.summary } : {})
       },
-      verification
+      verification,
+      verification_artifact: {
+        passed,
+        ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
+        ...(evaluation.summary ? { summary: evaluation.summary } : {}),
+        ...(evaluation.issues ? { issues: evaluation.issues } : {}),
+        check_kind: "ai"
+      }
     };
   }
 
@@ -1097,6 +1482,13 @@ async function defaultCheckExecutor(
       passed,
       ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
       ...(evaluation.summary ? { summary: evaluation.summary } : {})
+    },
+    verification_artifact: {
+      passed,
+      ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
+      ...(evaluation.summary ? { summary: evaluation.summary } : {}),
+      ...(evaluation.issues ? { issues: evaluation.issues } : {}),
+      check_kind: "ai"
     }
   };
 }
@@ -1120,11 +1512,28 @@ async function defaultAgentExecutor(
   }
 
   const outputDir = resolveExecutionArtifactsDirectory(context.execution_dir);
+  const runtimeDir = join(context.run_root, "runtime");
   const toolSetup = await prepareAgentTools({
     node: context.node,
     execution_dir: context.execution_dir,
     workspace_path: context.workspace_path,
-    artifacts_root: outputDir
+    artifacts_root: outputDir,
+    run_root: context.run_root,
+    runtime_dir: runtimeDir,
+    run_id: context.run_id,
+    graph_id: context.graph_id,
+    execution_id: context.attempt.execution_id,
+    repo_alias: context.node.repo,
+    ...(context.node.effective_policy.harness ? { harness: context.node.effective_policy.harness } : {}),
+    ...(context.node.effective_policy.model ? { model: context.node.effective_policy.model } : {}),
+    ...(context.node.effective_policy.reasoning_effort
+      ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
+      : {}),
+    sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
+    timeout_sec: context.node.effective_policy.timeout_sec,
+    context_packet_path: context.context_packet_path,
+    context_manifest_path: context.context_manifest_path,
+    credential_specs: context.credential_specs ?? {}
   });
   const contextManifest = await readContextManifestContent(context.context_manifest_path);
   const promptTokens = buildNodeRuntimeEnv(context);
@@ -1136,6 +1545,7 @@ async function defaultAgentExecutor(
     executionId: context.attempt.execution_id,
     repoAlias: context.node.repo,
     repoPath: context.workspace_path,
+    runtimeDir,
     sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
     ...(context.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
     model: context.node.effective_policy.model,
@@ -1143,6 +1553,13 @@ async function defaultAgentExecutor(
       ? { reasoningEffort: context.node.effective_policy.reasoning_effort }
       : {}),
     prompt: renderedPrompt,
+    graphGoal: context.graph_intent.goal,
+    ...(context.graph_intent.acceptance_criteria
+      ? { graphAcceptanceCriteria: context.graph_intent.acceptance_criteria }
+      : {}),
+    ...(context.graph_intent.constraints ? { graphConstraints: context.graph_intent.constraints } : {}),
+    ...(context.node.goal ? { nodeGoal: context.node.goal } : {}),
+    ...(context.node.acceptance_criteria ? { nodeAcceptanceCriteria: context.node.acceptance_criteria } : {}),
     contextPacketPath: context.context_packet_path,
     contextManifestPath: context.context_manifest_path,
     contextManifest,
@@ -1176,12 +1593,47 @@ async function writeAutomaticArtifacts(
   attempt: RuntimeNodeAttempt,
   result: RuntimeNodeExecutionResult
 ): Promise<Record<string, string>> {
-  const resultJsonPath = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "result.json");
-  await writeFile(resultJsonPath, `${JSON.stringify(result.result, null, 2)}\n`, "utf8");
+  const artifacts: Record<string, string> = {};
 
-  const artifacts: Record<string, string> = {
-    result_json: resultJsonPath
-  };
+  if (node.kind === "check") {
+    const verificationJsonPath = join(
+      resolveExecutionArtifactsDirectory(attempt.execution_dir),
+      "verification.json"
+    );
+    const passed =
+      result.check?.passed
+      ?? (result.verification?.passed
+        ?? (isRecord(result.result) && typeof result.result.passed === "boolean"
+          ? result.result.passed
+          : false));
+    const summary =
+      result.check?.summary
+      ?? result.verification?.summary
+      ?? (isRecord(result.result) && typeof result.result.summary === "string"
+        ? result.result.summary
+        : (result.status === "canceled" ? "Check canceled." : (passed ? "Check passed." : "Check failed.")));
+    const exit_code =
+      result.verification?.exit_code
+      ?? (isRecord(result.result) && typeof result.result.exit_code === "number"
+        ? result.result.exit_code
+        : undefined);
+
+    await writeFile(
+      verificationJsonPath,
+      `${JSON.stringify(
+        buildCheckVerificationArtifact(result, {
+          passed,
+          summary,
+          ...(result.check?.check_kind ? { check_kind: result.check.check_kind } : {}),
+          ...(exit_code !== undefined ? { exit_code } : {})
+        }),
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    artifacts.verification_json = verificationJsonPath;
+  }
 
   if (node.kind !== "agent") {
     return artifacts;
@@ -1198,10 +1650,32 @@ async function writeAutomaticArtifacts(
   return artifacts;
 }
 
-async function writeFailureResultArtifact(attempt: RuntimeNodeAttempt, message: string): Promise<string> {
-  const resultJsonPath = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "result.json");
-  await writeFile(resultJsonPath, `${JSON.stringify({ error: message }, null, 2)}\n`, "utf8");
-  return resultJsonPath;
+async function writeFailureAutomaticArtifacts(
+  node: CompiledExecutableNode,
+  attempt: RuntimeNodeAttempt,
+  message: string
+): Promise<Record<string, string>> {
+  const artifacts: Record<string, string> = {};
+
+  if (node.kind === "check") {
+    const verificationJsonPath = join(
+      resolveExecutionArtifactsDirectory(attempt.execution_dir),
+      "verification.json"
+    );
+    await writeFile(
+      verificationJsonPath,
+      `${JSON.stringify({
+        passed: false,
+        summary: message,
+        error: message,
+        check_kind: node.check_kind
+      }, null, 2)}\n`,
+      "utf8"
+    );
+    artifacts.verification_json = verificationJsonPath;
+  }
+
+  return artifacts;
 }
 
 async function collectMissingDeclaredArtifacts(
@@ -1235,6 +1709,144 @@ async function collectMissingDeclaredArtifacts(
   return missing;
 }
 
+function isHumanTextArtifact(artifact: MissingDeclaredArtifact): boolean {
+  if (artifact.from !== "output_dir") {
+    return false;
+  }
+
+  const lowerPath = artifact.path.toLowerCase();
+  return lowerPath.endsWith(".md") || lowerPath.endsWith(".markdown") || lowerPath.endsWith(".txt");
+}
+
+async function synthesizeMissingArtifactsFromAgentResponse(options: {
+  node: CompiledAgentNode;
+  attempt: RuntimeNodeAttempt;
+  missingArtifacts: MissingDeclaredArtifact[];
+  automaticArtifacts: Record<string, string>;
+  decisionId: string;
+  interventionId: string;
+  repairAttempt: number;
+  maxAttempts: number;
+}): Promise<SupervisorInterventionRecord | undefined> {
+  if (
+    options.missingArtifacts.length !== 1 ||
+    !options.missingArtifacts.every(isHumanTextArtifact)
+  ) {
+    return undefined;
+  }
+
+  const agentResponsePath = options.automaticArtifacts.agent_response;
+  if (!agentResponsePath) {
+    return undefined;
+  }
+
+  let agentResponse: string;
+  try {
+    agentResponse = await readFile(agentResponsePath, "utf8");
+  } catch {
+    return undefined;
+  }
+
+  const trimmedResponse = agentResponse.trim();
+  if (
+    trimmedResponse.length === 0 ||
+    trimmedResponse === "Agent completed without a captured final response."
+  ) {
+    return undefined;
+  }
+
+  const interventionDir = join(options.attempt.execution_dir, "interventions", options.interventionId);
+  const promptPath = join(interventionDir, "prompt.md");
+  const stdoutPath = join(interventionDir, "stdout.log");
+  const stderrPath = join(interventionDir, "stderr.log");
+  const resultPath = join(interventionDir, "result.json");
+  const startedAt = new Date().toISOString();
+
+  await mkdir(interventionDir, { recursive: true });
+
+  await Promise.all(options.missingArtifacts.map(async (artifact) => {
+    await mkdir(dirname(artifact.expected_path), { recursive: true });
+    await writeFile(
+      artifact.expected_path,
+      [
+        "# Recovered Agentflow Artifact",
+        "",
+        "Agentflow synthesized this human-readable handoff from the node's captured final response because the declared artifact was missing after the node completed.",
+        "",
+        "## Declared Artifact",
+        "",
+        `- Name: \`${artifact.name}\``,
+        `- Path: \`${artifact.path}\``,
+        `- Expected content: ${artifact.description}`,
+        "",
+        "## Recovered Content",
+        "",
+        trimmedResponse
+      ].join("\n"),
+      "utf8"
+    );
+  }));
+
+  await Promise.all([
+    writeFile(
+      promptPath,
+      [
+        "## Agentflow Artifact Repair",
+        "",
+        "The supervisor recovered missing human-readable artifacts from the captured agent response.",
+        "No external harness was invoked because every missing artifact was a text handoff and the node had already completed successfully.",
+        "",
+        "## Node Intent",
+        "",
+        options.node.goal ?? options.node.prompt,
+        "",
+        "## Recovered Artifacts",
+        formatMissingArtifactList(options.missingArtifacts)
+      ].join("\n"),
+      "utf8"
+    ),
+    writeFile(stdoutPath, "Synthesized missing text artifacts from agent_response.\n", "utf8"),
+    writeFile(stderrPath, "", "utf8"),
+    writeFile(
+      resultPath,
+      `${JSON.stringify({
+        status: "passed",
+        repair_strategy: "synthesize_from_agent_response",
+        missing_artifacts_after: []
+      }, null, 2)}\n`,
+      "utf8"
+    )
+  ]);
+
+  return {
+    intervention_id: options.interventionId,
+    decision_id: options.decisionId,
+    action: "repair_artifact",
+    status: "passed",
+    target_compiled_id: options.node.compiled_id,
+    target_execution_id: options.attempt.execution_id,
+    started_at: startedAt,
+    ended_at: new Date().toISOString(),
+    reason: "Recovered missing human-readable declared artifacts from the node's captured final response.",
+    evidence: {
+      repair_attempt: options.repairAttempt,
+      max_attempts: options.maxAttempts,
+      repair_strategy: "synthesize_from_agent_response",
+      source_artifact: "agent_response",
+      source_path: agentResponsePath,
+      missing_artifacts_before: options.missingArtifacts.map((artifact) => artifact.name),
+      missing_artifacts_after: []
+    },
+    artifact_paths: {
+      intervention_dir: interventionDir,
+      prompt: promptPath,
+      stdout: stdoutPath,
+      stderr: stderrPath,
+      result: resultPath
+    }
+  };
+}
+
 function formatMissingArtifactList(missingArtifacts: MissingDeclaredArtifact[]): string {
   return missingArtifacts
     .map((artifact) => [
@@ -1245,155 +1857,6 @@ function formatMissingArtifactList(missingArtifacts: MissingDeclaredArtifact[]):
       `  - expected content: ${artifact.description}`
     ].join("\n"))
     .join("\n");
-}
-
-function buildArtifactRepairPrompt(options: {
-  node: CompiledAgentNode;
-  attempt: RuntimeNodeAttempt;
-  repairAttempt: number;
-  maxAttempts: number;
-  missingArtifacts: MissingDeclaredArtifact[];
-  workspacePath: string;
-  contextPacketPath: string;
-  contextManifestPath: string;
-  runId: string;
-}): string {
-  const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
-  const priorResponsePath = join(artifactsRoot, "agent-response.md");
-
-  return [
-    "## Agentflow Artifact Repair",
-    "",
-    "You already executed this Agentflow agent node, but the node did not satisfy its declared artifact contract.",
-    "Do not redo unrelated work. Your only job is to produce the missing declared artifacts at the exact expected paths.",
-    "",
-    "## Original Node Task",
-    options.node.prompt,
-    "",
-    "## Missing Artifacts",
-    formatMissingArtifactList(options.missingArtifacts),
-    "",
-    "## Available Evidence",
-    `- Workspace: ${options.workspacePath}`,
-    `- Output directory for output_dir artifacts: ${artifactsRoot}`,
-    `- Context manifest: ${options.contextManifestPath}`,
-    `- Context packet: ${options.contextPacketPath}`,
-    `- Prior final response artifact, if present: ${priorResponsePath}`,
-    `- Prior stdout log: ${options.attempt.stdout_log_path ?? join(options.attempt.execution_dir, "logs", "stdout.log")}`,
-    `- Prior stderr log: ${options.attempt.stderr_log_path ?? join(options.attempt.execution_dir, "logs", "stderr.log")}`,
-    "",
-    "## Repair Instructions",
-    "- Inspect the workspace, git status, git diff, output directory, context, prior response, and logs as needed.",
-    "- If the artifact content exists in the wrong location, move or copy it to the expected absolute path.",
-    "- If the handoff was never written, write it now from the completed work, workspace changes, and available context.",
-    "- Do not make unrelated source changes.",
-    "- Finish only after every missing artifact exists at its exact expected absolute path.",
-    "",
-    "## Diagnostics",
-    `- Repair attempt: ${options.repairAttempt} of ${options.maxAttempts}`,
-    `- Run ID: ${options.runId}`,
-    `- Execution ID: ${options.attempt.execution_id}`,
-    `- Agent node: ${options.node.authored_id}`
-  ].join("\n");
-}
-
-async function runArtifactRepairHarness(options: {
-  node: CompiledAgentNode;
-  attempt: RuntimeNodeAttempt;
-  repairAttempt: number;
-  maxAttempts: number;
-  missingArtifacts: MissingDeclaredArtifact[];
-  session: RuntimeSession;
-  workspacePath: string;
-  contextPacketPath: string;
-  contextManifestPath: string;
-  signal: AbortSignal | undefined;
-  harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
-}): Promise<"passed" | "failed" | "canceled" | "unavailable"> {
-  const harnessName = options.node.effective_policy.harness;
-  const harness = harnessName ? options.harnesses[harnessName] : undefined;
-
-  if (!harnessName || !harness) {
-    return "unavailable";
-  }
-
-  const repairDir = join(
-    options.attempt.execution_dir,
-    "artifact-repairs",
-    String(options.repairAttempt).padStart(3, "0")
-  );
-  await mkdir(repairDir, { recursive: true });
-  const repairOutputDir = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
-  const repairPromptTokens: Record<string, string> = {
-    AGENTFLOW_WORKSPACE: options.workspacePath,
-    AGENTFLOW_OUTPUT_DIR: repairOutputDir,
-    AGENTFLOW_CONTEXT_PACKET: options.contextPacketPath,
-    AGENTFLOW_CONTEXT_MANIFEST: options.contextManifestPath
-  };
-  const composedRepairPrompt = buildArtifactRepairPrompt({
-    node: options.node,
-    attempt: options.attempt,
-    repairAttempt: options.repairAttempt,
-    maxAttempts: options.maxAttempts,
-    missingArtifacts: options.missingArtifacts,
-    workspacePath: options.workspacePath,
-    contextPacketPath: options.contextPacketPath,
-    contextManifestPath: options.contextManifestPath,
-    runId: options.session.run_id
-  });
-  const prompt = substituteAgentflowTokens(composedRepairPrompt, repairPromptTokens);
-  await writeFile(join(repairDir, "prompt.md"), `${prompt}\n`, "utf8");
-
-  const repairToolSetup = await prepareAgentTools({
-    node: options.node,
-    execution_dir: options.attempt.execution_dir,
-    workspace_path: options.workspacePath,
-    artifacts_root: repairOutputDir
-  });
-  const contextManifest = await readContextManifestContent(options.contextManifestPath);
-
-  const result = await harness.run({
-    promptKind: "agent",
-    runId: options.session.run_id,
-    executionId: `${options.attempt.execution_id}__artifact_repair_${options.repairAttempt}`,
-    repoAlias: options.node.repo,
-    repoPath: options.workspacePath,
-    sandbox: options.node.effective_policy.sandbox ?? "workspace-write",
-    ...(options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
-    model: options.node.effective_policy.model,
-    ...(options.node.effective_policy.reasoning_effort
-      ? { reasoningEffort: options.node.effective_policy.reasoning_effort }
-      : {}),
-    prompt,
-    contextPacketPath: options.contextPacketPath,
-    contextManifestPath: options.contextManifestPath,
-    contextManifest,
-    outputDir: repairOutputDir,
-    artifacts: options.node.declared_artifacts,
-    timeoutSec: options.node.effective_policy.timeout_sec,
-    signal: options.signal,
-    toolBinDir: repairToolSetup.bin_dir,
-    toolEnv: repairToolSetup.env,
-    tools: repairToolSetup.resolved_tools
-  });
-
-  await Promise.all([
-    writeFile(join(repairDir, "stdout.log"), result.stdout ?? "", "utf8"),
-    writeFile(join(repairDir, "stderr.log"), result.stderr ?? "", "utf8"),
-    writeFile(
-      join(repairDir, "result.json"),
-      `${JSON.stringify({
-        status: result.status,
-        exit_code: result.exitCode,
-        ...(result.metadata ? { metadata: result.metadata } : {}),
-        ...(result.outputJson ? { output_json: result.outputJson } : {}),
-        ...(result.transcript?.last_message ? { last_message: result.transcript.last_message } : {})
-      }, null, 2)}\n`,
-      "utf8"
-    )
-  ]);
-
-  return result.status;
 }
 
 async function materializeDeclaredArtifactsWithRepair(options: {
@@ -1453,18 +1916,90 @@ async function materializeDeclaredArtifactsWithRepair(options: {
     let attempted = 0;
 
     for (let repairAttempt = 1; repairAttempt <= maxAttempts; repairAttempt += 1) {
+      if (
+        !options.session.graph.supervision.allowed_actions.includes("repair_artifact") ||
+        options.session.supervisor.budget_remaining.max_total_interventions <= 0 ||
+        options.session.supervisor.budget_remaining.max_artifact_repairs <= 0
+      ) {
+        options.session.supervisor.status = "exhausted";
+        break;
+      }
+
       attempted = repairAttempt;
+      const missingBeforeRepair = missingArtifacts.map((artifact) => artifact.name);
+      const decisionId = `${options.attempt.execution_id}__repair_artifact_decision_${repairAttempt}`;
+      const interventionId = `${options.attempt.execution_id}__repair_artifact_${repairAttempt}`;
+      const interventionDir = join(options.attempt.execution_dir, "interventions", interventionId);
+      options.session.supervisor.status = "intervening";
+      options.session.supervisor.intervention_count += 1;
+      options.session.supervisor.last_decision_id = decisionId;
+      options.session.supervisor.budget_remaining.max_total_interventions = Math.max(
+        0,
+        options.session.supervisor.budget_remaining.max_total_interventions - 1
+      );
+      options.session.supervisor.budget_remaining.max_artifact_repairs = Math.max(
+        0,
+        options.session.supervisor.budget_remaining.max_artifact_repairs - 1
+      );
+      const startedRecord: SupervisorInterventionRecord = {
+        intervention_id: interventionId,
+        decision_id: decisionId,
+        action: "repair_artifact",
+        status: "running",
+        target_compiled_id: options.node.compiled_id,
+        target_execution_id: options.attempt.execution_id,
+        started_at: new Date().toISOString(),
+        reason: "Declared artifact contract is missing after an agent completed.",
+        evidence: {
+          repair_attempt: repairAttempt,
+          max_attempts: maxAttempts,
+          missing_artifacts_before: missingBeforeRepair
+        },
+        artifact_paths: {
+          intervention_dir: interventionDir
+        }
+      };
+
       await emitEvent(
         options.session,
         options.writer,
         options.runOwner,
         options.events,
         options.onEvent,
-        "artifact_repair.started",
+        "supervisor.decision",
         {
-          repair_attempt: repairAttempt,
-          max_attempts: maxAttempts,
-          missing_artifacts: missingArtifacts.map((artifact) => artifact.name)
+          decision_id: decisionId,
+          kind: "run_intervention",
+          classification: "artifact",
+          action: "repair_artifact",
+          target_compiled_id: options.node.compiled_id,
+          target_execution_id: options.attempt.execution_id,
+          reason: startedRecord.reason,
+          budget_cost: { total: 1, repair_artifact: 1 }
+        },
+        {
+          compiled_id: options.node.compiled_id,
+          execution_id: options.attempt.execution_id,
+          repeat_scope_id: options.attempt.repeat_scope_id,
+          iteration_index: options.attempt.iteration_index,
+          attempt_index: options.attempt.attempt_index
+        }
+      );
+      await options.writer.appendSupervisorIntervention(startedRecord);
+      await emitEvent(
+        options.session,
+        options.writer,
+        options.runOwner,
+        options.events,
+        options.onEvent,
+        "supervisor.intervention.started",
+        {
+          intervention_id: interventionId,
+          decision_id: decisionId,
+          action: "repair_artifact",
+          target_compiled_id: options.node.compiled_id,
+          summary: startedRecord.reason,
+          missing_artifacts: missingBeforeRepair
         },
         {
           compiled_id: options.node.compiled_id,
@@ -1475,21 +2010,61 @@ async function materializeDeclaredArtifactsWithRepair(options: {
         }
       );
 
-      const repairStatus = await runArtifactRepairHarness({
+      const harnessName = options.node.effective_policy.harness;
+      const harnessAvailable = Boolean(harnessName && options.harnesses[harnessName]);
+      const synthesizedIntervention = harnessAvailable
+        ? undefined
+        : await synthesizeMissingArtifactsFromAgentResponse({
+            node: options.node,
+            attempt: options.attempt,
+            missingArtifacts,
+            automaticArtifacts: options.automaticArtifacts,
+            decisionId,
+            interventionId,
+            repairAttempt,
+            maxAttempts
+          });
+      const intervention = synthesizedIntervention ?? await runRepairArtifactIntervention({
         node: options.node,
         attempt: options.attempt,
-        repairAttempt,
-        maxAttempts,
-        missingArtifacts,
+        missing_artifacts: missingArtifacts,
         session: options.session,
-        workspacePath: options.workspacePath,
-        contextPacketPath: options.contextPacketPath,
-        contextManifestPath: options.contextManifestPath,
-        signal: options.signal,
-        harnesses: options.harnesses
+        workspace_path: options.workspacePath,
+        context_packet_path: options.contextPacketPath,
+        context_manifest_path: options.contextManifestPath,
+        harnesses: options.harnesses,
+        decision_id: decisionId,
+        intervention_id: interventionId,
+        repair_attempt: repairAttempt,
+        max_attempts: maxAttempts,
+        ...(options.signal ? { signal: options.signal } : {})
       });
+      await options.writer.appendSupervisorIntervention(intervention);
 
-      if (repairStatus === "canceled") {
+      if (intervention.status === "canceled") {
+        await emitEvent(
+          options.session,
+          options.writer,
+          options.runOwner,
+          options.events,
+          options.onEvent,
+          "supervisor.intervention.failed",
+          {
+            intervention_id: intervention.intervention_id,
+            decision_id: intervention.decision_id,
+            action: intervention.action,
+            target_compiled_id: options.node.compiled_id,
+            summary: intervention.reason,
+            missing_artifacts: missingArtifacts.map((artifact) => artifact.name)
+          },
+          {
+            compiled_id: options.node.compiled_id,
+            execution_id: options.attempt.execution_id,
+            repeat_scope_id: options.attempt.repeat_scope_id,
+            iteration_index: options.attempt.iteration_index,
+            attempt_index: options.attempt.attempt_index
+          }
+        );
         return {
           artifacts: options.automaticArtifacts,
           repair_metadata: {
@@ -1509,17 +2084,21 @@ async function materializeDeclaredArtifactsWithRepair(options: {
       );
 
       if (missingArtifacts.length === 0) {
+        options.session.supervisor.status = "healthy";
         await emitEvent(
           options.session,
           options.writer,
           options.runOwner,
           options.events,
           options.onEvent,
-          "artifact_repair.completed",
+          "supervisor.intervention.completed",
           {
-            repair_attempt: repairAttempt,
-            max_attempts: maxAttempts,
-            repaired_artifacts: Object.keys(options.node.declared_artifacts).sort()
+            intervention_id: intervention.intervention_id,
+            decision_id: intervention.decision_id,
+            action: intervention.action,
+            target_compiled_id: options.node.compiled_id,
+            summary: intervention.reason,
+            repaired_artifacts: missingBeforeRepair
           },
           {
             compiled_id: options.node.compiled_id,
@@ -1546,22 +2125,20 @@ async function materializeDeclaredArtifactsWithRepair(options: {
         };
       }
 
-      const summary =
-        repairStatus === "unavailable"
-          ? "Artifact repair could not run because the resolved harness adapter is unavailable."
-          : `Artifact repair attempt ${repairAttempt} finished with status ${repairStatus}; missing artifacts remain: ${missingArtifacts.map((artifact) => artifact.name).join(", ")}.`;
       await emitEvent(
         options.session,
         options.writer,
         options.runOwner,
         options.events,
         options.onEvent,
-        "artifact_repair.failed",
+        "supervisor.intervention.failed",
         {
-          repair_attempt: repairAttempt,
-          max_attempts: maxAttempts,
+          intervention_id: intervention.intervention_id,
+          decision_id: intervention.decision_id,
+          action: intervention.action,
+          target_compiled_id: options.node.compiled_id,
           missing_artifacts: missingArtifacts.map((artifact) => artifact.name),
-          summary
+          summary: intervention.reason
         },
         {
           compiled_id: options.node.compiled_id,
@@ -1572,9 +2149,14 @@ async function materializeDeclaredArtifactsWithRepair(options: {
         }
       );
 
-      if (repairStatus === "unavailable") {
+      if (intervention.evidence.harness_status === "unavailable") {
+        options.session.supervisor.status = "exhausted";
         break;
       }
+    }
+
+    if (options.session.supervisor.status === "intervening") {
+      options.session.supervisor.status = "exhausted";
     }
 
     throw new ArtifactMaterializationError(
@@ -1677,7 +2259,11 @@ async function executeNode(
     if (node.kind === "exec") {
       result = options.executors?.exec
         ? await options.executors.exec({
+            run_root: options.run_root,
             run_id: session.run_id,
+            graph_id: session.graph.graph_id,
+            graph_intent: session.graph.intent,
+            credential_specs: session.graph.credential_specs ?? {},
             node,
             attempt,
             workspace_path: workspace.workspace_path,
@@ -1690,7 +2276,11 @@ async function executeNode(
             on_stderr_chunk: logSink.on_stderr_chunk
           })
         : await defaultExecExecutor({
+            run_root: options.run_root,
             run_id: session.run_id,
+            graph_id: session.graph.graph_id,
+            graph_intent: session.graph.intent,
+            credential_specs: session.graph.credential_specs ?? {},
             node,
             attempt,
             workspace_path: workspace.workspace_path,
@@ -1705,7 +2295,11 @@ async function executeNode(
     } else if (node.kind === "check") {
       result = options.executors?.check
         ? await options.executors.check({
+            run_root: options.run_root,
             run_id: session.run_id,
+            graph_id: session.graph.graph_id,
+            graph_intent: session.graph.intent,
+            credential_specs: session.graph.credential_specs ?? {},
             node,
             attempt,
             workspace_path: workspace.workspace_path,
@@ -1719,7 +2313,11 @@ async function executeNode(
           })
         : await defaultCheckExecutor(
             {
+              run_root: options.run_root,
               run_id: session.run_id,
+              graph_id: session.graph.graph_id,
+              graph_intent: session.graph.intent,
+              credential_specs: session.graph.credential_specs ?? {},
               node,
               attempt,
               workspace_path: workspace.workspace_path,
@@ -1739,7 +2337,11 @@ async function executeNode(
       }
 
       result = await options.executors.checkpoint({
+        run_root: options.run_root,
         run_id: session.run_id,
+        graph_id: session.graph.graph_id,
+        graph_intent: session.graph.intent,
+        credential_specs: session.graph.credential_specs ?? {},
         node,
         attempt,
         workspace_path: workspace.workspace_path,
@@ -1753,7 +2355,11 @@ async function executeNode(
     } else {
       result = options.executors?.agent
         ? await options.executors.agent({
+            run_root: options.run_root,
             run_id: session.run_id,
+            graph_id: session.graph.graph_id,
+            graph_intent: session.graph.intent,
+            credential_specs: session.graph.credential_specs ?? {},
             node,
             attempt,
             workspace_path: workspace.workspace_path,
@@ -1764,7 +2370,11 @@ async function executeNode(
           })
         : await defaultAgentExecutor(
             {
+              run_root: options.run_root,
               run_id: session.run_id,
+              graph_id: session.graph.graph_id,
+              graph_intent: session.graph.intent,
+              credential_specs: session.graph.credential_specs ?? {},
               node,
               attempt,
               workspace_path: workspace.workspace_path,
@@ -1865,7 +2475,7 @@ async function executeNode(
         : artifactRepairMetadata;
     const failureArtifacts: Record<string, string> | undefined = executionPaths
       ? {
-          result_json: await writeFailureResultArtifact(attempt, message),
+          ...(await writeFailureAutomaticArtifacts(node, attempt, message)),
           ...(automaticArtifacts ?? {})
         }
       : undefined;
@@ -2440,14 +3050,46 @@ async function finalizeRun(
     });
   }
 
-  const state = await writeTerminalRunSummary(session, writer, events);
+  let state = buildRuntimeStateSnapshot(session);
+  let attempts = await readRunExecutionAttempts(writer.run_root);
+  let deliveryManifest: DeliveryPackageManifest | undefined;
+
+  try {
+    deliveryManifest = await writeDeliveryPackage({
+      run_root: writer.run_root,
+      graph: session.graph,
+      state,
+      attempts,
+      events,
+      interventions: await readSupervisorInterventions(writer.run_root)
+    });
+    await emitEvent(session, writer, runOwner, events, onEvent, "delivery.package.completed", {
+      manifest_path: deliveryManifest.manifest_path,
+      reviewer_guide: deliveryManifest.sections.reviewer_guide,
+      intervention_count: deliveryManifest.intervention_count,
+      failed_check_count: deliveryManifest.failed_check_count
+    });
+    state = buildRuntimeStateSnapshot(session);
+    attempts = await readRunExecutionAttempts(writer.run_root);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    session.status = "failed";
+    state = await syncRunArtifacts(session, writer, runOwner);
+    await emitEvent(session, writer, runOwner, events, onEvent, "run.completed", {
+      outcome: "failed",
+      duration_ms,
+      reason: `delivery_package_failed: ${message}`
+    });
+  }
+
+  state = await writeTerminalRunSummary(session, writer, events, deliveryManifest);
 
   return {
     run_id: session.run_id,
     run_root: writer.run_root,
-    outcome,
+    outcome: session.status,
     state,
-    attempts: await readRunExecutionAttempts(writer.run_root),
+    attempts,
     events: await readRunEvents(writer.run_root)
   };
 }
@@ -2831,6 +3473,28 @@ async function executeRunLoop(
     }
 
     if (outcome === "failed" && !hasFailureContinuation(topology, node)) {
+      const retried = await handleFailedNodeWithSupervisor({
+        runOptions: options,
+        session,
+        writer,
+        runOwner,
+        events,
+        readyQueue,
+        node,
+        attempt,
+        result,
+        readyNode: {
+          compiled_id: node.compiled_id,
+          deps_satisfied: computeReadyDeps(session, topology, node, attempt.iteration_index) ?? [],
+          repeat_scope_id: attempt.repeat_scope_id,
+          iteration_index: attempt.iteration_index
+        }
+      });
+
+      if (retried) {
+        continue;
+      }
+
       session.status = "failed";
       await markPendingNodesBlocked(session, writer, runOwner, events, options.on_event, node);
       cancelActiveExecutions(activeExecutions);

@@ -1,280 +1,143 @@
 # Agentflow
 
-Agentflow is a graph-native execution engine for coding tasks.
+Agentflow is a supervised execution runtime for long-running coding work.
 
-It turns coding work into an explicit executable graph instead of burying the workflow inside one long prompt. A graph can inspect a repository, gather evidence in parallel, merge those findings into a plan, iterate on implementation, and gate completion with automated or operator review. The CLI validates that graph, compiles it into a runtime plan, runs it against local repositories, and leaves durable artifacts behind so the work can be inspected or resumed.
+Teams author a readable graph, hand meaningful work to external agent harnesses such as Codex CLI or Cursor CLI, and get back a durable run record with supervisor interventions, validation evidence, and a review-ready delivery package.
 
-The key boundary is simple: you author readable control flow, but the runtime executes compiled primitive nodes only.
+Agentflow is built for local repositories and local control. The authored DAG remains the human-facing source of intent; the runtime compiles it into primitive executable nodes; the supervisor keeps execution bounded and inspectable; the delivery package makes the final change understandable.
+
+## Core Promise
+
+- Humans define the goal, scope, constraints, acceptance criteria, and approval boundaries.
+- Agent nodes own substantial engineering outcomes rather than tiny prompt handoffs.
+- Deterministic and semantic checks feed the supervisor with structured evidence.
+- Supervisor interventions are policy-bounded, durable, and visible in `interventions.jsonl`.
+- Terminal runs write a `delivery/` package that helps humans review the work quickly.
+
+## Runtime Model
 
 ```mermaid
-flowchart TB
-    kickoff["sequence\ntriage coding task"] --> inspect["agent\ninspect repo and choose surfaces"]
-    inspect --> gather["parallel\ngather evidence"]
-    gather --> readCode["agent\ntrace relevant codepaths"]
-    gather --> reproduce["exec\nrun tests, builds, search"]
-    readCode --> plan["agent\nsynthesize findings into a plan"]
-    reproduce --> plan
-
-    subgraph repair["repeat until ready"]
-        direction TB
-        implement["agent\napply revision"] --> validate["exec\nrun targeted validation"]
-        validate --> quality["check\ndeterministic or AI gate"]
-        quality --> review["checkpoint\noperator review when needed"]
-    end
-
-    plan --> implement
-    quality -- fail --> implement
-    review -- revise --> implement
-    review -- pass --> artifacts["artifacts\noutputs, logs, summary"]
+flowchart LR
+  authored["Authored graph\nintent, nodes, tools"] --> compiled["Compiled contract\nprimitive nodes and flow"]
+  compiled --> runtime["Supervised execution\nCodex CLI, Cursor CLI, checks"]
+  runtime --> artifacts["Run artifacts\nevents, attempts, interventions"]
+  artifacts --> delivery["Delivery package\nreviewer guide and evidence"]
 ```
 
-Managed patterns such as `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change` are authored shortcuts that lower into generated primitive subgraphs rather than introducing a separate runtime model. Plugins use the same idea for team-owned workflows: a graph can reference a Git-resolved plugin workflow, resolve it into a lockfile, and compile it into normal Agentflow nodes.
+The graph is not a free-form planner. It is an accountable execution contract. The supervisor can retry, repair missing artifacts, rebuild context, refresh workspaces, run diagnostics, request semantic evaluation, and escalate. It cannot silently change the task, widen authority, bypass checks, or hide its interventions.
 
-The point is not just that Agentflow has several node kinds. It is that those node kinds compose into deliberate coding graphs: fan out when evidence gathering is independent, fan in when a plan needs synthesis, and use repair loops only where implementation and validation genuinely need iteration.
+## Where To Start
 
-## Why Agentflow
+- Humans evaluating Agentflow should read this README, then `docs/SCOPE.md` for the product boundary and `docs/ARCHITECTURE.md` for the runtime model.
+- Graph authors should use the minimal graph below, `docs/examples/graphs/`, and `docs/OPERATIONS.md` for validation and launch.
+- Plugin authors should use `docs/PLUGINS.md` for local or Git plugin packages, workflow exports, tool exports, and secure auth.
+- Operators reviewing a terminal run should start with `delivery/manifest.json` and the human entrypoints it lists.
+- Agents authoring or debugging Agentflow should use the packaged `agentflow` and `agentflow-plugins` skills under `skills/`.
 
-- Author the orchestration as data, not as hidden control flow inside a single agent prompt.
-- Keep execution local-first with explicit repos, workspaces, harnesses, and checks.
-- Compile author-friendly control flow into a runtime contract you can inspect before launch.
-- Preserve a durable run trail with summaries, logs, artifacts, events, and projected state.
-- Reuse structured managed patterns when you want higher-level scaffolds without inventing new runtime node kinds.
-- Reuse Git-distributed plugin workflows when a team needs its own managed graph, context files, scripts, and local conventions.
-
-## Node Model
-
-| Category | Kinds | Runtime behavior |
-| --- | --- | --- |
-| Primitive executable nodes | `agent`, `exec`, `check`, `checkpoint` | Executed directly by the runtime |
-| Authoring containers | `sequence`, `parallel`, `repeat` | Authoring-only control flow, compiled into primitive execution edges and scopes |
-| Managed patterns | `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, `pattern_review_change` | Authored as structured intent, lowered into generated primitive subgraphs |
-| Plugin workflows | `plugin` | Git-resolved reusable managed workflows, lowered into generated primitive subgraphs before compile |
-
-## Release Boundary
-
-- The runtime executes compiled graphs only.
-- Plugins package reusable managed workflows and optional CLI tools. They are the only way to ship reusable agent tools, and they do not add runtime sidecars, new primitive node kinds, or harness-specific runtime semantics.
-- Agentflow does not support remote devboxes or native non-CLI harnesses in this release.
-
-## Requirements
-
-- Node `>= 20.7.0`
-- npm
-- Git
-- Cursor CLI if you want to run agent nodes with the `cursor-cli` harness
-- Codex CLI if you want to use `codex-cli` profiles or AI `check` nodes (Codex-only in this release)
-
-Install dependencies:
+## Install And Build
 
 ```bash
 npm install
+npm run typecheck
+npm test
+npm run build
 ```
 
-Optional but useful:
+Run from source:
 
 ```bash
-npm run setup:link
+npm run graph-help
+npm run validate -- --graph agentflow.graph.json
+npm run run -- --graph agentflow.graph.json
 ```
 
-That lets you use `agentflow ...` directly from the shell.
+After `npm run build`, the packaged CLI entries are `dist/cli/index.js` and `dist/af/index.js`. The npm binary names are:
 
-If you are working from source without linking, use the corresponding `npm run ... -- ...` wrapper commands instead. The docs below use the installed CLI form by default.
-
-## 2-Minute Quick Start
-
-Inspect the graph contract:
-
-```bash
-agentflow graph-help
-```
-
-Validate the included showcase graph:
-
-```bash
-agentflow validate --graph docs/examples/graphs/feature-showcase.json
-```
-
-Inspect the compiled contract the runtime will execute:
-
-```bash
-agentflow validate --graph docs/examples/graphs/feature-showcase.json --show-compiled
-```
-
-Run it:
-
-```bash
-agentflow run --graph docs/examples/graphs/feature-showcase.json
-```
-
-List recorded runs and inspect the most recent one:
-
-```bash
-agentflow runs list --graph docs/examples/graphs/feature-showcase.json
-agentflow inspect ./.agentflow/runs/<run-id>
-```
-
-## Included Example Graphs
-
-See also: [`docs/examples/graphs/README.md`](docs/examples/graphs/README.md)
-
-- [`docs/examples/graphs/fake-plan.json`](docs/examples/graphs/fake-plan.json)
-  Small read-only sample with primitive `agent` and deterministic `check` nodes.
-- [`docs/examples/graphs/feature-showcase.json`](docs/examples/graphs/feature-showcase.json)
-  Broader sample that demonstrates profiles, `sequence`, `parallel`, `repeat`, primitive `agent`, `exec`, deterministic `check`, AI `check`, context flow, declared artifacts, and a repair loop that uses `latest_failed` and `latest_passed`.
-- [`docs/examples/graphs/pattern-deep-research-showcase.json`](docs/examples/graphs/pattern-deep-research-showcase.json)
-  Managed pattern sample showing `pattern_deep_research` plus a downstream handoff node that consumes the published research package.
-- [`docs/examples/graphs/pattern-spec-design-showcase.json`](docs/examples/graphs/pattern-spec-design-showcase.json)
-  Managed pattern sample showing `pattern_spec_design` plus a downstream handoff node that consumes the published design package.
-- [`docs/examples/graphs/pattern-generate-evaluate-fix-showcase.json`](docs/examples/graphs/pattern-generate-evaluate-fix-showcase.json)
-  Managed pattern sample showing the `pattern_spec_design -> pattern_generate_evaluate_fix` path plus a downstream handoff node that consumes the published change package.
-- [`docs/examples/graphs/pattern-review-change-showcase.json`](docs/examples/graphs/pattern-review-change-showcase.json)
-  Managed pattern sample showing the `pattern_generate_evaluate_fix -> pattern_review_change` path plus a downstream handoff node that consumes the final published review package.
-
-## Packaged Skills
-
-This repo also ships one installable agent skill under [`skills/`](skills/README.md) in a `skills.sh` compatible layout.
-
-Included skill:
-
-- [`agentflow`](skills/agentflow/SKILL.md)
-  A compact router skill with packaged references for graph authoring, managed workflows, local eval suites, run debugging, graph contracts, CLI validation, failure semantics, and examples.
-
-Once the repo is published, supporting agents can install the package with:
-
-```bash
-npx skills add <owner/repo>
-```
-
-Important path rule:
-
-- `--graph` resolves from the shell current working directory.
-- `$.repos.*.path` resolves relative to the graph file directory.
-
-That is why the sample graphs under `docs/examples/graphs/` use `"path": "../../.."` for the main repo.
-
-## Mental Model
-
-### Graph
-
-A graph is the authored execution document.
-
-Top-level fields:
-
-- `version`
-- `graph_id`
-- `repos`
-- `plugins`
-- `defaults`
-- `profiles`
-- `graph`
-
-Current graph version:
-
-```json
-{ "version": "1" }
-```
-
-### Profile
-
-A profile is a reusable execution-policy bundle.
-
-Profiles typically define:
-
-- `harness`
-- `model`
-- `reasoning_effort`
-  Supported values: `none`, `low`, `medium`, `high`, `xhigh`
-- `sandbox`
-- `skip_git_repo_check`
-- `env_files`
-- `timeout_sec`
-- `input_rules`
-- `artifact_repair`
-
-Profiles do not define graph structure.
-
-### Node kinds
-
-Four authoring categories matter:
-
-- Primitive executable nodes: `agent`, `exec`, `check`, `checkpoint`
-- Authoring containers: `sequence`, `parallel`, `repeat`
-- Managed patterns: `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, `pattern_review_change`
-- Plugin workflows: `plugin`
-
-Only primitive executable nodes run directly. Containers compile into control-flow edges and scopes. Managed patterns and plugin workflows compile into generated primitive subgraphs.
-
-`pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change` are structured managed patterns that compile into generated primitive subgraphs. Start with [`docs/MANAGED_PATTERNS.md`](docs/MANAGED_PATTERNS.md). The pattern-specific contracts live in [`docs/PATTERN_DEEP_RESEARCH.md`](docs/PATTERN_DEEP_RESEARCH.md), [`docs/PATTERN_SPEC_DESIGN.md`](docs/PATTERN_SPEC_DESIGN.md), [`docs/PATTERN_GENERATE_EVALUATE_FIX.md`](docs/PATTERN_GENERATE_EVALUATE_FIX.md), and [`docs/PATTERN_REVIEW_CHANGE.md`](docs/PATTERN_REVIEW_CHANGE.md).
-
-Plugin workflows are team-authored managed graphs distributed through Git. A graph declares plugin sources at the top level, resolves them with `agentflow plugin resolve --graph`, and then uses `type = "plugin"` nodes with `uses = "alias/workflow"`. See [`docs/PLUGINS.md`](docs/PLUGINS.md).
-
-Managed patterns share a common base:
-
-- `brief`
-- `context_policy`
-- `strategy`
-- optional `runtime`
-
-Pattern-specific fields vary:
-
-- `pattern_deep_research`: optional `approval_policy`, `delivery`
-- `pattern_spec_design`: optional `approval_policy`, `delivery`
-- `pattern_generate_evaluate_fix`: `task_source`, `evaluation`
-- `pattern_review_change`: `review_source`, `delivery`
-
-They are autonomous by default. Only `pattern_deep_research` and `pattern_spec_design` expose `approval_policy`, and a checkpoint appears only when that field explicitly enables one.
-
-Managed pattern summary:
-
-- `pattern_deep_research`
-  Plans and runs research, consolidates evidence, and publishes a sourced report plus machine-readable packet.
-- `pattern_spec_design`
-  Turns a repo-grounded problem statement into an implementation-ready design package plus machine-readable packet.
-- `pattern_generate_evaluate_fix`
-  Consumes a prepared task packet, generates or fixes a change, evaluates concrete commands independently, and optionally loops until the hard gate passes.
-- `pattern_review_change`
-  Reviews a structured change source with a reviewer panel and publishes a calibrated review summary plus machine-readable bundle.
-
-For pattern fields, authored examples, and compiled phases:
-
-- [`docs/MANAGED_PATTERNS.md`](docs/MANAGED_PATTERNS.md)
-- [`docs/PATTERN_DEEP_RESEARCH.md`](docs/PATTERN_DEEP_RESEARCH.md)
-- [`docs/PATTERN_SPEC_DESIGN.md`](docs/PATTERN_SPEC_DESIGN.md)
-- [`docs/PATTERN_GENERATE_EVALUATE_FIX.md`](docs/PATTERN_GENERATE_EVALUATE_FIX.md)
-- [`docs/PATTERN_REVIEW_CHANGE.md`](docs/PATTERN_REVIEW_CHANGE.md)
-
-Authoring contract references:
-
-- Primitive nodes, shared executable fields, containers, `context`, and `artifacts`: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- `pattern_deep_research`: [`docs/PATTERN_DEEP_RESEARCH.md`](docs/PATTERN_DEEP_RESEARCH.md)
-- `pattern_spec_design`: [`docs/PATTERN_SPEC_DESIGN.md`](docs/PATTERN_SPEC_DESIGN.md)
-- `pattern_generate_evaluate_fix`: [`docs/PATTERN_GENERATE_EVALUATE_FIX.md`](docs/PATTERN_GENERATE_EVALUATE_FIX.md)
-- `pattern_review_change`: [`docs/PATTERN_REVIEW_CHANGE.md`](docs/PATTERN_REVIEW_CHANGE.md)
-
-### Runs root
-
-Every run writes durable artifacts under a runs root.
-
-Resolution rules:
-
-- If `--runs-root <path>` is passed, CLI commands use it.
-- Else if `AGENTFLOW_RUNS_ROOT` is set, it must be an absolute path and CLI commands use it.
-- Otherwise Agentflow uses `<graph-dir>/.agentflow/runs`, where `<graph-dir>` is the directory containing the resolved `--graph` file.
+- `agentflow`: human/operator CLI for validation, launch, resume, inspection, plugin resolution, and auth.
+- `af`: agent-facing runtime CLI. Agentflow injects this into every agent node on `PATH`; humans normally do not use it outside a running node.
 
 ## Minimal Graph
 
 ```json
 {
   "version": "1",
-  "graph_id": "example-graph",
+  "graph_id": "ship-reviewable-change",
+  "intent": {
+    "goal": "Implement a focused change and leave it ready for review.",
+    "scope": {
+      "paths": ["src/**", "tests/**"],
+      "out_of_scope": ["unrelated refactors"]
+    },
+    "constraints": ["Keep the graph outcome-oriented."],
+    "acceptance_criteria": [
+      "The change is implemented.",
+      "Tests or checks provide evidence.",
+      "The reviewer guide explains risk and review order."
+    ],
+    "approval_boundaries": [
+      "Do not expand repository scope without an explicit checkpoint."
+    ]
+  },
   "repos": {
     "main": { "path": "." }
   },
+  "defaults": {
+    "launch_profile": "codex",
+    "workspace_backend": "worktree"
+  },
   "profiles": {
-    "default": {
+    "codex": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "workspace-write",
+      "timeout_sec": 1800
+    },
+    "cursor": {
       "harness": "cursor-cli",
-      "sandbox": "read-only"
+      "model": "auto",
+      "reasoning_effort": "medium",
+      "sandbox": "workspace-write",
+      "timeout_sec": 1800
     }
+  },
+  "supervision": {
+    "allowed_actions": [
+      "retry_node",
+      "repair_artifact",
+      "rebuild_context",
+      "refresh_workspace",
+      "run_diagnostic",
+      "semantic_evaluation",
+      "escalate"
+    ],
+    "retry_budget": {
+      "max_total_interventions": 8,
+      "max_node_retries": 2,
+      "max_artifact_repairs": 2,
+      "max_context_rebuilds": 1,
+      "max_workspace_refreshes": 1,
+      "max_diagnostic_runs": 3,
+      "max_semantic_evaluations": 2
+    },
+    "drift_detection": { "score_threshold": 0.8 },
+    "escalation": {
+      "require_human_on_policy_breach": true,
+      "require_human_on_scope_drift": true
+    }
+  },
+  "delivery": {
+    "required_sections": [
+      "task_brief",
+      "implementation_summary",
+      "grouped_change_map",
+      "decision_log",
+      "evaluation_ledger",
+      "reviewer_guide",
+      "risk_notes",
+      "follow_up_items",
+      "intervention_trace"
+    ]
   },
   "graph": {
     "type": "sequence",
@@ -282,358 +145,183 @@ Resolution rules:
     "steps": [
       {
         "type": "agent",
-        "id": "inspect_repo",
+        "id": "implement_slice",
         "repo": "main",
-        "prompt": "Inspect the repository and summarize what it does."
+        "profile": "codex",
+        "goal": "Implement the scoped change and leave reviewer-ready evidence.",
+        "acceptance_criteria": [
+          "Targeted validation is run or clearly explained.",
+          "The handoff names changed files, validation, and residual risks."
+        ],
+        "prompt": "Implement the scoped change. Run targeted validation. Write a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md.",
+        "context": [
+          {
+            "name": "goal",
+            "from": "text",
+            "text": "Keep the change focused and reviewable."
+          }
+        ],
+        "artifacts": {
+          "change_summary": {
+            "from": "output_dir",
+            "path": "change-summary.md",
+            "description": "Implementation summary written by the agent."
+          }
+        }
       },
       {
         "type": "check",
-        "id": "verify_package",
+        "id": "test",
         "repo": "main",
         "check_kind": "deterministic",
-        "command": "node",
-        "args": ["-e", "console.log(JSON.stringify({passed:true}))"],
-        "pass_if": {
-          "json_path": "$.passed",
-          "equals": true
-        }
+        "command": "npm",
+        "args": ["test"]
       }
     ]
   }
 }
 ```
 
-## CLI Commands
+Switching from Codex CLI to Cursor CLI is a graph-level launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, tool contract, artifact contract, output directory, and timeout budget. `model: "auto"` means "do not pass an explicit model flag to the selected harness"; it does not select or fall back between Codex CLI and Cursor CLI.
 
-### `graph-help`
+## Graph Contract
 
-Prints the current graph contract, including `prerequisites.checks`, soft verification via `on_failure`, repeat selector guidance, and a minimal example.
+Top-level fields:
+
+- `version`: currently `"1"`.
+- `graph_id`: stable id used for run roots and inspection.
+- `intent`: required goal, optional scope, constraints, acceptance criteria, and approval boundaries.
+- `repos`: local repository aliases. Defaults to `{ "main": { "path": "." } }`.
+- `defaults`: launch profile and workspace backend.
+- `profiles`: harness, model, sandbox, env, timeout, and input budget settings. Omit `model` or set `"model": "auto"` to let the installed Codex CLI or Cursor CLI choose its default model.
+- `supervision`: allowed supervisor actions, retry budgets, drift threshold, and escalation rules.
+- `delivery`: required terminal delivery sections.
+- `plugins`, `tools`, and `tool_config`: plugin-bundled CLI capabilities and non-secret tool options.
+- `prerequisites`: local launch checks for files, commands, env vars, and repos.
+- `graph`: `sequence`, `parallel`, `repeat`, executable nodes, or managed patterns.
+
+Executable nodes are `agent`, `exec`, `check`, and `checkpoint`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change`.
+
+Top-level `repos` are operational bindings: they say which local checkouts exist and where nodes execute. Top-level `profiles` are operational authority: they say which harness, sandbox, timeout, model, and tool policy a node receives. `intent.scope` is governance for humans and supervisor decisions; it can name paths or out-of-scope areas, but it is not a replacement for `repos`, `profiles`, or per-node `repo` and `profile`.
+
+Agent nodes may use `prompt`, `goal`, or both. `goal` and `acceptance_criteria` are stable node intent and are rendered into Codex CLI and Cursor CLI prompts, supervisor repair prompts, and resume fingerprints. `prompt` can carry detailed instructions; when omitted, the node goal becomes the executable prompt.
+
+Nodes exchange material through:
+
+- `context`: text, workspace files, workspace globs, and named prior artifacts.
+- `artifacts`: named durable files produced from `$AGENTFLOW_OUTPUT_DIR` or the workspace.
+
+Reserved automatic artifacts are `agent_response`, `verification_json`, `stdout`, and `stderr`.
+
+## Authoring Workflow
+
+1. Write the top-level `intent.goal` and `acceptance_criteria` first.
+2. Declare `repos` and `profiles` so execution authority is visible.
+3. Add outcome-sized nodes with node-level `goal`, `acceptance_criteria`, and named `artifacts`.
+4. Add deterministic checks for hard gates and AI checks only when semantic judgment is needed.
+5. Add plugin tools only when a team capability should be available to the agent; keep secret values in plugin `credentials`.
+6. Run `agentflow plugin resolve --graph <path>` when plugins are declared.
+7. Run `agentflow validate --graph <path>`, then `--run-ready`, then `--show-compiled`.
+8. Launch only after the compiled graph shows the expected harnesses, sandboxes, tools, context, artifacts, supervision, and delivery contract.
+
+## Supervisor
+
+The runtime records every supervisor action as an event and as a JSONL ledger entry. The current implementation supports classifier-driven retries and escalation plus the artifact repair path:
+
+- `retry_node`
+- `repair_artifact`
+- `rebuild_context`
+- `refresh_workspace`
+- `run_diagnostic`
+- `semantic_evaluation`
+- `escalate`
+
+Budget fields are `max_total_interventions`, `max_node_retries`, `max_artifact_repairs`, `max_context_rebuilds`, `max_workspace_refreshes`, `max_diagnostic_runs`, and `max_semantic_evaluations`.
+
+If a completed agent misses a declared artifact, validation has already accepted the graph shape, so the runtime treats it as a repairable execution problem. When a harness is available, the supervisor runs an intent-aware repair intervention under the same node authority. When exactly one missing artifact is a human-readable text handoff and no harness is available, the supervisor can synthesize it from the captured `agent_response`; machine-readable artifacts and multi-artifact contracts are not synthesized from prose.
+
+## Plugin Tools
+
+Plugins expose team capabilities as ordinary CLI tools. Each tool declares:
+
+- `capability`: `context`, `verification`, `mutation`, or `reporting`.
+- `impact`: `read`, `write`, `external`, or `secret`.
+
+Agentflow resolves plugin tools, places generated launch wrappers on the node `PATH`, and renders the tool contract into the harness prompt without exposing configured values. Non-secret `tool_config` values and secret credentials are resolved only inside the generated launcher when it starts the plugin tool subprocess. Secret-impact tools must declare plugin `credentials`; `agentflow auth` stores secret fields in macOS Keychain and requires `--value-stdin` for secret values. Credential and tool-config values are not exported into the Codex CLI or Cursor CLI harness environment. Mutation tools and write-impact tools are not exposed to read-only agents. External-impact tools require exact approval tokens in `intent.approval_boundaries`, such as `tool:babysit-poll` or `external:babysit/poll`. The tool name `af` is reserved for Agentflow's runtime CLI.
+
+## Agent Runtime CLI
+
+Every agent node receives a generated `af` command on `PATH`. It is a local runtime broker backed by files under the run root; it does not expose credentials to the harness. The command gives agents a concrete way to inspect their contract, publish artifacts, communicate through durable messages, request supervisor help, and spawn focused helpers.
+
+Core commands available inside an agent node:
+
+- `af status`: show run id, agent id, node id, workspace, output directory, required artifacts, and granted tools.
+- `af tools list`: show plugin tools granted to this node.
+- `af context show`: show the materialized context manifest and packet path.
+- `af artifact list|write|read`: inspect and publish declared artifacts.
+- `af channel post|read`: write and read typed run-level messages.
+- `af agents list`, `af inbox read`, `af send`, `af parent post`: inspect agent sessions and use durable mailboxes.
+- `af spawn --brief ... --artifact ... --wait`: request a supervised helper with selected skills/tools and wait for its artifact.
+- `af supervisor request --action ... --reason ...`: record a bounded supervisor request.
+
+Messages are coordination; artifacts are the durable handoff. If an agent has ended, other agents should read its artifacts or ask the supervisor to resume or replace it rather than assuming it can receive live messages.
+
+## Delivery Package
+
+Every terminal run writes:
+
+- `summary.md`
+- `events.jsonl`
+- `interventions.jsonl`
+- `delivery/manifest.json`
+- `delivery/task-brief.md`
+- `delivery/implementation-summary.md`
+- `delivery/grouped-change-map.json`
+- `delivery/decision-log.md`
+- `delivery/evaluation-ledger.json`
+- `delivery/reviewer-guide.md`
+- `delivery/risk-notes.md`
+- `delivery/follow-up-items.md`
+- `delivery/intervention-trace.json`
+
+The delivery package is intentionally higher signal than raw logs. `delivery/manifest.json` separates human entrypoints (`reviewer-guide.md`, `task-brief.md`, `implementation-summary.md`, `risk-notes.md`, `follow-up-items.md`) from evidence files (`grouped-change-map.json`, `evaluation-ledger.json`, `decision-log.md`, `intervention-trace.json`) and internal runtime artifacts (`state.json`, `events.jsonl`, `interventions.jsonl`, node attempt directories). Humans should start with the delivery files; resume and low-level debugging use the internal artifacts.
+
+## CLI Workflow
 
 ```bash
 agentflow graph-help
+agentflow plugin resolve --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow run --graph agentflow.graph.json
+agentflow inspect <run-root>
+agentflow resume --run-root <run-root>
+agentflow runs list --graph agentflow.graph.json
 ```
 
-### `validate`
+`validate --show-compiled` is the best way to confirm managed patterns, plugin workflows, context references, tool policy, and harness selection before launch.
 
-Validates and compiles a graph without running it. In an interactive terminal, success output is intentionally compact. Structured JSON remains available when stdout is redirected or when callers use the API-level command result.
+## Validation
+
+Use the same checks before merging runtime or contract changes:
 
 ```bash
-agentflow validate --graph ./agentflow.graph.json
-```
-
-Use this first whenever you author or change a graph, especially when managed patterns or run prerequisites are involved.
-
-Add run-ready validation when you need proof that the local machine can launch the graph:
-
-```bash
-agentflow validate --graph ./agentflow.graph.json --run-ready
-```
-
-`--run-ready` checks runtime dependencies such as `git`, referenced repo worktrees, executable node commands, and harness binaries for agent and AI-check nodes.
-
-Add `--show-compiled` when you want to inspect the compiled graph contract the runtime will execute, including lowered managed nodes, resolved profiles, compiled ids, repeat wiring, and dependency edges:
-
-```bash
-agentflow validate --graph ./agentflow.graph.json --show-compiled
-```
-
-### `plugin resolve`
-
-Resolves Git-distributed plugin workflows declared by a graph and writes `agentflow.plugins.lock.json` next to that graph.
-
-```bash
-agentflow plugin resolve --graph ./agentflow.graph.json
-```
-
-Run this before `validate` or `run` when a graph has a top-level `plugins` block. Normal validation and execution use the lockfile and local cache; they do not clone plugins implicitly.
-
-### `run`
-
-Compiles and executes the graph and writes a new run root with artifacts.
-
-```bash
-agentflow run --graph ./agentflow.graph.json
-```
-
-Useful forms:
-
-```bash
-agentflow run --graph ./agentflow.graph.json
-agentflow run --graph ./agentflow.graph.json --label demo
-```
-
-During a run, `agent` and AI `check` nodes append live harness output into each execution's `logs/stdout.log` and `logs/stderr.log` under the run root. The final completed logs still remain the authoritative artifact.
-
-While the graph is running, the CLI also prints human-readable progress to `stderr`. When `stdout` is a terminal, `run` prints a compact terminal summary with the final status and duration. When `stdout` is redirected or piped, the final machine-readable JSON result remains on `stdout`, so `agentflow run ... | jq` still works.
-
-Cancel behavior:
-
-- Press `Ctrl-C` in the terminal that launched the run.
-- The runtime performs cleanup and writes durable canceled state.
-- `summary.md`, `state.json`, and `events.jsonl` reflect that state from artifacts.
-
-### `resume`
-
-Resumes a failed or canceled run root in place.
-
-```bash
-agentflow resume --run-root ./.agentflow/runs/<run-id>
-```
-
-You can also pick the most recent failed or canceled run for a graph automatically:
-
-```bash
-agentflow resume --graph ./agentflow.graph.json --latest
-```
-
-Resume behavior:
-
-- recompiles from the original graph path with the current Agentflow build
-- preserves only nodes whose latest durable outcome is `passed` and whose compiled contract is unchanged
-- restarts failed, canceled, blocked, skipped, and pending nodes
-- restarts repeat scopes from iteration 1 when they were unfinished or their compiled contract changed
-- does not treat live workspace file changes as a resume invalidation boundary
-- appends new events and attempts into the same run root
-
-Like `run`, `resume` prints live graph progress to `stderr`, shows a compact terminal summary on interactive `stdout`, and keeps its final structured JSON result on `stdout` when redirected or piped.
-
-This is meant for interrupted or failed runs where you want to keep unchanged passed work while still picking up graph or workflow fixes.
-
-### `apply`
-
-Applies captured workspace changes from a run back to a git repo.
-
-```bash
-agentflow apply --run-root ./.agentflow/runs/<run-id>
-agentflow apply --run-root ./.agentflow/runs/<run-id> --commit-message "Apply Agentflow run changes"
-```
-
-`apply` reads `workspace-changes/<repo>/diff.patch` and defaults to the source repo path recorded in `execution_manifest.json`. If a run touched multiple repos, pass `--repo <alias>`. The command refuses to apply onto an already-dirty target unless `--allow-dirty` is passed.
-
-### `runs list`
-
-Lists recorded runs for a graph under the resolved runs root.
-
-```bash
-agentflow runs list --graph ./agentflow.graph.json
-```
-
-The output includes each run's id, status, started/finished timestamps, workspace backend, launch profile, and the absolute run-root path. Pass `--runs-root <path>` to enumerate runs from an explicit location.
-
-### `inspect`
-
-Surfaces a one-shot summary of a single run root, including terminal status, total nodes, attempt counts, the run summary path, and short stderr tails for each failed node.
-
-```bash
-agentflow inspect ./.agentflow/runs/<run-id>
-```
-
-Use this together with `runs list` to triage failures quickly without reading raw artifact files by hand.
-
-## Context and Artifacts
-
-Executable nodes use one `context` array for all material passed into the node.
-
-Think of the workspace and artifacts as separate channels:
-
-- The workspace is where source changes happen while the graph runs.
-- Artifacts are durable named files that later nodes may consume.
-- Downstream nodes do not implicitly receive arbitrary files from a prior execution directory. They receive only their authored `context`, including explicitly named artifacts.
-
-Supported context sources:
-
-- `text`
-- `workspace_file`
-- `workspace_glob`
-- `ref` (artifact path: `"node.artifact"` or bare `"node"` for the canonical artifact of that node kind)
-
-Context resolution rules:
-
-- authored `workspace_file` and `workspace_glob` context resolves from the live repo workspace when the node starts
-- missing live files, empty globs, first-iteration repeat history, and `ref` artifact context items marked `if_available: true` become explicit omitted context instead of crashing the run
-- executable nodes inside `repeat.body` receive automatic `repeat_history` context after iteration 1, built from completed prior iterations, retry causes, prior agent responses, failed check excerpts, checkpoint feedback, and artifact inventories
-- path escapes and unknown repo aliases are still hard errors
-- `run` and `resume` only resolve repo aliases the compiled graph actually references
-- `workspace_glob` uses a deterministic sorted filesystem walk with root `.gitignore` and `.ignore` filtering plus hard exclusions for `.git`, `.agentflow`, and `node_modules`
-- `workspace_glob.max_files` is a local cap applied after deterministic sorting
-- bare `ref` strings resolve per node kind: `agent` -> `agent_response`, `exec` -> `stdout`, deterministic and AI `check` -> `result_json`
-- the `name` of a context item defaults to the rightmost `.` segment of `ref` when `name` is omitted; explicit `name` always wins, and conflicting names across `ref` items inside a single node fail validation
-- artifact keys cannot contain `.` because `.` is reserved as the `ref` path separator
-
-Nodes publish durable named material with an `artifacts` map.
-
-Supported declared artifact sources:
-
-- `output_dir`, for files the executor or harness writes under `AGENTFLOW_OUTPUT_DIR`
-- `workspace`, for files copied from the node's repo workspace
-
-Automatic artifacts are always reserved:
-
-- `agent_response`, the final agent response for every `agent` node, persisted as `artifacts/agent-response.md`
-- `result_json`, the normalized executable result, persisted as `artifacts/result.json`
-
-Every graph-consumable artifact lives under the node execution's `artifacts/` directory. The root `execution.json`, root `result.json`, `context/`, and `logs/` files remain inspectable runtime bookkeeping.
-
-Agent harness prompts explain that the model is executing one node in a graph, list declared artifacts with their descriptions, and tell the model that the final response is captured as `agent_response`. Use that final response for concise narrative handoff: outcome, work completed, artifacts produced, validation run, and notes for the next node or human. Do not use it as a substitute for a declared machine-readable artifact.
-
-Agent nodes also have a bounded artifact-repair policy. If an agent reports success but misses a declared artifact, Agentflow can invoke the same harness again in the same workspace with the same context and output directory, using a focused repair prompt that asks the agent to put the missing artifact at the declared path. The policy is `artifact_repair.max_attempts`, defaults to `1` for agent nodes, can be set on a profile or an individual agent node, and can be disabled with `0`. Keep the default on for declared handoffs; it avoids brittle failures caused by an agent doing the work but writing the handoff to the wrong place.
-
-Downstream nodes consume only named artifacts through `context` items with a `ref` field. Old public data-flow fields `inputs`, `context_from`, and `outputs` are invalid graph syntax.
-
-Example handoff:
-
-```json
-{
-  "type": "agent",
-  "id": "design",
-  "prompt": "Write the implementation packet.",
-  "context": [
-    { "name": "goal", "from": "text", "text": "Keep the CLI contract stable." },
-    { "name": "architecture", "from": "workspace_file", "path": "docs/ARCHITECTURE.md" }
-  ],
-  "artifacts": {
-    "design_packet": {
-      "from": "output_dir",
-      "path": "design-packet.json",
-      "description": "Structured JSON implementation packet for downstream implementation nodes."
-    }
-  }
-}
-```
-
-```json
-{
-  "type": "agent",
-  "id": "implement",
-  "prompt": "Implement the approved packet.",
-  "context": [
-    {
-      "ref": "design.design_packet",
-      "attempt": "latest_passed"
-    }
-  ]
-}
-```
-
-During execution, agents and commands also receive:
-
-- `AGENTFLOW_WORKSPACE`, the repo workspace where source edits happen
-- `AGENTFLOW_OUTPUT_DIR`, the execution artifact directory where declared `output_dir` artifacts should be written
-- `AGENTFLOW_CONTEXT_PACKET`, the resolved context packet
-- `AGENTFLOW_CONTEXT_MANIFEST`, the human-readable context manifest
-
-`exec` nodes and deterministic `check` nodes also receive one `AGENTFLOW_CONTEXT_<UPPER_NAME>` environment variable per resolved context item, pointing at the materialized file inside the run root. This lets simple commands consume named context without parsing the full packet.
-
-Agents see plugin-declared CLI tools on their `PATH`. Tools are discovered through an auto-rendered prompt section, run inside the agent sandbox, and receive their own `AGENTFLOW_TOOL_*` configuration variables. There is no built-in tool surface and no inline graph- or agent-defined tools: plugins are the only way to ship reusable agent CLIs. See [`docs/PLUGINS.md`](docs/PLUGINS.md).
-
-## Local Command Environment
-
-`exec` nodes and deterministic `check` nodes run with a narrow baseline process environment. They do not inherit arbitrary shell variables by default.
-
-Use `env_files` to load repo-local dotenv-style files for local commands:
-
-```json
-{
-  "profiles": {
-    "zero_mock": {
-      "env_files": [".env.development"]
-    }
-  }
-}
-```
-
-Rules:
-
-- profile-level `env_files` apply to `exec` and deterministic `check` nodes using that profile
-- node-level `env_files` replaces the profile list for that node
-- paths resolve relative to the node workspace root and must stay inside it
-- files load in order, and inline node `env` overrides loaded values
-- declared env files are required; missing files fail the command node hard
-- AI checks and agent harnesses do not consume `env_files`
-
-## Harness Notes
-
-`harness` is required on every `agent` and AI `check` node. It is environment-dependent and is not auto-defaulted, so validation fails if a node cannot resolve a harness through its profile chain.
-
-### Cursor
-
-- Works for `agent` nodes via the `cursor-cli` harness
-- Read-only agent flows run without `--force`, so they stay in proposal mode
-- Does not support AI `check` nodes in this release
-
-### Codex
-
-- Works for `agent` nodes via the `codex-cli` harness
-- Works for AI `check` nodes (currently the only supported AI check harness because strict read-only evaluator guarantees are enforced there)
-- If `reasoning_effort` is omitted, Agentflow resolves Codex to `medium`
-- Set profile `skip_git_repo_check: true` only when a Codex-backed node must run from an intentional non-git workspace root
-
-## Validation and Confidence
-
-Use these in increasing order of proof.
-
-### Basic graph checks
-
-```bash
-agentflow validate --graph docs/examples/graphs/fake-plan.json
-agentflow validate --graph docs/examples/graphs/feature-showcase.json --show-compiled
-```
-
-### Package-level smoke gate
-
-```bash
+npm run typecheck
+npm test
+npm run build
 npm run validate:smoke
 ```
 
-This runs:
+`validate:smoke` also verifies the built CLI against the repeat fixture across Codex CLI and Cursor CLI adapters with both `inplace` and `worktree` workspace backends.
 
-- canonical docs check
-- `typecheck`
-- `test`
-- `build`
-- built CLI smoke over the shipped graph fixture
-- built run smoke with mock Codex and Cursor harnesses
+## Repository Map
 
-### Stronger deterministic confidence
-
-```bash
-npm run validate:confidence
-```
-
-This adds:
-
-- coverage policy enforcement
-
-### Real harness smoke
-
-```bash
-npm run validate:real-harness
-```
-
-This is optional and machine-local. It only runs for harness binaries detected on your machine.
-
-## Day-One Commands
-
-If you only want the commands most people need first:
-
-```bash
-npm install
-npm run setup:link
-agentflow graph-help
-agentflow validate --graph docs/examples/graphs/feature-showcase.json
-agentflow validate --graph docs/examples/graphs/feature-showcase.json --show-compiled
-agentflow run --graph docs/examples/graphs/feature-showcase.json
-agentflow runs list --graph docs/examples/graphs/feature-showcase.json
-agentflow inspect ./.agentflow/runs/<run-id>
-agentflow resume --graph docs/examples/graphs/feature-showcase.json --latest
-```
-
-## Where To Read Next
-
-You should not need anything else to get started. If you want deeper detail after that:
-
-- [`docs/SCOPE.md`](docs/SCOPE.md): supported product surface
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): compiler, runtime, and artifact contracts
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md): runs-root behavior, lifecycle, cleanup, and operator runbook
-- [`docs/MANAGED_PATTERNS.md`](docs/MANAGED_PATTERNS.md): managed pattern model and shipped workflow nodes
-- [`docs/PLUGINS.md`](docs/PLUGINS.md): Git-resolved plugin workflow packaging, consumption, and plugin-bundled CLI tools (runtime env, conflict rules, and authoring contract)
+- `src/graph/`: authored schema, normalization, validation, and compilation.
+- `src/runtime/`: scheduler, execution engine, harness calls, supervision, context resolution, delivery packaging.
+- `src/supervisor/`: policy, failure classification, and intervention actions.
+- `src/plugins/`: Git or local plugin workflows, plugin tool exports, and credential metadata.
+- `src/artifacts/`: run-root paths, event projection, reconciliation, and readers.
+- `src/cli/`: CLI commands and progress rendering.
+- `docs/`: supervised v1 product and operator documentation.
+- `skills/`: installable Agentflow skills aligned to the supervised v1 contract.

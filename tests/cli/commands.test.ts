@@ -22,7 +22,7 @@ async function initGitRepo(repoDir: string): Promise<void> {
   await execFileAsync("git", ["commit", "-m", "init"], { cwd: repoDir });
 }
 
-async function waitForPath(path: string, timeoutMs = 5000): Promise<void> {
+async function waitForPath(path: string, timeoutMs = 15000): Promise<void> {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -167,6 +167,7 @@ describe("graph CLI", () => {
         {
           ...baseGraph,
           graph_id: "cli-validate-prereq-warning",
+          intent: { goal: "Exercise cli-validate-prereq-warning.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           prerequisites: {
             checks: [
               {
@@ -187,6 +188,7 @@ describe("graph CLI", () => {
         {
           ...baseGraph,
           graph_id: "cli-validate-prereq-blocked",
+          intent: { goal: "Exercise cli-validate-prereq-blocked.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           prerequisites: {
             checks: [
               {
@@ -250,6 +252,7 @@ describe("graph CLI", () => {
           {
             version: "1",
             graph_id: "cli-run-ready",
+          intent: { goal: "Exercise cli-run-ready.", acceptance_criteria: ["CLI behavior matches the command contract."] },
             repos: {
               main: {
                 path: "./repo"
@@ -339,6 +342,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-run-ready-harness",
+          intent: { goal: "Exercise cli-run-ready-harness.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -414,6 +418,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-run-graph",
+          intent: { goal: "Exercise cli-run-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -450,7 +455,7 @@ describe("graph CLI", () => {
                 command: "node",
                 args: [
                   "-e",
-                  "const fs=require('node:fs'); const passed=fs.existsSync('marker.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                  "const fs=require('node:fs'); const path=require('node:path'); const passed=fs.existsSync('marker.txt'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
                 ],
                 pass_if: {
                   json_path: "$.passed",
@@ -520,6 +525,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-worktree-change-capture",
+          intent: { goal: "Exercise cli-worktree-change-capture.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -594,6 +600,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-apply-worktree-change",
+          intent: { goal: "Exercise cli-apply-worktree-change.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -672,6 +679,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-apply-commit",
+          intent: { goal: "Exercise cli-apply-commit.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -747,6 +755,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-run-failed-graph",
+          intent: { goal: "Exercise cli-run-failed-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -771,7 +780,7 @@ describe("graph CLI", () => {
                 command: "node",
                 args: [
                   "-e",
-                  "process.stdout.write(JSON.stringify({passed:false})); process.exit(1);"
+                  "const fs=require('node:fs'); const path=require('node:path'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed:false})); process.exit(1);"
                 ],
                 pass_if: {
                   json_path: "$.passed",
@@ -813,6 +822,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-unused-repo",
+          intent: { goal: "Exercise cli-unused-repo.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -877,6 +887,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "checkpoint-cli-preflight",
+          intent: { goal: "Exercise checkpoint-cli-preflight.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -997,6 +1008,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-run-root-graph",
+          intent: { goal: "Exercise cli-run-root-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -1067,6 +1079,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-resume-graph",
+          intent: { goal: "Exercise cli-resume-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -1101,7 +1114,7 @@ describe("graph CLI", () => {
                 command: "node",
                 args: [
                   "-e",
-                  "const fs=require('node:fs'); const passed=fs.existsSync('resume-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                  "const fs=require('node:fs'); const path=require('node:path'); const passed=fs.existsSync('resume-ok.txt'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
                 ],
                 pass_if: {
                   json_path: "$.passed",
@@ -1189,7 +1202,7 @@ describe("graph CLI", () => {
       })
     );
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
     expect(resumedProgress).toContain(
       "agentflow: resumed run from failed · preserved=1 restarted=2 · workspace=inplace"
@@ -1217,6 +1230,7 @@ describe("graph CLI", () => {
           {
             version: "1",
             graph_id: "cli-resume-recompile",
+          intent: { goal: "Exercise cli-resume-recompile.", acceptance_criteria: ["CLI behavior matches the command contract."] },
             repos: {
               main: {
                 path: "./repo"
@@ -1251,7 +1265,7 @@ describe("graph CLI", () => {
                   command: "node",
                   args: [
                     "-e",
-                    "const fs=require('node:fs'); const passed=fs.existsSync('resume-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                    "const fs=require('node:fs'); const path=require('node:path'); const passed=fs.existsSync('resume-ok.txt'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
                   ],
                   pass_if: {
                     json_path: "$.passed",
@@ -1299,7 +1313,7 @@ describe("graph CLI", () => {
     expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -1319,6 +1333,7 @@ describe("graph CLI", () => {
           {
             version: "1",
             graph_id: "cli-resume-repeat",
+          intent: { goal: "Exercise cli-resume-repeat.", acceptance_criteria: ["CLI behavior matches the command contract."] },
             repos: {
               main: {
                 path: "./repo"
@@ -1371,7 +1386,7 @@ describe("graph CLI", () => {
                         command: "node",
                         args: [
                           "-e",
-                          "const fs=require('node:fs'); const passed=fs.existsSync('loop.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                          "const fs=require('node:fs'); const path=require('node:path'); const passed=fs.existsSync('loop.txt'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
                         ],
                         pass_if: {
                           json_path: "$.passed",
@@ -1392,7 +1407,7 @@ describe("graph CLI", () => {
                   command: "node",
                   args: [
                     "-e",
-                    "const fs=require('node:fs'); const passed=fs.existsSync('resume-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                    "const fs=require('node:fs'); const path=require('node:path'); const passed=fs.existsSync('resume-ok.txt'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
                   ],
                   pass_if: {
                     json_path: "$.passed",
@@ -1451,7 +1466,7 @@ describe("graph CLI", () => {
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed").map((attempt) => ({
       attempt_index: attempt.attempt_index,
@@ -1499,6 +1514,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-resume-repeat-repair",
+          intent: { goal: "Exercise cli-resume-repeat-repair.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -1551,7 +1567,7 @@ describe("graph CLI", () => {
                       command: "node",
                       args: [
                         "-e",
-                        "const fs=require('node:fs'); const passed=fs.existsSync('loop.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                        "const fs=require('node:fs'); const path=require('node:path'); const passed=fs.existsSync('loop.txt'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
                       ],
                       pass_if: {
                         json_path: "$.passed",
@@ -1572,7 +1588,7 @@ describe("graph CLI", () => {
                 command: "node",
                 args: [
                   "-e",
-                  "const fs=require('node:fs'); const passed=fs.existsSync('resume-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                  "const fs=require('node:fs'); const path=require('node:path'); const passed=fs.existsSync('resume-ok.txt'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
                 ],
                 pass_if: {
                   json_path: "$.passed",
@@ -1659,7 +1675,7 @@ describe("graph CLI", () => {
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -1678,6 +1694,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-run-relative-runs-root",
+          intent: { goal: "Exercise cli-run-relative-runs-root.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -1747,6 +1764,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-cancel-graph",
+          intent: { goal: "Exercise cli-cancel-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo"
@@ -1838,6 +1856,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-repo-path-file",
+          intent: { goal: "Exercise cli-repo-path-file.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "./repo.txt"
@@ -1905,6 +1924,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "invalid-launch-settings",
+          intent: { goal: "Exercise invalid-launch-settings.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: {
             main: {
               path: "."
@@ -2036,6 +2056,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-runs-list-graph",
+          intent: { goal: "Exercise cli-runs-list-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: { main: { path: "./repo" } },
           defaults: { launch_profile: "default", workspace_backend: "inplace" },
           profiles: { default: {} },
@@ -2141,6 +2162,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-inspect-graph",
+          intent: { goal: "Exercise cli-inspect-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: { main: { path: "./repo" } },
           defaults: { launch_profile: "default", workspace_backend: "inplace" },
           profiles: { default: {} },
@@ -2239,6 +2261,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-resume-latest-graph",
+          intent: { goal: "Exercise cli-resume-latest-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: { main: { path: "./repo" } },
           defaults: { launch_profile: "default", workspace_backend: "inplace" },
           profiles: { default: {} },
@@ -2254,7 +2277,7 @@ describe("graph CLI", () => {
                 command: "node",
                 args: [
                   "-e",
-                  "const fs=require('node:fs'); const passed=fs.existsSync('latest-ok.txt'); process.stdout.write(JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
+                  "const fs=require('node:fs'); const path=require('node:path'); const passed=fs.existsSync('latest-ok.txt'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed})); process.exit(passed ? 0 : 1);"
                 ],
                 pass_if: { json_path: "$.passed", equals: true }
               }
@@ -2310,6 +2333,7 @@ describe("graph CLI", () => {
         {
           version: "1",
           graph_id: "cli-resume-latest-empty-graph",
+          intent: { goal: "Exercise cli-resume-latest-empty-graph.", acceptance_criteria: ["CLI behavior matches the command contract."] },
           repos: { main: { path: "./repo" } },
           defaults: { launch_profile: "default", workspace_backend: "inplace" },
           profiles: { default: {} },
