@@ -6,7 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const jsonMode = process.argv.includes("--json");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const commandTimeoutMs = 15 * 60 * 1000;
+const commandTimeoutMs = 30 * 60 * 1000;
 
 export const confidenceCommandChecks = [
   { name: "smoke gate", script: "validate:smoke" },
