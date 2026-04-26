@@ -365,7 +365,7 @@ describe("graph CLI", () => {
                 type: "agent",
                 id: "implement",
                 repo: "main",
-                prompt: "Implement the change."
+                goal: "Implement the change."
               }
             ]
           }
@@ -939,7 +939,7 @@ describe("graph CLI", () => {
                       type: "checkpoint",
                       id: "review",
                       repo: "main",
-                      prompt: "Review the artifact.",
+                      goal: "Review the artifact.",
                       review_from: {
                         node: "draft",
                         artifact: "draft_spec"

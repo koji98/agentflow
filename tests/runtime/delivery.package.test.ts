@@ -35,19 +35,6 @@ const graph: CompiledGraph = {
       require_human_on_scope_drift: true
     }
   },
-  delivery: {
-    required_sections: [
-      "task_brief",
-      "implementation_summary",
-      "grouped_change_map",
-      "decision_log",
-      "evaluation_ledger",
-      "reviewer_guide",
-      "risk_notes",
-      "follow_up_items",
-      "intervention_trace"
-    ]
-  },
   launch: {
     launch_profile: "default",
     workspace_backend: "inplace"
@@ -83,7 +70,7 @@ const graph: CompiledGraph = {
           description: "Human reviewer handoff produced by the implement node."
         }
       },
-      prompt: "Implement checkout timeout handling.",
+      goal: "Implement checkout timeout handling.",
       tools: []
     }
   ],

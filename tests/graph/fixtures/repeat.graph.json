@@ -42,7 +42,7 @@
         "type": "agent",
         "id": "understand",
         "repo": "main",
-        "prompt": "Inspect the checkout timeout flow.",
+        "goal": "Inspect the checkout timeout flow.",
         "artifacts": {
           "notes": {
             "from": "output_dir",
@@ -90,7 +90,7 @@
               "type": "agent",
               "id": "implement_fix",
               "repo": "main",
-              "prompt": "Implement the timeout fix.",
+              "goal": "Implement the timeout fix.",
               "context": [
                 {
                   "name": "sources",
@@ -109,7 +109,7 @@
               "id": "repair_notes",
               "repo": "main",
               "profile": "review",
-              "prompt": "Review the fix and tighten any rough edges.",
+              "goal": "Review the fix and tighten any rough edges.",
               "context": [
                 {
                   "ref": "implement_fix.agent_response",
@@ -147,7 +147,7 @@
         "type": "agent",
         "id": "handoff",
         "repo": "main",
-        "prompt": "Summarize the fix and remaining risks.",
+        "goal": "Summarize the fix and remaining risks.",
         "context": [
           {
             "ref": "verify_fix.verification",

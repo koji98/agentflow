@@ -18,7 +18,7 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 2. Keep workflow config small and schema-backed.
 3. Expose public artifacts from one `publish_node`.
 4. Declare tool `capability` and `impact`.
-5. Use plugin `credentials` plus `agentflow auth` for secret-impact tools; keep `tool_config` for non-secret options only.
+5. Use plugin `credentials` plus `agentflow auth` for secret-impact tools; keep inline `tools[].config` for non-secret options only.
 6. Keep tool config schemas string-only and reject secrets such as tokens, passwords, or API keys.
 7. Run `agentflow plugin resolve --graph <path>`.
 8. Run `agentflow validate --graph <path> --run-ready`.
@@ -29,6 +29,6 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 - Plugins do not create new primitive node kinds.
 - Plugin workflows lower into normal graph nodes.
 - Plugin tools are ordinary CLIs launched inside the node sandbox.
-- Plugin `tool_config` is for non-secret options only; use credential scopes for anything sensitive.
+- Plugin `tools[].config` is for non-secret options only; use credential scopes for anything sensitive.
 - Secret credential values are resolved only by generated tool launchers and are not exported into Codex or Cursor harness environments.
 - Downstream graph nodes consume only public plugin node artifacts.

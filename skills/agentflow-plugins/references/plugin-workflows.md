@@ -158,11 +158,11 @@ Policy:
 
 - read-only agents do not receive mutation tools or write-impact tools
 - secret-impact tools require plugin-declared `credentials`
-- external-impact tools require exact tokens in `intent.approval_boundaries`, such as `tool:<callable>` or `external:<plugin>/<tool>`
+- external-impact tools are approved by declaring them in the graph or agent node
 - tools share the node sandbox and timeout
 - credential values are configured through `agentflow auth`, stored in macOS Keychain for secret fields, and injected only into the plugin tool subprocess
-- `tool_config` values are not exported into the agent harness environment; the generated launcher resolves them only for the plugin tool subprocess
-- `tool_config` accepts non-secret string options only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
+- inline `tools[].config` values are not exported into the agent harness environment; the generated launcher resolves them only for the plugin tool subprocess
+- inline `tools[].config` accepts non-secret string options only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
 
 ## Validate
 

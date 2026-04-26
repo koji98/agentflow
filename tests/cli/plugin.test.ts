@@ -91,7 +91,7 @@ async function createFixturePlugin(root: string): Promise<string> {
             type: "agent",
             id: "inspect",
             repo: "main",
-            prompt: "Inspect the repo and use {{config.message}}.",
+            goal: "Inspect the repo and use {{config.message}}.",
             context: [
               {
                 name: "guidance",
@@ -111,7 +111,7 @@ async function createFixturePlugin(root: string): Promise<string> {
             type: "agent",
             id: "publish",
             repo: "main",
-            prompt: "Publish the public packet.",
+            goal: "Publish the public packet.",
             context: [
               {
                 ref: "inspect.notes",
@@ -354,7 +354,7 @@ describe("plugin workflows", () => {
                 type: "agent",
                 id: "consume",
                 repo: "main",
-                prompt: "Consume the plugin packet.",
+                goal: "Consume the plugin packet.",
                 context: [
                   {
                     ref: "handoff.packet",
@@ -639,7 +639,7 @@ describe("plugin workflows", () => {
                 type: "agent",
                 id: "consume",
                 repo: "main",
-                prompt: "Consume the plugin packet.",
+                goal: "Consume the plugin packet.",
                 context: [
                   {
                     ref: "handoff.packet",

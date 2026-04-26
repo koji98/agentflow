@@ -149,7 +149,7 @@ describe("pattern review change", () => {
         {
           type: "agent",
           id: "upstream_evaluation",
-          prompt: "Write evaluation ledger output.",
+          goal: "Write evaluation ledger output.",
           artifacts: {
             evaluation_ledger: {
               from: "output_dir",
@@ -237,7 +237,7 @@ describe("pattern review change", () => {
         {
           type: "agent",
           id: "handoff",
-          prompt: "Summarize the review result for an engineer.",
+          goal: "Summarize the review result for an engineer.",
           context: [
             {
               ref: "review_managed_nodes.agent_response",

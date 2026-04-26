@@ -47,7 +47,7 @@ describe("supervisor actions", () => {
           description: "Markdown handoff."
         }
       },
-      prompt: "Write a handoff.",
+      goal: "Write a handoff.",
       tools: []
     };
     const attempt: RuntimeNodeAttempt = {

@@ -24,11 +24,9 @@ Common top-level fields:
 - `defaults`
 - `profiles`
 - `supervision`
-- `delivery`
 - `prerequisites`
 - `plugins`
 - `tools`
-- `tool_config`
 - `config_schema`
 - `config`
 
@@ -37,19 +35,14 @@ Common top-level fields:
 ```json
 {
   "goal": "Ship checkout timeout handling.",
-  "scope": {
-    "paths": ["src/checkout/**", "tests/checkout/**"],
-    "out_of_scope": ["billing provider migration"]
-  },
-  "constraints": ["Keep the public API stable."],
-  "acceptance_criteria": ["Timeouts return a typed error.", "Tests cover retry behavior."],
-  "approval_boundaries": ["Do not modify payment provider configuration."]
+  "constraints": ["Keep the public API stable.", "Avoid unrelated refactors."],
+  "acceptance_criteria": ["Timeouts return a typed error.", "Tests cover retry behavior."]
 }
 ```
 
 The normalizer rejects unknown graph fields and invalid enum values. Missing `intent.goal` is a hard schema error.
 
-Repository and profile authority stay explicit outside `intent`. Top-level `repos` bind aliases to local checkouts, top-level `profiles` define harness authority, and executable nodes choose `repo` and `profile`. `intent.scope` is the human governance layer used for review and supervision, not an execution binding.
+Repository and profile authority stay explicit outside `intent`. Top-level `repos` bind aliases to local checkouts, top-level `profiles` define harness authority, and executable nodes choose `repo` and `profile`. Scope boundaries and out-of-scope notes are authored as plain `constraints`.
 
 ## Compilation
 
@@ -61,7 +54,7 @@ Compilation lowers the authored graph into primitive runtime structures:
 - resolved profiles and workspace policy
 - resolved plugin workflow expansions
 - resolved plugin tool contracts
-- delivery and supervision policy copied into the compiled graph
+- supervision policy copied into the compiled graph
 - graph and node intent copied into executable nodes
 
 Managed patterns compile into generated primitive subgraphs. The public authored node id remains the handoff boundary; generated internal ids are implementation details visible through `validate --show-compiled`.
@@ -214,9 +207,9 @@ Policy rules:
 
 - read-only agents can receive read or external-impact tools, but never mutation tools or write-impact tools
 - `impact: "secret"` requires plugin-declared `credentials`
-- `impact: "external"` requires exact approval tokens in `intent.approval_boundaries`
+- `impact: "external"` is approved by declaring the tool in the graph or agent node
 - tool wrappers run inside the same node sandbox and timeout
-- credential values and non-secret `tool_config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
+- credential values and non-secret inline `tools[].config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
 
 ## Delivery Package
 

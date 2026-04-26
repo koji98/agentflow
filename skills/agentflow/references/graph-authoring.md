@@ -6,13 +6,11 @@ Author graphs as supervised execution contracts. The graph should say what the t
 
 - Add `intent.goal`.
 - Add `repos` and `profiles` explicitly; use per-node `repo` and `profile` when work spans authority boundaries.
-- Add `intent.scope` paths and out-of-scope areas when governance matters.
 - Add `intent.acceptance_criteria`.
-- Add `intent.approval_boundaries` for high-impact work or external tools.
+- Add `intent.constraints` for scope boundaries, out-of-scope areas, and high-impact limits.
 - Keep nodes outcome-sized and give substantial agent nodes `goal` plus `acceptance_criteria`.
 - Give every downstream handoff a named artifact.
 - Set `supervision.retry_budget` to match risk.
-- Set `delivery.required_sections` for serious runs.
 - Use `workspace_backend: "worktree"` for code-writing work unless the operator intentionally wants in-place execution.
 
 ## Authoring Loop
@@ -23,7 +21,7 @@ Author graphs as supervised execution contracts. The graph should say what the t
 4. Resolve plugins when `plugins` is present.
 5. Run `agentflow validate --graph <path>`.
 6. Run `agentflow validate --graph <path> --run-ready` before launch on this machine.
-7. Run `agentflow validate --graph <path> --show-compiled` and inspect profiles, tools, context, artifacts, managed expansions, supervision, and delivery.
+7. Run `agentflow validate --graph <path> --show-compiled` and inspect profiles, tools, context, artifacts, managed expansions, and supervision.
 
 ## Node Sizing
 
@@ -57,7 +55,7 @@ Example:
     "The changed files are summarized.",
     "Validation and residual risks are named."
   ],
-  "prompt": "Implement the scoped change and write $AGENTFLOW_OUTPUT_DIR/change-summary.md.",
+  "constraints": ["Write $AGENTFLOW_OUTPUT_DIR/change-summary.md before finishing."],
   "context": [
     { "name": "task", "from": "text", "text": "Keep the change focused." }
   ],

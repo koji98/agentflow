@@ -42,7 +42,7 @@ const baseNode: CompiledExecutableNode = {
   },
   context: [],
   declared_artifacts: {},
-  prompt: "Do work.",
+  goal: "Do work.",
   tools: []
 };
 
@@ -154,7 +154,7 @@ describe("supervisor failure classifier", () => {
       kind: "check",
       check_kind: "ai",
       on_failure: "fail",
-      prompt: "Evaluate scope."
+      goal: "Evaluate scope."
     };
 
     expect(

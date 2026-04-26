@@ -30,7 +30,7 @@ A good node owns a meaningful outcome:
 - implement an accountable slice and publish change evidence
 - review a change package and publish calibrated findings
 
-The graph must preserve human control through `intent.approval_boundaries`, checkpoints when human input is required, and explicit tool impact policy.
+The graph must preserve human control through clear `constraints`, checkpoints when human input is required, and explicit tool impact policy.
 
 ## Runtime Bar
 

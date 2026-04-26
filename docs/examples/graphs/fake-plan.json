@@ -32,7 +32,10 @@
         "type": "agent",
         "id": "inspect_repo",
         "repo": "main",
-        "prompt": "Inspect this repository and summarize what it does, the main CLI commands a developer would use first, and any obvious operator-facing constraints. Do not modify files.",
+        "goal": "Inspect this repository and summarize what it does, the main CLI commands a developer would use first, and any obvious operator-facing constraints.",
+        "constraints": [
+          "Do not modify files."
+        ],
         "context": [
           {
             "name": "readme",
@@ -70,7 +73,10 @@
         "type": "agent",
         "id": "summarize_findings",
         "repo": "main",
-        "prompt": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing. Do not modify files.",
+        "goal": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing.",
+        "constraints": [
+          "Do not modify files."
+        ],
         "context": [
           {
             "ref": "inspect_repo.agent_response",
@@ -86,21 +92,11 @@
   },
   "intent": {
     "goal": "Inspect the Agentflow repository and return a concise, reviewable handoff.",
-    "scope": {
-      "repos": [
-        "main"
-      ],
-      "paths": [
-        "README.md",
-        "package.json",
-        "docs/SCOPE.md"
-      ]
-    },
     "acceptance_criteria": [
       "Repository purpose and first validation commands are clear.",
       "The run remains read-only."
     ],
-    "approval_boundaries": [
+    "constraints": [
       "Do not modify repository files."
     ]
   },
@@ -129,18 +125,5 @@
       "require_human_on_policy_breach": true,
       "require_human_on_scope_drift": true
     }
-  },
-  "delivery": {
-    "required_sections": [
-      "task_brief",
-      "implementation_summary",
-      "grouped_change_map",
-      "decision_log",
-      "evaluation_ledger",
-      "reviewer_guide",
-      "risk_notes",
-      "follow_up_items",
-      "intervention_trace"
-    ]
   }
 }

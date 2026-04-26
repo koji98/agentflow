@@ -42,7 +42,7 @@ describe("runtime checks", () => {
       repo_alias: "main",
       repo_path: process.cwd(),
       model: "gpt-5-judge",
-      prompt: "Evaluate the patch.",
+      node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
       context_packet_path: "/tmp/context/packet.json",
       context_manifest_path: "/tmp/context/manifest.md",
@@ -60,8 +60,9 @@ describe("runtime checks", () => {
         artifacts: {}
       })
     );
-    expect(capturedInvocation?.prompt).toContain("Evaluate the patch.");
-    expect(capturedInvocation?.prompt).toContain("Be strict.");
+    const renderedPrompt = renderHarnessPrompt(capturedInvocation!);
+    expect(renderedPrompt).toContain("Evaluate the patch.");
+    expect(renderedPrompt).toContain("Be strict.");
     expect(result.evaluation).toEqual(
       expect.objectContaining({
         passed: false,
@@ -79,7 +80,7 @@ describe("runtime checks", () => {
       repoPath: "/tmp/workspace",
       sandbox: "read-only",
       model: "gpt-5-judge",
-      prompt: "Evaluate the change.",
+      nodeGoal: "Evaluate the change.",
       contextPacketPath: "/tmp/context/packet.json",
       contextManifestPath: "/tmp/context/manifest.md",
       contextManifest: "# Context Manifest: exec-render\n\n- Materialized items: `2`\n",
@@ -124,7 +125,7 @@ describe("runtime checks", () => {
       repo_alias: "main",
       repo_path: process.cwd(),
       model: "gpt-5-judge",
-      prompt: "Evaluate the patch.",
+      node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
       context_packet_path: "/tmp/context/packet.json",
       context_manifest_path: "/tmp/context/manifest.md",
@@ -155,7 +156,7 @@ describe("runtime checks", () => {
       repo_alias: "main",
       repo_path: process.cwd(),
       model: "gpt-5-judge",
-      prompt: "Evaluate the patch.",
+      node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
       context_packet_path: "/tmp/context/packet.json",
       context_manifest_path: "/tmp/context/manifest.md",
@@ -195,7 +196,7 @@ describe("runtime checks", () => {
       repo_alias: "main",
       repo_path: process.cwd(),
       model: "gpt-5-judge",
-      prompt: "Evaluate the patch.",
+      node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
       context_packet_path: "/tmp/context/packet.json",
       context_manifest_path: "/tmp/context/manifest.md",
@@ -232,7 +233,7 @@ describe("runtime checks", () => {
       repo_alias: "main",
       repo_path: process.cwd(),
       model: "gpt-5-judge",
-      prompt: "Evaluate the patch.",
+      node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
       context_packet_path: "/tmp/context/packet.json",
       context_manifest_path: "/tmp/context/manifest.md",
@@ -265,7 +266,7 @@ describe("runtime checks", () => {
       repo_alias: "main",
       repo_path: process.cwd(),
       model: "gpt-5-judge",
-      prompt: "Evaluate the patch.",
+      node_goal: "Evaluate the patch.",
       rubric: undefined,
       context_packet_path: "/tmp/context/packet.json",
       context_manifest_path: "/tmp/context/manifest.md",

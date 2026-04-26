@@ -401,7 +401,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
       outputDirArtifact("task_packet", "task-packet.json"),
       workflowBriefOutput()
     ),
-    prompt: buildPreparePrompt(config)
+    goal: buildPreparePrompt(config)
   };
 
   const changeNode: AgentNode = {
@@ -418,7 +418,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
       })
     ],
     artifacts: outputDirArtifact("change_notes", "change-notes.md"),
-    prompt: buildGeneratePrompt(config)
+    goal: buildGeneratePrompt(config)
   };
 
   const aggregateNode: AgentNode = {
@@ -429,7 +429,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     sandbox: "workspace-write",
     context: buildAggregateContext(config, prepareId, changeId),
     artifacts: outputDirArtifact("evaluation_ledger", "evaluation-ledger.json"),
-    prompt: buildAggregatePrompt(config.evaluation)
+    goal: buildAggregatePrompt(config.evaluation)
   };
 
   const gateNode: CheckNode = {
@@ -441,7 +441,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
     context: [
       artifactContext("evaluation_ledger", aggregateId, "evaluation_ledger")
     ],
-    prompt: buildGatePrompt(),
+    goal: buildGatePrompt(),
     rubric: buildGateRubric()
   };
 
@@ -472,7 +472,7 @@ export function buildPatternGenerateEvaluateFix(config: PatternGenerateEvaluateF
       })
     ],
     artifacts: publishedArtifacts,
-    prompt: buildPublishPrompt(config)
+    goal: buildPublishPrompt(config)
   };
 
   const steps: SequenceNode["steps"] = [prepareNode];

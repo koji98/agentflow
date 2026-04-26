@@ -111,8 +111,7 @@ describe("plugin tool compilation", () => {
     const normalized = normalizeAuthoredGraphDocument({
       intent: {
         goal: `Compile tools for ${document.graph_id}.`,
-        acceptance_criteria: ["Plugin tools obey their capability policy."],
-        approval_boundaries: ["External tools must be explicitly approved."]
+        acceptance_criteria: ["Plugin tools obey their capability policy."]
       },
       ...document
     });
@@ -140,7 +139,7 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            prompt: "Draft something."
+            goal: "Draft something."
           }
         ]
       }
@@ -171,7 +170,7 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "watch",
-            prompt: "Watch the PR."
+            goal: "Watch the PR."
           }
         ]
       }
@@ -197,7 +196,7 @@ describe("plugin tool compilation", () => {
     expect(pollTool.source.declared_at).toBe("graph");
   });
 
-  it("supports agent-scoped plugin tool declarations and applies tool_config overrides", () => {
+  it("supports inline graph and agent-scoped plugin tool configuration", () => {
     const document: AuthoredGraphDocument = {
       version: "1",
       graph_id: "tools-plugin-agent-scope",
@@ -207,12 +206,10 @@ describe("plugin tool compilation", () => {
       tools: [
         {
           from_plugin: "babysit",
-          tool: "poll"
+          tool: "poll",
+          config: { mode: "graph" }
         }
       ],
-      tool_config: {
-        "babysit-poll": { mode: "graph" }
-      },
       graph: {
         type: "sequence",
         id: "root",
@@ -220,15 +217,20 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            prompt: "Draft."
+            goal: "Draft."
           },
           {
             type: "agent",
             id: "refine",
-            prompt: "Refine.",
-            tool_config: {
-              "babysit-poll": { mode: "agent", verbosity: "high" }
-            }
+            goal: "Refine.",
+            tools: [
+              {
+                from_plugin: "babysit",
+                tool: "poll",
+                alias: "babysit-poll-refine",
+                config: { mode: "agent", verbosity: "high" }
+              }
+            ]
           }
         ]
       }
@@ -241,13 +243,13 @@ describe("plugin tool compilation", () => {
     const refine = findAgentNode(compilation.compiled_graph!.nodes, "refine");
 
     const draftPoll = draft.tools.find((tool) => tool.callable_name === "babysit-poll");
-    const refinePoll = refine.tools.find((tool) => tool.callable_name === "babysit-poll");
+    const refinePoll = refine.tools.find((tool) => tool.callable_name === "babysit-poll-refine");
 
     expect(draftPoll?.config).toEqual({ mode: "graph" });
     expect(refinePoll?.config).toEqual({ mode: "agent", verbosity: "high" });
   });
 
-  it("validates plugin tool_config schemas and rejects secret-looking config keys", async () => {
+  it("validates inline plugin tool config schemas and rejects secret-looking config keys", async () => {
     resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath, {
       config_schema: {
         type: "object",
@@ -271,35 +273,31 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "use_tool", prompt: "Use tool." }]
+        steps: [{ type: "agent", id: "use_tool", goal: "Use tool." }]
       }
     };
 
     await expect(validateAuthoredGraphDocument({
       ...baseDocument,
-      tool_config: {
-        "babysit-poll": { token: "ghp_should_not_be_here" }
-      }
+      tools: [{ from_plugin: "babysit", tool: "poll", config: { token: "ghp_should_not_be_here" } }]
     }, { resolved_plugins: resolvedPlugins })).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({
-        path: "$.tool_config.babysit-poll.token",
+        path: "$.tools[0].config.token",
         message: expect.stringContaining("looks secret-bearing")
       }),
       expect.objectContaining({
-        path: "$.tool_config.babysit-poll.mode",
+        path: "$.tools[0].config.mode",
         message: expect.stringContaining("missing required")
       }),
       expect.objectContaining({
-        path: "$.tool_config.babysit-poll.token",
+        path: "$.tools[0].config.token",
         message: expect.stringContaining("does not allow")
       })
     ]));
 
     const diagnostics = await validateAuthoredGraphDocument({
       ...baseDocument,
-      tool_config: {
-        "babysit-poll": { mode: "watch" }
-      }
+      tools: [{ from_plugin: "babysit", tool: "poll", config: { mode: "watch" } }]
     }, { resolved_plugins: resolvedPlugins });
     expect(diagnostics).toEqual([]);
   });
@@ -346,7 +344,7 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "watch", prompt: "Watch the PR." }]
+        steps: [{ type: "agent", id: "watch", goal: "Watch the PR." }]
       }
     };
 
@@ -393,7 +391,7 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "inspect", prompt: "Inspect only." }]
+        steps: [{ type: "agent", id: "inspect", goal: "Inspect only." }]
       }
     };
 
@@ -410,7 +408,7 @@ describe("plugin tool compilation", () => {
     expect(inspect.tools.map((tool) => tool.callable_name)).toEqual(["babysit-poll"]);
   });
 
-  it("requires explicit approval boundaries for external-impact tools", async () => {
+  it("treats declaring external-impact tools as approval to expose them", async () => {
     resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath, {
       capability: "reporting",
       impact: "external"
@@ -428,20 +426,15 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "report", prompt: "Report." }]
+        steps: [{ type: "agent", id: "report", goal: "Report." }]
       }
     };
 
     await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
-      .resolves.toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.tools[0]",
-          message: expect.stringContaining("intent.approval_boundaries")
-        })
-      ]));
+      .resolves.toEqual([]);
   });
 
-  it("accepts exact external tool approvals but not prose that merely mentions external", async () => {
+  it("still validates policy around external-impact tools without approval-boundary fields", async () => {
     resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath, {
       capability: "reporting",
       impact: "external"
@@ -451,32 +444,20 @@ describe("plugin tool compilation", () => {
       graph_id: "tools-external-exact-policy",
       repos: { main: { path: "." } },
       defaults: { launch_profile: "default", workspace_backend: "inplace" },
-      profiles: { default: { harness: "codex-cli", sandbox: "read-only" } },
+      profiles: { default: { harness: "codex-cli", sandbox: "workspace-write" } },
       tools: [{ from_plugin: "babysit", tool: "poll" }],
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "report", prompt: "Report." }]
+        steps: [{ type: "agent", id: "report", goal: "Report." }]
       }
     };
-
-    await expect(validateAuthoredGraphDocument({
-      ...baseDocument,
-      intent: {
-        goal: "Report externally.",
-        approval_boundaries: ["Do not perform external side effects without review."]
-      }
-    }, { resolved_plugins: resolvedPlugins })).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        message: expect.stringContaining("must be explicitly approved")
-      })
-    ]));
 
     const diagnostics = await validateAuthoredGraphDocument({
       ...baseDocument,
       intent: {
         goal: "Report externally.",
-        approval_boundaries: ["tool:babysit-poll"]
+        constraints: ["Use the declared reporting tool only for this node."]
       }
     }, { resolved_plugins: resolvedPlugins });
     expect(diagnostics).toEqual([]);
@@ -496,7 +477,7 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "use_tool", prompt: "Use tool." }]
+        steps: [{ type: "agent", id: "use_tool", goal: "Use tool." }]
       }
     };
 
@@ -527,7 +508,7 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "context", prompt: "Read context." }]
+        steps: [{ type: "agent", id: "context", goal: "Read context." }]
       }
     };
 
@@ -560,7 +541,7 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            prompt: "Draft.",
+            goal: "Draft.",
             tools: [
               {
                 from_plugin: "babysit",
@@ -600,7 +581,7 @@ describe("plugin tool compilation", () => {
         type: "sequence",
         id: "root",
         steps: [
-          { type: "agent", id: "draft", prompt: "Draft." }
+          { type: "agent", id: "draft", goal: "Draft." }
         ]
       }
     };
@@ -633,7 +614,7 @@ describe("plugin tool compilation", () => {
         type: "sequence",
         id: "root",
         steps: [
-          { type: "agent", id: "draft", prompt: "Draft." }
+          { type: "agent", id: "draft", goal: "Draft." }
         ]
       }
     };
@@ -997,7 +978,7 @@ describe("formatToolContract", () => {
       repoPath: "/tmp/workspace",
       sandbox: "workspace-write",
       model: undefined,
-      prompt: "Do the work.",
+      nodeGoal: "Do the work.",
       contextPacketPath: "/tmp/context.json",
       contextManifestPath: "/tmp/manifest.md",
       contextManifest: "",
@@ -1039,7 +1020,6 @@ describe("formatToolContract", () => {
       repoPath: "/tmp/workspace",
       sandbox: "workspace-write",
       model: undefined,
-      prompt: "Implement the timeout behavior.",
       graphGoal: "Ship trustworthy checkout timeout handling.",
       graphAcceptanceCriteria: ["Targeted checkout tests pass."],
       nodeGoal: "Write the implementation and reviewer handoff.",
@@ -1056,7 +1036,7 @@ describe("formatToolContract", () => {
     expect(prompt).toContain("## Graph Intent");
     expect(prompt).toContain("Ship trustworthy checkout timeout handling.");
     expect(prompt).toContain("- Targeted checkout tests pass.");
-    expect(prompt).toContain("## Node Intent");
+    expect(prompt).toContain("## Node Task");
     expect(prompt).toContain("Write the implementation and reviewer handoff.");
     expect(prompt).toContain("- Handoff names changed files and validation.");
   });
@@ -1102,8 +1082,7 @@ describe("end-to-end runtime tool wiring", () => {
         repos: { main: { path: "." } },
         defaults: { launch_profile: "default", workspace_backend: "inplace" },
         profiles: { default: { harness: "codex-cli" } },
-        tools: [{ from_plugin: "babysit", tool: "poll" }],
-        tool_config: { "babysit-poll": { mode: "check-pr" } },
+        tools: [{ from_plugin: "babysit", tool: "poll", config: { mode: "check-pr" } }],
         graph: {
           type: "sequence",
           id: "root",
@@ -1111,7 +1090,7 @@ describe("end-to-end runtime tool wiring", () => {
             {
               type: "agent",
               id: "use_tool",
-              prompt: "Run babysit-poll --pr 42 to check the PR."
+              goal: "Run babysit-poll --pr 42 to check the PR."
             }
           ]
         }
@@ -1270,12 +1249,10 @@ describe("end-to-end runtime tool wiring", () => {
         tools: [
           {
             from_plugin: "babysit",
-            tool: "poll"
+            tool: "poll",
+            config: { mode: "test" }
           }
         ],
-        tool_config: {
-          "babysit-poll": { mode: "test" }
-        },
         graph: {
           type: "sequence",
           id: "root",
@@ -1283,7 +1260,7 @@ describe("end-to-end runtime tool wiring", () => {
             {
               type: "agent",
               id: "demo",
-              prompt: "Use babysit-poll."
+              goal: "Use babysit-poll."
             }
           ]
         }

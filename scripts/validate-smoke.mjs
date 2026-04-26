@@ -270,7 +270,7 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
         "The harness adapter launches successfully.",
         "The runtime writes terminal run and delivery artifacts."
       ],
-      approval_boundaries: ["Do not perform external side effects during smoke validation."]
+      constraints: ["Do not perform external side effects during smoke validation."]
     },
     repos: {
       main: {
@@ -297,7 +297,7 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
           type: "agent",
           id: "smoke-agent",
           repo: "main",
-          prompt: `Run the ${harnessKind} smoke test.`
+          goal: `Run the ${harnessKind} smoke test.`
         }
       ]
     }

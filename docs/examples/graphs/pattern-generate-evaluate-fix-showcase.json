@@ -150,7 +150,7 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "prompt": "Summarize the final change package for an operator who needs the outcome, evaluation status, and residual risks.",
+        "goal": "Summarize the final change package for an operator who needs the outcome, evaluation status, and residual risks.",
         "context": [
           {
             "ref": "implement_managed_nodes.agent_response",
@@ -170,20 +170,10 @@
   },
   "intent": {
     "goal": "Implement and evaluate a managed pattern change from a design packet.",
-    "scope": {
-      "repos": [
-        "main"
-      ],
-      "paths": [
-        "src/**",
-        "docs/**",
-        "tests/**"
-      ]
-    },
     "acceptance_criteria": [
       "The change package includes a summary, evaluation ledger, and fix log."
     ],
-    "approval_boundaries": [
+    "constraints": [
       "Only modify files inside the declared paths."
     ]
   },
@@ -212,18 +202,5 @@
       "require_human_on_policy_breach": true,
       "require_human_on_scope_drift": true
     }
-  },
-  "delivery": {
-    "required_sections": [
-      "task_brief",
-      "implementation_summary",
-      "grouped_change_map",
-      "decision_log",
-      "evaluation_ledger",
-      "reviewer_guide",
-      "risk_notes",
-      "follow_up_items",
-      "intervention_trace"
-    ]
   }
 }

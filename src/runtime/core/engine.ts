@@ -1185,6 +1185,13 @@ function buildNodeRuntimeEnv(context: RuntimeNodeExecutorContext<CompiledExecuta
   };
 }
 
+function substituteOptionalTextArray(
+  values: string[] | undefined,
+  tokens: Record<string, string>
+): string[] | undefined {
+  return values?.map((value) => substituteAgentflowTokens(value, tokens));
+}
+
 function summarizeExecVerification(exitCode: number): string {
   return exitCode === 0 ? "Command completed successfully." : `Command exited with code ${exitCode}.`;
 }
@@ -1371,14 +1378,26 @@ async function defaultCheckExecutor(
   }
 
   const aiCheckPromptTokens = buildNodeRuntimeEnv(context);
-  const renderedAiCheckPrompt = substituteAgentflowTokens(
-    context.node.prompt ?? "",
-    aiCheckPromptTokens
-  );
   const renderedAiCheckRubric =
     context.node.rubric !== undefined
       ? substituteAgentflowTokens(context.node.rubric, aiCheckPromptTokens)
       : undefined;
+  const renderedGraphAcceptanceCriteria = substituteOptionalTextArray(
+    context.graph_intent.acceptance_criteria,
+    aiCheckPromptTokens
+  );
+  const renderedGraphConstraints = substituteOptionalTextArray(
+    context.graph_intent.constraints,
+    aiCheckPromptTokens
+  );
+  const renderedNodeAcceptanceCriteria = substituteOptionalTextArray(
+    context.node.acceptance_criteria,
+    aiCheckPromptTokens
+  );
+  const renderedNodeConstraints = substituteOptionalTextArray(
+    context.node.constraints,
+    aiCheckPromptTokens
+  );
 
   const aiCheckResult = await runAiCheck({
     harness: harnesses[harnessName]!,
@@ -1391,15 +1410,13 @@ async function defaultCheckExecutor(
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
     ...(context.node.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
-    prompt: renderedAiCheckPrompt,
     rubric: renderedAiCheckRubric,
-    graph_goal: context.graph_intent.goal,
-    ...(context.graph_intent.acceptance_criteria
-      ? { graph_acceptance_criteria: context.graph_intent.acceptance_criteria }
-      : {}),
-    ...(context.graph_intent.constraints ? { graph_constraints: context.graph_intent.constraints } : {}),
-    ...(context.node.goal ? { node_goal: context.node.goal } : {}),
-    ...(context.node.acceptance_criteria ? { node_acceptance_criteria: context.node.acceptance_criteria } : {}),
+    graph_goal: substituteAgentflowTokens(context.graph_intent.goal, aiCheckPromptTokens),
+    ...(renderedGraphAcceptanceCriteria ? { graph_acceptance_criteria: renderedGraphAcceptanceCriteria } : {}),
+    ...(renderedGraphConstraints ? { graph_constraints: renderedGraphConstraints } : {}),
+    ...(context.node.goal ? { node_goal: substituteAgentflowTokens(context.node.goal, aiCheckPromptTokens) } : {}),
+    ...(renderedNodeAcceptanceCriteria ? { node_acceptance_criteria: renderedNodeAcceptanceCriteria } : {}),
+    ...(renderedNodeConstraints ? { node_constraints: renderedNodeConstraints } : {}),
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
     output_dir: resolveExecutionArtifactsDirectory(context.execution_dir),
@@ -1537,7 +1554,13 @@ async function defaultAgentExecutor(
   });
   const contextManifest = await readContextManifestContent(context.context_manifest_path);
   const promptTokens = buildNodeRuntimeEnv(context);
-  const renderedPrompt = substituteAgentflowTokens(context.node.prompt, promptTokens);
+  const agentGraphAcceptanceCriteria = substituteOptionalTextArray(
+    context.graph_intent.acceptance_criteria,
+    promptTokens
+  );
+  const agentGraphConstraints = substituteOptionalTextArray(context.graph_intent.constraints, promptTokens);
+  const agentNodeAcceptanceCriteria = substituteOptionalTextArray(context.node.acceptance_criteria, promptTokens);
+  const agentNodeConstraints = substituteOptionalTextArray(context.node.constraints, promptTokens);
 
   const harnessResult = await harnesses[harnessName]!.run({
     promptKind: "agent",
@@ -1552,14 +1575,12 @@ async function defaultAgentExecutor(
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoningEffort: context.node.effective_policy.reasoning_effort }
       : {}),
-    prompt: renderedPrompt,
-    graphGoal: context.graph_intent.goal,
-    ...(context.graph_intent.acceptance_criteria
-      ? { graphAcceptanceCriteria: context.graph_intent.acceptance_criteria }
-      : {}),
-    ...(context.graph_intent.constraints ? { graphConstraints: context.graph_intent.constraints } : {}),
-    ...(context.node.goal ? { nodeGoal: context.node.goal } : {}),
-    ...(context.node.acceptance_criteria ? { nodeAcceptanceCriteria: context.node.acceptance_criteria } : {}),
+    graphGoal: substituteAgentflowTokens(context.graph_intent.goal, promptTokens),
+    ...(agentGraphAcceptanceCriteria ? { graphAcceptanceCriteria: agentGraphAcceptanceCriteria } : {}),
+    ...(agentGraphConstraints ? { graphConstraints: agentGraphConstraints } : {}),
+    ...(context.node.goal ? { nodeGoal: substituteAgentflowTokens(context.node.goal, promptTokens) } : {}),
+    ...(agentNodeAcceptanceCriteria ? { nodeAcceptanceCriteria: agentNodeAcceptanceCriteria } : {}),
+    ...(agentNodeConstraints ? { nodeConstraints: agentNodeConstraints } : {}),
     contextPacketPath: context.context_packet_path,
     contextManifestPath: context.context_manifest_path,
     contextManifest,
@@ -1798,7 +1819,7 @@ async function synthesizeMissingArtifactsFromAgentResponse(options: {
         "",
         "## Node Intent",
         "",
-        options.node.goal ?? options.node.prompt,
+        options.node.goal,
         "",
         "## Recovered Artifacts",
         formatMissingArtifactList(options.missingArtifacts)

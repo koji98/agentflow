@@ -412,7 +412,7 @@ async function createSmokeFixture(spec) {
         "The harness launches through the built Agentflow CLI.",
         "The node returns a captured final response."
       ],
-      approval_boundaries: ["Do not perform external side effects during real harness validation."]
+      constraints: ["Do not perform external side effects during real harness validation."]
     },
     repos: {
       main: {
@@ -439,7 +439,7 @@ async function createSmokeFixture(spec) {
           type: "agent",
           id: "real-smoke-agent",
           repo: "main",
-          prompt: buildSmokePrompt(spec.kind)
+          goal: buildSmokePrompt(spec.kind)
         }
       ]
     }

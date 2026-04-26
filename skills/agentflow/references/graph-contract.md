@@ -17,11 +17,9 @@ Common:
 - `defaults`
 - `profiles`
 - `supervision`
-- `delivery`
 - `prerequisites`
 - `plugins`
 - `tools`
-- `tool_config`
 - `config_schema`
 - `config`
 
@@ -30,17 +28,12 @@ Common:
 ```json
 {
   "goal": "Ship checkout timeout handling.",
-  "scope": {
-    "paths": ["src/checkout/**", "tests/checkout/**"],
-    "out_of_scope": ["provider migration"]
-  },
-  "constraints": ["Keep public APIs stable."],
-  "acceptance_criteria": ["Timeouts return typed errors.", "Tests cover retry behavior."],
-  "approval_boundaries": ["Do not modify payment provider configuration."]
+  "constraints": ["Keep public APIs stable.", "Do not modify payment provider configuration."],
+  "acceptance_criteria": ["Timeouts return typed errors.", "Tests cover retry behavior."]
 }
 ```
 
-`intent.goal` is required. Approval boundaries are required when the graph exposes external-impact tools. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; `intent.scope` is governance, not a replacement for executable `repo` or `profile` settings.
+`intent.goal` is required. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; scope and approval boundaries belong in plain `constraints`.
 
 Executable nodes can also carry intent:
 
@@ -55,7 +48,7 @@ Executable nodes can also carry intent:
 }
 ```
 
-Agent nodes require either `prompt` or `goal`. When `prompt` is omitted, `goal` becomes the executable task prompt. Node goals and acceptance criteria are rendered to Codex CLI and Cursor CLI prompts, supervisor repair prompts, and resume fingerprints.
+Agent nodes require `goal`. Node goals, acceptance criteria, and constraints are rendered to Codex CLI and Cursor CLI prompts, supervisor repair prompts, and resume fingerprints.
 
 ## Supervision
 
@@ -83,24 +76,6 @@ Escalation fields:
 
 - `require_human_on_policy_breach`
 - `require_human_on_scope_drift`
-
-## Delivery
-
-```json
-{
-  "required_sections": [
-    "task_brief",
-    "implementation_summary",
-    "grouped_change_map",
-    "decision_log",
-    "evaluation_ledger",
-    "reviewer_guide",
-    "risk_notes",
-    "follow_up_items",
-    "intervention_trace"
-  ]
-}
-```
 
 ## Nodes
 
@@ -189,5 +164,5 @@ Validation enforces:
 
 - mutation tools and write-impact tools are withheld from read-only agents
 - secret-impact tools require plugin-declared `credentials`
-- external-impact tools require exact tokens in `intent.approval_boundaries`, such as `tool:<callable>` or `external:<plugin>/<tool>`
-- `tool_config` is for non-secret string options and is resolved only inside the plugin tool subprocess
+- external-impact tools are approved by declaring them in the graph or agent node
+- inline `tools[].config` is for non-secret string options and is resolved only inside the plugin tool subprocess

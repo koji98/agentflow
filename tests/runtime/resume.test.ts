@@ -261,7 +261,7 @@ describe("runtime resume", () => {
               type: "agent",
               id: "implement",
               repo: "main",
-              prompt: "Write nothing."
+              goal: "Write nothing."
             }
           ]
         }

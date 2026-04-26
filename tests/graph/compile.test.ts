@@ -57,9 +57,6 @@ describe("graph compilation", () => {
           require_human_on_scope_drift: true
         }
       },
-      delivery: {
-        required_sections: ["task_brief", "reviewer_guide", "intervention_trace"]
-      },
       repos: {
         main: {
           path: "."
@@ -107,9 +104,6 @@ describe("graph compilation", () => {
             score_threshold: 0.9
           }
         }),
-        delivery: {
-          required_sections: ["task_brief", "reviewer_guide", "intervention_trace"]
-        }
       })
     );
   });
@@ -142,7 +136,8 @@ describe("graph compilation", () => {
             acceptance_criteria: [
               "Timeout behavior is tested.",
               "The handoff lists changed files and risk."
-            ]
+            ],
+            constraints: ["Implement timeout handling with a reviewable handoff."]
           }
         ]
       }
@@ -164,7 +159,7 @@ describe("graph compilation", () => {
           "Timeout behavior is tested.",
           "The handoff lists changed files and risk."
         ],
-        prompt: "Implement timeout handling with a reviewable handoff."
+        constraints: ["Implement timeout handling with a reviewable handoff."]
       })
     ]);
   });
@@ -270,7 +265,7 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "draft",
-                  prompt: "Draft the artifact.",
+                  goal: "Draft the artifact.",
                   artifacts: {
                     draft_spec: {
                       from: "output_dir",
@@ -282,7 +277,7 @@ describe("graph compilation", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  prompt: "Review the draft.",
+                  goal: "Review the draft.",
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"
@@ -377,7 +372,7 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "fix",
-                  prompt: "Apply the fix."
+                  goal: "Apply the fix."
                 },
                 {
                   type: "check",
@@ -394,7 +389,7 @@ describe("graph compilation", () => {
           {
             type: "agent",
             id: "handoff",
-            prompt: "Summarize the run.",
+            goal: "Summarize the run.",
             context: [
               {
                 ref: "fix.agent_response",
@@ -461,7 +456,7 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "summarize",
-                  prompt: "Summarize the latest attempt."
+                  goal: "Summarize the latest attempt."
                 }
               ]
             },
@@ -518,12 +513,12 @@ describe("graph compilation", () => {
               {
                 type: "agent",
                 id: "inspect",
-                prompt: "Inspect the repo."
+                goal: "Inspect the repo."
               },
               {
                 type: "agent",
                 id: "report",
-                prompt: "Write the report.",
+                goal: "Write the report.",
                 context: [
                   {
                     ref: "inspect.agent_response",
@@ -608,7 +603,7 @@ describe("graph compilation", () => {
             type: "check",
             id: "ai_gate",
             check_kind: "ai",
-            prompt: "Evaluate the change."
+            goal: "Evaluate the change."
           }
         ]
       }
@@ -704,7 +699,7 @@ describe("graph compilation", () => {
           {
             type: "agent",
             id: "inspect",
-            prompt: "Inspect the codebase."
+            goal: "Inspect the codebase."
           },
           {
             type: "exec",
@@ -717,7 +712,7 @@ describe("graph compilation", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            prompt: "Judge the change."
+            goal: "Judge the change."
           }
         ]
       }
@@ -814,14 +809,14 @@ describe("graph compilation", () => {
             type: "agent",
             id: "review_patch",
             profile: "review",
-            prompt: "Review the patch."
+            goal: "Review the patch."
           },
           {
             type: "check",
             id: "judge_patch",
             profile: "review",
             check_kind: "ai",
-            prompt: "Judge the patch."
+            goal: "Judge the patch."
           }
         ]
       }

@@ -49,7 +49,7 @@ Resolution clones Git plugins into `.agentflow/plugins`, checks out the requeste
 3. Keep workflow config small and schema-backed.
 4. Publish workflow handoff artifacts from one `publish_node`.
 5. Classify every tool with `capability` and `impact`; declare `credentials` for secret-impact tools.
-6. Keep `tool_config` for non-secret string options only.
+6. Keep inline `tools[].config` values non-secret string options only.
 7. Resolve the plugin from a consumer graph and inspect `validate --show-compiled`.
 
 Minimal package:
@@ -237,13 +237,14 @@ Consumer graph:
 ```json
 {
   "tools": [
-    { "from_plugin": "babysit", "tool": "poll" }
-  ],
-  "tool_config": {
-    "babysit-poll": {
-      "poll_interval_ms": "15000"
+    {
+      "from_plugin": "babysit",
+      "tool": "poll",
+      "config": {
+        "poll_interval_ms": "15000"
+      }
     }
-  }
+  ]
 }
 ```
 
@@ -276,10 +277,10 @@ Tool impact is part of the supervision and validation contract.
 - `impact: "read"` can be exposed to read-only agents unless `capability` is `mutation`.
 - `capability: "mutation"` is withheld from read-only agents.
 - `impact: "write"` requires a write-capable sandbox.
-- `impact: "external"` requires exact approval tokens in `intent.approval_boundaries`, such as `tool:babysit-poll`, `tool:babysit/poll`, `external:babysit-poll`, or `external:babysit/poll`.
+- `impact: "external"` is approved by declaring the tool in the graph or agent node.
 - `impact: "secret"` requires the plugin tool to declare `credentials`.
 - `af` is a reserved callable name for Agentflow's runtime CLI and cannot be used as a plugin tool alias.
-- `tool_config` is for non-secret string options only. Secret-looking keys such as `token`, `secret`, `password`, or `api_key` are rejected; put those in plugin `credentials` and configure them with `agentflow auth`.
+- `tools[].config` is for non-secret string options only. Secret-looking keys such as `token`, `secret`, `password`, or `api_key` are rejected; put those in plugin `credentials` and configure them with `agentflow auth`.
 
 These rules keep tool authority visible in the graph and consistent across Codex CLI and Cursor CLI.
 

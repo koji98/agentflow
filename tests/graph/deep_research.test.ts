@@ -201,7 +201,7 @@ describe("deep research managed pattern", () => {
           {
             type: "agent",
             id: "handoff",
-            prompt: "Summarize the research recommendation.",
+            goal: "Summarize the research recommendation.",
             context: [
               {
                 ref: "market_scan.agent_response",

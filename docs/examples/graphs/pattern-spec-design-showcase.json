@@ -130,7 +130,7 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "prompt": "Summarize the final design package for a human operator. Mention the problem, the recommendation, and the artifacts a follow-on pattern_generate_evaluate_fix pattern would likely consume.",
+        "goal": "Summarize the final design package for a human operator. Mention the problem, the recommendation, and the artifacts a follow-on pattern_generate_evaluate_fix pattern would likely consume.",
         "context": [
           {
             "ref": "managed_nodes_spec.agent_response",
@@ -151,20 +151,10 @@
   },
   "intent": {
     "goal": "Design an implementation-ready Agentflow managed pattern package.",
-    "scope": {
-      "repos": [
-        "main"
-      ],
-      "paths": [
-        "README.md",
-        "docs/**",
-        "web-app/**"
-      ]
-    },
     "acceptance_criteria": [
       "The design package is implementation-ready and reviewable."
     ],
-    "approval_boundaries": [
+    "constraints": [
       "Do not expand repository scope beyond declared paths."
     ]
   },
@@ -193,18 +183,5 @@
       "require_human_on_policy_breach": true,
       "require_human_on_scope_drift": true
     }
-  },
-  "delivery": {
-    "required_sections": [
-      "task_brief",
-      "implementation_summary",
-      "grouped_change_map",
-      "decision_log",
-      "evaluation_ledger",
-      "reviewer_guide",
-      "risk_notes",
-      "follow_up_items",
-      "intervention_trace"
-    ]
   }
 }

@@ -266,7 +266,7 @@ async function runAiRubricGrader(options: {
     model: options.grader.model,
     ...(options.grader.reasoning_effort ? { reasoning_effort: options.grader.reasoning_effort } : {}),
     skip_git_repo_check: true,
-    prompt: [
+    node_goal: [
       "Grade this local Agentflow eval case using only the referenced local files.",
       "Return normalized grader JSON with passed, score, summary, assertions, and metrics.",
       `Case: ${options.case.id}`,

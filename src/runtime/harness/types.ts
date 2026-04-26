@@ -19,12 +19,13 @@ export interface AgentInvocation {
   skipGitRepoCheck?: boolean;
   model: string | undefined;
   reasoningEffort?: ReasoningEffort;
-  prompt: string;
   graphGoal?: string;
   graphAcceptanceCriteria?: string[];
   graphConstraints?: string[];
   nodeGoal?: string;
   nodeAcceptanceCriteria?: string[];
+  nodeConstraints?: string[];
+  rubric?: string;
   contextPacketPath: string;
   contextManifestPath: string;
   contextManifest: string;
@@ -337,26 +338,47 @@ function formatGraphIntent(invocation: AgentInvocation): string[] {
   ];
 }
 
-function formatNodeIntent(invocation: AgentInvocation): string[] {
-  if (!invocation.nodeGoal && !invocation.nodeAcceptanceCriteria) {
-    return [];
+function formatNodeTask(
+  invocation: AgentInvocation,
+  options: {
+    title: string;
+    emptyGoal: string;
+    emptyAcceptanceCriteria: string;
+    emptyConstraints: string;
   }
-
+): string[] {
   return [
-    "## Node Intent",
-    ...(invocation.nodeGoal ? ["", invocation.nodeGoal] : []),
+    `## ${options.title}`,
+    "",
+    invocation.nodeGoal ?? options.emptyGoal,
     "",
     "Acceptance criteria:",
-    ...formatBullets(invocation.nodeAcceptanceCriteria, "No node-level acceptance criteria were authored.")
+    ...formatBullets(invocation.nodeAcceptanceCriteria, options.emptyAcceptanceCriteria),
+    "",
+    "Constraints:",
+    ...formatBullets(invocation.nodeConstraints, options.emptyConstraints),
+    ...(invocation.rubric
+      ? [
+          "",
+          "Rubric:",
+          invocation.rubric
+        ]
+      : [])
   ];
 }
 
 export function renderHarnessPrompt(invocation: AgentInvocation): string {
   const graphIntent = formatGraphIntent(invocation);
-  const nodeIntent = formatNodeIntent(invocation);
   const toolContract = formatToolContract(invocation.tools);
 
   if (invocation.promptKind === "ai_check") {
+    const checkTask = formatNodeTask(invocation, {
+      title: "Check Task",
+      emptyGoal: "Evaluate the graph node against the provided context.",
+      emptyAcceptanceCriteria: "No check-level acceptance criteria were authored.",
+      emptyConstraints: "No check-level constraints were authored."
+    });
+
     return [
       "## Role",
       "You are an Agentflow AI evaluator running as one read-only node in a coding workflow.",
@@ -364,10 +386,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       "",
       ...graphIntent,
       ...(graphIntent.length > 0 ? [""] : []),
-      ...nodeIntent,
-      ...(nodeIntent.length > 0 ? [""] : []),
-      "## Check Task",
-      invocation.prompt,
+      ...checkTask,
       "",
       "## Workspace",
       `- Workspace path: ${invocation.repoPath}`,
@@ -392,6 +411,13 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     ].join("\n");
   }
 
+  const nodeTask = formatNodeTask(invocation, {
+    title: "Node Task",
+    emptyGoal: "Complete the authored node goal.",
+    emptyAcceptanceCriteria: "No node-level acceptance criteria were authored.",
+    emptyConstraints: "No node-level constraints were authored."
+  });
+
   return [
     "## Role",
     "You are an autonomous coding agent executing one node in an Agentflow graph.",
@@ -400,10 +426,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "",
     ...graphIntent,
     ...(graphIntent.length > 0 ? [""] : []),
-    ...nodeIntent,
-    ...(nodeIntent.length > 0 ? [""] : []),
-    "## Node Task",
-    invocation.prompt,
+    ...nodeTask,
     "",
     "## Workspace",
     `- Workspace path: ${invocation.repoPath}`,

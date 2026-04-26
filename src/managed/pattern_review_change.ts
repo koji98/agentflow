@@ -406,7 +406,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
         outputDirArtifact("review_packet", "review-packet.json"),
         workflowBriefOutput()
       ),
-      prompt: buildPreparePrompt(config)
+      goal: buildPreparePrompt(config)
     },
     {
       type: "agent",
@@ -421,7 +421,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
         workflowPlanMarkdownOutput(),
         workflowPlanJsonOutput()
       ),
-      prompt: buildPlanPrompt(config)
+      goal: buildPlanPrompt(config)
     },
     {
       type: "parallel",
@@ -439,7 +439,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
           artifactContext("workflow_plan_json", planId, "workflow_plan_json")
         ],
         artifacts: outputDirArtifact(`findings_${slugValue(profile)}`, `findings-${slugValue(profile)}.json`),
-        prompt: buildReviewerPrompt(profile, config)
+        goal: buildReviewerPrompt(profile, config)
       }))
     } satisfies ParallelNode,
     {
@@ -456,7 +456,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
         )
       ),
       artifacts: outputDirArtifact("raw_findings", "raw-findings.json"),
-      prompt: buildRawFindingsPrompt()
+      goal: buildRawFindingsPrompt()
     },
     {
       type: "agent",
@@ -469,7 +469,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
         artifactContext("raw_findings", rawId, "raw_findings")
       ],
       artifacts: outputDirArtifact("merged_findings", "merged-findings.json"),
-      prompt: buildMergePrompt()
+      goal: buildMergePrompt()
     },
     {
       type: "agent",
@@ -483,7 +483,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
         artifactContext("merged_findings", mergeId, "merged_findings")
       ],
       artifacts: outputDirArtifact("calibrated_findings", "calibrated-findings.json"),
-      prompt: buildCalibratePrompt(config)
+      goal: buildCalibratePrompt(config)
     }
   ];
 
@@ -509,7 +509,7 @@ export function buildPatternReviewChange(config: PatternReviewChangeConfig): Seq
       artifactContext("calibrated_findings", calibrateId, "calibrated_findings")
     ],
     artifacts: finalArtifacts,
-    prompt: buildFinalizePrompt(config, finalArtifacts)
+    goal: buildFinalizePrompt(config, finalArtifacts)
   });
 
   return {

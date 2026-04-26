@@ -101,7 +101,13 @@ function truncatePreview(
 function renderCheckpointReview(input: CheckpointRenderInput): string {
   const sections = [
     `Checkpoint: ${input.node.label ?? input.node.authored_id}`,
-    input.node.prompt,
+    input.node.goal ?? "Review the referenced artifact and decide whether the graph may proceed.",
+    "",
+    "Acceptance criteria:",
+    ...(input.node.acceptance_criteria ?? ["No checkpoint-level acceptance criteria were authored."]).map((item) => `- ${item}`),
+    "",
+    "Constraints:",
+    ...(input.node.constraints ?? ["No checkpoint-level constraints were authored."]).map((item) => `- ${item}`),
     `Review artifact: ${input.review_artifact_path}`,
     "Preview:",
     input.review_preview

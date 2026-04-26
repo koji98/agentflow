@@ -173,7 +173,6 @@ export interface ProjectedNodeDefinition {
   context: CompiledExecutableNode["context"];
   declared_artifacts: CompiledExecutableNode["declared_artifacts"];
   lowered_from?: CompiledExecutableNode["lowered_from"];
-  prompt?: string;
   command?: string;
   args?: string[];
   cwd?: string;
@@ -915,8 +914,7 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
     return {
       context: node.context,
       declared_artifacts: node.declared_artifacts,
-      ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
-      prompt: node.prompt
+      ...(node.lowered_from ? { lowered_from: node.lowered_from } : {})
     };
   }
 
@@ -939,7 +937,6 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
       context: node.context,
       declared_artifacts: node.declared_artifacts,
       ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
-      prompt: node.prompt,
       review_from: node.review_from
     };
   }
@@ -955,7 +952,6 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
     ...(node.env ? { env: node.env } : {}),
     on_failure: node.on_failure,
     check_kind: node.check_kind,
-    ...(node.prompt ? { prompt: node.prompt } : {}),
     ...(node.rubric ? { rubric: node.rubric } : {})
   };
 }

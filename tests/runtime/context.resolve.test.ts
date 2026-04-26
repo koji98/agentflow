@@ -266,7 +266,7 @@ describe("context resolution", () => {
                 {
                   type: "agent",
                   id: "implement",
-                  prompt: "Implement the fix.",
+                  goal: "Implement the fix.",
                   artifacts: {
                     fix_log: {
                       from: "output_dir",
@@ -428,7 +428,7 @@ describe("context resolution", () => {
                 {
                   type: "agent",
                   id: "implement",
-                  prompt: "Implement the fix."
+                  goal: "Implement the fix."
                 },
                 {
                   type: "check",

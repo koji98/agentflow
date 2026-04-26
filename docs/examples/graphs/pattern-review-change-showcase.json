@@ -192,7 +192,7 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "prompt": "Summarize the final review for an implementer. Focus on the highest-priority findings, their likely impact, and any evaluation or residual-risk context from upstream stages.",
+        "goal": "Summarize the final review for an implementer. Focus on the highest-priority findings, their likely impact, and any evaluation or residual-risk context from upstream stages.",
         "context": [
           {
             "ref": "review_managed_nodes.agent_response",
@@ -212,20 +212,10 @@
   },
   "intent": {
     "goal": "Review a generated Agentflow change and publish calibrated findings.",
-    "scope": {
-      "repos": [
-        "main"
-      ],
-      "paths": [
-        "src/**",
-        "docs/**",
-        "tests/**"
-      ]
-    },
     "acceptance_criteria": [
       "The review package includes findings, severity, and recommended actions."
     ],
-    "approval_boundaries": [
+    "constraints": [
       "Review only the declared change package."
     ]
   },
@@ -254,18 +244,5 @@
       "require_human_on_policy_breach": true,
       "require_human_on_scope_drift": true
     }
-  },
-  "delivery": {
-    "required_sections": [
-      "task_brief",
-      "implementation_summary",
-      "grouped_change_map",
-      "decision_log",
-      "evaluation_ledger",
-      "reviewer_guide",
-      "risk_notes",
-      "follow_up_items",
-      "intervention_trace"
-    ]
   }
 }

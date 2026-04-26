@@ -46,7 +46,7 @@ Confirm:
 - plugin tools have the expected `capability` and `impact`.
 - managed patterns publish the artifacts downstream nodes reference.
 - `supervision.retry_budget` is intentionally bounded.
-- `delivery.required_sections` includes reviewer-facing sections.
+- terminal delivery is automatic and reviewer-facing.
 
 ## Command Results
 

@@ -2,7 +2,6 @@ import type {
   ArtifactDefinition,
   ArtifactReference,
   ContextItem,
-  DeliveryContract,
   DeterministicPassIf,
   GraphIntent,
   GraphPrerequisites,
@@ -26,6 +25,7 @@ export interface CompiledExecutableNodeBase {
   label?: string;
   goal?: string;
   acceptance_criteria?: string[];
+  constraints?: string[];
   repo: string;
   deps: string[];
   scope_stack: string[];
@@ -65,7 +65,6 @@ export interface ResolvedTool {
 
 export interface CompiledAgentNode extends CompiledExecutableNodeBase {
   kind: "agent";
-  prompt: string;
   tools: ResolvedTool[];
 }
 
@@ -88,14 +87,12 @@ export interface CompiledCheckNode extends CompiledExecutableNodeBase {
   env_files?: string[];
   env?: Record<string, string>;
   pass_if?: DeterministicPassIf;
-  prompt?: string;
   rubric?: string;
   on_failure: FailureBehavior;
 }
 
 export interface CompiledCheckpointNode extends CompiledExecutableNodeBase {
   kind: "checkpoint";
-  prompt: string;
   review_from: ArtifactReference;
 }
 
@@ -153,7 +150,6 @@ export interface CompiledGraph {
   graph_id: string;
   intent: GraphIntent;
   supervision: SupervisionPolicy;
-  delivery: DeliveryContract;
   launch: Pick<LaunchResolution, "launch_profile" | "workspace_backend">;
   entry_node_ids: string[];
   nodes: CompiledExecutableNode[];

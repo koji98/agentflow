@@ -16,20 +16,14 @@ function normalizeAuthoredGraphDocument(value: unknown) {
 }
 
 describe("graph normalization", () => {
-  it("normalizes supervised v1 intent, supervision, and delivery defaults", () => {
+  it("normalizes supervised v1 intent and supervision defaults", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "ship-trusted-change",
       intent: {
         goal: "Ship checkout timeout handling.",
-        scope: {
-          repos: ["main"],
-          paths: ["src/checkout/**", "tests/checkout/**"],
-          out_of_scope: ["billing provider migration"]
-        },
         constraints: ["Keep public API names stable inside this repo."],
-        acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."],
-        approval_boundaries: ["Do not change payment provider credentials."]
+        acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."]
       },
       repos: {
         main: {
@@ -55,14 +49,8 @@ describe("graph normalization", () => {
       expect.objectContaining({
         intent: {
           goal: "Ship checkout timeout handling.",
-          scope: {
-            repos: ["main"],
-            paths: ["src/checkout/**", "tests/checkout/**"],
-            out_of_scope: ["billing provider migration"]
-          },
           constraints: ["Keep public API names stable inside this repo."],
-          acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."],
-          approval_boundaries: ["Do not change payment provider credentials."]
+          acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."]
         },
         supervision: {
           allowed_actions: [
@@ -90,19 +78,6 @@ describe("graph normalization", () => {
             require_human_on_policy_breach: true,
             require_human_on_scope_drift: true
           }
-        },
-        delivery: {
-          required_sections: [
-            "task_brief",
-            "implementation_summary",
-            "grouped_change_map",
-            "decision_log",
-            "evaluation_ledger",
-            "reviewer_guide",
-            "risk_notes",
-            "follow_up_items",
-            "intervention_trace"
-          ]
         }
       })
     );
@@ -130,6 +105,45 @@ describe("graph normalization", () => {
         {
           path: "$.intent.goal",
           message: "Expected a non-empty string."
+        }
+      ])
+    );
+  });
+
+  it("rejects removed prompt and delivery authoring fields", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "removed-fields",
+      delivery: {
+        required_sections: ["task_brief"]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "legacy",
+            prompt: "Do the old thing."
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.delivery",
+          message: 'Unknown field "delivery" is not part of the graph contract.'
+        },
+        {
+          path: "$.graph.steps[0].prompt",
+          message: 'Unknown field "prompt" is not part of the graph contract.'
+        },
+        {
+          path: "$.graph.steps[0].goal",
+          message: "Agent nodes require goal."
         }
       ])
     );
@@ -210,7 +224,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "inspect",
-            prompt: "Inspect the repository."
+            goal: "Inspect the repository."
           },
           {
             type: "parallel",
@@ -219,12 +233,12 @@ describe("graph normalization", () => {
               {
                 type: "agent",
                 id: "fix",
-                prompt: "Repair the issue."
+                goal: "Repair the issue."
               },
               {
                 type: "agent",
                 id: "handoff",
-                prompt: "Summarize the work.",
+                goal: "Summarize the work.",
                 context: [
                   {
                     ref: "inspect.agent_response",
@@ -260,7 +274,7 @@ describe("graph normalization", () => {
       expect.objectContaining({
         type: "agent",
         id: "inspect",
-        prompt: "Inspect the repository."
+        goal: "Inspect the repository."
       })
     );
 
@@ -272,7 +286,7 @@ describe("graph normalization", () => {
       expect.objectContaining({
         type: "agent",
         id: "fix",
-        prompt: "Repair the issue."
+        goal: "Repair the issue."
       })
     );
     expect(fanout.steps[1]).toEqual(
@@ -315,7 +329,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "bad",
-            prompt: "Legacy fields.",
+            goal: "Legacy fields.",
             inputs: [],
             context_from: [],
             outputs: []
@@ -422,7 +436,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "consume",
-            prompt: "Consume a prior response.",
+            goal: "Consume a prior response.",
             context: [
               {
                 ref: "inspect.agent_response",
@@ -470,7 +484,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "bad",
-            prompt: "Try to redefine automatic artifacts.",
+            goal: "Try to redefine automatic artifacts.",
             artifacts: {
               agent_response: {
                 from: "output_dir",
@@ -523,7 +537,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "bad",
-            prompt: "Write a packet.",
+            goal: "Write a packet.",
             artifacts: {
               packet: {
                 from: "output_dir",
@@ -656,7 +670,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "inspect",
-            prompt: "Inspect the repository.",
+            goal: "Inspect the repository.",
             reasoning_effort: "xhigh"
           }
         ]
@@ -698,7 +712,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "write_handoff",
-            prompt: "Write the handoff.",
+            goal: "Write the handoff.",
             artifact_repair: {
               max_attempts: 0
             }
@@ -746,7 +760,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "write_handoff",
-            prompt: "Write the handoff.",
+            goal: "Write the handoff.",
             artifact_repair: {
               max_attempts: -1
             }
@@ -966,7 +980,7 @@ describe("graph normalization", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            prompt: "Judge it.",
+            goal: "Judge it.",
             env_files: [".env"]
           }
         ]
@@ -1008,7 +1022,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "inspect",
-            prompt: "Inspect the repo."
+            goal: "Inspect the repo."
           }
         ]
       }
@@ -1054,7 +1068,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "inspect",
-            prompt: "Inspect the repo."
+            goal: "Inspect the repo."
           }
         ]
       }
@@ -1173,7 +1187,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "consume",
-            prompt: "Consume earlier outputs.",
+            goal: "Consume earlier outputs.",
             context: [
               { ref: "produce.stdout" } as never,
               { ref: "produce" } as never
@@ -1214,7 +1228,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "consume",
-            prompt: "Consume.",
+            goal: "Consume.",
             context: [
               { ref: "ghost" } as never
             ]
@@ -1247,7 +1261,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "merge",
-            prompt: "Merge both stdouts.",
+            goal: "Merge both stdouts.",
             context: [
               { ref: "left.stdout" } as never,
               { ref: "right.stdout" } as never
@@ -1279,7 +1293,7 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "produce",
-            prompt: "Write artifacts.",
+            goal: "Write artifacts.",
             artifacts: {
               "bad.name": {
                 from: "output_dir",

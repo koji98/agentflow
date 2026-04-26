@@ -27,7 +27,7 @@ Use the three validation levels for different questions:
 - `--run-ready`: are local repos, commands, env vars, plugin credentials, plugins, and harness binaries ready on this machine?
 - `--show-compiled`: does the compiled primitive graph match the operator's intent?
 
-Always inspect `intent`, `supervision`, `delivery`, resolved profiles, managed expansions, plugin tools, and artifact handoffs before launching serious work.
+Always inspect `intent`, `supervision`, resolved profiles, managed expansions, plugin tools, and artifact handoffs before launching serious work.
 
 ## Resolve Plugins
 
