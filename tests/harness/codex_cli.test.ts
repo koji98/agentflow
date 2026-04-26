@@ -216,10 +216,11 @@ describe("codex cli harness", () => {
         skipGitRepoCheck: true,
         model: "gpt-5-codex",
         reasoningEffort: "xhigh",
+        graphGoal: "Ship the larger change safely.",
         nodeGoal: "Implement the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
-        contextManifest: "# Context Manifest: exec-1\n\n- Compiled node: `agent.demo`\n- Repo: `main`\n",
+        contextManifest: "# Context Manifest\n\n- Materialized items: `1`\n",
         outputDir,
         artifacts: {
           handoff: {
@@ -260,14 +261,16 @@ describe("codex cli harness", () => {
         ])
       );
       expect(prompt).toContain("## Role");
-      expect(prompt).toContain("You are an autonomous coding agent executing one node in an Agentflow graph.");
-      expect(prompt).toContain("future nodes consume only the named artifacts you publish here");
+      expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
+      expect(prompt).toContain("You are executing one node in a wider Agentflow graph.");
       expect(prompt).toContain("## Node Task");
       expect(prompt).toContain("Implement the change.");
+      expect(prompt.indexOf("## Node Task")).toBeLessThan(prompt.indexOf("## Graph Context"));
       expect(prompt).toContain("## Context");
-      expect(prompt).toContain("# Context Manifest: exec-1");
-      expect(prompt).toContain("- Compiled node: `agent.demo`");
-      expect(prompt).toContain(`For exact paths, provenance, omission details, or structured metadata, read: ${join(executionDir, "context", "packet.json")}`);
+      expect(prompt).toContain("# Context Manifest");
+      expect(prompt).toContain("Context packet (exact materialized paths, omissions, and structured metadata)");
+      expect(prompt).toContain(join(executionDir, "context", "packet.json"));
+      expect(prompt).toContain("Context provenance (digests and harness instruction inputs, if needed)");
       expect(prompt).toContain("Output directory");
       expect(prompt).toContain("Sandbox: workspace-write - edit files in the workspace");
       expect(prompt).toContain("## Artifact Contract");
@@ -280,7 +283,7 @@ describe("codex cli harness", () => {
       expect(prompt).toContain(`${repoDir}/reports/junit.xml`);
       expect(prompt).not.toContain("$AGENTFLOW_WORKSPACE/reports/junit.xml");
       expect(prompt).toContain("Expected content: JUnit XML report written by the workspace validation command.");
-      expect(prompt).toContain("## Final Response Requirements");
+      expect(prompt).toContain("## Final Handoff");
       expect(prompt).toContain("captured automatically by Agentflow as the reserved `agent_response` artifact");
       expect(prompt).toContain("Artifacts produced: names and paths of declared artifacts you wrote.");
       expect(env).toEqual({
@@ -402,6 +405,7 @@ describe("codex cli harness", () => {
         nodeGoal: "Hang forever.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 1,
@@ -445,6 +449,7 @@ describe("codex cli harness", () => {
           nodeGoal: "This should fail fast.",
           contextPacketPath: join(executionDir, "context", "packet.json"),
           contextManifestPath: join(executionDir, "context", "manifest.md"),
+          contextManifest: "",
           outputDir: executionDir,
           artifacts: {},
           timeoutSec: 10,
@@ -482,6 +487,7 @@ describe("codex cli harness", () => {
         nodeGoal: "Stream logs.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 10,

@@ -145,9 +145,14 @@ describe("context resolution", () => {
     expect(resolved.packet.tokenizer).toBe("o200k_base");
     expect(resolved.packet.omitted).toEqual([]);
     const manifest = await readFile(resolved.manifest_path, "utf8");
+    expect(manifest).toContain("This is an index of materialized context");
     expect(manifest).toContain("Materialized items");
+    expect(manifest).toContain("Truncated items");
+    expect(manifest).toContain("Omitted items");
     expect(manifest).toContain('requested "src.txt"');
     expect(manifest).toContain("Structured verification result from the source node.");
+    expect(manifest).not.toContain("Tokenizer");
+    expect(manifest).not.toContain("Compiled node");
     expect(await readFile(resolved.provenance_path, "utf8")).toContain("\"compiled_id\"");
 
     await rm(tempRoot, { recursive: true, force: true });

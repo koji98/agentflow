@@ -1323,7 +1323,9 @@ describe("runtime engine", () => {
       `${attempt.execution_id}__${attempt.execution_id}__repair_artifact_2`
     ]);
     const repairPrompt = renderHarnessPrompt(invocations[1]!);
-    expect(repairPrompt).toContain("## Agentflow Artifact Repair");
+    expect(invocations[1]?.promptKind).toBe("artifact_repair");
+    expect(repairPrompt).toContain("## Repair Task");
+    expect(repairPrompt).toContain("## Missing Artifacts");
     expect(repairPrompt).toContain("Write a handoff after inspecting the repo.");
     expect(repairPrompt).toContain("expected absolute path");
     expect(attempt.artifacts.handoff).toBe(join(artifactsRoot, "handoff.md"));

@@ -12,6 +12,7 @@ Then inspect the run files directly.
 
 - `run.json`: terminal status and counts.
 - `delivery/manifest.json`: delivery package index.
+- `delivery/run-map.md`: plain-English map of human, resume, audit, debug, and empty/no-op files.
 - `delivery/reviewer-guide.md`: review order and risk notes.
 - `delivery/task-brief.md`: authored goal, constraints, and acceptance criteria.
 - `delivery/implementation-summary.md`: captured agent handoff responses.
@@ -25,7 +26,7 @@ Then inspect the run files directly.
 - `runtime/helpers/`: helper session metadata, logs, outputs, and artifacts created through `af spawn`.
 - `runtime/supervisor-requests.jsonl`: requests recorded through `af supervisor request`.
 
-`delivery/manifest.json` labels human entrypoints, evidence files, and internal runtime artifacts. Use delivery files first; use raw JSONL/state/node attempt files when resume or low-level debugging requires them.
+`delivery/manifest.json` labels `human_entrypoints`, `declared_artifacts`, `resume_required`, `audit_trail`, `debug_only`, and `empty_or_noop`. Use delivery files first; use raw JSONL/state/node attempt files when resume, audit, or low-level debugging requires them.
 
 ## Node Attempts
 
@@ -37,12 +38,14 @@ Each node attempt records execution-specific context, logs, result, and artifact
 - `logs/stderr.log`
 - `result.json`
 - `artifacts/`
+- `tool-invocations.jsonl`
+- `tool-invocation-logs/`
 - `interventions/`
 
 ## Debug Order
 
 1. Read `delivery/reviewer-guide.md` if it exists.
-2. Use `delivery/manifest.json` to identify human entrypoints and evidence files.
+2. Use `delivery/manifest.json` to identify human entrypoints, declared artifacts, and debug-only files.
 3. Check `interventions.jsonl` for supervisor actions.
 4. Check failed node `result.json` and stderr.
 5. Check missing artifact diagnostics against the node's declared `artifacts`.
@@ -58,4 +61,4 @@ Use:
 agentflow resume --run-root <run-root>
 ```
 
-Resume preserves compatible completed work and restarts work affected by node-contract or graph-level `intent`, `supervision`, or `delivery` changes.
+Resume preserves compatible completed work and restarts work affected by node-contract or graph-level `intent` or `supervision` changes.

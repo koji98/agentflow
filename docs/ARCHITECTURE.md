@@ -71,7 +71,7 @@ Runtime state tracks:
 - supervisor status, budget, escalations, and intervention count
 - event sequence
 
-Terminal runs write `run.json`, `events.jsonl`, `summary.md`, `interventions.jsonl`, and `delivery/manifest.json`.
+Terminal runs write stable resume and audit state such as `run.json`, `compiled_graph.json`, `execution_manifest.json`, `state.json`, `events.jsonl`, `interventions.jsonl`, `nodes/`, and `workspace-changes/`, plus the human-facing `delivery/` package.
 
 ## Context And Artifacts
 
@@ -135,7 +135,9 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 - `af wait` waits for helper completion.
 - `af supervisor request` records a supervisor request and mirrors it to the channel.
 
-Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocations.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and plugin stdout/stderr log paths when available.
+`af --help` and `af <command> --help` are the authoritative in-node runtime API reference. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.
+
+Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocations.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and stdout/stderr sidecar paths when output is captured.
 
 Agents never talk directly to another process. Delivery is explicit: a message is stored, and if the recipient is not running the response reports that it was not live-delivered. Durable work should move through artifacts, with messages used to notify or coordinate.
 
@@ -167,7 +169,7 @@ Current artifact repair behavior:
 
 1. The runtime detects a required declared artifact missing after an agent attempt.
 2. The supervisor classifies the failure and checks policy and budget.
-3. If allowed, it starts an intent-aware repair intervention using graph intent, node intent, the original prompt, the same harness authority, and the same sandbox boundary as the node.
+3. If allowed, it starts an intent-aware repair intervention using graph intent, node task, constraints, acceptance criteria, the same harness authority, and the same sandbox boundary as the node.
 4. If no harness is available and exactly one missing artifact is a human-readable text handoff, it may synthesize that handoff from `agent_response`; JSON, other machine-readable contracts, and multi-artifact contracts still require real artifacts.
 5. It writes intervention prompt, stdout, stderr, result, and ledger records under the node attempt.
 6. It accepts the repaired artifact only if the declared artifact now exists.
@@ -197,6 +199,7 @@ Plugin-bundled tools are runtime-visible CLI capabilities. Tool exports declare:
 
 - callable name, derived from graph declaration alias or `plugin-tool`
 - `executable`
+- `description`
 - `usage`
 - `capability`
 - `impact`
@@ -210,6 +213,7 @@ Policy rules:
 - `impact: "external"` is approved by declaring the tool in the graph or agent node
 - tool wrappers run inside the same node sandbox and timeout
 - credential values and non-secret inline `tools[].config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
+- executable `--help` is required for every plugin tool, must run without credentials or side effects, and is checked by `agentflow validate --graph ... --run-ready`
 
 ## Delivery Package
 
@@ -225,17 +229,21 @@ Terminal delivery is part of the runtime contract. The package collector reads r
 - follow-up items
 - intervention trace
 - manifest
+- run map
 
-The manifest separates three audiences:
+The manifest keeps the legacy entrypoint maps and adds an explicit `artifact_taxonomy` object:
 
-- human entrypoints: reviewer guide, task brief, implementation summary, risk notes, and follow-up items
-- evidence files: grouped change map, evaluation ledger, decision log, intervention trace, and promoted per-node tool invocation summaries
-- internal runtime artifacts: run record, state, events, interventions ledger, node attempts, and workspace-change captures
+- `human_entrypoints`: reviewer guide, task brief, implementation summary, risk notes, follow-up items, and run map
+- `declared_artifacts`: graph outcome artifacts grouped by node/artifact name
+- `resume_required`: stable files needed for resume and replay
+- `audit_trail`: events, attempts, tool invocation ledgers, and workspace-change captures
+- `debug_only`: raw logs, context packets/provenance, tool sidecars, and runtime coordination files
+- `empty_or_noop`: empty ledgers/logs or no-change captures that should not look important
 
 If delivery package creation fails, the run is marked failed with a `delivery_package_failed` reason. This keeps the promise that a terminal run returns reviewable evidence, not just a raw diff.
 
 ## Resume
 
-Resume compares the prior compiled contract with the current compiled contract. Changes to `intent`, `supervision`, or `delivery` invalidate completed work because they change the human contract, policy contract, or terminal review contract.
+Resume compares the prior compiled contract with the current compiled contract. Changes to `intent` or `supervision` invalidate completed work because they change the human contract or policy contract.
 
 When the contract is compatible, resume preserves completed attempts and continues from the durable run state. When it is not compatible, affected nodes restart under the new compiled contract.

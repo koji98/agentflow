@@ -8,7 +8,7 @@ Agentflow is built for local repositories and local control. The authored DAG re
 
 ## Core Promise
 
-- Humans define the goal, scope, constraints, acceptance criteria, and approval boundaries.
+- Humans define the goal, constraints, acceptance criteria, repos, profiles, tools, and outcome artifacts.
 - Agent nodes own substantial engineering outcomes rather than tiny prompt handoffs.
 - Deterministic and semantic checks feed the supervisor with structured evidence.
 - Supervisor interventions are policy-bounded, durable, and visible in `interventions.jsonl`.

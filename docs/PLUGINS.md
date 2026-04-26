@@ -49,8 +49,9 @@ Resolution clones Git plugins into `.agentflow/plugins`, checks out the requeste
 3. Keep workflow config small and schema-backed.
 4. Publish workflow handoff artifacts from one `publish_node`.
 5. Classify every tool with `capability` and `impact`; declare `credentials` for secret-impact tools.
-6. Keep inline `tools[].config` values non-secret string options only.
-7. Resolve the plugin from a consumer graph and inspect `validate --show-compiled`.
+6. Give every tool a short `description`, concise `usage`, and executable `--help` output with arguments, defaults, output format, exit codes, examples, and safety notes.
+7. Keep inline `tools[].config` values non-secret string options only.
+8. Resolve the plugin from a consumer graph and inspect `validate --show-compiled`.
 
 Minimal package:
 
@@ -95,6 +96,7 @@ Minimal `agentflow.plugin.json`:
   "tools": {
     "poll": {
       "executable": "tools/poll-pr.sh",
+      "description": "Poll a pull request and print a JSON status object.",
       "usage": "poll --pr <number>",
       "capability": "verification",
       "impact": "secret",
@@ -185,6 +187,7 @@ Tool exports let teams expose stable CLI capabilities to agent nodes.
 Each tool declares:
 
 - `executable`
+- `description`
 - `usage`
 - `capability`: `context`, `verification`, `mutation`, or `reporting`
 - `impact`: `read`, `write`, `external`, or `secret`
@@ -216,6 +219,7 @@ Example:
   "tools": {
     "poll": {
       "executable": "bin/babysit-poll.js",
+      "description": "Poll a pull request and print a JSON status object.",
       "usage": "babysit-poll --pr <number>",
       "capability": "verification",
       "impact": "secret",
@@ -252,10 +256,14 @@ Runtime behavior:
 
 - Agentflow generates per-execution tool launchers under the node runtime directory.
 - The launcher directory is prepended to `PATH` and also contains Agentflow's reserved `af` runtime CLI wrapper.
+- Agents receive short tool summaries in the prompt and should run `<tool> --help` for authoritative arguments, defaults, output shape, exit codes, examples, and safety notes.
+- Tool `--help` must be fast, read-only, credential-free, side-effect-free, and exit `0`.
+- Tool help output must include purpose, `Usage:`, arguments/options, defaults, configured defaults with secret-looking values redacted, `Output:`, `Exit codes:`, and `Examples:`.
 - `AGENTFLOW_TOOL_<NAME>_<KEY>` env vars carry non-secret tool config only inside the plugin tool subprocess.
 - Credential values are not exported to the Codex CLI or Cursor CLI harness environment.
 - Generated tool launchers resolve credentials just before starting the plugin tool subprocess and inject `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into that child process.
-- The harness prompt includes each tool's capability, impact, usage, origin, and config env var names, but never configured values.
+- Generated tool launchers do not resolve credentials for `--help`; they pass non-secret config defaults and append an `Agentflow configured defaults` section with secret-looking keys redacted.
+- The harness prompt includes each tool's capability, impact, description, usage hint, origin, and configured default keys, but never configured values.
 - Tools share the node sandbox and timeout.
 
 ## Auth
@@ -300,5 +308,6 @@ Inspect:
 - resolved workflow public artifacts
 - generated managed expansion
 - tool capability and impact
+- plugin tool `--help` readiness under `--run-ready`
 - read-only agent write/mutation policy
 - secret and external-impact policy diagnostics

@@ -899,6 +899,89 @@ describe("prepareAgentTools", () => {
     );
     expect(result.stdout.trim()).toBe("resolved-at-tool-launch");
   });
+
+  it("renders plugin tool --help through the wrapper without resolving credentials", async () => {
+    const executionDir = join(tempRoot, "executions/help");
+    const workspacePath = join(tempRoot, "workspace");
+    const artifactsRoot = join(tempRoot, "executions/help/output");
+    await mkdir(executionDir, { recursive: true });
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(artifactsRoot, { recursive: true });
+
+    const pluginPath = join(tempRoot, "plugins/helpful/scripts/helpful.sh");
+    await writeExecutable(
+      pluginPath,
+      [
+        "#!/usr/bin/env bash",
+        "set -eu",
+        "if [[ \"${1:-}\" == \"--help\" ]]; then",
+        "  cat <<'HELP'",
+        "helpful - inspect a fixture",
+        "",
+        "Usage:",
+        "  helpful [--format json] [--help]",
+        "",
+        "Options:",
+        "  --format <json>  Output format. Default: json",
+        "  --help           Show this help and exit. Default: false",
+        "",
+        "Output:",
+        "  JSON object: { \"ok\": true }",
+        "",
+        "Exit codes:",
+        "  0 success",
+        "  1 runtime failure",
+        "",
+        "Examples:",
+        "  helpful --format json",
+        "HELP",
+        "  exit 0",
+        "fi",
+        "test -n \"${AGENTFLOW_CREDENTIAL_SERVICE_TOKEN:-}\"",
+        "echo ok",
+        ""
+      ].join("\n")
+    );
+
+    const setup = await prepareAgentTools({
+      node: {
+        authored_id: "help",
+        compiled_id: "main__help",
+        declared_artifacts: {},
+        tools: [
+          {
+            callable_name: "helpful",
+            capability: "context",
+            impact: "secret",
+            description: "Inspect a fixture.",
+            executable_path: pluginPath,
+            args: [],
+            config: { mode: "check", token: "must-redact" },
+            credentials: ["service"],
+            source: {
+              kind: "plugin",
+              alias: "helpful",
+              tool: "inspect",
+              plugin_root: join(tempRoot, "plugins/helpful"),
+              declared_at: "graph",
+              declaration_path: "$.tools[0]"
+            }
+          }
+        ]
+      } as unknown as CompiledAgentNode,
+      execution_dir: executionDir,
+      workspace_path: workspacePath,
+      artifacts_root: artifactsRoot,
+      credential_specs: {}
+    });
+
+    const result = await execFileAsync(join(setup.bin_dir, "helpful"), ["--help"]);
+    expect(result.stdout).toContain("Usage:");
+    expect(result.stdout).toContain("Options:");
+    expect(result.stdout).toContain("Agentflow configured defaults:");
+    expect(result.stdout).toContain("mode: check");
+    expect(result.stdout).toContain("token: <redacted>");
+  });
 });
 
 describe("formatToolContract", () => {
@@ -907,7 +990,7 @@ describe("formatToolContract", () => {
     expect(formatToolContract([])).toEqual([]);
   });
 
-  it("renders a tool contract sorted alphabetically with origin, usage, and config env vars", () => {
+  it("renders a tool contract sorted alphabetically with origin, usage, and configured defaults", () => {
     const tools: ResolvedTool[] = [
       {
         callable_name: "zeta-poll",
@@ -952,6 +1035,8 @@ describe("formatToolContract", () => {
     expect(heading).toBe("## Available Tools");
 
     const text = lines.join("\n");
+    expect(text).toContain("short selection hints, not full API docs");
+    expect(text).toContain("Run `<tool> --help` before first use");
     expect(text.indexOf("### alpha-cli")).toBeLessThan(text.indexOf("### zeta-poll"));
     expect(text).toContain("### alpha-cli (from plugin \"alphaplug\" (tool: alpha))");
     expect(text).toContain("### zeta-poll (from plugin \"zetaplug\" (tool: poll))");
@@ -961,8 +1046,9 @@ describe("formatToolContract", () => {
     expect(text).toContain("Impact: secret");
     expect(text).toContain("Capability: verification");
     expect(text).toContain("Impact: read");
-    expect(text).toContain("AGENTFLOW_TOOL_ALPHA_CLI_ORG=<configured>");
-    expect(text).toContain("AGENTFLOW_TOOL_ZETA_POLL_MODE=<configured>");
+    expect(text).toContain("Configured defaults are applied inside the tool subprocess");
+    expect(text).toContain("org: configured");
+    expect(text).toContain("mode: configured");
     expect(text).not.toContain("=abc");
     expect(text).not.toContain("=fast");
     expect(text).toContain("Credentials: alpha");
@@ -1009,6 +1095,8 @@ describe("formatToolContract", () => {
 
     expect(prompt).toContain("## Available Tools");
     expect(prompt).toContain("### babysit-poll (from plugin \"babysit\" (tool: poll))");
+    expect(prompt).toContain("Run `<tool> --help` before first use");
+    expect(prompt).toContain("Use `af --help` and `af <command> --help`");
   });
 
   it("renders graph and node intent into agent prompts", () => {
@@ -1033,7 +1121,7 @@ describe("formatToolContract", () => {
       signal: undefined
     });
 
-    expect(prompt).toContain("## Graph Intent");
+    expect(prompt).toContain("## Graph Context");
     expect(prompt).toContain("Ship trustworthy checkout timeout handling.");
     expect(prompt).toContain("- Targeted checkout tests pass.");
     expect(prompt).toContain("## Node Task");
@@ -1219,7 +1307,7 @@ describe("end-to-end runtime tool wiring", () => {
       // 5. The agent prompt advertises the namespaced callable name, not "poll".
       const renderedPrompt = renderHarnessPrompt(invocation);
       expect(renderedPrompt).toContain("### babysit-poll (from plugin \"babysit\" (tool: poll))");
-      expect(renderedPrompt).toContain("AGENTFLOW_TOOL_BABYSIT_POLL_MODE=<configured>");
+      expect(renderedPrompt).toContain("mode: configured");
       expect(renderedPrompt).not.toContain("check-pr");
       expect(renderedPrompt).not.toMatch(/^### poll /m);
     } finally {

@@ -132,12 +132,21 @@ const state: RuntimeStateSnapshot = {
 describe("delivery package", () => {
   it("writes every required supervised delivery artifact", async () => {
     const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-"));
-    const artifactDir = join(runRoot, "nodes", "001-implement", "executions", "001-exec", "artifacts");
+    const executionDir = join(runRoot, "nodes", "001-implement", "executions", "001-exec");
+    const artifactDir = join(executionDir, "artifacts");
+    const logsDir = join(executionDir, "logs");
     await mkdir(artifactDir, { recursive: true });
+    await mkdir(logsDir, { recursive: true });
     const responsePath = join(artifactDir, "agent-response.md");
     const handoffPath = join(artifactDir, "handoff.md");
+    const stdoutPath = join(logsDir, "stdout.log");
+    const stderrPath = join(logsDir, "stderr.log");
     await writeFile(responsePath, "Implemented checkout timeout handling.\n", "utf8");
     await writeFile(handoffPath, "Reviewer handoff with validation evidence.\n", "utf8");
+    await writeFile(stdoutPath, "agent stdout\n", "utf8");
+    await writeFile(stderrPath, "", "utf8");
+    await writeFile(join(runRoot, "interventions.jsonl"), "", "utf8");
+    await writeFile(join(runRoot, "compile_diagnostics.json"), "[]\n", "utf8");
     const attempts: RuntimeNodeAttempt[] = [
       {
         execution_id: "exec-1",
@@ -145,13 +154,15 @@ describe("delivery package", () => {
         authored_id: "implement",
         kind: "agent",
         repo_alias: "main",
-        execution_dir: join(runRoot, "nodes", "001-implement", "executions", "001-exec"),
+        execution_dir: executionDir,
         attempt_index: 1,
         status: "passed",
         outcome: "passed",
         started_at: "2026-04-24T00:00:00.000Z",
         ended_at: "2026-04-24T00:00:01.000Z",
         duration_ms: 1000,
+        stdout_log_path: stdoutPath,
+        stderr_log_path: stderrPath,
         artifacts: {
           agent_response: responsePath,
           handoff: handoffPath
@@ -210,12 +221,51 @@ describe("delivery package", () => {
       "Reviewer Guide"
     );
     await expect(readFile(join(runRoot, "delivery", "reviewer-guide.md"), "utf8")).resolves.toContain(
-      "Human Review Surface"
+      "Review Order"
+    );
+    await expect(readFile(join(runRoot, "delivery", "run-map.md"), "utf8")).resolves.toContain(
+      "Run Map"
     );
     await expect(readFile(join(runRoot, "delivery", "evaluation-ledger.json"), "utf8")).resolves.toContain(
       '"failed_checks": []'
     );
     expect(manifest.artifact_counts.declared_artifacts).toBe(1);
+    expect(manifest.run_map).toBe(join(runRoot, "delivery", "run-map.md"));
+    expect(manifest.artifact_taxonomy.declared_artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "implement.handoff",
+          path: handoffPath
+        })
+      ])
+    );
+    expect(manifest.artifact_taxonomy.resume_required.map((entry) => entry.label)).toEqual(
+      expect.arrayContaining(["Run record", "Compiled graph snapshot", "Runtime state"])
+    );
+    expect(manifest.artifact_taxonomy.debug_only).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "implement stdout log",
+          path: stdoutPath
+        })
+      ])
+    );
+    expect(manifest.artifact_taxonomy.empty_or_noop).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: stderrPath,
+          reason: "empty_stderr"
+        }),
+        expect.objectContaining({
+          path: join(runRoot, "interventions.jsonl"),
+          reason: "empty_ledger"
+        }),
+        expect.objectContaining({
+          path: join(runRoot, "compile_diagnostics.json"),
+          reason: "no_diagnostics"
+        })
+      ])
+    );
     await expect(readFile(join(runRoot, "delivery", "implementation-summary.md"), "utf8")).resolves.toContain(
       "Reviewer handoff with validation evidence."
     );

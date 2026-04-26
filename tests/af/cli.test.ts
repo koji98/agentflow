@@ -2,9 +2,9 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { executeAfCli } from "../../src/af/index.js";
+import { executeAfCli, runAfCli } from "../../src/af/index.js";
 import type { ArtifactDefinition } from "../../src/graph/authored.js";
 
 interface TestRuntimePaths {
@@ -14,6 +14,7 @@ interface TestRuntimePaths {
   metadata: string;
   contextPacket: string;
   contextManifest: string;
+  toolInvocations: string;
 }
 
 async function writeExecutable(path: string, body: string): Promise<void> {
@@ -41,6 +42,7 @@ async function createRuntime(tempRoot: string, artifacts: Record<string, Artifac
   const output = join(root, "executions/main/output");
   const contextPacket = join(root, "executions/main/context.json");
   const contextManifest = join(root, "executions/main/manifest.md");
+  const toolInvocations = join(root, "executions/main/tool-invocations.jsonl");
   const toolsDir = join(root, "executions/main/agentflow-tools");
   const metadata = join(toolsDir, "runtime.json");
   await mkdir(workspace, { recursive: true });
@@ -66,6 +68,7 @@ async function createRuntime(tempRoot: string, artifacts: Record<string, Artifac
     context_manifest_path: contextManifest,
     tool_state_path: join(toolsDir, "state.json"),
     tool_bin_dir: join(toolsDir, "bin"),
+    tool_invocations_path: toolInvocations,
     credential_specs: {},
     declared_artifacts: artifacts,
     tools: [],
@@ -74,7 +77,7 @@ async function createRuntime(tempRoot: string, artifacts: Record<string, Artifac
     sandbox: "workspace-write",
     timeout_sec: 10
   }, null, 2)}\n`, "utf8");
-  return { root, workspace, output, metadata, contextPacket, contextManifest };
+  return { root, workspace, output, metadata, contextPacket, contextManifest, toolInvocations };
 }
 
 describe("af runtime CLI", () => {
@@ -100,6 +103,28 @@ describe("af runtime CLI", () => {
       process.env.AGENTFLOW_CODEX_CLI_BIN = originalCodexBin;
     }
     await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("renders top-level and subcommand help without runtime metadata", async () => {
+    delete process.env.AGENTFLOW_RUNTIME_METADATA;
+
+    const topLevel = await executeAfCli(["--help"]);
+    expect(topLevel.exitCode).toBe(0);
+    expect(topLevel.stdout).toContain("Usage:");
+    expect(topLevel.stdout).toContain("af <command> [subcommand] --help");
+    expect(topLevel.stdout).toContain("Exit codes:");
+
+    const artifactWrite = await executeAfCli(["artifact", "write", "--help"]);
+    expect(artifactWrite.exitCode).toBe(0);
+    expect(artifactWrite.stdout).toContain("af artifact write - publish a declared artifact");
+    expect(artifactWrite.stdout).toContain("--file <path>");
+    expect(artifactWrite.stdout).toContain("Default:");
+    expect(artifactWrite.stdout).toContain("Examples:");
+
+    const contextShow = await executeAfCli(["context", "show", "--help"]);
+    expect(contextShow.exitCode).toBe(0);
+    expect(contextShow.stdout).toContain("context_packet_path");
+    expect(contextShow.stdout).toContain("Read-only inspection");
   });
 
   it("exposes status, artifact, channel, inbox, and supervisor commands through runtime metadata", async () => {
@@ -156,6 +181,31 @@ describe("af runtime CLI", () => {
       "--tools",
       "not-granted"
     ])).rejects.toThrow("not granted");
+  });
+
+  it("records af stdout sidecar logs in the invocation ledger", async () => {
+    const runtime = await createRuntime(tempRoot);
+    process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    try {
+      await expect(runAfCli(["status"])).resolves.toBe(0);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+
+    const records = (await readFile(runtime.toolInvocations, "utf8"))
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as { kind: string; argv: string[]; stdout_path?: string });
+    expect(records).toEqual([
+      expect.objectContaining({
+        kind: "af",
+        argv: ["status"],
+        stdout_path: expect.stringContaining("tool-invocation-logs")
+      })
+    ]);
+    await expect(readFile(records[0]!.stdout_path!, "utf8")).resolves.toContain('"command": "af status"');
   });
 
   it("spawns a helper with its own metadata and waits for the helper artifact", async () => {

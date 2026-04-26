@@ -72,7 +72,7 @@
         "id": "watch_pr",
         "repo": "main",
         "profile": "review",
-        "goal": "Use the `babysit-poll` plugin tool to fetch the current state of pull request `123` (call `babysit-poll --pr 123`). Combine the polled JSON with the release-notes draft to produce a short ship-readiness handoff. Write it to `ship-handoff.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR).",
+        "goal": "Use the `babysit-poll` plugin tool to fetch the current state of pull request `123` (run `babysit-poll --help` if you need exact syntax, then call `babysit-poll --pr 123`). Combine the polled JSON with the release-notes draft to produce a short ship-readiness handoff. Write it to `ship-handoff.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR).",
         "constraints": [
           "Do not modify files in the repository."
         ],

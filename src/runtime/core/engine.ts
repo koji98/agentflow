@@ -1817,7 +1817,7 @@ async function synthesizeMissingArtifactsFromAgentResponse(options: {
         "The supervisor recovered missing human-readable artifacts from the captured agent response.",
         "No external harness was invoked because every missing artifact was a text handoff and the node had already completed successfully.",
         "",
-        "## Node Intent",
+        "## Node Task",
         "",
         options.node.goal,
         "",

@@ -33,7 +33,7 @@ Common:
 }
 ```
 
-`intent.goal` is required. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; scope and approval boundaries belong in plain `constraints`.
+`intent.goal` is required. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; scope boundaries and high-impact limits belong in plain `constraints`.
 
 Executable nodes can also carry intent:
 

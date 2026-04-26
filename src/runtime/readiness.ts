@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js";
+import type { CompiledExecutableNode, CompiledGraph, ResolvedTool } from "../graph/compiled.js";
 import type { HarnessName } from "../graph/schema.js";
 import { resolveSubpathWithinRoot } from "../path_rules.js";
 import type { HarnessAdapter } from "./harness/types.js";
@@ -14,7 +14,7 @@ export type ReadinessCheckStatus = "passed" | "warning" | "blocked";
 export type ReadinessStatus = "ready" | "warnings" | "blocked";
 
 export interface ReadinessCheckResult {
-  kind: "file" | "command" | "env" | "repo" | "harness" | "credential";
+  kind: "file" | "command" | "env" | "repo" | "harness" | "credential" | "tool";
   required: boolean;
   status: ReadinessCheckStatus;
   target: string;
@@ -384,6 +384,137 @@ function collectRequiredCredentialScopes(
   return [...scopes].sort();
 }
 
+function collectPluginTools(graph: Pick<CompiledGraph, "nodes">): ResolvedTool[] {
+  const tools = new Map<string, ResolvedTool>();
+
+  for (const node of graph.nodes) {
+    if (node.kind !== "agent") {
+      continue;
+    }
+
+    for (const tool of node.tools) {
+      if (tool.source.kind !== "plugin") {
+        continue;
+      }
+
+      const key = `${tool.source.alias}/${tool.source.tool}:${tool.executable_path}:${tool.args.join("\0")}`;
+      if (!tools.has(key)) {
+        tools.set(key, tool);
+      }
+    }
+  }
+
+  return [...tools.values()].sort((left, right) => left.callable_name.localeCompare(right.callable_name));
+}
+
+function helpValidationEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const safeEnvironment: NodeJS.ProcessEnv = {};
+  for (const key of ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SystemRoot", "ComSpec"]) {
+    const value = environment[key];
+    if (typeof value === "string") {
+      safeEnvironment[key] = value;
+    }
+  }
+  return safeEnvironment;
+}
+
+function missingHelpSignals(helpText: string): string[] {
+  const requiredSignals = [
+    { label: "Usage", pattern: /\bUsage\s*:/i },
+    { label: "Options", pattern: /\bOptions\s*:/i },
+    { label: "Default", pattern: /\bDefault\s*:/i },
+    { label: "Output", pattern: /\bOutput\s*:/i },
+    { label: "Exit codes", pattern: /\bExit codes\s*:/i },
+    { label: "Examples", pattern: /\bExamples\s*:/i },
+    { label: "--help option", pattern: /--help\b/i }
+  ];
+
+  return requiredSignals
+    .filter((signal) => !signal.pattern.test(helpText))
+    .map((signal) => signal.label);
+}
+
+function containsObviousSecret(helpText: string): boolean {
+  return /(?:token|secret|password|passwd|api[_-]?key|credential)\s*[:=]\s*(?!<redacted>|redacted|\(redacted\)|unset|none\b)[^\s\n]{8,}/i
+    .test(helpText);
+}
+
+async function evaluatePluginToolHelp(
+  tool: ResolvedTool,
+  environment: NodeJS.ProcessEnv
+): Promise<ReadinessCheckResult> {
+  const target = `$.plugins.${tool.source.alias}.tools.${tool.source.tool}.help`;
+  const helpArgs = [...tool.args, "--help"];
+  const result = spawnSync(tool.executable_path, helpArgs, {
+    cwd: tool.source.plugin_root,
+    env: helpValidationEnvironment(environment),
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+    timeout: 5000,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+
+  if (result.error) {
+    return buildIssue(
+      "tool",
+      true,
+      target,
+      false,
+      `Plugin tool "${tool.source.alias}/${tool.source.tool}" --help could not run: ${result.error.message}.`
+    );
+  }
+
+  if (result.status !== 0) {
+    return buildIssue(
+      "tool",
+      true,
+      target,
+      false,
+      `Plugin tool "${tool.source.alias}/${tool.source.tool}" --help must exit 0; got ${result.status ?? "unknown"}.`
+    );
+  }
+
+  if (output.length === 0) {
+    return buildIssue(
+      "tool",
+      true,
+      target,
+      false,
+      `Plugin tool "${tool.source.alias}/${tool.source.tool}" --help must print non-empty help output.`
+    );
+  }
+
+  const missingSignals = missingHelpSignals(output);
+  if (missingSignals.length > 0) {
+    return buildIssue(
+      "tool",
+      true,
+      target,
+      false,
+      `Plugin tool "${tool.source.alias}/${tool.source.tool}" --help is missing required help sections/signals: ${missingSignals.join(", ")}.`
+    );
+  }
+
+  if (containsObviousSecret(output)) {
+    return buildIssue(
+      "tool",
+      true,
+      target,
+      false,
+      `Plugin tool "${tool.source.alias}/${tool.source.tool}" --help appears to expose an unredacted secret-looking value. Redact credential and token defaults.`
+    );
+  }
+
+  return buildIssue(
+    "tool",
+    true,
+    target,
+    true,
+    `Plugin tool "${tool.source.alias}/${tool.source.tool}" --help satisfies the Agentflow help contract.`
+  );
+}
+
 async function evaluateHarnessReadiness(
   harnessName: HarnessName,
   harnesses: Partial<Record<HarnessName, HarnessAdapter>> | undefined
@@ -481,6 +612,10 @@ async function evaluateMachineReadiness(options: {
 
   for (const harnessName of collectRequiredHarnesses(options.graph)) {
     checks.push(await evaluateHarnessReadiness(harnessName, options.harnesses));
+  }
+
+  for (const tool of collectPluginTools(options.graph)) {
+    checks.push(await evaluatePluginToolHelp(tool, options.env));
   }
 
   const credentialSpecs = options.graph.credential_specs ?? {};

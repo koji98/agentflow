@@ -12,6 +12,7 @@ npm run build
 For source-mode development, use `npm run <script> -- ...`. For packaged CLI checks after build, use `node dist/cli/index.js ...` or the linked `agentflow` binary.
 
 The package also includes `af`, but that command is for agents inside a running node. Agentflow injects a generated `af` wrapper into each agent node's `PATH` with `$AGENTFLOW_RUNTIME_METADATA` pointing at that node's runtime contract.
+Agents can run `af --help` and `af <command> --help` inside a node for the authoritative runtime CLI arguments, defaults, output shape, examples, and safety notes.
 
 ## Validate A Graph
 
@@ -24,7 +25,7 @@ agentflow validate --graph agentflow.graph.json --show-compiled
 Use the three validation levels for different questions:
 
 - plain `validate`: is the authored and compiled graph contract valid?
-- `--run-ready`: are local repos, commands, env vars, plugin credentials, plugins, and harness binaries ready on this machine?
+- `--run-ready`: are local repos, commands, env vars, plugin credentials, plugin tool `--help` contracts, plugins, and harness binaries ready on this machine?
 - `--show-compiled`: does the compiled primitive graph match the operator's intent?
 
 Always inspect `intent`, `supervision`, resolved profiles, managed expansions, plugin tools, and artifact handoffs before launching serious work.
@@ -95,16 +96,18 @@ Inspect reports:
 - run summary path
 - interventions ledger path
 - delivery package manifest and reviewer guide paths
+- delivery artifact taxonomy counts when the delivery manifest is available
 - recent events
 
 Manual files worth opening:
 
-- `<run-root>/summary.md`
 - `<run-root>/events.jsonl`
 - `<run-root>/interventions.jsonl`
 - `<run-root>/delivery/manifest.json`
+- `<run-root>/delivery/run-map.md`
 - `<run-root>/delivery/reviewer-guide.md`
 - `<run-root>/delivery/evaluation-ledger.json`
+- `<run-root>/summary.md`
 
 Runtime coordination files are under `<run-root>/runtime/`. They are useful when debugging agent-to-agent coordination:
 
@@ -124,7 +127,7 @@ agentflow resume --graph agentflow.graph.json --latest
 
 Resume revalidates the current graph, recompiles it, and compares the new contract with the prior run.
 
-Completed work is preserved only when the node contract and graph-level `intent`, `supervision`, and `delivery` contracts remain compatible. If the human contract or policy contract changes, affected completed work restarts so the final evidence matches the current graph.
+Completed work is preserved only when the node contract and graph-level `intent` and `supervision` contracts remain compatible. If the human contract or policy contract changes, affected completed work restarts so the final evidence matches the current graph.
 
 ## Delivery Review
 
@@ -135,10 +138,11 @@ At terminal state, review in this order:
 3. `delivery/implementation-summary.md`
 4. `delivery/risk-notes.md`
 5. `delivery/follow-up-items.md`
-6. evidence files named by `delivery/manifest.json`
-7. internal runtime artifacts only for resume debugging, failed repair diagnosis, or low-level audit
+6. `delivery/run-map.md` when you need the run tree explained
+7. evidence files named by `delivery/manifest.json`
+8. internal runtime artifacts only for resume debugging, failed repair diagnosis, or low-level audit
 
-The reviewer guide should explain review order, risk areas, failed checks, supervisor interventions, and follow-up items. `delivery/manifest.json` labels human entrypoints, evidence files, and internal runtime artifacts so operators do not have to guess which files are for review versus resume/debugging. Treat missing or low-quality delivery artifacts as a failed run quality signal even if code changes exist.
+The reviewer guide should explain review order, risk areas, failed checks, supervisor interventions, and follow-up items. `delivery/manifest.json` includes an `artifact_taxonomy` that labels human entrypoints, declared artifacts, resume-required files, audit trail files, debug-only files, and empty/no-op files so operators do not have to guess which files are for review versus resume/debugging. Treat missing or low-quality delivery artifacts as a failed run quality signal even if code changes exist.
 
 ## Applying Captured Changes
 

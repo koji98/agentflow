@@ -20,7 +20,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 
 ## Default Workflow
 
-1. Confirm the graph has `intent.goal`, acceptance criteria, scope, approval boundaries, explicit `repos`, and explicit `profiles`.
+1. Confirm the graph has `intent.goal`, `intent.acceptance_criteria`, explicit `constraints`, explicit `repos`, and explicit `profiles`.
 2. Prefer fewer, larger outcome nodes with named artifacts and node-level `goal` plus `acceptance_criteria`.
 3. Set `supervision` budgets and delivery sections appropriate to the task.
 4. Use plugin-bundled CLI tools for team capabilities; verify each tool's `capability`, `impact`, and credential requirements.
@@ -28,22 +28,23 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 6. Run `agentflow validate --graph <path>`.
 7. Run `agentflow validate --graph <path> --run-ready` before launch on this machine.
 8. Run `agentflow validate --graph <path> --show-compiled` for managed patterns, plugin workflows, repeat scopes, or nontrivial artifact handoffs.
-9. After a run, inspect `summary.md`, `interventions.jsonl`, `delivery/manifest.json`, and `delivery/reviewer-guide.md`.
+9. After a run, inspect `delivery/reviewer-guide.md`, `delivery/manifest.json`, `delivery/run-map.md`, and declared artifacts before raw runtime files.
 
 ## Authoring Posture
 
 - Treat the authored DAG as the human contract, not a prose plan.
 - Use `context` for node material and `artifacts` for durable handoffs.
-- Treat `repos` and `profiles` as operational authority; treat `intent.scope` as governance.
+- Treat `repos` and `profiles` as operational authority; put scope boundaries and out-of-scope notes in `constraints`.
 - Keep downstream references on named artifacts from public node ids.
 - Use deterministic checks for hard facts and AI checks for semantic judgment.
-- Make approval boundaries explicit before granting external, secret, or mutation tools.
+- Make high-impact limits explicit in `constraints` before granting external, secret, or mutation tools.
 - Do not widen scope through supervisor behavior; use checkpoints or graph edits for human decisions.
 
 ## Runtime CLI Posture
 
 - Humans use `agentflow`; agents inside running nodes use `af`.
 - `af` is injected into agent nodes on `PATH` and reads `$AGENTFLOW_RUNTIME_METADATA`.
+- Use `af --help` and `af <command> --help` for exact runtime CLI arguments, defaults, output shape, examples, and safety notes.
 - Prefer `af status`, `af tools list`, and `af context show` when debugging what a node actually received.
 - Prefer `af artifact write` for declared handoffs instead of ad hoc output files.
 - Use `af channel post` and `af parent post` for coordination, but keep durable conclusions in artifacts.

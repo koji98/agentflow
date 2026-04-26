@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolveRunArtifactPaths } from "../../artifacts/paths.js";
@@ -22,12 +22,22 @@ const sectionFiles: Record<DeliverySection, string> = {
   intervention_trace: "intervention-trace.json"
 };
 
+export interface DeliveryArtifactEntry {
+  path: string;
+  label: string;
+  purpose: string;
+  bytes?: number;
+  empty?: boolean;
+  reason?: string;
+}
+
 export interface DeliveryPackageManifest {
   run_id: string;
   graph_id: string;
   status: RuntimeStateSnapshot["status"];
   generated_at: string;
   manifest_path: string;
+  run_map: string;
   sections: Record<DeliverySection, string>;
   human_entrypoints: {
     reviewer_guide: string;
@@ -50,6 +60,14 @@ export interface DeliveryPackageManifest {
     node_attempts: string;
     workspace_changes: string;
   };
+  artifact_taxonomy: {
+    human_entrypoints: DeliveryArtifactEntry[];
+    declared_artifacts: DeliveryArtifactEntry[];
+    resume_required: DeliveryArtifactEntry[];
+    audit_trail: DeliveryArtifactEntry[];
+    debug_only: DeliveryArtifactEntry[];
+    empty_or_noop: DeliveryArtifactEntry[];
+  };
   artifact_counts: {
     attempts: number;
     events: number;
@@ -69,6 +87,43 @@ function writeJson(filePath: string, payload: unknown): Promise<void> {
 
 function writeText(filePath: string, contents: string): Promise<void> {
   return writeFile(filePath, contents.endsWith("\n") ? contents : `${contents}\n`, "utf8");
+}
+
+async function fileInfo(filePath: string): Promise<Pick<DeliveryArtifactEntry, "bytes" | "empty">> {
+  try {
+    const entry = await stat(filePath);
+    return {
+      bytes: entry.size,
+      empty: entry.size === 0
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function readTrimmed(filePath: string): Promise<string | undefined> {
+  try {
+    return (await readFile(filePath, "utf8")).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+async function artifactEntry(options: {
+  path: string;
+  label: string;
+  purpose: string;
+  reason?: string;
+}): Promise<DeliveryArtifactEntry> {
+  const info = await fileInfo(options.path);
+  return {
+    path: options.path,
+    label: options.label,
+    purpose: options.purpose,
+    ...(info.bytes !== undefined ? { bytes: info.bytes } : {}),
+    ...(info.empty !== undefined ? { empty: info.empty } : {}),
+    ...(options.reason ? { reason: options.reason } : {})
+  };
 }
 
 function markdownList(values: string[], emptyText: string): string[] {
@@ -219,11 +274,19 @@ function renderReviewerGuide(manifest: DeliveryPackageManifest, evidence: Delive
   return [
     "# Reviewer Guide",
     "",
-    "## Human Review Surface",
+    "## Review Order",
     "",
-    `- Start with \`${manifest.human_entrypoints.task_brief}\` and \`${manifest.human_entrypoints.implementation_summary}\`.`,
-    `- Review risk and follow-up notes in \`${manifest.human_entrypoints.risk_notes}\` and \`${manifest.human_entrypoints.follow_up_items}\`.`,
-    `- Use evidence files for audit details: \`${manifest.evidence_files.grouped_change_map}\`, \`${manifest.evidence_files.evaluation_ledger}\`, and \`${manifest.evidence_files.intervention_trace}\`.`,
+    `1. Start with \`${manifest.human_entrypoints.task_brief}\`.`,
+    `2. Read \`${manifest.human_entrypoints.implementation_summary}\` and the declared artifacts it references.`,
+    `3. Check \`${manifest.human_entrypoints.risk_notes}\` and \`${manifest.human_entrypoints.follow_up_items}\`.`,
+    `4. Use \`${manifest.run_map}\` if you need to understand the run directory layout.`,
+    `5. Use evidence files for audit details: \`${manifest.evidence_files.grouped_change_map}\`, \`${manifest.evidence_files.evaluation_ledger}\`, and \`${manifest.evidence_files.intervention_trace}\`.`,
+    "",
+    "## What To Ignore Unless Debugging",
+    "",
+    "- `nodes/` contains per-node audit/debug details: raw logs, context packets, tool ledgers, and harness result JSON.",
+    "- `runtime/` contains live coordination state such as shared channel messages, mailboxes, helper sessions, and supervisor requests.",
+    "- Empty/no-op files are called out in the manifest so they do not look like missing review work.",
     "",
     "## Internal Runtime Artifacts",
     "",
@@ -242,6 +305,46 @@ function renderReviewerGuide(manifest: DeliveryPackageManifest, evidence: Delive
     ...(evidence.attempts.length === 0
       ? ["No node executions were recorded."]
       : evidence.attempts.map(formatAttempt))
+  ].join("\n");
+}
+
+function renderRunMap(manifest: DeliveryPackageManifest): string {
+  return [
+    "# Run Map",
+    "",
+    "This file explains the run directory without making every internal artifact look equally important.",
+    "",
+    "## Human Review",
+    "",
+    ...manifest.artifact_taxonomy.human_entrypoints.map((entry) => `- \`${entry.path}\` - ${entry.purpose}`),
+    "",
+    "## Declared Artifacts",
+    "",
+    ...(manifest.artifact_taxonomy.declared_artifacts.length > 0
+      ? manifest.artifact_taxonomy.declared_artifacts.map((entry) => `- \`${entry.label}\`: \`${entry.path}\` - ${entry.purpose}`)
+      : ["- No declared artifacts were captured."]),
+    "",
+    "## Resume Required",
+    "",
+    "Agentflow keeps these files stable for resume, inspect, and replay compatibility.",
+    "",
+    ...manifest.artifact_taxonomy.resume_required.map((entry) => `- \`${entry.path}\` - ${entry.purpose}`),
+    "",
+    "## Audit Trail",
+    "",
+    ...manifest.artifact_taxonomy.audit_trail.map((entry) => `- \`${entry.path}\` - ${entry.purpose}`),
+    "",
+    "## Debug Only",
+    "",
+    "Open these only when investigating a failure, auditing a specific node, or debugging context/tool behavior.",
+    "",
+    ...manifest.artifact_taxonomy.debug_only.map((entry) => `- \`${entry.path}\` - ${entry.purpose}`),
+    "",
+    "## Empty Or No-Op",
+    "",
+    ...(manifest.artifact_taxonomy.empty_or_noop.length > 0
+      ? manifest.artifact_taxonomy.empty_or_noop.map((entry) => `- \`${entry.path}\` - ${entry.purpose}${entry.reason ? ` (${entry.reason})` : ""}`)
+      : ["- No empty or no-op artifacts were detected."])
   ].join("\n");
 }
 
@@ -309,11 +412,270 @@ function buildGroupedChangeMap(workspaceChanges: WorkspaceChangeArtifacts[]): Ar
   }));
 }
 
-function buildManifest(evidence: DeliveryEvidence, runRoot: string, deliveryDir: string): DeliveryPackageManifest {
+async function buildArtifactTaxonomy(options: {
+  evidence: DeliveryEvidence;
+  runRoot: string;
+  sections: Record<DeliverySection, string>;
+  runMapPath: string;
+}): Promise<DeliveryPackageManifest["artifact_taxonomy"]> {
+  const { evidence, runRoot, sections } = options;
+  const runPaths = resolveRunArtifactPaths(runRoot);
+  const humanEntryPoints = await Promise.all([
+    artifactEntry({
+      path: sections.reviewer_guide,
+      label: "Reviewer guide",
+      purpose: "Start here for review order, risks, follow-ups, and links into supporting evidence."
+    }),
+    artifactEntry({
+      path: sections.task_brief,
+      label: "Task brief",
+      purpose: "Human-readable summary of the graph goal, constraints, and acceptance criteria."
+    }),
+    artifactEntry({
+      path: sections.implementation_summary,
+      label: "Implementation summary",
+      purpose: "Captured agent responses and declared handoff artifacts."
+    }),
+    artifactEntry({
+      path: sections.risk_notes,
+      label: "Risk notes",
+      purpose: "Failed checks, supervisor interventions, changed-file counts, and authored constraints."
+    }),
+    artifactEntry({
+      path: sections.follow_up_items,
+      label: "Follow-up items",
+      purpose: "Residual work or failures that need human attention."
+    }),
+    artifactEntry({
+      path: options.runMapPath,
+      label: "Run map",
+      purpose: "Plain-English guide to the run directory layout."
+    })
+  ]);
+  const declaredArtifacts = await Promise.all(
+    evidence.declared_artifacts.map((artifact) =>
+      artifactEntry({
+        path: artifact.artifact_path,
+        label: `${artifact.authored_id}.${artifact.name}`,
+        purpose: artifact.description
+      })
+    )
+  );
+  const resumeRequired = await Promise.all([
+    artifactEntry({
+      path: runPaths.run_file,
+      label: "Run record",
+      purpose: "Stable run identity, launch profile, workspace backend, and terminal status used by inspect/resume."
+    }),
+    artifactEntry({
+      path: runPaths.authored_graph_file,
+      label: "Authored graph snapshot",
+      purpose: "Exact authored graph contract captured at launch."
+    }),
+    artifactEntry({
+      path: runPaths.compiled_graph_file,
+      label: "Compiled graph snapshot",
+      purpose: "Resolved executable graph contract used by runtime and resume compatibility checks."
+    }),
+    artifactEntry({
+      path: runPaths.execution_manifest_file,
+      label: "Execution manifest",
+      purpose: "Resolved repo workspaces, node policies, and launch metadata."
+    }),
+    artifactEntry({
+      path: runPaths.state_file,
+      label: "Runtime state",
+      purpose: "Latest scheduler state and node statuses required for resume."
+    })
+  ]);
+  const toolInvocationEntries = await Promise.all(
+    evidence.tool_invocations.map((entry) =>
+      artifactEntry({
+        path: entry.invocation_path,
+        label: `${entry.authored_id} tool invocation ledger`,
+        purpose: "Canonical JSONL ledger of Agentflow-provided `af` and plugin tool calls for this execution."
+      })
+    )
+  );
+  const auditTrail = await Promise.all([
+    artifactEntry({
+      path: runPaths.events_file,
+      label: "Runtime event ledger",
+      purpose: "Append-only lifecycle event stream for replay, audit, and debugging."
+    }),
+    artifactEntry({
+      path: runPaths.interventions_file,
+      label: "Supervisor intervention ledger",
+      purpose: "Append-only supervisor intervention records."
+    }),
+    artifactEntry({
+      path: runPaths.nodes_dir,
+      label: "Node attempt tree",
+      purpose: "Per-node execution metadata, artifacts, logs, context, and tool invocation ledgers."
+    }),
+    artifactEntry({
+      path: runPaths.workspace_changes_dir,
+      label: "Workspace change captures",
+      purpose: "Git status, diffs, and changed-file lists used for review/apply workflows."
+    }),
+    artifactEntry({
+      path: sections.grouped_change_map,
+      label: "Grouped change map",
+      purpose: "Delivery summary of changed files and workspace change artifact paths."
+    }),
+    artifactEntry({
+      path: sections.evaluation_ledger,
+      label: "Evaluation ledger",
+      purpose: "Delivery summary of failed checks, declared artifacts, and tool invocation ledgers."
+    }),
+    ...toolInvocationEntries
+  ]);
+  const debugPaths = [
+    ...evidence.attempts.flatMap((attempt) => [
+      {
+        path: attempt.stdout_log_path ?? `${attempt.execution_dir}/logs/stdout.log`,
+        label: `${attempt.authored_id} stdout log`,
+        purpose: "Raw harness stdout for this execution."
+      },
+      {
+        path: attempt.stderr_log_path ?? `${attempt.execution_dir}/logs/stderr.log`,
+        label: `${attempt.authored_id} stderr log`,
+        purpose: "Raw harness stderr for this execution."
+      },
+      {
+        path: attempt.result_path ?? `${attempt.execution_dir}/result.json`,
+        label: `${attempt.authored_id} harness result`,
+        purpose: "Raw harness result metadata for this execution."
+      },
+      ...(attempt.context_packet_path
+        ? [{
+            path: attempt.context_packet_path,
+            label: `${attempt.authored_id} context packet`,
+            purpose: "Exact materialized context contract provided to the node."
+          }]
+        : []),
+      ...(attempt.context_manifest_path
+        ? [{
+            path: attempt.context_manifest_path,
+            label: `${attempt.authored_id} context manifest`,
+            purpose: "Prompt-facing index of materialized context."
+          }]
+        : []),
+      ...(attempt.context_provenance_path
+        ? [{
+            path: attempt.context_provenance_path,
+            label: `${attempt.authored_id} context provenance`,
+            purpose: "Digests and source metadata for context debugging."
+          }]
+        : [])
+    ]),
+    ...evidence.tool_invocations.flatMap((entry) =>
+      entry.records.flatMap((record) => [
+        ...(typeof record.stdout_path === "string"
+          ? [{
+              path: record.stdout_path,
+              label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} stdout`,
+              purpose: "Raw stdout sidecar for a single Agentflow-provided tool invocation."
+            }]
+          : []),
+        ...(typeof record.stderr_path === "string"
+          ? [{
+              path: record.stderr_path,
+              label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} stderr`,
+              purpose: "Raw stderr sidecar for a single Agentflow-provided tool invocation."
+            }]
+          : [])
+      ])
+    ),
+    {
+      path: `${runRoot}/runtime`,
+      label: "Runtime coordination state",
+      purpose: "Shared channel, mailboxes, helper sessions, and supervisor request state for live/debug workflows."
+    }
+  ];
+  const debugOnly = await Promise.all(debugPaths.map((entry) => artifactEntry(entry)));
+  const emptyOrNoop: DeliveryArtifactEntry[] = [];
+
+  if ((await readTrimmed(runPaths.interventions_file)) === "") {
+    emptyOrNoop.push(await artifactEntry({
+      path: runPaths.interventions_file,
+      label: "Supervisor intervention ledger",
+      purpose: "No supervisor interventions were recorded.",
+      reason: "empty_ledger"
+    }));
+  }
+
+  const compileDiagnostics = await readTrimmed(runPaths.compile_diagnostics_file);
+  if (compileDiagnostics === "[]" || compileDiagnostics === "") {
+    emptyOrNoop.push(await artifactEntry({
+      path: runPaths.compile_diagnostics_file,
+      label: "Compile diagnostics",
+      purpose: "Compilation produced no diagnostics.",
+      reason: "no_diagnostics"
+    }));
+  }
+
+  for (const attempt of evidence.attempts) {
+    const stderrPath = attempt.stderr_log_path ?? `${attempt.execution_dir}/logs/stderr.log`;
+    if ((await readTrimmed(stderrPath)) === "") {
+      emptyOrNoop.push(await artifactEntry({
+        path: stderrPath,
+        label: `${attempt.authored_id} stderr log`,
+        purpose: "Execution produced no stderr output.",
+        reason: "empty_stderr"
+      }));
+    }
+  }
+
+  for (const entry of evidence.tool_invocations) {
+    for (const record of entry.records) {
+      for (const stream of ["stdout_path", "stderr_path"] as const) {
+        const path = record[stream];
+        if (typeof path === "string" && (await readTrimmed(path)) === "") {
+          emptyOrNoop.push(await artifactEntry({
+            path,
+            label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} ${stream === "stdout_path" ? "stdout" : "stderr"}`,
+            purpose: `Tool invocation produced no ${stream === "stdout_path" ? "stdout" : "stderr"} output.`,
+            reason: stream === "stdout_path" ? "empty_tool_stdout" : "empty_tool_stderr"
+          }));
+        }
+      }
+    }
+  }
+
+  for (const workspaceChange of evidence.workspace_changes) {
+    if (workspaceChange.changed_files.length === 0) {
+      emptyOrNoop.push(await artifactEntry({
+        path: workspaceChange.changed_files_file,
+        label: `${workspaceChange.repo_alias} workspace changes`,
+        purpose: "Workspace change capture found no changed files.",
+        reason: "no_workspace_changes"
+      }));
+    }
+  }
+
+  return {
+    human_entrypoints: humanEntryPoints,
+    declared_artifacts: declaredArtifacts,
+    resume_required: resumeRequired,
+    audit_trail: auditTrail,
+    debug_only: debugOnly,
+    empty_or_noop: emptyOrNoop
+  };
+}
+
+async function buildManifest(evidence: DeliveryEvidence, runRoot: string, deliveryDir: string): Promise<DeliveryPackageManifest> {
   const sections = Object.fromEntries(
     deliverySections.map((section) => [section, join(deliveryDir, sectionFiles[section])])
   ) as Record<DeliverySection, string>;
   const runPaths = resolveRunArtifactPaths(runRoot);
+  const runMapPath = join(deliveryDir, "run-map.md");
+  const artifactTaxonomy = await buildArtifactTaxonomy({
+    evidence,
+    runRoot,
+    sections,
+    runMapPath
+  });
 
   return {
     run_id: evidence.run_id,
@@ -321,6 +683,7 @@ function buildManifest(evidence: DeliveryEvidence, runRoot: string, deliveryDir:
     status: evidence.status,
     generated_at: new Date().toISOString(),
     manifest_path: join(deliveryDir, "manifest.json"),
+    run_map: runMapPath,
     sections,
     human_entrypoints: {
       reviewer_guide: sections.reviewer_guide,
@@ -343,6 +706,7 @@ function buildManifest(evidence: DeliveryEvidence, runRoot: string, deliveryDir:
       node_attempts: runPaths.nodes_dir,
       workspace_changes: runPaths.workspace_changes_dir
     },
+    artifact_taxonomy: artifactTaxonomy,
     artifact_counts: {
       attempts: evidence.attempts.length,
       events: evidence.events.length,
@@ -372,11 +736,12 @@ export async function writeDeliveryPackage(options: {
   await mkdir(deliveryDir, { recursive: true });
 
   const evidence = await collectDeliveryEvidence(options);
-  const manifest = buildManifest(evidence, options.run_root, deliveryDir);
+  const manifest = await buildManifest(evidence, options.run_root, deliveryDir);
 
   await Promise.all([
     writeText(manifest.sections.task_brief, renderTaskBrief(evidence)),
     writeText(manifest.sections.implementation_summary, renderImplementationSummary(evidence)),
+    writeText(manifest.run_map, renderRunMap(manifest)),
     writeJson(manifest.sections.grouped_change_map, {
       graph_id: evidence.graph_id,
       run_id: evidence.run_id,

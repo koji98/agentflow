@@ -1,0 +1,100 @@
+import { describe, expect, it } from "vitest";
+
+import { renderHarnessPrompt, type AgentInvocation } from "../../src/runtime/harness/types.js";
+
+function baseInvocation(overrides: Partial<AgentInvocation> = {}): AgentInvocation {
+  return {
+    promptKind: "agent",
+    runId: "run-1",
+    executionId: "exec-1",
+    repoAlias: "main",
+    repoPath: "/tmp/workspace",
+    sandbox: "workspace-write",
+    model: undefined,
+    nodeGoal: "Implement the focused node task.",
+    contextPacketPath: "/tmp/run/context/packet.json",
+    contextManifestPath: "/tmp/run/context/manifest.md",
+    contextManifest: "# Context Manifest\n\n- Materialized items: `1`\n",
+    outputDir: "/tmp/run/output",
+    artifacts: {},
+    timeoutSec: 1800,
+    signal: undefined,
+    ...overrides
+  };
+}
+
+describe("harness prompt rendering", () => {
+  it("makes the node task primary and graph context secondary", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      graphGoal: "Ship the wider feature safely.",
+      graphAcceptanceCriteria: ["The full workflow validates."],
+      graphConstraints: ["Stay within the repo."]
+    }));
+
+    expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
+    expect(prompt.indexOf("## Node Task")).toBeLessThan(prompt.indexOf("## Graph Context"));
+    expect(prompt).toContain("The node task is the controlling objective.");
+    expect(prompt).toContain("Use this to understand why this node exists.");
+    expect(prompt).not.toContain("## Diagnostics");
+  });
+
+  it("keeps context metadata just-in-time through packet and provenance paths", () => {
+    const prompt = renderHarnessPrompt(baseInvocation());
+
+    expect(prompt).toContain("Read the manifest first");
+    expect(prompt).toContain("Context packet (exact materialized paths, omissions, and structured metadata): /tmp/run/context/packet.json");
+    expect(prompt).toContain("Context provenance (digests and harness instruction inputs, if needed): /tmp/run/context/provenance.json");
+    expect(prompt).not.toContain("Run ID:");
+    expect(prompt).not.toContain("Execution ID:");
+  });
+
+  it("renders read-only artifact declarations as blockers instead of write instructions", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      sandbox: "read-only",
+      artifacts: {
+        report: {
+          from: "output_dir",
+          path: "report.md",
+          description: "Review report."
+        }
+      }
+    }));
+
+    expect(prompt).toContain("read-only sandbox prevents file writes");
+    expect(prompt).toContain("Treat this as a blocker");
+    expect(prompt).not.toContain("Every declared artifact must exist before you finish");
+  });
+
+  it("renders artifact repair as a dedicated prompt kind", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      promptKind: "artifact_repair",
+      nodeGoal: "Produce the missing artifact while preserving the original task.",
+      artifacts: {
+        handoff: {
+          from: "output_dir",
+          path: "handoff.md",
+          description: "Markdown handoff."
+        }
+      },
+      repair: {
+        repairAttempt: 1,
+        maxAttempts: 2,
+        priorResponsePath: "/tmp/run/output/agent-response.md",
+        stdoutLogPath: "/tmp/run/logs/stdout.log",
+        stderrLogPath: "/tmp/run/logs/stderr.log",
+        missingArtifacts: [{
+          name: "handoff",
+          from: "output_dir",
+          path: "handoff.md",
+          description: "Markdown handoff.",
+          expectedPath: "/tmp/run/output/handoff.md"
+        }]
+      }
+    }));
+
+    expect(prompt).toContain("## Repair Task");
+    expect(prompt).toContain("## Missing Artifacts");
+    expect(prompt).toContain("expected absolute path: `/tmp/run/output/handoff.md`");
+    expect(prompt).not.toContain("## Diagnostics");
+  });
+});

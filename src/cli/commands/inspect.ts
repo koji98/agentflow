@@ -86,6 +86,32 @@ async function summarizeFailedNodes(attempts: RuntimeNodeAttempt[]): Promise<Nod
   );
 }
 
+async function readDeliveryTaxonomySummary(manifestPath: string): Promise<Record<string, number> | undefined> {
+  const contents = await readTextFileIfPresent(manifestPath);
+  if (!contents) {
+    return undefined;
+  }
+
+  try {
+    const manifest = JSON.parse(contents) as {
+      artifact_taxonomy?: Record<string, unknown[]>;
+    };
+    const taxonomy = manifest.artifact_taxonomy;
+    if (!taxonomy) {
+      return undefined;
+    }
+
+    return Object.fromEntries(
+      Object.entries(taxonomy).map(([category, entries]) => [
+        category,
+        Array.isArray(entries) ? entries.length : 0
+      ])
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 export const inspectCommand = {
   name: "inspect",
   summary: "Inspect a recorded run root and surface terminal status, counts, and failure stderr tails.",
@@ -172,6 +198,8 @@ export const inspectCommand = {
       readRunExecutionAttempts(runRoot).catch(() => [] as RuntimeNodeAttempt[]),
       readRunEvents(runRoot).catch(() => [])
     ]);
+    const deliveryManifestPath = `${artifactPaths.delivery_dir}/manifest.json`;
+    const deliveryTaxonomySummary = await readDeliveryTaxonomySummary(deliveryManifestPath);
 
     const failedNodeStderrTails = await summarizeFailedNodes(attempts);
     const terminalFields = state
@@ -199,8 +227,11 @@ export const inspectCommand = {
               supervisor_status: state.supervisor.status,
               intervention_count: state.supervisor.intervention_count,
               supervisor_budget_remaining: state.supervisor.budget_remaining,
-              delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
+              delivery_package: deliveryManifestPath,
               reviewer_guide: `${artifactPaths.delivery_dir}/reviewer-guide.md`,
+              ...(deliveryTaxonomySummary
+                ? { delivery_artifact_taxonomy: deliveryTaxonomySummary }
+                : {}),
               soft_verification_counts: state.soft_verification_counts,
               repo_workspaces: state.repo_workspaces,
               workspace_change_artifacts: state.workspace_change_artifacts

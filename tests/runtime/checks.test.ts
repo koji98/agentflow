@@ -83,7 +83,7 @@ describe("runtime checks", () => {
       nodeGoal: "Evaluate the change.",
       contextPacketPath: "/tmp/context/packet.json",
       contextManifestPath: "/tmp/context/manifest.md",
-      contextManifest: "# Context Manifest: exec-render\n\n- Materialized items: `2`\n",
+      contextManifest: "# Context Manifest\n\n- Materialized items: `2`\n",
       outputDir: "/tmp",
       artifacts: {},
       timeoutSec: 30,
@@ -91,10 +91,11 @@ describe("runtime checks", () => {
     });
 
     expect(rendered).toContain("## Role");
-    expect(rendered).toContain("You are an Agentflow AI evaluator");
+    expect(rendered).toContain("You are an AI evaluator executing one read-only check node");
     expect(rendered).toContain("Sandbox: read-only - cannot modify the workspace");
-    expect(rendered).toContain("# Context Manifest: exec-render");
-    expect(rendered).toContain("For exact paths, provenance, omission details, or structured metadata, read: /tmp/context/packet.json");
+    expect(rendered).toContain("# Context Manifest");
+    expect(rendered).toContain("Context packet (exact materialized paths, omissions, and structured metadata): /tmp/context/packet.json");
+    expect(rendered).toContain("Context provenance (digests and harness instruction inputs, if needed): /tmp/context/provenance.json");
     expect(rendered).toContain("## Output");
     expect(rendered).toContain("Return JSON only with this exact shape:");
     expect(rendered).toContain('{"passed":true,"score":0.0,"summary":"short summary","issues":[]}');

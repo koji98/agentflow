@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -511,6 +511,176 @@ describe("graph CLI", () => {
     expect(progressOutput).toContain("agentflow: run passed · 2/2 terminal nodes");
 
     await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("executes plugin tool --help only during run-ready validation", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-plugin-help-"));
+    const repoDir = join(tempRoot, "repo");
+    const pluginDir = join(tempRoot, "fixture-plugin");
+    const toolPath = join(pluginDir, "scripts", "inspect.sh");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    const mockCodex = join(tempRoot, "mock-codex.mjs");
+    const previousCodex = process.env.AGENTFLOW_CODEX_CLI_BIN;
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(join(pluginDir, "scripts"), { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(mockCodex, "#!/usr/bin/env node\nprocess.exit(0);\n", "utf8");
+    await chmod(mockCodex, 0o755);
+
+    const writeTool = async (body: string) => {
+      await writeFile(toolPath, body, "utf8");
+      await chmod(toolPath, 0o755);
+    };
+
+    await writeFile(
+      join(pluginDir, "agentflow.plugin.json"),
+      `${JSON.stringify(
+        {
+          schema: "agentflow.plugin/1",
+          id: "fixture",
+          version: "1.0.0",
+          workflows: {},
+          credentials: {},
+          tools: {
+            inspect: {
+              executable: "scripts/inspect.sh",
+              description: "Inspect fixture state.",
+              usage: "inspect --format json",
+              capability: "context",
+              impact: "read"
+            }
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "plugin-help-validation",
+          intent: {
+            goal: "Validate plugin help readiness.",
+            acceptance_criteria: ["Plugin tool help is enforced only in run-ready validation."]
+          },
+          plugins: {
+            fixture: {
+              path: "./fixture-plugin"
+            }
+          },
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {
+              harness: "codex-cli"
+            }
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "agent",
+                id: "inspect",
+                repo: "main",
+                goal: "Use the fixture inspect tool.",
+                tools: [
+                  {
+                    from_plugin: "fixture",
+                    tool: "inspect"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+    await writeTool("#!/usr/bin/env bash\necho missing structured help\n");
+    process.env.AGENTFLOW_CODEX_CLI_BIN = mockCodex;
+
+    try {
+      const resolveResult = await executeCli(["plugin", "resolve", "--graph", graphPath], tempRoot);
+      expect(resolveResult.exitCode).toBe(0);
+
+      const normalResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
+      expect(normalResult.exitCode).toBe(0);
+
+      const blockedResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+      const blockedPayload = JSON.parse(blockedResult.stdout);
+      expect(blockedResult.exitCode).toBe(1);
+      expect(blockedPayload.readiness.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "tool",
+            target: "$.plugins.fixture.tools.inspect.help",
+            status: "blocked",
+            message: expect.stringContaining("missing required help sections/signals")
+          })
+        ])
+      );
+
+      await writeTool([
+        "#!/usr/bin/env bash",
+        "if [[ \"${1:-}\" == \"--help\" ]]; then",
+        "  cat <<'HELP'",
+        "inspect - inspect fixture state",
+        "",
+        "Usage:",
+        "  inspect [--format json] [--help]",
+        "",
+        "Options:",
+        "  --format <json>  Output format. Default: json",
+        "  --help           Show this help and exit. Default: false",
+        "",
+        "Output:",
+        "  JSON object: { \"ok\": true }",
+        "",
+        "Exit codes:",
+        "  0 success",
+        "  1 runtime failure",
+        "",
+        "Examples:",
+        "  inspect --format json",
+        "HELP",
+        "  exit 0",
+        "fi",
+        "echo '{\"ok\":true}'",
+        ""
+      ].join("\n"));
+      const resolveUpdated = await executeCli(["plugin", "resolve", "--graph", graphPath], tempRoot);
+      expect(resolveUpdated.exitCode).toBe(0);
+      const readyResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+      const readyPayload = JSON.parse(readyResult.stdout);
+      expect(readyResult.exitCode).toBe(0);
+      expect(readyPayload.readiness.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "tool",
+            target: "$.plugins.fixture.tools.inspect.help",
+            status: "passed"
+          })
+        ])
+      );
+    } finally {
+      if (previousCodex === undefined) {
+        delete process.env.AGENTFLOW_CODEX_CLI_BIN;
+      } else {
+        process.env.AGENTFLOW_CODEX_CLI_BIN = previousCodex;
+      }
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("captures worktree status, binary diff, and changed files before cleanup", async () => {
@@ -2215,6 +2385,15 @@ describe("graph CLI", () => {
             stderr_tail: expect.stringContaining("failure-marker-12345")
           })
         ])
+      );
+      expect(inspectPayload.delivery_artifact_taxonomy).toEqual(
+        expect.objectContaining({
+          human_entrypoints: expect.any(Number),
+          resume_required: expect.any(Number),
+          audit_trail: expect.any(Number),
+          debug_only: expect.any(Number),
+          empty_or_noop: expect.any(Number)
+        })
       );
       expect(inspectPayload.artifacts.run_file).toBe(join(runPayload.run_root, "run.json"));
       expect(inspectPayload.artifacts.state_file).toBe(join(runPayload.run_root, "state.json"));

@@ -92,9 +92,9 @@ Plugin tools should match the node's job.
 - Use read/context tools for discovery nodes.
 - Use verification/reporting tools for evaluator nodes.
 - Use mutation/write tools only on write-capable agents.
-- Use approval boundaries before external-impact tools.
+- Put high-impact limits in `constraints` before granting external-impact tools.
 - Use plugin-declared `credentials` plus `agentflow auth` for secret-impact tools.
 
 ## Final Review
 
-At terminal state, start with the human entrypoints named by `delivery/manifest.json`: `delivery/reviewer-guide.md`, `delivery/task-brief.md`, `delivery/implementation-summary.md`, `delivery/risk-notes.md`, and `delivery/follow-up-items.md`. Use evidence files next. Read raw runtime files such as `events.jsonl`, `state.json`, `interventions.jsonl`, and node attempt directories only for resume/debugging or low-level audit.
+At terminal state, start with the human entrypoints named by `delivery/manifest.json`: `delivery/reviewer-guide.md`, `delivery/task-brief.md`, `delivery/implementation-summary.md`, `delivery/risk-notes.md`, `delivery/follow-up-items.md`, and `delivery/run-map.md`. Use declared artifacts and evidence files next. Read raw runtime files such as `events.jsonl`, `state.json`, `interventions.jsonl`, and node attempt directories only for resume/debugging or low-level audit.
