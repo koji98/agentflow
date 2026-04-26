@@ -154,4 +154,69 @@ describe("eval suite loading", () => {
     expect(messages).toContain("Fixture path does not exist");
     expect(messages).toContain("Unknown graph template placeholder");
   });
+
+  it("loads AI rubric grader harness selection and rejects Cursor reasoning_effort", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-suite-harness-"));
+    const suiteDir = join(tempRoot, "suite");
+    await mkdir(suiteDir, { recursive: true });
+    await writeFile(
+      join(suiteDir, "graph.template.json"),
+      `${JSON.stringify({
+        version: "1",
+        graph_id: "eval",
+        graph: {
+          type: "sequence",
+          id: "root",
+          steps: [{ type: "exec", id: "noop", command: "true" }]
+        }
+      })}\n`
+    );
+    await writeFile(join(suiteDir, "cases.jsonl"), `${JSON.stringify({ id: "case", task: "Do it" })}\n`);
+    await writeFile(join(suiteDir, "rubric.md"), "Grade strictly.\n");
+    await writeFile(
+      join(suiteDir, "suite.json"),
+      `${JSON.stringify({
+        version: "1",
+        suite_id: "harness-suite",
+        target: {
+          graph_template: "graph.template.json"
+        },
+        cases: "cases.jsonl",
+        graders: [
+          {
+            id: "cursor-grade",
+            kind: "ai_rubric",
+            harness: "cursor-cli",
+            rubric: "rubric.md",
+            model: "gpt-5.5-extra-high"
+          },
+          {
+            id: "bad-cursor-grade",
+            kind: "ai_rubric",
+            harness: "cursor-cli",
+            rubric: "rubric.md",
+            reasoning_effort: "high"
+          }
+        ]
+      })}\n`
+    );
+
+    const loaded = await loadEvalSuite(tempRoot, join(suiteDir, "suite.json"));
+
+    expect(loaded.suite.graders).toEqual([
+      expect.objectContaining({
+        id: "cursor-grade",
+        harness: "cursor-cli",
+        model: "gpt-5.5-extra-high"
+      })
+    ]);
+    expect(loaded.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graders[1].reasoning_effort",
+          message: expect.stringContaining("Cursor AI rubric graders cannot set reasoning_effort")
+        })
+      ])
+    );
+  });
 });

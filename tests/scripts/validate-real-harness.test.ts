@@ -23,7 +23,13 @@ describe("validate:real-harness contract", () => {
         nodeKind: "agent",
         timeoutSec: 180
       },
-      artifactChecks: ["run.json status", "state.json status", "summary.md status", "run.completed event"],
+      artifactChecks: [
+        "run.json status",
+        "state.json status",
+        "summary.md status",
+        "run.completed event",
+        "agent_response artifact"
+      ],
       supportedHarnesses: [
         {
           kind: "codex-cli",
@@ -105,7 +111,7 @@ describe("validate:real-harness contract", () => {
             harness: "codex-cli",
             status: "skipped",
             reason:
-              'codex-cli binary "codex" is unavailable. Set AGENTFLOW_CODEX_CLI_BIN or install it on PATH. The smoke would have run the built CLI against a one-node real harness graph and verified durable passed artifacts.',
+              'codex-cli binary "codex" is unavailable. Set AGENTFLOW_CODEX_CLI_BIN or install it on PATH. The smoke would have run the built CLI against a one-node real harness graph and verified durable passed artifacts and captured agent response.',
             binary: "codex",
             binary_source: "path-default"
           },
@@ -113,7 +119,7 @@ describe("validate:real-harness contract", () => {
             harness: "cursor-cli",
             status: "skipped",
             reason:
-              'cursor-cli binary "agent" is unavailable. Set AGENTFLOW_CURSOR_CLI_BIN or install it on PATH. The smoke would have run the built CLI against a one-node real harness graph and verified durable passed artifacts.',
+              'cursor-cli binary "agent" is unavailable. Set AGENTFLOW_CURSOR_CLI_BIN or install it on PATH. The smoke would have run the built CLI against a one-node real harness graph and verified durable passed artifacts and captured agent response.',
             binary: "agent",
             binary_source: "path-default"
           }

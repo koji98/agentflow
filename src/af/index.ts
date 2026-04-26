@@ -36,6 +36,7 @@ interface RuntimeMetadata {
   context_manifest_path: string;
   tool_state_path: string;
   tool_bin_dir: string;
+  tool_invocations_path?: string;
   credential_specs?: CredentialSpecMap;
   credential_index_path?: string;
   keychain_account?: string;
@@ -83,6 +84,62 @@ interface AfResult {
   exitCode: number;
   stdout?: string;
   output?: unknown;
+}
+
+function redactArgv(argv: string[]): string[] {
+  const secretPattern = /(^|[_-])(token|secret|password|passwd|api[_-]?key|credential|authorization|bearer)([_-]|$)/i;
+  const redacted: string[] = [];
+  let redactNext = false;
+
+  for (const arg of argv) {
+    if (redactNext) {
+      redacted.push("<redacted>");
+      redactNext = false;
+      continue;
+    }
+
+    const [key] = arg.split("=", 1);
+    if (secretPattern.test(key ?? arg)) {
+      redacted.push(arg.includes("=") ? `${key}=<redacted>` : arg);
+      redactNext = !arg.includes("=");
+      continue;
+    }
+
+    redacted.push(arg);
+  }
+
+  return redacted;
+}
+
+async function appendAfInvocation(options: {
+  metadata: RuntimeMetadata;
+  argv: string[];
+  exitCode: number;
+  durationMs: number;
+  error?: string;
+}): Promise<void> {
+  const path = options.metadata.tool_invocations_path ?? process.env.AGENTFLOW_TOOL_INVOCATIONS;
+  if (!path) {
+    return;
+  }
+
+  await appendJsonl(path, {
+    ts: new Date().toISOString(),
+    run_id: options.metadata.run_id,
+    graph_id: options.metadata.graph_id,
+    agent_id: options.metadata.agent_id,
+    execution_id: options.metadata.execution_id,
+    node_id: options.metadata.node_id,
+    compiled_id: options.metadata.compiled_id,
+    kind: "af",
+    tool: "af",
+    argv: redactArgv(options.argv),
+    cwd: process.cwd(),
+    exit_code: options.exitCode,
+    duration_ms: options.durationMs,
+    ...(options.error ? { error: options.error } : {}),
+    redaction: "secret-looking argv values redacted"
+  });
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -904,7 +961,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
       ? [
           "-p",
           "--output-format",
-          "text",
+          "json",
           "--workspace",
           parentMetadata.workspace_path,
           "--sandbox",
@@ -1178,12 +1235,31 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
 }
 
 export async function runAfCli(argv = process.argv.slice(2)): Promise<number> {
+  const startedAt = Date.now();
   try {
     const result = await executeAfCli(argv);
+    if (process.env.AGENTFLOW_RUNTIME_METADATA && argv[0] !== "_helper-run") {
+      await appendAfInvocation({
+        metadata: requireRuntimeMetadata(),
+        argv,
+        exitCode: result.exitCode,
+        durationMs: Date.now() - startedAt
+      }).catch(() => undefined);
+    }
     process.stdout.write(result.stdout ?? `${JSON.stringify(result.output ?? {}, null, 2)}\n`);
     process.exitCode = result.exitCode;
     return result.exitCode;
   } catch (error) {
+    if (process.env.AGENTFLOW_RUNTIME_METADATA && argv[0] !== "_helper-run") {
+      const message = error instanceof Error ? error.message : String(error);
+      await appendAfInvocation({
+        metadata: requireRuntimeMetadata(),
+        argv,
+        exitCode: 1,
+        durationMs: Date.now() - startedAt,
+        error: message
+      }).catch(() => undefined);
+    }
     const output = {
       command: "af",
       status: "failed",

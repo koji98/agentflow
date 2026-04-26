@@ -100,12 +100,20 @@ describe("runtime checks", () => {
     expect((rendered.match(/## Context/g) ?? []).length).toBe(1);
   });
 
-  it("fails AI checks closed when cursor-cli cannot guarantee strict read-only evaluation", async () => {
+  it("runs Cursor AI checks when the harness provides the strict read-only contract", async () => {
     const harness = createHarness("cursor-cli", async () => {
       return {
         status: "passed",
         exitCode: 0,
-        stdout: '{"passed":true,"score":1,"summary":"ok"}'
+        transcript: {
+          last_message: '{"passed":true,"score":1,"summary":"ok"}'
+        },
+        outputJson: {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: '{"passed":true,"score":1,"summary":"ok"}'
+        }
       };
     });
 
@@ -125,16 +133,12 @@ describe("runtime checks", () => {
       signal: undefined
     });
 
-    expect(result.harness_result).toEqual(
-      expect.objectContaining({
-        status: "failed",
-        stderr: expect.stringContaining("cursor-cli does not provide a strict read-only evaluation contract")
-      })
-    );
+    expect(result.harness_result.status).toBe("passed");
     expect(result.evaluation).toEqual(
       expect.objectContaining({
-        passed: false,
-        summary: expect.stringContaining("Use a harness that supports AI checks")
+        passed: true,
+        score: 1,
+        summary: "ok"
       })
     );
   });

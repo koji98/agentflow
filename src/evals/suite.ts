@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import { reasoningEfforts } from "../graph/schema.js";
+import { harnessNames, reasoningEfforts } from "../graph/schema.js";
 import type {
   EvalAiRubricGrader,
   EvalCase,
@@ -21,6 +21,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isReasoningEffort(value: unknown): value is EvalAiRubricGrader["reasoning_effort"] {
   return typeof value === "string" && (reasoningEfforts as readonly string[]).includes(value);
+}
+
+function isHarnessName(value: unknown): value is EvalAiRubricGrader["harness"] {
+  return typeof value === "string" && (harnessNames as readonly string[]).includes(value);
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -85,6 +89,7 @@ function normalizeGrader(value: unknown, path: string, diagnostics: EvalDiagnost
 
   if (kind === "ai_rubric") {
     const rubric = readString(value.rubric);
+    const harness = value.harness;
     const model = readString(value.model);
     const reasoning_effort = value.reasoning_effort;
 
@@ -96,7 +101,24 @@ function normalizeGrader(value: unknown, path: string, diagnostics: EvalDiagnost
       diagnostics.push({ path: `${path}.reasoning_effort`, message: "AI rubric grader has invalid reasoning_effort." });
     }
 
-    if (!id || !rubric || (reasoning_effort !== undefined && !isReasoningEffort(reasoning_effort))) {
+    if (harness !== undefined && !isHarnessName(harness)) {
+      diagnostics.push({ path: `${path}.harness`, message: "AI rubric grader has invalid harness." });
+    }
+
+    if (harness === "cursor-cli" && reasoning_effort !== undefined) {
+      diagnostics.push({
+        path: `${path}.reasoning_effort`,
+        message: "Cursor AI rubric graders cannot set reasoning_effort; choose the appropriate Cursor model id instead."
+      });
+    }
+
+    if (
+      !id ||
+      !rubric ||
+      (harness !== undefined && !isHarnessName(harness)) ||
+      (reasoning_effort !== undefined && !isReasoningEffort(reasoning_effort)) ||
+      (harness === "cursor-cli" && reasoning_effort !== undefined)
+    ) {
       return undefined;
     }
 
@@ -105,6 +127,7 @@ function normalizeGrader(value: unknown, path: string, diagnostics: EvalDiagnost
       kind,
       rubric,
       ...(required !== undefined ? { required } : {}),
+      ...(harness ? { harness } : {}),
       ...(model ? { model } : {}),
       ...(reasoning_effort ? { reasoning_effort } : {}),
       ...(timeout_sec !== undefined ? { timeout_sec } : {})

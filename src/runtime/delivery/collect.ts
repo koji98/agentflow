@@ -36,6 +36,13 @@ export interface DeliveryEvidence {
     artifact_path: string;
     content?: string;
   }>;
+  tool_invocations: Array<{
+    authored_id: string;
+    compiled_id: string;
+    execution_id: string;
+    invocation_path: string;
+    records: Array<Record<string, unknown>>;
+  }>;
   workspace_changes: WorkspaceChangeArtifacts[];
 }
 
@@ -49,6 +56,28 @@ async function readTextArtifact(path: string | undefined): Promise<string | unde
   } catch {
     return undefined;
   }
+}
+
+async function readJsonlRecords(path: string): Promise<Array<Record<string, unknown>>> {
+  const contents = await readTextArtifact(path);
+  if (!contents) {
+    return [];
+  }
+
+  return contents
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? [parsed as Record<string, unknown>]
+          : [];
+      } catch {
+        return [];
+      }
+    });
 }
 
 function readVerification(attempt: RuntimeNodeAttempt): VerificationRecordedPayload | undefined {
@@ -125,6 +154,24 @@ export async function collectDeliveryEvidence(options: {
       summary: verification?.summary ?? "Check failed."
     }];
   });
+  const toolInvocations = (
+    await Promise.all(
+      options.attempts.map(async (attempt) => {
+        const invocationPath = `${attempt.execution_dir}/tool-invocations.jsonl`;
+        const records = await readJsonlRecords(invocationPath);
+
+        return records.length > 0
+          ? {
+              authored_id: attempt.authored_id,
+              compiled_id: attempt.compiled_id,
+              execution_id: attempt.execution_id,
+              invocation_path: invocationPath,
+              records
+            }
+          : undefined;
+      })
+    )
+  ).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
 
   return {
     graph_id: options.graph.graph_id,
@@ -137,6 +184,7 @@ export async function collectDeliveryEvidence(options: {
     failed_checks: failedChecks,
     agent_responses: agentResponses,
     declared_artifacts: declaredArtifacts,
+    tool_invocations: toolInvocations,
     workspace_changes: Object.values(options.state.workspace_change_artifacts)
   };
 }

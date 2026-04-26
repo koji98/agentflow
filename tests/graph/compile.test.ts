@@ -733,14 +733,7 @@ describe("graph compilation", () => {
       normalized.lowered_managed_nodes
     );
 
-    expect(compilation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.judge.profile",
-          message: expect.stringContaining('does not support AI checks')
-        })
-      ])
-    );
+    expect(compilation.diagnostics).toEqual([]);
     expect(compilation.compiled_graph?.launch).toEqual({
       launch_profile: "review",
       workspace_backend: "inplace"
@@ -841,14 +834,7 @@ describe("graph compilation", () => {
       normalized.lowered_managed_nodes
     );
 
-    expect(compilation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.judge_patch.profile",
-          message: expect.stringContaining('does not support AI checks')
-        })
-      ])
-    );
+    expect(compilation.diagnostics).toEqual([]);
 
     const reviewPatch = compilation.compiled_graph?.nodes.find(
       (node) => node.authored_id === "review_patch"

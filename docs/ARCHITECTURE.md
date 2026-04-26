@@ -121,6 +121,8 @@ Codex CLI and Cursor CLI are adapters behind one Agentflow harness contract. Bot
 - the same sandbox and timeout policy
 - the same `$AGENTFLOW_OUTPUT_DIR`
 
+Both adapters also support `check_kind: "ai"`. AI checks run in the read-only sandbox and must return structured evaluation JSON. Cursor runs with JSON output enabled and uses Cursor model ids directly; graphs must not set `reasoning_effort` on Cursor profiles or Cursor agent/check nodes.
+
 Continuity comes from Agentflow artifacts and resume logic, not from assuming persistent harness chat state.
 
 ## Agent Runtime CLI
@@ -139,6 +141,8 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 - `af spawn` creates a helper session with its own runtime metadata, selected plugin tools, output directory, logs, and artifact contract.
 - `af wait` waits for helper completion.
 - `af supervisor request` records a supervisor request and mirrors it to the channel.
+
+Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocations.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and plugin stdout/stderr log paths when available.
 
 Agents never talk directly to another process. Delivery is explicit: a message is stored, and if the recipient is not running the response reports that it was not live-delivered. Durable work should move through artifacts, with messages used to notify or coordinate.
 
@@ -232,7 +236,7 @@ Terminal delivery is part of the runtime contract. The package collector reads r
 The manifest separates three audiences:
 
 - human entrypoints: reviewer guide, task brief, implementation summary, risk notes, and follow-up items
-- evidence files: grouped change map, evaluation ledger, decision log, and intervention trace
+- evidence files: grouped change map, evaluation ledger, decision log, intervention trace, and promoted per-node tool invocation summaries
 - internal runtime artifacts: run record, state, events, interventions ledger, node attempts, and workspace-change captures
 
 If delivery package creation fails, the run is marked failed with a `delivery_package_failed` reason. This keeps the promise that a terminal run returns reviewable evidence, not just a raw diff.

@@ -233,7 +233,13 @@ process.stdin.on("end", () => {
 async function createMockCursorBinary(tempRoot) {
   const binaryPath = join(tempRoot, "mock-agent.mjs");
   const source = `#!/usr/bin/env node
-process.stdout.write('{"passed":true,"summary":"cursor smoke ok"}');
+process.stdout.write(JSON.stringify({
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  result: "cursor smoke ok",
+  session_id: "validate-smoke"
+}));
 `;
 
   await writeFile(binaryPath, source);

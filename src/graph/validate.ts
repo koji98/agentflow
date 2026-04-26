@@ -552,6 +552,23 @@ async function validateNormalizedDocument(
 
   Object.entries(document.profiles ?? {}).forEach(([profileName, profile]) => {
     validateEnvFiles(profile.env_files, `$.profiles.${profileName}.env_files`, diagnostics);
+    if (profile.harness === "cursor-cli" && profile.reasoning_effort !== undefined) {
+      diagnostics.push({
+        path: `$.profiles.${profileName}.reasoning_effort`,
+        message:
+          `Cursor profile "${profileName}" cannot set reasoning_effort because Cursor model ids encode reasoning effort. ` +
+          "Choose the appropriate Cursor model id instead."
+      });
+    }
+
+    if (profile.harness === "cursor-cli" && profile.ai_check_defaults?.reasoning_effort !== undefined) {
+      diagnostics.push({
+        path: `$.profiles.${profileName}.ai_check_defaults.reasoning_effort`,
+        message:
+          `Cursor profile "${profileName}" cannot set ai_check_defaults.reasoning_effort because Cursor model ids encode reasoning effort. ` +
+          "Choose the appropriate Cursor model id instead."
+      });
+    }
   });
 
   if (document.config_schema) {
@@ -570,6 +587,15 @@ async function validateNormalizedDocument(
       const resolution = resolveNodePolicy(document, launch, node);
       for (const diagnostic of resolution.diagnostics) {
         diagnostics.push(diagnostic);
+      }
+
+      if (resolution.policy?.harness === "cursor-cli" && node.reasoning_effort !== undefined) {
+        diagnostics.push({
+          path: `${metadata.path}.reasoning_effort`,
+          message:
+            `Cursor node "${node.id}" cannot set reasoning_effort because Cursor model ids encode reasoning effort. ` +
+            "Choose the appropriate Cursor model id instead."
+        });
       }
 
       if (

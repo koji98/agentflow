@@ -605,6 +605,66 @@ describe("graph validation", () => {
     expect(sandboxDiagnostics).toEqual([]);
   });
 
+  it("rejects reasoning_effort on Cursor profiles and nodes", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "cursor-reasoning-effort",
+      intent: TEST_INTENT,
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default" },
+      profiles: {
+        default: {
+          harness: "cursor-cli",
+          model: "gpt-5.5-extra-high",
+          reasoning_effort: "high",
+          ai_check_defaults: {
+            reasoning_effort: "low"
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            prompt: "Implement the change.",
+            reasoning_effort: "medium"
+          },
+          {
+            type: "check",
+            id: "judge",
+            check_kind: "ai",
+            prompt: "Judge the current state.",
+            reasoning_effort: "high"
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.profiles.default.reasoning_effort",
+          message: expect.stringMatching(/Cursor profile.*model ids encode reasoning effort/i)
+        }),
+        expect.objectContaining({
+          path: "$.profiles.default.ai_check_defaults.reasoning_effort",
+          message: expect.stringMatching(/Cursor profile.*ai_check_defaults\.reasoning_effort.*model ids encode reasoning effort/i)
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].reasoning_effort",
+          message: expect.stringMatching(/Cursor node "implement".*model ids encode reasoning effort/i)
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].reasoning_effort",
+          message: expect.stringMatching(/Cursor node "judge".*model ids encode reasoning effort/i)
+        })
+      ])
+    );
+  });
+
   it("does not require a harness for exec-only graphs", async () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",

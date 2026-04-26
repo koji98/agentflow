@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from "../graph/schema.js";
+import type { HarnessName, ReasoningEffort } from "../graph/schema.js";
 
 export const evalSuiteVersion = "1";
 
@@ -34,6 +34,7 @@ export interface EvalAiRubricGrader {
   kind: "ai_rubric";
   rubric: string;
   required?: boolean;
+  harness?: HarnessName;
   model?: string;
   reasoning_effort?: ReasoningEffort;
   timeout_sec?: number;

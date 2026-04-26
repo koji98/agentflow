@@ -12,7 +12,7 @@ const harnessCapabilitiesByName: Record<HarnessName, HarnessCapabilities> = {
   },
   "cursor-cli": {
     supports_agent: true,
-    supports_ai_check: false
+    supports_ai_check: true
   }
 };
 

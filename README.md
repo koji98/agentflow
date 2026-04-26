@@ -96,7 +96,6 @@ After `npm run build`, the packaged CLI entries are `dist/cli/index.js` and `dis
     "cursor": {
       "harness": "cursor-cli",
       "model": "auto",
-      "reasoning_effort": "medium",
       "sandbox": "workspace-write",
       "timeout_sec": 1800
     }

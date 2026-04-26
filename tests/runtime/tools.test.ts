@@ -732,8 +732,31 @@ describe("prepareAgentTools", () => {
     const afSource = await readFile(join(setup.bin_dir, "af"), "utf8");
     expect(afSource).toContain("Agentflow runtime CLI wrapper");
 
-    const wrapperResult = await execFileAsync(join(setup.bin_dir, "babysit-poll"));
+    const wrapperResult = await execFileAsync(join(setup.bin_dir, "babysit-poll"), ["--token", "secret-value"]);
     expect(wrapperResult.stdout.trim()).toBe("plugin");
+    const invocationRecords = (await readFile(join(executionDir, "tool-invocations.jsonl"), "utf8"))
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(invocationRecords).toEqual([
+      expect.objectContaining({
+        run_id: "run-tools",
+        graph_id: "tools-runtime",
+        agent_id: "exec-draft",
+        execution_id: "exec-draft",
+        node_id: "draft",
+        compiled_id: "main__draft",
+        kind: "plugin_tool",
+        tool: "babysit-poll",
+        capability: "verification",
+        impact: "read",
+        argv: ["--token", "<redacted>"],
+        exit_code: 0,
+        stdout_path: expect.stringMatching(/tool-invocation-logs\/.*babysit-poll\.stdout\.log$/),
+        stderr_path: expect.stringMatching(/tool-invocation-logs\/.*babysit-poll\.stderr\.log$/)
+      })
+    ]);
+    expect(await readFile(invocationRecords[0]!.stdout_path as string, "utf8")).toBe("plugin\n");
 
     const state = JSON.parse(await readFile(setup.tool_state_path, "utf8")) as {
       version: string;
@@ -756,6 +779,7 @@ describe("prepareAgentTools", () => {
     });
 
     expect(setup.env.AGENTFLOW_TOOL_STATE).toBe(setup.tool_state_path);
+    expect(setup.env.AGENTFLOW_TOOL_INVOCATIONS).toBe(join(executionDir, "tool-invocations.jsonl"));
     expect(setup.env.AGENTFLOW_RUNTIME_METADATA).toBe(join(executionDir, "agentflow-tools/runtime.json"));
     expect(setup.env.AGENTFLOW_RUN_ROOT).toBe(tempRoot);
     expect(setup.env.AGENTFLOW_RUNTIME_DIR).toBe(join(tempRoot, "runtime"));
@@ -769,6 +793,7 @@ describe("prepareAgentTools", () => {
       agent_id: string;
       run_id: string;
       tool_bin_dir: string;
+      tool_invocations_path: string;
       runtime_dir: string;
       declared_artifacts: Record<string, { path: string }>;
     };
@@ -777,6 +802,7 @@ describe("prepareAgentTools", () => {
       run_id: "run-tools",
       runtime_dir: join(tempRoot, "runtime"),
       tool_bin_dir: setup.bin_dir,
+      tool_invocations_path: join(executionDir, "tool-invocations.jsonl"),
       declared_artifacts: {
         summary: { path: "summary.md" }
       }

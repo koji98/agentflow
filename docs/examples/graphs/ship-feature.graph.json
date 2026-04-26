@@ -15,7 +15,6 @@
     "default": {
       "harness": "cursor-cli",
       "model": "auto",
-      "reasoning_effort": "medium",
       "sandbox": "workspace-write",
       "timeout_sec": 900,
       "input_rules": {
@@ -26,7 +25,6 @@
     "review": {
       "harness": "cursor-cli",
       "model": "auto",
-      "reasoning_effort": "medium",
       "sandbox": "workspace-write",
       "timeout_sec": 900
     }

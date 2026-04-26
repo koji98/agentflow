@@ -276,8 +276,8 @@ export async function runAiCheck(
   }
 
   const rawPayload =
-    harness_result.outputJson ??
     harness_result.transcript?.last_message ??
+    harness_result.outputJson ??
     harness_result.stdout ??
     "";
   const parsedEvaluation = parseAiCheckResult(rawPayload);

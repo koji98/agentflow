@@ -262,14 +262,7 @@ describe("graph profile resolution", () => {
       })
     );
 
-    expect(isolated.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.judge_cross.profile",
-          message: expect.stringContaining('does not support AI checks')
-        })
-      ])
-    );
+    expect(isolated.diagnostics).toEqual([]);
     expect(isolated.policy).toEqual(
       expect.objectContaining({
         profile_name: "different_harness",
