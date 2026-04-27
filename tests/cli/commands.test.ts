@@ -2555,6 +2555,55 @@ describe("graph CLI", () => {
     }
   });
 
+  it("handles missing or corrupted durable run files during inspect", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-inspect-damaged-"));
+    try {
+      const missingRunJson = join(tempRoot, "missing-run-json");
+      await mkdir(missingRunJson, { recursive: true });
+      const missing = await executeCli(["inspect", missingRunJson], tempRoot);
+      const missingPayload = JSON.parse(missing.stdout);
+
+      expect(missing.exitCode).toBe(1);
+      expect(missingPayload.message).toContain("run.json could not be read");
+
+      const corruptRunJson = join(tempRoot, "corrupt-run-json");
+      await mkdir(corruptRunJson, { recursive: true });
+      await writeFile(join(corruptRunJson, "run.json"), "{not-json", "utf8");
+      const corrupt = await executeCli(["inspect", corruptRunJson], tempRoot);
+      const corruptPayload = JSON.parse(corrupt.stdout);
+
+      expect(corrupt.exitCode).toBe(1);
+      expect(corruptPayload.message).toContain("run.json could not be read");
+
+      const partialState = join(tempRoot, "partial-state");
+      await mkdir(partialState, { recursive: true });
+      await writeFile(
+        join(partialState, "run.json"),
+        `${JSON.stringify({
+          run_id: "run-partial-state",
+          graph_id: "partial-state",
+          launch_profile: "default",
+          workspace_backend: "inplace",
+          status: "failed",
+          started_at: "2026-04-24T00:00:00.000Z",
+          ended_at: "2026-04-24T00:00:01.000Z"
+        }, null, 2)}\n`,
+        "utf8"
+      );
+      await writeFile(join(partialState, "state.json"), "{partial", "utf8");
+      const inspectedPartial = await executeCli(["inspect", partialState], tempRoot);
+      const partialPayload = JSON.parse(inspectedPartial.stdout);
+
+      expect(inspectedPartial.exitCode).toBe(0);
+      expect(partialPayload.status).toBe("passed");
+      expect(partialPayload.run_status).toBe("failed");
+      expect(partialPayload.counts).toBeUndefined();
+      expect(partialPayload.artifacts.state_file).toBe(join(partialState, "state.json"));
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("resumes the latest failed run for a graph via resume --graph --latest", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-latest-"));
     const repoDir = join(tempRoot, "repo");

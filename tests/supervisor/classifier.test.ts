@@ -108,6 +108,26 @@ describe("supervisor failure classifier", () => {
     );
   });
 
+  it("uses failed harness stderr when no structured error is available", () => {
+    expect(classify({
+      result: {
+        status: "failed",
+        outcome: "failed",
+        result: {
+          exit_code: 1,
+          metadata: {}
+        },
+        stderr: "operation escapes the workspace\n"
+      }
+    })).toEqual(
+      expect.objectContaining({
+        class: "policy_breach",
+        retryable: false,
+        recommended_action: "pause_for_human"
+      })
+    );
+  });
+
   it("classifies harness readiness errors as harness failures", () => {
     expect(classify({ error_message: 'codex-cli harness binary "codex" is unavailable.' })).toEqual(
       expect.objectContaining({

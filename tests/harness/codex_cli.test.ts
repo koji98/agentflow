@@ -99,6 +99,18 @@ setTimeout(() => {
   return binary_path;
 }
 
+async function createKilledCodexBinary(tempRoot: string): Promise<string> {
+  const binary_path = join(tempRoot, "killed-codex.mjs");
+  const source = `#!/usr/bin/env node
+process.stdout.write("starting\\n");
+process.kill(process.pid, "SIGKILL");
+`;
+
+  await writeFile(binary_path, source);
+  await chmod(binary_path, 0o755);
+  return binary_path;
+}
+
 describe("codex cli harness", () => {
   it("reports readiness availability from the resolved binary path", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-preflight-"));
@@ -419,6 +431,49 @@ describe("codex cli harness", () => {
         expect.objectContaining({
           timed_out: true,
           force_killed: true
+        })
+      );
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("records an abruptly killed codex child as a failed harness result", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-killed-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const harness = createCodexCliHarness({
+      binary: await createKilledCodexBinary(tempRoot)
+    });
+
+    try {
+      const result = await harness.run({
+        runId: "run-killed",
+        executionId: "exec-killed",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-codex",
+        nodeGoal: "Exit abruptly.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toContain("starting");
+      expect(result.metadata).toEqual(
+        expect.objectContaining({
+          timed_out: false,
+          force_killed: false
         })
       );
     } finally {

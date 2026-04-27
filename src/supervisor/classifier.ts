@@ -30,7 +30,15 @@ function readMessage(input: {
     typeof input.attempt.metadata.error === "string"
       ? input.attempt.metadata.error
       : undefined;
-  return input.error_message ?? resultError ?? metadataError ?? "";
+  const resultStderr =
+    typeof input.result?.stderr === "string" && input.result.stderr.trim().length > 0
+      ? input.result.stderr.trim()
+      : undefined;
+  const resultStdout =
+    typeof input.result?.stdout === "string" && input.result.stdout.trim().length > 0
+      ? input.result.stdout.trim()
+      : undefined;
+  return input.error_message ?? resultError ?? metadataError ?? resultStderr ?? resultStdout ?? "";
 }
 
 function resultTimedOut(result: RuntimeNodeExecutionResult | undefined): boolean {
