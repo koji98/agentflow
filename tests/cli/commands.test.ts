@@ -107,8 +107,132 @@ describe("graph CLI", () => {
     expect(payload.compiled_validation.managed_expansion).toEqual([]);
     expect(payload.readiness_mode).toBe("declared");
     expect(payload.readiness.status).toBe("ready");
+    expect(payload.authoring_review.mode).toBe("standard");
+    expect(payload.authoring_review.summary.reviewed_node_count).toBe(7);
     expect(payload.next_steps.run).toContain("agentflow run --graph");
     expect(payload.next_steps.graph_help).toBe("agentflow graph-help");
+  });
+
+  it("reports authoring review warnings by default and fails only under strict review", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-authoring-review-"));
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "authoring-review",
+          intent: {
+            goal: "Implement a reviewable change.",
+            acceptance_criteria: ["The implementation is ready to review."]
+          },
+          repos: {
+            main: {
+              path: "."
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {
+              harness: "codex-cli",
+              sandbox: "workspace-write"
+            }
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "agent",
+                id: "implement",
+                repo: "main",
+                goal: "Implement the requested change."
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const normalResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
+    const normalPayload = JSON.parse(normalResult.stdout);
+    const reviewResult = await executeCli(["validate", "--graph", graphPath, "--review"], tempRoot);
+    const reviewPayload = JSON.parse(reviewResult.stdout);
+    const strictResult = await executeCli(["validate", "--graph", graphPath, "--strict-review"], tempRoot);
+    const strictPayload = JSON.parse(strictResult.stdout);
+
+    expect(normalResult.exitCode).toBe(0);
+    expect(normalPayload.status).toBe("passed");
+    expect(normalPayload.authoring_review.mode).toBe("standard");
+    expect(normalPayload.authoring_review.status).toBe("serious_findings");
+    expect(normalPayload.authoring_review.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: "serious",
+          category: "artifact_contract",
+          node_id: "implement"
+        }),
+        expect.objectContaining({
+          severity: "serious",
+          category: "verification"
+        })
+      ])
+    );
+
+    expect(reviewResult.exitCode).toBe(0);
+    expect(reviewPayload.authoring_review.mode).toBe("review");
+    expect(reviewPayload.authoring_review.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "intent",
+          path: "$.intent.constraints"
+        })
+      ])
+    );
+
+    expect(strictResult.exitCode).toBe(1);
+    expect(strictPayload.status).toBe("failed");
+    expect(strictPayload.message).toContain("strict authoring review");
+    expect(strictPayload.authoring_review.mode).toBe("strict-review");
+    expect(strictPayload.readiness.status).toBe("ready");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("emits and writes compiled Mermaid diagrams from validate", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-diagram-"));
+    const graphPath = fileURLToPath(
+      new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
+    );
+    const diagramPath = join(tempRoot, "graph.mmd");
+
+    const inlineResult = await executeCli(["validate", "--graph", graphPath, "--diagram"], tempRoot);
+    const inlinePayload = JSON.parse(inlineResult.stdout);
+    const writtenResult = await executeCli(
+      ["validate", "--graph", graphPath, "--diagram-output", diagramPath],
+      tempRoot
+    );
+    const writtenPayload = JSON.parse(writtenResult.stdout);
+    const writtenDiagram = await readFile(diagramPath, "utf8");
+
+    expect(inlineResult.exitCode).toBe(0);
+    expect(inlinePayload.diagram.format).toBe("mermaid");
+    expect(inlinePayload.diagram.graph).toContain("flowchart TD");
+    expect(inlinePayload.diagram.graph).toContain("agent: understand");
+    expect(inlinePayload.diagram.graph).toContain("delivery package");
+
+    expect(writtenResult.exitCode).toBe(0);
+    expect(writtenPayload.diagram_output_path).toBe(diagramPath);
+    expect(writtenPayload).not.toHaveProperty("diagram");
+    expect(writtenDiagram).toContain("flowchart TD");
+    expect(writtenDiagram).toContain("repeat: repair_loop");
+
+    await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("renders compact interactive validate success output", async () => {
@@ -2204,6 +2328,9 @@ describe("graph CLI", () => {
     expect(validateHelp.exitCode).toBe(0);
     expect(validateHelp.stdout).toContain("validate: Validate and compile an authored graph without launching a run.");
     expect(validateHelp.stdout).toContain("--show-compiled");
+    expect(validateHelp.stdout).toContain("--review");
+    expect(validateHelp.stdout).toContain("--strict-review");
+    expect(validateHelp.stdout).toContain("--diagram-output");
 
     expect(runsHelp.exitCode).toBe(0);
     expect(runsHelp.stdout).toContain("runs: Inspect previously recorded run roots");

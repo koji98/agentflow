@@ -67,6 +67,10 @@ const optionDescriptions: Record<string, string> = {
   "runs-root": "--runs-root <path>           Absolute runs root directory to enumerate.",
   latest: "--latest                     Resume the most recent resumable run discovered for the supplied --graph.",
   "show-compiled": "--show-compiled              Include the compiled graph payload in the validate output.",
+  review: "--review                     Include deeper authoring review findings in validate output.",
+  "strict-review": "--strict-review              Fail validate when serious authoring review findings are present.",
+  diagram: "--diagram                    Include Mermaid for the compiled graph in validate output.",
+  "diagram-output": "--diagram-output <path>      Write Mermaid for the compiled graph to a file.",
   repo: "--repo <alias>                Repo alias to select from run workspace changes.",
   target: "--target <path>              Git worktree where captured workspace changes should be applied.",
   "allow-dirty": "--allow-dirty                Apply onto a target repo that already has local changes.",
@@ -317,6 +321,12 @@ function renderInteractiveValidateResult(output: Record<string, unknown>): strin
   const blockedCount = readiness && typeof readiness.blocked_count === "number" ? readiness.blocked_count : 0;
   const warningCount = readiness && typeof readiness.warning_count === "number" ? readiness.warning_count : 0;
   const passedCount = readiness && typeof readiness.passed_count === "number" ? readiness.passed_count : 0;
+  const authoringReview = isRecord(output.authoring_review) ? output.authoring_review : undefined;
+  const reviewSummary = authoringReview && isRecord(authoringReview.summary) ? authoringReview.summary : undefined;
+  const reviewStatus = authoringReview && typeof authoringReview.status === "string" ? authoringReview.status : undefined;
+  const reviewMode = authoringReview && typeof authoringReview.mode === "string" ? authoringReview.mode : undefined;
+  const seriousReviewCount = reviewSummary && typeof reviewSummary.serious_count === "number" ? reviewSummary.serious_count : 0;
+  const warningReviewCount = reviewSummary && typeof reviewSummary.warning_count === "number" ? reviewSummary.warning_count : 0;
   const checks = readiness && Array.isArray(readiness.checks) ? readiness.checks : [];
   const readinessMode = output.readiness_mode === "run-ready" ? "run-ready" : "declared";
   const problemChecks = checks
@@ -325,6 +335,16 @@ function renderInteractiveValidateResult(output: Record<string, unknown>): strin
     )
     .slice(0, 6)
     .map((check) => `- ${String(check.status)} ${String(check.kind ?? "check")} ${String(check.target ?? "")}: ${String(check.message ?? "")}`);
+  const reviewFindings = authoringReview && Array.isArray(authoringReview.findings)
+    ? authoringReview.findings
+        .filter((finding): finding is Record<string, unknown> =>
+          isRecord(finding) && (finding.severity === "serious" || finding.severity === "warning")
+        )
+        .slice(0, 6)
+        .map((finding) =>
+          `- ${String(finding.severity)} ${String(finding.category ?? "review")}${finding.node_id ? ` ${String(finding.node_id)}` : ""}: ${String(finding.message ?? "")}`
+        )
+    : [];
 
   const headline =
     status === "passed"
@@ -334,6 +354,9 @@ function renderInteractiveValidateResult(output: Record<string, unknown>): strin
       : "Graph validation failed.";
   const readinessLine = readinessStatus
     ? `Readiness: ${readinessStatus} (${passedCount} passed, ${warningCount} warnings, ${blockedCount} blocked; mode: ${readinessMode})`
+    : undefined;
+  const reviewLine = reviewStatus
+    ? `Authoring review: ${reviewStatus} (${seriousReviewCount} serious, ${warningReviewCount} warnings; mode: ${reviewMode ?? "standard"})`
     : undefined;
   const nextSteps = isRecord(output.next_steps) ? output.next_steps : undefined;
   const runStep = nextSteps && typeof nextSteps.run === "string" ? nextSteps.run : undefined;
@@ -349,10 +372,11 @@ function renderInteractiveValidateResult(output: Record<string, unknown>): strin
       ? [`Compiled: ${nodeCount ?? "?"} nodes · ${edgeCount ?? "?"} edges`]
       : []),
     ...(readinessLine ? [readinessLine] : []),
+    ...(reviewLine ? [reviewLine] : []),
     ...(readinessMode !== "run-ready" && status === "passed"
       ? ["Run-ready checks: not requested; add --run-ready to check git, commands, and harness binaries."]
       : []),
-    ...(problemChecks.length > 0 ? ["Issues:", ...problemChecks] : []),
+    ...(problemChecks.length > 0 || reviewFindings.length > 0 ? ["Issues:", ...problemChecks, ...reviewFindings] : []),
     ...(runStep && status === "passed" ? [`Run: ${runStep}`] : [])
   ].join("\n");
 }
@@ -383,7 +407,7 @@ function renderMainHelp(): string {
     "",
     "Local workflow:",
     "  1. graph-help: review the authored graph contract and minimal example",
-    "  2. validate: check authored, compiled, and optional run-ready phases without running the graph (use --show-compiled to print the compiled payload)",
+    "  2. validate: check authored, compiled, authoring review, diagram, and optional run-ready phases without running the graph",
     "  3. run: execute the compiled graph and write durable artifacts under the run root",
     "  4. runs list: enumerate previous run roots for a graph",
     "  5. inspect: review a single recorded run root",
@@ -398,6 +422,8 @@ function renderMainHelp(): string {
     "  agentflow validate --graph agentflow.graph.json",
     "  agentflow validate --graph agentflow.graph.json --run-ready",
     "  agentflow validate --graph agentflow.graph.json --show-compiled",
+    "  agentflow validate --graph agentflow.graph.json --review",
+    "  agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd",
     "  agentflow run --graph agentflow.graph.json",
     "  agentflow runs list --graph agentflow.graph.json",
     "  agentflow inspect .agentflow/runs/<run-id>",

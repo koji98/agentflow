@@ -195,8 +195,8 @@ Reserved automatic artifacts are `agent_response`, `verification_json`, `stdout`
 4. Add deterministic checks for hard gates and AI checks only when semantic judgment is needed.
 5. Add plugin tools only when a team capability should be available to the agent; keep secret values in plugin `credentials`.
 6. Run `agentflow plugin resolve --graph <path>` when plugins are declared.
-7. Run `agentflow validate --graph <path>`, then `--run-ready`, then `--show-compiled`.
-8. Launch only after the compiled graph shows the expected harnesses, sandboxes, tools, context, artifacts, and supervision policy.
+7. Run `agentflow validate --graph <path>`, `--review` or `--strict-review` for authoring guidance, `--run-ready` for local readiness, and `--show-compiled` or `--diagram` to inspect the compiled shape.
+8. Launch only after the compiled graph and authoring review show the expected harnesses, sandboxes, tools, context, artifacts, checks, handoffs, and supervision policy.
 
 ## Supervisor
 
@@ -264,15 +264,18 @@ The delivery package is intentionally higher signal than raw logs. `delivery/man
 agentflow graph-help
 agentflow plugin resolve --graph agentflow.graph.json
 agentflow validate --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json --review
+agentflow validate --graph agentflow.graph.json --strict-review
 agentflow validate --graph agentflow.graph.json --run-ready
 agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
 agentflow run --graph agentflow.graph.json
 agentflow inspect <run-root>
 agentflow resume --run-root <run-root>
 agentflow runs list --graph agentflow.graph.json
 ```
 
-`validate --show-compiled` is the best way to confirm managed patterns, plugin workflows, context references, tool policy, and harness selection before launch.
+`validate` always includes the standard authoring review warnings. Use `--review` for deeper node-by-node guidance, `--strict-review` to fail on serious review findings, `--show-compiled` to inspect the compiled payload, and `--diagram` or `--diagram-output` to produce Mermaid for the resolved execution plan.
 
 ## Validation
 

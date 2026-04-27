@@ -13,7 +13,7 @@ const commandTimeoutMs = 20 * 60 * 1000;
 const builtCliRelativePath = "dist/cli/index.js";
 const fixtureGraphRelativePath = "tests/graph/fixtures/repeat.graph.json";
 const fixtureGraphId = "repeat-graph";
-const builtCliFixtureCommands = ["validate", "validate --show-compiled"];
+const builtCliFixtureCommands = ["validate", "validate --show-compiled", "validate --review", "validate --diagram"];
 const builtCliRunHarnessAdapters = ["codex-cli", "cursor-cli"];
 const builtCliRunWorkspaceBackends = ["inplace", "worktree"];
 
@@ -451,6 +451,65 @@ async function checkBuiltCliSmoke() {
     }
   }
 
+  const reviewResult = runCommand(
+    process.execPath,
+    [builtCliPath, "validate", "--graph", fixtureGraphRelativePath, "--review"],
+    "built CLI validate --review"
+  );
+
+  if (!reviewResult.passed) {
+    smokeFailures.push(reviewResult.reason);
+  } else {
+    try {
+      const payload = expectRecord(
+        parseJsonOutput("built CLI validate --review", reviewResult.stdout),
+        "validate --review payload"
+      );
+      const authoringReview = expectRecord(
+        payload.authoring_review,
+        "validate --review payload.authoring_review"
+      );
+
+      if (authoringReview.mode !== "review") {
+        throw new Error("validate --review payload.authoring_review.mode must equal \"review\".");
+      }
+
+      if (!Array.isArray(authoringReview.findings)) {
+        throw new Error("validate --review payload.authoring_review.findings must be an array.");
+      }
+    } catch (error) {
+      smokeFailures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  const diagramResult = runCommand(
+    process.execPath,
+    [builtCliPath, "validate", "--graph", fixtureGraphRelativePath, "--diagram"],
+    "built CLI validate --diagram"
+  );
+
+  if (!diagramResult.passed) {
+    smokeFailures.push(diagramResult.reason);
+  } else {
+    try {
+      const payload = expectRecord(
+        parseJsonOutput("built CLI validate --diagram", diagramResult.stdout),
+        "validate --diagram payload"
+      );
+      const diagram = expectRecord(payload.diagram, "validate --diagram payload.diagram");
+
+      if (diagram.format !== "mermaid") {
+        throw new Error("validate --diagram payload.diagram.format must equal \"mermaid\".");
+      }
+
+      if (!expectString(diagram.graph, "validate --diagram payload.diagram.graph").includes("flowchart TD")) {
+        throw new Error("validate --diagram payload.diagram.graph must include Mermaid flowchart syntax.");
+      }
+    } catch (error) {
+      smokeFailures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   for (const harnessKind of builtCliRunHarnessAdapters) {
     for (const workspaceBackend of builtCliRunWorkspaceBackends) {
       const fixture = await createRunSmokeFixture(harnessKind, workspaceBackend);
@@ -607,6 +666,8 @@ async function checkBuiltCliSmoke() {
         commands_run: [
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --show-compiled`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --review`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --diagram`,
           ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
             builtCliRunWorkspaceBackends.map((workspaceBackend) =>
               `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`
@@ -629,6 +690,8 @@ async function checkBuiltCliSmoke() {
         commands_run: [
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --show-compiled`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --review`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --diagram`,
           ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
             builtCliRunWorkspaceBackends.map((workspaceBackend) =>
               `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`

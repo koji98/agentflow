@@ -18,15 +18,21 @@ Agents can run `af --help` and `af <command> --help` inside a node for the autho
 
 ```bash
 agentflow validate --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json --review
+agentflow validate --graph agentflow.graph.json --strict-review
 agentflow validate --graph agentflow.graph.json --run-ready
 agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
 ```
 
-Use the three validation levels for different questions:
+Use the validation modes for different questions:
 
-- plain `validate`: is the authored and compiled graph contract valid?
+- plain `validate`: is the authored and compiled graph contract valid, and are there standard authoring warnings?
+- `--review`: what deeper node-by-node authoring guidance should the operator consider before launch?
+- `--strict-review`: should serious authoring review findings fail validation?
 - `--run-ready`: are local repos, commands, env vars, plugin credentials, plugin tool `--help` contracts, plugins, and harness binaries ready on this machine?
 - `--show-compiled`: does the compiled primitive graph match the operator's intent?
+- `--diagram` or `--diagram-output`: what Mermaid diagram represents the resolved compiled graph, scopes, artifacts, checks, supervision, and delivery surface?
 
 Always inspect `intent`, `supervision`, resolved profiles, managed expansions, plugin tools, and artifact handoffs before launching serious work.
 

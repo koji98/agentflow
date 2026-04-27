@@ -1,8 +1,11 @@
-import { dirname } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { dirname, resolve as resolvePath } from "node:path";
 
 import { compileAuthoredGraph } from "../../graph/compile.js";
 import { buildManagedExpansionSummaries } from "../../graph/managed_expansion.js";
+import { renderCompiledGraphMermaid } from "../../graph/mermaid.js";
 import { resolveLaunchConfig } from "../../graph/profiles.js";
+import { reviewCompiledGraph } from "../../graph/review.js";
 import { workspaceBackends } from "../../graph/schema.js";
 import { loadAuthoredGraphDocument, summarizeAuthoredGraph } from "../../graph/validate.js";
 import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
@@ -20,17 +23,32 @@ export const validateCommand = {
   name: "validate",
   summary: "Validate and compile an authored graph without launching a run.",
   usage:
-    "agentflow validate --graph <path/to/agentflow.graph.json> [--run-ready] [--show-compiled]",
+    "agentflow validate --graph <path/to/agentflow.graph.json> [--run-ready] [--show-compiled] [--review] [--strict-review] [--diagram] [--diagram-output <path>]",
   examples: [
     "agentflow validate --graph ./agentflow.graph.json",
     "agentflow validate --graph ./agentflow.graph.json --run-ready",
-    "agentflow validate --graph ./agentflow.graph.json --show-compiled"
+    "agentflow validate --graph ./agentflow.graph.json --show-compiled",
+    "agentflow validate --graph ./agentflow.graph.json --review",
+    "agentflow validate --graph ./agentflow.graph.json --diagram-output graph.mmd"
   ] as const,
-  optionNames: ["graph", "run-ready", "show-compiled", "config", "config-file", "help"] as const,
+  optionNames: [
+    "graph",
+    "run-ready",
+    "show-compiled",
+    "review",
+    "strict-review",
+    "diagram",
+    "diagram-output",
+    "config",
+    "config-file",
+    "help"
+  ] as const,
   helpNotes: [
     "--graph validation resolves from the launch shell current working directory.",
     "--run-ready also checks local runtime dependencies such as git, node commands, and harness binaries.",
     "--show-compiled emits the full compiled graph payload alongside the summary.",
+    "--review emits deeper authoring guidance; --strict-review fails when serious review findings are present.",
+    "--diagram emits Mermaid for the compiled graph; --diagram-output writes the same Mermaid to a file.",
     "Use run when you want durable artifacts after validation passes.",
     "Use --config key=value (repeatable) and --config-file <path> to override top-level graph config; values like 1, true, [\"a\"] parse as JSON, others stay strings."
   ] as const,
@@ -41,12 +59,28 @@ export const validateCommand = {
     const graphPath = typeof options.graph === "string" ? options.graph : undefined;
     const runReady = options["run-ready"] === true;
     const showCompiled = options["show-compiled"] === true;
+    const review = options.review === true;
+    const strictReview = options["strict-review"] === true;
+    const includeDiagram = options.diagram === true;
+    const diagramOutput = typeof options["diagram-output"] === "string" ? options["diagram-output"] : undefined;
 
     if (!graphPath) {
       return {
         exitCode: 2,
         stdout: renderCommandUsageError({
           message: "Missing required option: --graph",
+          commandName: this.name,
+          usage: this.usage,
+          includeGraphHelp: true
+        })
+      };
+    }
+
+    if (options["diagram-output"] === true || Array.isArray(options["diagram-output"])) {
+      return {
+        exitCode: 2,
+        stdout: renderCommandUsageError({
+          message: "Option --diagram-output requires a file path.",
           commandName: this.name,
           usage: this.usage,
           includeGraphHelp: true
@@ -220,6 +254,21 @@ export const validateCommand = {
           }
         : {})
     });
+    const authoringReview = reviewCompiledGraph(loaded.document, compilation.compiled_graph!, {
+      mode: strictReview ? "strict-review" : review ? "review" : "standard"
+    });
+    const strictReviewBlocked = strictReview && authoringReview.summary.serious_count > 0;
+    const mermaidDiagram = includeDiagram || diagramOutput
+      ? renderCompiledGraphMermaid(compilation.compiled_graph!)
+      : undefined;
+    const diagramOutputPath = diagramOutput
+      ? resolvePath(currentWorkingDirectory, diagramOutput)
+      : undefined;
+
+    if (diagramOutputPath && mermaidDiagram) {
+      await writeFile(diagramOutputPath, mermaidDiagram, "utf8");
+    }
+
     const compiledValidation = {
       status: "passed",
       diagnostics: [] as Array<{ path: string; message: string }>,
@@ -236,13 +285,15 @@ export const validateCommand = {
     };
 
     return {
-      exitCode: readiness.status === "blocked" ? 1 : 0,
+      exitCode: readiness.status === "blocked" || strictReviewBlocked ? 1 : 0,
       output: {
         command: "validate",
-        status: readiness.status === "blocked" ? "failed" : "passed",
+        status: readiness.status === "blocked" || strictReviewBlocked ? "failed" : "passed",
         message:
           readiness.status === "blocked"
             ? `Graph compiled, but readiness validation is blocked for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
+            : strictReviewBlocked
+              ? `Graph compiled, but strict authoring review found ${authoringReview.summary.serious_count} serious finding(s) for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
             : readiness.status === "warnings"
               ? `Graph validated with readiness warnings for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
               : runReady
@@ -255,12 +306,26 @@ export const validateCommand = {
         readiness_mode: runReady ? "run-ready" : "declared",
         compiled_summary: compiledValidation.compiled_summary,
         managed_expansion: compiledValidation.managed_expansion,
+        authoring_review: authoringReview,
         authored_validation: {
           status: "passed",
           diagnostics: []
         },
         compiled_validation: compiledValidation,
         readiness,
+        ...(mermaidDiagram && includeDiagram
+          ? {
+              diagram: {
+                format: "mermaid",
+                graph: mermaidDiagram
+              }
+            }
+          : {}),
+        ...(diagramOutputPath
+          ? {
+              diagram_output_path: diagramOutputPath
+            }
+          : {}),
         ...(showCompiled
           ? {
               compiled_graph: compilation.compiled_graph!,

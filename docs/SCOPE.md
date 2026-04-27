@@ -38,7 +38,7 @@ The runtime must make long-running agent work inspectable while it is happening 
 
 Required behavior:
 
-- validate authored and compiled contracts before launch
+- validate authored and compiled contracts before launch, including standard authoring review warnings
 - run only compiled primitive nodes
 - materialize context packets and preserve provenance
 - enforce sandbox, timeout, env, workspace, and tool constraints consistently for Codex CLI and Cursor CLI
