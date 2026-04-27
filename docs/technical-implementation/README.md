@@ -6,7 +6,7 @@ Use these when you need to understand why a run behaves the way it does, how mat
 
 ```mermaid
 flowchart LR
-  graph["Authored graph"] --> validate["Normalize and validate"]
+  authoredGraph["Authored graph"] --> validate["Normalize and validate"]
   validate --> compile["Compile primitive contract"]
   compile --> run["Runtime scheduler"]
   run --> attempt["Node attempt"]
