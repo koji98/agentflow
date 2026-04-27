@@ -6,7 +6,7 @@ The product surface is intentionally centered on four layers:
 
 1. Authored intent: a graph that states goal, constraints, acceptance criteria, repos, profiles, tools, and outcome nodes.
 2. Compiled contract: normalized primitive runtime nodes with explicit control flow, context dependencies, artifact contracts, harness selection, and tool policy.
-3. Supervised execution: local execution through Codex CLI, Cursor CLI, deterministic checks, semantic checks, plugin-bundled tools, durable events, retry budgets, and visible interventions.
+3. Supervised execution: local execution through Codex CLI, Cursor CLI, deterministic checks, semantic checks, plugin-bundled tools, durable events, bounded action budgets, and visible interventions.
 4. Delivery package: review artifacts that summarize what happened, what changed, what evidence exists, where risk remains, what the supervisor did, and which files are human-facing versus resume/audit/debug state.
 
 ## Canonical Surfaces

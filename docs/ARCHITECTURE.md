@@ -4,7 +4,7 @@ Agentflow has four runtime layers:
 
 1. `src/graph/`: normalize, validate, and compile authored graphs.
 2. `src/runtime/`: execute compiled primitive nodes with durable state.
-3. `src/supervisor/`: classify failures, spend retry budgets, and run policy-bounded interventions.
+3. `src/supervisor/`: classify failures, spend bounded action budgets, and run policy-bounded interventions.
 4. `src/runtime/delivery/`: collect run evidence and write the review package.
 
 The authored graph remains the source of intent. The compiled graph is the executable contract. Runtime artifacts are the audit log. The delivery package is the human review surface.
@@ -68,7 +68,7 @@ Runtime state tracks:
 - repeat scope iteration state
 - cleanup state
 - repo workspaces
-- supervisor status, budget, escalations, and intervention count
+- supervisor status, action budget, pause state, and intervention count
 - event sequence
 
 Terminal runs write stable resume and audit state such as `run.json`, `compiled_graph.json`, `execution_manifest.json`, `state.json`, `events.jsonl`, `interventions.jsonl`, `nodes/`, and `workspace-changes/`, plus the human-facing `delivery/` package.
@@ -136,7 +136,7 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 
 Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocations.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and stdout/stderr sidecar paths when output is captured.
 
-Agents never talk directly to another process. Delivery is explicit: a message is stored, and if the recipient is not running the response reports that it was not live-delivered. Durable work should move through artifacts, with messages used to notify or coordinate.
+Agents do not rely on synchronous coordination with other graph nodes. Durable work moves through declared artifacts, worker notes are recorded with `af log`, and helper sub-node coordination stays under the parent node's runtime contract.
 
 ## Supervision
 
@@ -174,7 +174,7 @@ Supervisor events:
 - `supervisor.intervention.started`
 - `supervisor.intervention.completed`
 - `supervisor.intervention.failed`
-- `supervisor.escalated`
+- `supervisor.paused`
 
 ## Checks And Evaluation
 

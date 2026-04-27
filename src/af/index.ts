@@ -881,7 +881,7 @@ async function commandSpawn(
   const helperId = helperIdFromBrief(brief);
   const helperRoot = join(helpersDir(metadata), helperId);
   const outputDir = join(helperRoot, "artifacts");
-  const logPath = join(helperRoot, "logs", "harness.log");
+  const helperLogPath = join(helperRoot, "logs", "harness.log");
   const resultPath = join(helperRoot, "result.json");
   const artifactName = optionString(options, "artifact") ?? "helper-report.md";
   const allowedTools = optionList(options, "tools");
@@ -899,7 +899,7 @@ async function commandSpawn(
     skills: optionList(options, "skills"),
     allowed_tools: allowedTools,
     output_dir: outputDir,
-    log_path: logPath,
+    log_path: helperLogPath,
     result_path: resultPath,
     ...(process.env.AGENTFLOW_RUNTIME_METADATA
       ? { parent_metadata_path: process.env.AGENTFLOW_RUNTIME_METADATA }

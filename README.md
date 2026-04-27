@@ -24,7 +24,7 @@ flowchart LR
   artifacts --> delivery["Delivery package\nreviewer guide and evidence"]
 ```
 
-The graph is not a free-form planner. It is an accountable execution contract. The supervisor can retry, repair missing artifacts, rebuild context, refresh workspaces, run diagnostics, request semantic evaluation, and escalate. It cannot silently change the task, widen authority, bypass checks, or hide its interventions.
+The graph is not a free-form planner. It is an accountable execution contract. The supervisor can retry with guidance, repair missing artifacts, rebuild context, run diagnostics, request semantic evaluation, pause for human input, or fail the run. It cannot silently change the task, widen authority, bypass checks, or hide its interventions.
 
 ## Where To Start
 
@@ -236,7 +236,7 @@ Core commands available inside an agent node:
 - `af log --type progress|finding|blocker|risk|question|handoff_note --summary ...`: record worker evidence for supervisor and delivery review.
 - `af spawn --brief ... --artifact ... --wait`: request a supervised helper with selected skills/tools and wait for its artifact.
 
-Logs are coordination evidence; artifacts are the durable handoff. If an agent has ended, rely on declared artifacts and post-attempt supervisor handling rather than assuming live collaboration.
+Logs are coordination evidence; artifacts are the durable handoff. If an agent has ended, rely on declared artifacts and post-attempt supervisor handling rather than assuming an online collaborator.
 
 ## Delivery Package
 

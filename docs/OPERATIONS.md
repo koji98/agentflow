@@ -65,7 +65,7 @@ Use `--resume-on-fail N` when a local automation should retry the same run root 
 
 ## Progress Events
 
-TTY progress includes node lifecycle, check results, supervisor decisions, supervisor interventions, escalations, and delivery package completion.
+TTY progress includes node lifecycle, check results, supervisor decisions, supervisor interventions, human pauses, and delivery package completion.
 
 Important event types:
 
@@ -78,7 +78,7 @@ Important event types:
 - `supervisor.intervention.started`
 - `supervisor.intervention.completed`
 - `supervisor.intervention.failed`
-- `supervisor.escalated`
+- `supervisor.paused`
 - `run.completed`
 - `delivery.package.completed`
 
@@ -115,7 +115,7 @@ Runtime coordination files are under `<run-root>/runtime/`. They are useful when
 - `helpers/<helper-id>/session.json`: helper lifecycle, logs, output directory, and artifact paths.
 - `human-resume-input.jsonl`: structured human input used when resuming paused runs.
 
-Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, or handoff notes with `af log --type`. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live prompt injection.
+Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, or handoff notes with `af log --type`. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live intervention.
 
 ## Resume
 
