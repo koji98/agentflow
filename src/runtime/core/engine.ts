@@ -747,20 +747,24 @@ async function handleFailedNodeWithSupervisor(options: {
     if (requestedAction === "pause_for_human") {
       if (!canSpendRuntimeSupervisorAction(options.session, "pause_for_human")) {
         options.session.supervisor.status = "exhausted";
+        decision.kind = "fail_run";
+        decision.action = "fail";
+        decision.requires_human = false;
+        decision.reason = 'Supervisor cannot run action "pause_for_human" because its budget is exhausted or the action is disabled.';
       } else {
         spendRuntimeSupervisorAction(options.session, "pause_for_human");
         options.session.supervisor.intervention_count += 1;
         decision.budget_cost = { total: 1, pause_for_human: 1 };
+        options.session.supervisor.status = "paused";
+        options.session.supervisor.pause = {
+          decision_id: decisionId,
+          reason: classification.summary,
+          target_compiled_id: options.node.compiled_id,
+          target_execution_id: options.attempt.execution_id,
+          resume_options: ["retry_with_guidance", "fail", "add_context"]
+        };
+        options.session.status = "paused";
       }
-      options.session.supervisor.status = "paused";
-      options.session.supervisor.pause = {
-        decision_id: decisionId,
-        reason: classification.summary,
-        target_compiled_id: options.node.compiled_id,
-        target_execution_id: options.attempt.execution_id,
-        resume_options: ["retry", "fail", "add_context"]
-      };
-      options.session.status = "paused";
     }
     await options.writer.appendSupervisorDecision(decision);
     await emitEvent(
@@ -779,7 +783,7 @@ async function handleFailedNodeWithSupervisor(options: {
         attempt_index: options.attempt.attempt_index
       }
     );
-    if (requestedAction === "pause_for_human") {
+    if (requestedAction === "pause_for_human" && decision.kind === "pause_for_human") {
       const interventionId = createSupervisorInterventionId(options.attempt, "pause_for_human");
       const intervention = await runEvidenceIntervention({
         action: "pause_for_human",
@@ -799,7 +803,7 @@ async function handleFailedNodeWithSupervisor(options: {
         ...(options.session.supervisor.pause ?? {
           decision_id: decisionId,
           reason: classification.summary,
-          resume_options: ["retry", "fail", "add_context"]
+          resume_options: ["retry_with_guidance", "fail", "add_context"]
         }),
         ...(typeof intervention.artifact_paths.brief === "string"
           ? { brief_path: intervention.artifact_paths.brief }
@@ -913,7 +917,12 @@ async function handleFailedNodeWithSupervisor(options: {
       attempt_index: options.attempt.attempt_index
     }
   );
-  if (action === "run_diagnostic" || action === "rebuild_context" || action === "semantic_evaluation") {
+  if (
+    action === "retry_with_guidance" ||
+    action === "run_diagnostic" ||
+    action === "rebuild_context" ||
+    action === "semantic_evaluation"
+  ) {
     const interventionId = createSupervisorInterventionId(options.attempt, action);
     await emitEvent(
       options.session,

@@ -661,6 +661,52 @@ describe("graph validation", () => {
     );
   });
 
+  it("rejects reasoning_effort inherited by a Cursor launch profile", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "cursor-inherited-reasoning-effort",
+      intent: TEST_INTENT,
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "cursor"
+      },
+      profiles: {
+        cursor: {
+          harness: "cursor-cli",
+          model: "auto"
+        },
+        node_defaults: {
+          reasoning_effort: "high"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            profile: "node_defaults",
+            goal: "Implement the change."
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.profiles.node_defaults.reasoning_effort",
+          message: expect.stringMatching(/Cursor profile.*reasoning_effort/i)
+        })
+      ])
+    );
+  });
+
   it("does not require a harness for exec-only graphs", async () => {
     const diagnostics = await validateAuthoredGraphDocument({
       version: "1",

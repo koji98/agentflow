@@ -34,12 +34,14 @@ describe("validate:real-harness contract", () => {
         {
           kind: "codex-cli",
           envVar: "AGENTFLOW_CODEX_CLI_BIN",
-          defaultBinary: "codex"
+          defaultBinary: "codex",
+          modelEnvVar: "AGENTFLOW_CODEX_MODEL"
         },
         {
           kind: "cursor-cli",
           envVar: "AGENTFLOW_CURSOR_CLI_BIN",
-          defaultBinary: "agent"
+          defaultBinary: "agent",
+          modelEnvVar: "AGENTFLOW_CURSOR_MODEL"
         }
       ]
     });
@@ -62,6 +64,21 @@ describe("validate:real-harness contract", () => {
     expect(() => scriptModule.parseRequestedHarnessKinds(["--harness", "unknown-cli"], {})).toThrow(
       'Unsupported harness "unknown-cli". Use codex-cli, cursor-cli, or all.'
     );
+  });
+
+  it("allows the real Codex smoke model to be overridden", async () => {
+    const scriptModule = await import("../../scripts/validate-real-harness.mjs");
+    const codexSpec = scriptModule.realHarnessSpecs.find((spec: { kind: string }) => spec.kind === "codex-cli");
+
+    expect(codexSpec).toBeDefined();
+    expect(codexSpec.defaultModel).not.toBe("gpt-5-codex");
+    expect(scriptModule.resolveHarnessModel(codexSpec, {})).toBe(codexSpec.defaultModel);
+    expect(scriptModule.resolveHarnessModel(codexSpec, {
+      AGENTFLOW_CODEX_MODEL: "gpt-5.4-mini"
+    })).toBe("gpt-5.4-mini");
+    expect(scriptModule.buildSmokeGraphDocument(codexSpec, {
+      AGENTFLOW_CODEX_MODEL: "gpt-5.4-mini"
+    }).profiles.default.model).toBe("gpt-5.4-mini");
   });
 
   it("detects explicit binary overrides and skips cleanly when no binaries are available", async () => {

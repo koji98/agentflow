@@ -560,6 +560,36 @@ async function validateNormalizedDocument(
       }
 
       if (
+        resolution.policy?.harness === "cursor-cli" &&
+        node.profile &&
+        resolution.node_profile?.harness !== "cursor-cli" &&
+        resolution.node_profile?.reasoning_effort !== undefined
+      ) {
+        diagnostics.push({
+          path: `$.profiles.${node.profile}.reasoning_effort`,
+          message:
+            `Cursor profile "${node.profile}" cannot set reasoning_effort because Cursor model ids encode reasoning effort. ` +
+            "Choose the appropriate Cursor model id instead."
+        });
+      }
+
+      if (
+        resolution.policy?.harness === "cursor-cli" &&
+        node.type === "check" &&
+        node.check_kind === "ai" &&
+        node.profile &&
+        resolution.node_profile?.harness !== "cursor-cli" &&
+        resolution.node_profile?.ai_check_defaults?.reasoning_effort !== undefined
+      ) {
+        diagnostics.push({
+          path: `$.profiles.${node.profile}.ai_check_defaults.reasoning_effort`,
+          message:
+            `Cursor profile "${node.profile}" cannot set ai_check_defaults.reasoning_effort because Cursor model ids encode reasoning effort. ` +
+            "Choose the appropriate Cursor model id instead."
+        });
+      }
+
+      if (
         resolution.policy?.sandbox === "read-only" &&
         node.artifacts &&
         Object.keys(node.artifacts).length > 0

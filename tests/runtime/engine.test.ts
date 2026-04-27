@@ -2876,6 +2876,7 @@ describe("runtime engine", () => {
     expect(calls).toBe(2);
     expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
     expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(0);
+    expect(run.state.supervisor.intervention_count).toBe(1);
     expect(run.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2886,9 +2887,184 @@ describe("runtime engine", () => {
             action: "retry_with_guidance",
             target_execution_id: attempts[0]!.execution_id
           })
+        }),
+        expect.objectContaining({
+          type: "supervisor.intervention.started",
+          compiled_id: "root__flaky",
+          payload: expect.objectContaining({
+            action: "retry_with_guidance",
+            target_compiled_id: "root__flaky"
+          })
+        }),
+        expect.objectContaining({
+          type: "supervisor.intervention.completed",
+          compiled_id: "root__flaky",
+          payload: expect.objectContaining({
+            action: "retry_with_guidance",
+            target_compiled_id: "root__flaky"
+          })
         })
       ])
     );
+    await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain(
+      '"action":"retry_with_guidance"'
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("fails instead of pausing when human pause supervision is disabled", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-pause-disabled-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-pause-disabled",
+      supervision: {
+        actions: {
+          pause_for_human: { max_uses: 0 }
+        },
+        max_total_interventions: 0,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "policy_failure",
+            command: "placeholder"
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async () => ({
+          status: "failed",
+          outcome: "failed",
+          result: { error: "env file escapes the workspace" },
+          stdout: "",
+          stderr: "env file escapes the workspace"
+        })
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.state.status).toBe("failed");
+    expect(run.state.supervisor.status).toBe("exhausted");
+    expect(run.state.supervisor.intervention_count).toBe(0);
+    expect(run.state.supervisor.pause).toBeUndefined();
+    expect(run.events).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({
+          type: "supervisor.paused"
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("advertises resume actions accepted by the resume command when paused", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-pause-options-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-pause-options",
+      supervision: {
+        actions: {
+          pause_for_human: { max_uses: 1 }
+        },
+        max_total_interventions: 1,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "policy_failure",
+            command: "placeholder"
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async () => ({
+          status: "failed",
+          outcome: "failed",
+          result: { error: "operation escapes the workspace" },
+          stdout: "",
+          stderr: "operation escapes the workspace"
+        })
+      }
+    });
+
+    expect(run.outcome).toBe("paused");
+    expect(run.state.supervisor.pause?.resume_options).toEqual([
+      "retry_with_guidance",
+      "fail",
+      "add_context"
+    ]);
 
     await rm(tempRoot, { recursive: true, force: true });
   });

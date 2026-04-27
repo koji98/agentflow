@@ -17,13 +17,15 @@ export const realHarnessSpecs = [
     kind: "codex-cli",
     envVar: "AGENTFLOW_CODEX_CLI_BIN",
     defaultBinary: "codex",
-    defaultModel: "gpt-5-codex",
+    modelEnvVar: "AGENTFLOW_CODEX_MODEL",
+    defaultModel: "gpt-5.4-mini",
     sandbox: "workspace-write"
   },
   {
     kind: "cursor-cli",
     envVar: "AGENTFLOW_CURSOR_CLI_BIN",
     defaultBinary: "agent",
+    modelEnvVar: "AGENTFLOW_CURSOR_MODEL",
     defaultModel: "gpt-5.4-mini-medium",
     sandbox: "workspace-write"
   }
@@ -47,7 +49,8 @@ export const realHarnessContract = {
   supportedHarnesses: realHarnessSpecs.map((spec) => ({
     kind: spec.kind,
     envVar: spec.envVar,
-    defaultBinary: spec.defaultBinary
+    defaultBinary: spec.defaultBinary,
+    modelEnvVar: spec.modelEnvVar
   }))
 };
 
@@ -349,7 +352,11 @@ function renderUsage() {
     "",
     "Binary overrides:",
     "- AGENTFLOW_CODEX_CLI_BIN",
-    "- AGENTFLOW_CURSOR_CLI_BIN"
+    "- AGENTFLOW_CURSOR_CLI_BIN",
+    "",
+    "Model overrides:",
+    "- AGENTFLOW_CODEX_MODEL",
+    "- AGENTFLOW_CURSOR_MODEL"
   ].join("\n");
 }
 
@@ -397,13 +404,14 @@ function buildSmokePrompt(harnessKind) {
   ].join(" ");
 }
 
-async function createSmokeFixture(spec) {
-  const tempRoot = await mkdtemp(join(tmpdir(), `agentflow-real-harness-${spec.kind}-`));
-  const launchRoot = join(tempRoot, "launch");
-  const repoDir = join(tempRoot, "repo");
-  const graphPath = join(tempRoot, "agentflow.graph.json");
+export function resolveHarnessModel(spec, env = process.env) {
+  const configuredModel = spec.modelEnvVar ? env[spec.modelEnvVar]?.trim() : "";
+  return configuredModel || spec.defaultModel;
+}
+
+export function buildSmokeGraphDocument(spec, env = process.env) {
   const timeoutSec = realHarnessContract.smokeGraph.timeoutSec;
-  const graphDocument = {
+  return {
     version: "1",
     graph_id: `real-harness-${spec.kind}`,
     intent: {
@@ -426,7 +434,7 @@ async function createSmokeFixture(spec) {
     profiles: {
       default: {
         harness: spec.kind,
-        model: spec.defaultModel,
+        model: resolveHarnessModel(spec, env),
         sandbox: spec.sandbox,
         timeout_sec: timeoutSec
       }
@@ -444,6 +452,14 @@ async function createSmokeFixture(spec) {
       ]
     }
   };
+}
+
+async function createSmokeFixture(spec) {
+  const tempRoot = await mkdtemp(join(tmpdir(), `agentflow-real-harness-${spec.kind}-`));
+  const launchRoot = join(tempRoot, "launch");
+  const repoDir = join(tempRoot, "repo");
+  const graphPath = join(tempRoot, "agentflow.graph.json");
+  const graphDocument = buildSmokeGraphDocument(spec);
 
   await mkdir(launchRoot, { recursive: true });
   await mkdir(repoDir, { recursive: true });

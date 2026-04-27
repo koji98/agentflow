@@ -310,7 +310,10 @@ export async function runRepairArtifactIntervention(options: {
 }
 
 export async function runEvidenceIntervention(options: {
-  action: Extract<SupervisorActionKind, "run_diagnostic" | "rebuild_context" | "semantic_evaluation" | "pause_for_human">;
+  action: Extract<
+    SupervisorActionKind,
+    "retry_with_guidance" | "run_diagnostic" | "rebuild_context" | "semantic_evaluation" | "pause_for_human"
+  >;
   attempt: RuntimeNodeAttempt;
   decision_id: string;
   intervention_id: string;
@@ -327,7 +330,9 @@ export async function runEvidenceIntervention(options: {
         ? "context-brief.md"
         : options.action === "semantic_evaluation"
           ? "semantic-evaluation.md"
-          : "diagnostic.md";
+          : options.action === "retry_with_guidance"
+            ? "retry-guidance.md"
+            : "diagnostic.md";
   const artifactPath = join(interventionDir, fileName);
   const resultPath = join(interventionDir, "result.json");
   await mkdir(interventionDir, { recursive: true });
