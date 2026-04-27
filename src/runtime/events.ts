@@ -11,7 +11,7 @@ export const runtimeEventTypes = [
   "supervisor.intervention.started",
   "supervisor.intervention.completed",
   "supervisor.intervention.failed",
-  "supervisor.escalated",
+  "supervisor.paused",
   "check.evaluated",
   "verification.recorded",
   "node.completed",

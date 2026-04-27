@@ -112,6 +112,13 @@ async function readDeliveryTaxonomySummary(manifestPath: string): Promise<Record
   }
 }
 
+async function countJsonlRecords(filePath: string): Promise<number> {
+  const contents = await readTextFileIfPresent(filePath);
+  return contents
+    ? contents.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length
+    : 0;
+}
+
 export const inspectCommand = {
   name: "inspect",
   summary: "Inspect a recorded run root and surface terminal status, counts, and failure stderr tails.",
@@ -199,7 +206,11 @@ export const inspectCommand = {
       readRunEvents(runRoot).catch(() => [])
     ]);
     const deliveryManifestPath = `${artifactPaths.delivery_dir}/manifest.json`;
-    const deliveryTaxonomySummary = await readDeliveryTaxonomySummary(deliveryManifestPath);
+    const [deliveryTaxonomySummary, supervisorTimelineCount, runtimeLogCount] = await Promise.all([
+      readDeliveryTaxonomySummary(deliveryManifestPath),
+      countJsonlRecords(artifactPaths.supervisor_timeline_file),
+      countJsonlRecords(artifactPaths.runtime_log_file)
+    ]);
 
     const failedNodeStderrTails = await summarizeFailedNodes(attempts);
     const terminalFields = state
@@ -225,6 +236,9 @@ export const inspectCommand = {
               counts: state.counts,
               evidence_status: state.evidence_status,
               supervisor_status: state.supervisor.status,
+              supervisor_pause: state.supervisor.pause,
+              supervisor_timeline_count: supervisorTimelineCount,
+              runtime_log_count: runtimeLogCount,
               intervention_count: state.supervisor.intervention_count,
               supervisor_budget_remaining: state.supervisor.budget_remaining,
               delivery_package: deliveryManifestPath,
@@ -250,6 +264,8 @@ export const inspectCommand = {
           compile_diagnostics_file: artifactPaths.compile_diagnostics_file,
           state_file: artifactPaths.state_file,
           events_file: artifactPaths.events_file,
+          supervisor_timeline_file: artifactPaths.supervisor_timeline_file,
+          runtime_log_file: artifactPaths.runtime_log_file,
           interventions_file: artifactPaths.interventions_file,
           summary_file: artifactPaths.summary_file,
           delivery_dir: artifactPaths.delivery_dir,

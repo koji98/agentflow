@@ -3,12 +3,13 @@ import { join } from "node:path";
 
 import { resolveExecutionArtifactsDirectory } from "../artifacts/paths.js";
 import type { CompiledAgentNode } from "../graph/compiled.js";
-import type { HarnessName } from "../graph/schema.js";
+import type { HarnessName, SupervisorActionKind } from "../graph/schema.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../runtime/harness/types.js";
 import type { RuntimeSession } from "../runtime/session.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
 import type { SupervisorInterventionRecord } from "./types.js";
+import type { FailureClassification } from "./classifier.js";
 
 export interface MissingDeclaredArtifact {
   name: string;
@@ -303,6 +304,65 @@ export async function runRepairArtifactIntervention(options: {
       prompt: promptPath,
       stdout: stdoutPath,
       stderr: stderrPath,
+      result: resultPath
+    }
+  };
+}
+
+export async function runEvidenceIntervention(options: {
+  action: Extract<SupervisorActionKind, "run_diagnostic" | "rebuild_context" | "semantic_evaluation" | "pause_for_human">;
+  attempt: RuntimeNodeAttempt;
+  decision_id: string;
+  intervention_id: string;
+  classification: FailureClassification;
+  title: string;
+  body: string;
+}): Promise<SupervisorInterventionRecord> {
+  const interventionDir = join(options.attempt.execution_dir, "interventions", options.intervention_id);
+  const startedAt = new Date().toISOString();
+  const fileName =
+    options.action === "pause_for_human"
+      ? "escalation-brief.md"
+      : options.action === "rebuild_context"
+        ? "context-brief.md"
+        : options.action === "semantic_evaluation"
+          ? "semantic-evaluation.md"
+          : "diagnostic.md";
+  const artifactPath = join(interventionDir, fileName);
+  const resultPath = join(interventionDir, "result.json");
+  await mkdir(interventionDir, { recursive: true });
+  await Promise.all([
+    writeFile(artifactPath, `${options.body.trim()}\n`, "utf8"),
+    writeFile(
+      resultPath,
+      `${JSON.stringify({
+        status: "passed",
+        action: options.action,
+        classification: options.classification.class,
+        summary: options.classification.summary
+      }, null, 2)}\n`,
+      "utf8"
+    )
+  ]);
+
+  return {
+    intervention_id: options.intervention_id,
+    decision_id: options.decision_id,
+    action: options.action,
+    status: "passed",
+    target_compiled_id: options.attempt.compiled_id,
+    target_execution_id: options.attempt.execution_id,
+    started_at: startedAt,
+    ended_at: new Date().toISOString(),
+    reason: options.title,
+    evidence: {
+      classification: options.classification.class,
+      summary: options.classification.summary,
+      ...options.classification.evidence
+    },
+    artifact_paths: {
+      intervention_dir: interventionDir,
+      brief: artifactPath,
       result: resultPath
     }
   };

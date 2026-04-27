@@ -168,11 +168,11 @@ export function createRuntimeProgressReporter(
           return;
         }
 
-        case "supervisor.escalated": {
+        case "supervisor.paused": {
           const node = nodeByCompiledId.get(event.compiled_id ?? "");
           const payload = event.payload as { reason?: string; summary?: string };
           writeLine(
-            `agentflow: supervisor escalated ${summarizeNode(node)}${payload.summary ? ` · ${payload.summary}` : payload.reason ? ` · ${payload.reason}` : ""}`
+            `agentflow: supervisor paused ${summarizeNode(node)}${payload.summary ? ` · ${payload.summary}` : payload.reason ? ` · ${payload.reason}` : ""}`
           );
           return;
         }

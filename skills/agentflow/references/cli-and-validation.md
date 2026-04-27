@@ -27,10 +27,9 @@ af tools list
 af context show
 af artifact list
 af artifact write <name> --file <path>
-af channel post --type finding --summary "..."
-af agents list
-af inbox read
+af log --type finding --summary "..."
 af spawn --brief "..." --artifact helper-report.md --wait
+af wait --agent <helper-id> --artifact helper-report.md
 ```
 
 ## Validation Levels
@@ -48,7 +47,7 @@ Confirm:
 - write-capable nodes use a write-capable sandbox.
 - plugin tools have the expected `capability`, `impact`, concise `usage`, and passing `--help` output.
 - managed patterns publish the artifacts downstream nodes reference.
-- `supervision.retry_budget` is intentionally bounded.
+- `supervision.actions.<action>.max_uses` and `supervision.max_total_interventions` are intentionally bounded.
 - terminal delivery is automatic and reviewer-facing.
 
 ## Command Results

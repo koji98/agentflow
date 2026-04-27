@@ -52,30 +52,26 @@ Agent nodes require `goal`. Node goals, acceptance criteria, and constraints are
 
 ## Supervision
 
-Allowed action kinds:
+Configured action kinds:
 
-- `retry_node`
+- `retry_with_guidance`
 - `repair_artifact`
 - `rebuild_context`
-- `refresh_workspace`
 - `run_diagnostic`
+- `pause_for_human`
 - `semantic_evaluation`
-- `escalate`
+- `fail`
 
-Retry budget fields:
+Budget fields:
 
+- `actions.<action>.max_uses`
 - `max_total_interventions`
-- `max_node_retries`
-- `max_artifact_repairs`
-- `max_context_rebuilds`
-- `max_workspace_refreshes`
-- `max_diagnostic_runs`
-- `max_semantic_evaluations`
 
-Escalation fields:
+Policy fields:
 
-- `require_human_on_policy_breach`
-- `require_human_on_scope_drift`
+- `pause_on_policy_risk`
+- `pause_on_repeated_recovery`
+- `drift_score_threshold`
 
 ## Nodes
 

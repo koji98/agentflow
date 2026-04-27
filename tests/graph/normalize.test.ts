@@ -53,30 +53,19 @@ describe("graph normalization", () => {
           acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."]
         },
         supervision: {
-          allowed_actions: [
-            "retry_node",
-            "repair_artifact",
-            "rebuild_context",
-            "refresh_workspace",
-            "run_diagnostic",
-            "semantic_evaluation",
-            "escalate"
-          ],
-          retry_budget: {
-            max_total_interventions: 8,
-            max_node_retries: 2,
-            max_artifact_repairs: 2,
-            max_context_rebuilds: 1,
-            max_workspace_refreshes: 1,
-            max_diagnostic_runs: 3,
-            max_semantic_evaluations: 2
+          actions: {
+            retry_with_guidance: { max_uses: 2 },
+            repair_artifact: { max_uses: 2 },
+            rebuild_context: { max_uses: 1 },
+            run_diagnostic: { max_uses: 3 },
+            pause_for_human: { max_uses: 1 },
+            semantic_evaluation: { max_uses: 2 }
           },
-          drift_detection: {
-            score_threshold: 0.8
-          },
-          escalation: {
-            require_human_on_policy_breach: true,
-            require_human_on_scope_drift: true
+          max_total_interventions: 8,
+          policy: {
+            pause_on_policy_risk: true,
+            pause_on_repeated_recovery: true,
+            drift_score_threshold: 0.8
           }
         }
       })

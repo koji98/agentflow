@@ -127,13 +127,10 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 `af` commands are file-backed against the run root:
 
 - `af status`, `af tools list`, and `af context show` read the node contract.
-- `af artifact write|read|list` publish and inspect declared artifacts.
-- `af channel post|read` append and read typed run-level messages.
-- `af send`, `af parent post`, and `af inbox read` use durable mailboxes.
-- `af agents list` reads graph-agent attempts and helper sessions.
-- `af spawn` creates a helper session with its own runtime metadata, selected plugin tools, output directory, logs, and artifact contract.
+- `af artifact write|list` publish and inspect declared artifacts.
+- `af log --type <progress|finding|blocker|risk|question|handoff_note>` appends structured worker evidence to `runtime/log.jsonl`.
+- `af spawn` creates a helper sub-node with its own runtime metadata, selected plugin tools, output directory, logs, and artifact contract.
 - `af wait` waits for helper completion.
-- `af supervisor request` records a supervisor request and mirrors it to the channel.
 
 `af --help` and `af <command> --help` are the authoritative in-node runtime API reference. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.
 
@@ -143,27 +140,23 @@ Agents never talk directly to another process. Delivery is explicit: a message i
 
 ## Supervision
 
-The supervisor is a governor, not a planner. It operates against the compiled contract and authored intent.
+The supervisor is engine-side runtime logic, not a second always-running agent. It observes worker evidence while a node attempt runs, then evaluates the completed attempt against graph goal, node goal, constraints, acceptance criteria, declared artifacts, tool usage, and workspace changes at a scheduler boundary.
 
-Allowed action kinds:
+Action kinds:
 
-- `retry_node`
+- `accept`
+- `accept_with_warnings`
+- `retry_with_guidance`
 - `repair_artifact`
 - `rebuild_context`
-- `refresh_workspace`
 - `run_diagnostic`
+- `pause_for_human`
 - `semantic_evaluation`
-- `escalate`
+- `fail`
 
-Budget fields:
+The graph contract configures bounded intervention actions with `supervision.actions.<action>.max_uses`, plus `max_total_interventions` and `policy` settings such as `pause_on_policy_risk`, `pause_on_repeated_recovery`, and `drift_score_threshold`.
 
-- `max_total_interventions`
-- `max_node_retries`
-- `max_artifact_repairs`
-- `max_context_rebuilds`
-- `max_workspace_refreshes`
-- `max_diagnostic_runs`
-- `max_semantic_evaluations`
+Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Bounded intervention workers attach artifacts under the target attempt's `interventions/` directory. Durable human pauses set run status to `paused` and include resume options plus an escalation brief.
 
 Current artifact repair behavior:
 

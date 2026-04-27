@@ -97,28 +97,19 @@ After `npm run build`, the packaged CLI entries are `dist/cli/index.js` and `dis
     }
   },
   "supervision": {
-    "allowed_actions": [
-      "retry_node",
-      "repair_artifact",
-      "rebuild_context",
-      "refresh_workspace",
-      "run_diagnostic",
-      "semantic_evaluation",
-      "escalate"
-    ],
-    "retry_budget": {
-      "max_total_interventions": 8,
-      "max_node_retries": 2,
-      "max_artifact_repairs": 2,
-      "max_context_rebuilds": 1,
-      "max_workspace_refreshes": 1,
-      "max_diagnostic_runs": 3,
-      "max_semantic_evaluations": 2
+    "actions": {
+      "retry_with_guidance": { "max_uses": 2 },
+      "repair_artifact": { "max_uses": 2 },
+      "rebuild_context": { "max_uses": 1 },
+      "run_diagnostic": { "max_uses": 3 },
+      "pause_for_human": { "max_uses": 1 },
+      "semantic_evaluation": { "max_uses": 2 }
     },
-    "drift_detection": { "score_threshold": 0.8 },
-    "escalation": {
-      "require_human_on_policy_breach": true,
-      "require_human_on_scope_drift": true
+    "max_total_interventions": 8,
+    "policy": {
+      "pause_on_policy_risk": true,
+      "pause_on_repeated_recovery": true,
+      "drift_score_threshold": 0.8
     }
   },
   "graph": {
@@ -178,7 +169,7 @@ Top-level fields:
 - `repos`: local repository aliases. Defaults to `{ "main": { "path": "." } }`.
 - `defaults`: launch profile and workspace backend.
 - `profiles`: harness, model, sandbox, env, timeout, and input budget settings. Omit `model` or set `"model": "auto"` to let the installed Codex CLI or Cursor CLI choose its default model.
-- `supervision`: allowed supervisor actions, retry budgets, drift threshold, and escalation rules.
+- `supervision`: resolved supervisor actions, intervention budget, drift threshold, and pause rules.
 - `plugins` and `tools`: plugin-bundled CLI capabilities. Put non-secret defaults inline under `tools[].config`.
 - `prerequisites`: local launch checks for files, commands, env vars, and repos.
 - `graph`: `sequence`, `parallel`, `repeat`, executable nodes, or managed patterns.
@@ -209,17 +200,17 @@ Reserved automatic artifacts are `agent_response`, `verification_json`, `stdout`
 
 ## Supervisor
 
-The runtime records every supervisor action as an event and as a JSONL ledger entry. The current implementation supports classifier-driven retries and escalation plus the artifact repair path:
+The runtime records supervisor decisions in `supervisor-timeline.jsonl`, intervention worker records in `interventions.jsonl`, and worker evidence from `af log` in `runtime/log.jsonl`. Supervision happens at scheduler boundaries after node attempts complete or fail:
 
-- `retry_node`
+- `retry_with_guidance`
 - `repair_artifact`
 - `rebuild_context`
-- `refresh_workspace`
 - `run_diagnostic`
+- `pause_for_human`
 - `semantic_evaluation`
-- `escalate`
+- `fail`
 
-Budget fields are `max_total_interventions`, `max_node_retries`, `max_artifact_repairs`, `max_context_rebuilds`, `max_workspace_refreshes`, `max_diagnostic_runs`, and `max_semantic_evaluations`.
+Each configured action uses `actions.<action>.max_uses`, with `max_total_interventions` enforcing the overall cap. The default supervisor action is observe; it intervenes only when graph success, node alignment, artifact integrity, or policy safety is at risk.
 
 If a completed agent misses a declared artifact, validation has already accepted the graph shape, so the runtime treats it as a repairable execution problem. When a harness is available, the supervisor runs an intent-aware repair intervention under the same node authority. When exactly one missing artifact is a human-readable text handoff and no harness is available, the supervisor can synthesize it from the captured `agent_response`; machine-readable artifacts and multi-artifact contracts are not synthesized from prose.
 
@@ -234,20 +225,18 @@ Agentflow resolves plugin tools, places generated launch wrappers on the node `P
 
 ## Agent Runtime CLI
 
-Every agent node receives a generated `af` command on `PATH`. It is a local runtime broker backed by files under the run root; it does not expose credentials to the harness. The command gives agents a concrete way to inspect their contract, publish artifacts, communicate through durable messages, request supervisor help, and spawn focused helpers.
+Every agent node receives a generated `af` command on `PATH`. It is a local runtime broker backed by files under the run root; it does not expose credentials to the harness. The command gives agents a concrete way to inspect their contract, publish artifacts, record structured evidence, and spawn focused helper sub-nodes.
 
 Core commands available inside an agent node:
 
 - `af status`: show run id, agent id, node id, workspace, output directory, required artifacts, and granted tools.
 - `af tools list`: show plugin tools granted to this node.
 - `af context show`: show the materialized context manifest and packet path.
-- `af artifact list|write|read`: inspect and publish declared artifacts.
-- `af channel post|read`: write and read typed run-level messages.
-- `af agents list`, `af inbox read`, `af send`, `af parent post`: inspect agent sessions and use durable mailboxes.
+- `af artifact list|write`: inspect and publish declared artifacts.
+- `af log --type progress|finding|blocker|risk|question|handoff_note --summary ...`: record worker evidence for supervisor and delivery review.
 - `af spawn --brief ... --artifact ... --wait`: request a supervised helper with selected skills/tools and wait for its artifact.
-- `af supervisor request --action ... --reason ...`: record a bounded supervisor request.
 
-Messages are coordination; artifacts are the durable handoff. If an agent has ended, other agents should read its artifacts or ask the supervisor to resume or replace it rather than assuming it can receive live messages.
+Logs are coordination evidence; artifacts are the durable handoff. If an agent has ended, rely on declared artifacts and post-attempt supervisor handling rather than assuming live collaboration.
 
 ## Delivery Package
 

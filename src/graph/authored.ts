@@ -81,26 +81,18 @@ export interface GraphIntent {
   acceptance_criteria?: string[];
 }
 
-export interface SupervisionRetryBudget {
-  max_total_interventions: number;
-  max_node_retries: number;
-  max_artifact_repairs: number;
-  max_context_rebuilds: number;
-  max_workspace_refreshes: number;
-  max_diagnostic_runs: number;
-  max_semantic_evaluations: number;
+export interface SupervisionActionPolicy {
+  max_uses: number;
 }
 
 export interface SupervisionPolicy {
-  allowed_actions: SupervisorActionKind[];
-  retry_budget: SupervisionRetryBudget;
-  drift_detection: {
-    score_threshold: number;
+  actions: Partial<Record<SupervisorActionKind, SupervisionActionPolicy>>;
+  max_total_interventions: number;
+  policy: {
+    pause_on_policy_risk: boolean;
+    pause_on_repeated_recovery: boolean;
+    drift_score_threshold: number;
     evaluator_profile?: string;
-  };
-  escalation: {
-    require_human_on_policy_breach: boolean;
-    require_human_on_scope_drift: boolean;
   };
 }
 

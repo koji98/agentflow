@@ -7,22 +7,18 @@ import type { RuntimeNodeExecutionResult } from "../../src/runtime/core/engine.j
 import { classifyNodeFailure } from "../../src/supervisor/classifier.js";
 
 const policy: SupervisionPolicy = {
-  allowed_actions: ["retry_node", "repair_artifact", "rebuild_context", "refresh_workspace", "escalate"],
-  retry_budget: {
-    max_total_interventions: 5,
-    max_node_retries: 1,
-    max_artifact_repairs: 1,
-    max_context_rebuilds: 1,
-    max_workspace_refreshes: 1,
-    max_diagnostic_runs: 0,
-    max_semantic_evaluations: 1
+  actions: {
+    retry_with_guidance: { max_uses: 1 },
+    repair_artifact: { max_uses: 1 },
+    rebuild_context: { max_uses: 1 },
+    pause_for_human: { max_uses: 1 },
+    semantic_evaluation: { max_uses: 1 }
   },
-  drift_detection: {
-    score_threshold: 0.8
-  },
-  escalation: {
-    require_human_on_policy_breach: true,
-    require_human_on_scope_drift: true
+  max_total_interventions: 5,
+  policy: {
+    pause_on_policy_risk: true,
+    pause_on_repeated_recovery: true,
+    drift_score_threshold: 0.8
   }
 };
 
@@ -107,7 +103,7 @@ describe("supervisor failure classifier", () => {
       expect.objectContaining({
         class: "policy_breach",
         retryable: false,
-        recommended_action: "escalate"
+        recommended_action: "pause_for_human"
       })
     );
   });
@@ -116,7 +112,7 @@ describe("supervisor failure classifier", () => {
     expect(classify({ error_message: 'codex-cli harness binary "codex" is unavailable.' })).toEqual(
       expect.objectContaining({
         class: "harness",
-        recommended_action: "escalate"
+        recommended_action: "pause_for_human"
       })
     );
   });
@@ -125,7 +121,7 @@ describe("supervisor failure classifier", () => {
     expect(classify({ result: { status: "failed", outcome: "failed", result: { timed_out: true } } as RuntimeNodeExecutionResult })).toEqual(
       expect.objectContaining({
         class: "timeout",
-        recommended_action: "retry_node"
+        recommended_action: "retry_with_guidance"
       })
     );
   });
@@ -143,7 +139,7 @@ describe("supervisor failure classifier", () => {
     expect(classify({ node })).toEqual(
       expect.objectContaining({
         class: "deterministic_evaluation",
-        recommended_action: "retry_node"
+        recommended_action: "retry_with_guidance"
       })
     );
   });
@@ -174,7 +170,7 @@ describe("supervisor failure classifier", () => {
     ).toEqual(
       expect.objectContaining({
         class: "scope_drift",
-        recommended_action: "escalate"
+        recommended_action: "pause_for_human"
       })
     );
   });

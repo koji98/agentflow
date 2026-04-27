@@ -10,7 +10,7 @@ Author graphs as supervised execution contracts. The graph should say what the t
 - Add `intent.constraints` for scope boundaries, out-of-scope areas, and high-impact limits.
 - Keep nodes outcome-sized and give substantial agent nodes `goal` plus `acceptance_criteria`.
 - Give every downstream handoff a named artifact.
-- Set `supervision.retry_budget` to match risk.
+- Set `supervision.actions.<action>.max_uses` and `supervision.max_total_interventions` to match risk.
 - Use `workspace_backend: "worktree"` for code-writing work unless the operator intentionally wants in-place execution.
 
 ## Authoring Loop

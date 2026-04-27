@@ -3,12 +3,12 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, realpathSync, readFileSync } from "node:fs";
-import { access, appendFile, copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, appendFile, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 import { resolveSubpathWithinRoot } from "../path_rules.js";
-import { readRunExecutionAttempts, readRunState } from "../artifacts/reader.js";
+import { readRunState } from "../artifacts/reader.js";
 import type { ArtifactDefinition } from "../graph/authored.js";
 import type { ResolvedTool } from "../graph/compiled.js";
 import type { CredentialSpecMap } from "../auth/types.js";
@@ -49,12 +49,17 @@ interface RuntimeMetadata {
   timeout_sec: number;
 }
 
-interface RuntimeMessage {
-  message_id: string;
+type RuntimeLogType = "progress" | "finding" | "blocker" | "risk" | "question" | "handoff_note";
+
+interface RuntimeLogEntry {
+  log_id: string;
   run_id: string;
-  from_agent_id: string;
-  to: string;
-  type: string;
+  graph_id: string;
+  agent_id: string;
+  execution_id: string;
+  node_id: string;
+  compiled_id: string;
+  type: RuntimeLogType;
   summary: string;
   body?: string;
   artifact_refs?: string[];
@@ -206,21 +211,6 @@ async function appendJsonl(path: string, value: unknown): Promise<void> {
   await appendFile(path, jsonLine(value), "utf8");
 }
 
-async function readJsonl<T>(path: string): Promise<T[]> {
-  let text: string;
-  try {
-    text = await readFile(path, "utf8");
-  } catch {
-    return [];
-  }
-
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as T);
-}
-
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -238,16 +228,8 @@ function metadataRuntimeDir(metadata: RuntimeMetadata): string {
   return metadata.runtime_dir ?? runtimeDir(metadata.run_root);
 }
 
-function channelPath(metadata: RuntimeMetadata): string {
-  return join(metadataRuntimeDir(metadata), "channel.jsonl");
-}
-
-function mailboxPath(metadata: RuntimeMetadata, agentId: string): string {
-  return join(metadataRuntimeDir(metadata), "mailboxes", `${agentId}.jsonl`);
-}
-
-function supervisorRequestsPath(metadata: RuntimeMetadata): string {
-  return join(metadataRuntimeDir(metadata), "supervisor-requests.jsonl");
+function logPath(metadata: RuntimeMetadata): string {
+  return join(metadataRuntimeDir(metadata), "log.jsonl");
 }
 
 function helperPath(metadata: RuntimeMetadata, helperId: string): string {
@@ -375,7 +357,7 @@ function renderHelp(): string {
     "Agentflow runtime CLI (`af`)",
     "",
     "Purpose:",
-    "  Runtime broker for Agentflow agents. Use it to inspect node state, read context, publish artifacts, message other agents, and spawn focused helpers.",
+    "  Runtime broker for Agentflow agents. Use it to inspect node state, read context, publish artifacts, record structured runtime notes, and spawn focused helpers.",
     "",
     "Usage:",
     "  af <command> [subcommand] [options]",
@@ -387,14 +369,7 @@ function renderHelp(): string {
     "  af context show",
     "  af artifact list",
     "  af artifact write <name> (--file <path> | --content <text> | --stdin)",
-    "  af artifact read <artifact | node.artifact | helper.artifact>",
-    "  af channel post --type <type> --summary <text> [--body <text>] [--artifact <name>]",
-    "  af channel read [--latest N]",
-    "  af agents list",
-    "  af inbox read [--latest N]",
-    "  af send --to <agent-id> --type <type> --summary <text> [--body <text>]",
-    "  af parent post --type <type> --summary <text> [--body <text>]",
-    "  af supervisor request --action <action> --reason <text>",
+    "  af log --type <progress|finding|blocker|risk|question|handoff_note> --summary <text> [--body <text>] [--artifact <name>]",
     "  af spawn --brief <text> [--skills a,b] [--tools tool-a,tool-b] [--artifact name] [--wait]",
     "  af wait --agent <agent-id> [--artifact <name>] [--timeout-sec N]",
     "",
@@ -409,6 +384,7 @@ function renderHelp(): string {
     "Examples:",
     "  af status",
     "  af artifact write handoff --file /tmp/handoff.md",
+    "  af log --type progress --summary \"Implemented parser changes\"",
     "  af context show",
     "",
     "Safety:",
@@ -541,204 +517,33 @@ function commandHelp(commandPath: string): string | undefined {
       "Safety:",
       "  Writes only to the declared artifact destination enforced by Agentflow."
     ],
-    "artifact read": [
-      "af artifact read - print an artifact's contents.",
+    log: [
+      "af log - record a durable runtime note for supervisor and delivery review.",
       "",
       "Usage:",
-      "  af artifact read <artifact>",
-      "  af artifact read <node.artifact>",
-      "",
-      "Arguments:",
-      "  <artifact>       Artifact on this node.",
-      "  <node.artifact>  Latest passed artifact from another node or helper.",
+      "  af log --type <type> --summary <text> [--body <text>] [--artifact <name>]",
+      "  af log --help",
       "",
       "Options:",
-      "  --help  Show this help and exit. Default: false",
-      "",
-      "Output:",
-      "  Raw artifact text on stdout.",
-      "",
-      "Exit codes:",
-      "  0 success",
-      "  1 artifact could not be resolved or read",
-      "",
-      "Examples:",
-      "  af artifact read handoff",
-      "  af artifact read planner.plan",
-      "",
-      "Safety:",
-      "  Read-only artifact access."
-    ],
-    "channel post": [
-      "af channel post - record a durable run-level message.",
-      "",
-      "Usage:",
-      "  af channel post --type <type> --summary <text> [--body <text>] [--artifact <name>]",
-      "",
-      "Options:",
-      "  --type <type>       Message type. Default: status",
-      "  --summary <text>    Short message summary. Required.",
-      "  --body <text>       Longer message body. Default: unset",
+      "  --type <type>       One of progress, finding, blocker, risk, question, handoff_note. Default: progress",
+      "  --summary <text>    Short note summary. Required.",
+      "  --body <text>       Longer note body. Default: unset",
       "  --artifact <name>   Artifact reference to attach. Repeatable/comma-separated. Default: none",
       "  --help              Show this help and exit. Default: false",
       "",
       "Output:",
-      "  JSON object with command, status, and message metadata.",
+      "  JSON object with command, status, log_id, type, and guidance for safe continuation.",
       "",
       "Exit codes:",
       "  0 success",
-      "  1 missing summary or write failure",
+      "  1 missing summary, invalid type, or write failure",
       "",
       "Examples:",
-      "  af channel post --type blocker --summary \"Validation command is unavailable\"",
+      "  af log --type progress --summary \"Implemented parser changes\"",
+      "  af log --type blocker --summary \"Need migration target decision\" --body \"Two config files match.\"",
       "",
       "Safety:",
-      "  Writes coordination metadata only; artifacts remain the durable handoff."
-    ],
-    "channel read": [
-      "af channel read - read recent run-level messages.",
-      "",
-      "Usage:",
-      "  af channel read [--latest N]",
-      "",
-      "Options:",
-      "  --latest <N>  Number of recent messages. Default: 20",
-      "  --help        Show this help and exit. Default: false",
-      "",
-      "Output:",
-      "  JSON object with recent channel messages.",
-      "",
-      "Exit codes:",
-      "  0 success",
-      "  1 read failure",
-      "",
-      "Examples:",
-      "  af channel read --latest 5",
-      "",
-      "Safety:",
-      "  Read-only message access."
-    ],
-    "inbox read": [
-      "af inbox read - read direct messages for this agent.",
-      "",
-      "Usage:",
-      "  af inbox read [--latest N]",
-      "",
-      "Options:",
-      "  --latest <N>  Number of recent messages. Default: 20",
-      "  --help        Show this help and exit. Default: false",
-      "",
-      "Output:",
-      "  JSON object with recent inbox messages.",
-      "",
-      "Exit codes:",
-      "  0 success",
-      "  1 read failure",
-      "",
-      "Examples:",
-      "  af inbox read --latest 10",
-      "",
-      "Safety:",
-      "  Read-only message access."
-    ],
-    "agents list": [
-      "af agents list - list active and helper agents in this run.",
-      "",
-      "Usage:",
-      "  af agents list",
-      "",
-      "Options:",
-      "  --help  Show this help and exit. Default: false",
-      "",
-      "Output:",
-      "  JSON object with agent IDs, statuses, relationship to current agent, and message capability.",
-      "",
-      "Exit codes:",
-      "  0 success",
-      "  1 state read failure",
-      "",
-      "Examples:",
-      "  af agents list",
-      "",
-      "Safety:",
-      "  Read-only inspection."
-    ],
-    send: [
-      "af send - send a direct message to another running agent.",
-      "",
-      "Usage:",
-      "  af send --to <agent-id> --type <type> --summary <text> [--body <text>]",
-      "",
-      "Options:",
-      "  --to <agent-id>    Recipient agent ID. Required.",
-      "  --type <type>      Message type. Default: status",
-      "  --summary <text>   Short message summary. Required.",
-      "  --body <text>      Longer message body. Default: unset",
-      "  --artifact <name>  Artifact reference to attach. Repeatable/comma-separated. Default: none",
-      "  --help             Show this help and exit. Default: false",
-      "",
-      "Output:",
-      "  JSON object with delivery status.",
-      "",
-      "Exit codes:",
-      "  0 success",
-      "  1 missing recipient/summary or write failure",
-      "",
-      "Examples:",
-      "  af send --to helper_abc --type blocker --summary \"Need API schema path\"",
-      "",
-      "Safety:",
-      "  Coordination only; do not use messages as durable artifact substitutes."
-    ],
-    "parent post": [
-      "af parent post - send a message to this helper's parent agent.",
-      "",
-      "Usage:",
-      "  af parent post --type <type> --summary <text> [--body <text>]",
-      "",
-      "Options:",
-      "  --type <type>      Message type. Default: status",
-      "  --summary <text>   Short message summary. Required.",
-      "  --body <text>      Longer message body. Default: unset",
-      "  --artifact <name>  Artifact reference to attach. Repeatable/comma-separated. Default: none",
-      "  --help             Show this help and exit. Default: false",
-      "",
-      "Output:",
-      "  JSON object with delivery status or agent_has_no_parent.",
-      "",
-      "Exit codes:",
-      "  0 success",
-      "  1 missing summary or write failure",
-      "",
-      "Examples:",
-      "  af parent post --type done --summary \"Helper artifact is ready\"",
-      "",
-      "Safety:",
-      "  Coordination only; publish required helper artifacts separately."
-    ],
-    "supervisor request": [
-      "af supervisor request - ask the supervisor for a bounded intervention.",
-      "",
-      "Usage:",
-      "  af supervisor request --action <action> --reason <text>",
-      "",
-      "Options:",
-      "  --action <action>  Requested supervisor action. Required.",
-      "  --reason <text>    Why the action is needed. Required.",
-      "  --help             Show this help and exit. Default: false",
-      "",
-      "Output:",
-      "  JSON object with recorded request metadata.",
-      "",
-      "Exit codes:",
-      "  0 success",
-      "  1 missing action/reason or write failure",
-      "",
-      "Examples:",
-      "  af supervisor request --action rebuild_context --reason \"Required upstream artifact is missing from context\"",
-      "",
-      "Safety:",
-      "  Records a request; the supervisor decides whether to act."
+      "  Records structured evidence only; it is not a synchronous supervisor chat channel."
     ],
     spawn: [
       "af spawn - start a focused helper agent.",
@@ -950,66 +755,32 @@ async function commandArtifactWrite(
   };
 }
 
-async function latestArtifactPathFromAttempts(
+const runtimeLogTypes: RuntimeLogType[] = ["progress", "finding", "blocker", "risk", "question", "handoff_note"];
+
+function createRuntimeLogEntry(
   metadata: RuntimeMetadata,
-  nodeOrAgent: string,
-  artifact: string
-): Promise<string | undefined> {
-  const helperSession = await readHelperSessionForMetadata(metadata, nodeOrAgent).catch(() => undefined);
-  if (helperSession?.artifacts[artifact]) {
-    return helperSession.artifacts[artifact];
-  }
-
-  const attempts = await readRunExecutionAttempts(metadata.run_root);
-  return attempts
-    .filter((attempt) => attempt.status === "passed" && attempt.authored_id === nodeOrAgent && attempt.artifacts[artifact])
-    .sort((left, right) => Date.parse(right.ended_at ?? right.started_at) - Date.parse(left.ended_at ?? left.started_at))
-    .at(0)?.artifacts[artifact];
-}
-
-async function commandArtifactRead(metadata: RuntimeMetadata, positionals: string[]): Promise<AfResult> {
-  const ref = positionals[2];
-  if (!ref) {
-    throw new Error("af artifact read requires an artifact name or node.artifact reference.");
-  }
-
-  const dotIndex = ref.indexOf(".");
-  let artifactPath: string | undefined;
-  if (dotIndex === -1) {
-    artifactPath = currentArtifactPath(metadata, ref);
-  } else {
-    artifactPath = await latestArtifactPathFromAttempts(metadata, ref.slice(0, dotIndex), ref.slice(dotIndex + 1));
-  }
-
-  if (!artifactPath) {
-    throw new Error(`Artifact reference "${ref}" could not be resolved.`);
-  }
-
-  return {
-    exitCode: 0,
-    stdout: await readFile(artifactPath, "utf8")
-  };
-}
-
-function createMessage(
-  metadata: RuntimeMetadata,
-  to: string,
   options: Record<string, string | boolean | string[]>
-): RuntimeMessage {
-  const type = optionString(options, "type") ?? "status";
+): RuntimeLogEntry {
+  const type = optionString(options, "type") ?? "progress";
+  if (!runtimeLogTypes.includes(type as RuntimeLogType)) {
+    throw new Error(`af log --type must be one of: ${runtimeLogTypes.join(", ")}.`);
+  }
   const summary = optionString(options, "summary");
   if (!summary) {
-    throw new Error("Message commands require --summary.");
+    throw new Error("af log requires --summary.");
   }
 
   const body = optionString(options, "body");
   const artifact_refs = optionList(options, "artifact");
   return {
-    message_id: `msg_${randomUUID()}`,
+    log_id: `log_${randomUUID()}`,
     run_id: metadata.run_id,
-    from_agent_id: metadata.agent_id,
-    to,
-    type,
+    graph_id: metadata.graph_id,
+    agent_id: metadata.agent_id,
+    execution_id: metadata.execution_id,
+    node_id: metadata.node_id,
+    compiled_id: metadata.compiled_id,
+    type: type as RuntimeLogType,
     summary,
     ...(body ? { body } : {}),
     ...(artifact_refs.length > 0 ? { artifact_refs } : {}),
@@ -1017,205 +788,26 @@ function createMessage(
   };
 }
 
-async function commandChannelPost(
+async function commandLog(
   metadata: RuntimeMetadata,
   options: Record<string, string | boolean | string[]>
 ): Promise<AfResult> {
-  const message = createMessage(metadata, "channel", options);
-  await appendJsonl(channelPath(metadata), message);
+  const entry = createRuntimeLogEntry(metadata, options);
+  await appendJsonl(logPath(metadata), entry);
   return {
     exitCode: 0,
     output: {
-      command: "af channel post",
-      status: "passed",
-      message_id: message.message_id,
-      stored: true
-    }
-  };
-}
-
-async function commandChannelRead(
-  metadata: RuntimeMetadata,
-  options: Record<string, string | boolean | string[]>
-): Promise<AfResult> {
-  const latest = optionNumber(options, "latest", 50);
-  const messages = await readJsonl<RuntimeMessage>(channelPath(metadata));
-  return {
-    exitCode: 0,
-    output: {
-      command: "af channel read",
-      status: "passed",
-      messages: messages.slice(-latest)
+      command: "af log",
+      status: "recorded",
+      log_id: entry.log_id,
+      type: entry.type,
+      message: "Runtime log recorded. Continue only if safe; otherwise publish current findings and stop."
     }
   };
 }
 
 async function readHelperSessionForMetadata(metadata: RuntimeMetadata, helperId: string): Promise<HelperSession> {
   return readJsonFile<HelperSession>(helperPath(metadata, helperId));
-}
-
-async function listHelperSessions(metadata: RuntimeMetadata): Promise<HelperSession[]> {
-  let entries: string[];
-  try {
-    entries = await readdir(helpersDir(metadata));
-  } catch {
-    return [];
-  }
-
-  const sessions = await Promise.all(
-    entries.map((entry) => readHelperSessionForMetadata(metadata, entry).catch(() => undefined))
-  );
-  return sessions.filter((session): session is HelperSession => session !== undefined);
-}
-
-async function isRecipientRunning(metadata: RuntimeMetadata, agentId: string): Promise<boolean> {
-  if (agentId === "supervisor") {
-    return true;
-  }
-  if (agentId === metadata.agent_id) {
-    return true;
-  }
-
-  const state = await readRunState(metadata.run_root).catch(() => undefined);
-  if (state && state.active_executions[agentId]) {
-    return true;
-  }
-
-  const helper = await readHelperSessionForMetadata(metadata, agentId).catch(() => undefined);
-  return helper?.status === "running" || helper?.status === "starting";
-}
-
-async function deliverMessage(
-  metadata: RuntimeMetadata,
-  to: string,
-  options: Record<string, string | boolean | string[]>
-): Promise<AfResult> {
-  const message = createMessage(metadata, to, options);
-  const delivered = await isRecipientRunning(metadata, to);
-  await appendJsonl(mailboxPath(metadata, to), message);
-  await appendJsonl(channelPath(metadata), {
-    ...message,
-    to: `mailbox:${to}`,
-    delivery: {
-      delivered,
-      stored: true
-    }
-  });
-
-  return {
-    exitCode: 0,
-    output: {
-      command: "af send",
-      status: "passed",
-      message_id: message.message_id,
-      to,
-      delivered,
-      stored: true,
-      reason: delivered ? "recipient_running" : "recipient_not_running"
-    }
-  };
-}
-
-async function commandInboxRead(
-  metadata: RuntimeMetadata,
-  options: Record<string, string | boolean | string[]>
-): Promise<AfResult> {
-  const latest = optionNumber(options, "latest", 50);
-  const messages = await readJsonl<RuntimeMessage>(mailboxPath(metadata, metadata.agent_id));
-  return {
-    exitCode: 0,
-    output: {
-      command: "af inbox read",
-      status: "passed",
-      agent_id: metadata.agent_id,
-      messages: messages.slice(-latest)
-    }
-  };
-}
-
-async function commandAgentsList(metadata: RuntimeMetadata): Promise<AfResult> {
-  const state = await readRunState(metadata.run_root).catch(() => undefined);
-  const helpers = await listHelperSessions(metadata);
-  const graphAgents = state
-    ? Object.values(state.latest_execution_by_compiled_id)
-        .filter((execution) => execution.kind === "agent")
-        .map((execution) => ({
-          agent_id: execution.execution_id,
-          node_id: execution.authored_id,
-          compiled_id: execution.compiled_id,
-          status: state.active_executions[execution.execution_id] ? "running" : execution.status,
-          relationship:
-            execution.execution_id === metadata.agent_id
-              ? "self"
-              : "graph-agent",
-          can_receive_messages: Boolean(state.active_executions[execution.execution_id])
-        }))
-    : [];
-
-  return {
-    exitCode: 0,
-    output: {
-      command: "af agents list",
-      status: "passed",
-      agents: [
-        ...graphAgents,
-        ...helpers.map((helper) => ({
-          agent_id: helper.agent_id,
-          parent_agent_id: helper.parent_agent_id,
-          status: helper.status,
-          relationship:
-            helper.agent_id === metadata.agent_id
-              ? "self"
-              : helper.parent_agent_id === metadata.agent_id
-                ? "child"
-                : helper.parent_agent_id === metadata.parent_agent_id
-                  ? "sibling"
-                  : "helper",
-          can_receive_messages: helper.status === "running" || helper.status === "starting"
-        }))
-      ]
-    }
-  };
-}
-
-async function commandSupervisorRequest(
-  metadata: RuntimeMetadata,
-  options: Record<string, string | boolean | string[]>
-): Promise<AfResult> {
-  const action = optionString(options, "action");
-  const reason = optionString(options, "reason");
-  if (!action || !reason) {
-    throw new Error("af supervisor request requires --action and --reason.");
-  }
-
-  const request = {
-    request_id: `sup_${randomUUID()}`,
-    run_id: metadata.run_id,
-    from_agent_id: metadata.agent_id,
-    action,
-    reason,
-    created_at: new Date().toISOString(),
-    status: "recorded"
-  };
-  await appendJsonl(supervisorRequestsPath(metadata), request);
-  await appendJsonl(channelPath(metadata), {
-    message_id: request.request_id,
-    run_id: metadata.run_id,
-    from_agent_id: metadata.agent_id,
-    to: "supervisor",
-    type: "supervisor-request",
-    summary: `${action}: ${reason}`,
-    created_at: request.created_at
-  });
-
-  return {
-    exitCode: 0,
-    output: {
-      command: "af supervisor request",
-      status: "passed",
-      request
-    }
-  };
 }
 
 function helperIdFromBrief(brief: string): string {
@@ -1319,13 +911,17 @@ async function commandSpawn(
   };
 
   await writeJsonFile(helperPath(metadata, helperId), session);
-  await appendJsonl(channelPath(metadata), {
-    message_id: `msg_${randomUUID()}`,
+  await appendJsonl(logPath(metadata), {
+    log_id: `log_${randomUUID()}`,
     run_id: metadata.run_id,
-    from_agent_id: metadata.agent_id,
-    to: "channel",
-    type: "helper-spawned",
+    graph_id: metadata.graph_id,
+    agent_id: metadata.agent_id,
+    execution_id: metadata.execution_id,
+    node_id: metadata.node_id,
+    compiled_id: metadata.compiled_id,
+    type: "progress",
     summary: `Spawned helper ${helperId}: ${brief}`,
+    helper_event: "spawned",
     artifact_refs: [artifactName],
     created_at: new Date().toISOString()
   });
@@ -1419,7 +1015,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "## Agentflow Runtime CLI",
     "- Use `af status` to inspect this helper session.",
     "- Use `af artifact write` to publish the required artifact.",
-    "- Use `af parent post` only for concise blockers or important completion notes.",
+    "- Use `af log --type` for concise blockers or important completion notes.",
     ...(toolContract.length > 0 ? ["", ...toolContract] : []),
     "",
     "## Final Handoff",
@@ -1566,13 +1162,17 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     exit_code: exitCode,
     artifact_exists: artifactExists
   });
-  await appendJsonl(mailboxPath(parentMetadata, session.parent_agent_id), {
-    message_id: `msg_${randomUUID()}`,
+  await appendJsonl(logPath(parentMetadata), {
+    log_id: `log_${randomUUID()}`,
     run_id: parentMetadata.run_id,
-    from_agent_id: helperId,
-    to: session.parent_agent_id,
-    type: "helper-completed",
+    graph_id: parentMetadata.graph_id,
+    agent_id: helperId,
+    execution_id: helperId,
+    node_id: helperId,
+    compiled_id: helperId,
+    type: "progress",
     summary: `Helper ${helperId} ${completed.status}.`,
+    helper_event: "completed",
     artifact_refs: Object.keys(completed.artifacts),
     created_at: completed.ended_at ?? new Date().toISOString()
   });
@@ -1659,45 +1259,8 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
   if (command === "artifact" && subcommand === "write") {
     return commandArtifactWrite(metadata, positionals, options);
   }
-  if (command === "artifact" && subcommand === "read") {
-    return commandArtifactRead(metadata, positionals);
-  }
-  if (command === "channel" && subcommand === "post") {
-    return commandChannelPost(metadata, options);
-  }
-  if (command === "channel" && subcommand === "read") {
-    return commandChannelRead(metadata, options);
-  }
-  if (command === "inbox" && subcommand === "read") {
-    return commandInboxRead(metadata, options);
-  }
-  if (command === "agents" && subcommand === "list") {
-    return commandAgentsList(metadata);
-  }
-  if (command === "send") {
-    const to = optionString(options, "to");
-    if (!to) {
-      throw new Error("af send requires --to.");
-    }
-    return deliverMessage(metadata, to, options);
-  }
-  if (command === "parent" && subcommand === "post") {
-    if (!metadata.parent_agent_id) {
-      return {
-        exitCode: 0,
-        output: {
-          command: "af parent post",
-          status: "passed",
-          delivered: false,
-          stored: false,
-          reason: "agent_has_no_parent"
-        }
-      };
-    }
-    return deliverMessage(metadata, metadata.parent_agent_id, options);
-  }
-  if (command === "supervisor" && subcommand === "request") {
-    return commandSupervisorRequest(metadata, options);
+  if (command === "log") {
+    return commandLog(metadata, options);
   }
   if (command === "spawn") {
     return commandSpawn(metadata, options);

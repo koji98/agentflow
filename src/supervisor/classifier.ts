@@ -70,7 +70,7 @@ export function classifyNodeFailure(input: {
       class: "policy_breach",
       summary: message || "Execution attempted to access a path outside the allowed workspace scope.",
       retryable: false,
-      recommended_action: "escalate",
+      recommended_action: "pause_for_human",
       evidence
     };
   }
@@ -100,7 +100,7 @@ export function classifyNodeFailure(input: {
       class: "harness",
       summary: message || "Required harness is unavailable.",
       retryable: false,
-      recommended_action: "escalate",
+      recommended_action: "pause_for_human",
       evidence
     };
   }
@@ -110,22 +110,22 @@ export function classifyNodeFailure(input: {
       class: "timeout",
       summary: message || "Node execution timed out.",
       retryable: true,
-      recommended_action: "retry_node",
+      recommended_action: "retry_with_guidance",
       evidence
     };
   }
 
   const scopeDriftScore = readScopeDriftScore(input.result);
-  if (scopeDriftScore !== undefined && scopeDriftScore < input.policy.drift_detection.score_threshold) {
+  if (scopeDriftScore !== undefined && scopeDriftScore < input.policy.policy.drift_score_threshold) {
     return {
       class: "scope_drift",
       summary: message || "Semantic evaluation detected scope drift.",
       retryable: false,
-      recommended_action: "escalate",
+      recommended_action: "pause_for_human",
       evidence: {
         ...evidence,
         scope_drift_score: scopeDriftScore,
-        threshold: input.policy.drift_detection.score_threshold
+        threshold: input.policy.policy.drift_score_threshold
       }
     };
   }
@@ -135,7 +135,7 @@ export function classifyNodeFailure(input: {
       class: "deterministic_evaluation",
       summary: message || "Deterministic evaluation failed.",
       retryable: true,
-      recommended_action: "retry_node",
+      recommended_action: "retry_with_guidance",
       evidence
     };
   }
@@ -155,7 +155,7 @@ export function classifyNodeFailure(input: {
       class: "operator",
       summary: message || "Operator checkpoint did not pass.",
       retryable: false,
-      recommended_action: "escalate",
+      recommended_action: "pause_for_human",
       evidence
     };
   }
@@ -164,7 +164,7 @@ export function classifyNodeFailure(input: {
     class: "unknown",
     summary: message || "Node failed without a recognized failure class.",
     retryable: true,
-    recommended_action: "retry_node",
+    recommended_action: "retry_with_guidance",
     evidence
   };
 }

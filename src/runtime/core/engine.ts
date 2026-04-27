@@ -64,8 +64,13 @@ import { initializeInplaceWorkspace } from "../workspace/inplace.js";
 import type { WorkspaceSetup } from "../workspace/types.js";
 import { captureWorkspaceChanges } from "../workspace/changes.js";
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
-import { runRepairArtifactIntervention } from "../../supervisor/actions.js";
+import { runEvidenceIntervention, runRepairArtifactIntervention } from "../../supervisor/actions.js";
 import { classifyNodeFailure, type FailureClassification } from "../../supervisor/classifier.js";
+import {
+  canSpendSupervisorAction,
+  spendSupervisorAction,
+  type SupervisorBudgetState
+} from "../../supervisor/policy.js";
 import type { SupervisorDecision, SupervisorInterventionRecord } from "../../supervisor/types.js";
 import {
   buildSchedulerTopology,
@@ -602,53 +607,19 @@ async function emitEvent(
   return event;
 }
 
-function supervisorActionBudgetField(action: SupervisorActionKind): keyof RuntimeSession["supervisor"]["budget_remaining"] | undefined {
-  switch (action) {
-    case "retry_node":
-      return "max_node_retries";
-    case "repair_artifact":
-      return "max_artifact_repairs";
-    case "rebuild_context":
-      return "max_context_rebuilds";
-    case "refresh_workspace":
-      return "max_workspace_refreshes";
-    case "run_diagnostic":
-      return "max_diagnostic_runs";
-    case "semantic_evaluation":
-      return "max_semantic_evaluations";
-    default:
-      return undefined;
-  }
-}
-
 function canSpendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): boolean {
-  if (action === "escalate") {
-    return true;
-  }
-
-  const budgetField = supervisorActionBudgetField(action);
-  return (
-    session.graph.supervision.allowed_actions.includes(action) &&
-    budgetField !== undefined &&
-    session.supervisor.budget_remaining.max_total_interventions > 0 &&
-    session.supervisor.budget_remaining[budgetField] > 0
-  );
+  return canSpendSupervisorAction({
+    remaining: session.supervisor.budget_remaining,
+    spent: { total: 0 }
+  }, action);
 }
 
 function spendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): void {
-  const budgetField = supervisorActionBudgetField(action);
-  if (action === "escalate" || !budgetField) {
-    return;
-  }
-
-  session.supervisor.budget_remaining.max_total_interventions = Math.max(
-    0,
-    session.supervisor.budget_remaining.max_total_interventions - 1
-  );
-  session.supervisor.budget_remaining[budgetField] = Math.max(
-    0,
-    session.supervisor.budget_remaining[budgetField] - 1
-  );
+  const spent = spendSupervisorAction({
+    remaining: session.supervisor.budget_remaining,
+    spent: { total: 0 }
+  } satisfies SupervisorBudgetState, action);
+  session.supervisor.budget_remaining = spent.remaining;
 }
 
 function createSupervisorDecisionId(attempt: RuntimeNodeAttempt, action: SupervisorActionKind): string {
@@ -665,9 +636,8 @@ function retryActionForClassification(classification: FailureClassification): Su
   }
 
   switch (classification.recommended_action) {
-    case "retry_node":
+    case "retry_with_guidance":
     case "rebuild_context":
-    case "refresh_workspace":
     case "run_diagnostic":
     case "semantic_evaluation":
       return classification.recommended_action;
@@ -680,15 +650,58 @@ function actionRetrySummary(action: SupervisorActionKind): string {
   switch (action) {
     case "rebuild_context":
       return "Supervisor will retry the node with a freshly materialized context packet.";
-    case "refresh_workspace":
-      return "Supervisor will retry the node after reusing the current workspace binding.";
     case "run_diagnostic":
       return "Supervisor will retry the node after recording the diagnostic classification.";
     case "semantic_evaluation":
       return "Supervisor will rerun the semantic evaluation node.";
     default:
-      return "Supervisor will retry the node.";
+      return "Supervisor will retry the node with guidance.";
   }
+}
+
+function interventionTitle(action: SupervisorActionKind): string {
+  switch (action) {
+    case "run_diagnostic":
+      return "Supervisor diagnostic for failed node.";
+    case "rebuild_context":
+      return "Supervisor context brief for retry.";
+    case "semantic_evaluation":
+      return "Supervisor semantic evaluation brief.";
+    case "pause_for_human":
+      return "Supervisor escalation brief for human input.";
+    default:
+      return actionRetrySummary(action);
+  }
+}
+
+function interventionBody(options: {
+  action: SupervisorActionKind;
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  classification: FailureClassification;
+}): string {
+  return [
+    `# ${interventionTitle(options.action)}`,
+    "",
+    `Node: ${options.node.authored_id} (${options.node.compiled_id})`,
+    `Execution: ${options.attempt.execution_id}`,
+    `Classification: ${options.classification.class}`,
+    `Summary: ${options.classification.summary}`,
+    "",
+    "## Evidence",
+    "```json",
+    JSON.stringify(options.classification.evidence, null, 2),
+    "```",
+    "",
+    "## Recommended Next Step",
+    options.action === "pause_for_human"
+      ? "Wait for structured human input before continuing."
+      : options.action === "rebuild_context"
+        ? "Retry the authored node with this context brief available as supervisor evidence."
+        : options.action === "semantic_evaluation"
+          ? "Use this semantic assessment as retry guidance for the authored node."
+          : "Retry only if this diagnostic confirms the failure is recoverable."
+  ].join("\n");
 }
 
 async function handleFailedNodeWithSupervisor(options: {
@@ -712,33 +725,100 @@ async function handleFailedNodeWithSupervisor(options: {
   const action = retryActionForClassification(classification);
 
   if (!action) {
-    if (
-      options.session.graph.supervision.allowed_actions.includes("escalate") &&
-      (classification.recommended_action === "escalate" || !classification.retryable)
-    ) {
-      const decisionId = createSupervisorDecisionId(options.attempt, "escalate");
-      options.session.supervisor.status = "escalated";
-      options.session.supervisor.last_decision_id = decisionId;
-      options.session.supervisor.escalations.push({
+    const requestedAction = classification.recommended_action;
+    const decisionId = createSupervisorDecisionId(options.attempt, requestedAction);
+    const decision: SupervisorDecision = {
+      decision_id: decisionId,
+      kind: requestedAction === "pause_for_human" ? "pause_for_human" : "fail_run",
+      classification: classification.class,
+      health_state: classification.class === "scope_drift" ? "drifting" : "unhealthy",
+      confidence: "medium",
+      target_compiled_id: options.node.compiled_id,
+      target_execution_id: options.attempt.execution_id,
+      action: requestedAction,
+      reason: classification.summary,
+      evidence: classification.evidence,
+      budget_cost: {},
+      requires_human: requestedAction === "pause_for_human",
+      created_at: new Date().toISOString()
+    };
+    options.session.supervisor.last_decision_id = decisionId;
+    options.session.supervisor.timeline.push(decision);
+    if (requestedAction === "pause_for_human") {
+      if (!canSpendRuntimeSupervisorAction(options.session, "pause_for_human")) {
+        options.session.supervisor.status = "exhausted";
+      } else {
+        spendRuntimeSupervisorAction(options.session, "pause_for_human");
+        options.session.supervisor.intervention_count += 1;
+        decision.budget_cost = { total: 1, pause_for_human: 1 };
+      }
+      options.session.supervisor.status = "paused";
+      options.session.supervisor.pause = {
         decision_id: decisionId,
         reason: classification.summary,
-        target_compiled_id: options.node.compiled_id
+        target_compiled_id: options.node.compiled_id,
+        target_execution_id: options.attempt.execution_id,
+        resume_options: ["retry", "fail", "add_context"]
+      };
+      options.session.status = "paused";
+    }
+    await options.writer.appendSupervisorDecision(decision);
+    await emitEvent(
+      options.session,
+      options.writer,
+      options.runOwner,
+      options.events,
+      options.runOptions.on_event,
+      "supervisor.decision",
+      decision,
+      {
+        compiled_id: options.node.compiled_id,
+        execution_id: options.attempt.execution_id,
+        repeat_scope_id: options.attempt.repeat_scope_id,
+        iteration_index: options.attempt.iteration_index,
+        attempt_index: options.attempt.attempt_index
+      }
+    );
+    if (requestedAction === "pause_for_human") {
+      const interventionId = createSupervisorInterventionId(options.attempt, "pause_for_human");
+      const intervention = await runEvidenceIntervention({
+        action: "pause_for_human",
+        attempt: options.attempt,
+        decision_id: decisionId,
+        intervention_id: interventionId,
+        classification,
+        title: interventionTitle("pause_for_human"),
+        body: interventionBody({
+          action: "pause_for_human",
+          node: options.node,
+          attempt: options.attempt,
+          classification
+        })
       });
+      options.session.supervisor.pause = {
+        ...(options.session.supervisor.pause ?? {
+          decision_id: decisionId,
+          reason: classification.summary,
+          resume_options: ["retry", "fail", "add_context"]
+        }),
+        ...(typeof intervention.artifact_paths.brief === "string"
+          ? { brief_path: intervention.artifact_paths.brief }
+          : {})
+      };
+      await options.writer.appendSupervisorIntervention(intervention);
       await emitEvent(
         options.session,
         options.writer,
         options.runOwner,
         options.events,
         options.runOptions.on_event,
-        "supervisor.escalated",
+        "supervisor.paused",
         {
           decision_id: decisionId,
-          classification: classification.class,
-          action: "escalate",
           target_compiled_id: options.node.compiled_id,
           target_execution_id: options.attempt.execution_id,
           reason: classification.summary,
-          evidence: classification.evidence
+          resume_options: options.session.supervisor.pause?.resume_options ?? []
         },
         {
           compiled_id: options.node.compiled_id,
@@ -752,13 +832,26 @@ async function handleFailedNodeWithSupervisor(options: {
     return false;
   }
 
-  if (
-    !options.session.graph.supervision.allowed_actions.includes(action) ||
-    !canSpendRuntimeSupervisorAction(options.session, action)
-  ) {
+  if (!canSpendRuntimeSupervisorAction(options.session, action)) {
     options.session.supervisor.status = "exhausted";
     const decisionId = createSupervisorDecisionId(options.attempt, action);
     options.session.supervisor.last_decision_id = decisionId;
+    const decision: SupervisorDecision = {
+      decision_id: decisionId,
+      kind: "fail_run",
+      classification: classification.class,
+      health_state: "unhealthy",
+      confidence: "high",
+      action: "fail",
+      target_compiled_id: options.node.compiled_id,
+      target_execution_id: options.attempt.execution_id,
+      reason: `Supervisor cannot run action "${action}" because its budget is exhausted or the action is disabled.`,
+      evidence: classification.evidence,
+      budget_cost: {},
+      created_at: new Date().toISOString()
+    };
+    options.session.supervisor.timeline.push(decision);
+    await options.writer.appendSupervisorDecision(decision);
     await emitEvent(
       options.session,
       options.writer,
@@ -766,18 +859,7 @@ async function handleFailedNodeWithSupervisor(options: {
       options.events,
       options.runOptions.on_event,
       "supervisor.decision",
-      {
-        decision_id: decisionId,
-        kind: "escalate",
-        classification: classification.class,
-        action: "escalate",
-        requested_action: action,
-        target_compiled_id: options.node.compiled_id,
-        target_execution_id: options.attempt.execution_id,
-        reason: `Supervisor cannot run action "${action}" because it is not allowed or its budget is exhausted.`,
-        evidence: classification.evidence,
-        budget_cost: {}
-      },
+      decision,
       {
         compiled_id: options.node.compiled_id,
         execution_id: options.attempt.execution_id,
@@ -793,7 +875,6 @@ async function handleFailedNodeWithSupervisor(options: {
   options.session.supervisor.status = "intervening";
   options.session.supervisor.intervention_count += 1;
   const decisionId = createSupervisorDecisionId(options.attempt, action);
-  const interventionId = createSupervisorInterventionId(options.attempt, action);
   options.session.supervisor.last_decision_id = decisionId;
   const budgetCost = {
     total: 1,
@@ -801,33 +882,20 @@ async function handleFailedNodeWithSupervisor(options: {
   };
   const decision: SupervisorDecision = {
     decision_id: decisionId,
-    kind: "retry_node",
+    kind: "retry_with_guidance",
     classification: classification.class,
+    health_state: "unhealthy",
+    confidence: "medium",
     target_compiled_id: options.node.compiled_id,
     target_execution_id: options.attempt.execution_id,
     action,
     reason: classification.summary,
+    evidence: classification.evidence,
     budget_cost: budgetCost,
     created_at: new Date().toISOString()
   };
-  const intervention: SupervisorInterventionRecord = {
-    intervention_id: interventionId,
-    decision_id: decisionId,
-    action,
-    status: "passed",
-    target_compiled_id: options.node.compiled_id,
-    target_execution_id: options.attempt.execution_id,
-    started_at: decision.created_at,
-    ended_at: new Date().toISOString(),
-    reason: actionRetrySummary(action),
-    evidence: {
-      ...classification.evidence,
-      retry_attempt_index: options.attempt.attempt_index + 1
-    },
-    artifact_paths: {
-      failed_execution_dir: options.attempt.execution_dir
-    }
-  };
+  options.session.supervisor.timeline.push(decision);
+  await options.writer.appendSupervisorDecision(decision);
 
   await emitEvent(
     options.session,
@@ -845,58 +913,69 @@ async function handleFailedNodeWithSupervisor(options: {
       attempt_index: options.attempt.attempt_index
     }
   );
-  const runningIntervention: SupervisorInterventionRecord = {
-    ...intervention,
-    status: "running"
-  };
-  delete runningIntervention.ended_at;
-  await options.writer.appendSupervisorIntervention(runningIntervention);
-  await emitEvent(
-    options.session,
-    options.writer,
-    options.runOwner,
-    options.events,
-    options.runOptions.on_event,
-    "supervisor.intervention.started",
-    {
-      intervention_id: interventionId,
-      decision_id: decisionId,
+  if (action === "run_diagnostic" || action === "rebuild_context" || action === "semantic_evaluation") {
+    const interventionId = createSupervisorInterventionId(options.attempt, action);
+    await emitEvent(
+      options.session,
+      options.writer,
+      options.runOwner,
+      options.events,
+      options.runOptions.on_event,
+      "supervisor.intervention.started",
+      {
+        intervention_id: interventionId,
+        decision_id: decisionId,
+        action,
+        target_compiled_id: options.node.compiled_id,
+        summary: interventionTitle(action)
+      },
+      {
+        compiled_id: options.node.compiled_id,
+        execution_id: options.attempt.execution_id,
+        repeat_scope_id: options.attempt.repeat_scope_id,
+        iteration_index: options.attempt.iteration_index,
+        attempt_index: options.attempt.attempt_index
+      }
+    );
+    const intervention = await runEvidenceIntervention({
       action,
-      target_compiled_id: options.node.compiled_id,
-      summary: actionRetrySummary(action)
-    },
-    {
-      compiled_id: options.node.compiled_id,
-      execution_id: options.attempt.execution_id,
-      repeat_scope_id: options.attempt.repeat_scope_id,
-      iteration_index: options.attempt.iteration_index,
-      attempt_index: options.attempt.attempt_index
-    }
-  );
-  await options.writer.appendSupervisorIntervention(intervention);
-  await emitEvent(
-    options.session,
-    options.writer,
-    options.runOwner,
-    options.events,
-    options.runOptions.on_event,
-    "supervisor.intervention.completed",
-    {
-      intervention_id: interventionId,
+      attempt: options.attempt,
       decision_id: decisionId,
-      action,
-      target_compiled_id: options.node.compiled_id,
-      summary: intervention.reason,
-      retry_attempt_index: options.attempt.attempt_index + 1
-    },
-    {
-      compiled_id: options.node.compiled_id,
-      execution_id: options.attempt.execution_id,
-      repeat_scope_id: options.attempt.repeat_scope_id,
-      iteration_index: options.attempt.iteration_index,
-      attempt_index: options.attempt.attempt_index
-    }
-  );
+      intervention_id: interventionId,
+      classification,
+      title: interventionTitle(action),
+      body: interventionBody({
+        action,
+        node: options.node,
+        attempt: options.attempt,
+        classification
+      })
+    });
+    await options.writer.appendSupervisorIntervention(intervention);
+    await emitEvent(
+      options.session,
+      options.writer,
+      options.runOwner,
+      options.events,
+      options.runOptions.on_event,
+      "supervisor.intervention.completed",
+      {
+        intervention_id: intervention.intervention_id,
+        decision_id: intervention.decision_id,
+        action: intervention.action,
+        target_compiled_id: options.node.compiled_id,
+        summary: intervention.reason,
+        artifacts: intervention.artifact_paths
+      },
+      {
+        compiled_id: options.node.compiled_id,
+        execution_id: options.attempt.execution_id,
+        repeat_scope_id: options.attempt.repeat_scope_id,
+        iteration_index: options.attempt.iteration_index,
+        attempt_index: options.attempt.attempt_index
+      }
+    );
+  }
 
   options.session.supervisor.status = "healthy";
   await queueReadyNode(
@@ -1937,11 +2016,7 @@ async function materializeDeclaredArtifactsWithRepair(options: {
     let attempted = 0;
 
     for (let repairAttempt = 1; repairAttempt <= maxAttempts; repairAttempt += 1) {
-      if (
-        !options.session.graph.supervision.allowed_actions.includes("repair_artifact") ||
-        options.session.supervisor.budget_remaining.max_total_interventions <= 0 ||
-        options.session.supervisor.budget_remaining.max_artifact_repairs <= 0
-      ) {
+      if (!canSpendRuntimeSupervisorAction(options.session, "repair_artifact")) {
         options.session.supervisor.status = "exhausted";
         break;
       }
@@ -1954,14 +2029,7 @@ async function materializeDeclaredArtifactsWithRepair(options: {
       options.session.supervisor.status = "intervening";
       options.session.supervisor.intervention_count += 1;
       options.session.supervisor.last_decision_id = decisionId;
-      options.session.supervisor.budget_remaining.max_total_interventions = Math.max(
-        0,
-        options.session.supervisor.budget_remaining.max_total_interventions - 1
-      );
-      options.session.supervisor.budget_remaining.max_artifact_repairs = Math.max(
-        0,
-        options.session.supervisor.budget_remaining.max_artifact_repairs - 1
-      );
+      spendRuntimeSupervisorAction(options.session, "repair_artifact");
       const startedRecord: SupervisorInterventionRecord = {
         intervention_id: interventionId,
         decision_id: decisionId,
@@ -1981,6 +2049,22 @@ async function materializeDeclaredArtifactsWithRepair(options: {
         }
       };
 
+      const decision: SupervisorDecision = {
+        decision_id: decisionId,
+        kind: "run_intervention",
+        classification: "artifact",
+        health_state: "artifact_at_risk",
+        confidence: "high",
+        action: "repair_artifact",
+        target_compiled_id: options.node.compiled_id,
+        target_execution_id: options.attempt.execution_id,
+        reason: startedRecord.reason,
+        evidence: startedRecord.evidence,
+        budget_cost: { total: 1, repair_artifact: 1 },
+        created_at: startedRecord.started_at
+      };
+      options.session.supervisor.timeline.push(decision);
+      await options.writer.appendSupervisorDecision(decision);
       await emitEvent(
         options.session,
         options.writer,
@@ -1988,16 +2072,7 @@ async function materializeDeclaredArtifactsWithRepair(options: {
         options.events,
         options.onEvent,
         "supervisor.decision",
-        {
-          decision_id: decisionId,
-          kind: "run_intervention",
-          classification: "artifact",
-          action: "repair_artifact",
-          target_compiled_id: options.node.compiled_id,
-          target_execution_id: options.attempt.execution_id,
-          reason: startedRecord.reason,
-          budget_cost: { total: 1, repair_artifact: 1 }
-        },
+        decision,
         {
           compiled_id: options.node.compiled_id,
           execution_id: options.attempt.execution_id,
@@ -3289,6 +3364,21 @@ async function executeRunLoop(
       );
     }
 
+    if (session.status === "paused" && activeExecutions.size === 0) {
+      return finalizeRunAfterCleanup(
+        options,
+        session,
+        writer,
+        runOwner,
+        events,
+        workspace,
+        topology,
+        readinessCache,
+        "paused",
+        session.supervisor.pause?.reason ?? "paused_for_human"
+      );
+    }
+
     if (session.status === "running" && activeExecutions.size === 0) {
       const remainingReady = readyQueue.queue.length > 0;
       const cleanupNodeIds = collectCleanupNodeIds(session.graph);
@@ -3513,6 +3603,11 @@ async function executeRunLoop(
       });
 
       if (retried) {
+        continue;
+      }
+
+      if (session.status === "paused") {
+        cancelActiveExecutions(activeExecutions);
         continue;
       }
 

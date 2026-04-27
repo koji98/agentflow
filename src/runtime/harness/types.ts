@@ -265,8 +265,8 @@ function formatRuntimeCliContract(): string[] {
     "- Use `af status` when you need run metadata, declared artifacts, sandbox, or granted tools.",
     "- Use `af context show` when you need to redisplay the context manifest.",
     "- Use `af artifact write <name> --file <path>` or `af artifact write <name> --content <text>` to publish declared artifacts.",
-    "- Use messaging or helper commands only when the node task explicitly needs coordination.",
-    "- Messages are coordination; artifacts are the durable handoff."
+    "- Use helper commands only when the node task explicitly benefits from sub-node context management.",
+    "- Runtime logs are coordination evidence; artifacts are the durable handoff."
   ];
 }
 

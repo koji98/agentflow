@@ -109,14 +109,13 @@ Manual files worth opening:
 - `<run-root>/delivery/evaluation-ledger.json`
 - `<run-root>/summary.md`
 
-Runtime coordination files are under `<run-root>/runtime/`. They are useful when debugging agent-to-agent coordination:
+Runtime coordination files are under `<run-root>/runtime/`. They are useful when debugging worker evidence and helper sub-nodes:
 
-- `channel.jsonl`: typed shared channel messages and delivery notices.
-- `mailboxes/<agent-id>.jsonl`: durable direct messages for an agent.
+- `log.jsonl`: structured worker evidence recorded with `af log --type`.
 - `helpers/<helper-id>/session.json`: helper lifecycle, logs, output directory, and artifact paths.
-- `supervisor-requests.jsonl`: requests recorded through `af supervisor request`.
+- `human-resume-input.jsonl`: structured human input used when resuming paused runs.
 
-Agents should publish durable results with `af artifact write` and then notify with `af channel post` or `af parent post`. A completed agent is not an online collaborator; inspect its artifacts or ask the supervisor to resume or replace it.
+Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, or handoff notes with `af log --type`. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live prompt injection.
 
 ## Resume
 

@@ -417,7 +417,14 @@ export async function createResumedRuntimeSession(options: {
   if (fingerprintGraphRunContract(options.prior_graph) === fingerprintGraphRunContract(options.graph)) {
     session.supervisor = {
       ...options.prior_state.supervisor,
-      budget_remaining: { ...options.prior_state.supervisor.budget_remaining },
+      budget_remaining: {
+        max_total_interventions: options.prior_state.supervisor.budget_remaining.max_total_interventions,
+        actions: { ...options.prior_state.supervisor.budget_remaining.actions }
+      },
+      timeline: options.prior_state.supervisor.timeline.map((decision) => ({ ...decision })),
+      ...(options.prior_state.supervisor.pause
+        ? { pause: { ...options.prior_state.supervisor.pause } }
+        : {}),
       escalations: options.prior_state.supervisor.escalations.map((escalation) => ({ ...escalation }))
     };
   }

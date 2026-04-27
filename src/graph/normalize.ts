@@ -129,30 +129,19 @@ const checkpointOperatorFeedbackArtifact: ArtifactDefinition = {
 };
 
 export const defaultSupervisionPolicy: SupervisionPolicy = {
-  allowed_actions: [
-    "retry_node",
-    "repair_artifact",
-    "rebuild_context",
-    "refresh_workspace",
-    "run_diagnostic",
-    "semantic_evaluation",
-    "escalate"
-  ],
-  retry_budget: {
-    max_total_interventions: 8,
-    max_node_retries: 2,
-    max_artifact_repairs: 2,
-    max_context_rebuilds: 1,
-    max_workspace_refreshes: 1,
-    max_diagnostic_runs: 3,
-    max_semantic_evaluations: 2
+  actions: {
+    retry_with_guidance: { max_uses: 2 },
+    repair_artifact: { max_uses: 2 },
+    rebuild_context: { max_uses: 1 },
+    run_diagnostic: { max_uses: 3 },
+    pause_for_human: { max_uses: 1 },
+    semantic_evaluation: { max_uses: 2 }
   },
-  drift_detection: {
-    score_threshold: 0.8
-  },
-  escalation: {
-    require_human_on_policy_breach: true,
-    require_human_on_scope_drift: true
+  max_total_interventions: 8,
+  policy: {
+    pause_on_policy_risk: true,
+    pause_on_repeated_recovery: true,
+    drift_score_threshold: 0.8
   }
 };
 
@@ -865,11 +854,14 @@ function normalizeSupervisionPolicy(
 ): SupervisionPolicy {
   if (value === undefined) {
     return {
-      ...defaultSupervisionPolicy,
-      allowed_actions: [...defaultSupervisionPolicy.allowed_actions],
-      retry_budget: { ...defaultSupervisionPolicy.retry_budget },
-      drift_detection: { ...defaultSupervisionPolicy.drift_detection },
-      escalation: { ...defaultSupervisionPolicy.escalation }
+      actions: Object.fromEntries(
+        Object.entries(defaultSupervisionPolicy.actions).map(([action, policy]) => [
+          action,
+          { ...policy }
+        ])
+      ),
+      max_total_interventions: defaultSupervisionPolicy.max_total_interventions,
+      policy: { ...defaultSupervisionPolicy.policy }
     };
   }
 
@@ -885,155 +877,112 @@ function normalizeSupervisionPolicy(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["allowed_actions", "retry_budget", "drift_detection", "escalation"],
+    ["actions", "max_total_interventions", "policy"],
     diagnostics
   );
 
-  const allowed_actions =
-    readEnumArray(record.allowed_actions, `${path}.allowed_actions`, supervisorActionKinds, diagnostics) ??
-    [...defaultSupervisionPolicy.allowed_actions];
-
-  const budgetRecord = record.retry_budget === undefined ? undefined : asRecord(record.retry_budget);
-  if (record.retry_budget !== undefined && !budgetRecord) {
+  const actionRecord = record.actions === undefined ? undefined : asRecord(record.actions);
+  if (record.actions !== undefined && !actionRecord) {
     diagnostics.push({
-      path: `${path}.retry_budget`,
-      message: "supervision.retry_budget must be an object when provided."
+      path: `${path}.actions`,
+      message: "supervision.actions must be an object when provided."
     });
   }
-  if (budgetRecord) {
+  const actions: SupervisionPolicy["actions"] = {};
+  const actionSource = actionRecord ?? defaultSupervisionPolicy.actions;
+  if (actionRecord) {
+    pushUnknownKeyDiagnostics(actionRecord, `${path}.actions`, supervisorActionKinds, diagnostics);
+  }
+  for (const action of supervisorActionKinds) {
+    const defaultAction = defaultSupervisionPolicy.actions[action];
+    const actionPath = `${path}.actions.${action}`;
+    const valueForAction = actionSource[action];
+    if (valueForAction === undefined) {
+      if (defaultAction) {
+        actions[action] = { ...defaultAction };
+      }
+      continue;
+    }
+
+    const actionPolicyRecord = asRecord(valueForAction);
+    if (!actionPolicyRecord) {
+      diagnostics.push({
+        path: actionPath,
+        message: "supervision.actions entries must be objects when provided."
+      });
+      if (defaultAction) {
+        actions[action] = { ...defaultAction };
+      }
+      continue;
+    }
+    pushUnknownKeyDiagnostics(actionPolicyRecord, actionPath, ["max_uses"], diagnostics);
+    const maxUses =
+      readBoundedInteger(
+        actionPolicyRecord.max_uses,
+        `${actionPath}.max_uses`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultAction?.max_uses;
+    if (maxUses !== undefined && maxUses > 0) {
+      actions[action] = { max_uses: maxUses };
+    }
+  }
+
+  const max_total_interventions =
+    readBoundedInteger(
+      record.max_total_interventions,
+      `${path}.max_total_interventions`,
+      diagnostics,
+      { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+    ) ?? defaultSupervisionPolicy.max_total_interventions;
+
+  const policyRecord = record.policy === undefined ? undefined : asRecord(record.policy);
+  if (record.policy !== undefined && !policyRecord) {
+    diagnostics.push({
+      path: `${path}.policy`,
+      message: "supervision.policy must be an object when provided."
+    });
+  }
+  if (policyRecord) {
     pushUnknownKeyDiagnostics(
-      budgetRecord,
-      `${path}.retry_budget`,
-      [
-        "max_total_interventions",
-        "max_node_retries",
-        "max_artifact_repairs",
-        "max_context_rebuilds",
-        "max_workspace_refreshes",
-        "max_diagnostic_runs",
-        "max_semantic_evaluations"
-      ],
+      policyRecord,
+      `${path}.policy`,
+      ["pause_on_policy_risk", "pause_on_repeated_recovery", "drift_score_threshold", "evaluator_profile"],
       diagnostics
     );
   }
-  const retry_budget = {
-    max_total_interventions:
-      readBoundedInteger(
-        budgetRecord?.max_total_interventions,
-        `${path}.retry_budget.max_total_interventions`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_total_interventions,
-    max_node_retries:
-      readBoundedInteger(
-        budgetRecord?.max_node_retries,
-        `${path}.retry_budget.max_node_retries`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_node_retries,
-    max_artifact_repairs:
-      readBoundedInteger(
-        budgetRecord?.max_artifact_repairs,
-        `${path}.retry_budget.max_artifact_repairs`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_artifact_repairs,
-    max_context_rebuilds:
-      readBoundedInteger(
-        budgetRecord?.max_context_rebuilds,
-        `${path}.retry_budget.max_context_rebuilds`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_context_rebuilds,
-    max_workspace_refreshes:
-      readBoundedInteger(
-        budgetRecord?.max_workspace_refreshes,
-        `${path}.retry_budget.max_workspace_refreshes`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_workspace_refreshes,
-    max_diagnostic_runs:
-      readBoundedInteger(
-        budgetRecord?.max_diagnostic_runs,
-        `${path}.retry_budget.max_diagnostic_runs`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_diagnostic_runs,
-    max_semantic_evaluations:
-      readBoundedInteger(
-        budgetRecord?.max_semantic_evaluations,
-        `${path}.retry_budget.max_semantic_evaluations`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_semantic_evaluations
-  };
-
-  const driftRecord = record.drift_detection === undefined ? undefined : asRecord(record.drift_detection);
-  if (record.drift_detection !== undefined && !driftRecord) {
-    diagnostics.push({
-      path: `${path}.drift_detection`,
-      message: "supervision.drift_detection must be an object when provided."
-    });
-  }
-  if (driftRecord) {
-    pushUnknownKeyDiagnostics(
-      driftRecord,
-      `${path}.drift_detection`,
-      ["score_threshold", "evaluator_profile"],
-      diagnostics
-    );
-  }
-  const score_threshold =
+  const drift_score_threshold =
     readBoundedNumber(
-      driftRecord?.score_threshold,
-      `${path}.drift_detection.score_threshold`,
+      policyRecord?.drift_score_threshold,
+      `${path}.policy.drift_score_threshold`,
       diagnostics,
       { minimum: 0, maximum: 1 }
-    ) ?? defaultSupervisionPolicy.drift_detection.score_threshold;
+    ) ?? defaultSupervisionPolicy.policy.drift_score_threshold;
   const evaluator_profile = readOptionalString(
-    driftRecord?.evaluator_profile,
-    `${path}.drift_detection.evaluator_profile`,
+    policyRecord?.evaluator_profile,
+    `${path}.policy.evaluator_profile`,
     diagnostics
   );
 
-  const escalationRecord = record.escalation === undefined ? undefined : asRecord(record.escalation);
-  if (record.escalation !== undefined && !escalationRecord) {
-    diagnostics.push({
-      path: `${path}.escalation`,
-      message: "supervision.escalation must be an object when provided."
-    });
-  }
-  if (escalationRecord) {
-    pushUnknownKeyDiagnostics(
-      escalationRecord,
-      `${path}.escalation`,
-      ["require_human_on_policy_breach", "require_human_on_scope_drift"],
-      diagnostics
-    );
-  }
-  const escalation = {
-    require_human_on_policy_breach:
-      readBoolean(
-        escalationRecord?.require_human_on_policy_breach,
-        `${path}.escalation.require_human_on_policy_breach`,
-        diagnostics
-      ) ?? defaultSupervisionPolicy.escalation.require_human_on_policy_breach,
-    require_human_on_scope_drift:
-      readBoolean(
-        escalationRecord?.require_human_on_scope_drift,
-        `${path}.escalation.require_human_on_scope_drift`,
-        diagnostics
-      ) ?? defaultSupervisionPolicy.escalation.require_human_on_scope_drift
-  };
-
   return {
-    allowed_actions,
-    retry_budget,
-    drift_detection: {
-      score_threshold,
+    actions,
+    max_total_interventions,
+    policy: {
+      pause_on_policy_risk:
+        readBoolean(
+          policyRecord?.pause_on_policy_risk,
+          `${path}.policy.pause_on_policy_risk`,
+          diagnostics
+        ) ?? defaultSupervisionPolicy.policy.pause_on_policy_risk,
+      pause_on_repeated_recovery:
+        readBoolean(
+          policyRecord?.pause_on_repeated_recovery,
+          `${path}.policy.pause_on_repeated_recovery`,
+          diagnostics
+        ) ?? defaultSupervisionPolicy.policy.pause_on_repeated_recovery,
+      drift_score_threshold,
       ...(evaluator_profile ? { evaluator_profile } : {})
-    },
-    escalation
+    }
   };
 }
 

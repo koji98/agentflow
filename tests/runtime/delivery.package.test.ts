@@ -19,20 +19,16 @@ const graph: CompiledGraph = {
     acceptance_criteria: ["Tests pass.", "Reviewer guide names risk."]
   },
   supervision: {
-    allowed_actions: ["retry_node", "repair_artifact", "escalate"],
-    retry_budget: {
-      max_total_interventions: 2,
-      max_node_retries: 1,
-      max_artifact_repairs: 1,
-      max_context_rebuilds: 0,
-      max_workspace_refreshes: 0,
-      max_diagnostic_runs: 0,
-      max_semantic_evaluations: 0
+    actions: {
+      retry_with_guidance: { max_uses: 1 },
+      repair_artifact: { max_uses: 1 },
+      pause_for_human: { max_uses: 1 }
     },
-    drift_detection: { score_threshold: 0.8 },
-    escalation: {
-      require_human_on_policy_breach: true,
-      require_human_on_scope_drift: true
+    max_total_interventions: 2,
+    policy: {
+      pause_on_policy_risk: true,
+      pause_on_repeated_recovery: true,
+      drift_score_threshold: 0.8
     }
   },
   launch: {
@@ -112,13 +108,13 @@ const state: RuntimeStateSnapshot = {
     intervention_count: 0,
     budget_remaining: {
       max_total_interventions: 2,
-      max_node_retries: 1,
-      max_artifact_repairs: 1,
-      max_context_rebuilds: 0,
-      max_workspace_refreshes: 0,
-      max_diagnostic_runs: 0,
-      max_semantic_evaluations: 0
+      actions: {
+        retry_with_guidance: 1,
+        repair_artifact: 1,
+        pause_for_human: 1
+      }
     },
+    timeline: [],
     escalations: []
   },
   node_statuses: {},
@@ -146,6 +142,9 @@ describe("delivery package", () => {
     await writeFile(stdoutPath, "agent stdout\n", "utf8");
     await writeFile(stderrPath, "", "utf8");
     await writeFile(join(runRoot, "interventions.jsonl"), "", "utf8");
+    await mkdir(join(runRoot, "runtime"), { recursive: true });
+    await writeFile(join(runRoot, "supervisor-timeline.jsonl"), "", "utf8");
+    await writeFile(join(runRoot, "runtime", "log.jsonl"), "", "utf8");
     await writeFile(join(runRoot, "compile_diagnostics.json"), "[]\n", "utf8");
     const attempts: RuntimeNodeAttempt[] = [
       {
@@ -204,12 +203,16 @@ describe("delivery package", () => {
       grouped_change_map: join(runRoot, "delivery", "grouped-change-map.json"),
       decision_log: join(runRoot, "delivery", "decision-log.md"),
       evaluation_ledger: join(runRoot, "delivery", "evaluation-ledger.json"),
-      intervention_trace: join(runRoot, "delivery", "intervention-trace.json")
+      intervention_trace: join(runRoot, "delivery", "intervention-trace.json"),
+      supervisor_timeline: join(runRoot, "supervisor-timeline.jsonl"),
+      runtime_log: join(runRoot, "runtime", "log.jsonl")
     });
     expect(manifest.internal_artifacts).toEqual({
       run_record: join(runRoot, "run.json"),
       state: join(runRoot, "state.json"),
       events: join(runRoot, "events.jsonl"),
+      supervisor_timeline: join(runRoot, "supervisor-timeline.jsonl"),
+      runtime_log: join(runRoot, "runtime", "log.jsonl"),
       interventions: join(runRoot, "interventions.jsonl"),
       node_attempts: join(runRoot, "nodes"),
       workspace_changes: join(runRoot, "workspace-changes")
@@ -258,6 +261,14 @@ describe("delivery package", () => {
         }),
         expect.objectContaining({
           path: join(runRoot, "interventions.jsonl"),
+          reason: "empty_ledger"
+        }),
+        expect.objectContaining({
+          path: join(runRoot, "supervisor-timeline.jsonl"),
+          reason: "empty_ledger"
+        }),
+        expect.objectContaining({
+          path: join(runRoot, "runtime", "log.jsonl"),
           reason: "empty_ledger"
         }),
         expect.objectContaining({

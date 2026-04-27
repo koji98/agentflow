@@ -2039,7 +2039,7 @@ describe("runtime engine", () => {
       }
     });
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.attempts).toHaveLength(1);
     expect(run.state.node_statuses.root__reader).toBe("failed");
     expect(run.events).toEqual(
@@ -2103,7 +2103,7 @@ describe("runtime engine", () => {
       }
     });
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.attempts[0]?.status).toBe("failed");
     expect(run.attempts[0]?.metadata.error).toContain(
       'cwd "../outside" must be a relative path that stays within its repo or workspace root.'
@@ -2156,7 +2156,7 @@ describe("runtime engine", () => {
       }
     });
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.attempts[0]?.status).toBe("failed");
     expect(run.attempts[0]?.metadata.error).toContain(
       'env_files entry "main:.env" must be a relative path that stays within its repo or workspace root.'
@@ -2176,22 +2176,12 @@ describe("runtime engine", () => {
       version: "1",
       graph_id: "runtime-terminal-failure",
       supervision: {
-        allowed_actions: ["repair_artifact", "escalate"],
-        retry_budget: {
-          max_total_interventions: 0,
-          max_node_retries: 0,
-          max_artifact_repairs: 0,
-          max_context_rebuilds: 0,
-          max_workspace_refreshes: 0,
-          max_diagnostic_runs: 0,
-          max_semantic_evaluations: 0
-        },
-        drift_detection: {
-          score_threshold: 0.8
-        },
-        escalation: {
-          require_human_on_policy_breach: true,
-          require_human_on_scope_drift: true
+        actions: {},
+        max_total_interventions: 0,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
         }
       },
       repos: {
@@ -2575,9 +2565,9 @@ describe("runtime engine", () => {
 
     const attempt = run.attempts.find((candidate) => candidate.authored_id === "implement");
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.attempts).toHaveLength(1);
-    expect(run.state.status).toBe("failed");
+    expect(run.state.status).toBe("paused");
     expect(run.events).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2597,7 +2587,7 @@ describe("runtime engine", () => {
         graph_id: "runtime-preflight-harness",
         launch_profile: "default",
         workspace_backend: "inplace",
-        status: "failed",
+        status: "paused",
         ended_at: expect.any(String)
       })
     );
@@ -2812,22 +2802,14 @@ describe("runtime engine", () => {
       version: "1",
       graph_id: "runtime-supervisor-retry",
       supervision: {
-        allowed_actions: ["retry_node", "escalate"],
-        retry_budget: {
-          max_total_interventions: 1,
-          max_node_retries: 1,
-          max_artifact_repairs: 0,
-          max_context_rebuilds: 0,
-          max_workspace_refreshes: 0,
-          max_diagnostic_runs: 0,
-          max_semantic_evaluations: 0
+        actions: {
+          retry_with_guidance: { max_uses: 1 }
         },
-        drift_detection: {
-          score_threshold: 0.8
-        },
-        escalation: {
-          require_human_on_policy_breach: true,
-          require_human_on_scope_drift: true
+        max_total_interventions: 1,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
         }
       },
       repos: {
@@ -2893,7 +2875,7 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("passed");
     expect(calls).toBe(2);
     expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
-    expect(run.state.supervisor.budget_remaining.max_node_retries).toBe(0);
+    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(0);
     expect(run.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2901,15 +2883,8 @@ describe("runtime engine", () => {
           compiled_id: "root__flaky",
           payload: expect.objectContaining({
             classification: "timeout",
-            action: "retry_node",
+            action: "retry_with_guidance",
             target_execution_id: attempts[0]!.execution_id
-          })
-        }),
-        expect.objectContaining({
-          type: "supervisor.intervention.completed",
-          compiled_id: "root__flaky",
-          payload: expect.objectContaining({
-            action: "retry_node"
           })
         })
       ])
@@ -3767,7 +3742,7 @@ describe("runtime engine", () => {
     });
 
     const attempt = run.attempts.find((candidate) => candidate.authored_id === "implement");
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.state.node_statuses.root__implement).toBe("failed");
     expect(attempt?.status).toBe("failed");
     expect(attempt?.context_packet_path).toBeUndefined();
@@ -3834,7 +3809,7 @@ describe("runtime engine", () => {
       await readFile(join(attempt!.execution_dir, "execution.json"), "utf8")
     ) as Record<string, unknown>;
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(attempt?.context_packet_path).toBeUndefined();
     expect(attempt?.context_manifest_path).toBeUndefined();
     expect(executionRecord.context_packet_path).toBeUndefined();

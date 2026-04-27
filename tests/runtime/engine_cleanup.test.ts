@@ -55,22 +55,12 @@ function buildGraphWithCleanup(
     graph_id: "cleanup-test",
     intent: TEST_INTENT,
     supervision: {
-      allowed_actions: ["repair_artifact", "escalate"],
-      retry_budget: {
-        max_total_interventions: 0,
-        max_node_retries: 0,
-        max_artifact_repairs: 0,
-        max_context_rebuilds: 0,
-        max_workspace_refreshes: 0,
-        max_diagnostic_runs: 0,
-        max_semantic_evaluations: 0
-      },
-      drift_detection: {
-        score_threshold: 0.8
-      },
-      escalation: {
-        require_human_on_policy_breach: true,
-        require_human_on_scope_drift: true
+      actions: {},
+      max_total_interventions: 0,
+      policy: {
+        pause_on_policy_risk: true,
+        pause_on_repeated_recovery: true,
+        drift_score_threshold: 0.8
       }
     },
     repos: {

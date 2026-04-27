@@ -51,12 +51,16 @@ export interface DeliveryPackageManifest {
     decision_log: string;
     evaluation_ledger: string;
     intervention_trace: string;
+    supervisor_timeline: string;
+    runtime_log: string;
   };
   internal_artifacts: {
     run_record: string;
     state: string;
     events: string;
     interventions: string;
+    supervisor_timeline: string;
+    runtime_log: string;
     node_attempts: string;
     workspace_changes: string;
   };
@@ -258,8 +262,24 @@ function renderDecisionLog(evidence: DeliveryEvidence): string {
     }
   }
 
+  if (evidence.supervisor_timeline.length > 0) {
+    lines.push("## Supervisor Timeline", "");
+    for (const decision of evidence.supervisor_timeline) {
+      lines.push(`- \`${decision.action ?? decision.kind}\` on \`${decision.target_compiled_id ?? "run"}\`: ${decision.reason}`);
+    }
+    lines.push("");
+  }
+
+  if (evidence.runtime_logs.length > 0) {
+    lines.push("## Worker Runtime Logs", "");
+    for (const entry of evidence.runtime_logs) {
+      lines.push(`- \`${String(entry.type ?? "progress")}\`: ${String(entry.summary ?? "")}`);
+    }
+    lines.push("");
+  }
+
   if (evidence.interventions.length > 0) {
-    lines.push("## Supervisor Decisions", "");
+    lines.push("## Supervisor Interventions", "");
     for (const intervention of evidence.interventions) {
       lines.push(`- \`${intervention.action}\` on \`${intervention.target_compiled_id ?? "run"}\`: ${intervention.reason}`);
     }
@@ -280,12 +300,12 @@ function renderReviewerGuide(manifest: DeliveryPackageManifest, evidence: Delive
     `2. Read \`${manifest.human_entrypoints.implementation_summary}\` and the declared artifacts it references.`,
     `3. Check \`${manifest.human_entrypoints.risk_notes}\` and \`${manifest.human_entrypoints.follow_up_items}\`.`,
     `4. Use \`${manifest.run_map}\` if you need to understand the run directory layout.`,
-    `5. Use evidence files for audit details: \`${manifest.evidence_files.grouped_change_map}\`, \`${manifest.evidence_files.evaluation_ledger}\`, and \`${manifest.evidence_files.intervention_trace}\`.`,
+    `5. Use evidence files for audit details: \`${manifest.evidence_files.grouped_change_map}\`, \`${manifest.evidence_files.evaluation_ledger}\`, \`${manifest.evidence_files.supervisor_timeline}\`, \`${manifest.evidence_files.runtime_log}\`, and \`${manifest.evidence_files.intervention_trace}\`.`,
     "",
     "## What To Ignore Unless Debugging",
     "",
     "- `nodes/` contains per-node audit/debug details: raw logs, context packets, tool ledgers, and harness result JSON.",
-    "- `runtime/` contains live coordination state such as shared channel messages, mailboxes, helper sessions, and supervisor requests.",
+    "- `runtime/` contains worker `af log` evidence, helper sessions, and structured human resume input.",
     "- Empty/no-op files are called out in the manifest so they do not look like missing review work.",
     "",
     "## Internal Runtime Artifacts",
@@ -293,6 +313,8 @@ function renderReviewerGuide(manifest: DeliveryPackageManifest, evidence: Delive
     "These files support resume, inspection, and debugging. They are not the primary human handoff.",
     `- State: \`${manifest.internal_artifacts.state}\``,
     `- Events: \`${manifest.internal_artifacts.events}\``,
+    `- Supervisor timeline: \`${manifest.internal_artifacts.supervisor_timeline}\``,
+    `- Runtime log: \`${manifest.internal_artifacts.runtime_log}\``,
     `- Interventions ledger: \`${manifest.internal_artifacts.interventions}\``,
     `- Node attempts: \`${manifest.internal_artifacts.node_attempts}\``,
     "",
@@ -504,6 +526,16 @@ async function buildArtifactTaxonomy(options: {
       purpose: "Append-only lifecycle event stream for replay, audit, and debugging."
     }),
     artifactEntry({
+      path: runPaths.supervisor_timeline_file,
+      label: "Supervisor timeline",
+      purpose: "Append-only supervisor health and decision records."
+    }),
+    artifactEntry({
+      path: runPaths.runtime_log_file,
+      label: "Worker runtime log",
+      purpose: "Structured `af log` evidence recorded by workers during node execution."
+    }),
+    artifactEntry({
       path: runPaths.interventions_file,
       label: "Supervisor intervention ledger",
       purpose: "Append-only supervisor intervention records."
@@ -590,7 +622,7 @@ async function buildArtifactTaxonomy(options: {
     {
       path: `${runRoot}/runtime`,
       label: "Runtime coordination state",
-      purpose: "Shared channel, mailboxes, helper sessions, and supervisor request state for live/debug workflows."
+      purpose: "Worker log evidence, helper sessions, and structured human resume input for live/debug workflows."
     }
   ];
   const debugOnly = await Promise.all(debugPaths.map((entry) => artifactEntry(entry)));
@@ -601,6 +633,24 @@ async function buildArtifactTaxonomy(options: {
       path: runPaths.interventions_file,
       label: "Supervisor intervention ledger",
       purpose: "No supervisor interventions were recorded.",
+      reason: "empty_ledger"
+    }));
+  }
+
+  if ((await readTrimmed(runPaths.supervisor_timeline_file)) === "") {
+    emptyOrNoop.push(await artifactEntry({
+      path: runPaths.supervisor_timeline_file,
+      label: "Supervisor timeline",
+      purpose: "No supervisor decisions were recorded.",
+      reason: "empty_ledger"
+    }));
+  }
+
+  if ((await readTrimmed(runPaths.runtime_log_file)) === "") {
+    emptyOrNoop.push(await artifactEntry({
+      path: runPaths.runtime_log_file,
+      label: "Worker runtime log",
+      purpose: "No worker `af log` entries were recorded.",
       reason: "empty_ledger"
     }));
   }
@@ -696,12 +746,16 @@ async function buildManifest(evidence: DeliveryEvidence, runRoot: string, delive
       grouped_change_map: sections.grouped_change_map,
       decision_log: sections.decision_log,
       evaluation_ledger: sections.evaluation_ledger,
-      intervention_trace: sections.intervention_trace
+      intervention_trace: sections.intervention_trace,
+      supervisor_timeline: runPaths.supervisor_timeline_file,
+      runtime_log: runPaths.runtime_log_file
     },
     internal_artifacts: {
       run_record: runPaths.run_file,
       state: runPaths.state_file,
       events: runPaths.events_file,
+      supervisor_timeline: runPaths.supervisor_timeline_file,
+      runtime_log: runPaths.runtime_log_file,
       interventions: runPaths.interventions_file,
       node_attempts: runPaths.nodes_dir,
       workspace_changes: runPaths.workspace_changes_dir
@@ -777,7 +831,20 @@ export async function writeDeliveryPackage(options: {
     writeJson(manifest.sections.intervention_trace, {
       graph_id: evidence.graph_id,
       run_id: evidence.run_id,
-      interventions: evidence.interventions
+      supervisor_timeline: evidence.supervisor_timeline,
+      runtime_logs: evidence.runtime_logs,
+      interventions: evidence.interventions,
+      final_assessments: Object.fromEntries(
+        evidence.attempts.map((attempt) => [
+          attempt.compiled_id,
+          {
+            authored_id: attempt.authored_id,
+            execution_id: attempt.execution_id,
+            status: attempt.status,
+            outcome: attempt.outcome ?? "none"
+          }
+        ])
+      )
     })
   ]);
 

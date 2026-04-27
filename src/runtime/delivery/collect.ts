@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
 
+import { resolveRunArtifactPaths } from "../../artifacts/paths.js";
 import type { CompiledGraph } from "../../graph/compiled.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { RuntimeEventEnvelope, VerificationRecordedPayload } from "../events.js";
 import type { RuntimeStateSnapshot, WorkspaceChangeArtifacts } from "../session.js";
-import type { SupervisorInterventionRecord } from "../../supervisor/types.js";
+import type { SupervisorDecision, SupervisorInterventionRecord } from "../../supervisor/types.js";
 
 export interface DeliveryEvidence {
   graph_id: string;
@@ -13,6 +14,8 @@ export interface DeliveryEvidence {
   intent: CompiledGraph["intent"];
   attempts: RuntimeNodeAttempt[];
   events: RuntimeEventEnvelope[];
+  supervisor_timeline: SupervisorDecision[];
+  runtime_logs: Array<Record<string, unknown>>;
   interventions: SupervisorInterventionRecord[];
   failed_checks: Array<{
     authored_id: string;
@@ -92,11 +95,13 @@ function readVerification(attempt: RuntimeNodeAttempt): VerificationRecordedPayl
 
 export async function collectDeliveryEvidence(options: {
   graph: CompiledGraph;
+  run_root: string;
   state: RuntimeStateSnapshot;
   attempts: RuntimeNodeAttempt[];
   events: RuntimeEventEnvelope[];
   interventions: SupervisorInterventionRecord[];
 }): Promise<DeliveryEvidence> {
+  const runPaths = resolveRunArtifactPaths(options.run_root);
   const agentResponses = await Promise.all(
     options.attempts
       .filter((attempt) => attempt.artifacts.agent_response)
@@ -172,6 +177,8 @@ export async function collectDeliveryEvidence(options: {
       })
     )
   ).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+  const runtimeLogs = await readJsonlRecords(runPaths.runtime_log_file);
+  const supervisorTimeline = options.state.supervisor.timeline;
 
   return {
     graph_id: options.graph.graph_id,
@@ -180,6 +187,8 @@ export async function collectDeliveryEvidence(options: {
     intent: options.graph.intent,
     attempts: options.attempts,
     events: options.events,
+    supervisor_timeline: supervisorTimeline,
+    runtime_logs: runtimeLogs,
     interventions: options.interventions,
     failed_checks: failedChecks,
     agent_responses: agentResponses,

@@ -39,22 +39,17 @@ describe("graph compilation", () => {
         acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
       },
       supervision: {
-        allowed_actions: ["retry_node", "escalate"],
-        retry_budget: {
-          max_total_interventions: 3,
-          max_node_retries: 1,
-          max_artifact_repairs: 0,
-          max_context_rebuilds: 0,
-          max_workspace_refreshes: 0,
-          max_diagnostic_runs: 1,
-          max_semantic_evaluations: 1
+        actions: {
+          retry_with_guidance: { max_uses: 1 },
+          run_diagnostic: { max_uses: 1 },
+          semantic_evaluation: { max_uses: 1 },
+          pause_for_human: { max_uses: 1 }
         },
-        drift_detection: {
-          score_threshold: 0.9
-        },
-        escalation: {
-          require_human_on_policy_breach: true,
-          require_human_on_scope_drift: true
+        max_total_interventions: 3,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.9
         }
       },
       repos: {
@@ -99,9 +94,14 @@ describe("graph compilation", () => {
           acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
         }),
         supervision: expect.objectContaining({
-          allowed_actions: ["retry_node", "escalate"],
-          drift_detection: {
-            score_threshold: 0.9
+          actions: expect.objectContaining({
+            retry_with_guidance: { max_uses: 1 },
+            run_diagnostic: { max_uses: 1 }
+          }),
+          policy: {
+            pause_on_policy_risk: true,
+            pause_on_repeated_recovery: true,
+            drift_score_threshold: 0.9
           }
         }),
       })

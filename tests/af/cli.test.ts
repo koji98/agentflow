@@ -127,7 +127,7 @@ describe("af runtime CLI", () => {
     expect(contextShow.stdout).toContain("Read-only inspection");
   });
 
-  it("exposes status, artifact, channel, inbox, and supervisor commands through runtime metadata", async () => {
+  it("exposes status, artifact, log, and helper commands through runtime metadata", async () => {
     const runtime = await createRuntime(tempRoot);
     process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
 
@@ -141,38 +141,15 @@ describe("af runtime CLI", () => {
       .resolves.toMatchObject({ exitCode: 0 });
     await expect(readFile(join(runtime.output, "handoff.md"), "utf8")).resolves.toBe("ready\n");
 
-    await expect(executeAfCli(["channel", "post", "--type", "finding", "--summary", "Observed runtime CLI"]))
+    await expect(executeAfCli(["log", "--type", "finding", "--summary", "Observed runtime CLI"]))
       .resolves.toMatchObject({ exitCode: 0 });
-    const channel = outputOf<{ messages: Array<{ type: string; summary: string }> }>(
-      await executeAfCli(["channel", "read", "--latest", "1"])
-    );
-    expect(channel.messages).toEqual([
+    const runtimeLog = (await readFile(join(runtime.root, "runtime", "log.jsonl"), "utf8"))
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as { type: string; summary: string });
+    expect(runtimeLog).toEqual([
       expect.objectContaining({ type: "finding", summary: "Observed runtime CLI" })
     ]);
-
-    const sent = outputOf<{ delivered: boolean; stored: boolean }>(
-      await executeAfCli(["send", "--to", "agent-main", "--type", "question", "--summary", "self check"])
-    );
-    expect(sent).toMatchObject({ delivered: true, stored: true });
-    const inbox = outputOf<{ messages: Array<{ summary: string }> }>(
-      await executeAfCli(["inbox", "read", "--latest", "1"])
-    );
-    expect(inbox.messages[0]?.summary).toBe("self check");
-
-    const supervisor = outputOf<{ request: { action: string; reason: string } }>(
-      await executeAfCli([
-        "supervisor",
-        "request",
-        "--action",
-        "run_diagnostic",
-        "--reason",
-        "validate af supervisor request persistence"
-      ])
-    );
-    expect(supervisor.request).toMatchObject({
-      action: "run_diagnostic",
-      reason: "validate af supervisor request persistence"
-    });
 
     await expect(executeAfCli([
       "spawn",
@@ -239,15 +216,5 @@ describe("af runtime CLI", () => {
     expect(spawned.status).toBe("passed");
     expect(spawned.agent.status).toBe("completed");
     await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");
-
-    const agents = outputOf<{ agents: Array<{ parent_agent_id?: string; status: string }> }>(
-      await executeAfCli(["agents", "list"])
-    );
-    expect(agents.agents).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        parent_agent_id: "agent-main",
-        status: "completed"
-      })
-    ]));
   });
 });

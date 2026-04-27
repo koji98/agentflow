@@ -43,6 +43,7 @@ export type ProjectionStatus =
   | "Pending"
   | "Ready"
   | "Running"
+  | "Paused"
   | "Passed"
   | "Failed"
   | "Blocked"
@@ -256,6 +257,8 @@ function toProjectionStatus(status: RuntimeNodeStatus | RuntimeRunStatus): Proje
       return "Ready";
     case "running":
       return "Running";
+    case "paused":
+      return "Paused";
     case "passed":
       return "Passed";
     case "failed":
@@ -478,11 +481,11 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: String(payload.summary ?? `Supervisor intervention ${String(payload.intervention_id ?? "?")} failed.`)
       };
-    case "supervisor.escalated":
+    case "supervisor.paused":
       return {
         ...(authored_id ? { authored_id } : {}),
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
-        summary: String(payload.summary ?? payload.reason ?? "Supervisor escalated.")
+        summary: String(payload.summary ?? payload.reason ?? "Supervisor paused for human input.")
       };
     case "check.evaluated":
       return {
@@ -646,7 +649,7 @@ function buildRunDiagnostic(
         ...(event.execution_id ? { execution_id: event.execution_id } : {}),
         ...(event.node_label ? { node_label: event.node_label } : {})
       };
-    case "supervisor.escalated":
+    case "supervisor.paused":
       return {
         seq: event.seq,
         ts: event.ts,

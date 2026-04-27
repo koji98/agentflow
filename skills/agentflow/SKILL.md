@@ -47,5 +47,5 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Use `af --help` and `af <command> --help` for exact runtime CLI arguments, defaults, output shape, examples, and safety notes.
 - Prefer `af status`, `af tools list`, and `af context show` when debugging what a node actually received.
 - Prefer `af artifact write` for declared handoffs instead of ad hoc output files.
-- Use `af channel post` and `af parent post` for coordination, but keep durable conclusions in artifacts.
+- Use `af log --type` for worker evidence and helper coordination notes, but keep durable conclusions in artifacts.
 - Treat `af spawn` helpers as supervised sessions with their own artifacts, not persistent coworkers.
