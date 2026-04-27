@@ -120,7 +120,7 @@ Secret values are configured with `agentflow auth` and stored in macOS Keychain.
 flowchart LR
   auth["agentflow auth"] --> keychain["macOS Keychain\nsecret values"]
   auth --> index["credential index\nmetadata and non-secrets"]
-  graph["Graph tool declaration"] --> compiled["compiled credential specs"]
+  toolDeclaration["Graph tool declaration"] --> compiled["compiled credential specs"]
   compiled --> launcher["generated launcher"]
   index --> launcher
   keychain --> launcher
