@@ -776,7 +776,8 @@ async function validateNormalizedDocument(
         if (!metadata.nearest_repeat_id) {
           diagnostics.push({
             path: metadata.path,
-            message: "checkpoint nodes are only valid inside a repeat body in this release."
+            message:
+              "checkpoint nodes are planned human gates and are only valid inside a repeat body in this release; use supervisor pause_for_human for runtime safety pauses."
           });
         }
 

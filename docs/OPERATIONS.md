@@ -65,6 +65,8 @@ Important launch behavior:
 - `workspace_backend: "inplace"` runs directly against the configured repo path.
 - Codex CLI and Cursor CLI receive the same Agentflow context, `af` runtime CLI, plugin tool, artifact, timeout, and sandbox contract.
 - `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.
+- `checkpoint` nodes are planned human gates inside repeat bodies; they prompt on a TTY when reached and feed pass, deny, or abort back into the graph.
+- Supervisor `pause_for_human` is a safety pause, not a graph node; it writes a paused run root that must be resumed with structured human input.
 - Terminal runs write the delivery package after run completion.
 
 Use `--resume-on-fail N` when a local automation should retry the same run root after failure using Agentflow resume semantics.
@@ -133,6 +135,23 @@ agentflow resume --graph agentflow.graph.json --latest
 Resume revalidates the current graph, recompiles it, and compares the new contract with the prior run.
 
 Completed work is preserved only when the node contract and graph-level `intent` and `supervision` contracts remain compatible. If the human contract or policy contract changes, affected completed work restarts so the final evidence matches the current graph.
+
+Paused runs require explicit human input:
+
+```bash
+agentflow resume --run-root <run-root> --human-action retry_with_guidance --human-note "Reviewed the policy pause; retry with this constraint."
+```
+
+Use this for supervisor pauses. Planned checkpoint prompts are handled during the original TTY run; if a checkpoint deny causes the surrounding repeat to continue, inspect the repeat attempts and operator feedback artifact rather than looking for `human-resume-input.jsonl`.
+
+## Evaluation Lanes
+
+Choose the smallest evaluation lane that matches the question:
+
+- Use graph `check` nodes for in-run sensors that should gate flow or produce delivery evidence.
+- Let supervisor `semantic_evaluation` spend intervention budget when a failed AI check or semantic uncertainty needs runtime recovery evidence.
+- Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_generate_evaluate_fix`.
+- Use `agentflow eval` for offline product or workflow suites that compare variants and write `.agentflow/evals` artifacts.
 
 ## Delivery Review
 

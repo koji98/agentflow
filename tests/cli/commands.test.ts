@@ -2276,6 +2276,8 @@ describe("graph CLI", () => {
     );
     expect(graphHelp.stdout).not.toContain("Legacy thin aliases");
     expect(graphHelp.stdout).toContain(`"version": "1"`);
+    expect(graphHelp.stdout).toContain("checkpoint nodes are planned human gates inside repeat bodies");
+    expect(graphHelp.stdout).toContain("evaluation lanes are distinct");
     expect(graphHelp.stdout).toContain("Recommended local workflow:");
     expect(graphHelp.stdout).toContain("Repo paths in $.repos.*.path resolve relative to the graph file directory.");
   });
@@ -2319,6 +2321,8 @@ describe("graph CLI", () => {
     const validateHelp = await executeCli(["validate", "-h"]);
     const runsHelp = await executeCli(["runs", "--help"]);
     const inspectHelp = await executeCli(["inspect", "--help"]);
+    const evalHelp = await executeCli(["eval", "--help"]);
+    const evalSubcommandHelp = await executeCli(["eval", "help"]);
 
     expect(mainHelp.exitCode).toBe(0);
     expect(mainHelp.stdout).toContain("Agentflow CLI");
@@ -2339,6 +2343,11 @@ describe("graph CLI", () => {
     expect(inspectHelp.exitCode).toBe(0);
     expect(inspectHelp.stdout).toContain("inspect: Inspect a recorded run root");
     expect(inspectHelp.stdout).toContain("Usage: agentflow inspect <run-root>");
+
+    expect(evalHelp.exitCode).toBe(0);
+    expect(evalHelp.stdout).toContain("offline product/workflow grading");
+    expect(evalSubcommandHelp.exitCode).toBe(0);
+    expect(evalSubcommandHelp.stdout).toContain("eval is offline product/workflow evaluation");
   });
 
   it("lists recorded run summaries for a graph through agentflow runs list", async () => {

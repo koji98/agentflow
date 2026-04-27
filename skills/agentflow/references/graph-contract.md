@@ -62,6 +62,8 @@ Configured action kinds:
 - `semantic_evaluation`
 - `fail`
 
+`pause_for_human` is a supervisor safety pause chosen at runtime. It is distinct from authored `checkpoint` nodes.
+
 Budget fields:
 
 - `actions.<action>.max_uses`
@@ -81,6 +83,8 @@ Executable node kinds:
 - `exec`
 - `check`
 - `checkpoint`
+
+`checkpoint` is a planned human gate. In this release it belongs inside a `repeat` body so pass, deny, or abort decisions can drive loop control and operator feedback.
 
 Container node kinds:
 

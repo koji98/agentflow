@@ -164,6 +164,26 @@ describe("supervisor failure classifier", () => {
     );
   });
 
+  it("classifies generic AI check failures as semantic evaluation failures", () => {
+    const node: CompiledCheckNode = {
+      ...baseNode,
+      kind: "check",
+      check_kind: "ai",
+      on_failure: "fail",
+      goal: "Evaluate whether the implementation satisfies the rubric."
+    };
+
+    expect(classify({
+      node,
+      error_message: "AI evaluator returned a failing judgment."
+    })).toEqual(
+      expect.objectContaining({
+        class: "semantic_evaluation",
+        recommended_action: "semantic_evaluation"
+      })
+    );
+  });
+
   it("classifies semantic scope drift below threshold as scope drift", () => {
     const node: CompiledCheckNode = {
       ...baseNode,
@@ -190,6 +210,28 @@ describe("supervisor failure classifier", () => {
     ).toEqual(
       expect.objectContaining({
         class: "scope_drift",
+        recommended_action: "pause_for_human"
+      })
+    );
+  });
+
+  it("classifies checkpoint failures as operator decisions that need human pause handling", () => {
+    const node: CompiledExecutableNode = {
+      ...baseNode,
+      kind: "checkpoint",
+      review_from: {
+        node: "draft",
+        artifact: "draft_spec"
+      }
+    };
+
+    expect(classify({
+      node,
+      error_message: "Operator denied the checkpoint."
+    })).toEqual(
+      expect.objectContaining({
+        class: "operator",
+        retryable: false,
         recommended_action: "pause_for_human"
       })
     );

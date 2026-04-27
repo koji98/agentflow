@@ -36,6 +36,17 @@ These remain hard failures even when a verifier uses soft failure behavior:
 
 `on_failure: "continue"` records failed deterministic verification evidence while allowing control flow to proceed. Use it for evidence collection, not for required gates.
 
+## Evaluation Lanes
+
+- Graph `check` nodes are in-run sensors.
+- Supervisor `semantic_evaluation` is an intervention selected by failure classification and bounded by the supervisor budget.
+- Managed pattern evaluation is authored workflow structure that lowers into generated graph nodes.
+- `agentflow eval` is offline product/workflow evaluation with file-backed suites.
+
+## Human Gates
+
+`checkpoint` is a planned human gate inside a repeat body. `pause_for_human` is a supervisor safety pause for runtime risk or failure conditions and resumes through structured human input.
+
 ## Repeat
 
 `repeat.until.node` must target a descendant `check` or `checkpoint`. The until node decides whether the repeat scope exits or runs another iteration.

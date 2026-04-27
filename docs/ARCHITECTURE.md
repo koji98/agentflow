@@ -176,6 +176,16 @@ Supervisor events:
 - `supervisor.intervention.failed`
 - `supervisor.paused`
 
+## Human Gates And Pauses
+
+Agentflow has two human-in-the-loop mechanisms, and they are intentionally different.
+
+`checkpoint` is authored workflow structure. It is a planned human gate that reviews a declared artifact at a known point in the graph. In this release, checkpoints are valid only inside `repeat` bodies so a deny decision can feed the next iteration with operator feedback. A checkpoint used as the repeat `until` node behaves like the loop's human approval sensor: pass exits the loop, deny can drive another iteration, and abort cancels the run.
+
+`pause_for_human` is supervisor safety behavior. It is not an authored node. The supervisor chooses it when a failure or policy classification needs a human decision outside the planned graph path, such as a policy breach, repeated recovery, or scope drift. A pause writes durable run state, records `supervisor.paused`, sets the run status to `paused`, and waits for `agentflow resume --human-action ...`.
+
+This mirrors the durable interrupt/resume shape used by production agent runtimes: the run state is persisted before asking a human, resources are released, and resume input is recorded as part of the audit trail. Agentflow implements that locally through run-root artifacts rather than a remote checkpoint database.
+
 ## Checks And Evaluation
 
 Checks are sensors. They produce evidence for the run, not hidden control-plane behavior.
@@ -185,6 +195,13 @@ Checks are sensors. They produce evidence for the run, not hidden control-plane 
 `check_kind: "ai"` invokes the configured harness and normalizes semantic evaluation JSON into a structured record.
 
 `on_failure: "continue"` keeps soft verification evidence visible while allowing control flow to continue. Operational failures such as spawn errors, timeouts, cancellation, invalid context, missing env files, and missing required artifacts remain hard failures.
+
+Evaluation has four lanes:
+
+- Graph `check` nodes are in-run sensors. They are authored into the graph and can gate flow, repeat loops, or evidence collection.
+- Supervisor `semantic_evaluation` is an intervention. It is chosen by the supervisor after a failed AI check or semantic uncertainty, spends intervention budget, and writes supervisor evidence.
+- Managed pattern evaluation is authored workflow structure. For example, `pattern_generate_evaluate_fix.evaluation` expands into evaluator and repair-loop nodes as part of the compiled graph.
+- `agentflow eval` is offline product or workflow evaluation. It runs file-backed eval suites against Agentflow workflows and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks.
 
 ## Plugin Tools
 

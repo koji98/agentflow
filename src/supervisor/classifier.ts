@@ -127,7 +127,7 @@ export function classifyNodeFailure(input: {
   if (scopeDriftScore !== undefined && scopeDriftScore < input.policy.policy.drift_score_threshold) {
     return {
       class: "scope_drift",
-      summary: message || "Semantic evaluation detected scope drift.",
+      summary: message || "Scope drift detected.",
       retryable: false,
       recommended_action: "pause_for_human",
       evidence: {

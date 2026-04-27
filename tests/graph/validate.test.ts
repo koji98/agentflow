@@ -280,7 +280,7 @@ describe("graph validation", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.steps[1]",
-          message: expect.stringContaining("only valid inside a repeat body")
+          message: expect.stringContaining("planned human gates")
         })
       ])
     );

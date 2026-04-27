@@ -28,7 +28,8 @@ function renderEvalHelp(): string {
     "Notes:",
     "- Eval suites are local JSON/JSONL files.",
     "- Eval runs write artifacts under <launch-cwd>/.agentflow/evals unless --evals-root is provided.",
-    "- Graph execution still uses normal Agentflow graph run artifacts."
+    "- Graph execution still uses normal Agentflow graph run artifacts.",
+    "- eval is offline product/workflow evaluation; use graph check nodes for in-run sensors and supervisor semantic_evaluation for runtime interventions."
   ].join("\n");
 }
 
@@ -44,7 +45,8 @@ export const evalCommand = {
   optionNames: ["suite", "case", "variant", "label", "evals-root", "eval-root", "help"] as const,
   helpNotes: [
     "Eval suites are local file-backed datasets and graders for workflows built with Agentflow.",
-    "Script graders receive AGENTFLOW_EVAL_* environment variables and must emit normalized JSON."
+    "Script graders receive AGENTFLOW_EVAL_* environment variables and must emit normalized JSON.",
+    "Use eval for offline product/workflow grading; use graph check nodes for in-run sensors and supervisor semantic_evaluation for runtime interventions."
   ] as const,
   async run(
     options: Record<string, string | boolean | string[] | undefined>,
