@@ -1001,15 +1001,6 @@ function normalizeContextItem(
     return undefined;
   }
 
-  if (record.from === "artifact") {
-    diagnostics.push({
-      path: `${path}.from`,
-      message:
-        "context item kind \"artifact\" was removed. Use { \"ref\": \"node.artifact\" } (or bare { \"ref\": \"node\" }) instead."
-    });
-    return undefined;
-  }
-
   const hasRef = "ref" in record;
   const hasFrom = "from" in record;
 
@@ -1090,7 +1081,7 @@ function normalizeArtifactContextRef(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["ref", "name", "node", "artifact", "iteration", "attempt", "if_available"],
+    ["ref", "name", "iteration", "attempt", "if_available"],
     diagnostics
   );
 
@@ -1168,20 +1159,6 @@ function normalizeArtifactContextRef(
   const iteration = normalizeSelector(record.iteration, `${path}.iteration`, diagnostics);
   const attempt = normalizeSelector(record.attempt, `${path}.attempt`, diagnostics);
   const if_available = readBoolean(record.if_available, `${path}.if_available`, diagnostics);
-
-  if (record.node !== undefined && record.node !== node) {
-    diagnostics.push({
-      path: `${path}.node`,
-      message: `node "${String(record.node)}" does not match the node "${node}" derived from ref "${trimmedRef}". Omit node; it is derived from ref.`
-    });
-  }
-
-  if (artifact !== undefined && record.artifact !== undefined && record.artifact !== artifact) {
-    diagnostics.push({
-      path: `${path}.artifact`,
-      message: `artifact "${String(record.artifact)}" does not match the artifact "${artifact}" derived from ref "${trimmedRef}". Omit artifact; it is derived from ref.`
-    });
-  }
 
   return {
     ref: trimmedRef,

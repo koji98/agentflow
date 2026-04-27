@@ -1,4 +1,4 @@
-import type { ArtifactContextRef } from "./authored.js";
+import type { ResolvedArtifactContextRef } from "./authored.js";
 import type { CompiledExecutableNode, CompiledGraph } from "./compiled.js";
 
 function mermaidId(prefix: string, value: string): string {
@@ -44,7 +44,7 @@ function scopeLabel(kind: string, authoredId: string, detail?: string): string {
   return [`${kind}: ${authoredId}`, detail].filter((value): value is string => Boolean(value)).map(escapeLabel).join("<br/>");
 }
 
-function isArtifactContextRef(value: unknown): value is ArtifactContextRef {
+function isArtifactContextRef(value: unknown): value is ResolvedArtifactContextRef {
   return typeof value === "object" && value !== null && "ref" in value && "node" in value && "artifact" in value;
 }
 

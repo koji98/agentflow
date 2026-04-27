@@ -428,7 +428,7 @@ function commandHelp(commandPath: string): string | undefined {
       "  --help  Show this help and exit. Default: false",
       "",
       "Output:",
-      "  JSON object with callable_name, capability, impact, description, usage, and credential scope names for each granted tool.",
+      "  JSON object with callable_name, description, and credential scope names for each granted tool.",
       "",
       "Exit codes:",
       "  0 success",
@@ -652,8 +652,6 @@ async function commandStatus(metadata: RuntimeMetadata): Promise<AfResult> {
       required_artifacts: metadata.declared_artifacts,
       tools: metadata.tools.map((tool) => ({
         callable_name: tool.callable_name,
-        capability: tool.capability,
-        impact: tool.impact,
         description: tool.description ?? null
       }))
     }
@@ -668,10 +666,7 @@ async function commandTools(metadata: RuntimeMetadata): Promise<AfResult> {
       status: "passed",
       tools: metadata.tools.map((tool) => ({
         callable_name: tool.callable_name,
-        capability: tool.capability,
-        impact: tool.impact,
         description: tool.description ?? null,
-        usage: tool.usage ?? null,
         credentials: tool.credentials ?? []
       }))
     }

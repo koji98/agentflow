@@ -202,21 +202,6 @@ async function collectInvalidatedCompiledIds(options: {
     }
   }
 
-  for (const node of options.graph.nodes) {
-    if (options.prior_state.node_statuses[node.compiled_id] !== "passed") {
-      continue;
-    }
-
-    if (invalidated_compiled_ids.has(node.compiled_id)) {
-      continue;
-    }
-
-    if (node.repeat_scope_id && restarted_repeat_scope_ids.has(node.repeat_scope_id)) {
-      continue;
-    }
-
-  }
-
   const adjacency = new Map<string, string[]>();
 
   for (const node of options.graph.nodes) {

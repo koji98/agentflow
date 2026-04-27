@@ -61,7 +61,7 @@ const repeatableOptionNames = new Set(["config"]);
 
 const optionDescriptions: Record<string, string> = {
   graph: "--graph <path>               Authored graph document to validate or run.",
-  label: "--label <run_label>          Optional run label appended to the generated run root.",
+  label: "--label <label>              Optional label appended to the generated run or eval artifact root.",
   "run-ready": "--run-ready                  Also check local runtime dependencies during validate.",
   "run-root": "--run-root <path>            Existing run root to resume.",
   "runs-root": "--runs-root <path>           Absolute runs root directory to enumerate.",
@@ -71,6 +71,11 @@ const optionDescriptions: Record<string, string> = {
   "strict-review": "--strict-review              Fail validate when serious authoring review findings are present.",
   diagram: "--diagram                    Include Mermaid for the compiled graph in validate output.",
   "diagram-output": "--diagram-output <path>      Write Mermaid for the compiled graph to a file.",
+  "diagram-image-output": "--diagram-image-output <path> Render Mermaid for the compiled graph to an image file.",
+  "diagram-image-renderer": "--diagram-image-renderer <npx|mmdc> Choose the Mermaid image renderer.",
+  "diagram-image-package": "--diagram-image-package <pkg> npx package spec used for Mermaid image rendering.",
+  "human-action": "--human-action <action>      Structured action for resuming a paused run.",
+  "human-note": "--human-note <text>          Human note recorded when resuming a paused run.",
   repo: "--repo <alias>                Repo alias to select from run workspace changes.",
   target: "--target <path>              Git worktree where captured workspace changes should be applied.",
   "allow-dirty": "--allow-dirty                Apply onto a target repo that already has local changes.",
@@ -78,8 +83,8 @@ const optionDescriptions: Record<string, string> = {
   suite: "--suite <path>               Eval suite JSON file.",
   case: "--case <id>                  Eval case id filter.",
   variant: "--variant <id>              Eval variant id filter.",
-  "evals-root": "--evals-root <path>          Absolute eval artifact root for a new eval run.",
-  "eval-root": "--eval-root <path>           Existing eval artifact root to report.",
+  "evals-root": "--evals-root <path>          Absolute parent directory for new eval run artifacts.",
+  "eval-root": "--eval-root <path>           Existing single eval run root to report.",
   scope: "--scope <scope>              Credential scope for auth commands.",
   key: "--key <field>                 Credential field key for auth commands.",
   value: "--value <value>              Non-secret credential field value for auth set.",
@@ -90,8 +95,6 @@ const optionDescriptions: Record<string, string> = {
     "--config key=value           Override top-level graph config (repeatable). JSON-typed values like 1, true, [\"a\"] parse as JSON; everything else stays a string. Use dotted keys for nested paths.",
   "config-file":
     "--config-file <path>         Load graph config overrides from a JSON file. Merged before --config entries.",
-  "resume-on-fail":
-    "--resume-on-fail [N]         After a failed run, automatically resume up to N times in the same process (default 3).",
   help: "--help, -h                   Show command help."
 };
 
@@ -173,7 +176,7 @@ function renderGraphHelp(): string {
     "- plugin workflow nodes use type = plugin, uses = plugin_alias/workflow_id, and config = workflow-specific settings; run agentflow plugin resolve --graph first.",
     "- repeat.until.node must target a descendant check or checkpoint node.",
     "- checkpoint nodes are planned human gates inside repeat bodies; supervisor pause_for_human is a runtime safety pause resumed with structured human input.",
-    "- repeat context selectors support latest, latest_passed, latest_failed, or a positive integer ordinal.",
+    "- repeat context selectors support latest, latest_passed, latest_failed, previous, or a positive integer ordinal.",
     "- launch profile and workspace backend come from graph defaults.",
     "- executable nodes may still select node-level profiles inside the authored graph.",
     "- codex-cli profiles may set skip_git_repo_check for intentional non-git workspace roots.",
@@ -183,7 +186,7 @@ function renderGraphHelp(): string {
     "- evaluation lanes are distinct: check nodes are in-run sensors, semantic_evaluation is a supervisor intervention, managed pattern evaluation is authored workflow structure, and agentflow eval is offline suite grading.",
     "- executable nodes use context for text, workspace files, workspace globs, and prior artifacts.",
     "- executable nodes use artifacts to declare durable handoff files from AGENTFLOW_OUTPUT_DIR (execution artifacts/) or the workspace.",
-    "- plugin tools must declare capability and impact; secret-impact tools must declare credentials and use agentflow auth.",
+    "- plugin tools must declare a useful description; credential-backed tools must declare credentials and use agentflow auth.",
     "- terminal runs write interventions.jsonl and delivery/manifest.json for review.",
     "- agent_response is automatically written for agent nodes; verification_json is automatically available for check nodes.",
     "- prerequisites.checks may assert required files, commands, env vars, or repos before launch.",
@@ -197,11 +200,13 @@ function renderGraphHelp(): string {
     "",
     "Recommended local workflow:",
     "1. agentflow validate --graph agentflow.graph.json",
-    "2. agentflow validate --graph agentflow.graph.json --run-ready when local launch readiness matters",
-    "3. agentflow validate --graph agentflow.graph.json --show-compiled to inspect the compiled graph",
-    "4. agentflow run --graph agentflow.graph.json",
-    "5. agentflow runs list --graph agentflow.graph.json to discover prior run roots",
-    "6. agentflow inspect <run-root> for failure stderr tails and summaries"
+    "2. agentflow validate --graph agentflow.graph.json --review for substantive graphs, or --strict-review for release gates",
+    "3. agentflow validate --graph agentflow.graph.json --run-ready when local launch readiness matters",
+    "4. agentflow validate --graph agentflow.graph.json --show-compiled, --diagram-output graph.mmd, or --diagram-image-output graph.svg to inspect the compiled graph (image export uses npx by default)",
+    "5. agentflow eval validate --suite <suite.json> when offline evaluation suites exist",
+    "6. agentflow run --graph agentflow.graph.json",
+    "7. agentflow runs list --graph agentflow.graph.json to discover prior run roots",
+    "8. agentflow inspect <run-root> for failure stderr tails and summaries"
   ].join("\n");
 }
 

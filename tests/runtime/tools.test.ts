@@ -74,11 +74,7 @@ function buildPluginFixture(
       tools: {
         poll: {
           executable: pluginToolPath,
-          capability: toolOverrides.capability ?? "verification",
-          impact: toolOverrides.impact ?? "read",
           description: "Poll a PR.",
-          usage: "babysit-poll [--once]",
-          args: ["--once"],
           config_schema: toolOverrides.config_schema ?? {},
           ...(toolOverrides.credentials ? { credentials: toolOverrides.credentials } : {})
         }
@@ -111,7 +107,7 @@ describe("plugin tool compilation", () => {
     const normalized = normalizeAuthoredGraphDocument({
       intent: {
         goal: `Compile tools for ${document.graph_id}.`,
-        acceptance_criteria: ["Plugin tools obey their capability policy."]
+        acceptance_criteria: ["Plugin tools obey their config and credential policy."]
       },
       ...document
     });
@@ -186,7 +182,6 @@ describe("plugin tool compilation", () => {
 
     expect(pollTool?.callable_name).toBe("babysit-poll");
     expect(pollTool?.executable_path).toBe(pluginAbsoluteToolPath);
-    expect(pollTool?.args).toEqual(["--once"]);
     if (pollTool?.source.kind !== "plugin") {
       throw new Error("expected plugin source");
     }
@@ -307,7 +302,7 @@ describe("plugin tool compilation", () => {
       buildPluginFixture(
         pluginRoot,
         pluginToolPath,
-        { impact: "secret", credentials: ["github"] },
+        { credentials: ["github"] },
         {
           credentials: {
             github: {
@@ -372,11 +367,8 @@ describe("plugin tool compilation", () => {
     });
   });
 
-  it("does not expose mutation tools to read-only agents", async () => {
-    resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath, {
-      capability: "mutation",
-      impact: "write"
-    })];
+  it("allows read-only agents to receive declared tools and relies on description for operator-facing risk", async () => {
+    resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath)];
     const document: AuthoredGraphDocument = {
       version: "1",
       graph_id: "tools-read-only-policy",
@@ -396,71 +388,11 @@ describe("plugin tool compilation", () => {
     };
 
     await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
-      .resolves.toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.tools[0]",
-          message: expect.stringContaining("cannot be exposed to a read-only agent")
-        })
-      ]));
+      .resolves.toEqual([]);
 
     const compilation = compileWith(document);
     const inspect = findAgentNode(compilation.compiled_graph!.nodes, "inspect");
     expect(inspect.tools.map((tool) => tool.callable_name)).toEqual(["babysit-poll"]);
-  });
-
-  it("treats declaring external-impact tools as approval to expose them", async () => {
-    resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath, {
-      capability: "reporting",
-      impact: "external"
-    })];
-    const document: AuthoredGraphDocument = {
-      version: "1",
-      graph_id: "tools-external-policy",
-      repos: { main: { path: "." } },
-      intent: {
-        goal: "Report externally."
-      },
-      defaults: { launch_profile: "default", workspace_backend: "inplace" },
-      profiles: { default: { harness: "codex-cli" } },
-      tools: [{ from_plugin: "babysit", tool: "poll" }],
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [{ type: "agent", id: "report", goal: "Report." }]
-      }
-    };
-
-    await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
-      .resolves.toEqual([]);
-  });
-
-  it("still validates policy around external-impact tools without approval-boundary fields", async () => {
-    resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath, {
-      capability: "reporting",
-      impact: "external"
-    })];
-    const baseDocument: AuthoredGraphDocument = {
-      version: "1",
-      graph_id: "tools-external-exact-policy",
-      repos: { main: { path: "." } },
-      defaults: { launch_profile: "default", workspace_backend: "inplace" },
-      profiles: { default: { harness: "codex-cli", sandbox: "workspace-write" } },
-      tools: [{ from_plugin: "babysit", tool: "poll" }],
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [{ type: "agent", id: "report", goal: "Report." }]
-      }
-    };
-
-    const diagnostics = await validateAuthoredGraphDocument({
-      ...baseDocument,
-      intent: {
-        goal: "Report externally.",
-        constraints: ["Use the declared reporting tool only for this node."]
-      }
-    }, { resolved_plugins: resolvedPlugins });
-    expect(diagnostics).toEqual([]);
   });
 
   it("rejects plugin tools that try to use the reserved af command name", async () => {
@@ -486,37 +418,6 @@ describe("plugin tool compilation", () => {
         expect.objectContaining({
           path: "$.tools[0]",
           message: expect.stringContaining("reserved for Agentflow runtime commands")
-        })
-      ]));
-  });
-
-  it("requires declared credentials for secret-impact tools", async () => {
-    resolvedPlugins = [buildPluginFixture(pluginRoot, pluginToolPath, {
-      capability: "context",
-      impact: "secret"
-    })];
-    const document: AuthoredGraphDocument = {
-      version: "1",
-      graph_id: "tools-secret-policy",
-      repos: { main: { path: "." } },
-      intent: {
-        goal: "Use a secret-backed context tool."
-      },
-      defaults: { launch_profile: "default", workspace_backend: "inplace" },
-      profiles: { default: { harness: "codex-cli" } },
-      tools: [{ from_plugin: "babysit", tool: "poll" }],
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [{ type: "agent", id: "context", goal: "Read context." }]
-      }
-    };
-
-    await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
-      .resolves.toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.tools[0]",
-          message: expect.stringContaining("must declare credentials")
         })
       ]));
   });
@@ -666,11 +567,8 @@ describe("prepareAgentTools", () => {
       tools: [
         {
           callable_name: "babysit-poll",
-          capability: "verification",
-          impact: "read",
           description: "plugin",
           executable_path: pluginPath,
-          args: [],
           config: { mode: "fast" },
           source: {
             kind: "plugin",
@@ -729,8 +627,6 @@ describe("prepareAgentTools", () => {
         compiled_id: "main__draft",
         kind: "plugin_tool",
         tool: "babysit-poll",
-        capability: "verification",
-        impact: "read",
         argv: ["--token", "<redacted>"],
         exit_code: 0,
         stdout_path: expect.stringMatching(/tool-invocation-logs\/.*babysit-poll\.stdout\.log$/),
@@ -766,7 +662,7 @@ describe("prepareAgentTools", () => {
     expect(setup.env.AGENTFLOW_RUNTIME_DIR).toBe(join(tempRoot, "runtime"));
     expect(setup.env.AGENTFLOW_RUN_ID).toBe("run-tools");
     expect(setup.env.AGENTFLOW_AGENT_ID).toBe("exec-draft");
-    expect(setup.env.AGENTFLOW_PLUGIN_ROOT).toBe(join(tempRoot, "plugins/babysit"));
+    expect(setup.env.AGENTFLOW_PLUGIN_ROOT).toBeUndefined();
     expect(setup.env.AGENTFLOW_PLUGIN_ROOT_BABYSIT).toBe(join(tempRoot, "plugins/babysit"));
     expect(setup.env.AGENTFLOW_TOOL_BABYSIT_POLL_MODE).toBeUndefined();
 
@@ -833,11 +729,8 @@ describe("prepareAgentTools", () => {
       tools: [
         {
           callable_name: "secure-token",
-          capability: "context",
-          impact: "secret",
           description: "Print a resolved credential.",
           executable_path: pluginPath,
-          args: [],
           config: {},
           credentials: ["service"],
           source: {
@@ -951,11 +844,8 @@ describe("prepareAgentTools", () => {
         tools: [
           {
             callable_name: "helpful",
-            capability: "context",
-            impact: "secret",
             description: "Inspect a fixture.",
             executable_path: pluginPath,
-            args: [],
             config: { mode: "check", token: "must-redact" },
             credentials: ["service"],
             source: {
@@ -990,15 +880,12 @@ describe("formatToolContract", () => {
     expect(formatToolContract([])).toEqual([]);
   });
 
-  it("renders a tool contract sorted alphabetically with origin, usage, and configured defaults", () => {
+  it("renders a tool contract sorted alphabetically with origin and configured defaults", () => {
     const tools: ResolvedTool[] = [
       {
         callable_name: "zeta-poll",
-        capability: "verification",
-        impact: "read",
         description: "Zeta tool.",
         executable_path: "/tmp/zeta",
-        args: [],
         config: { mode: "fast" },
         source: {
           kind: "plugin",
@@ -1011,12 +898,8 @@ describe("formatToolContract", () => {
       },
       {
         callable_name: "alpha-cli",
-        capability: "context",
-        impact: "secret",
         description: "Alpha tool.",
-        usage: "alpha-cli list\nalpha-cli show <id>",
         executable_path: "/tmp/alpha",
-        args: [],
         config: { org: "abc" },
         credentials: ["alpha"],
         source: {
@@ -1040,12 +923,8 @@ describe("formatToolContract", () => {
     expect(text.indexOf("### alpha-cli")).toBeLessThan(text.indexOf("### zeta-poll"));
     expect(text).toContain("### alpha-cli (from plugin \"alphaplug\" (tool: alpha))");
     expect(text).toContain("### zeta-poll (from plugin \"zetaplug\" (tool: poll))");
-    expect(text).toContain("alpha-cli list");
-    expect(text).toContain("alpha-cli show <id>");
-    expect(text).toContain("Capability: context");
-    expect(text).toContain("Impact: secret");
-    expect(text).toContain("Capability: verification");
-    expect(text).toContain("Impact: read");
+    expect(text).not.toContain("Capability:");
+    expect(text).not.toContain("Impact:");
     expect(text).toContain("Configured defaults are applied inside the tool subprocess");
     expect(text).toContain("org: configured");
     expect(text).toContain("mode: configured");
@@ -1075,11 +954,8 @@ describe("formatToolContract", () => {
       tools: [
         {
           callable_name: "babysit-poll",
-          capability: "verification",
-          impact: "read",
           description: "Poll a PR.",
           executable_path: "/tmp/babysit-poll",
-          args: [],
           config: {},
           source: {
             kind: "plugin",
@@ -1151,7 +1027,6 @@ describe("end-to-end runtime tool wiring", () => {
           "cat <<EOF > \"$AGENTFLOW_OUTPUT_DIR/poll-call.json\"",
           "{",
           "  \"argv\": \"$*\",",
-          "  \"plugin_root\": \"$AGENTFLOW_PLUGIN_ROOT\",",
           "  \"plugin_root_alias\": \"$AGENTFLOW_PLUGIN_ROOT_BABYSIT\",",
           "  \"tool_state\": \"$AGENTFLOW_TOOL_STATE\",",
           "  \"tool_config_mode\": \"$AGENTFLOW_TOOL_BABYSIT_POLL_MODE\",",
@@ -1292,12 +1167,11 @@ describe("end-to-end runtime tool wiring", () => {
       expect(toolState.artifacts_root).toBe(invocation.outputDir);
 
       // 4. Tool sentinel proves AGENTFLOW_* env vars propagated end-to-end:
-      //    plugin root, tool config, workspace, output dir, manifest args.
+      //    plugin root alias, tool config, workspace, output dir, and agent args.
       const sentinel = JSON.parse(
         await readFile(join(invocation.outputDir, "poll-call.json"), "utf8")
       ) as Record<string, string>;
-      expect(sentinel.argv).toBe("--once --pr 42");
-      expect(sentinel.plugin_root).toBe(pluginRoot);
+      expect(sentinel.argv).toBe("--pr 42");
       expect(sentinel.plugin_root_alias).toBe(pluginRoot);
       expect(sentinel.tool_state).toBe(invocation.toolEnv!.AGENTFLOW_TOOL_STATE);
       expect(sentinel.tool_config_mode).toBe("check-pr");

@@ -241,21 +241,15 @@ describe("pattern review change", () => {
           context: [
             {
               ref: "review_managed_nodes.agent_response",
-              name: "review_agent_response",
-              node: "review_managed_nodes",
-              artifact: "agent_response"
+              name: "review_agent_response"
             },
             {
               ref: "review_managed_nodes.review_summary",
-              name: "review_summary",
-              node: "review_managed_nodes",
-              artifact: "review_summary"
+              name: "review_summary"
             },
             {
               ref: "review_managed_nodes.review_bundle",
-              name: "review_bundle",
-              node: "review_managed_nodes",
-              artifact: "review_bundle"
+              name: "review_bundle"
             }
           ]
         }

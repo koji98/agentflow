@@ -42,7 +42,7 @@ Executable nodes can also carry intent:
   "type": "agent",
   "id": "implement_timeout",
   "repo": "main",
-  "profile": "coder",
+  "profile": "default",
   "goal": "Implement timeout handling and publish reviewer evidence.",
   "acceptance_criteria": ["Tests pass.", "The handoff names changed files and risks."]
 }
@@ -106,7 +106,7 @@ Context item sources:
 - `text`
 - `workspace_file`
 - `workspace_glob`
-- artifact references with `ref`, `node`, and `artifact`
+- artifact references with `ref`; Agentflow derives the target node and artifact from `node.artifact`
 
 Artifact references may use `iteration` or `attempt` selectors: `latest`, `latest_passed`, `latest_failed`, `previous`, or a positive integer. Use `if_available: true` when omission is acceptable.
 
@@ -154,15 +154,13 @@ Agents that declare artifacts need a write-capable sandbox.
 
 ## Plugin Tools
 
-Tool exports declare `capability` and `impact`.
-
-Capabilities: `context`, `verification`, `mutation`, `reporting`.
-
-Impacts: `read`, `write`, `external`, `secret`.
+Tool exports declare `executable` and a clear `description`. Tools that need auth declare `credentials`; optional `config_schema` validates non-secret graph `tools[].config` defaults.
 
 Validation enforces:
 
-- mutation tools and write-impact tools are withheld from read-only agents
-- secret-impact tools require plugin-declared `credentials`
-- external-impact tools are approved by declaring them in the graph or agent node
-- inline `tools[].config` is for non-secret string options and is resolved only inside the plugin tool subprocess
+- plugin tool callable names do not collide with reserved runtime commands
+- credential references point at plugin-declared credential scopes
+- inline `tools[].config` is for non-secret graph-provided defaults and is resolved only inside the plugin tool subprocess
+- graph config values are exposed to the tool subprocess as `AGENTFLOW_TOOL_<CALLABLE_NAME>_<KEY>` environment variables, with non-alphanumeric characters converted to `_`
+- manifests do not declare default CLI arguments; exact CLI usage belongs in the executable's `--help`, and agents pass arguments when invoking the callable tool
+- `config_schema` is not the tool's CLI argument schema

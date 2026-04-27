@@ -75,7 +75,7 @@ describe("graph profile resolution", () => {
     );
   });
 
-  it("keeps invalid launch overrides explicit while falling back to a supported workspace backend", () => {
+  it("keeps invalid launch overrides explicit without coercing workspace backend", () => {
     const document = createDocument({
       default: {
         harness: "codex-cli"
@@ -88,7 +88,7 @@ describe("graph profile resolution", () => {
     });
 
     expect(launch.launch_profile).toBe("missing");
-    expect(launch.workspace_backend).toBe("inplace");
+    expect(launch.workspace_backend).toBe("remote-devbox");
     expect(launch.profile).toBeUndefined();
     expect(launch.diagnostics).toEqual(
       expect.arrayContaining([

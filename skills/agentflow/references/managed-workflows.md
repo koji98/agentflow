@@ -35,6 +35,8 @@ Run:
 
 ```bash
 agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow validate --graph agentflow.graph.json --diagram-output compiled-graph.mmd
+agentflow validate --graph agentflow.graph.json --diagram-image-output compiled-graph.svg
 ```
 
-Inspect the `lowered_managed_nodes` list, generated scopes, repeat limits, evaluator commands, public artifacts, and delivery compatibility.
+Inspect the `lowered_managed_nodes` list, generated scopes, repeat limits, evaluator commands, public artifacts, and delivery compatibility. The diagram source or rendered image is especially useful when a managed pattern expands into repeat or parallel structure that reviewers need to audit.

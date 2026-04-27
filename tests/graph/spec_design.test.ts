@@ -207,21 +207,15 @@ describe("spec design managed pattern", () => {
             context: [
               {
                 ref: "managed_nodes_spec.agent_response",
-                name: "design_agent_response",
-                node: "managed_nodes_spec",
-                artifact: "agent_response"
+                name: "design_agent_response"
               },
               {
                 ref: "managed_nodes_spec.design_spec",
-                name: "design_spec",
-                node: "managed_nodes_spec",
-                artifact: "design_spec"
+                name: "design_spec"
               },
               {
                 ref: "managed_nodes_spec.implementation_readiness",
-                name: "implementation_readiness",
-                node: "managed_nodes_spec",
-                artifact: "implementation_readiness"
+                name: "implementation_readiness"
               }
             ]
           }

@@ -187,8 +187,6 @@ async function createFixtureRun() {
             {
               ref: "verify-fix.verification",
               name: "verification",
-              node: "verify-fix",
-              artifact: "verification",
               iteration: "latest_passed"
             }
           ]

@@ -76,11 +76,7 @@ export interface PluginWorkflowExport {
 
 export interface PluginToolExport {
   executable: string;
-  capability: "context" | "verification" | "mutation" | "reporting";
-  impact: "read" | "write" | "external" | "secret";
   description?: string;
-  args?: string[];
-  usage?: string;
   config_schema?: Record<string, unknown>;
   credentials?: string[];
 }
@@ -474,20 +470,6 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
     }
 
     const executable = readStringField(toolRecord, "executable", `${path}.tools.${toolName}`, diagnostics);
-    const capability = readEnumField(
-      toolRecord,
-      "capability",
-      ["context", "verification", "mutation", "reporting"],
-      `${path}.tools.${toolName}`,
-      diagnostics
-    );
-    const impact = readEnumField(
-      toolRecord,
-      "impact",
-      ["read", "write", "external", "secret"],
-      `${path}.tools.${toolName}`,
-      diagnostics
-    );
     const description =
       typeof toolRecord.description === "string" && toolRecord.description.trim().length > 0
         ? toolRecord.description
@@ -497,24 +479,6 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
         path: `${path}.tools.${toolName}.description`,
         message: "Tool description is required so agents can choose the right CLI before reading --help."
       });
-    }
-    const usage =
-      typeof toolRecord.usage === "string" && toolRecord.usage.trim().length > 0
-        ? toolRecord.usage
-        : undefined;
-    if (!usage) {
-      diagnostics.push({
-        path: `${path}.tools.${toolName}.usage`,
-        message: "Tool usage is required as a concise prompt hint; the executable --help output remains the authoritative detailed contract."
-      });
-    }
-    let args: string[] | undefined;
-    if (toolRecord.args !== undefined) {
-      if (!Array.isArray(toolRecord.args) || toolRecord.args.some((entry) => typeof entry !== "string")) {
-        diagnostics.push({ path: `${path}.tools.${toolName}.args`, message: "Tool args must be an array of strings." });
-      } else {
-        args = toolRecord.args as string[];
-      }
     }
     let config_schema: Record<string, unknown> | undefined;
     if (toolRecord.config_schema !== undefined) {
@@ -542,14 +506,10 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
       }
     }
 
-    if (executable && capability && impact) {
+    if (executable) {
       tools[toolName] = {
         executable,
-        capability,
-        impact,
         ...(description ? { description } : {}),
-        ...(args ? { args } : {}),
-        ...(usage ? { usage } : {}),
         ...(config_schema ? { config_schema } : {}),
         ...(credentialScopes && credentialScopes.length > 0 ? { credentials: credentialScopes } : {})
       };

@@ -27,6 +27,20 @@ async function readValueFromStdin(): Promise<string> {
   return value.replace(/\r?\n$/, "");
 }
 
+function unexpectedAuthOptions(
+  options: Record<string, string | boolean | string[] | undefined>,
+  allowed: readonly string[]
+): string[] {
+  const allowedSet = new Set(allowed);
+  return Object.keys(options).filter((optionName) => !allowedSet.has(optionName));
+}
+
+function renderUnexpectedAuthOptions(unexpected: string[]): string {
+  return renderAuthUsageError(
+    `Unexpected option(s) for auth subcommand: ${unexpected.map((optionName) => `--${optionName}`).join(", ")}`
+  );
+}
+
 export const authCommand = {
   name: "auth",
   summary: "Configure credential fields for plugin tools without exposing secret values to agent harnesses.",
@@ -67,6 +81,14 @@ export const authCommand = {
     });
 
     if (subcommand === "list") {
+      const unexpected = unexpectedAuthOptions(options, ["index"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedAuthOptions(unexpected)
+        };
+      }
+
       return {
         exitCode: 0,
         output: {
@@ -80,6 +102,27 @@ export const authCommand = {
 
     const scope = readStringOption(options, "scope");
     const key = readStringOption(options, "key");
+
+    if (subcommand === "delete") {
+      const unexpected = unexpectedAuthOptions(options, ["scope", "key", "index"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedAuthOptions(unexpected)
+        };
+      }
+    }
+
+    if (subcommand === "set") {
+      const unexpected = unexpectedAuthOptions(options, ["scope", "key", "value", "value-stdin", "secret", "index"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedAuthOptions(unexpected)
+        };
+      }
+    }
+
     if (!scope || !key) {
       return {
         exitCode: 2,

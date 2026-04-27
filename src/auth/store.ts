@@ -58,8 +58,16 @@ function normalizeIndex(value: unknown): CredentialIndexFile {
   const record = asRecord(value);
   const scopes = asRecord(record?.scopes);
 
-  if (!record || record.version !== "1" || !scopes) {
-    return createEmptyIndex();
+  if (!record) {
+    throw new Error("Credential index must be a JSON object.");
+  }
+
+  if (record.version !== "1") {
+    throw new Error("Credential index version must be \"1\".");
+  }
+
+  if (!scopes) {
+    throw new Error("Credential index scopes must be an object.");
   }
 
   const normalized = createEmptyIndex();
@@ -67,14 +75,14 @@ function normalizeIndex(value: unknown): CredentialIndexFile {
     const scopeRecord = asRecord(scopeValue);
     const fieldsRecord = asRecord(scopeRecord?.fields);
     if (!fieldsRecord) {
-      continue;
+      throw new Error(`Credential index scope "${scope}" must declare object fields.`);
     }
 
     const fields: Record<string, CredentialIndexField> = {};
     for (const [key, fieldValue] of Object.entries(fieldsRecord)) {
       const fieldRecord = asRecord(fieldValue);
       if (!fieldRecord || typeof fieldRecord.secret !== "boolean") {
-        continue;
+        throw new Error(`Credential index field "${scope}.${key}" must declare boolean secret metadata.`);
       }
       fields[key] = {
         secret: fieldRecord.secret,
@@ -93,11 +101,23 @@ function normalizeIndex(value: unknown): CredentialIndexFile {
   return normalized;
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && (error as { code?: unknown }).code === "ENOENT";
+}
+
 async function readIndex(path: string): Promise<CredentialIndexFile> {
   try {
     return normalizeIndex(JSON.parse(await readFile(path, "utf8")) as unknown);
-  } catch {
-    return createEmptyIndex();
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return createEmptyIndex();
+    }
+
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read credential index at ${path}: ${reason}`);
   }
 }
 

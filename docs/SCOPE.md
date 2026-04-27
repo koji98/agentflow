@@ -17,7 +17,7 @@ The product surface is intentionally centered on four layers:
 - Executable node kinds are `agent`, `exec`, `check`, and `checkpoint`.
 - Container node kinds are `sequence`, `parallel`, and `repeat`.
 - Managed patterns are `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change`.
-- Team capabilities enter through plugin-bundled CLI tools with declared `capability`, `impact`, and credential requirements when secrets are needed.
+- Team capabilities enter through plugin-bundled CLI tools with a clear description, optional non-secret config schema, and credential requirements when auth is needed.
 
 ## Graph Authoring Bar
 
@@ -30,7 +30,7 @@ A good node owns a meaningful outcome:
 - implement an accountable slice and publish change evidence
 - review a change package and publish calibrated findings
 
-The graph must preserve human control through clear `constraints`, planned repeat-scoped `checkpoint` gates when human input is required, supervisor `pause_for_human` for safety stops, and explicit tool impact policy.
+The graph must preserve human control through clear `constraints`, planned repeat-scoped `checkpoint` gates when human input is required, supervisor `pause_for_human` for safety stops, and explicit approval before exposing plugin tools to agents.
 
 ## Runtime Bar
 
@@ -46,6 +46,8 @@ Required behavior:
 - preserve run state for inspection and resume
 - distinguish planned checkpoint gates from supervisor safety pauses in validation, operations, and delivery evidence
 - produce a delivery package for terminal runs
+
+Implementation details for these runtime paths live under `technical-implementation/`. Those docs explain how validation compiles graphs, how context packets and artifacts are materialized, how generated `af` and plugin tool wrappers enter the harness environment, and how credentials stay out of the agent context window.
 
 ## Documentation Bar
 

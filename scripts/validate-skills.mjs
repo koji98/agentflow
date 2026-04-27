@@ -65,10 +65,6 @@ const staleSkillContractPatterns = [
   {
     pattern: /every missing artifact/u,
     reason: "artifact synthesis only handles exactly one human-readable text artifact"
-  },
-  {
-    pattern: /local eval suites|workflows, evals,/u,
-    reason: "packaged skills no longer include local eval-suite guidance"
   }
 ];
 

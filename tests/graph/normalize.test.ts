@@ -232,8 +232,6 @@ describe("graph normalization", () => {
                   {
                     ref: "inspect.agent_response",
                     name: "inspect_response",
-                    node: "inspect",
-                    artifact: "agent_response",
                     iteration: 1,
                     attempt: "latest_failed",
                     if_available: true

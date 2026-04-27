@@ -23,6 +23,8 @@ agentflow validate --graph agentflow.graph.json --strict-review
 agentflow validate --graph agentflow.graph.json --run-ready
 agentflow validate --graph agentflow.graph.json --show-compiled
 agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
+agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg
+agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest
 ```
 
 Use the validation modes for different questions:
@@ -33,6 +35,7 @@ Use the validation modes for different questions:
 - `--run-ready`: are local repos, commands, env vars, plugin credentials, plugin tool `--help` contracts, plugins, and harness binaries ready on this machine?
 - `--show-compiled`: does the compiled primitive graph match the operator's intent?
 - `--diagram` or `--diagram-output`: what Mermaid diagram represents the resolved compiled graph, scopes, artifacts, checks, supervision, and delivery surface?
+- `--diagram-image-output`: can Mermaid CLI render that compiled diagram as an image for review? This uses `npx -y @mermaid-js/mermaid-cli` by default; use `--diagram-image-package` for a specific package spec, or `--diagram-image-renderer mmdc` for an installed local binary.
 
 Always inspect `intent`, `supervision`, resolved profiles, managed expansions, plugin tools, and artifact handoffs before launching serious work.
 
@@ -69,7 +72,7 @@ Important launch behavior:
 - Supervisor `pause_for_human` is a safety pause, not a graph node; it writes a paused run root that must be resumed with structured human input.
 - Terminal runs write the delivery package after run completion.
 
-Use `--resume-on-fail N` when a local automation should retry the same run root after failure using Agentflow resume semantics.
+For the implementation flow behind launch, node attempts, context materialization, generated runtime tooling, supervision, and delivery, see `technical-implementation/runtime-lifecycle.md`.
 
 ## Progress Events
 
@@ -125,6 +128,8 @@ Runtime coordination files are under `<run-root>/runtime/`. They are useful when
 
 Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, or handoff notes with `af log --type`. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live intervention.
 
+When debugging what an agent actually received, use `technical-implementation/context-and-artifacts.md` and `technical-implementation/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation.
+
 ## Resume
 
 ```bash
@@ -151,7 +156,7 @@ Choose the smallest evaluation lane that matches the question:
 - Use graph `check` nodes for in-run sensors that should gate flow or produce delivery evidence.
 - Let supervisor `semantic_evaluation` spend intervention budget when a failed AI check or semantic uncertainty needs runtime recovery evidence.
 - Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_generate_evaluate_fix`.
-- Use `agentflow eval` for offline product or workflow suites that compare variants and write `.agentflow/evals` artifacts.
+- Use `agentflow eval` for offline product or workflow suites that compare variants and write `.agentflow/evals` artifacts, including `evaluation-ledger.json`, `benchmark.json`, and `summary.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
 
 ## Delivery Review
 

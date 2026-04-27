@@ -1,6 +1,6 @@
 # Graph Examples
 
-These graphs demonstrate the supervised v1 contract. Each example includes top-level `intent`, `supervision`, and `delivery` fields.
+These graphs demonstrate the supervised v1 contract. Each example includes top-level `intent`; larger showcase graphs also include explicit `supervision` or managed pattern delivery configuration.
 
 The examples live under `docs/examples/graphs/`, so graphs that target this repository use:
 

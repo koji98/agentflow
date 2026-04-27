@@ -23,11 +23,7 @@
   "tools": {
     "poll": {
       "executable": "scripts/poll-pr.sh",
-      "capability": "verification",
-      "impact": "secret",
       "description": "Polls a GitHub pull request URL once and prints a JSON status object to stdout.",
-      "args": ["--once"],
-      "usage": "poll [--pr <id>]",
       "credentials": ["github"]
     }
   }

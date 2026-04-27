@@ -277,21 +277,15 @@ describe("pattern generate evaluate fix", () => {
           context: [
             {
               ref: "implement_managed_nodes.agent_response",
-              name: "change_agent_response",
-              node: "implement_managed_nodes",
-              artifact: "agent_response"
+              name: "change_agent_response"
             },
             {
               ref: "implement_managed_nodes.change_summary",
-              name: "change_summary",
-              node: "implement_managed_nodes",
-              artifact: "change_summary"
+              name: "change_summary"
             },
             {
               ref: "implement_managed_nodes.evaluation_ledger",
-              name: "evaluation_ledger",
-              node: "implement_managed_nodes",
-              artifact: "evaluation_ledger"
+              name: "evaluation_ledger"
             }
           ]
         }

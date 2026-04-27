@@ -33,6 +33,20 @@ function renderEvalHelp(): string {
   ].join("\n");
 }
 
+function unexpectedEvalOptions(
+  options: Record<string, string | boolean | string[] | undefined>,
+  allowed: readonly string[]
+): string[] {
+  const allowedSet = new Set(allowed);
+  return Object.keys(options).filter((optionName) => !allowedSet.has(optionName));
+}
+
+function renderUnexpectedEvalOptions(unexpected: string[]): string {
+  return renderEvalUsageError(
+    `Unexpected option(s) for eval subcommand: ${unexpected.map((optionName) => `--${optionName}`).join(", ")}`
+  );
+}
+
 export const evalCommand = {
   name: "eval",
   summary: "Validate and run local eval suites for agentic workflows.",
@@ -66,6 +80,14 @@ export const evalCommand = {
     }
 
     if (subcommand === "validate") {
+      const unexpected = unexpectedEvalOptions(options, ["suite"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedEvalOptions(unexpected)
+        };
+      }
+
       const suitePath = typeof options.suite === "string" ? options.suite : undefined;
 
       if (!suitePath) {
@@ -97,6 +119,14 @@ export const evalCommand = {
     }
 
     if (subcommand === "run") {
+      const unexpected = unexpectedEvalOptions(options, ["suite", "case", "variant", "label", "evals-root"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedEvalOptions(unexpected)
+        };
+      }
+
       const suitePath = typeof options.suite === "string" ? options.suite : undefined;
 
       if (!suitePath) {
@@ -170,6 +200,14 @@ export const evalCommand = {
     }
 
     if (subcommand === "report") {
+      const unexpected = unexpectedEvalOptions(options, ["eval-root"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedEvalOptions(unexpected)
+        };
+      }
+
       const evalRoot = typeof options["eval-root"] === "string" ? options["eval-root"] : undefined;
 
       if (!evalRoot) {
@@ -211,6 +249,14 @@ export const evalCommand = {
     }
 
     if (subcommand === "help") {
+      const unexpected = unexpectedEvalOptions(options, []);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedEvalOptions(unexpected)
+        };
+      }
+
       return {
         exitCode: 0,
         stdout: renderEvalHelp()

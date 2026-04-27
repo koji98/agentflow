@@ -364,10 +364,7 @@ describe("golden end-to-end graph runs", () => {
       tools: {
         inspect: {
           executable: "tools/inspect.mjs",
-          description: "Inspect fixture input.",
-          usage: "fixture-inspect --subject <name>",
-          capability: "context",
-          impact: "read"
+          description: "Inspect fixture input."
         }
       }
     }, null, 2)}\n`);

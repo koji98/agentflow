@@ -108,6 +108,15 @@ describe("supervisor failure classifier", () => {
     );
   });
 
+  it("does not classify incidental context mentions as context-resolution failures", () => {
+    expect(classify({ error_message: "Model failed because the context window was exhausted." })).toEqual(
+      expect.objectContaining({
+        class: "unknown",
+        recommended_action: "retry_with_guidance"
+      })
+    );
+  });
+
   it("uses failed harness stderr when no structured error is available", () => {
     expect(classify({
       result: {
@@ -133,6 +142,15 @@ describe("supervisor failure classifier", () => {
       expect.objectContaining({
         class: "harness",
         recommended_action: "pause_for_human"
+      })
+    );
+  });
+
+  it("does not classify generic unavailable resources as harness failures", () => {
+    expect(classify({ error_message: "Package mirror is temporarily unavailable." })).toEqual(
+      expect.objectContaining({
+        class: "unknown",
+        recommended_action: "retry_with_guidance"
       })
     );
   });

@@ -397,7 +397,7 @@ function collectPluginTools(graph: Pick<CompiledGraph, "nodes">): ResolvedTool[]
         continue;
       }
 
-      const key = `${tool.source.alias}/${tool.source.tool}:${tool.executable_path}:${tool.args.join("\0")}`;
+      const key = `${tool.source.alias}/${tool.source.tool}:${tool.executable_path}`;
       if (!tools.has(key)) {
         tools.set(key, tool);
       }
@@ -444,7 +444,7 @@ async function evaluatePluginToolHelp(
   environment: NodeJS.ProcessEnv
 ): Promise<ReadinessCheckResult> {
   const target = `$.plugins.${tool.source.alias}.tools.${tool.source.tool}.help`;
-  const helpArgs = [...tool.args, "--help"];
+  const helpArgs = ["--help"];
   const result = spawnSync(tool.executable_path, helpArgs, {
     cwd: tool.source.plugin_root,
     env: helpValidationEnvironment(environment),

@@ -115,9 +115,7 @@ async function createFixturePlugin(root: string): Promise<string> {
             context: [
               {
                 ref: "inspect.notes",
-                name: "notes",
-                node: "inspect",
-                artifact: "notes"
+                name: "notes"
               }
             ]
           }
@@ -247,8 +245,7 @@ describe("plugin workflows", () => {
           tools: {
             poll: {
               executable: "./scripts/poll.sh",
-              capability: "context",
-              impact: "secret",
+              description: "Poll a fixture service.",
               credentials: ["missing"]
             }
           }
@@ -358,9 +355,7 @@ describe("plugin workflows", () => {
                 context: [
                   {
                     ref: "handoff.packet",
-                    name: "packet",
-                    node: "handoff",
-                    artifact: "packet"
+                    name: "packet"
                   }
                 ]
               }
@@ -643,9 +638,7 @@ describe("plugin workflows", () => {
                 context: [
                   {
                     ref: "handoff.packet",
-                    name: "packet",
-                    node: "handoff",
-                    artifact: "packet"
+                    name: "packet"
                   }
                 ]
               }

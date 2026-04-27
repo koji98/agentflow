@@ -8,11 +8,11 @@ import type {
   AuthoredGraphNode,
   AuthoredGraphSummary,
   ContainerGraphNode,
-  ArtifactContextRef,
   ArtifactReference,
   ContextItem,
   ExecutableGraphNode,
   GraphPrerequisiteCheck,
+  ResolvedArtifactContextRef,
   ToolDeclaration
 } from "./authored.js";
 import { normalizeAuthoredGraphDocument } from "./normalize.js";
@@ -249,7 +249,7 @@ function validateEnvFiles(
 }
 
 function validateArtifactReference(
-  reference: ArtifactReference | ArtifactContextRef,
+  reference: ArtifactReference | ResolvedArtifactContextRef,
   path: string,
   currentNodeId: string,
   nodeIndex: Map<string, NodeMetadata>,
@@ -361,23 +361,6 @@ function validateToolDeclarations(
         message: `Plugin tool callable name "${callable}" is reserved for Agentflow runtime commands.`
       });
       return;
-    }
-
-    if (
-      options.sandbox === "read-only" &&
-      (exported.capability === "mutation" || exported.impact === "write")
-    ) {
-      diagnostics.push({
-        path: declarationPath,
-        message: `Plugin tool "${callable}" cannot be exposed to a read-only agent because it declares capability "${exported.capability}" and impact "${exported.impact}".`
-      });
-    }
-
-    if (exported.impact === "secret" && (!exported.credentials || exported.credentials.length === 0)) {
-      diagnostics.push({
-        path: declarationPath,
-        message: `Plugin tool "${callable}" has secret impact and must declare credentials in its plugin manifest.`
-      });
     }
 
     if (callableNames.has(callable)) {
@@ -697,18 +680,6 @@ async function validateNormalizedDocument(
 
     const agentNode = node as AgentNode;
     const sandbox = resolveNodePolicy(document, launch, agentNode).policy?.sandbox;
-    if (sandbox === "read-only") {
-      (document.tools ?? []).forEach((declaration, index) => {
-        const exported = pluginsByAlias.get(declaration.from_plugin)?.manifest.tools[declaration.tool];
-        const callable = callableNameForToolDeclaration(declaration);
-        if (exported && (exported.capability === "mutation" || exported.impact === "write")) {
-          diagnostics.push({
-            path: `$.tools[${index}]`,
-            message: `Plugin tool "${callable}" cannot be exposed to a read-only agent because it declares capability "${exported.capability}" and impact "${exported.impact}".`
-          });
-        }
-      });
-    }
 
     if (agentNode.tools) {
       const agentToolValidation = validateToolDeclarations(

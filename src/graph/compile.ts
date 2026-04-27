@@ -212,12 +212,8 @@ function resolveToolDeclaration(
 
   return {
     callable_name: callable,
-    capability: exported.capability,
-    impact: exported.impact,
     ...(exported.description ? { description: exported.description } : {}),
-    ...(exported.usage ? { usage: exported.usage } : {}),
     executable_path: executablePath,
-    args: [...(exported.args ?? [])],
     config: { ...(declaration.config ?? {}) },
     ...(exported.config_schema ? { config_schema: exported.config_schema } : {}),
     ...(exported.credentials && exported.credentials.length > 0 ? { credentials: [...exported.credentials] } : {}),
@@ -364,6 +360,11 @@ function compileExecutableNode(
       path: `${path}.repo`,
       message: "Executable node could not resolve a repo alias."
     });
+    return {
+      entry_node_ids: [],
+      exit_node_ids: [],
+      compiled_node_ids: []
+    };
   }
 
   const compiled_id = createCompiledId(scopeFrame, node.id);
@@ -377,7 +378,7 @@ function compileExecutableNode(
     ...(node.goal ? { goal: node.goal } : {}),
     ...(node.acceptance_criteria ? { acceptance_criteria: node.acceptance_criteria } : {}),
     ...(node.constraints ? { constraints: node.constraints } : {}),
-    repo: repo ?? "unknown",
+    repo,
     deps: [],
     scope_stack: scopeFrame.scope_stack,
     ...(scopeFrame.nearest_repeat_scope_id
@@ -924,6 +925,12 @@ export function compileAuthoredGraph(
   loweredManagedNodes: LoweredManagedNode[] = [],
   options: CompileAuthoredGraphOptions = {}
 ): CompileGraphResult {
+  if (launch.diagnostics.length > 0) {
+    return {
+      diagnostics: [...launch.diagnostics]
+    };
+  }
+
   const lowered_managed_kind_by_id = new Map<string, LoweredManagedKind>(
     loweredManagedNodes.map((item) => [item.authored_id, item.managed_kind])
   );

@@ -72,7 +72,7 @@ interface AuthoredNodeMetadata {
 
 const implementationIntentPattern =
   /\b(implement|ship|fix|change|update|refactor|build|generate|patch|feature|bug|release)\b/i;
-const highImpactToolDescription = "mutation, write, external, or secret impact";
+const credentialToolDescription = "credential-backed";
 const automaticArtifactNames = new Set<string>(reservedArtifactNames);
 
 function isExecutableNode(node: AuthoredGraphNode): node is ExecutableGraphNode {
@@ -155,12 +155,7 @@ function pathForNode(
 }
 
 function isHighImpactTool(tool: CompiledAgentNode["tools"][number]): boolean {
-  return (
-    tool.capability === "mutation" ||
-    tool.impact === "write" ||
-    tool.impact === "external" ||
-    tool.impact === "secret"
-  );
+  return (tool.credentials ?? []).length > 0;
 }
 
 function nodeHasExplicitConstraint(document: AuthoredGraphDocument, node: CompiledExecutableNode): boolean {
@@ -266,8 +261,8 @@ function reviewExecutableNode(
         ...(path ? { path: `${path}.tools` } : {}),
         node_id: node.authored_id,
         compiled_id: node.compiled_id,
-        message: `Agent node "${node.authored_id}" grants ${highImpactToolDescription} tools without explicit constraints.`,
-        recommendation: "Add graph or node constraints that bound the approved external, secret, write, or mutation behavior."
+        message: `Agent node "${node.authored_id}" grants ${credentialToolDescription} tools without explicit constraints.`,
+        recommendation: "Add graph or node constraints that bound the approved credential use and any external or mutating behavior described by the tool."
       });
     }
   }
@@ -563,9 +558,7 @@ export function reviewCompiledGraph(
   const findings: GraphReviewFinding[] = [];
   const authoredMetadata = collectAuthoredMetadata(document.graph);
 
-  if (fullReview) {
-    reviewIntent(document, findings);
-  }
+  reviewIntent(document, findings);
 
   graph.nodes.forEach((node) => {
     reviewExecutableNode(document, node, authoredMetadata, findings, { fullReview });

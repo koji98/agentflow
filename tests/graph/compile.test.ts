@@ -393,9 +393,7 @@ describe("graph compilation", () => {
             context: [
               {
                 ref: "fix.agent_response",
-                name: "fix_response",
-                node: "fix",
-                artifact: "agent_response"
+                name: "fix_response"
               }
             ]
           }
@@ -522,9 +520,7 @@ describe("graph compilation", () => {
                 context: [
                   {
                     ref: "inspect.agent_response",
-                    name: "inspect_response",
-                    node: "inspect",
-                    artifact: "agent_response"
+                    name: "inspect_response"
                   }
                 ]
               }

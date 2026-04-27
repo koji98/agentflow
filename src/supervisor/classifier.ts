@@ -54,6 +54,20 @@ function readScopeDriftScore(result: RuntimeNodeExecutionResult | undefined): nu
     : undefined;
 }
 
+function isContextFailureMessage(lowerMessage: string): boolean {
+  return [
+    "required context",
+    "context item",
+    "context packet",
+    "context manifest",
+    "context provenance",
+    "context could not be resolved",
+    "execution context could not be resolved",
+    "materialized context",
+    "context material"
+  ].some((fragment) => lowerMessage.includes(fragment));
+}
+
 export function classifyNodeFailure(input: {
   node: CompiledExecutableNode;
   attempt: RuntimeNodeAttempt;
@@ -93,7 +107,7 @@ export function classifyNodeFailure(input: {
     };
   }
 
-  if (lowerMessage.includes("context")) {
+  if (isContextFailureMessage(lowerMessage)) {
     return {
       class: "context",
       summary: message || "Execution context could not be resolved.",
@@ -103,7 +117,12 @@ export function classifyNodeFailure(input: {
     };
   }
 
-  if (lowerMessage.includes("harness") || lowerMessage.includes("binary") || lowerMessage.includes("unavailable")) {
+  if (
+    lowerMessage.includes("harness")
+    || lowerMessage.includes("binary")
+    || lowerMessage.includes("required harness is unavailable")
+    || lowerMessage.includes("harness binary")
+  ) {
     return {
       class: "harness",
       summary: message || "Required harness is unavailable.",

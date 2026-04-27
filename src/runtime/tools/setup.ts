@@ -263,10 +263,7 @@ function buildToolLauncher(): string {
     "  for (const [key, value] of Object.entries(tool.config || {})) {",
     "    childEnv[toolConfigEnvName(toolName, key)] = String(value);",
     "  }",
-    "  const helpArgs = [",
-    "    ...(tool.args || []),",
-    "    ...passthroughArgs",
-    "  ];",
+    "  const helpArgs = passthroughArgs;",
     "  const startedAt = Date.now();",
     "  const result = spawnSync(tool.executable_path, helpArgs, {",
     "    encoding: 'utf8',",
@@ -300,8 +297,6 @@ function buildToolLauncher(): string {
     "    kind: 'plugin_tool',",
     "    tool: toolName,",
     "    source: tool.source,",
-    "    capability: tool.capability,",
-    "    impact: tool.impact,",
     "    argv: redactArgv(helpArgs),",
     "    cwd: process.cwd(),",
     "    exit_code: result.status ?? (result.error ? 127 : 1),",
@@ -335,10 +330,7 @@ function buildToolLauncher(): string {
     "  process.exit(1);",
     "}",
     "",
-    "const invocationArgs = [",
-    "  ...(tool.args || []),",
-    "  ...passthroughArgs",
-    "];",
+    "const invocationArgs = passthroughArgs;",
     "const startedAt = Date.now();",
     "if (config.tool_invocation_log_dir) {",
     "  mkdirSync(config.tool_invocation_log_dir, { recursive: true });",
@@ -375,8 +367,6 @@ function buildToolLauncher(): string {
     "  kind: 'plugin_tool',",
     "  tool: toolName,",
     "  source: tool.source,",
-    "  capability: tool.capability,",
-    "  impact: tool.impact,",
     "  argv: redactArgv(invocationArgs),",
     "  cwd: process.cwd(),",
     "  exit_code: result.status ?? (result.error ? 127 : 1),",
@@ -506,13 +496,10 @@ export async function prepareAgentTools(
         tool.callable_name,
         {
           executable_path: tool.executable_path,
-          args: tool.args ?? [],
           config: Object.fromEntries(
             Object.entries(tool.config).map(([key, value]) => [key, stringifyToolConfigValue(value)])
           ),
           credentials: tool.credentials ?? [],
-          capability: tool.capability,
-          impact: tool.impact,
           source: tool.source
         }
       ])),
@@ -562,13 +549,6 @@ export async function prepareAgentTools(
 
   for (const [aliasSegment, pluginRoot] of pluginRoots.entries()) {
     env[`AGENTFLOW_PLUGIN_ROOT_${aliasSegment}`] = pluginRoot;
-  }
-
-  if (pluginRoots.size === 1) {
-    const [singleRoot] = pluginRoots.values();
-    if (singleRoot) {
-      env.AGENTFLOW_PLUGIN_ROOT = singleRoot;
-    }
   }
 
   return {
