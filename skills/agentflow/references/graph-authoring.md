@@ -20,8 +20,18 @@ Author graphs as supervised execution contracts. The graph should say what the t
 3. Add checks after the work they validate.
 4. Resolve plugins when `plugins` is present.
 5. Run `agentflow validate --graph <path>`.
-6. Run `agentflow validate --graph <path> --run-ready` before launch on this machine.
-7. Run `agentflow validate --graph <path> --show-compiled` and inspect profiles, tools, context, artifacts, managed expansions, and supervision.
+6. Run `agentflow validate --graph <path> --review` for substantive graphs; use `--strict-review` when this graph is release-bound or reusable.
+7. Run `agentflow validate --graph <path> --run-ready` before launch on this machine.
+8. Run `agentflow validate --graph <path> --show-compiled` and inspect profiles, tools, context, artifacts, managed expansions, and supervision.
+
+## Authoring Decisions
+
+- If a graph is implementation-shaped, include at least one hard check that proves the changed surface still works.
+- If branches run in parallel and later work depends on them, make each branch publish named artifacts.
+- If a node uses external, secret, write, or mutation tools, put explicit limits in graph or node `constraints`.
+- If a loop needs a planned human decision, use a `checkpoint` inside the `repeat` body; do not model supervisor safety pauses as authored nodes.
+- If outcome quality needs judgment, choose the right lane: `check` for in-run sensing, managed pattern evaluation for authored repair loops, and `agentflow eval` for offline suite grading.
+- If the compiled shape is hard to explain in prose, generate Mermaid with `validate --diagram-output` or a rendered review image with `validate --diagram-image-output`.
 
 ## Node Sizing
 
@@ -92,8 +102,8 @@ Plugin tools should match the node's job.
 - Use read/context tools for discovery nodes.
 - Use verification/reporting tools for evaluator nodes.
 - Use mutation/write tools only on write-capable agents.
-- Put high-impact limits in `constraints` before granting external-impact tools.
-- Use plugin-declared `credentials` plus `agentflow auth` for secret-impact tools.
+- Put high-impact limits in `constraints` before granting credential-backed, external, or mutating tools.
+- Use plugin-declared `credentials` plus `agentflow auth` for tools that need auth.
 
 ## Final Review
 

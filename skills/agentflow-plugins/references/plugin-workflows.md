@@ -91,9 +91,6 @@ Minimal `agentflow.plugin.json`:
     "poll": {
       "executable": "tools/poll-pr.sh",
       "description": "Poll a pull request and print a JSON status object.",
-      "usage": "poll --pr <number>",
-      "capability": "verification",
-      "impact": "secret",
       "credentials": ["github"],
       "config_schema": {
         "type": "object",
@@ -148,25 +145,25 @@ Tools are CLIs. Each export declares:
 
 - `executable`
 - `description`
-- `usage`
-- `capability`: `context`, `verification`, `mutation`, or `reporting`
-- `impact`: `read`, `write`, `external`, or `secret`
-- optional `config_schema` for non-secret string options
+- optional `config_schema` for non-secret graph `tools[].config` defaults
 - optional `credentials`
 
 The graph-visible callable name is derived from the declaration alias or `plugin-tool`.
 
 Policy:
 
-- read-only agents do not receive mutation tools or write-impact tools
-- secret-impact tools require plugin-declared `credentials`
-- external-impact tools are approved by declaring them in the graph or agent node
+- declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent
 - tools share the node sandbox and timeout
 - credential values are configured through `agentflow auth`, stored in macOS Keychain for secret fields, and injected only into the plugin tool subprocess
 - inline `tools[].config` values are not exported into the agent harness environment; the generated launcher resolves them only for the plugin tool subprocess
-- inline `tools[].config` accepts non-secret string options only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
+- inline `tools[].config` accepts non-secret graph-provided defaults only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
+- `config_schema` validates graph config defaults; it is not the tool's CLI argument schema
+- graph config values are exposed to the tool subprocess as `AGENTFLOW_TOOL_<CALLABLE_NAME>_<KEY>` environment variables, with non-alphanumeric characters converted to `_`
+- default CLI arguments are not declared in the manifest; the executable defines its own interface, and agents pass arguments when invoking the callable tool
 - every plugin tool executable must support credential-free, side-effect-free `--help` that exits `0` and includes purpose, usage, options, defaults, output, exit codes, and examples
 - `agentflow validate --graph <path> --run-ready` executes resolved plugin tools with `--help` and blocks launch if the help contract fails
+
+For the generated wrapper, launcher, credential isolation, harness prompt, and tool invocation ledger mechanics, see `docs/technical-implementation/runtime-tooling.md` in the repository.
 
 ## Validate
 

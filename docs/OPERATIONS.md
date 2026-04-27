@@ -18,15 +18,24 @@ Agents can run `af --help` and `af <command> --help` inside a node for the autho
 
 ```bash
 agentflow validate --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json --review
+agentflow validate --graph agentflow.graph.json --strict-review
 agentflow validate --graph agentflow.graph.json --run-ready
 agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
+agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg
+agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest
 ```
 
-Use the three validation levels for different questions:
+Use the validation modes for different questions:
 
-- plain `validate`: is the authored and compiled graph contract valid?
+- plain `validate`: is the authored and compiled graph contract valid, and are there standard authoring warnings?
+- `--review`: what deeper node-by-node authoring guidance should the operator consider before launch?
+- `--strict-review`: should serious authoring review findings fail validation?
 - `--run-ready`: are local repos, commands, env vars, plugin credentials, plugin tool `--help` contracts, plugins, and harness binaries ready on this machine?
 - `--show-compiled`: does the compiled primitive graph match the operator's intent?
+- `--diagram` or `--diagram-output`: what Mermaid diagram represents the resolved compiled graph, scopes, artifacts, checks, supervision, and delivery surface?
+- `--diagram-image-output`: can Mermaid CLI render that compiled diagram as an image for review? This uses `npx -y @mermaid-js/mermaid-cli` by default; use `--diagram-image-package` for a specific package spec, or `--diagram-image-renderer mmdc` for an installed local binary.
 
 Always inspect `intent`, `supervision`, resolved profiles, managed expansions, plugin tools, and artifact handoffs before launching serious work.
 
@@ -59,9 +68,11 @@ Important launch behavior:
 - `workspace_backend: "inplace"` runs directly against the configured repo path.
 - Codex CLI and Cursor CLI receive the same Agentflow context, `af` runtime CLI, plugin tool, artifact, timeout, and sandbox contract.
 - `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.
+- `checkpoint` nodes are planned human gates inside repeat bodies; they prompt on a TTY when reached and feed pass, deny, or abort back into the graph.
+- Supervisor `pause_for_human` is a safety pause, not a graph node; it writes a paused run root that must be resumed with structured human input.
 - Terminal runs write the delivery package after run completion.
 
-Use `--resume-on-fail N` when a local automation should retry the same run root after failure using Agentflow resume semantics.
+For the implementation flow behind launch, node attempts, context materialization, generated runtime tooling, supervision, and delivery, see `technical-implementation/runtime-lifecycle.md`.
 
 ## Progress Events
 
@@ -117,6 +128,8 @@ Runtime coordination files are under `<run-root>/runtime/`. They are useful when
 
 Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, or handoff notes with `af log --type`. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live intervention.
 
+When debugging what an agent actually received, use `technical-implementation/context-and-artifacts.md` and `technical-implementation/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation.
+
 ## Resume
 
 ```bash
@@ -127,6 +140,23 @@ agentflow resume --graph agentflow.graph.json --latest
 Resume revalidates the current graph, recompiles it, and compares the new contract with the prior run.
 
 Completed work is preserved only when the node contract and graph-level `intent` and `supervision` contracts remain compatible. If the human contract or policy contract changes, affected completed work restarts so the final evidence matches the current graph.
+
+Paused runs require explicit human input:
+
+```bash
+agentflow resume --run-root <run-root> --human-action retry_with_guidance --human-note "Reviewed the policy pause; retry with this constraint."
+```
+
+Use this for supervisor pauses. Planned checkpoint prompts are handled during the original TTY run; if a checkpoint deny causes the surrounding repeat to continue, inspect the repeat attempts and operator feedback artifact rather than looking for `human-resume-input.jsonl`.
+
+## Evaluation Lanes
+
+Choose the smallest evaluation lane that matches the question:
+
+- Use graph `check` nodes for in-run sensors that should gate flow or produce delivery evidence.
+- Let supervisor `semantic_evaluation` spend intervention budget when a failed AI check or semantic uncertainty needs runtime recovery evidence.
+- Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_generate_evaluate_fix`.
+- Use `agentflow eval` for offline product or workflow suites that compare variants and write `.agentflow/evals` artifacts, including `evaluation-ledger.json`, `benchmark.json`, and `summary.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
 
 ## Delivery Review
 

@@ -169,4 +169,14 @@ describe("eval CLI", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toContain("Unexpected positional arguments: unexpected");
   });
+
+  it("rejects options that do not apply to the selected eval subcommand", async () => {
+    const validate = await executeCli(["eval", "validate", "--suite", "suite.json", "--eval-root", "eval-root"]);
+    expect(validate.exitCode).toBe(2);
+    expect(validate.stdout).toContain("Unexpected option(s) for eval subcommand: --eval-root");
+
+    const report = await executeCli(["eval", "report", "--eval-root", "eval-root", "--suite", "suite.json"]);
+    expect(report.exitCode).toBe(2);
+    expect(report.stdout).toContain("Unexpected option(s) for eval subcommand: --suite");
+  });
 });

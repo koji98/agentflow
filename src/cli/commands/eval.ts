@@ -28,8 +28,23 @@ function renderEvalHelp(): string {
     "Notes:",
     "- Eval suites are local JSON/JSONL files.",
     "- Eval runs write artifacts under <launch-cwd>/.agentflow/evals unless --evals-root is provided.",
-    "- Graph execution still uses normal Agentflow graph run artifacts."
+    "- Graph execution still uses normal Agentflow graph run artifacts.",
+    "- eval is offline product/workflow evaluation; use graph check nodes for in-run sensors and supervisor semantic_evaluation for runtime interventions."
   ].join("\n");
+}
+
+function unexpectedEvalOptions(
+  options: Record<string, string | boolean | string[] | undefined>,
+  allowed: readonly string[]
+): string[] {
+  const allowedSet = new Set(allowed);
+  return Object.keys(options).filter((optionName) => !allowedSet.has(optionName));
+}
+
+function renderUnexpectedEvalOptions(unexpected: string[]): string {
+  return renderEvalUsageError(
+    `Unexpected option(s) for eval subcommand: ${unexpected.map((optionName) => `--${optionName}`).join(", ")}`
+  );
 }
 
 export const evalCommand = {
@@ -44,7 +59,8 @@ export const evalCommand = {
   optionNames: ["suite", "case", "variant", "label", "evals-root", "eval-root", "help"] as const,
   helpNotes: [
     "Eval suites are local file-backed datasets and graders for workflows built with Agentflow.",
-    "Script graders receive AGENTFLOW_EVAL_* environment variables and must emit normalized JSON."
+    "Script graders receive AGENTFLOW_EVAL_* environment variables and must emit normalized JSON.",
+    "Use eval for offline product/workflow grading; use graph check nodes for in-run sensors and supervisor semantic_evaluation for runtime interventions."
   ] as const,
   async run(
     options: Record<string, string | boolean | string[] | undefined>,
@@ -64,6 +80,14 @@ export const evalCommand = {
     }
 
     if (subcommand === "validate") {
+      const unexpected = unexpectedEvalOptions(options, ["suite"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedEvalOptions(unexpected)
+        };
+      }
+
       const suitePath = typeof options.suite === "string" ? options.suite : undefined;
 
       if (!suitePath) {
@@ -95,6 +119,14 @@ export const evalCommand = {
     }
 
     if (subcommand === "run") {
+      const unexpected = unexpectedEvalOptions(options, ["suite", "case", "variant", "label", "evals-root"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedEvalOptions(unexpected)
+        };
+      }
+
       const suitePath = typeof options.suite === "string" ? options.suite : undefined;
 
       if (!suitePath) {
@@ -168,6 +200,14 @@ export const evalCommand = {
     }
 
     if (subcommand === "report") {
+      const unexpected = unexpectedEvalOptions(options, ["eval-root"]);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedEvalOptions(unexpected)
+        };
+      }
+
       const evalRoot = typeof options["eval-root"] === "string" ? options["eval-root"] : undefined;
 
       if (!evalRoot) {
@@ -209,6 +249,14 @@ export const evalCommand = {
     }
 
     if (subcommand === "help") {
+      const unexpected = unexpectedEvalOptions(options, []);
+      if (unexpected.length > 0) {
+        return {
+          exitCode: 2,
+          stdout: renderUnexpectedEvalOptions(unexpected)
+        };
+      }
+
       return {
         exitCode: 0,
         stdout: renderEvalHelp()

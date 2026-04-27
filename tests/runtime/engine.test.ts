@@ -202,8 +202,6 @@ describe("runtime engine", () => {
               {
                 ref: "verify.verification",
                 name: "verification",
-                node: "verify",
-                artifact: "verification",
                 iteration: "latest_passed"
               }
             ]
@@ -946,7 +944,7 @@ describe("runtime engine", () => {
               ].join(" ")
             ],
             context: [
-              { ref: "produce_seed.seed", name: "seed_payload", node: "produce_seed", artifact: "seed" }
+              { ref: "produce_seed.seed", name: "seed_payload" }
             ],
             artifacts: {
               consume: {
@@ -1936,9 +1934,7 @@ describe("runtime engine", () => {
             context: [
               {
                 ref: "source.agent_response",
-                name: "missing_artifact",
-                node: "source",
-                artifact: "agent_response"
+                name: "missing_artifact"
               }
             ]
           }

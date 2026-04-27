@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -84,5 +84,33 @@ describe("auth CLI", () => {
     expect(set.exitCode).toBe(2);
     expect(set.stdout).toContain("Secret values must be provided with --value-stdin");
     expect(set.stdout).not.toContain("ghp_should_not_be_argv");
+  });
+
+  it("rejects options that do not apply to the selected auth subcommand", async () => {
+    const list = await executeCli(["auth", "list", "--index", indexPath, "--value", "unused"]);
+    expect(list.exitCode).toBe(2);
+    expect(list.stdout).toContain("Unexpected option(s) for auth subcommand: --value");
+
+    const deleted = await executeCli([
+      "auth",
+      "delete",
+      "--index",
+      indexPath,
+      "--scope",
+      "github",
+      "--key",
+      "host",
+      "--secret"
+    ]);
+    expect(deleted.exitCode).toBe(2);
+    expect(deleted.stdout).toContain("Unexpected option(s) for auth subcommand: --secret");
+  });
+
+  it("fails loudly when the credential index is malformed", async () => {
+    await writeFile(indexPath, "{not-json", "utf8");
+
+    const list = await executeCli(["auth", "list", "--index", indexPath]);
+    expect(list.exitCode).toBe(1);
+    expect(list.stdout).toContain("Failed to read credential index");
   });
 });

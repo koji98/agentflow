@@ -10,7 +10,8 @@ Agentflow is built for local repositories and local control. The authored DAG re
 
 - Humans define the goal, constraints, acceptance criteria, repos, profiles, tools, and outcome artifacts.
 - Agent nodes own substantial engineering outcomes rather than tiny prompt handoffs.
-- Deterministic and semantic checks feed the supervisor with structured evidence.
+- Deterministic and AI checks are in-run sensors that feed structured evidence to the supervisor.
+- Planned `checkpoint` nodes capture human approval inside repeat loops; supervisor `pause_for_human` handles safety stops outside the authored path.
 - Supervisor interventions are policy-bounded, durable, and visible in `interventions.jsonl`.
 - Terminal runs write a `delivery/` package that helps humans review the work quickly.
 
@@ -24,13 +25,14 @@ flowchart LR
   artifacts --> delivery["Delivery package\nreviewer guide and evidence"]
 ```
 
-The graph is not a free-form planner. It is an accountable execution contract. The supervisor can retry with guidance, repair missing artifacts, rebuild context, run diagnostics, request semantic evaluation, pause for human input, or fail the run. It cannot silently change the task, widen authority, bypass checks, or hide its interventions.
+The graph is not a free-form planner. It is an accountable execution contract. The supervisor can retry with guidance, repair missing artifacts, rebuild context, run diagnostics, run a semantic-evaluation intervention, pause for human input, or fail the run. It cannot silently change the task, widen authority, bypass checks, or hide its interventions.
 
 ## Where To Start
 
 - Humans evaluating Agentflow should read this README, then `docs/SCOPE.md` for the product boundary and `docs/ARCHITECTURE.md` for the runtime model.
 - Graph authors should use the minimal graph below, `docs/examples/graphs/`, and `docs/OPERATIONS.md` for validation and launch.
 - Plugin authors should use `docs/PLUGINS.md` for local or Git plugin packages, workflow exports, tool exports, and secure auth.
+- Implementers and debuggers who need the mechanics should use `docs/technical-implementation/` for runtime lifecycle, context/artifact materialization, and tool injection details.
 - Operators reviewing a terminal run should start with `delivery/manifest.json` and the human entrypoints it lists.
 - Agents authoring or debugging Agentflow should use the packaged `agentflow` and `agentflow-plugins` skills under `skills/`.
 
@@ -176,6 +178,8 @@ Top-level fields:
 
 Executable nodes are `agent`, `exec`, `check`, and `checkpoint`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change`.
 
+`checkpoint` is the planned human gate. In this release it belongs inside a `repeat` body so a human pass, deny, or abort decision can drive loop control and operator feedback. Supervisor `pause_for_human` is different: it is a safety pause chosen by runtime policy after a failure or risk classification, persisted in run state, and resumed with `agentflow resume --human-action ...`.
+
 Top-level `repos` are operational bindings: they say which local checkouts exist and where nodes execute. Top-level `profiles` are operational authority: they say which harness, sandbox, timeout, model, and tool policy a node receives. Scope boundaries belong in plain-language `constraints` so authors do not have to choose between overlapping soft fields.
 
 Agent and AI check nodes require `goal`. Executable nodes may add `acceptance_criteria` and `constraints`; Agentflow renders those structured fields into Codex CLI and Cursor CLI prompts, supervisor repair prompts, and resume fingerprints.
@@ -195,8 +199,8 @@ Reserved automatic artifacts are `agent_response`, `verification_json`, `stdout`
 4. Add deterministic checks for hard gates and AI checks only when semantic judgment is needed.
 5. Add plugin tools only when a team capability should be available to the agent; keep secret values in plugin `credentials`.
 6. Run `agentflow plugin resolve --graph <path>` when plugins are declared.
-7. Run `agentflow validate --graph <path>`, then `--run-ready`, then `--show-compiled`.
-8. Launch only after the compiled graph shows the expected harnesses, sandboxes, tools, context, artifacts, and supervision policy.
+7. Run `agentflow validate --graph <path>`, `--review` or `--strict-review` for authoring guidance, `--run-ready` for local readiness, and `--show-compiled` or `--diagram` to inspect the compiled shape.
+8. Launch only after the compiled graph and authoring review show the expected harnesses, sandboxes, tools, context, artifacts, checks, handoffs, and supervision policy.
 
 ## Supervisor
 
@@ -214,14 +218,20 @@ Each configured action uses `actions.<action>.max_uses`, with `max_total_interve
 
 If a completed agent misses a declared artifact, validation has already accepted the graph shape, so the runtime treats it as a repairable execution problem. When a harness is available, the supervisor runs an intent-aware repair intervention under the same node authority. When exactly one missing artifact is a human-readable text handoff and no harness is available, the supervisor can synthesize it from the captured `agent_response`; machine-readable artifacts and multi-artifact contracts are not synthesized from prose.
 
+## Evaluation Lanes
+
+- Graph `check` nodes are in-run sensors. Deterministic checks verify hard facts; AI checks judge semantic criteria and return structured evidence.
+- Supervisor `semantic_evaluation` is an intervention. It spends supervisor budget after a runtime classification and records recovery evidence.
+- Managed pattern evaluation is authored workflow structure, such as the evaluator loop generated by `pattern_generate_evaluate_fix`.
+- `agentflow eval` is offline product/workflow evaluation for file-backed suites and variant comparison; it writes `.agentflow/evals` artifacts such as `evaluation-ledger.json`, `benchmark.json`, and `summary.md`.
+
 ## Plugin Tools
 
-Plugins expose team capabilities as ordinary CLI tools. Each tool declares:
+Plugins expose team capabilities as ordinary CLI tools. Each tool declares an `executable` and a clear `description`; tools that need auth declare `credentials`; tools that accept graph-provided defaults may declare `config_schema`.
 
-- `capability`: `context`, `verification`, `mutation`, or `reporting`.
-- `impact`: `read`, `write`, `external`, or `secret`.
+Agentflow resolves plugin tools, places generated launch wrappers on the node `PATH`, and renders the tool contract into the harness prompt without exposing configured values. Non-secret inline `tools[].config` values and secret credentials are resolved only inside the generated launcher when it starts the plugin tool subprocess. `tools[].config` is for graph-provided defaults, not the tool's CLI argument schema; exact CLI arguments belong in the tool executable's `--help`. `agentflow auth` stores secret fields in macOS Keychain and requires `--value-stdin` for secret values. Credential and tool-config values are not exported into the Codex CLI or Cursor CLI harness environment. Declaring a tool in the graph is the operator approval to expose it to eligible nodes. The tool name `af` is reserved for Agentflow's runtime CLI.
 
-Agentflow resolves plugin tools, places generated launch wrappers on the node `PATH`, and renders the tool contract into the harness prompt without exposing configured values. Non-secret inline `tools[].config` values and secret credentials are resolved only inside the generated launcher when it starts the plugin tool subprocess. Secret-impact tools must declare plugin `credentials`; `agentflow auth` stores secret fields in macOS Keychain and requires `--value-stdin` for secret values. Credential and tool-config values are not exported into the Codex CLI or Cursor CLI harness environment. Mutation tools and write-impact tools are not exposed to read-only agents. Declaring a tool in the graph is the approval to expose it to eligible nodes. The tool name `af` is reserved for Agentflow's runtime CLI.
+For the implementation mechanics, see `docs/technical-implementation/runtime-tooling.md`.
 
 ## Agent Runtime CLI
 
@@ -248,6 +258,7 @@ Every terminal run writes:
 - `delivery/manifest.json`
 - `delivery/task-brief.md`
 - `delivery/implementation-summary.md`
+- `delivery/run-map.md`
 - `delivery/grouped-change-map.json`
 - `delivery/decision-log.md`
 - `delivery/evaluation-ledger.json`
@@ -256,7 +267,7 @@ Every terminal run writes:
 - `delivery/follow-up-items.md`
 - `delivery/intervention-trace.json`
 
-The delivery package is intentionally higher signal than raw logs. `delivery/manifest.json` separates human entrypoints (`reviewer-guide.md`, `task-brief.md`, `implementation-summary.md`, `risk-notes.md`, `follow-up-items.md`) from evidence files (`grouped-change-map.json`, `evaluation-ledger.json`, `decision-log.md`, `intervention-trace.json`) and internal runtime artifacts (`state.json`, `events.jsonl`, `interventions.jsonl`, node attempt directories). Humans should start with the delivery files; resume and low-level debugging use the internal artifacts.
+The delivery package is intentionally higher signal than raw logs. `delivery/manifest.json` separates human entrypoints (`reviewer-guide.md`, `task-brief.md`, `implementation-summary.md`, `run-map.md`, `risk-notes.md`, `follow-up-items.md`) from evidence files (`grouped-change-map.json`, `evaluation-ledger.json`, `decision-log.md`, `intervention-trace.json`) and internal runtime artifacts (`state.json`, `events.jsonl`, `interventions.jsonl`, node attempt directories). Humans should start with the delivery files; resume and low-level debugging use the internal artifacts.
 
 ## CLI Workflow
 
@@ -264,15 +275,20 @@ The delivery package is intentionally higher signal than raw logs. `delivery/man
 agentflow graph-help
 agentflow plugin resolve --graph agentflow.graph.json
 agentflow validate --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json --review
+agentflow validate --graph agentflow.graph.json --strict-review
 agentflow validate --graph agentflow.graph.json --run-ready
 agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
+agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg
+agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest
 agentflow run --graph agentflow.graph.json
 agentflow inspect <run-root>
 agentflow resume --run-root <run-root>
 agentflow runs list --graph agentflow.graph.json
 ```
 
-`validate --show-compiled` is the best way to confirm managed patterns, plugin workflows, context references, tool policy, and harness selection before launch.
+`validate` always includes the standard authoring review warnings. Use `--review` for deeper node-by-node guidance, `--strict-review` to fail on serious review findings, `--show-compiled` to inspect the compiled payload, `--diagram` or `--diagram-output` to produce Mermaid for the resolved execution plan, and `--diagram-image-output` to render an image. Image export uses `npx -y @mermaid-js/mermaid-cli` by default; use `--diagram-image-package` to choose a package spec, or `--diagram-image-renderer mmdc` with `AGENTFLOW_MERMAID_CLI_BIN` for an installed local binary.
 
 ## Validation
 
@@ -296,4 +312,5 @@ npm run validate:smoke
 - `src/artifacts/`: run-root paths, event projection, reconciliation, and readers.
 - `src/cli/`: CLI commands and progress rendering.
 - `docs/`: supervised v1 product and operator documentation.
+- `docs/technical-implementation/`: medium-level implementation docs for runtime lifecycle, context/artifact flow, and generated runtime tooling.
 - `skills/`: installable Agentflow skills aligned to the supervised v1 contract.

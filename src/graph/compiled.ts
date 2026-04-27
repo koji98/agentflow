@@ -51,12 +51,8 @@ export type ResolvedToolSource = ResolvedToolPluginSource;
 
 export interface ResolvedTool {
   callable_name: string;
-  capability: "context" | "verification" | "mutation" | "reporting";
-  impact: "read" | "write" | "external" | "secret";
   description?: string;
-  usage?: string;
   executable_path: string;
-  args: string[];
   config: Record<string, string>;
   config_schema?: Record<string, unknown>;
   credentials?: string[];

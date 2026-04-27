@@ -48,9 +48,9 @@ Resolution clones Git plugins into `.agentflow/plugins`, checks out the requeste
 2. Add workflow exports for reusable graph templates and tool exports for executable team capabilities.
 3. Keep workflow config small and schema-backed.
 4. Publish workflow handoff artifacts from one `publish_node`.
-5. Classify every tool with `capability` and `impact`; declare `credentials` for secret-impact tools.
-6. Give every tool a short `description`, concise `usage`, and executable `--help` output with arguments, defaults, output format, exit codes, examples, and safety notes.
-7. Keep inline `tools[].config` values non-secret string options only.
+5. Give every tool a clear `description` and executable `--help` output with arguments, defaults, output format, exit codes, examples, and safety notes.
+6. Declare `credentials` for tools that need auth.
+7. Keep inline `tools[].config` values non-secret and schema-backed; generated launchers expose them to tool subprocesses as environment strings.
 8. Resolve the plugin from a consumer graph and inspect `validate --show-compiled`.
 
 Minimal package:
@@ -97,9 +97,6 @@ Minimal `agentflow.plugin.json`:
     "poll": {
       "executable": "tools/poll-pr.sh",
       "description": "Poll a pull request and print a JSON status object.",
-      "usage": "poll --pr <number>",
-      "capability": "verification",
-      "impact": "secret",
       "credentials": ["github"],
       "config_schema": {
         "type": "object",
@@ -188,12 +185,10 @@ Each tool declares:
 
 - `executable`
 - `description`
-- `usage`
-- `capability`: `context`, `verification`, `mutation`, or `reporting`
-- `impact`: `read`, `write`, `external`, or `secret`
-- optional `args`
-- optional `config_schema` for non-secret runtime options
+- optional `config_schema` for non-secret graph `tools[].config` values
 - optional `credentials` for secure auth scopes
+
+Plugin tools do not declare default CLI arguments in the manifest. The executable owns its interface, documents it in `--help`, and receives the arguments the agent passes when invoking the generated callable tool.
 
 Example:
 
@@ -220,9 +215,6 @@ Example:
     "poll": {
       "executable": "bin/babysit-poll.js",
       "description": "Poll a pull request and print a JSON status object.",
-      "usage": "babysit-poll --pr <number>",
-      "capability": "verification",
-      "impact": "secret",
       "credentials": ["github"],
       "config_schema": {
         "type": "object",
@@ -263,8 +255,10 @@ Runtime behavior:
 - Credential values are not exported to the Codex CLI or Cursor CLI harness environment.
 - Generated tool launchers resolve credentials just before starting the plugin tool subprocess and inject `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into that child process.
 - Generated tool launchers do not resolve credentials for `--help`; they pass non-secret config defaults and append an `Agentflow configured defaults` section with secret-looking keys redacted.
-- The harness prompt includes each tool's capability, impact, description, usage hint, origin, and configured default keys, but never configured values.
+- The harness prompt includes each tool's description, origin, credential scope names, and configured default keys, but never configured values.
 - Tools share the node sandbox and timeout.
+
+For the full implementation flow from compiled tool declaration to generated wrapper, launcher, credential resolution, harness prompt, and invocation ledger, see `technical-implementation/runtime-tooling.md`.
 
 ## Auth
 
@@ -280,15 +274,13 @@ Secret fields are stored in macOS Keychain. Secret values must be supplied throu
 
 ## Tool Policy
 
-Tool impact is part of the supervision and validation contract.
+Tool risk is described in the tool `description` and bounded by the graph or node `constraints`.
 
-- `impact: "read"` can be exposed to read-only agents unless `capability` is `mutation`.
-- `capability: "mutation"` is withheld from read-only agents.
-- `impact: "write"` requires a write-capable sandbox.
-- `impact: "external"` is approved by declaring the tool in the graph or agent node.
-- `impact: "secret"` requires the plugin tool to declare `credentials`.
+- Declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent.
+- Tools share the node sandbox and timeout.
+- Tools that need auth declare `credentials`; configure those values with `agentflow auth`.
 - `af` is a reserved callable name for Agentflow's runtime CLI and cannot be used as a plugin tool alias.
-- `tools[].config` is for non-secret string options only. Secret-looking keys such as `token`, `secret`, `password`, or `api_key` are rejected; put those in plugin `credentials` and configure them with `agentflow auth`.
+- `tools[].config` is for non-secret graph-provided config values only. It is not a CLI argument schema; exact CLI arguments belong in the tool's own `--help` and are passed by the agent at invocation time. Secret-looking keys such as `token`, `secret`, `password`, or `api_key` are rejected; put those in plugin `credentials` and configure them with `agentflow auth`.
 
 These rules keep tool authority visible in the graph and consistent across Codex CLI and Cursor CLI.
 
@@ -307,7 +299,5 @@ Inspect:
 - lockfile commit pins
 - resolved workflow public artifacts
 - generated managed expansion
-- tool capability and impact
 - plugin tool `--help` readiness under `--run-ready`
-- read-only agent write/mutation policy
-- secret and external-impact policy diagnostics
+- credential references and config policy diagnostics

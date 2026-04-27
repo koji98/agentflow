@@ -151,7 +151,7 @@ export function resolveLaunchConfig(
 
   const workspace_backend = workspaceBackends.includes(requestedWorkspaceBackend as WorkspaceBackend)
     ? (requestedWorkspaceBackend as WorkspaceBackend)
-    : "inplace";
+    : undefined;
 
   if (!workspaceBackends.includes(requestedWorkspaceBackend as WorkspaceBackend)) {
     diagnostics.push({
@@ -161,8 +161,8 @@ export function resolveLaunchConfig(
   }
 
   return {
-    launch_profile: launch_profile ?? "default",
-    workspace_backend,
+    launch_profile: launch_profile ?? "",
+    workspace_backend: workspace_backend ?? (requestedWorkspaceBackend as WorkspaceBackend),
     ...(launch_profile && launch_profile in profiles ? { profile: profiles[launch_profile] } : {}),
     diagnostics
   };

@@ -41,6 +41,8 @@ Each node attempt records execution-specific context, logs, result, and artifact
 - `tool-invocation-logs/`
 - `interventions/`
 
+For the implementation model behind these files, see `docs/technical-implementation/context-and-artifacts.md` and `docs/technical-implementation/runtime-tooling.md` in the repository.
+
 ## Debug Order
 
 1. Read `delivery/reviewer-guide.md` if it exists.
@@ -61,3 +63,9 @@ agentflow resume --run-root <run-root>
 ```
 
 Resume preserves compatible completed work and restarts work affected by node-contract or graph-level `intent` or `supervision` changes.
+
+## Human Gates And Pauses
+
+- Authored `checkpoint` nodes are planned human gates inside `repeat` bodies. During a run, they ask the operator for loop-control judgment at the point the graph author intended.
+- Supervisor `pause_for_human` is a safety pause chosen after runtime evidence such as policy risk, unresolved operator judgment, or a checkpoint-related failure.
+- For a paused run, inspect `interventions.jsonl`, `supervisor-timeline.jsonl`, and `runtime/human-resume-input.jsonl` when present, then resume with structured human input through `agentflow resume --run-root <run-root> --human-action ...`.

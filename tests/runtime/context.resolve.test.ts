@@ -102,9 +102,7 @@ describe("context resolution", () => {
               },
               {
                 ref: "source.verification",
-                name: "verification",
-                node: "source",
-                artifact: "verification"
+                name: "verification"
               }
             ]
           }
@@ -194,8 +192,6 @@ describe("context resolution", () => {
               {
                 ref: "source.agent_response",
                 name: "source_response",
-                node: "source",
-                artifact: "agent_response",
                 if_available: true
               }
             ]
@@ -547,16 +543,12 @@ describe("context resolution", () => {
               {
                 ref: "produce.report",
                 name: "latest_passed_report",
-                node: "produce",
-                artifact: "report",
                 iteration: "latest_passed",
                 attempt: "latest"
               },
               {
                 ref: "produce.report",
                 name: "iteration_2_attempt_2_report",
-                node: "produce",
-                artifact: "report",
                 iteration: 2,
                 attempt: 2
               }
@@ -681,8 +673,6 @@ describe("context resolution", () => {
                     {
                       ref: "produce.report",
                       name: "previous_report",
-                      node: "produce",
-                      artifact: "report",
                       iteration: "previous",
                       if_available: true
                     }

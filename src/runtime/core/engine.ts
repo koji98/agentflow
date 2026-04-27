@@ -653,7 +653,7 @@ function actionRetrySummary(action: SupervisorActionKind): string {
     case "run_diagnostic":
       return "Supervisor will retry the node after recording the diagnostic classification.";
     case "semantic_evaluation":
-      return "Supervisor will rerun the semantic evaluation node.";
+      return "Supervisor will run a semantic-evaluation intervention.";
     default:
       return "Supervisor will retry the node with guidance.";
   }
@@ -666,7 +666,7 @@ function interventionTitle(action: SupervisorActionKind): string {
     case "rebuild_context":
       return "Supervisor context brief for retry.";
     case "semantic_evaluation":
-      return "Supervisor semantic evaluation brief.";
+      return "Supervisor semantic-evaluation intervention brief.";
     case "pause_for_human":
       return "Supervisor escalation brief for human input.";
     default:

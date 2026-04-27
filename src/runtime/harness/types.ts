@@ -228,21 +228,12 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
     const origin = describeToolOrigin(tool);
     lines.push("");
     lines.push(`### ${tool.callable_name}${origin ? ` (${origin})` : ""}`);
-    lines.push(`Capability: ${tool.capability}`);
-    lines.push(`Impact: ${tool.impact}`);
     if (tool.description) {
       lines.push(tool.description);
     }
     if (tool.credentials && tool.credentials.length > 0) {
       lines.push(`Credentials: ${tool.credentials.join(", ")}`);
       lines.push("Credential values are resolved only inside the tool subprocess and are not exported to the agent environment.");
-    }
-    if (tool.usage) {
-      lines.push("");
-      lines.push("Usage:");
-      for (const usageLine of tool.usage.split("\n")) {
-        lines.push(`  ${usageLine}`);
-      }
     }
     const configEntries = Object.entries(tool.config);
     if (configEntries.length > 0) {

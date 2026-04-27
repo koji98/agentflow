@@ -107,8 +107,241 @@ describe("graph CLI", () => {
     expect(payload.compiled_validation.managed_expansion).toEqual([]);
     expect(payload.readiness_mode).toBe("declared");
     expect(payload.readiness.status).toBe("ready");
+    expect(payload.authoring_review.mode).toBe("standard");
+    expect(payload.authoring_review.summary.reviewed_node_count).toBe(7);
     expect(payload.next_steps.run).toContain("agentflow run --graph");
     expect(payload.next_steps.graph_help).toBe("agentflow graph-help");
+  });
+
+  it("reports authoring review warnings by default and fails only under strict review", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-authoring-review-"));
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "authoring-review",
+          intent: {
+            goal: "Implement a reviewable change.",
+            acceptance_criteria: ["The implementation is ready to review."]
+          },
+          repos: {
+            main: {
+              path: "."
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {
+              harness: "codex-cli",
+              sandbox: "workspace-write"
+            }
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "agent",
+                id: "implement",
+                repo: "main",
+                goal: "Implement the requested change."
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const normalResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
+    const normalPayload = JSON.parse(normalResult.stdout);
+    const reviewResult = await executeCli(["validate", "--graph", graphPath, "--review"], tempRoot);
+    const reviewPayload = JSON.parse(reviewResult.stdout);
+    const strictResult = await executeCli(["validate", "--graph", graphPath, "--strict-review"], tempRoot);
+    const strictPayload = JSON.parse(strictResult.stdout);
+
+    expect(normalResult.exitCode).toBe(0);
+    expect(normalPayload.status).toBe("passed");
+    expect(normalPayload.authoring_review.mode).toBe("standard");
+    expect(normalPayload.authoring_review.status).toBe("serious_findings");
+    expect(normalPayload.authoring_review.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: "serious",
+          category: "artifact_contract",
+          node_id: "implement"
+        }),
+        expect.objectContaining({
+          severity: "serious",
+          category: "verification"
+        })
+      ])
+    );
+
+    expect(reviewResult.exitCode).toBe(0);
+    expect(reviewPayload.authoring_review.mode).toBe("review");
+    expect(reviewPayload.authoring_review.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "intent",
+          path: "$.intent.constraints"
+        })
+      ])
+    );
+
+    expect(strictResult.exitCode).toBe(1);
+    expect(strictPayload.status).toBe("failed");
+    expect(strictPayload.message).toContain("strict authoring review");
+    expect(strictPayload.authoring_review.mode).toBe("strict-review");
+    expect(strictPayload.readiness.status).toBe("ready");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("emits and writes compiled Mermaid diagrams from validate", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-diagram-"));
+    const graphPath = fileURLToPath(
+      new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
+    );
+    const diagramPath = join(tempRoot, "graph.mmd");
+    const npxImagePath = join(tempRoot, "graph-npx.svg");
+    const mmdcImagePath = join(tempRoot, "graph-mmdc.svg");
+    const fakeNpxPath = join(tempRoot, "npx");
+    const fakeMmdcPath = join(tempRoot, "fake-mmdc.cjs");
+    const previousPath = process.env.PATH;
+    const previousMermaidCliBin = process.env.AGENTFLOW_MERMAID_CLI_BIN;
+    const previousMermaidRenderer = process.env.AGENTFLOW_MERMAID_RENDERER;
+    const previousMermaidNpxPackage = process.env.AGENTFLOW_MERMAID_NPX_PACKAGE;
+
+    await writeFile(
+      fakeNpxPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const packageSpec = args[1];
+const inputPath = args[args.indexOf("-i") + 1];
+const outputPath = args[args.indexOf("-o") + 1];
+const mermaid = fs.readFileSync(inputPath, "utf8");
+fs.writeFileSync(outputPath, \`rendered by npx \${packageSpec}\\n\${mermaid}\`);
+`,
+      "utf8"
+    );
+
+    await writeFile(
+      fakeMmdcPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const inputPath = args[args.indexOf("-i") + 1];
+const outputPath = args[args.indexOf("-o") + 1];
+const mermaid = fs.readFileSync(inputPath, "utf8");
+fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
+`,
+      "utf8"
+    );
+    await chmod(fakeNpxPath, 0o755);
+    await chmod(fakeMmdcPath, 0o755);
+    process.env.PATH = `${tempRoot}:${previousPath ?? ""}`;
+    process.env.AGENTFLOW_MERMAID_CLI_BIN = fakeMmdcPath;
+    delete process.env.AGENTFLOW_MERMAID_RENDERER;
+    delete process.env.AGENTFLOW_MERMAID_NPX_PACKAGE;
+
+    try {
+      const inlineResult = await executeCli(["validate", "--graph", graphPath, "--diagram"], tempRoot);
+      const inlinePayload = JSON.parse(inlineResult.stdout);
+      const writtenResult = await executeCli(
+        ["validate", "--graph", graphPath, "--diagram-output", diagramPath],
+        tempRoot
+      );
+      const writtenPayload = JSON.parse(writtenResult.stdout);
+      const npxImageResult = await executeCli(
+        [
+          "validate",
+          "--graph",
+          graphPath,
+          "--diagram-image-output",
+          npxImagePath,
+          "--diagram-image-package",
+          "fixture-mermaid-cli@1.0.0"
+        ],
+        tempRoot
+      );
+      const npxImagePayload = JSON.parse(npxImageResult.stdout);
+      const mmdcImageResult = await executeCli(
+        [
+          "validate",
+          "--graph",
+          graphPath,
+          "--diagram-image-output",
+          mmdcImagePath,
+          "--diagram-image-renderer",
+          "mmdc"
+        ],
+        tempRoot
+      );
+      const mmdcImagePayload = JSON.parse(mmdcImageResult.stdout);
+      const writtenDiagram = await readFile(diagramPath, "utf8");
+      const renderedNpxImage = await readFile(npxImagePath, "utf8");
+      const renderedMmdcImage = await readFile(mmdcImagePath, "utf8");
+
+      expect(inlineResult.exitCode).toBe(0);
+      expect(inlinePayload.diagram.format).toBe("mermaid");
+      expect(inlinePayload.diagram.graph).toContain("flowchart TD");
+      expect(inlinePayload.diagram.graph).toContain("agent: understand");
+      expect(inlinePayload.diagram.graph).toContain("delivery package");
+
+      expect(writtenResult.exitCode).toBe(0);
+      expect(writtenPayload.diagram_output_path).toBe(diagramPath);
+      expect(writtenPayload).not.toHaveProperty("diagram");
+      expect(writtenDiagram).toContain("flowchart TD");
+      expect(writtenDiagram).toContain("repeat: repair_loop");
+
+      expect(npxImageResult.exitCode).toBe(0);
+      expect(npxImagePayload.diagram_image_output_path).toBe(npxImagePath);
+      expect(npxImagePayload.diagram_image_renderer.renderer).toBe("npx");
+      expect(npxImagePayload.diagram_image_renderer.npx_package).toBe("fixture-mermaid-cli@1.0.0");
+      expect(renderedNpxImage).toContain("rendered by npx fixture-mermaid-cli@1.0.0");
+      expect(renderedNpxImage).toContain("flowchart TD");
+
+      expect(mmdcImageResult.exitCode).toBe(0);
+      expect(mmdcImagePayload.diagram_image_output_path).toBe(mmdcImagePath);
+      expect(mmdcImagePayload.diagram_image_renderer.renderer).toBe("mmdc");
+      expect(mmdcImagePayload.diagram_image_renderer.cli_binary).toBe(fakeMmdcPath);
+      expect(renderedMmdcImage).toContain("rendered svg");
+      expect(renderedMmdcImage).toContain("flowchart TD");
+    } finally {
+      if (previousPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = previousPath;
+      }
+
+      if (previousMermaidCliBin === undefined) {
+        delete process.env.AGENTFLOW_MERMAID_CLI_BIN;
+      } else {
+        process.env.AGENTFLOW_MERMAID_CLI_BIN = previousMermaidCliBin;
+      }
+
+      if (previousMermaidRenderer === undefined) {
+        delete process.env.AGENTFLOW_MERMAID_RENDERER;
+      } else {
+        process.env.AGENTFLOW_MERMAID_RENDERER = previousMermaidRenderer;
+      }
+
+      if (previousMermaidNpxPackage === undefined) {
+        delete process.env.AGENTFLOW_MERMAID_NPX_PACKAGE;
+      } else {
+        process.env.AGENTFLOW_MERMAID_NPX_PACKAGE = previousMermaidNpxPackage;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("renders compact interactive validate success output", async () => {
@@ -544,10 +777,7 @@ describe("graph CLI", () => {
           tools: {
             inspect: {
               executable: "scripts/inspect.sh",
-              description: "Inspect fixture state.",
-              usage: "inspect --format json",
-              capability: "context",
-              impact: "read"
+              description: "Inspect fixture state."
             }
           }
         },
@@ -2152,7 +2382,13 @@ describe("graph CLI", () => {
     );
     expect(graphHelp.stdout).not.toContain("Legacy thin aliases");
     expect(graphHelp.stdout).toContain(`"version": "1"`);
+    expect(graphHelp.stdout).toContain("checkpoint nodes are planned human gates inside repeat bodies");
+    expect(graphHelp.stdout).toContain("evaluation lanes are distinct");
+    expect(graphHelp.stdout).toContain("latest_passed, latest_failed, previous");
     expect(graphHelp.stdout).toContain("Recommended local workflow:");
+    expect(graphHelp.stdout).toContain("--strict-review for release gates");
+    expect(graphHelp.stdout).toContain("--diagram-output graph.mmd");
+    expect(graphHelp.stdout).toContain("--diagram-image-output graph.svg");
     expect(graphHelp.stdout).toContain("Repo paths in $.repos.*.path resolve relative to the graph file directory.");
   });
 
@@ -2195,6 +2431,8 @@ describe("graph CLI", () => {
     const validateHelp = await executeCli(["validate", "-h"]);
     const runsHelp = await executeCli(["runs", "--help"]);
     const inspectHelp = await executeCli(["inspect", "--help"]);
+    const evalHelp = await executeCli(["eval", "--help"]);
+    const evalSubcommandHelp = await executeCli(["eval", "help"]);
 
     expect(mainHelp.exitCode).toBe(0);
     expect(mainHelp.stdout).toContain("Agentflow CLI");
@@ -2204,6 +2442,12 @@ describe("graph CLI", () => {
     expect(validateHelp.exitCode).toBe(0);
     expect(validateHelp.stdout).toContain("validate: Validate and compile an authored graph without launching a run.");
     expect(validateHelp.stdout).toContain("--show-compiled");
+    expect(validateHelp.stdout).toContain("--review");
+    expect(validateHelp.stdout).toContain("--strict-review");
+    expect(validateHelp.stdout).toContain("--diagram-output");
+    expect(validateHelp.stdout).toContain("--diagram-image-output");
+    expect(validateHelp.stdout).toContain("--diagram-image-renderer");
+    expect(validateHelp.stdout).toContain("--diagram-image-package");
 
     expect(runsHelp.exitCode).toBe(0);
     expect(runsHelp.stdout).toContain("runs: Inspect previously recorded run roots");
@@ -2212,6 +2456,11 @@ describe("graph CLI", () => {
     expect(inspectHelp.exitCode).toBe(0);
     expect(inspectHelp.stdout).toContain("inspect: Inspect a recorded run root");
     expect(inspectHelp.stdout).toContain("Usage: agentflow inspect <run-root>");
+
+    expect(evalHelp.exitCode).toBe(0);
+    expect(evalHelp.stdout).toContain("offline product/workflow grading");
+    expect(evalSubcommandHelp.exitCode).toBe(0);
+    expect(evalSubcommandHelp.stdout).toContain("eval is offline product/workflow evaluation");
   });
 
   it("lists recorded run summaries for a graph through agentflow runs list", async () => {
@@ -2423,6 +2672,119 @@ describe("graph CLI", () => {
       expect(nonexistentPayload.command).toBe("inspect");
       expect(nonexistentPayload.status).toBe("failed");
       expect(nonexistentPayload.message).toContain("Run root could not be resolved");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("handles missing or corrupted durable run files during inspect", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-inspect-damaged-"));
+    try {
+      const missingRunJson = join(tempRoot, "missing-run-json");
+      await mkdir(missingRunJson, { recursive: true });
+      const missing = await executeCli(["inspect", missingRunJson], tempRoot);
+      const missingPayload = JSON.parse(missing.stdout);
+
+      expect(missing.exitCode).toBe(1);
+      expect(missingPayload.message).toContain("run.json could not be read");
+
+      const corruptRunJson = join(tempRoot, "corrupt-run-json");
+      await mkdir(corruptRunJson, { recursive: true });
+      await writeFile(join(corruptRunJson, "run.json"), "{not-json", "utf8");
+      const corrupt = await executeCli(["inspect", corruptRunJson], tempRoot);
+      const corruptPayload = JSON.parse(corrupt.stdout);
+
+      expect(corrupt.exitCode).toBe(1);
+      expect(corruptPayload.message).toContain("run.json could not be read");
+
+      const partialState = join(tempRoot, "partial-state");
+      await mkdir(partialState, { recursive: true });
+      await writeFile(
+        join(partialState, "run.json"),
+        `${JSON.stringify({
+          run_id: "run-partial-state",
+          graph_id: "partial-state",
+          launch_profile: "default",
+          workspace_backend: "inplace",
+          status: "failed",
+          started_at: "2026-04-24T00:00:00.000Z",
+          ended_at: "2026-04-24T00:00:01.000Z"
+        }, null, 2)}\n`,
+        "utf8"
+      );
+      await writeFile(join(partialState, "state.json"), "{partial", "utf8");
+      const inspectedPartial = await executeCli(["inspect", partialState], tempRoot);
+      const partialPayload = JSON.parse(inspectedPartial.stdout);
+
+      expect(inspectedPartial.exitCode).toBe(0);
+      expect(partialPayload.status).toBe("passed");
+      expect(partialPayload.run_status).toBe("failed");
+      expect(partialPayload.counts).toBeUndefined();
+      expect(partialPayload.artifacts.state_file).toBe(join(partialState, "state.json"));
+
+      const partialDelivery = join(tempRoot, "partial-delivery");
+      await mkdir(join(partialDelivery, "delivery"), { recursive: true });
+      await writeFile(
+        join(partialDelivery, "run.json"),
+        `${JSON.stringify({
+          run_id: "run-partial-delivery",
+          graph_id: "partial-delivery",
+          launch_profile: "default",
+          workspace_backend: "inplace",
+          status: "passed",
+          started_at: "2026-04-24T00:00:00.000Z",
+          ended_at: "2026-04-24T00:00:01.000Z"
+        }, null, 2)}\n`,
+        "utf8"
+      );
+      await writeFile(
+        join(partialDelivery, "state.json"),
+        `${JSON.stringify({
+          run_id: "run-partial-delivery",
+          graph_id: "partial-delivery",
+          snapshot_seq: 1,
+          status: "passed",
+          evidence_status: "clean",
+          workspace_backend: "inplace",
+          repo_workspaces: {},
+          workspace_change_artifacts: {},
+          counts: {
+            total: 0,
+            pending: 0,
+            ready: 0,
+            running: 0,
+            passed: 0,
+            failed: 0,
+            blocked: 0,
+            canceled: 0,
+            skipped: 0
+          },
+          soft_verification_counts: { passed: 0, failed: 0 },
+          failed_soft_verifications: [],
+          supervisor: {
+            status: "healthy",
+            intervention_count: 0,
+            budget_remaining: {},
+            timeline: [],
+            escalations: []
+          },
+          node_statuses: {},
+          active_executions: {},
+          latest_execution_by_compiled_id: {},
+          repeat_scopes: {},
+          started_at: "2026-04-24T00:00:00.000Z",
+          ended_at: "2026-04-24T00:00:01.000Z"
+        }, null, 2)}\n`,
+        "utf8"
+      );
+      await writeFile(join(partialDelivery, "delivery", "manifest.json"), "{partial", "utf8");
+      const inspectedDelivery = await executeCli(["inspect", partialDelivery], tempRoot);
+      const deliveryPayload = JSON.parse(inspectedDelivery.stdout);
+
+      expect(inspectedDelivery.exitCode).toBe(0);
+      expect(deliveryPayload.status).toBe("passed");
+      expect(deliveryPayload.delivery_package).toBe(join(partialDelivery, "delivery", "manifest.json"));
+      expect(deliveryPayload.delivery_artifact_taxonomy).toBeUndefined();
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

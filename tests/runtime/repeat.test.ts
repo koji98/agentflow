@@ -206,24 +206,18 @@ describe("runtime repeat", () => {
                     {
                       ref: "merge_feedback.critique_merged",
                       name: "failed_critique_merged",
-                      node: "merge_feedback",
-                      artifact: "critique_merged",
                       iteration: "latest_failed",
                       if_available: true
                     },
                     {
                       ref: "quality_review.quality_review",
                       name: "failed_quality_review",
-                      node: "quality_review",
-                      artifact: "quality_review",
                       iteration: "latest_failed",
                       if_available: true
                     },
                     {
                       ref: "human_review.operator_feedback",
                       name: "failed_operator_feedback",
-                      node: "human_review",
-                      artifact: "operator_feedback",
                       iteration: "latest_failed",
                       if_available: true
                     }
@@ -271,9 +265,7 @@ describe("runtime repeat", () => {
                   context: [
                     {
                       ref: "quality_review.quality_review",
-                      name: "quality_review",
-                      node: "quality_review",
-                      artifact: "quality_review"
+                      name: "quality_review"
                     }
                   ]
                 }

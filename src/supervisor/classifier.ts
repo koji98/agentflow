@@ -30,7 +30,15 @@ function readMessage(input: {
     typeof input.attempt.metadata.error === "string"
       ? input.attempt.metadata.error
       : undefined;
-  return input.error_message ?? resultError ?? metadataError ?? "";
+  const resultStderr =
+    typeof input.result?.stderr === "string" && input.result.stderr.trim().length > 0
+      ? input.result.stderr.trim()
+      : undefined;
+  const resultStdout =
+    typeof input.result?.stdout === "string" && input.result.stdout.trim().length > 0
+      ? input.result.stdout.trim()
+      : undefined;
+  return input.error_message ?? resultError ?? metadataError ?? resultStderr ?? resultStdout ?? "";
 }
 
 function resultTimedOut(result: RuntimeNodeExecutionResult | undefined): boolean {
@@ -44,6 +52,20 @@ function readScopeDriftScore(result: RuntimeNodeExecutionResult | undefined): nu
   return typeof result.result.scope_drift.score === "number"
     ? result.result.scope_drift.score
     : undefined;
+}
+
+function isContextFailureMessage(lowerMessage: string): boolean {
+  return [
+    "required context",
+    "context item",
+    "context packet",
+    "context manifest",
+    "context provenance",
+    "context could not be resolved",
+    "execution context could not be resolved",
+    "materialized context",
+    "context material"
+  ].some((fragment) => lowerMessage.includes(fragment));
 }
 
 export function classifyNodeFailure(input: {
@@ -85,7 +107,7 @@ export function classifyNodeFailure(input: {
     };
   }
 
-  if (lowerMessage.includes("context")) {
+  if (isContextFailureMessage(lowerMessage)) {
     return {
       class: "context",
       summary: message || "Execution context could not be resolved.",
@@ -95,7 +117,12 @@ export function classifyNodeFailure(input: {
     };
   }
 
-  if (lowerMessage.includes("harness") || lowerMessage.includes("binary") || lowerMessage.includes("unavailable")) {
+  if (
+    lowerMessage.includes("harness")
+    || lowerMessage.includes("binary")
+    || lowerMessage.includes("required harness is unavailable")
+    || lowerMessage.includes("harness binary")
+  ) {
     return {
       class: "harness",
       summary: message || "Required harness is unavailable.",
@@ -119,7 +146,7 @@ export function classifyNodeFailure(input: {
   if (scopeDriftScore !== undefined && scopeDriftScore < input.policy.policy.drift_score_threshold) {
     return {
       class: "scope_drift",
-      summary: message || "Semantic evaluation detected scope drift.",
+      summary: message || "Scope drift detected.",
       retryable: false,
       recommended_action: "pause_for_human",
       evidence: {

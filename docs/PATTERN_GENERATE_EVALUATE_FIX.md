@@ -28,6 +28,8 @@ Common fields:
 - `evaluation.required`
 - `runtime.max_concurrency`
 
+The `evaluation` block is part of this managed workflow's authored shape. It generates evaluator and repair-loop nodes when the pattern is compiled. Use graph `check` nodes for custom in-run sensors outside the pattern, supervisor `semantic_evaluation` for runtime interventions, and `agentflow eval` for offline suite grading.
+
 ## Published Artifacts
 
 - `change_summary`: human-readable implementation summary.

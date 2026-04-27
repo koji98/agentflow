@@ -1,0 +1,157 @@
+import { describe, expect, it } from "vitest";
+
+import { compileAuthoredGraph } from "../../src/graph/compile.js";
+import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
+import { resolveLaunchConfig } from "../../src/graph/profiles.js";
+import { reviewCompiledGraph } from "../../src/graph/review.js";
+
+function compileReviewGraph(value: unknown) {
+  const normalized = normalizeAuthoredGraphDocument(value);
+  expect(normalized.diagnostics).toEqual([]);
+  expect(normalized.document).toBeDefined();
+
+  const launch = resolveLaunchConfig(normalized.document!);
+  const compilation = compileAuthoredGraph(
+    normalized.document!,
+    launch,
+    normalized.lowered_managed_nodes
+  );
+  expect(compilation.diagnostics).toEqual([]);
+  expect(compilation.compiled_graph).toBeDefined();
+
+  return {
+    document: normalized.document!,
+    graph: compilation.compiled_graph!
+  };
+}
+
+describe("compiled graph authoring review", () => {
+  it("includes graph intent findings in the standard review", () => {
+    const { document, graph } = compileReviewGraph({
+      version: "1",
+      graph_id: "review-standard-intent",
+      intent: {
+        goal: "Ship"
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "noop",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    const review = reviewCompiledGraph(document, graph);
+
+    expect(review.status).toBe("serious_findings");
+    expect(review.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "intent",
+          severity: "serious",
+          path: "$.intent.acceptance_criteria"
+        }),
+        expect.objectContaining({
+          category: "intent",
+          severity: "warning",
+          path: "$.intent.goal"
+        }),
+        expect.objectContaining({
+          category: "intent",
+          severity: "warning",
+          path: "$.intent.constraints"
+        })
+      ])
+    );
+  });
+
+  it("keeps deeper node-purpose guidance behind explicit review modes", () => {
+    const { document, graph } = compileReviewGraph({
+      version: "1",
+      graph_id: "review-deep-node-guidance",
+      intent: {
+        goal: "Publish an implementation package for the requested change.",
+        acceptance_criteria: ["The package includes a reviewable summary."],
+        constraints: ["Stay within the requested change boundary."]
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            goal: "Implement the scoped change.",
+            context: [
+              {
+                name: "wide_scan",
+                from: "workspace_glob",
+                path: "src/**/*.ts",
+                max_files: 101
+              }
+            ],
+            artifacts: {
+              change_summary: {
+                from: "output_dir",
+                path: "change-summary.md",
+                description: "Implementation summary."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const standard = reviewCompiledGraph(document, graph);
+    const full = reviewCompiledGraph(document, graph, { mode: "review" });
+
+    expect(standard.findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "context",
+          path: "$.graph.steps[0].context[0].max_files"
+        })
+      ])
+    );
+    expect(full.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "context",
+          path: "$.graph.steps[0].context[0].max_files"
+        })
+      ])
+    );
+  });
+});

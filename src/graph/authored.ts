@@ -118,14 +118,17 @@ export interface TextInput {
 export interface ArtifactContextRef {
   ref: string;
   name: string;
-  node: string;
-  artifact: string;
   iteration?: ContextSelector;
   attempt?: ContextSelector;
   if_available?: boolean;
 }
 
-export type ContextItem = FileInput | GlobInput | TextInput | ArtifactContextRef;
+export interface ResolvedArtifactContextRef extends ArtifactContextRef {
+  node: string;
+  artifact: string;
+}
+
+export type ContextItem = FileInput | GlobInput | TextInput | ResolvedArtifactContextRef;
 
 export interface ArtifactReference {
   node: string;

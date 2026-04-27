@@ -9,6 +9,8 @@ Agentflow has four runtime layers:
 
 The authored graph remains the source of intent. The compiled graph is the executable contract. Runtime artifacts are the audit log. The delivery package is the human review surface.
 
+For a more detailed implementation walkthrough with diagrams, see `technical-implementation/runtime-lifecycle.md`, `technical-implementation/context-and-artifacts.md`, and `technical-implementation/runtime-tooling.md`.
+
 ## Authored Graph
 
 Required top-level fields:
@@ -102,6 +104,8 @@ Reserved automatic artifacts:
 
 Downstream nodes should consume named artifacts, not rediscover scratch files.
 
+See `technical-implementation/context-and-artifacts.md` for the materialization lifecycle, token budget behavior, repeat selectors, and how artifact refs are derived from `ref`.
+
 ## Harness Contract
 
 Codex CLI and Cursor CLI are adapters behind one Agentflow harness contract. Both receive:
@@ -137,6 +141,8 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocations.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and stdout/stderr sidecar paths when output is captured.
 
 Agents do not rely on synchronous coordination with other graph nodes. Durable work moves through declared artifacts, worker notes are recorded with `af log`, and helper sub-node coordination stays under the parent node's runtime contract.
+
+See `technical-implementation/runtime-tooling.md` for the generated `af` wrapper, plugin launcher, credential isolation, harness environment, and tool invocation ledger flow.
 
 ## Supervision
 
@@ -176,6 +182,16 @@ Supervisor events:
 - `supervisor.intervention.failed`
 - `supervisor.paused`
 
+## Human Gates And Pauses
+
+Agentflow has two human-in-the-loop mechanisms, and they are intentionally different.
+
+`checkpoint` is authored workflow structure. It is a planned human gate that reviews a declared artifact at a known point in the graph. In this release, checkpoints are valid only inside `repeat` bodies so a deny decision can feed the next iteration with operator feedback. A checkpoint used as the repeat `until` node behaves like the loop's human approval sensor: pass exits the loop, deny can drive another iteration, and abort cancels the run.
+
+`pause_for_human` is supervisor safety behavior. It is not an authored node. The supervisor chooses it when a failure or policy classification needs a human decision outside the planned graph path, such as a policy breach, repeated recovery, or scope drift. A pause writes durable run state, records `supervisor.paused`, sets the run status to `paused`, and waits for `agentflow resume --human-action ...`.
+
+This mirrors the durable interrupt/resume shape used by production agent runtimes: the run state is persisted before asking a human, resources are released, and resume input is recorded as part of the audit trail. Agentflow implements that locally through run-root artifacts rather than a remote checkpoint database.
+
 ## Checks And Evaluation
 
 Checks are sensors. They produce evidence for the run, not hidden control-plane behavior.
@@ -186,6 +202,13 @@ Checks are sensors. They produce evidence for the run, not hidden control-plane 
 
 `on_failure: "continue"` keeps soft verification evidence visible while allowing control flow to continue. Operational failures such as spawn errors, timeouts, cancellation, invalid context, missing env files, and missing required artifacts remain hard failures.
 
+Evaluation has four lanes:
+
+- Graph `check` nodes are in-run sensors. They are authored into the graph and can gate flow, repeat loops, or evidence collection.
+- Supervisor `semantic_evaluation` is an intervention. It is chosen by the supervisor after a failed AI check or semantic uncertainty, spends intervention budget, and writes supervisor evidence.
+- Managed pattern evaluation is authored workflow structure. For example, `pattern_generate_evaluate_fix.evaluation` expands into evaluator and repair-loop nodes as part of the compiled graph.
+- `agentflow eval` is offline product or workflow evaluation. It runs file-backed eval suites against Agentflow workflows and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks.
+
 ## Plugin Tools
 
 Plugin-bundled tools are runtime-visible CLI capabilities. Tool exports declare:
@@ -193,19 +216,16 @@ Plugin-bundled tools are runtime-visible CLI capabilities. Tool exports declare:
 - callable name, derived from graph declaration alias or `plugin-tool`
 - `executable`
 - `description`
-- `usage`
-- `capability`
-- `impact`
-- optional config schema
+- optional config schema for non-secret graph `tools[].config` values
 - optional credential scopes
 
 Policy rules:
 
-- read-only agents can receive read or external-impact tools, but never mutation tools or write-impact tools
-- `impact: "secret"` requires plugin-declared `credentials`
-- `impact: "external"` is approved by declaring the tool in the graph or agent node
+- declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent
 - tool wrappers run inside the same node sandbox and timeout
 - credential values and non-secret inline `tools[].config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
+- plugin manifests do not declare default CLI arguments; exact tool CLI arguments belong in the tool's `--help` and are passed by the agent when invoking the callable tool
+- `config_schema` only validates graph-provided default config values
 - executable `--help` is required for every plugin tool, must run without credentials or side effects, and is checked by `agentflow validate --graph ... --run-ready`
 
 ## Delivery Package

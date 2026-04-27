@@ -217,4 +217,62 @@ describe("af runtime CLI", () => {
     expect(spawned.agent.status).toBe("completed");
     await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");
   });
+
+  it("reports a missing helper session as a wait failure", async () => {
+    const runtime = await createRuntime(tempRoot);
+    process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+
+    const result = await executeAfCli([
+      "wait",
+      "--agent",
+      "helper_missing",
+      "--timeout-sec",
+      "0"
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toEqual(
+      expect.objectContaining({
+        command: "af wait",
+        status: "failed",
+        message: "Timed out waiting for helper_missing."
+      })
+    );
+  });
+
+  it("fails af spawn --wait when the helper exits without its required artifact", async () => {
+    const runtime = await createRuntime(tempRoot);
+    const codexBin = join(tempRoot, "mock-codex-no-artifact.mjs");
+    await writeExecutable(codexBin, [
+      "#!/usr/bin/env node",
+      "process.stdout.write('helper finished without artifact\\n');",
+      ""
+    ].join("\n"));
+    process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+    process.env.AGENTFLOW_CODEX_CLI_BIN = codexBin;
+
+    const result = await executeAfCli([
+      "spawn",
+      "--brief",
+      "Exit without writing the required helper artifact.",
+      "--artifact",
+      "helper-report.md",
+      "--wait",
+      "--timeout-sec",
+      "10"
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toEqual(
+      expect.objectContaining({
+        command: "af wait",
+        status: "failed",
+        agent: expect.objectContaining({
+          status: "failed",
+          exit_code: 0,
+          artifacts: {}
+        })
+      })
+    );
+  });
 });
