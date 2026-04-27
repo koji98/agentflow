@@ -47,7 +47,7 @@ describe("supervisor actions", () => {
           description: "Markdown handoff."
         }
       },
-      prompt: "Write a handoff.",
+      goal: "Write a handoff.",
       tools: []
     };
     const attempt: RuntimeNodeAttempt = {
@@ -118,7 +118,7 @@ describe("supervisor actions", () => {
     );
     expect(record.artifact_paths.intervention_dir).toBe(join(executionDir, "interventions", "intervention-1"));
     await expect(readFile(join(executionDir, "interventions", "intervention-1", "prompt.md"), "utf8"))
-      .resolves.toContain("## Agentflow Artifact Repair");
+      .resolves.toContain("## Repair Task");
     await expect(readFile(join(executionDir, "interventions", "intervention-1", "result.json"), "utf8"))
       .resolves.toContain('"missing_artifacts_after": []');
     await expect(readFile(join(artifactsRoot, "handoff.md"), "utf8")).resolves.toBe("repaired\n");

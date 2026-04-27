@@ -102,10 +102,10 @@ The supervisor:
 - classifies failures
 - repairs bounded environment and artifact issues
 - rebuilds context when needed
-- retriggers nodes intelligently
+- retries nodes with guidance when policy allows
 - detects drift from scope or acceptance criteria
-- enforces retry, time, and intervention budgets
-- escalates when policy or ambiguity thresholds are crossed
+- enforces action, time, and intervention budgets
+- pauses for human input when policy or ambiguity thresholds are crossed
 
 The supervisor does not silently change the user’s objective or widen authority.
 
@@ -121,13 +121,12 @@ Its job is to keep execution on track, not to invent a new plan.
 
 It may:
 
-- refresh workspaces
 - repair missing artifacts
-- rerun or retrigger failed nodes
+- retry failed nodes with guidance
 - inject typed diagnostic or repair steps where policy allows
 - request additional evaluation
 - stop unhealthy loops
-- escalate to a human with evidence
+- pause for a human with evidence
 
 It may not:
 

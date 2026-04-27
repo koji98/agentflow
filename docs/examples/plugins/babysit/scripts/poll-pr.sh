@@ -24,15 +24,35 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       cat <<USAGE
-poll-pr.sh - example babysit poll tool
+poll-pr.sh - example babysit poll tool that prints simulated PR status JSON
 
 Usage:
-  poll-pr.sh [--pr <id>] [--once]
+  poll-pr.sh [--pr <id>] [--once] [--help]
 
-Reads:
-  AGENTFLOW_CREDENTIAL_GITHUB_TOKEN  GitHub token resolved by Agentflow auth for this subprocess.
+Arguments:
+  (none)
 
-Prints a JSON object describing the simulated PR status.
+Options:
+  --pr <id>  Pull request id to inspect. Default: unknown
+  --once     Poll once and exit. Default: false
+  --help     Show this help and exit. Default: false
+
+Agentflow configured defaults:
+  (none)
+
+Output:
+  JSON object: {"pr_id": "...", "state": "open", "checks_passing": true, "once": true, "token_present": true}
+
+Exit codes:
+  0 success
+  2 invalid arguments
+  1 runtime failure
+
+Examples:
+  poll-pr.sh --pr 123 --once
+
+Safety:
+  --help is read-only and credential-free. Normal polling reads AGENTFLOW_CREDENTIAL_GITHUB_TOKEN only inside the plugin subprocess.
 USAGE
       exit 0
       ;;

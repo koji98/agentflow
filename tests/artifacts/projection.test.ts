@@ -131,7 +131,7 @@ async function createFixtureRun() {
         {
           type: "agent",
           id: "inspect",
-          prompt: "Inspect the repository.",
+          goal: "Inspect the repository.",
           artifacts: {
             notes: {
               from: "output_dir",
@@ -151,7 +151,7 @@ async function createFixtureRun() {
               {
                 type: "agent",
                 id: "apply-fix",
-                prompt: "Apply the fix.",
+                goal: "Apply the fix.",
                 artifacts: {
                   patch: {
                     from: "output_dir",
@@ -329,7 +329,7 @@ async function createAiTimeoutRun() {
           id: "judge-fix",
           repo: "main",
           check_kind: "ai",
-          prompt: "Judge the graph output."
+          goal: "Judge the graph output."
         }
       ]
     }

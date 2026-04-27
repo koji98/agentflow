@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
 
+import { resolveRunArtifactPaths } from "../../artifacts/paths.js";
 import type { CompiledGraph } from "../../graph/compiled.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { RuntimeEventEnvelope, VerificationRecordedPayload } from "../events.js";
 import type { RuntimeStateSnapshot, WorkspaceChangeArtifacts } from "../session.js";
-import type { SupervisorInterventionRecord } from "../../supervisor/types.js";
+import type { SupervisorDecision, SupervisorInterventionRecord } from "../../supervisor/types.js";
 
 export interface DeliveryEvidence {
   graph_id: string;
@@ -13,6 +14,8 @@ export interface DeliveryEvidence {
   intent: CompiledGraph["intent"];
   attempts: RuntimeNodeAttempt[];
   events: RuntimeEventEnvelope[];
+  supervisor_timeline: SupervisorDecision[];
+  runtime_logs: Array<Record<string, unknown>>;
   interventions: SupervisorInterventionRecord[];
   failed_checks: Array<{
     authored_id: string;
@@ -36,6 +39,13 @@ export interface DeliveryEvidence {
     artifact_path: string;
     content?: string;
   }>;
+  tool_invocations: Array<{
+    authored_id: string;
+    compiled_id: string;
+    execution_id: string;
+    invocation_path: string;
+    records: Array<Record<string, unknown>>;
+  }>;
   workspace_changes: WorkspaceChangeArtifacts[];
 }
 
@@ -51,6 +61,28 @@ async function readTextArtifact(path: string | undefined): Promise<string | unde
   }
 }
 
+async function readJsonlRecords(path: string): Promise<Array<Record<string, unknown>>> {
+  const contents = await readTextArtifact(path);
+  if (!contents) {
+    return [];
+  }
+
+  return contents
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? [parsed as Record<string, unknown>]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
 function readVerification(attempt: RuntimeNodeAttempt): VerificationRecordedPayload | undefined {
   return (
     attempt.metadata.verification &&
@@ -63,11 +95,13 @@ function readVerification(attempt: RuntimeNodeAttempt): VerificationRecordedPayl
 
 export async function collectDeliveryEvidence(options: {
   graph: CompiledGraph;
+  run_root: string;
   state: RuntimeStateSnapshot;
   attempts: RuntimeNodeAttempt[];
   events: RuntimeEventEnvelope[];
   interventions: SupervisorInterventionRecord[];
 }): Promise<DeliveryEvidence> {
+  const runPaths = resolveRunArtifactPaths(options.run_root);
   const agentResponses = await Promise.all(
     options.attempts
       .filter((attempt) => attempt.artifacts.agent_response)
@@ -125,6 +159,26 @@ export async function collectDeliveryEvidence(options: {
       summary: verification?.summary ?? "Check failed."
     }];
   });
+  const toolInvocations = (
+    await Promise.all(
+      options.attempts.map(async (attempt) => {
+        const invocationPath = `${attempt.execution_dir}/tool-invocations.jsonl`;
+        const records = await readJsonlRecords(invocationPath);
+
+        return records.length > 0
+          ? {
+              authored_id: attempt.authored_id,
+              compiled_id: attempt.compiled_id,
+              execution_id: attempt.execution_id,
+              invocation_path: invocationPath,
+              records
+            }
+          : undefined;
+      })
+    )
+  ).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+  const runtimeLogs = await readJsonlRecords(runPaths.runtime_log_file);
+  const supervisorTimeline = options.state.supervisor.timeline;
 
   return {
     graph_id: options.graph.graph_id,
@@ -133,10 +187,13 @@ export async function collectDeliveryEvidence(options: {
     intent: options.graph.intent,
     attempts: options.attempts,
     events: options.events,
+    supervisor_timeline: supervisorTimeline,
+    runtime_logs: runtimeLogs,
     interventions: options.interventions,
     failed_checks: failedChecks,
     agent_responses: agentResponses,
     declared_artifacts: declaredArtifacts,
+    tool_invocations: toolInvocations,
     workspace_changes: Object.values(options.state.workspace_change_artifacts)
   };
 }

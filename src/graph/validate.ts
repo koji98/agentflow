@@ -312,22 +312,12 @@ interface ToolDeclarationValidationResult {
   tools_by_callable: Map<string, ValidatedToolDeclaration>;
 }
 
-function toolApprovalTokens(declaration: ToolDeclaration, callable: string): string[] {
-  return [
-    `tool:${callable}`,
-    `tool:${declaration.from_plugin}/${declaration.tool}`,
-    `external:${callable}`,
-    `external:${declaration.from_plugin}/${declaration.tool}`
-  ].map((token) => token.toLowerCase());
-}
-
 function validateToolDeclarations(
   tools: ToolDeclaration[],
   basePath: string,
   pluginsByAlias: Map<string, ResolvedPlugin>,
   diagnostics: ValidationDiagnostic[],
   options: {
-    approval_boundaries?: string[];
     sandbox?: string;
   } = {}
 ): ToolDeclarationValidationResult {
@@ -390,20 +380,6 @@ function validateToolDeclarations(
       });
     }
 
-    if (exported.impact === "external") {
-      const approvedTokens = new Set(
-        (options.approval_boundaries ?? []).map((boundary) => boundary.trim().toLowerCase())
-      );
-      const approved = toolApprovalTokens(declaration, callable).some((token) => approvedTokens.has(token));
-
-      if (!approved) {
-        diagnostics.push({
-          path: declarationPath,
-          message: `Plugin tool "${callable}" has external impact and must be explicitly approved in intent.approval_boundaries using "tool:${callable}", "tool:${declaration.from_plugin}/${declaration.tool}", "external:${callable}", or "external:${declaration.from_plugin}/${declaration.tool}".`
-        });
-      }
-    }
-
     if (callableNames.has(callable)) {
       diagnostics.push({
         path: declarationPath,
@@ -411,6 +387,8 @@ function validateToolDeclarations(
       });
       return;
     }
+
+    validateToolConfig(declaration.config, `${declarationPath}.config`, exported, diagnostics);
 
     callableNames.add(callable);
     toolsByCallable.set(callable, { exported, declaration });
@@ -454,7 +432,7 @@ function validateToolConfigSchema(
     if (config[key] === undefined) {
       diagnostics.push({
         path: `${basePath}.${key}`,
-        message: `tool_config is missing required property "${key}".`
+        message: `Tool config is missing required property "${key}".`
       });
     }
   });
@@ -465,7 +443,7 @@ function validateToolConfigSchema(
       .forEach((key) => {
         diagnostics.push({
           path: `${basePath}.${key}`,
-          message: `tool_config does not allow property "${key}".`
+          message: `Tool config does not allow property "${key}".`
         });
       });
   }
@@ -479,44 +457,33 @@ function validateToolConfigSchema(
     if (expectedType !== undefined && expectedType !== "string") {
       diagnostics.push({
         path: `${basePath}.${key}`,
-        message: `tool_config property "${key}" must be ${String(expectedType)}, but tool_config values are strings.`
+        message: `Tool config property "${key}" must be ${String(expectedType)}, but tool config values are strings.`
       });
     }
   });
 }
 
 function validateToolConfig(
-  config: Record<string, Record<string, string>> | undefined,
+  config: Record<string, string> | undefined,
   basePath: string,
-  scopeToolsByName: ReadonlyMap<string, ValidatedToolDeclaration>,
+  exported: PluginToolExport,
   diagnostics: ValidationDiagnostic[]
 ): void {
   if (!config) {
     return;
   }
 
-  for (const [toolName, toolConfig] of Object.entries(config)) {
-    const scopeTool = scopeToolsByName.get(toolName);
-    if (!scopeTool) {
+  for (const key of Object.keys(config)) {
+    if (sensitiveToolConfigKeyPattern.test(key)) {
       diagnostics.push({
-        path: `${basePath}.${toolName}`,
-        message: `tool_config references unknown tool "${toolName}". Declare it in tools or via a plugin first.`
+        path: `${basePath}.${key}`,
+        message: `Tool config key "${key}" looks secret-bearing. Put secret values in plugin credentials and configure them with agentflow auth instead.`
       });
-      continue;
     }
+  }
 
-    for (const key of Object.keys(toolConfig)) {
-      if (sensitiveToolConfigKeyPattern.test(key)) {
-        diagnostics.push({
-          path: `${basePath}.${toolName}.${key}`,
-          message: `tool_config key "${key}" looks secret-bearing. Put secret values in plugin credentials and configure them with agentflow auth instead.`
-        });
-      }
-    }
-
-    if (scopeTool.exported.config_schema) {
-      validateToolConfigSchema(toolConfig, scopeTool.exported.config_schema, `${basePath}.${toolName}`, diagnostics);
-    }
+  if (exported.config_schema) {
+    validateToolConfigSchema(config, exported.config_schema, basePath, diagnostics);
   }
 }
 
@@ -537,14 +504,8 @@ async function validateNormalizedDocument(
     document.tools ?? [],
     "$.tools",
     pluginsByAlias,
-    diagnostics,
-    {
-      ...(document.intent.approval_boundaries
-        ? { approval_boundaries: document.intent.approval_boundaries }
-        : {})
-    }
+    diagnostics
   );
-  validateToolConfig(document.tool_config, "$.tool_config", graphToolValidation.tools_by_callable, diagnostics);
 
   (document.prerequisites?.checks ?? []).forEach((check, index) => {
     validatePrerequisiteCheck(check, `$.prerequisites.checks[${index}]`, repoAliases, repoCount, diagnostics);
@@ -552,6 +513,23 @@ async function validateNormalizedDocument(
 
   Object.entries(document.profiles ?? {}).forEach(([profileName, profile]) => {
     validateEnvFiles(profile.env_files, `$.profiles.${profileName}.env_files`, diagnostics);
+    if (profile.harness === "cursor-cli" && profile.reasoning_effort !== undefined) {
+      diagnostics.push({
+        path: `$.profiles.${profileName}.reasoning_effort`,
+        message:
+          `Cursor profile "${profileName}" cannot set reasoning_effort because Cursor model ids encode reasoning effort. ` +
+          "Choose the appropriate Cursor model id instead."
+      });
+    }
+
+    if (profile.harness === "cursor-cli" && profile.ai_check_defaults?.reasoning_effort !== undefined) {
+      diagnostics.push({
+        path: `$.profiles.${profileName}.ai_check_defaults.reasoning_effort`,
+        message:
+          `Cursor profile "${profileName}" cannot set ai_check_defaults.reasoning_effort because Cursor model ids encode reasoning effort. ` +
+          "Choose the appropriate Cursor model id instead."
+      });
+    }
   });
 
   if (document.config_schema) {
@@ -570,6 +548,45 @@ async function validateNormalizedDocument(
       const resolution = resolveNodePolicy(document, launch, node);
       for (const diagnostic of resolution.diagnostics) {
         diagnostics.push(diagnostic);
+      }
+
+      if (resolution.policy?.harness === "cursor-cli" && node.reasoning_effort !== undefined) {
+        diagnostics.push({
+          path: `${metadata.path}.reasoning_effort`,
+          message:
+            `Cursor node "${node.id}" cannot set reasoning_effort because Cursor model ids encode reasoning effort. ` +
+            "Choose the appropriate Cursor model id instead."
+        });
+      }
+
+      if (
+        resolution.policy?.harness === "cursor-cli" &&
+        node.profile &&
+        resolution.node_profile?.harness !== "cursor-cli" &&
+        resolution.node_profile?.reasoning_effort !== undefined
+      ) {
+        diagnostics.push({
+          path: `$.profiles.${node.profile}.reasoning_effort`,
+          message:
+            `Cursor profile "${node.profile}" cannot set reasoning_effort because Cursor model ids encode reasoning effort. ` +
+            "Choose the appropriate Cursor model id instead."
+        });
+      }
+
+      if (
+        resolution.policy?.harness === "cursor-cli" &&
+        node.type === "check" &&
+        node.check_kind === "ai" &&
+        node.profile &&
+        resolution.node_profile?.harness !== "cursor-cli" &&
+        resolution.node_profile?.ai_check_defaults?.reasoning_effort !== undefined
+      ) {
+        diagnostics.push({
+          path: `$.profiles.${node.profile}.ai_check_defaults.reasoning_effort`,
+          message:
+            `Cursor profile "${node.profile}" cannot set ai_check_defaults.reasoning_effort because Cursor model ids encode reasoning effort. ` +
+            "Choose the appropriate Cursor model id instead."
+        });
       }
 
       if (
@@ -693,16 +710,13 @@ async function validateNormalizedDocument(
       });
     }
 
-    if (agentNode.tools || agentNode.tool_config) {
+    if (agentNode.tools) {
       const agentToolValidation = validateToolDeclarations(
         agentNode.tools ?? [],
         `${metadata.path}.tools`,
         pluginsByAlias,
         diagnostics,
         {
-          ...(document.intent.approval_boundaries
-            ? { approval_boundaries: document.intent.approval_boundaries }
-            : {}),
           ...(sandbox ? { sandbox } : {})
         }
       );
@@ -717,11 +731,6 @@ async function validateNormalizedDocument(
         });
       }
 
-      const agentScopeToolsByName = new Map<string, ValidatedToolDeclaration>([
-        ...graphToolValidation.tools_by_callable,
-        ...agentToolValidation.tools_by_callable
-      ]);
-      validateToolConfig(agentNode.tool_config, `${metadata.path}.tool_config`, agentScopeToolsByName, diagnostics);
     }
   }, "$.graph");
 

@@ -386,7 +386,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
         outputDirArtifact("design_brief", "design-brief.md"),
         workflowBriefOutput()
       ),
-      prompt: buildBriefPrompt(config)
+      goal: buildBriefPrompt(config)
     },
     {
       type: "agent",
@@ -397,7 +397,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
         artifactContext("design_brief", briefId, "design_brief")
       ],
       artifacts: outputDirArtifact("current_state", "current-state.md"),
-      prompt: buildInspectPrompt(config)
+      goal: buildInspectPrompt(config)
     },
     {
       type: "agent",
@@ -409,7 +409,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
         artifactContext("current_state", inspectId, "current_state")
       ],
       artifacts: outputDirArtifact("information_gaps", "information-gaps.md"),
-      prompt: buildGapPrompt(config)
+      goal: buildGapPrompt(config)
     }
   ];
 
@@ -430,7 +430,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
           artifactContext("information_gaps", gapId, "information_gaps")
         ],
         artifacts: outputDirArtifact(`external_findings_${String(index + 1).padStart(2, "0")}`, "external-findings.md"),
-        prompt: buildExternalResearchPrompt(config, index)
+        goal: buildExternalResearchPrompt(config, index)
       }))
     } satisfies ParallelNode);
   }
@@ -462,7 +462,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
     ...shared,
     context: directionContext,
     artifacts: buildOptionArtifacts(index),
-    prompt: buildOptionPrompt(config, index, alternatives)
+    goal: buildOptionPrompt(config, index, alternatives)
   }));
 
   steps.push({
@@ -512,7 +512,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
               workflowPlanMarkdownOutput(),
               workflowPlanJsonOutput()
             ),
-            prompt: buildDirectionPrompt(config, alternatives)
+            goal: buildDirectionPrompt(config, alternatives)
           },
           {
             type: "checkpoint",
@@ -526,7 +526,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
               node: directionId,
               artifact: "direction_proposal"
             },
-            prompt: buildDirectionCheckpointPrompt()
+            goal: buildDirectionCheckpointPrompt()
           }
         ]
       },
@@ -547,7 +547,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
         workflowPlanMarkdownOutput(),
         workflowPlanJsonOutput()
       ),
-      prompt: buildDirectionPrompt(config, alternatives)
+      goal: buildDirectionPrompt(config, alternatives)
     });
   }
 
@@ -571,7 +571,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
       latestTradeoffRef
     ],
     artifacts: outputDirArtifact("spec_draft", "spec-draft.md"),
-    prompt: buildDraftPrompt(config)
+    goal: buildDraftPrompt(config)
   });
 
   const critiqueNodes: AgentNode[] = critiqueProfiles.map((profile) => ({
@@ -586,7 +586,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
       artifactContext("current_state", inspectId, "current_state")
     ],
     artifacts: outputDirArtifact(`critique_${profile}`, `critique-${profile}.md`),
-    prompt: buildCritiquePrompt(profile, config)
+    goal: buildCritiquePrompt(profile, config)
   }));
 
   steps.push({
@@ -619,7 +619,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
             })
           ],
           artifacts: outputDirArtifact("spec_revision", "spec-revision.md"),
-          prompt: buildDraftPrompt(config)
+          goal: buildDraftPrompt(config)
         },
         {
           type: "parallel",
@@ -637,7 +637,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
             artifactContext(`critique_${profile}`, workflowNodeId(config.id, `critique_${profile}`), `critique_${profile}`)
           ),
           artifacts: outputDirArtifact("critique_merged", "critique-merged.md"),
-          prompt: buildMergePrompt()
+          goal: buildMergePrompt()
         },
         {
           type: "check",
@@ -651,7 +651,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
             latestDirectionRef,
             artifactContext("current_state", inspectId, "current_state")
           ],
-          prompt: buildQualityPrompt(config),
+          goal: buildQualityPrompt(config),
           rubric: buildQualityRubric(config)
         }
       ]
@@ -694,7 +694,7 @@ export function buildPatternSpecDesign(config: PatternSpecDesignConfig): Sequenc
       })
     ],
     artifacts: publishedArtifacts,
-    prompt: buildFinalizePrompt(config)
+    goal: buildFinalizePrompt(config)
   });
 
   return {

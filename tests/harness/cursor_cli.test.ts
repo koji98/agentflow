@@ -28,11 +28,19 @@ if (envPath) {
     AGENTFLOW_WORKSPACE: process.env.AGENTFLOW_WORKSPACE,
     AGENTFLOW_OUTPUT_DIR: process.env.AGENTFLOW_OUTPUT_DIR,
     AGENTFLOW_CONTEXT_PACKET: process.env.AGENTFLOW_CONTEXT_PACKET,
-    AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST
+    AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST,
+    CURSOR_CONFIG_DIR: process.env.CURSOR_CONFIG_DIR
   }, null, 2));
 }
 
-process.stdout.write('{"passed":true,"summary":"cursor ok"}');
+process.stdout.write(JSON.stringify({
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  duration_ms: 1234,
+  result: process.env.MOCK_CURSOR_RESULT || "cursor final response",
+  session_id: "session-1"
+}));
 `;
 
   await writeFile(binary_path, source);
@@ -87,6 +95,100 @@ describe("cursor cli harness", () => {
     }
   });
 
+  it("fails closed on malformed cursor JSON output", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-malformed-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+    const binary_path = join(tempRoot, "malformed-agent.mjs");
+    await writeFile(binary_path, "#!/usr/bin/env node\nprocess.stdout.write('not-json');\n");
+    await chmod(binary_path, 0o755);
+
+    try {
+      const result = await createCursorCliHarness({ binary: binary_path }).run({
+        runId: "run-malformed",
+        executionId: "exec-malformed",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "read-only",
+        model: "gpt-5-cursor",
+        nodeGoal: "Return malformed.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.metadata?.error).toContain("stdout was not a JSON object");
+      expect(result.outputJson).toBeUndefined();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed on cursor JSON envelopes without successful result text", async () => {
+    const cases = [
+      {
+        name: "missing-result",
+        payload: { type: "result", subtype: "success", is_error: false },
+        expected: "result field"
+      },
+      {
+        name: "error-envelope",
+        payload: { type: "result", subtype: "success", is_error: true, result: "failed" },
+        expected: "is_error=true"
+      },
+      {
+        name: "non-success-subtype",
+        payload: { type: "result", subtype: "error", is_error: false, result: "failed" },
+        expected: 'subtype was "error"'
+      }
+    ];
+
+    for (const testCase of cases) {
+      const tempRoot = await mkdtemp(join(tmpdir(), `agentflow-cursor-${testCase.name}-`));
+      const repoDir = join(tempRoot, "repo");
+      const executionDir = join(tempRoot, "execution");
+      await mkdir(repoDir, { recursive: true });
+      await mkdir(executionDir, { recursive: true });
+      const binary_path = join(tempRoot, "agent.mjs");
+      await writeFile(
+        binary_path,
+        `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(JSON.stringify(testCase.payload))});\n`
+      );
+      await chmod(binary_path, 0o755);
+
+      try {
+        const result = await createCursorCliHarness({ binary: binary_path }).run({
+          runId: `run-${testCase.name}`,
+          executionId: `exec-${testCase.name}`,
+          repoAlias: "main",
+          repoPath: repoDir,
+          sandbox: "read-only",
+          model: "gpt-5-cursor",
+          nodeGoal: "Return envelope.",
+          contextPacketPath: join(executionDir, "context", "packet.json"),
+          contextManifestPath: join(executionDir, "context", "manifest.md"),
+          contextManifest: "",
+          outputDir: executionDir,
+          artifacts: {},
+          timeoutSec: 10,
+          signal: undefined
+        });
+
+        expect(result.status).toBe("failed");
+        expect(result.metadata?.error).toContain(testCase.expected);
+      } finally {
+        await rm(tempRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("resolves the cursor binary from AGENTFLOW_CURSOR_CLI_BIN when no override is provided", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-env-"));
     const repoDir = join(tempRoot, "repo");
@@ -109,7 +211,7 @@ describe("cursor cli harness", () => {
         repoPath: repoDir,
         sandbox: "read-only",
         model: "gpt-5-cursor",
-        prompt: "Read from env override.",
+        nodeGoal: "Read from env override.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
         contextManifest: "",
@@ -168,10 +270,10 @@ describe("cursor cli harness", () => {
         repoPath: repoDir,
         sandbox: "read-only",
         model: "gpt-5-cursor",
-        prompt: "Review the change.",
+        nodeGoal: "Review the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
-        contextManifest: "# Context Manifest: exec-1\n\n- Compiled node: `agent.review`\n- Repo: `main`\n",
+        contextManifest: "# Context Manifest\n\n- Materialized items: `1`\n",
         outputDir,
         artifacts: {
           review_report: {
@@ -193,7 +295,7 @@ describe("cursor cli harness", () => {
         expect.arrayContaining([
           "-p",
           "--output-format",
-          "text",
+          "json",
           "--workspace",
           repoDir,
           "--sandbox",
@@ -204,38 +306,58 @@ describe("cursor cli harness", () => {
       );
       expect(argv).not.toContain("--force");
       expect(prompt).toContain("## Role");
-      expect(prompt).toContain("You are an autonomous coding agent executing one node in an Agentflow graph.");
-      expect(prompt).toContain("future nodes consume only the named artifacts you publish here");
+      expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
+      expect(prompt).toContain("You are executing one node in a wider Agentflow graph.");
       expect(prompt).toContain("## Node Task");
       expect(prompt).toContain("Review the change.");
       expect(prompt).toContain("## Context");
-      expect(prompt).toContain("# Context Manifest: exec-1");
-      expect(prompt).toContain("- Compiled node: `agent.review`");
-      expect(prompt).toContain(`For exact paths, provenance, omission details, or structured metadata, read: ${join(executionDir, "context", "packet.json")}`);
+      expect(prompt).toContain("# Context Manifest");
+      expect(prompt).toContain("Context packet (exact materialized paths, omissions, and structured metadata)");
+      expect(prompt).toContain(join(executionDir, "context", "packet.json"));
+      expect(prompt).toContain("Context provenance (digests and harness instruction inputs, if needed)");
       expect(prompt).toContain("Sandbox: read-only - cannot modify the workspace");
       expect(prompt).toContain("## Artifact Contract");
-      expect(prompt).toContain("Every declared artifact must exist before you finish");
+      expect(prompt).toContain("read-only sandbox prevents file writes");
       expect(prompt).toContain("`review_report` (from `output_dir`)");
-      expect(prompt).toContain(`${outputDir}/review-report.md`);
-      expect(prompt).not.toContain("$AGENTFLOW_OUTPUT_DIR/review-report.md");
-      expect(prompt).toContain("Expected content: Markdown review report for downstream nodes.");
-      expect(prompt).toContain("## Final Response Requirements");
+      expect(prompt).toContain("Markdown review report for downstream nodes.");
+      expect(prompt).toContain("## Final Handoff");
       expect(prompt).toContain("captured automatically by Agentflow as the reserved `agent_response` artifact");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,
         AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
-        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md")
+        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md"),
+        CURSOR_CONFIG_DIR: join(outputDir, ".cursor-config")
       });
       expect(result.outputJson).toEqual({
-        passed: true,
-        summary: "cursor ok"
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1234,
+        result: "cursor final response",
+        session_id: "session-1"
       });
+      expect(result.transcript?.last_message).toBe("cursor final response");
       expect(result.metadata).toEqual(
         expect.objectContaining({
           binary: mock.binary_path,
+          cursor_config_dir: join(outputDir, ".cursor-config"),
+          cursor_cli_config_path: join(outputDir, ".cursor-config", "cli.json"),
           timed_out: false
         })
+      );
+      const cursorConfig = JSON.parse(
+        await readFile(join(outputDir, ".cursor-config", "cli.json"), "utf8")
+      ) as { permissions: { allow: string[]; deny: string[] } };
+      expect(cursorConfig.permissions.allow).toEqual(
+        expect.arrayContaining([
+          `Read(${repoDir}/**)`,
+          `Read(${join(executionDir, "context", "packet.json")})`,
+          `Read(${join(executionDir, "context", "manifest.md")})`
+        ])
+      );
+      expect(cursorConfig.permissions.deny).toEqual(
+        expect.arrayContaining(["Write(*)", "Shell(*)", "WebFetch(*)", "Mcp(*:*)"])
       );
     } finally {
       if (previousArgvPath === undefined) {
@@ -277,7 +399,7 @@ describe("cursor cli harness", () => {
         repoPath: repoDir,
         sandbox: "read-only",
         model: "auto",
-        prompt: "Use the harness default model.",
+        nodeGoal: "Use the harness default model.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
         contextManifest: "",
@@ -325,7 +447,7 @@ describe("cursor cli harness", () => {
         repoPath: repoDir,
         sandbox: "workspace-write",
         model: "gpt-5-cursor",
-        prompt: "Apply the change.",
+        nodeGoal: "Apply the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
         contextManifest: "",
@@ -355,6 +477,55 @@ describe("cursor cli harness", () => {
     }
   });
 
+  it("allows workspace and output writes in cursor config for writable sandboxes", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-config-write-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    const runtimeDir = join(executionDir, "runtime");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCursorBinary(tempRoot);
+    const harness = createCursorCliHarness({
+      binary: mock.binary_path
+    });
+
+    try {
+      const result = await harness.run({
+        runId: "run-config-write",
+        executionId: "exec-config-write",
+        repoAlias: "main",
+        repoPath: repoDir,
+        runtimeDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        nodeGoal: "Apply the change.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      expect(result.status).toBe("passed");
+      const cursorConfig = JSON.parse(
+        await readFile(join(executionDir, ".cursor-config", "cli.json"), "utf8")
+      ) as { permissions: { allow: string[]; deny: string[] } };
+      expect(cursorConfig.permissions.allow).toEqual(
+        expect.arrayContaining([
+          `Write(${repoDir}/**)`,
+          `Write(${executionDir}/**)`,
+          `Write(${runtimeDir}/**)`
+        ])
+      );
+      expect(cursorConfig.permissions.deny).toEqual([]);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("streams stdout and stderr chunks while buffering the final result", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-streaming-"));
     const repoDir = join(tempRoot, "repo");
@@ -376,7 +547,7 @@ describe("cursor cli harness", () => {
         repoPath: repoDir,
         sandbox: "read-only",
         model: "gpt-5-cursor",
-        prompt: "Stream logs.",
+        nodeGoal: "Stream logs.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
         contextManifest: "",

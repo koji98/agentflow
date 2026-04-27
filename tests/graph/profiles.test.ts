@@ -51,7 +51,7 @@ describe("graph profile resolution", () => {
     const resolution = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "implement",
-      prompt: "Implement the change."
+      goal: "Implement the change."
     } satisfies AgentNode);
 
     expect(launch).toEqual({
@@ -178,18 +178,18 @@ describe("graph profile resolution", () => {
     const inherited = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "inherited",
-      prompt: "Write artifacts."
+      goal: "Write artifacts."
     } satisfies AgentNode);
     const profileOverride = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "profile_override",
       profile: "disabled",
-      prompt: "Write artifacts."
+      goal: "Write artifacts."
     } satisfies AgentNode);
     const nodeOverride = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "node_override",
-      prompt: "Write artifacts.",
+      goal: "Write artifacts.",
       artifact_repair: {
         max_attempts: 3
       }
@@ -241,14 +241,14 @@ describe("graph profile resolution", () => {
       id: "judge_same",
       profile: "same_harness",
       check_kind: "ai",
-      prompt: "Judge the patch."
+      goal: "Judge the patch."
     } satisfies CheckNode);
     const isolated = resolveNodePolicy(document, launch, {
       type: "check",
       id: "judge_cross",
       profile: "different_harness",
       check_kind: "ai",
-      prompt: "Judge the patch."
+      goal: "Judge the patch."
     } satisfies CheckNode);
 
     expect(inherited.diagnostics).toEqual([]);
@@ -262,14 +262,7 @@ describe("graph profile resolution", () => {
       })
     );
 
-    expect(isolated.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.judge_cross.profile",
-          message: expect.stringContaining('does not support AI checks')
-        })
-      ])
-    );
+    expect(isolated.diagnostics).toEqual([]);
     expect(isolated.policy).toEqual(
       expect.objectContaining({
         profile_name: "different_harness",
@@ -297,7 +290,7 @@ describe("graph profile resolution", () => {
     const resolution = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "implement",
-      prompt: "Implement the change.",
+      goal: "Implement the change.",
       reasoning_effort: "xhigh"
     } satisfies AgentNode);
 
@@ -325,13 +318,13 @@ describe("graph profile resolution", () => {
     const codexResolution = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "implement",
-      prompt: "Implement the change."
+      goal: "Implement the change."
     } satisfies AgentNode);
     const cursorResolution = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "cursor_implement",
       profile: "cursor",
-      prompt: "Implement the change."
+      goal: "Implement the change."
     } satisfies AgentNode);
 
     expect(codexResolution.diagnostics).toEqual([]);

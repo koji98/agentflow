@@ -218,7 +218,7 @@ function resolveToolDeclaration(
     ...(exported.usage ? { usage: exported.usage } : {}),
     executable_path: executablePath,
     args: [...(exported.args ?? [])],
-    config: {},
+    config: { ...(declaration.config ?? {}) },
     ...(exported.config_schema ? { config_schema: exported.config_schema } : {}),
     ...(exported.credentials && exported.credentials.length > 0 ? { credentials: [...exported.credentials] } : {}),
     source
@@ -265,35 +265,12 @@ function buildGraphScopeTools(
   return tools;
 }
 
-function applyToolConfigOverrides(
-  tools: ResolvedTool[],
-  overrides: Record<string, Record<string, string>> | undefined
-): ResolvedTool[] {
-  if (!overrides) {
-    return tools;
-  }
-  return tools.map((tool) => {
-    const override = overrides[tool.callable_name];
-    if (!override) {
-      return tool;
-    }
-    return {
-      ...tool,
-      config: { ...tool.config, ...override }
-    };
-  });
-}
-
 function buildAgentResolvedTools(
   context: CompileContext,
   agentNode: AgentNode,
   agentPath: string
 ): ResolvedTool[] {
-  const baseTools = applyToolConfigOverrides(
-    context.graph_scope_tools,
-    context.document.tool_config
-  );
-
+  const baseTools = context.graph_scope_tools;
   const baseNames = new Set<string>(baseTools.map((tool) => tool.callable_name));
   const effectiveTools: ResolvedTool[] = [...baseTools];
 
@@ -330,7 +307,7 @@ function buildAgentResolvedTools(
     effectiveTools.push(resolved);
   });
 
-  return applyToolConfigOverrides(effectiveTools, agentNode.tool_config);
+  return effectiveTools;
 }
 
 function resolveCheckFields(
@@ -399,6 +376,7 @@ function compileExecutableNode(
     ...(node.label ? { label: node.label } : {}),
     ...(node.goal ? { goal: node.goal } : {}),
     ...(node.acceptance_criteria ? { acceptance_criteria: node.acceptance_criteria } : {}),
+    ...(node.constraints ? { constraints: node.constraints } : {}),
     repo: repo ?? "unknown",
     deps: [],
     scope_stack: scopeFrame.scope_stack,
@@ -421,7 +399,6 @@ function compileExecutableNode(
     compiledNode = {
       ...compiledBase,
       kind: "agent",
-      prompt: node.prompt ?? node.goal ?? "",
       tools: resolvedTools
     };
   } else if (node.type === "exec") {
@@ -446,7 +423,6 @@ function compileExecutableNode(
     compiledNode = {
       ...compiledBase,
       kind: "checkpoint",
-      prompt: node.prompt,
       review_from: node.review_from
     };
   } else {
@@ -462,7 +438,6 @@ function compileExecutableNode(
       ...(resolvedCheckFields.env_files !== undefined ? { env_files: resolvedCheckFields.env_files } : {}),
       ...(resolvedCheckFields.env ? { env: resolvedCheckFields.env } : {}),
       ...(resolvedCheckFields.pass_if ? { pass_if: resolvedCheckFields.pass_if } : {}),
-      ...(node.prompt ? { prompt: node.prompt } : {}),
       ...(resolvedCheckFields.rubric ? { rubric: resolvedCheckFields.rubric } : {})
     };
   }
@@ -989,7 +964,6 @@ export function compileAuthoredGraph(
     graph_id: document.graph_id,
     intent: document.intent,
     supervision: document.supervision,
-    delivery: document.delivery,
     launch: {
       launch_profile: launch.launch_profile,
       workspace_backend: launch.workspace_backend

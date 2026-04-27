@@ -3,13 +3,13 @@ import { join } from "node:path";
 
 import { resolveExecutionArtifactsDirectory } from "../artifacts/paths.js";
 import type { CompiledAgentNode } from "../graph/compiled.js";
-import type { HarnessName } from "../graph/schema.js";
+import type { HarnessName, SupervisorActionKind } from "../graph/schema.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
-import { substituteAgentflowTokens } from "../runtime/harness/tokens.js";
-import type { HarnessAdapter } from "../runtime/harness/types.js";
+import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../runtime/harness/types.js";
 import type { RuntimeSession } from "../runtime/session.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
 import type { SupervisorInterventionRecord } from "./types.js";
+import type { FailureClassification } from "./classifier.js";
 
 export interface MissingDeclaredArtifact {
   name: string;
@@ -17,96 +17,6 @@ export interface MissingDeclaredArtifact {
   path: string;
   description: string;
   expected_path: string;
-}
-
-function formatMissingArtifactList(missingArtifacts: MissingDeclaredArtifact[]): string {
-  return missingArtifacts
-    .map((artifact) => [
-      `- \`${artifact.name}\``,
-      `  - from: \`${artifact.from}\``,
-      `  - declared path: \`${artifact.path}\``,
-      `  - expected absolute path: \`${artifact.expected_path}\``,
-      `  - expected content: ${artifact.description}`
-    ].join("\n"))
-    .join("\n");
-}
-
-function formatBullets(values: string[] | undefined, emptyText: string): string[] {
-  if (!values || values.length === 0) {
-    return [`- ${emptyText}`];
-  }
-
-  return values.map((value) => `- ${value}`);
-}
-
-function buildArtifactRepairPrompt(options: {
-  node: CompiledAgentNode;
-  attempt: RuntimeNodeAttempt;
-  graph_goal: string;
-  graph_acceptance_criteria?: string[];
-  graph_constraints?: string[];
-  repair_attempt: number;
-  max_attempts: number;
-  missing_artifacts: MissingDeclaredArtifact[];
-  workspace_path: string;
-  context_packet_path: string;
-  context_manifest_path: string;
-  run_id: string;
-}): string {
-  const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
-  const priorResponsePath = join(artifactsRoot, "agent-response.md");
-
-  return [
-    "## Agentflow Artifact Repair",
-    "",
-    "You already executed this Agentflow agent node, but the node did not satisfy its declared artifact contract.",
-    "Do not redo unrelated work. Your only job is to produce the missing declared artifacts at the exact expected paths.",
-    "",
-    "## Graph Intent",
-    "",
-    options.graph_goal,
-    "",
-    "Acceptance criteria:",
-    ...formatBullets(options.graph_acceptance_criteria, "No graph-level acceptance criteria were authored."),
-    "",
-    "Constraints:",
-    ...formatBullets(options.graph_constraints, "No graph-level constraints were authored."),
-    "",
-    "## Node Intent",
-    "",
-    options.node.goal ?? options.node.prompt,
-    "",
-    "Acceptance criteria:",
-    ...formatBullets(options.node.acceptance_criteria, "No node-level acceptance criteria were authored."),
-    "",
-    "## Original Node Task",
-    options.node.prompt,
-    "",
-    "## Missing Artifacts",
-    formatMissingArtifactList(options.missing_artifacts),
-    "",
-    "## Available Evidence",
-    `- Workspace: ${options.workspace_path}`,
-    `- Output directory for output_dir artifacts: ${artifactsRoot}`,
-    `- Context manifest: ${options.context_manifest_path}`,
-    `- Context packet: ${options.context_packet_path}`,
-    `- Prior final response artifact, if present: ${priorResponsePath}`,
-    `- Prior stdout log: ${options.attempt.stdout_log_path ?? join(options.attempt.execution_dir, "logs", "stdout.log")}`,
-    `- Prior stderr log: ${options.attempt.stderr_log_path ?? join(options.attempt.execution_dir, "logs", "stderr.log")}`,
-    "",
-    "## Repair Instructions",
-    "- Inspect the workspace, git status, git diff, output directory, context, prior response, and logs as needed.",
-    "- If the artifact content exists in the wrong location, move or copy it to the expected absolute path.",
-    "- If the handoff was never written, write it now from the completed work, workspace changes, and available context.",
-    "- Do not make unrelated source changes.",
-    "- Finish only after every missing artifact exists at its exact expected absolute path.",
-    "",
-    "## Diagnostics",
-    `- Repair attempt: ${options.repair_attempt} of ${options.max_attempts}`,
-    `- Run ID: ${options.run_id}`,
-    `- Execution ID: ${options.attempt.execution_id}`,
-    `- Agent node: ${options.node.authored_id}`
-  ].join("\n");
 }
 
 function createDefaultInterventionId(attempt: RuntimeNodeAttempt, repairAttempt: number): string {
@@ -138,6 +48,75 @@ async function readContextManifestContent(path: string): Promise<string> {
   }
 }
 
+function buildRepairInvocation(options: {
+  node: CompiledAgentNode;
+  attempt: RuntimeNodeAttempt;
+  execution_id?: string;
+  run_id: string;
+  graph_goal: string;
+  graph_acceptance_criteria?: string[];
+  graph_constraints?: string[];
+  workspace_path: string;
+  context_packet_path: string;
+  context_manifest_path: string;
+  context_manifest: string;
+  artifacts_root: string;
+  repair_attempt: number;
+  max_attempts: number;
+  missing_artifacts: MissingDeclaredArtifact[];
+  tool_bin_dir?: string;
+  tool_env?: Record<string, string>;
+  tools?: AgentInvocation["tools"];
+  signal?: AbortSignal;
+}): AgentInvocation {
+  const priorResponsePath = join(options.artifacts_root, "agent-response.md");
+  return {
+    promptKind: "artifact_repair",
+    runId: options.run_id,
+    executionId: options.execution_id ?? options.attempt.execution_id,
+    repoAlias: options.node.repo,
+    repoPath: options.workspace_path,
+    sandbox: options.node.effective_policy.sandbox ?? "workspace-write",
+    ...(options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
+    model: options.node.effective_policy.model,
+    ...(options.node.effective_policy.reasoning_effort
+      ? { reasoningEffort: options.node.effective_policy.reasoning_effort }
+      : {}),
+    graphGoal: options.graph_goal,
+    ...(options.graph_acceptance_criteria ? { graphAcceptanceCriteria: options.graph_acceptance_criteria } : {}),
+    ...(options.graph_constraints ? { graphConstraints: options.graph_constraints } : {}),
+    nodeGoal: options.node.goal
+      ? `Produce the missing declared artifacts while preserving the original node goal:\n${options.node.goal}`
+      : "Produce the missing declared artifacts for the previously executed node.",
+    ...(options.node.acceptance_criteria ? { nodeAcceptanceCriteria: options.node.acceptance_criteria } : {}),
+    ...(options.node.constraints ? { nodeConstraints: options.node.constraints } : {}),
+    contextPacketPath: options.context_packet_path,
+    contextManifestPath: options.context_manifest_path,
+    contextManifest: options.context_manifest,
+    outputDir: options.artifacts_root,
+    artifacts: options.node.declared_artifacts,
+    timeoutSec: options.node.effective_policy.timeout_sec,
+    signal: options.signal,
+    ...(options.tool_bin_dir ? { toolBinDir: options.tool_bin_dir } : {}),
+    ...(options.tool_env ? { toolEnv: options.tool_env } : {}),
+    ...(options.tools ? { tools: options.tools } : {}),
+    repair: {
+      repairAttempt: options.repair_attempt,
+      maxAttempts: options.max_attempts,
+      priorResponsePath,
+      stdoutLogPath: options.attempt.stdout_log_path ?? join(options.attempt.execution_dir, "logs", "stdout.log"),
+      stderrLogPath: options.attempt.stderr_log_path ?? join(options.attempt.execution_dir, "logs", "stderr.log"),
+      missingArtifacts: options.missing_artifacts.map((artifact) => ({
+        name: artifact.name,
+        from: artifact.from,
+        path: artifact.path,
+        description: artifact.description,
+        expectedPath: artifact.expected_path
+      }))
+    }
+  };
+}
+
 export async function runRepairArtifactIntervention(options: {
   node: CompiledAgentNode;
   attempt: RuntimeNodeAttempt;
@@ -160,46 +139,43 @@ export async function runRepairArtifactIntervention(options: {
   const interventionDir = join(options.attempt.execution_dir, "interventions", interventionId);
   const startedAt = new Date().toISOString();
   const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
-  const promptTokens: Record<string, string> = {
-    AGENTFLOW_WORKSPACE: options.workspace_path,
-    AGENTFLOW_OUTPUT_DIR: artifactsRoot,
-    AGENTFLOW_CONTEXT_PACKET: options.context_packet_path,
-    AGENTFLOW_CONTEXT_MANIFEST: options.context_manifest_path
-  };
   const graphIntent = options.session.graph?.intent ?? {
     goal: "Repair the missing artifact without changing the authored task intent."
   };
-  const composedPrompt = buildArtifactRepairPrompt({
-    node: options.node,
-    attempt: options.attempt,
-    graph_goal: graphIntent.goal,
-    ...(graphIntent.acceptance_criteria
-      ? { graph_acceptance_criteria: graphIntent.acceptance_criteria }
-      : {}),
-    ...(graphIntent.constraints
-      ? { graph_constraints: graphIntent.constraints }
-      : {}),
-    repair_attempt: repairAttempt,
-    max_attempts: maxAttempts,
-    missing_artifacts: options.missing_artifacts,
-    workspace_path: options.workspace_path,
-    context_packet_path: options.context_packet_path,
-    context_manifest_path: options.context_manifest_path,
-    run_id: options.session.run_id
-  });
-  const prompt = substituteAgentflowTokens(composedPrompt, promptTokens);
   const promptPath = join(interventionDir, "prompt.md");
   const stdoutPath = join(interventionDir, "stdout.log");
   const stderrPath = join(interventionDir, "stderr.log");
   const resultPath = join(interventionDir, "result.json");
 
   await mkdir(interventionDir, { recursive: true });
-  await writeFile(promptPath, `${prompt}\n`, "utf8");
+  const contextManifest = await readContextManifestContent(options.context_manifest_path);
 
   const harnessName = options.node.effective_policy.harness;
   const harness = harnessName ? options.harnesses[harnessName] : undefined;
 
   if (!harnessName || !harness) {
+    const unavailableInvocation = buildRepairInvocation({
+      node: options.node,
+      attempt: options.attempt,
+      run_id: options.session.run_id,
+      execution_id: `${options.attempt.execution_id}__${interventionId}`,
+      graph_goal: graphIntent.goal,
+      ...(graphIntent.acceptance_criteria
+        ? { graph_acceptance_criteria: graphIntent.acceptance_criteria }
+        : {}),
+      ...(graphIntent.constraints ? { graph_constraints: graphIntent.constraints } : {}),
+      workspace_path: options.workspace_path,
+      context_packet_path: options.context_packet_path,
+      context_manifest_path: options.context_manifest_path,
+      context_manifest: contextManifest,
+      artifacts_root: artifactsRoot,
+      repair_attempt: repairAttempt,
+      max_attempts: maxAttempts,
+      missing_artifacts: options.missing_artifacts,
+      tools: options.node.tools,
+      ...(options.signal ? { signal: options.signal } : {})
+    });
+    await writeFile(promptPath, `${renderHarnessPrompt(unavailableInvocation)}\n`, "utf8");
     const stillMissing = await collectStillMissing(options.missing_artifacts);
     const reason = "Artifact repair could not run because the resolved harness adapter is unavailable.";
     await Promise.all([
@@ -249,31 +225,31 @@ export async function runRepairArtifactIntervention(options: {
     artifacts_root: artifactsRoot,
     credential_specs: options.session.graph?.credential_specs ?? {}
   });
-  const contextManifest = await readContextManifestContent(options.context_manifest_path);
-  const result = await harness.run({
-    promptKind: "agent",
-    runId: options.session.run_id,
-    executionId: `${options.attempt.execution_id}__${interventionId}`,
-    repoAlias: options.node.repo,
-    repoPath: options.workspace_path,
-    sandbox: options.node.effective_policy.sandbox ?? "workspace-write",
-    ...(options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
-    model: options.node.effective_policy.model,
-    ...(options.node.effective_policy.reasoning_effort
-      ? { reasoningEffort: options.node.effective_policy.reasoning_effort }
+  const invocation = buildRepairInvocation({
+    node: options.node,
+    attempt: options.attempt,
+    run_id: options.session.run_id,
+    execution_id: `${options.attempt.execution_id}__${interventionId}`,
+    graph_goal: graphIntent.goal,
+    ...(graphIntent.acceptance_criteria
+      ? { graph_acceptance_criteria: graphIntent.acceptance_criteria }
       : {}),
-    prompt,
-    contextPacketPath: options.context_packet_path,
-    contextManifestPath: options.context_manifest_path,
-    contextManifest,
-    outputDir: artifactsRoot,
-    artifacts: options.node.declared_artifacts,
-    timeoutSec: options.node.effective_policy.timeout_sec,
-    signal: options.signal,
-    toolBinDir: repairToolSetup.bin_dir,
-    toolEnv: repairToolSetup.env,
-    tools: repairToolSetup.resolved_tools
+    ...(graphIntent.constraints ? { graph_constraints: graphIntent.constraints } : {}),
+    workspace_path: options.workspace_path,
+    context_packet_path: options.context_packet_path,
+    context_manifest_path: options.context_manifest_path,
+    context_manifest: contextManifest,
+    artifacts_root: artifactsRoot,
+    repair_attempt: repairAttempt,
+    max_attempts: maxAttempts,
+    missing_artifacts: options.missing_artifacts,
+    tool_bin_dir: repairToolSetup.bin_dir,
+    tool_env: repairToolSetup.env,
+    tools: repairToolSetup.resolved_tools,
+    ...(options.signal ? { signal: options.signal } : {})
   });
+  await writeFile(promptPath, `${renderHarnessPrompt(invocation)}\n`, "utf8");
+  const result = await harness.run(invocation);
   const stillMissing = await collectStillMissing(options.missing_artifacts);
   const status =
     result.status === "canceled"
@@ -328,6 +304,70 @@ export async function runRepairArtifactIntervention(options: {
       prompt: promptPath,
       stdout: stdoutPath,
       stderr: stderrPath,
+      result: resultPath
+    }
+  };
+}
+
+export async function runEvidenceIntervention(options: {
+  action: Extract<
+    SupervisorActionKind,
+    "retry_with_guidance" | "run_diagnostic" | "rebuild_context" | "semantic_evaluation" | "pause_for_human"
+  >;
+  attempt: RuntimeNodeAttempt;
+  decision_id: string;
+  intervention_id: string;
+  classification: FailureClassification;
+  title: string;
+  body: string;
+}): Promise<SupervisorInterventionRecord> {
+  const interventionDir = join(options.attempt.execution_dir, "interventions", options.intervention_id);
+  const startedAt = new Date().toISOString();
+  const fileName =
+    options.action === "pause_for_human"
+      ? "escalation-brief.md"
+      : options.action === "rebuild_context"
+        ? "context-brief.md"
+        : options.action === "semantic_evaluation"
+          ? "semantic-evaluation.md"
+          : options.action === "retry_with_guidance"
+            ? "retry-guidance.md"
+            : "diagnostic.md";
+  const artifactPath = join(interventionDir, fileName);
+  const resultPath = join(interventionDir, "result.json");
+  await mkdir(interventionDir, { recursive: true });
+  await Promise.all([
+    writeFile(artifactPath, `${options.body.trim()}\n`, "utf8"),
+    writeFile(
+      resultPath,
+      `${JSON.stringify({
+        status: "passed",
+        action: options.action,
+        classification: options.classification.class,
+        summary: options.classification.summary
+      }, null, 2)}\n`,
+      "utf8"
+    )
+  ]);
+
+  return {
+    intervention_id: options.intervention_id,
+    decision_id: options.decision_id,
+    action: options.action,
+    status: "passed",
+    target_compiled_id: options.attempt.compiled_id,
+    target_execution_id: options.attempt.execution_id,
+    started_at: startedAt,
+    ended_at: new Date().toISOString(),
+    reason: options.title,
+    evidence: {
+      classification: options.classification.class,
+      summary: options.classification.summary,
+      ...options.classification.evidence
+    },
+    artifact_paths: {
+      intervention_dir: interventionDir,
+      brief: artifactPath,
       result: resultPath
     }
   };

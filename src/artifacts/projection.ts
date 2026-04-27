@@ -43,6 +43,7 @@ export type ProjectionStatus =
   | "Pending"
   | "Ready"
   | "Running"
+  | "Paused"
   | "Passed"
   | "Failed"
   | "Blocked"
@@ -173,7 +174,6 @@ export interface ProjectedNodeDefinition {
   context: CompiledExecutableNode["context"];
   declared_artifacts: CompiledExecutableNode["declared_artifacts"];
   lowered_from?: CompiledExecutableNode["lowered_from"];
-  prompt?: string;
   command?: string;
   args?: string[];
   cwd?: string;
@@ -257,6 +257,8 @@ function toProjectionStatus(status: RuntimeNodeStatus | RuntimeRunStatus): Proje
       return "Ready";
     case "running":
       return "Running";
+    case "paused":
+      return "Paused";
     case "passed":
       return "Passed";
     case "failed":
@@ -479,11 +481,11 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: String(payload.summary ?? `Supervisor intervention ${String(payload.intervention_id ?? "?")} failed.`)
       };
-    case "supervisor.escalated":
+    case "supervisor.paused":
       return {
         ...(authored_id ? { authored_id } : {}),
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
-        summary: String(payload.summary ?? payload.reason ?? "Supervisor escalated.")
+        summary: String(payload.summary ?? payload.reason ?? "Supervisor paused for human input.")
       };
     case "check.evaluated":
       return {
@@ -647,7 +649,7 @@ function buildRunDiagnostic(
         ...(event.execution_id ? { execution_id: event.execution_id } : {}),
         ...(event.node_label ? { node_label: event.node_label } : {})
       };
-    case "supervisor.escalated":
+    case "supervisor.paused":
       return {
         seq: event.seq,
         ts: event.ts,
@@ -915,8 +917,7 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
     return {
       context: node.context,
       declared_artifacts: node.declared_artifacts,
-      ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
-      prompt: node.prompt
+      ...(node.lowered_from ? { lowered_from: node.lowered_from } : {})
     };
   }
 
@@ -939,7 +940,6 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
       context: node.context,
       declared_artifacts: node.declared_artifacts,
       ...(node.lowered_from ? { lowered_from: node.lowered_from } : {}),
-      prompt: node.prompt,
       review_from: node.review_from
     };
   }
@@ -955,7 +955,6 @@ function buildNodeDefinition(node: CompiledExecutableNode): ProjectedNodeDefinit
     ...(node.env ? { env: node.env } : {}),
     on_failure: node.on_failure,
     check_kind: node.check_kind,
-    ...(node.prompt ? { prompt: node.prompt } : {}),
     ...(node.rubric ? { rubric: node.rubric } : {})
   };
 }

@@ -70,6 +70,7 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     deps: node.deps,
     ...(node.goal ? { goal: node.goal } : {}),
     ...(node.acceptance_criteria ? { acceptance_criteria: node.acceptance_criteria } : {}),
+    ...(node.constraints ? { constraints: node.constraints } : {}),
     effective_policy: node.effective_policy,
     context: node.context,
     declared_artifacts: node.declared_artifacts,
@@ -77,10 +78,7 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
   };
 
   if (node.kind === "agent") {
-    return JSON.stringify(sortJson({
-      ...shared,
-      prompt: node.prompt
-    }));
+    return JSON.stringify(sortJson(shared));
   }
 
   if (node.kind === "exec") {
@@ -98,7 +96,6 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
   if (node.kind === "checkpoint") {
     return JSON.stringify(sortJson({
       ...shared,
-      prompt: node.prompt,
       review_from: node.review_from
     }));
   }
@@ -113,7 +110,6 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     ...(node.env_files !== undefined ? { env_files: node.env_files } : {}),
     ...(node.env ? { env: node.env } : {}),
     ...(node.pass_if ? { pass_if: node.pass_if } : {}),
-    ...(node.prompt ? { prompt: node.prompt } : {}),
     ...(node.rubric ? { rubric: node.rubric } : {})
   }));
 }
@@ -136,8 +132,7 @@ function fingerprintRepeatScope(scope: CompiledRepeatScope): string {
 function fingerprintGraphRunContract(graph: CompiledGraph): string {
   return JSON.stringify(sortJson({
     intent: graph.intent,
-    supervision: graph.supervision,
-    delivery: graph.delivery
+    supervision: graph.supervision
   }));
 }
 
@@ -422,7 +417,14 @@ export async function createResumedRuntimeSession(options: {
   if (fingerprintGraphRunContract(options.prior_graph) === fingerprintGraphRunContract(options.graph)) {
     session.supervisor = {
       ...options.prior_state.supervisor,
-      budget_remaining: { ...options.prior_state.supervisor.budget_remaining },
+      budget_remaining: {
+        max_total_interventions: options.prior_state.supervisor.budget_remaining.max_total_interventions,
+        actions: { ...options.prior_state.supervisor.budget_remaining.actions }
+      },
+      timeline: options.prior_state.supervisor.timeline.map((decision) => ({ ...decision })),
+      ...(options.prior_state.supervisor.pause
+        ? { pause: { ...options.prior_state.supervisor.pause } }
+        : {}),
       escalations: options.prior_state.supervisor.escalations.map((escalation) => ({ ...escalation }))
     };
   }

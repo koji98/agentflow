@@ -1,8 +1,9 @@
 import type { CompiledExecutableNode, CompiledGraph, CompiledRepeatScope } from "../graph/compiled.js";
 import type { WorkspaceBackend } from "../graph/schema.js";
-import type { SupervisionRetryBudget } from "../graph/authored.js";
 import type { AttemptRegistry, RuntimeNodeAttempt } from "./attempts.js";
 import type { VerificationRecordedPayload } from "./events.js";
+import type { SupervisorBudgetRemaining } from "../supervisor/policy.js";
+import type { SupervisorDecision } from "../supervisor/types.js";
 
 export type RuntimeNodeStatus =
   | "pending"
@@ -14,7 +15,7 @@ export type RuntimeNodeStatus =
   | "canceled"
   | "skipped";
 
-export type RuntimeRunStatus = "pending" | "running" | "passed" | "failed" | "canceled";
+export type RuntimeRunStatus = "pending" | "running" | "passed" | "failed" | "canceled" | "paused";
 export type EvidenceStatus = "clean" | "warnings";
 
 export interface WorkspaceBinding {
@@ -116,10 +117,19 @@ export interface FailedSoftVerificationSummary extends VerificationRecordedPaylo
 }
 
 export interface RuntimeSupervisorState {
-  status: "healthy" | "intervening" | "escalated" | "exhausted";
+  status: "healthy" | "intervening" | "paused" | "exhausted";
   intervention_count: number;
-  budget_remaining: SupervisionRetryBudget;
+  budget_remaining: SupervisorBudgetRemaining;
   last_decision_id?: string;
+  timeline: SupervisorDecision[];
+  pause?: {
+    decision_id: string;
+    reason: string;
+    target_compiled_id?: string;
+    target_execution_id?: string;
+    brief_path?: string;
+    resume_options: string[];
+  };
   escalations: Array<{
     decision_id: string;
     reason: string;
@@ -250,6 +260,15 @@ export function createRuntimeSession(
   graphPath?: string
 ): RuntimeSession {
   const started_at = new Date().toISOString();
+  const budgetRemaining: SupervisorBudgetRemaining = {
+    max_total_interventions: graph.supervision.max_total_interventions,
+    actions: Object.fromEntries(
+      Object.entries(graph.supervision.actions).map(([action, policy]) => [
+        action,
+        policy?.max_uses ?? 0
+      ])
+    )
+  };
   const repeat_scopes = new Map<string, RepeatScopeState>(
     graph.scopes
       .filter((scope): scope is CompiledRepeatScope => scope.kind === "repeat")
@@ -283,7 +302,8 @@ export function createRuntimeSession(
     supervisor: {
       status: "healthy",
       intervention_count: 0,
-      budget_remaining: { ...graph.supervision.retry_budget },
+      budget_remaining: budgetRemaining,
+      timeline: [],
       escalations: []
     },
     workspace_change_artifacts: {},
@@ -402,7 +422,12 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     failed_soft_verifications: softVerificationSummary.failed_soft_verifications,
     supervisor: {
       ...session.supervisor,
-      budget_remaining: { ...session.supervisor.budget_remaining },
+      budget_remaining: {
+        max_total_interventions: session.supervisor.budget_remaining.max_total_interventions,
+        actions: { ...session.supervisor.budget_remaining.actions }
+      },
+      timeline: session.supervisor.timeline.map((decision) => ({ ...decision })),
+      ...(session.supervisor.pause ? { pause: { ...session.supervisor.pause } } : {}),
       escalations: session.supervisor.escalations.map((escalation) => ({ ...escalation }))
     },
     node_statuses: Object.fromEntries(session.node_statuses),

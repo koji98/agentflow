@@ -743,18 +743,14 @@ function renderContextManifest(packet: ContextPacket): string {
   const truncatedCount = packet.materials.filter((item) => item.truncated).length;
   const liveWorkspaceItems = packet.materials.filter((item) => item.binding?.kind === "live_workspace_input");
   const lines = [
-    `# Context Manifest: ${packet.execution_id}`,
+    "# Context Manifest",
     "",
-    `- Compiled node: \`${packet.compiled_id}\``,
-    `- Repo: \`${packet.repo_alias}\``,
-    `- Workspace: \`${packet.workspace_path}\``,
-    `- Tokenizer: \`${packet.tokenizer}\``,
+    "This is an index of materialized context for the current node. Read the listed files that are relevant to the task before acting.",
+    "",
     `- Materialized items: \`${packet.totals.material_count}\``,
-    `- Total files: \`${packet.totals.file_count}\``,
-    `- Total tokens: \`${packet.totals.total_tokens}\``,
     `- Truncated items: \`${truncatedCount}\``,
-    `- Live workspace context items: \`${liveWorkspaceItems.length}\``,
     `- Omitted items: \`${packet.omitted.length}\``,
+    `- Live workspace inputs: \`${liveWorkspaceItems.length}\``,
     ""
   ];
 
@@ -764,7 +760,7 @@ function renderContextManifest(packet: ContextPacket): string {
     for (const item of packet.materials) {
       const bindingSuffix =
         item.binding?.kind === "live_workspace_input"
-          ? `, requested "${item.binding.requested_path ?? "inline text"}", resolved "${item.binding.resolved_path}"`
+          ? `, live workspace input requested "${item.binding.requested_path ?? "inline text"}", resolved "${item.binding.resolved_path}"`
           : "";
       lines.push(
         `- \`${item.key}\` -> \`${item.materialized_path}\` (${item.tokens} tokens${item.truncated ? ", truncated" : ""}${bindingSuffix})${item.description ? `: ${item.description}` : ""}`

@@ -12,7 +12,6 @@ import type {
   ArtifactDefinition,
   ArtifactReference,
   ContextItem,
-  DeliveryContract,
   DeterministicCheckDefaults,
   DeterministicPassIf,
   EnvPrerequisite,
@@ -32,7 +31,6 @@ import type {
   RepoDefinition,
   SequenceNode,
   SupervisionPolicy,
-  ToolConfigMap,
   ToolDeclaration
 } from "./authored.js";
 import {
@@ -42,7 +40,6 @@ import {
   checkKinds,
   contextSourceKinds,
   contextSelectors,
-  deliverySections,
   failureBehaviors,
   graphVersion,
   harnessNames,
@@ -132,45 +129,20 @@ const checkpointOperatorFeedbackArtifact: ArtifactDefinition = {
 };
 
 export const defaultSupervisionPolicy: SupervisionPolicy = {
-  allowed_actions: [
-    "retry_node",
-    "repair_artifact",
-    "rebuild_context",
-    "refresh_workspace",
-    "run_diagnostic",
-    "semantic_evaluation",
-    "escalate"
-  ],
-  retry_budget: {
-    max_total_interventions: 8,
-    max_node_retries: 2,
-    max_artifact_repairs: 2,
-    max_context_rebuilds: 1,
-    max_workspace_refreshes: 1,
-    max_diagnostic_runs: 3,
-    max_semantic_evaluations: 2
+  actions: {
+    retry_with_guidance: { max_uses: 2 },
+    repair_artifact: { max_uses: 2 },
+    rebuild_context: { max_uses: 1 },
+    run_diagnostic: { max_uses: 3 },
+    pause_for_human: { max_uses: 1 },
+    semantic_evaluation: { max_uses: 2 }
   },
-  drift_detection: {
-    score_threshold: 0.8
-  },
-  escalation: {
-    require_human_on_policy_breach: true,
-    require_human_on_scope_drift: true
+  max_total_interventions: 8,
+  policy: {
+    pause_on_policy_risk: true,
+    pause_on_repeated_recovery: true,
+    drift_score_threshold: 0.8
   }
-};
-
-export const defaultDeliveryContract: DeliveryContract = {
-  required_sections: [
-    "task_brief",
-    "implementation_summary",
-    "grouped_change_map",
-    "decision_log",
-    "evaluation_ledger",
-    "reviewer_guide",
-    "risk_notes",
-    "follow_up_items",
-    "intervention_trace"
-  ]
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -852,40 +824,15 @@ function normalizeGraphIntent(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["goal", "scope", "constraints", "acceptance_criteria", "approval_boundaries"],
+    ["goal", "constraints", "acceptance_criteria"],
     diagnostics
   );
 
   const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
-  const scopeRecord = record.scope === undefined ? undefined : asRecord(record.scope);
-  let scope: GraphIntent["scope"] | undefined;
-
-  if (record.scope !== undefined && !scopeRecord) {
-    diagnostics.push({
-      path: `${path}.scope`,
-      message: "intent.scope must be an object when provided."
-    });
-  } else if (scopeRecord) {
-    pushUnknownKeyDiagnostics(scopeRecord, `${path}.scope`, ["repos", "paths", "out_of_scope"], diagnostics);
-    const repos = readStringArray(scopeRecord.repos, `${path}.scope.repos`, diagnostics);
-    const paths = readStringArray(scopeRecord.paths, `${path}.scope.paths`, diagnostics);
-    const out_of_scope = readStringArray(scopeRecord.out_of_scope, `${path}.scope.out_of_scope`, diagnostics);
-    scope = {
-      ...(repos ? { repos } : {}),
-      ...(paths ? { paths } : {}),
-      ...(out_of_scope ? { out_of_scope } : {})
-    };
-  }
-
   const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
   const acceptance_criteria = readStringArray(
     record.acceptance_criteria,
     `${path}.acceptance_criteria`,
-    diagnostics
-  );
-  const approval_boundaries = readStringArray(
-    record.approval_boundaries,
-    `${path}.approval_boundaries`,
     diagnostics
   );
 
@@ -895,10 +842,8 @@ function normalizeGraphIntent(
 
   return {
     goal,
-    ...(scope && Object.keys(scope).length > 0 ? { scope } : {}),
     ...(constraints ? { constraints } : {}),
-    ...(acceptance_criteria ? { acceptance_criteria } : {}),
-    ...(approval_boundaries ? { approval_boundaries } : {})
+    ...(acceptance_criteria ? { acceptance_criteria } : {})
   };
 }
 
@@ -909,11 +854,14 @@ function normalizeSupervisionPolicy(
 ): SupervisionPolicy {
   if (value === undefined) {
     return {
-      ...defaultSupervisionPolicy,
-      allowed_actions: [...defaultSupervisionPolicy.allowed_actions],
-      retry_budget: { ...defaultSupervisionPolicy.retry_budget },
-      drift_detection: { ...defaultSupervisionPolicy.drift_detection },
-      escalation: { ...defaultSupervisionPolicy.escalation }
+      actions: Object.fromEntries(
+        Object.entries(defaultSupervisionPolicy.actions).map(([action, policy]) => [
+          action,
+          { ...policy }
+        ])
+      ),
+      max_total_interventions: defaultSupervisionPolicy.max_total_interventions,
+      policy: { ...defaultSupervisionPolicy.policy }
     };
   }
 
@@ -929,184 +877,112 @@ function normalizeSupervisionPolicy(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["allowed_actions", "retry_budget", "drift_detection", "escalation"],
+    ["actions", "max_total_interventions", "policy"],
     diagnostics
   );
 
-  const allowed_actions =
-    readEnumArray(record.allowed_actions, `${path}.allowed_actions`, supervisorActionKinds, diagnostics) ??
-    [...defaultSupervisionPolicy.allowed_actions];
-
-  const budgetRecord = record.retry_budget === undefined ? undefined : asRecord(record.retry_budget);
-  if (record.retry_budget !== undefined && !budgetRecord) {
+  const actionRecord = record.actions === undefined ? undefined : asRecord(record.actions);
+  if (record.actions !== undefined && !actionRecord) {
     diagnostics.push({
-      path: `${path}.retry_budget`,
-      message: "supervision.retry_budget must be an object when provided."
+      path: `${path}.actions`,
+      message: "supervision.actions must be an object when provided."
     });
   }
-  if (budgetRecord) {
+  const actions: SupervisionPolicy["actions"] = {};
+  const actionSource = actionRecord ?? defaultSupervisionPolicy.actions;
+  if (actionRecord) {
+    pushUnknownKeyDiagnostics(actionRecord, `${path}.actions`, supervisorActionKinds, diagnostics);
+  }
+  for (const action of supervisorActionKinds) {
+    const defaultAction = defaultSupervisionPolicy.actions[action];
+    const actionPath = `${path}.actions.${action}`;
+    const valueForAction = actionSource[action];
+    if (valueForAction === undefined) {
+      if (defaultAction) {
+        actions[action] = { ...defaultAction };
+      }
+      continue;
+    }
+
+    const actionPolicyRecord = asRecord(valueForAction);
+    if (!actionPolicyRecord) {
+      diagnostics.push({
+        path: actionPath,
+        message: "supervision.actions entries must be objects when provided."
+      });
+      if (defaultAction) {
+        actions[action] = { ...defaultAction };
+      }
+      continue;
+    }
+    pushUnknownKeyDiagnostics(actionPolicyRecord, actionPath, ["max_uses"], diagnostics);
+    const maxUses =
+      readBoundedInteger(
+        actionPolicyRecord.max_uses,
+        `${actionPath}.max_uses`,
+        diagnostics,
+        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+      ) ?? defaultAction?.max_uses;
+    if (maxUses !== undefined && maxUses > 0) {
+      actions[action] = { max_uses: maxUses };
+    }
+  }
+
+  const max_total_interventions =
+    readBoundedInteger(
+      record.max_total_interventions,
+      `${path}.max_total_interventions`,
+      diagnostics,
+      { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+    ) ?? defaultSupervisionPolicy.max_total_interventions;
+
+  const policyRecord = record.policy === undefined ? undefined : asRecord(record.policy);
+  if (record.policy !== undefined && !policyRecord) {
+    diagnostics.push({
+      path: `${path}.policy`,
+      message: "supervision.policy must be an object when provided."
+    });
+  }
+  if (policyRecord) {
     pushUnknownKeyDiagnostics(
-      budgetRecord,
-      `${path}.retry_budget`,
-      [
-        "max_total_interventions",
-        "max_node_retries",
-        "max_artifact_repairs",
-        "max_context_rebuilds",
-        "max_workspace_refreshes",
-        "max_diagnostic_runs",
-        "max_semantic_evaluations"
-      ],
+      policyRecord,
+      `${path}.policy`,
+      ["pause_on_policy_risk", "pause_on_repeated_recovery", "drift_score_threshold", "evaluator_profile"],
       diagnostics
     );
   }
-  const retry_budget = {
-    max_total_interventions:
-      readBoundedInteger(
-        budgetRecord?.max_total_interventions,
-        `${path}.retry_budget.max_total_interventions`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_total_interventions,
-    max_node_retries:
-      readBoundedInteger(
-        budgetRecord?.max_node_retries,
-        `${path}.retry_budget.max_node_retries`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_node_retries,
-    max_artifact_repairs:
-      readBoundedInteger(
-        budgetRecord?.max_artifact_repairs,
-        `${path}.retry_budget.max_artifact_repairs`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_artifact_repairs,
-    max_context_rebuilds:
-      readBoundedInteger(
-        budgetRecord?.max_context_rebuilds,
-        `${path}.retry_budget.max_context_rebuilds`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_context_rebuilds,
-    max_workspace_refreshes:
-      readBoundedInteger(
-        budgetRecord?.max_workspace_refreshes,
-        `${path}.retry_budget.max_workspace_refreshes`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_workspace_refreshes,
-    max_diagnostic_runs:
-      readBoundedInteger(
-        budgetRecord?.max_diagnostic_runs,
-        `${path}.retry_budget.max_diagnostic_runs`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_diagnostic_runs,
-    max_semantic_evaluations:
-      readBoundedInteger(
-        budgetRecord?.max_semantic_evaluations,
-        `${path}.retry_budget.max_semantic_evaluations`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultSupervisionPolicy.retry_budget.max_semantic_evaluations
-  };
-
-  const driftRecord = record.drift_detection === undefined ? undefined : asRecord(record.drift_detection);
-  if (record.drift_detection !== undefined && !driftRecord) {
-    diagnostics.push({
-      path: `${path}.drift_detection`,
-      message: "supervision.drift_detection must be an object when provided."
-    });
-  }
-  if (driftRecord) {
-    pushUnknownKeyDiagnostics(
-      driftRecord,
-      `${path}.drift_detection`,
-      ["score_threshold", "evaluator_profile"],
-      diagnostics
-    );
-  }
-  const score_threshold =
+  const drift_score_threshold =
     readBoundedNumber(
-      driftRecord?.score_threshold,
-      `${path}.drift_detection.score_threshold`,
+      policyRecord?.drift_score_threshold,
+      `${path}.policy.drift_score_threshold`,
       diagnostics,
       { minimum: 0, maximum: 1 }
-    ) ?? defaultSupervisionPolicy.drift_detection.score_threshold;
+    ) ?? defaultSupervisionPolicy.policy.drift_score_threshold;
   const evaluator_profile = readOptionalString(
-    driftRecord?.evaluator_profile,
-    `${path}.drift_detection.evaluator_profile`,
+    policyRecord?.evaluator_profile,
+    `${path}.policy.evaluator_profile`,
     diagnostics
   );
 
-  const escalationRecord = record.escalation === undefined ? undefined : asRecord(record.escalation);
-  if (record.escalation !== undefined && !escalationRecord) {
-    diagnostics.push({
-      path: `${path}.escalation`,
-      message: "supervision.escalation must be an object when provided."
-    });
-  }
-  if (escalationRecord) {
-    pushUnknownKeyDiagnostics(
-      escalationRecord,
-      `${path}.escalation`,
-      ["require_human_on_policy_breach", "require_human_on_scope_drift"],
-      diagnostics
-    );
-  }
-  const escalation = {
-    require_human_on_policy_breach:
-      readBoolean(
-        escalationRecord?.require_human_on_policy_breach,
-        `${path}.escalation.require_human_on_policy_breach`,
-        diagnostics
-      ) ?? defaultSupervisionPolicy.escalation.require_human_on_policy_breach,
-    require_human_on_scope_drift:
-      readBoolean(
-        escalationRecord?.require_human_on_scope_drift,
-        `${path}.escalation.require_human_on_scope_drift`,
-        diagnostics
-      ) ?? defaultSupervisionPolicy.escalation.require_human_on_scope_drift
-  };
-
   return {
-    allowed_actions,
-    retry_budget,
-    drift_detection: {
-      score_threshold,
+    actions,
+    max_total_interventions,
+    policy: {
+      pause_on_policy_risk:
+        readBoolean(
+          policyRecord?.pause_on_policy_risk,
+          `${path}.policy.pause_on_policy_risk`,
+          diagnostics
+        ) ?? defaultSupervisionPolicy.policy.pause_on_policy_risk,
+      pause_on_repeated_recovery:
+        readBoolean(
+          policyRecord?.pause_on_repeated_recovery,
+          `${path}.policy.pause_on_repeated_recovery`,
+          diagnostics
+        ) ?? defaultSupervisionPolicy.policy.pause_on_repeated_recovery,
+      drift_score_threshold,
       ...(evaluator_profile ? { evaluator_profile } : {})
-    },
-    escalation
-  };
-}
-
-function normalizeDeliveryContract(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): DeliveryContract {
-  if (value === undefined) {
-    return {
-      required_sections: [...defaultDeliveryContract.required_sections]
-    };
-  }
-
-  const record = asRecord(value);
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "delivery must be an object when provided."
-    });
-    return defaultDeliveryContract;
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["required_sections"], diagnostics);
-
-  return {
-    required_sections:
-      readEnumArray(record.required_sections, `${path}.required_sections`, deliverySections, diagnostics) ??
-      [...defaultDeliveryContract.required_sections]
+    }
   };
 }
 
@@ -1612,6 +1488,7 @@ function normalizeExecutableBase(
     `${path}.acceptance_criteria`,
     diagnostics
   );
+  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
   const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
   const artifacts = allow_artifacts
     ? normalizeArtifacts(record.artifacts, `${path}.artifacts`, diagnostics)
@@ -1636,6 +1513,7 @@ function normalizeExecutableBase(
     ...(profile ? { profile } : {}),
     ...(goal ? { goal } : {}),
     ...(acceptance_criteria ? { acceptance_criteria } : {}),
+    ...(constraints ? { constraints } : {}),
     ...(context ? { context } : {}),
     ...(artifacts ? { artifacts } : {}),
     ...(timeout_sec !== undefined ? { timeout_sec } : {})
@@ -1657,16 +1535,17 @@ function normalizeToolDeclaration(
     diagnostics.push({
       path,
       message:
-        "Tool declarations must reference a plugin tool with { from_plugin, tool, alias? }. Inline executable tools are no longer supported; bundle the executable in a plugin instead."
+        "Tool declarations must reference a plugin tool with { from_plugin, tool, alias?, config? }. Inline executable tools are no longer supported; bundle the executable in a plugin instead."
     });
     return undefined;
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["from_plugin", "tool", "alias"], diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["from_plugin", "tool", "alias", "config"], diagnostics);
 
   const from_plugin = readRequiredString(record.from_plugin, `${path}.from_plugin`, diagnostics);
   const tool = readRequiredString(record.tool, `${path}.tool`, diagnostics);
   const alias = readOptionalString(record.alias, `${path}.alias`, diagnostics);
+  const config = readStringRecord(record.config, `${path}.config`, diagnostics);
 
   if (alias !== undefined && !toolNamePattern.test(alias)) {
     diagnostics.push({
@@ -1682,7 +1561,8 @@ function normalizeToolDeclaration(
   return {
     from_plugin,
     tool,
-    ...(alias ? { alias } : {})
+    ...(alias ? { alias } : {}),
+    ...(config ? { config } : {})
   } satisfies PluginToolReference;
 }
 
@@ -1705,31 +1585,6 @@ function normalizeToolDeclarations(
     .filter((item): item is ToolDeclaration => item !== undefined);
 }
 
-function normalizeToolConfig(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): ToolConfigMap | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const record = asRecord(value);
-  if (!record) {
-    diagnostics.push({ path, message: "tool_config must be an object when provided." });
-    return undefined;
-  }
-
-  const result: ToolConfigMap = {};
-  for (const [toolName, configValue] of Object.entries(record)) {
-    const toolConfig = readStringRecord(configValue, `${path}.${toolName}`, diagnostics);
-    if (toolConfig) {
-      result[toolName] = toolConfig;
-    }
-  }
-  return result;
-}
-
 function normalizeAgentNode(
   record: Record<string, unknown>,
   path: string,
@@ -1746,22 +1601,20 @@ function normalizeAgentNode(
       "profile",
       "goal",
       "acceptance_criteria",
+      "constraints",
       "context",
       "artifacts",
       "timeout_sec",
-      "prompt",
       "model",
       "reasoning_effort",
       "sandbox",
       "artifact_repair",
-      "tools",
-      "tool_config"
+      "tools"
     ],
     diagnostics
   );
 
   const base = normalizeExecutableBase(record, path, diagnostics);
-  const prompt = readOptionalString(record.prompt, `${path}.prompt`, diagnostics);
   const model = readOptionalString(record.model, `${path}.model`, diagnostics);
   const reasoning_effort = readEnumValue(
     record.reasoning_effort,
@@ -1776,29 +1629,26 @@ function normalizeAgentNode(
     diagnostics
   );
   const tools = normalizeToolDeclarations(record.tools, `${path}.tools`, diagnostics);
-  const tool_config = normalizeToolConfig(record.tool_config, `${path}.tool_config`, diagnostics);
 
-  if (base && !prompt && !base.goal) {
+  if (base && !base.goal) {
     diagnostics.push({
-      path: `${path}.prompt`,
-      message: "Agent nodes require either prompt or goal."
+      path: `${path}.goal`,
+      message: "Agent nodes require goal."
     });
   }
 
-  if (!base || (!prompt && !base.goal)) {
+  if (!base || !base.goal) {
     return undefined;
   }
 
   return {
     type: "agent",
     ...base,
-    ...(prompt ? { prompt } : {}),
     ...(model ? { model } : {}),
     ...(reasoning_effort ? { reasoning_effort } : {}),
     ...(sandbox ? { sandbox } : {}),
     ...(artifact_repair ? { artifact_repair } : {}),
-    ...(tools && tools.length > 0 ? { tools } : {}),
-    ...(tool_config && Object.keys(tool_config).length > 0 ? { tool_config } : {})
+    ...(tools && tools.length > 0 ? { tools } : {})
   };
 }
 
@@ -1818,6 +1668,7 @@ function normalizeExecNode(
       "profile",
       "goal",
       "acceptance_criteria",
+      "constraints",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1871,6 +1722,7 @@ function normalizeCheckNode(
       "profile",
       "goal",
       "acceptance_criteria",
+      "constraints",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1881,7 +1733,6 @@ function normalizeCheckNode(
       "env_files",
       "env",
       "pass_if",
-      "prompt",
       "rubric",
       "model",
       "reasoning_effort",
@@ -1900,7 +1751,6 @@ function normalizeCheckNode(
   const env_files = readStringArray(record.env_files, `${path}.env_files`, diagnostics);
   const env = readStringRecord(record.env, `${path}.env`, diagnostics);
   const pass_if = normalizePassIf(record.pass_if, `${path}.pass_if`, diagnostics);
-  const prompt = readOptionalString(record.prompt, `${path}.prompt`, diagnostics);
   const rubric = readOptionalString(record.rubric, `${path}.rubric`, diagnostics);
   const model = readOptionalString(record.model, `${path}.model`, diagnostics);
   const on_failure = readEnumValue(record.on_failure, `${path}.on_failure`, failureBehaviors, diagnostics);
@@ -1916,7 +1766,7 @@ function normalizeCheckNode(
   }
 
   if (check_kind === "deterministic") {
-    for (const field of ["prompt", "rubric", "model", "reasoning_effort"] as const) {
+    for (const field of ["rubric", "model", "reasoning_effort"] as const) {
       if (record[field] !== undefined) {
         diagnostics.push({
           path: `${path}.${field}`,
@@ -1944,10 +1794,10 @@ function normalizeCheckNode(
     });
   }
 
-  if (check_kind === "ai" && !prompt) {
+  if (check_kind === "ai" && !base.goal) {
     diagnostics.push({
-      path: `${path}.prompt`,
-      message: "AI checks require prompt."
+      path: `${path}.goal`,
+      message: "AI checks require goal."
     });
   }
 
@@ -1961,7 +1811,6 @@ function normalizeCheckNode(
     ...(check_kind === "deterministic" && env_files !== undefined ? { env_files } : {}),
     ...(check_kind === "deterministic" && env ? { env } : {}),
     ...(check_kind === "deterministic" && pass_if ? { pass_if } : {}),
-    ...(check_kind === "ai" && prompt ? { prompt } : {}),
     ...(check_kind === "ai" && rubric ? { rubric } : {}),
     ...(check_kind === "ai" && model ? { model } : {}),
     ...(check_kind === "ai" && reasoning_effort ? { reasoning_effort } : {}),
@@ -1985,10 +1834,10 @@ function normalizeCheckpointNode(
       "profile",
       "goal",
       "acceptance_criteria",
+      "constraints",
       "context",
       "artifacts",
       "timeout_sec",
-      "prompt",
       "review_from"
     ],
     diagnostics
@@ -1997,14 +1846,20 @@ function normalizeCheckpointNode(
   const base = normalizeExecutableBase(record, path, diagnostics, {
     allow_artifacts: false
   });
-  const prompt = readRequiredString(record.prompt, `${path}.prompt`, diagnostics);
   const review_from = normalizeArtifactReference(
     record.review_from,
     `${path}.review_from`,
     diagnostics
   );
 
-  if (!base || !prompt || !review_from) {
+  if (base && !base.goal) {
+    diagnostics.push({
+      path: `${path}.goal`,
+      message: "Checkpoint nodes require goal."
+    });
+  }
+
+  if (!base || !base.goal || !review_from) {
     return undefined;
   }
 
@@ -2014,7 +1869,6 @@ function normalizeCheckpointNode(
     artifacts: {
       operator_feedback: checkpointOperatorFeedbackArtifact
     },
-    prompt,
     review_from
   };
 }
@@ -3674,7 +3528,6 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
       "graph_id",
       "intent",
       "supervision",
-      "delivery",
       "repos",
       "defaults",
       "profiles",
@@ -3682,7 +3535,6 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
       "config",
       "config_schema",
       "tools",
-      "tool_config",
       "graph"
     ],
     diagnostics
@@ -3699,7 +3551,6 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
   const graph_id = readRequiredString(documentRecord.graph_id, "$.graph_id", diagnostics);
   const intent = normalizeGraphIntent(documentRecord.intent, "$.intent", diagnostics);
   const supervision = normalizeSupervisionPolicy(documentRecord.supervision, "$.supervision", diagnostics);
-  const delivery = normalizeDeliveryContract(documentRecord.delivery, "$.delivery", diagnostics);
   const defaults = normalizeGraphDefaults(documentRecord.defaults, "$.defaults", diagnostics);
   const prerequisites = normalizeGraphPrerequisites(
     documentRecord.prerequisites,
@@ -3781,7 +3632,6 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
   }
 
   const tools = normalizeToolDeclarations(documentRecord.tools, "$.tools", diagnostics);
-  const tool_config = normalizeToolConfig(documentRecord.tool_config, "$.tool_config", diagnostics);
 
   const normalizedGraph = normalizeGraphNode(
     documentRecord.graph,
@@ -3801,18 +3651,6 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     resolveArtifactContextRefs(normalizedGraph, "$.graph", diagnostics);
   }
 
-  if (intent?.scope?.repos) {
-    const repoAliases = new Set(Object.keys(repos));
-    intent.scope.repos.forEach((repoAlias, index) => {
-      if (!repoAliases.has(repoAlias)) {
-        diagnostics.push({
-          path: `$.intent.scope.repos[${index}]`,
-          message: `intent.scope.repos references unknown repo "${repoAlias}".`
-        });
-      }
-    });
-  }
-
   if (diagnostics.length > 0 || !graph_id || !intent || !normalizedGraph || Object.keys(repos).length === 0) {
     return {
       diagnostics,
@@ -3825,7 +3663,6 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     graph_id,
     intent,
     supervision,
-    delivery,
     repos,
     defaults: effectiveDefaults,
     ...(Object.keys(profiles).length > 0 ? { profiles } : {}),
@@ -3833,7 +3670,6 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     ...(config ? { config } : {}),
     ...(config_schema ? { config_schema } : {}),
     ...(tools && tools.length > 0 ? { tools } : {}),
-    ...(tool_config && Object.keys(tool_config).length > 0 ? { tool_config } : {}),
     graph: normalizedGraph as ContainerGraphNode
   };
 

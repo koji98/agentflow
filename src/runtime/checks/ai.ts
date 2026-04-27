@@ -20,13 +20,13 @@ export interface RunAiCheckInvocation {
   model: string | undefined;
   reasoning_effort?: ReasoningEffort;
   skip_git_repo_check?: boolean;
-  prompt: string;
   rubric: string | undefined;
   graph_goal?: string;
   graph_acceptance_criteria?: string[];
   graph_constraints?: string[];
   node_goal?: string;
   node_acceptance_criteria?: string[];
+  node_constraints?: string[];
   context_packet_path: string;
   context_manifest_path: string;
   output_dir: string;
@@ -170,25 +170,6 @@ export function parseAiCheckResult(payload: unknown): AiCheckResult {
   };
 }
 
-export function buildAiCheckPrompt(options: {
-  prompt: string;
-  rubric?: string;
-}): string {
-  return [
-    "Evaluate the graph node against the provided context.",
-    "",
-    "## Evaluation Task",
-    options.prompt,
-    ...(options.rubric
-      ? [
-          "",
-          "## Rubric",
-          options.rubric
-        ]
-      : [])
-  ].join("\n");
-}
-
 async function readContextManifest(path: string): Promise<string> {
   try {
     return await readFile(path, "utf8");
@@ -231,10 +212,7 @@ export async function runAiCheck(
       ...(invocation.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
       model: invocation.model,
       ...(invocation.reasoning_effort ? { reasoningEffort: invocation.reasoning_effort } : {}),
-      prompt: buildAiCheckPrompt({
-        prompt: invocation.prompt,
-        ...(invocation.rubric ? { rubric: invocation.rubric } : {})
-      }),
+      ...(invocation.rubric ? { rubric: invocation.rubric } : {}),
       ...(invocation.graph_goal ? { graphGoal: invocation.graph_goal } : {}),
       ...(invocation.graph_acceptance_criteria
         ? { graphAcceptanceCriteria: invocation.graph_acceptance_criteria }
@@ -244,6 +222,7 @@ export async function runAiCheck(
       ...(invocation.node_acceptance_criteria
         ? { nodeAcceptanceCriteria: invocation.node_acceptance_criteria }
         : {}),
+      ...(invocation.node_constraints ? { nodeConstraints: invocation.node_constraints } : {}),
       contextPacketPath: invocation.context_packet_path,
       contextManifestPath: invocation.context_manifest_path,
       contextManifest,
@@ -276,8 +255,8 @@ export async function runAiCheck(
   }
 
   const rawPayload =
-    harness_result.outputJson ??
     harness_result.transcript?.last_message ??
+    harness_result.outputJson ??
     harness_result.stdout ??
     "";
   const parsedEvaluation = parseAiCheckResult(rawPayload);

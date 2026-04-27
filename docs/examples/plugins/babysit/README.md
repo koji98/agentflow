@@ -15,6 +15,8 @@ printf %s "$GITHUB_TOKEN" | agentflow auth set --scope github --key token --secr
 
 Agentflow stores the secret in macOS Keychain and injects it as `AGENTFLOW_CREDENTIAL_GITHUB_TOKEN` only into the plugin tool subprocess. The Codex/Cursor harness environment does not receive the credential value.
 
+The executable supports credential-free `--help`, which is mandatory for plugin tools. Agents see the short manifest description and usage hint, then run `babysit-poll --help` for exact arguments, defaults, output shape, exit codes, examples, and safety notes.
+
 The package also includes a `poll-pr` workflow export so plugin workflow authoring has a local example. Workflow nodes lower into normal graph nodes, and downstream consumers read only the public artifacts declared by the workflow manifest.
 
 ## Layout

@@ -2,8 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { createCodexCliHarness } from "../runtime/harness/codex_cli.js";
+import { createCursorCliHarness } from "../runtime/harness/cursor_cli.js";
 import { runAiCheck } from "../runtime/checks/ai.js";
 import { runLocalProcess } from "../runtime/checks/deterministic.js";
+import type { HarnessAdapter } from "../runtime/harness/types.js";
 import type {
   EvalAiRubricGrader,
   EvalCase,
@@ -113,6 +115,15 @@ function errorResult(options: {
   };
 }
 
+function createAiRubricHarness(grader: EvalAiRubricGrader): HarnessAdapter {
+  switch (grader.harness ?? "codex-cli") {
+    case "codex-cli":
+      return createCodexCliHarness();
+    case "cursor-cli":
+      return createCursorCliHarness();
+  }
+}
+
 async function runScriptGrader(options: {
   grader: EvalScriptGrader;
   suite_dir: string;
@@ -190,7 +201,14 @@ async function runAiRubricGrader(options: {
 }): Promise<EvalGraderResult> {
   await mkdir(options.output_dir, { recursive: true });
 
-  const harness = createCodexCliHarness();
+  const harness = createAiRubricHarness(options.grader);
+  if (!harness.capabilities.supports_ai_check) {
+    return errorResult({
+      grader: options.grader,
+      output_dir: options.output_dir,
+      error: `${harness.kind} does not support AI rubric grading.`
+    });
+  }
   const readiness = await harness.checkReadiness?.();
 
   if (readiness && readiness.length > 0) {
@@ -248,7 +266,7 @@ async function runAiRubricGrader(options: {
     model: options.grader.model,
     ...(options.grader.reasoning_effort ? { reasoning_effort: options.grader.reasoning_effort } : {}),
     skip_git_repo_check: true,
-    prompt: [
+    node_goal: [
       "Grade this local Agentflow eval case using only the referenced local files.",
       "Return normalized grader JSON with passed, score, summary, assertions, and metrics.",
       `Case: ${options.case.id}`,

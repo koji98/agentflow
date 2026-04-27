@@ -130,7 +130,7 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "prompt": "Summarize the final design package for a human operator. Mention the problem, the recommendation, and the artifacts a follow-on pattern_generate_evaluate_fix pattern would likely consume.",
+        "goal": "Summarize the final design package for a human operator. Mention the problem, the recommendation, and the artifacts a follow-on pattern_generate_evaluate_fix pattern would likely consume.",
         "context": [
           {
             "ref": "managed_nodes_spec.agent_response",
@@ -151,60 +151,27 @@
   },
   "intent": {
     "goal": "Design an implementation-ready Agentflow managed pattern package.",
-    "scope": {
-      "repos": [
-        "main"
-      ],
-      "paths": [
-        "README.md",
-        "docs/**",
-        "web-app/**"
-      ]
-    },
     "acceptance_criteria": [
       "The design package is implementation-ready and reviewable."
     ],
-    "approval_boundaries": [
+    "constraints": [
       "Do not expand repository scope beyond declared paths."
     ]
   },
   "supervision": {
-    "allowed_actions": [
-      "retry_node",
-      "repair_artifact",
-      "rebuild_context",
-      "run_diagnostic",
-      "semantic_evaluation",
-      "escalate"
-    ],
-    "retry_budget": {
-      "max_total_interventions": 6,
-      "max_node_retries": 2,
-      "max_artifact_repairs": 2,
-      "max_context_rebuilds": 1,
-      "max_workspace_refreshes": 1,
-      "max_diagnostic_runs": 2,
-      "max_semantic_evaluations": 1
+    "actions": {
+      "retry_with_guidance": { "max_uses": 2 },
+      "repair_artifact": { "max_uses": 2 },
+      "rebuild_context": { "max_uses": 1 },
+      "run_diagnostic": { "max_uses": 2 },
+      "pause_for_human": { "max_uses": 1 },
+      "semantic_evaluation": { "max_uses": 1 }
     },
-    "drift_detection": {
-      "score_threshold": 0.8
-    },
-    "escalation": {
-      "require_human_on_policy_breach": true,
-      "require_human_on_scope_drift": true
+    "max_total_interventions": 6,
+    "policy": {
+      "pause_on_policy_risk": true,
+      "pause_on_repeated_recovery": true,
+      "drift_score_threshold": 0.8
     }
-  },
-  "delivery": {
-    "required_sections": [
-      "task_brief",
-      "implementation_summary",
-      "grouped_change_map",
-      "decision_log",
-      "evaluation_ledger",
-      "reviewer_guide",
-      "risk_notes",
-      "follow_up_items",
-      "intervention_trace"
-    ]
   }
 }

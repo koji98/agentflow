@@ -87,7 +87,7 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "implement",
-                  prompt: "Attempt a fix."
+                  goal: "Attempt a fix."
                 },
                 {
                   type: "check",
@@ -201,7 +201,7 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "revise",
-                  prompt: "Revise the spec.",
+                  goal: "Revise the spec.",
                   context: [
                     {
                       ref: "merge_feedback.critique_merged",
@@ -239,7 +239,7 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "merge_feedback",
-                  prompt: "Merge feedback.",
+                  goal: "Merge feedback.",
                   artifacts: {
                     critique_merged: {
                       from: "output_dir",
@@ -251,7 +251,7 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "quality_review",
-                  prompt: "Evaluate the revision.",
+                  goal: "Evaluate the revision.",
                   artifacts: {
                     quality_review: {
                       from: "output_dir",
@@ -263,7 +263,7 @@ describe("runtime repeat", () => {
                 {
                   type: "checkpoint",
                   id: "human_review",
-                  prompt: "Review the spec revision.",
+                  goal: "Review the spec revision.",
                   review_from: {
                     node: "revise",
                     artifact: "spec_revision"
@@ -425,7 +425,7 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "draft",
-                  prompt: "Draft the artifact.",
+                  goal: "Draft the artifact.",
                   artifacts: {
                     draft_spec: {
                       from: "output_dir",
@@ -437,7 +437,7 @@ describe("runtime repeat", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  prompt: "Review the draft.",
+                  goal: "Review the draft.",
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"

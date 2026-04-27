@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createProcessTerminationController } from "../process_control.js";
@@ -33,6 +35,64 @@ function parseJsonRecord(value: string | undefined): Record<string, unknown> | u
   }
 }
 
+function createCursorOutputFailure(message: string): Error {
+  return new Error(`Cursor CLI structured output failed: ${message}`);
+}
+
+function normalizeCursorOutput(stdout: string, exitCode: number): {
+  output_json?: Record<string, unknown>;
+  last_message?: string;
+  error?: string;
+} {
+  const output_json = parseJsonRecord(stdout);
+
+  if (!output_json) {
+    return {
+      error: "stdout was not a JSON object."
+    };
+  }
+
+  const subtype = typeof output_json.subtype === "string" ? output_json.subtype : undefined;
+  const is_error = output_json.is_error === true;
+  const result = typeof output_json.result === "string" ? output_json.result : undefined;
+
+  if (exitCode !== 0) {
+    return {
+      output_json,
+      ...(result ? { last_message: result } : {}),
+      error: `process exited with code ${exitCode}.`
+    };
+  }
+
+  if (is_error) {
+    return {
+      output_json,
+      ...(result ? { last_message: result } : {}),
+      error: "JSON envelope reported is_error=true."
+    };
+  }
+
+  if (subtype && subtype !== "success") {
+    return {
+      output_json,
+      ...(result ? { last_message: result } : {}),
+      error: `JSON envelope subtype was "${subtype}", expected "success".`
+    };
+  }
+
+  if (!result) {
+    return {
+      output_json,
+      error: "JSON envelope did not include a string result field."
+    };
+  }
+
+  return {
+    output_json,
+    last_message: result
+  };
+}
+
 function mapCursorSandbox(
   sandbox: AgentInvocation["sandbox"]
 ): "enabled" | "disabled" {
@@ -44,7 +104,7 @@ function buildCursorArgs(invocation: AgentInvocation): string[] {
   const args = [
     "-p",
     "--output-format",
-    "text",
+    "json",
     "--workspace",
     invocation.repoPath,
     "--sandbox",
@@ -61,6 +121,58 @@ function buildCursorArgs(invocation: AgentInvocation): string[] {
 
   args.push(prompt);
   return args;
+}
+
+function cursorPermissionEntry(kind: "Read" | "Write", path: string): string {
+  return `${kind}(${path})`;
+}
+
+async function createCursorConfig(invocation: AgentInvocation): Promise<{
+  config_dir: string;
+  cli_config_path: string;
+}> {
+  const config_dir = join(invocation.outputDir, ".cursor-config");
+  const cli_config_path = join(config_dir, "cli.json");
+  const allow = [
+    cursorPermissionEntry("Read", `${invocation.repoPath}/**`),
+    cursorPermissionEntry("Read", invocation.contextPacketPath),
+    cursorPermissionEntry("Read", invocation.contextManifestPath),
+    cursorPermissionEntry("Read", `${invocation.outputDir}/**`),
+    ...(invocation.runtimeDir ? [cursorPermissionEntry("Read", `${invocation.runtimeDir}/**`)] : [])
+  ];
+  const deny = invocation.promptKind === "ai_check" || invocation.sandbox === "read-only"
+    ? [
+        "Write(*)",
+        "Shell(*)",
+        "WebFetch(*)",
+        "Mcp(*:*)"
+      ]
+    : [];
+  const writeAllow = invocation.sandbox === "read-only"
+    ? []
+    : [
+        cursorPermissionEntry("Write", `${invocation.repoPath}/**`),
+        cursorPermissionEntry("Write", `${invocation.outputDir}/**`),
+        ...(invocation.runtimeDir ? [cursorPermissionEntry("Write", `${invocation.runtimeDir}/**`)] : [])
+      ];
+
+  await mkdir(config_dir, { recursive: true });
+  await writeFile(
+    cli_config_path,
+    `${JSON.stringify({
+      version: 1,
+      editor: {
+        vimMode: false
+      },
+      permissions: {
+        allow: [...allow, ...writeAllow],
+        deny
+      }
+    }, null, 2)}\n`,
+    "utf8"
+  );
+
+  return { config_dir, cli_config_path };
 }
 
 export function createCursorCliHarness(
@@ -80,13 +192,18 @@ export function createCursorCliHarness(
       );
     },
     async run(invocation: AgentInvocation): Promise<HarnessResult> {
+      await mkdir(invocation.outputDir, { recursive: true });
       const args = buildCursorArgs(invocation);
+      const cursorConfig = await createCursorConfig(invocation);
       const spawnBroker = startSpawnBroker(invocation);
 
       return new Promise<HarnessResult>((resolve, reject) => {
         const child = spawn(binary, args, {
           cwd: invocation.repoPath,
-          env: buildHarnessSpawnEnv(invocation),
+          env: {
+            ...buildHarnessSpawnEnv(invocation),
+            CURSOR_CONFIG_DIR: cursorConfig.config_dir
+          },
           stdio: ["ignore", "pipe", "pipe"]
         });
         const stdoutChunks: Buffer[] = [];
@@ -141,24 +258,39 @@ export function createCursorCliHarness(
           active_processes.delete(invocation.executionId);
           const stdout = Buffer.concat(stdoutChunks).toString("utf8");
           const stderr = Buffer.concat(stderrChunks).toString("utf8");
-          const output_json = parseJsonRecord(stdout);
+          const exitCode = typeof code === "number" ? code : 1;
+          const cursorOutput = normalizeCursorOutput(stdout, exitCode);
+          const structuredOutputError =
+            !termination.state.canceled && !termination.state.timed_out
+              ? cursorOutput.error
+              : undefined;
           resolve({
             status:
               termination.state.canceled
                 ? "canceled"
-                : code === 0 && !termination.state.timed_out
+                : exitCode === 0 && !termination.state.timed_out && !structuredOutputError
                   ? "passed"
                   : "failed",
-            exitCode: typeof code === "number" ? code : 1,
+            exitCode,
             ...(stdout ? { stdout } : {}),
             ...(stderr ? { stderr } : {}),
             metadata: {
               binary,
               args,
+              cursor_config_dir: cursorConfig.config_dir,
+              cursor_cli_config_path: cursorConfig.cli_config_path,
               timed_out: termination.state.timed_out,
-              force_killed: termination.state.force_killed
+              force_killed: termination.state.force_killed,
+              ...(structuredOutputError ? { error: createCursorOutputFailure(structuredOutputError).message } : {})
             },
-            ...(output_json ? { outputJson: output_json } : {})
+            ...(cursorOutput.last_message
+              ? {
+                  transcript: {
+                    last_message: cursorOutput.last_message
+                  }
+                }
+              : {}),
+            ...(cursorOutput.output_json ? { outputJson: cursorOutput.output_json } : {})
           });
         });
       });

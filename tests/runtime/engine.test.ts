@@ -18,7 +18,7 @@ import {
 import { buildExecutionId } from "../../src/runtime/attempts.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
-import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
+import { renderHarnessPrompt, type HarnessAdapter } from "../../src/runtime/harness/types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -161,7 +161,7 @@ describe("runtime engine", () => {
                 {
                   type: "agent",
                   id: "implement",
-                  prompt: "Increment the counter.",
+                  goal: "Increment the counter.",
                   artifacts: {
                     notes: {
                       from: "output_dir",
@@ -740,7 +740,6 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "implement",
-            prompt: "Write the handoff into $AGENTFLOW_OUTPUT_DIR.",
             goal: "Produce the review handoff.",
             acceptance_criteria: ["The handoff explains validation."],
             artifacts: {
@@ -801,7 +800,7 @@ describe("runtime engine", () => {
         nodeAcceptanceCriteria: ["The handoff explains validation."]
       })
     );
-    expect(invocations[0]?.prompt).toContain(invocations[0]?.outputDir);
+    expect(renderHarnessPrompt(invocations[0]!)).toContain(invocations[0]?.outputDir);
     expect(attempt?.metadata).toEqual(expect.objectContaining({
       session_id: "agent-1"
     }));
@@ -1084,7 +1083,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "package_handoff",
-            prompt: "Write the handoff file.",
+            goal: "Write the handoff file.",
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -1180,7 +1179,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_with_paths",
-            prompt: [
+            goal: [
               "Save your draft to ${AGENTFLOW_OUTPUT_DIR}/draft.md.",
               "The workspace lives at $AGENTFLOW_WORKSPACE.",
               "The packet path is AGENTFLOW_CONTEXT_PACKET.",
@@ -1222,7 +1221,7 @@ describe("runtime engine", () => {
 
     expect(run.outcome).toBe("passed");
     expect(capturedInvocation).toBeDefined();
-    const renderedPrompt = capturedInvocation!.prompt;
+    const renderedPrompt = renderHarnessPrompt(capturedInvocation!);
     expect(renderedPrompt).toContain(`Save your draft to ${expectedOutputDir}/draft.md.`);
     expect(renderedPrompt).toContain(`The workspace lives at ${repoDir}.`);
     expect(renderedPrompt).toMatch(/The packet path is .+\/context\/packet\.json\./);
@@ -1265,7 +1264,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            prompt: "Write a handoff after inspecting the repo.",
+            goal: "Write a handoff after inspecting the repo.",
             artifact_repair: {
               max_attempts: 2
             },
@@ -1323,9 +1322,12 @@ describe("runtime engine", () => {
       `${attempt.execution_id}__${attempt.execution_id}__repair_artifact_1`,
       `${attempt.execution_id}__${attempt.execution_id}__repair_artifact_2`
     ]);
-    expect(invocations[1]?.prompt).toContain("## Agentflow Artifact Repair");
-    expect(invocations[1]?.prompt).toContain("Write a handoff after inspecting the repo.");
-    expect(invocations[1]?.prompt).toContain("expected absolute path");
+    const repairPrompt = renderHarnessPrompt(invocations[1]!);
+    expect(invocations[1]?.promptKind).toBe("artifact_repair");
+    expect(repairPrompt).toContain("## Repair Task");
+    expect(repairPrompt).toContain("## Missing Artifacts");
+    expect(repairPrompt).toContain("Write a handoff after inspecting the repo.");
+    expect(repairPrompt).toContain("expected absolute path");
     expect(attempt.artifacts.handoff).toBe(join(artifactsRoot, "handoff.md"));
     expect(await readFile(attempt.artifacts.handoff!, "utf8")).toBe("repaired handoff\n");
     expect(attempt.metadata.artifact_repair).toEqual({
@@ -1375,7 +1377,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            prompt: "Write summary and handoff artifacts.",
+            goal: "Write summary and handoff artifacts.",
             artifacts: {
               summary: {
                 from: "output_dir",
@@ -1473,7 +1475,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            prompt: "Write a handoff.",
+            goal: "Write a handoff.",
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -1569,7 +1571,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "silent_agent",
-            prompt: "Return nothing."
+            goal: "Return nothing."
           }
         ]
       }
@@ -1825,7 +1827,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            prompt: "Write a handoff.",
+            goal: "Write a handoff.",
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -2007,7 +2009,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "reader",
-            prompt: "Read the input.",
+            goal: "Read the input.",
             context: [
               {
                 name: "secret",
@@ -2037,7 +2039,7 @@ describe("runtime engine", () => {
       }
     });
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.attempts).toHaveLength(1);
     expect(run.state.node_statuses.root__reader).toBe("failed");
     expect(run.events).toEqual(
@@ -2101,7 +2103,7 @@ describe("runtime engine", () => {
       }
     });
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.attempts[0]?.status).toBe("failed");
     expect(run.attempts[0]?.metadata.error).toContain(
       'cwd "../outside" must be a relative path that stays within its repo or workspace root.'
@@ -2154,7 +2156,7 @@ describe("runtime engine", () => {
       }
     });
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.attempts[0]?.status).toBe("failed");
     expect(run.attempts[0]?.metadata.error).toContain(
       'env_files entry "main:.env" must be a relative path that stays within its repo or workspace root.'
@@ -2174,22 +2176,12 @@ describe("runtime engine", () => {
       version: "1",
       graph_id: "runtime-terminal-failure",
       supervision: {
-        allowed_actions: ["repair_artifact", "escalate"],
-        retry_budget: {
-          max_total_interventions: 0,
-          max_node_retries: 0,
-          max_artifact_repairs: 0,
-          max_context_rebuilds: 0,
-          max_workspace_refreshes: 0,
-          max_diagnostic_runs: 0,
-          max_semantic_evaluations: 0
-        },
-        drift_detection: {
-          score_threshold: 0.8
-        },
-        escalation: {
-          require_human_on_policy_breach: true,
-          require_human_on_scope_drift: true
+        actions: {},
+        max_total_interventions: 0,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
         }
       },
       repos: {
@@ -2551,7 +2543,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "implement",
-            prompt: "Attempt a harness run."
+            goal: "Attempt a harness run."
           }
         ]
       }
@@ -2573,9 +2565,9 @@ describe("runtime engine", () => {
 
     const attempt = run.attempts.find((candidate) => candidate.authored_id === "implement");
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.attempts).toHaveLength(1);
-    expect(run.state.status).toBe("failed");
+    expect(run.state.status).toBe("paused");
     expect(run.events).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2595,7 +2587,7 @@ describe("runtime engine", () => {
         graph_id: "runtime-preflight-harness",
         launch_profile: "default",
         workspace_backend: "inplace",
-        status: "failed",
+        status: "paused",
         ended_at: expect.any(String)
       })
     );
@@ -2657,7 +2649,7 @@ describe("runtime engine", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  prompt: "Review the draft.",
+                  goal: "Review the draft.",
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"
@@ -2748,7 +2740,7 @@ describe("runtime engine", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            prompt: "Evaluate the latest patch."
+            goal: "Evaluate the latest patch."
           }
         ]
       }
@@ -2810,22 +2802,14 @@ describe("runtime engine", () => {
       version: "1",
       graph_id: "runtime-supervisor-retry",
       supervision: {
-        allowed_actions: ["retry_node", "escalate"],
-        retry_budget: {
-          max_total_interventions: 1,
-          max_node_retries: 1,
-          max_artifact_repairs: 0,
-          max_context_rebuilds: 0,
-          max_workspace_refreshes: 0,
-          max_diagnostic_runs: 0,
-          max_semantic_evaluations: 0
+        actions: {
+          retry_with_guidance: { max_uses: 1 }
         },
-        drift_detection: {
-          score_threshold: 0.8
-        },
-        escalation: {
-          require_human_on_policy_breach: true,
-          require_human_on_scope_drift: true
+        max_total_interventions: 1,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
         }
       },
       repos: {
@@ -2891,7 +2875,8 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("passed");
     expect(calls).toBe(2);
     expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
-    expect(run.state.supervisor.budget_remaining.max_node_retries).toBe(0);
+    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(0);
+    expect(run.state.supervisor.intervention_count).toBe(1);
     expect(run.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2899,19 +2884,187 @@ describe("runtime engine", () => {
           compiled_id: "root__flaky",
           payload: expect.objectContaining({
             classification: "timeout",
-            action: "retry_node",
+            action: "retry_with_guidance",
             target_execution_id: attempts[0]!.execution_id
+          })
+        }),
+        expect.objectContaining({
+          type: "supervisor.intervention.started",
+          compiled_id: "root__flaky",
+          payload: expect.objectContaining({
+            action: "retry_with_guidance",
+            target_compiled_id: "root__flaky"
           })
         }),
         expect.objectContaining({
           type: "supervisor.intervention.completed",
           compiled_id: "root__flaky",
           payload: expect.objectContaining({
-            action: "retry_node"
+            action: "retry_with_guidance",
+            target_compiled_id: "root__flaky"
           })
         })
       ])
     );
+    await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain(
+      '"action":"retry_with_guidance"'
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("fails instead of pausing when human pause supervision is disabled", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-pause-disabled-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-pause-disabled",
+      supervision: {
+        actions: {
+          pause_for_human: { max_uses: 0 }
+        },
+        max_total_interventions: 0,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "policy_failure",
+            command: "placeholder"
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async () => ({
+          status: "failed",
+          outcome: "failed",
+          result: { error: "env file escapes the workspace" },
+          stdout: "",
+          stderr: "env file escapes the workspace"
+        })
+      }
+    });
+
+    expect(run.outcome).toBe("failed");
+    expect(run.state.status).toBe("failed");
+    expect(run.state.supervisor.status).toBe("exhausted");
+    expect(run.state.supervisor.intervention_count).toBe(0);
+    expect(run.state.supervisor.pause).toBeUndefined();
+    expect(run.events).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({
+          type: "supervisor.paused"
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("advertises resume actions accepted by the resume command when paused", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-pause-options-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-pause-options",
+      supervision: {
+        actions: {
+          pause_for_human: { max_uses: 1 }
+        },
+        max_total_interventions: 1,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "policy_failure",
+            command: "placeholder"
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        exec: async () => ({
+          status: "failed",
+          outcome: "failed",
+          result: { error: "operation escapes the workspace" },
+          stdout: "",
+          stderr: "operation escapes the workspace"
+        })
+      }
+    });
+
+    expect(run.outcome).toBe("paused");
+    expect(run.state.supervisor.pause?.resume_options).toEqual([
+      "retry_with_guidance",
+      "fail",
+      "add_context"
+    ]);
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -2948,7 +3101,7 @@ describe("runtime engine", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            prompt: "Evaluate the latest patch."
+            goal: "Evaluate the latest patch."
           }
         ]
       }
@@ -3047,9 +3200,8 @@ describe("runtime engine", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            prompt: "Evaluate the latest patch against $AGENTFLOW_OUTPUT_DIR.",
+            goal: "Judge whether reviewer evidence is complete against $AGENTFLOW_OUTPUT_DIR.",
             rubric: "Return JSON with pass/fail and issues.",
-            goal: "Judge whether reviewer evidence is complete.",
             acceptance_criteria: ["Incomplete evidence is recorded as a warning."],
             on_failure: "continue"
           },
@@ -3111,12 +3263,13 @@ describe("runtime engine", () => {
         graphGoal: "Exercise soft AI check behavior.",
         graphAcceptanceCriteria: ["The run continues while preserving evaluator evidence."],
         graphConstraints: ["The evaluator must stay read-only."],
-        nodeGoal: "Judge whether reviewer evidence is complete.",
+        nodeGoal: expect.stringContaining("Judge whether reviewer evidence is complete"),
         nodeAcceptanceCriteria: ["Incomplete evidence is recorded as a warning."]
       })
     );
-    expect(invocations[0]?.prompt).toContain("## Rubric");
-    expect(invocations[0]?.prompt).toContain("Return JSON with pass/fail and issues.");
+    const aiPrompt = renderHarnessPrompt(invocations[0]!);
+    expect(aiPrompt).toContain("Rubric:");
+    expect(aiPrompt).toContain("Return JSON with pass/fail and issues.");
     expect(JSON.parse(await readFile(judgeAttempt!.result_path!, "utf8"))).toEqual(
       expect.objectContaining({
         soft_verification: true,
@@ -3178,7 +3331,7 @@ describe("runtime engine", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            prompt: "Evaluate the latest patch."
+            goal: "Evaluate the latest patch."
           }
         ]
       }
@@ -3266,7 +3419,7 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "stream_logs",
-            prompt: "Stream a partial response before completion."
+            goal: "Stream a partial response before completion."
           }
         ]
       }
@@ -3673,7 +3826,7 @@ describe("runtime engine", () => {
             type: "agent",
             id: "never_runs",
             repo: "main",
-            prompt: "Should stay blocked."
+            goal: "Should stay blocked."
           }
         ]
       }
@@ -3736,7 +3889,7 @@ describe("runtime engine", () => {
             type: "agent",
             id: "implement",
             repo: "main",
-            prompt: "Implement the change."
+            goal: "Implement the change."
           }
         ]
       }
@@ -3765,7 +3918,7 @@ describe("runtime engine", () => {
     });
 
     const attempt = run.attempts.find((candidate) => candidate.authored_id === "implement");
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(run.state.node_statuses.root__implement).toBe("failed");
     expect(attempt?.status).toBe("failed");
     expect(attempt?.context_packet_path).toBeUndefined();
@@ -3832,7 +3985,7 @@ describe("runtime engine", () => {
       await readFile(join(attempt!.execution_dir, "execution.json"), "utf8")
     ) as Record<string, unknown>;
 
-    expect(run.outcome).toBe("failed");
+    expect(run.outcome).toBe("paused");
     expect(attempt?.context_packet_path).toBeUndefined();
     expect(attempt?.context_manifest_path).toBeUndefined();
     expect(executionRecord.context_packet_path).toBeUndefined();

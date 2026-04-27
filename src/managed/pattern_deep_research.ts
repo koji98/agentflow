@@ -364,7 +364,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         outputDirArtifact("research_brief", "research-brief.md"),
         workflowBriefOutput()
       ),
-      prompt: buildBriefPrompt(config)
+      goal: buildBriefPrompt(config)
     }
   ];
 
@@ -401,7 +401,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
               workflowPlanMarkdownOutput(),
               workflowPlanJsonOutput()
             ),
-            prompt: buildPlanPrompt(config, trackCount)
+            goal: buildPlanPrompt(config, trackCount)
           },
           {
             type: "checkpoint",
@@ -415,7 +415,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
               node: planId,
               artifact: "research_plan_markdown"
             },
-            prompt: buildPlanCheckpointPrompt()
+            goal: buildPlanCheckpointPrompt()
           }
         ]
       },
@@ -438,7 +438,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         workflowPlanMarkdownOutput(),
         workflowPlanJsonOutput()
       ),
-      prompt: buildPlanPrompt(config, trackCount)
+      goal: buildPlanPrompt(config, trackCount)
     });
   }
 
@@ -461,7 +461,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         latestPlanJsonRef
       ],
       artifacts: outputDirArtifact("track_briefs", "track-briefs.json"),
-      prompt: buildTrackPrompt(config)
+      goal: buildTrackPrompt(config)
     },
     {
       type: "parallel",
@@ -479,7 +479,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
           latestPlanRef
         ],
         artifacts: buildWorkerArtifacts(index),
-        prompt: buildWorkerPrompt(config, index, "initial")
+        goal: buildWorkerPrompt(config, index, "initial")
       }))
     },
     {
@@ -492,7 +492,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         return artifactContext(`track_summary_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_summary_${suffix}`);
       }),
       artifacts: outputDirArtifact("contradictions", "contradictions.md"),
-      prompt: buildContradictionPrompt()
+    goal: buildContradictionPrompt()
     }
   );
 
@@ -528,7 +528,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
           })
         ],
         artifacts: outputDirArtifact(`followup_plan_${zeroPad(passIndex + 1)}`, `followup-plan-pass-${zeroPad(passIndex + 1)}.json`),
-        prompt: buildFollowupPlanPrompt(passIndex)
+        goal: buildFollowupPlanPrompt(passIndex)
       },
       {
         type: "parallel",
@@ -545,7 +545,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
             artifactContext("research_brief", briefId, "research_brief")
           ],
           artifacts: buildFollowupArtifacts(passIndex, index),
-          prompt: buildWorkerPrompt(config, index, `follow-up pass ${zeroPad(passIndex + 1)}`)
+          goal: buildWorkerPrompt(config, index, `follow-up pass ${zeroPad(passIndex + 1)}`)
         }))
       }
     );
@@ -589,7 +589,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       outputDirArtifact("source_ledger", "source-ledger.json"),
       outputDirArtifact("uncertainties", "uncertainties.md")
     ),
-    prompt: buildConsolidatePrompt(config)
+    goal: buildConsolidatePrompt(config)
   });
 
   const publishedArtifacts = mergeArtifacts(
@@ -614,7 +614,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       artifactContext("uncertainties", consolidateId, "uncertainties")
     ],
     artifacts: publishedArtifacts,
-    prompt: buildFinalPrompt(config)
+    goal: buildFinalPrompt(config)
   });
 
   if (config.strategy.final_critique) {
@@ -630,7 +630,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         artifactContext("uncertainties", config.id, "uncertainties"),
         latestPlanRef
       ],
-      prompt: buildFinalCritiquePrompt(config),
+      goal: buildFinalCritiquePrompt(config),
       rubric: buildFinalCritiqueRubric(config)
     } satisfies CheckNode);
   }

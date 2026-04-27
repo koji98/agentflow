@@ -492,10 +492,22 @@ function normalizeManifest(value: unknown, path: string, diagnostics: GraphDiagn
       typeof toolRecord.description === "string" && toolRecord.description.trim().length > 0
         ? toolRecord.description
         : undefined;
+    if (!description) {
+      diagnostics.push({
+        path: `${path}.tools.${toolName}.description`,
+        message: "Tool description is required so agents can choose the right CLI before reading --help."
+      });
+    }
     const usage =
       typeof toolRecord.usage === "string" && toolRecord.usage.trim().length > 0
         ? toolRecord.usage
         : undefined;
+    if (!usage) {
+      diagnostics.push({
+        path: `${path}.tools.${toolName}.usage`,
+        message: "Tool usage is required as a concise prompt hint; the executable --help output remains the authoritative detailed contract."
+      });
+    }
     let args: string[] | undefined;
     if (toolRecord.args !== undefined) {
       if (!Array.isArray(toolRecord.args) || toolRecord.args.some((entry) => typeof entry !== "string")) {

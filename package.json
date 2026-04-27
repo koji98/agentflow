@@ -15,7 +15,6 @@
     "dev": "tsx src/cli/index.ts",
     "help": "npm run dev --",
     "start": "node dist/cli/index.js --help",
-    "plan-help": "npm run graph-help",
     "run": "tsx src/cli/index.ts run",
     "validate": "tsx src/cli/index.ts validate",
     "graph-help": "tsx src/cli/index.ts graph-help",

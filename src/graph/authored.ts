@@ -3,7 +3,6 @@ import type {
   ArtifactSourceKind,
   CheckKind,
   ContextSelector,
-  DeliverySection,
   FailureBehavior,
   HarnessName,
   PrerequisiteKind,
@@ -52,11 +51,10 @@ export interface PluginToolReference {
   from_plugin: string;
   tool: string;
   alias?: string;
+  config?: Record<string, string>;
 }
 
 export type ToolDeclaration = PluginToolReference;
-
-export type ToolConfigMap = Record<string, Record<string, string>>;
 
 export interface GraphProfile {
   harness?: HarnessName;
@@ -79,41 +77,23 @@ export interface GraphDefaults {
 
 export interface GraphIntent {
   goal: string;
-  scope?: {
-    repos?: string[];
-    paths?: string[];
-    out_of_scope?: string[];
-  };
   constraints?: string[];
   acceptance_criteria?: string[];
-  approval_boundaries?: string[];
 }
 
-export interface SupervisionRetryBudget {
-  max_total_interventions: number;
-  max_node_retries: number;
-  max_artifact_repairs: number;
-  max_context_rebuilds: number;
-  max_workspace_refreshes: number;
-  max_diagnostic_runs: number;
-  max_semantic_evaluations: number;
+export interface SupervisionActionPolicy {
+  max_uses: number;
 }
 
 export interface SupervisionPolicy {
-  allowed_actions: SupervisorActionKind[];
-  retry_budget: SupervisionRetryBudget;
-  drift_detection: {
-    score_threshold: number;
+  actions: Partial<Record<SupervisorActionKind, SupervisionActionPolicy>>;
+  max_total_interventions: number;
+  policy: {
+    pause_on_policy_risk: boolean;
+    pause_on_repeated_recovery: boolean;
+    drift_score_threshold: number;
     evaluator_profile?: string;
   };
-  escalation: {
-    require_human_on_policy_breach: boolean;
-    require_human_on_scope_drift: boolean;
-  };
-}
-
-export interface DeliveryContract {
-  required_sections: DeliverySection[];
 }
 
 export interface FileInput {
@@ -204,6 +184,7 @@ export interface BaseExecutableNode extends BaseNode {
   profile?: string;
   goal?: string;
   acceptance_criteria?: string[];
+  constraints?: string[];
   context?: ContextItem[];
   artifacts?: Record<string, ArtifactDefinition>;
   timeout_sec?: number;
@@ -211,13 +192,11 @@ export interface BaseExecutableNode extends BaseNode {
 
 export interface AgentNode extends BaseExecutableNode {
   type: "agent";
-  prompt?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
   artifact_repair?: ArtifactRepairPolicy;
   tools?: ToolDeclaration[];
-  tool_config?: ToolConfigMap;
 }
 
 export interface ExecNode extends BaseExecutableNode {
@@ -239,7 +218,6 @@ export interface CheckNode extends BaseExecutableNode {
   env_files?: string[];
   env?: Record<string, string>;
   pass_if?: DeterministicPassIf;
-  prompt?: string;
   rubric?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;
@@ -248,7 +226,6 @@ export interface CheckNode extends BaseExecutableNode {
 
 export interface CheckpointNode extends BaseExecutableNode {
   type: "checkpoint";
-  prompt: string;
   review_from: ArtifactReference;
 }
 
@@ -282,7 +259,6 @@ export interface AuthoredGraphDocument {
   graph_id: string;
   intent: GraphIntent;
   supervision: SupervisionPolicy;
-  delivery: DeliveryContract;
   repos: Record<string, RepoDefinition>;
   defaults?: GraphDefaults;
   profiles?: Record<string, GraphProfile>;
@@ -290,7 +266,6 @@ export interface AuthoredGraphDocument {
   config?: Record<string, unknown>;
   config_schema?: Record<string, unknown>;
   tools?: ToolDeclaration[];
-  tool_config?: ToolConfigMap;
   graph: ContainerGraphNode;
 }
 

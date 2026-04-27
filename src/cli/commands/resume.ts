@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { appendFile, mkdir, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { isRecordedRunOwnerActive } from "../../artifacts/owner.js";
@@ -96,7 +96,7 @@ async function selectLatestResumableRunRoot(
   const resumableEntries = records
     .filter((entry): entry is { runRoot: string; record: Awaited<ReturnType<typeof readRunRecord>> } =>
       Boolean(entry) &&
-      ["failed", "canceled"].includes(entry!.record.status) &&
+      ["failed", "canceled", "paused"].includes(entry!.record.status) &&
       entry!.record.graph_path === loaded.absolute_path
     )
     .sort((left, right) => {
@@ -110,7 +110,7 @@ async function selectLatestResumableRunRoot(
     return {
       ok: false,
       message:
-        "No failed or canceled runs were found for the supplied graph in the resolved runs root.",
+        "No failed, canceled, or paused runs were found for the supplied graph in the resolved runs root.",
       runs_root: runsRoot,
       graph_path: loaded.absolute_path
     };
@@ -166,19 +166,20 @@ function compareRepoBindings(
 
 export const resumeCommand = {
   name: "resume",
-  summary: "Recompile the original graph for a failed or canceled run root and preserve only unchanged passed work.",
+  summary: "Recompile the original graph for a failed, canceled, or paused run root and preserve only unchanged passed work.",
   usage: "agentflow resume (--run-root <path/to/run-root> | --graph <path/to/graph> --latest)",
   examples: [
     "agentflow resume --run-root .agentflow/runs/<run-id>",
     "agentflow resume --run-root /absolute/path/to/.agentflow/runs/<run-id>",
     "agentflow resume --graph ./agentflow.graph.json --latest"
   ] as const,
-  optionNames: ["run-root", "graph", "latest", "help"] as const,
+  optionNames: ["run-root", "graph", "latest", "human-action", "human-note", "help"] as const,
   helpNotes: [
     "Resume recompiles from the original graph path using the current Agentflow build.",
     "Only passed nodes whose compiled contract still matches are preserved.",
     "Repeat scopes restart from iteration 1 when they were unfinished or their compiled contract changed.",
-    "Pass --graph with --latest to resume the most recent failed or canceled run discovered under the graph's runs root."
+    "Pass --graph with --latest to resume the most recent failed, canceled, or paused run discovered under the graph's runs root.",
+    "Paused runs require --human-action approve|fail|add_context|retry_with_guidance|rebuild_context_then_retry, with optional --human-note."
   ] as const,
   async run(
     options: Record<string, string | boolean | string[] | undefined>,
@@ -186,6 +187,8 @@ export const resumeCommand = {
   ) {
     const runRootInput = typeof options["run-root"] === "string" ? options["run-root"] : undefined;
     const graphInput = typeof options.graph === "string" ? options.graph : undefined;
+    const humanAction = typeof options["human-action"] === "string" ? options["human-action"] : undefined;
+    const humanNote = typeof options["human-note"] === "string" ? options["human-note"] : undefined;
     const latestRequested = options.latest === true;
 
     if (latestRequested && runRootInput) {
@@ -300,17 +303,67 @@ export const resumeCommand = {
       };
     }
 
-    if (!["failed", "canceled"].includes(runRecord.status)) {
+    if (!["failed", "canceled", "paused"].includes(runRecord.status)) {
       return {
         exitCode: 1,
         output: {
           command: "resume",
           status: "failed",
-          message: `Only failed or canceled runs can be resumed. Current status: ${runRecord.status}.`,
+          message: `Only failed, canceled, or paused runs can be resumed. Current status: ${runRecord.status}.`,
           run_root,
           run_id: runRecord.run_id
         }
       };
+    }
+
+    if (runRecord.status === "paused") {
+      const allowedHumanActions = new Set([
+        "approve",
+        "fail",
+        "add_context",
+        "retry_with_guidance",
+        "rebuild_context_then_retry"
+      ]);
+      if (!humanAction || !allowedHumanActions.has(humanAction)) {
+        return {
+          exitCode: 2,
+          output: {
+            command: "resume",
+            status: "failed",
+            message: "Paused runs require --human-action approve|fail|add_context|retry_with_guidance|rebuild_context_then_retry.",
+            run_root,
+            run_id: runRecord.run_id,
+            pause: state.supervisor.pause
+          }
+        };
+      }
+      const artifactPaths = resolveRunArtifactPaths(run_root);
+      await mkdir(`${run_root}/runtime`, { recursive: true });
+      await appendFile(
+        `${run_root}/runtime/human-resume-input.jsonl`,
+        `${JSON.stringify({
+          run_id: runRecord.run_id,
+          decision_id: state.supervisor.pause?.decision_id,
+          action: humanAction,
+          ...(humanNote ? { note: humanNote } : {}),
+          created_at: new Date().toISOString()
+        })}\n`,
+        "utf8"
+      );
+      if (humanAction === "fail") {
+        return {
+          exitCode: 1,
+          output: {
+            command: "resume",
+            status: "failed",
+            message: "Paused run was rejected by structured human input.",
+            run_root,
+            run_id: runRecord.run_id,
+            delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
+            reviewer_guide: `${artifactPaths.delivery_dir}/reviewer-guide.md`
+          }
+        };
+      }
     }
 
     const loaded = await loadAuthoredGraphDocument(currentWorkingDirectory, runRecord.graph_path);
@@ -513,7 +566,9 @@ export const resumeCommand = {
         ? "Run resumed and completed successfully."
         : resumed.outcome === "canceled"
           ? "Run resumed and was canceled."
-          : "Run resumed and failed again.";
+          : resumed.outcome === "paused"
+            ? "Run resumed and paused for human input."
+            : "Run resumed and failed again.";
 
     return {
       exitCode: resumed.outcome === "passed" ? 0 : 1,

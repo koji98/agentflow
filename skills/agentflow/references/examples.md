@@ -32,9 +32,6 @@ agentflow validate --graph docs/examples/graphs/ship-feature.graph.json --run-re
       "sandbox": "workspace-write"
     }
   },
-  "delivery": {
-    "required_sections": ["task_brief", "implementation_summary", "evaluation_ledger", "reviewer_guide", "intervention_trace"]
-  },
   "graph": {
     "type": "sequence",
     "id": "root",
@@ -42,7 +39,7 @@ agentflow validate --graph docs/examples/graphs/ship-feature.graph.json --run-re
       {
         "type": "agent",
         "id": "implement",
-        "prompt": "Implement the focused change and write $AGENTFLOW_OUTPUT_DIR/change-summary.md.",
+        "goal": "Implement the focused change and write $AGENTFLOW_OUTPUT_DIR/change-summary.md.",
         "artifacts": {
           "change_summary": {
             "from": "output_dir",

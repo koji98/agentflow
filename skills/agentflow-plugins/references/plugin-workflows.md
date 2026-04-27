@@ -90,6 +90,7 @@ Minimal `agentflow.plugin.json`:
   "tools": {
     "poll": {
       "executable": "tools/poll-pr.sh",
+      "description": "Poll a pull request and print a JSON status object.",
       "usage": "poll --pr <number>",
       "capability": "verification",
       "impact": "secret",
@@ -146,6 +147,7 @@ Minimal `workflow.json`:
 Tools are CLIs. Each export declares:
 
 - `executable`
+- `description`
 - `usage`
 - `capability`: `context`, `verification`, `mutation`, or `reporting`
 - `impact`: `read`, `write`, `external`, or `secret`
@@ -158,11 +160,13 @@ Policy:
 
 - read-only agents do not receive mutation tools or write-impact tools
 - secret-impact tools require plugin-declared `credentials`
-- external-impact tools require exact tokens in `intent.approval_boundaries`, such as `tool:<callable>` or `external:<plugin>/<tool>`
+- external-impact tools are approved by declaring them in the graph or agent node
 - tools share the node sandbox and timeout
 - credential values are configured through `agentflow auth`, stored in macOS Keychain for secret fields, and injected only into the plugin tool subprocess
-- `tool_config` values are not exported into the agent harness environment; the generated launcher resolves them only for the plugin tool subprocess
-- `tool_config` accepts non-secret string options only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
+- inline `tools[].config` values are not exported into the agent harness environment; the generated launcher resolves them only for the plugin tool subprocess
+- inline `tools[].config` accepts non-secret string options only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
+- every plugin tool executable must support credential-free, side-effect-free `--help` that exits `0` and includes purpose, usage, options, defaults, output, exit codes, and examples
+- `agentflow validate --graph <path> --run-ready` executes resolved plugin tools with `--help` and blocks launch if the help contract fails
 
 ## Validate
 

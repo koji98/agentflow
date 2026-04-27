@@ -4,10 +4,10 @@ Agentflow v1 is the supervised runtime for delegating substantial coding work to
 
 The product surface is intentionally centered on four layers:
 
-1. Authored intent: a graph that states goal, scope, constraints, acceptance criteria, approval boundaries, repos, tools, and outcome nodes.
+1. Authored intent: a graph that states goal, constraints, acceptance criteria, repos, profiles, tools, and outcome nodes.
 2. Compiled contract: normalized primitive runtime nodes with explicit control flow, context dependencies, artifact contracts, harness selection, and tool policy.
-3. Supervised execution: local execution through Codex CLI, Cursor CLI, deterministic checks, semantic checks, plugin-bundled tools, durable events, retry budgets, and visible interventions.
-4. Delivery package: review artifacts that summarize what happened, what changed, what evidence exists, where risk remains, and what the supervisor did.
+3. Supervised execution: local execution through Codex CLI, Cursor CLI, deterministic checks, semantic checks, plugin-bundled tools, durable events, bounded action budgets, and visible interventions.
+4. Delivery package: review artifacts that summarize what happened, what changed, what evidence exists, where risk remains, what the supervisor did, and which files are human-facing versus resume/audit/debug state.
 
 ## Canonical Surfaces
 
@@ -30,7 +30,7 @@ A good node owns a meaningful outcome:
 - implement an accountable slice and publish change evidence
 - review a change package and publish calibrated findings
 
-The graph must preserve human control through `intent.approval_boundaries`, checkpoints when human input is required, and explicit tool impact policy.
+The graph must preserve human control through clear `constraints`, checkpoints when human input is required, and explicit tool impact policy.
 
 ## Runtime Bar
 

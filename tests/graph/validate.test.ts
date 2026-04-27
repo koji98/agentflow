@@ -83,7 +83,7 @@ describe("graph validation", () => {
                 {
                   type: "agent",
                   id: "draft",
-                  prompt: "Draft the artifact.",
+                  goal: "Draft the artifact.",
                   artifacts: {
                     draft_spec: {
                       from: "output_dir",
@@ -95,7 +95,7 @@ describe("graph validation", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  prompt: "Review the draft.",
+                  goal: "Review the draft.",
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"
@@ -200,7 +200,7 @@ describe("graph validation", () => {
                 {
                   type: "agent",
                   id: "fix",
-                  prompt: "Apply the fix."
+                  goal: "Apply the fix."
                 },
                 {
                   type: "check",
@@ -254,7 +254,7 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "draft",
-            prompt: "Draft the artifact.",
+            goal: "Draft the artifact.",
             artifacts: {
               draft_spec: {
                 from: "output_dir",
@@ -266,7 +266,7 @@ describe("graph validation", () => {
           {
             type: "checkpoint",
             id: "review",
-            prompt: "Review the draft.",
+            goal: "Review the draft.",
             review_from: {
               node: "draft",
               artifact: "draft_spec"
@@ -313,14 +313,14 @@ describe("graph validation", () => {
             id: "deterministic_gate",
             check_kind: "deterministic",
             command: "npm",
-            prompt: "This should not be allowed.",
+            goal: "This should not be allowed.",
             model: "gpt-5"
           },
           {
             type: "check",
             id: "ai_gate",
             check_kind: "ai",
-            prompt: "Evaluate the change.",
+            goal: "Evaluate the change.",
             command: "npm",
             env: {
               SHOULD_NOT_EXIST: "true"
@@ -335,10 +335,6 @@ describe("graph validation", () => {
 
     expect(diagnostics).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.steps[0].prompt",
-          message: expect.stringContaining("does not apply to deterministic checks")
-        }),
         expect.objectContaining({
           path: "$.graph.steps[0].model",
           message: expect.stringContaining("does not apply to deterministic checks")
@@ -385,7 +381,7 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "reader",
-            prompt: "Read files.",
+            goal: "Read files.",
             context: [
               {
                 name: "secret",
@@ -494,7 +490,7 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "implement",
-            prompt: "Implement the requested change."
+            goal: "Implement the requested change."
           }
         ]
       }
@@ -524,7 +520,7 @@ describe("graph validation", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            prompt: "Judge the current state."
+            goal: "Judge the current state."
           }
         ]
       }
@@ -555,7 +551,7 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "summarize",
-            prompt: "Summarize the change.",
+            goal: "Summarize the change.",
             artifacts: {
               summary: {
                 from: "output_dir",
@@ -593,7 +589,7 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "inspect",
-            prompt: "Read the code and respond with observations only."
+            goal: "Read the code and respond with observations only."
           }
         ]
       }
@@ -603,6 +599,112 @@ describe("graph validation", () => {
       /read-only sandbox/i.test(diagnostic.message)
     );
     expect(sandboxDiagnostics).toEqual([]);
+  });
+
+  it("rejects reasoning_effort on Cursor profiles and nodes", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "cursor-reasoning-effort",
+      intent: TEST_INTENT,
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default" },
+      profiles: {
+        default: {
+          harness: "cursor-cli",
+          model: "gpt-5.5-extra-high",
+          reasoning_effort: "high",
+          ai_check_defaults: {
+            reasoning_effort: "low"
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            goal: "Implement the change.",
+            reasoning_effort: "medium"
+          },
+          {
+            type: "check",
+            id: "judge",
+            check_kind: "ai",
+            goal: "Judge the current state.",
+            reasoning_effort: "high"
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.profiles.default.reasoning_effort",
+          message: expect.stringMatching(/Cursor profile.*model ids encode reasoning effort/i)
+        }),
+        expect.objectContaining({
+          path: "$.profiles.default.ai_check_defaults.reasoning_effort",
+          message: expect.stringMatching(/Cursor profile.*ai_check_defaults\.reasoning_effort.*model ids encode reasoning effort/i)
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[0].reasoning_effort",
+          message: expect.stringMatching(/Cursor node "implement".*model ids encode reasoning effort/i)
+        }),
+        expect.objectContaining({
+          path: "$.graph.steps[1].reasoning_effort",
+          message: expect.stringMatching(/Cursor node "judge".*model ids encode reasoning effort/i)
+        })
+      ])
+    );
+  });
+
+  it("rejects reasoning_effort inherited by a Cursor launch profile", async () => {
+    const diagnostics = await validateAuthoredGraphDocument({
+      version: "1",
+      graph_id: "cursor-inherited-reasoning-effort",
+      intent: TEST_INTENT,
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "cursor"
+      },
+      profiles: {
+        cursor: {
+          harness: "cursor-cli",
+          model: "auto"
+        },
+        node_defaults: {
+          reasoning_effort: "high"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            profile: "node_defaults",
+            goal: "Implement the change."
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.profiles.node_defaults.reasoning_effort",
+          message: expect.stringMatching(/Cursor profile.*reasoning_effort/i)
+        })
+      ])
+    );
   });
 
   it("does not require a harness for exec-only graphs", async () => {

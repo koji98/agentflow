@@ -17,15 +17,17 @@ export const realHarnessSpecs = [
     kind: "codex-cli",
     envVar: "AGENTFLOW_CODEX_CLI_BIN",
     defaultBinary: "codex",
-    defaultModel: "gpt-5-codex",
+    modelEnvVar: "AGENTFLOW_CODEX_MODEL",
+    defaultModel: "gpt-5.4-mini",
     sandbox: "workspace-write"
   },
   {
     kind: "cursor-cli",
     envVar: "AGENTFLOW_CURSOR_CLI_BIN",
     defaultBinary: "agent",
-    defaultModel: "gpt-5-cursor",
-    sandbox: "read-only"
+    modelEnvVar: "AGENTFLOW_CURSOR_MODEL",
+    defaultModel: "gpt-5.4-mini-medium",
+    sandbox: "workspace-write"
   }
 ];
 
@@ -37,11 +39,18 @@ export const realHarnessContract = {
     nodeKind: "agent",
     timeoutSec: 180
   },
-  artifactChecks: ["run.json status", "state.json status", "summary.md status", "run.completed event"],
+  artifactChecks: [
+    "run.json status",
+    "state.json status",
+    "summary.md status",
+    "run.completed event",
+    "agent_response artifact"
+  ],
   supportedHarnesses: realHarnessSpecs.map((spec) => ({
     kind: spec.kind,
     envVar: spec.envVar,
-    defaultBinary: spec.defaultBinary
+    defaultBinary: spec.defaultBinary,
+    modelEnvVar: spec.modelEnvVar
   }))
 };
 
@@ -343,7 +352,11 @@ function renderUsage() {
     "",
     "Binary overrides:",
     "- AGENTFLOW_CODEX_CLI_BIN",
-    "- AGENTFLOW_CURSOR_CLI_BIN"
+    "- AGENTFLOW_CURSOR_CLI_BIN",
+    "",
+    "Model overrides:",
+    "- AGENTFLOW_CODEX_MODEL",
+    "- AGENTFLOW_CURSOR_MODEL"
   ].join("\n");
 }
 
@@ -391,15 +404,24 @@ function buildSmokePrompt(harnessKind) {
   ].join(" ");
 }
 
-async function createSmokeFixture(spec) {
-  const tempRoot = await mkdtemp(join(tmpdir(), `agentflow-real-harness-${spec.kind}-`));
-  const launchRoot = join(tempRoot, "launch");
-  const repoDir = join(tempRoot, "repo");
-  const graphPath = join(tempRoot, "agentflow.graph.json");
+export function resolveHarnessModel(spec, env = process.env) {
+  const configuredModel = spec.modelEnvVar ? env[spec.modelEnvVar]?.trim() : "";
+  return configuredModel || spec.defaultModel;
+}
+
+export function buildSmokeGraphDocument(spec, env = process.env) {
   const timeoutSec = realHarnessContract.smokeGraph.timeoutSec;
-  const graphDocument = {
+  return {
     version: "1",
     graph_id: `real-harness-${spec.kind}`,
+    intent: {
+      goal: `Validate the ${spec.kind} real harness adapter.`,
+      acceptance_criteria: [
+        "The harness launches through the built Agentflow CLI.",
+        "The node returns a captured final response."
+      ],
+      constraints: ["Do not perform external side effects during real harness validation."]
+    },
     repos: {
       main: {
         path: "./repo"
@@ -412,7 +434,7 @@ async function createSmokeFixture(spec) {
     profiles: {
       default: {
         harness: spec.kind,
-        model: spec.defaultModel,
+        model: resolveHarnessModel(spec, env),
         sandbox: spec.sandbox,
         timeout_sec: timeoutSec
       }
@@ -425,11 +447,19 @@ async function createSmokeFixture(spec) {
           type: "agent",
           id: "real-smoke-agent",
           repo: "main",
-          prompt: buildSmokePrompt(spec.kind)
+          goal: buildSmokePrompt(spec.kind)
         }
       ]
     }
   };
+}
+
+async function createSmokeFixture(spec) {
+  const tempRoot = await mkdtemp(join(tmpdir(), `agentflow-real-harness-${spec.kind}-`));
+  const launchRoot = join(tempRoot, "launch");
+  const repoDir = join(tempRoot, "repo");
+  const graphPath = join(tempRoot, "agentflow.graph.json");
+  const graphDocument = buildSmokeGraphDocument(spec);
 
   await mkdir(launchRoot, { recursive: true });
   await mkdir(repoDir, { recursive: true });
@@ -441,7 +471,7 @@ async function createSmokeFixture(spec) {
     tempRoot,
     launchRoot: canonicalLaunchRoot,
     graphPath,
-    runsRoot: join(canonicalLaunchRoot, ".agentflow", "runs")
+    runsRoot: join(await realpath(tempRoot), ".agentflow", "runs")
   };
 }
 
@@ -508,6 +538,46 @@ async function readLatestExecutionFailure(runRoot) {
   };
 }
 
+async function readExecutionRecords(runRoot) {
+  const nodesRoot = join(runRoot, "nodes");
+  const nodeEntries = await readdir(nodesRoot, {
+    withFileTypes: true
+  }).catch(() => []);
+  const executions = [];
+
+  for (const nodeEntry of nodeEntries) {
+    if (!nodeEntry.isDirectory()) {
+      continue;
+    }
+
+    const executionsRoot = join(nodesRoot, nodeEntry.name, "executions");
+    const executionEntries = await readdir(executionsRoot, {
+      withFileTypes: true
+    }).catch(() => []);
+
+    for (const executionEntry of executionEntries) {
+      if (!executionEntry.isDirectory()) {
+        continue;
+      }
+
+      const executionDir = join(executionsRoot, executionEntry.name);
+      const executionPath = join(executionDir, "execution.json");
+
+      try {
+        const record = expectRecord(
+          JSON.parse(await readFile(executionPath, "utf8")),
+          `execution record (${executionPath})`
+        );
+        executions.push({ ...record, execution_dir: executionDir });
+      } catch {
+        // Ignore unreadable execution records.
+      }
+    }
+  }
+
+  return executions;
+}
+
 async function verifyRunArtifacts(runRoot, expectedRunId) {
   const runRecord = expectRecord(
     JSON.parse(await readFile(join(runRoot, "run.json"), "utf8")),
@@ -540,12 +610,26 @@ async function verifyRunArtifacts(runRoot, expectedRunId) {
     throw new Error("state.json status must equal \"passed\".");
   }
 
-  if (!summary.includes("- Status: `passed`")) {
+  if (!summary.includes("- Status: `passed`") && !summary.includes("- Control-flow status: `passed`")) {
     throw new Error("summary.md must record a passed terminal status.");
   }
 
   if (!events.some((event) => event?.type === "run.completed")) {
     throw new Error("events.jsonl must contain a run.completed event.");
+  }
+
+  const executions = await readExecutionRecords(runRoot);
+  const smokeExecution = executions.find((execution) => execution.authored_id === "real-smoke-agent");
+  if (!smokeExecution) {
+    throw new Error("real-smoke-agent execution record must exist.");
+  }
+
+  const artifacts = expectRecord(smokeExecution.artifacts, "real-smoke-agent artifacts");
+  const agentResponsePath = expectString(artifacts.agent_response, "real-smoke-agent agent_response artifact");
+  const agentResponse = await readFile(agentResponsePath, "utf8");
+
+  if (agentResponse.trim().length === 0) {
+    throw new Error("agent_response artifact must be non-empty.");
   }
 }
 
@@ -554,7 +638,7 @@ async function canonicalizeExistingPath(absolutePath) {
 }
 
 function renderSkipReason(spec, inspection) {
-  return `${spec.kind} binary "${inspection.binary}" is unavailable. Set ${spec.envVar} or install it on PATH. The smoke would have run the built CLI against a one-node real harness graph and verified durable passed artifacts.`;
+  return `${spec.kind} binary "${inspection.binary}" is unavailable. Set ${spec.envVar} or install it on PATH. The smoke would have run the built CLI against a one-node real harness graph and verified durable passed artifacts and captured agent response.`;
 }
 
 async function describeFailedRun(spec, inspection, runResult) {

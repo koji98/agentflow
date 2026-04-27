@@ -201,6 +201,8 @@ export interface RunArtifactPaths {
   compile_diagnostics_file: string;
   state_file: string;
   events_file: string;
+  runtime_log_file: string;
+  supervisor_timeline_file: string;
   interventions_file: string;
   summary_file: string;
   delivery_dir: string;
@@ -219,6 +221,8 @@ export function resolveRunArtifactPaths(runRoot: string): RunArtifactPaths {
     compile_diagnostics_file: join(runRoot, "compile_diagnostics.json"),
     state_file: join(runRoot, "state.json"),
     events_file: join(runRoot, "events.jsonl"),
+    runtime_log_file: join(runRoot, "runtime", "log.jsonl"),
+    supervisor_timeline_file: join(runRoot, "supervisor-timeline.jsonl"),
     interventions_file: join(runRoot, "interventions.jsonl"),
     summary_file: join(runRoot, "summary.md"),
     delivery_dir: join(runRoot, "delivery"),

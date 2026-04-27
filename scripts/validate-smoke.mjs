@@ -233,7 +233,13 @@ process.stdin.on("end", () => {
 async function createMockCursorBinary(tempRoot) {
   const binaryPath = join(tempRoot, "mock-agent.mjs");
   const source = `#!/usr/bin/env node
-process.stdout.write('{"passed":true,"summary":"cursor smoke ok"}');
+process.stdout.write(JSON.stringify({
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  result: "cursor smoke ok",
+  session_id: "validate-smoke"
+}));
 `;
 
   await writeFile(binaryPath, source);
@@ -264,7 +270,7 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
         "The harness adapter launches successfully.",
         "The runtime writes terminal run and delivery artifacts."
       ],
-      approval_boundaries: ["Do not perform external side effects during smoke validation."]
+      constraints: ["Do not perform external side effects during smoke validation."]
     },
     repos: {
       main: {
@@ -291,7 +297,7 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
           type: "agent",
           id: "smoke-agent",
           repo: "main",
-          prompt: `Run the ${harnessKind} smoke test.`
+          goal: `Run the ${harnessKind} smoke test.`
         }
       ]
     }

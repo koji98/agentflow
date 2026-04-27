@@ -42,12 +42,12 @@ function readEventSummary(event: RuntimeEventEnvelope): string | undefined {
           : undefined;
     case "supervisor.intervention.failed":
       return typeof payload.summary === "string" ? payload.summary : "Supervisor intervention failed.";
-    case "supervisor.escalated":
+    case "supervisor.paused":
       return typeof payload.summary === "string"
         ? payload.summary
         : typeof payload.reason === "string"
           ? payload.reason
-          : "Supervisor escalated.";
+          : "Supervisor paused for human input.";
     case "run.canceled":
       return typeof payload.reason === "string" ? `Run canceled: ${payload.reason}` : "Run canceled.";
     case "run.completed":

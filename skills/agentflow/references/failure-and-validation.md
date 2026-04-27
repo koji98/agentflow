@@ -50,7 +50,7 @@ Use repeat context selectors for iterative repair evidence:
 
 ## Artifact Repair
 
-When a required agent artifact is missing and policy allows repair, the supervisor can run a bounded repair intervention. The intervention includes graph intent, node intent, and the original prompt, then uses the node's same harness authority and sandbox boundary. It writes durable records under the node attempt plus `interventions.jsonl`.
+When a required agent artifact is missing and policy allows repair, the supervisor can run a bounded repair intervention. The intervention includes graph intent, node task, constraints, acceptance criteria, and the missing artifact contract, then uses the node's same harness authority and sandbox boundary. It writes durable records under the node attempt plus `interventions.jsonl`.
 
 If no harness is available and exactly one missing artifact is a human-readable text handoff, the supervisor may synthesize that artifact from the captured `agent_response`. It does not synthesize JSON, other machine-readable artifacts, or multi-artifact contracts from prose; those remain failed until real artifacts exist.
 

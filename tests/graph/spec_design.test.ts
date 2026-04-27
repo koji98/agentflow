@@ -203,7 +203,7 @@ describe("spec design managed pattern", () => {
           {
             type: "agent",
             id: "handoff",
-            prompt: "Summarize the design package for an implementer.",
+            goal: "Summarize the design package for an implementer.",
             context: [
               {
                 ref: "managed_nodes_spec.agent_response",

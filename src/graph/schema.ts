@@ -35,13 +35,13 @@ export const edgeOutcomes = ["passed", "failed"] as const;
 export const failureBehaviors = ["fail", "continue"] as const;
 export const prerequisiteKinds = ["file", "command", "env", "repo"] as const;
 export const supervisorActionKinds = [
-  "retry_node",
+  "retry_with_guidance",
   "repair_artifact",
   "rebuild_context",
-  "refresh_workspace",
   "run_diagnostic",
+  "pause_for_human",
   "semantic_evaluation",
-  "escalate"
+  "fail"
 ] as const;
 export const deliverySections = [
   "task_brief",

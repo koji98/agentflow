@@ -199,7 +199,7 @@ describe("pattern generate evaluate fix", () => {
         {
           type: "agent",
           id: "upstream_decisions",
-          prompt: "Write a decision log artifact.",
+          goal: "Write a decision log artifact.",
           artifacts: {
             decision_log: {
               from: "output_dir",
@@ -273,7 +273,7 @@ describe("pattern generate evaluate fix", () => {
         {
           type: "agent",
           id: "handoff",
-          prompt: "Summarize the final change package for an operator.",
+          goal: "Summarize the final change package for an operator.",
           context: [
             {
               ref: "implement_managed_nodes.agent_response",

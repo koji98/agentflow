@@ -35,7 +35,7 @@ function createCompiledGraph(): CompiledGraph {
         },
         context: [],
         declared_artifacts: {},
-        prompt: "Inspect the repo."
+        goal: "Inspect the repo."
       },
       {
         compiled_id: "root__verify",
@@ -61,7 +61,7 @@ function createCompiledGraph(): CompiledGraph {
         context: [],
         declared_artifacts: {},
         check_kind: "ai",
-        prompt: "Check quality."
+        goal: "Check quality."
       }
     ],
     edges: [],
