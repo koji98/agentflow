@@ -38,6 +38,7 @@ import {
   encodeContextText
 } from "./tokenizer.js";
 import { buildRepeatHistory } from "./repeat_history.js";
+import type { SupervisorRetryGuidanceRecord } from "../../supervisor/types.js";
 
 interface PreparedMaterialization {
   text: string;
@@ -60,6 +61,7 @@ export interface ResolveContextOptions {
   workspace_path: string;
   repo_workspaces: Record<string, string>;
   attempts: AttemptRegistry;
+  retry_guidance?: SupervisorRetryGuidanceRecord;
 }
 
 const truncatedTextNotice =
@@ -305,6 +307,107 @@ async function materializeRepeatHistoryContext(
     },
     materialized,
     "runtime repeat history"
+  );
+}
+
+function renderSupervisorRetryGuidance(guidance: SupervisorRetryGuidanceRecord): string {
+  const revision = guidance.prompt_revision;
+  return [
+    "# Supervisor Retry Guidance",
+    "",
+    "This node is being retried after a supervisor intervention. Treat this guidance as the controlling retry task where it conflicts with incomplete, stale, or contradictory node wording, while preserving graph-level constraints and safety boundaries.",
+    "",
+    `- Prior execution: \`${guidance.prior_execution_id}\``,
+    `- Action: \`${guidance.action}\``,
+    `- Classification: \`${guidance.classification}\``,
+    `- Failure fingerprint: \`${guidance.failure_fingerprint}\``,
+    `- Repeated fingerprint count: \`${guidance.repeated_fingerprint_count}\``,
+    `- Retry guidance brief: \`${guidance.guidance_brief_path}\``,
+    `- Prompt revision artifact: \`${guidance.prompt_revision_path}\``,
+    "",
+    "## Revised Goal",
+    revision.revised_goal,
+    "",
+    "## Must Do",
+    ...revision.must_do.map((item) => `- ${item}`),
+    "",
+    "## Must Not Do",
+    ...revision.must_not_do.map((item) => `- ${item}`),
+    "",
+    "## Artifact Requirements",
+    ...revision.artifact_requirements.map((item) => `- ${item}`),
+    "",
+    "## Resolved Conflicts",
+    ...revision.resolved_conflicts.map((item) => `- ${item}`),
+    "",
+    "## Evidence To Read",
+    ...revision.evidence_to_read.map((item) => `- ${item}`),
+    "",
+    "## Intent Preservation",
+    revision.intent_preservation,
+    "",
+    "## Justification",
+    revision.justification
+  ].join("\n");
+}
+
+async function materializeSupervisorRetryGuidanceContext(
+  options: ResolveContextOptions,
+  accumulator: MaterializationAccumulator,
+  maxTokensPerItem: number
+): Promise<void> {
+  const guidance = options.retry_guidance;
+
+  if (!guidance) {
+    return;
+  }
+
+  const source: ContextPacketSource = {
+    name: "supervisor_retry_guidance",
+    from: "runtime_supervisor_retry_guidance",
+    prior_execution_id: guidance.prior_execution_id,
+    action: guidance.action,
+    classification: guidance.classification,
+    failure_fingerprint: guidance.failure_fingerprint,
+    repeated_fingerprint_count: guidance.repeated_fingerprint_count
+  };
+  const description = "Supervisor-authored recovery guidance and prompt revision for this retry attempt.";
+  const remainingTokens = accumulator.max_total_tokens - accumulator.total_tokens;
+
+  if (remainingTokens <= 0) {
+    accumulator.omitted.push({
+      key: source.name,
+      source,
+      description,
+      reason: "Supervisor retry guidance was omitted because authored context consumed the available token budget.",
+      if_available: true
+    });
+    return;
+  }
+
+  const materialized = prepareTextMaterialization(
+    renderSupervisorRetryGuidance(guidance),
+    Math.min(maxTokensPerItem, remainingTokens)
+  );
+
+  await appendMaterializedItem(
+    accumulator,
+    {
+      key: source.name,
+      source,
+      description,
+      materialized_path: join(
+        options.execution_dir,
+        "context",
+        "materialized",
+        source.name,
+        "retry-guidance.md"
+      ),
+      tokens: materialized.tokens,
+      truncated: materialized.truncated
+    },
+    materialized,
+    "runtime supervisor retry guidance"
   );
 }
 
@@ -810,6 +913,12 @@ export async function resolveExecutionContext(
       options.node.effective_policy.input_rules.max_tokens_per_item
     );
   }
+
+  await materializeSupervisorRetryGuidanceContext(
+    options,
+    accumulator,
+    options.node.effective_policy.input_rules.max_tokens_per_item
+  );
 
   await materializeRepeatHistoryContext(
     options,

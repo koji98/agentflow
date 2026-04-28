@@ -143,12 +143,36 @@ describe("af runtime CLI", () => {
 
     await expect(executeAfCli(["log", "--type", "finding", "--summary", "Observed runtime CLI"]))
       .resolves.toMatchObject({ exitCode: 0 });
+    await expect(executeAfCli([
+      "log",
+      "--type",
+      "decision",
+      "--decision",
+      "Use the generated client path",
+      "--rationale",
+      "It matches the node contract and existing source layout.",
+      "--evidence",
+      "repo inspection found src/client.ts",
+      "--evidence",
+      "context manifest cited the generated client"
+    ]))
+      .resolves.toMatchObject({ exitCode: 0 });
     const runtimeLog = (await readFile(join(runtime.root, "runtime", "log.jsonl"), "utf8"))
       .trim()
       .split(/\r?\n/)
-      .map((line) => JSON.parse(line) as { type: string; summary: string });
+      .map((line) => JSON.parse(line) as { type: string; summary: string; decision?: string; rationale?: string; evidence?: string[] });
     expect(runtimeLog).toEqual([
-      expect.objectContaining({ type: "finding", summary: "Observed runtime CLI" })
+      expect.objectContaining({ type: "finding", summary: "Observed runtime CLI" }),
+      expect.objectContaining({
+        type: "decision",
+        summary: "Use the generated client path",
+        decision: "Use the generated client path",
+        rationale: "It matches the node contract and existing source layout.",
+        evidence: [
+          "repo inspection found src/client.ts",
+          "context manifest cited the generated client"
+        ]
+      })
     ]);
 
     await expect(executeAfCli([

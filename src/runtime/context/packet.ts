@@ -7,7 +7,20 @@ export interface RuntimeRepeatHistoryContext {
   current_iteration: number;
 }
 
-export type ContextPacketSource = ContextItem | RuntimeRepeatHistoryContext;
+export interface RuntimeSupervisorRetryGuidanceContext {
+  name: "supervisor_retry_guidance";
+  from: "runtime_supervisor_retry_guidance";
+  prior_execution_id: string;
+  action: string;
+  classification: string;
+  failure_fingerprint: string;
+  repeated_fingerprint_count: number;
+}
+
+export type ContextPacketSource =
+  | ContextItem
+  | RuntimeRepeatHistoryContext
+  | RuntimeSupervisorRetryGuidanceContext;
 
 export interface ContextPacketLiveWorkspaceBinding {
   kind: "live_workspace_input";

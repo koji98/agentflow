@@ -37,6 +37,8 @@ Each node attempt records execution-specific context, logs, result, and artifact
 - `logs/stderr.log`
 - `result.json`
 - `artifacts/`
+- `workspace-changes/`
+- `verify-outcome.json` and `verify-outcome.md` when the attempt reached outcome verification
 - `tool-invocations.jsonl`
 - `tool-invocation-logs/`
 - `interventions/`
@@ -60,12 +62,17 @@ Use:
 
 ```bash
 agentflow resume --run-root <run-root>
+agentflow resume --run-root <run-root> --dry-run
+agentflow resume --run-root <run-root> --reset-supervisor-budget
+agentflow resume --graph agentflow.graph.json --latest
 ```
 
 Resume preserves compatible completed work and restarts work affected by node-contract or graph-level `intent` or `supervision` changes.
+
+Use `--dry-run` first when the resume boundary matters; it shows preserved, restarted, and initially startable nodes without executing anything. Use `--reset-supervisor-budget` only after the operator has fixed the graph, credentials, environment, or another blocker enough to justify fresh recovery actions.
 
 ## Human Gates And Pauses
 
 - Authored `checkpoint` nodes are planned human gates inside `repeat` bodies. During a run, they ask the operator for loop-control judgment at the point the graph author intended.
 - Supervisor `pause_for_human` is a safety pause chosen after runtime evidence such as policy risk, unresolved operator judgment, or a checkpoint-related failure.
-- For a paused run, inspect `interventions.jsonl`, `supervisor-timeline.jsonl`, and `runtime/human-resume-input.jsonl` when present, then resume with structured human input through `agentflow resume --run-root <run-root> --human-action ...`.
+- For a paused run, inspect `interventions.jsonl`, `supervisor-timeline.jsonl`, and `runtime/human-resume-input.jsonl` when present, then resume with structured human input through `agentflow resume --run-root <run-root> --human-action ...`. A dry-run preview of a paused run does not require `--human-action`.

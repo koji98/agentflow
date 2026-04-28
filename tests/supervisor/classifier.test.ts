@@ -85,6 +85,42 @@ describe("supervisor failure classifier", () => {
         recommended_action: "repair_artifact"
       })
     );
+    expect(classify({ error_message: 'Required output_dir artifact "implementation_summary" is missing at agent-implementation-summary.md.' })).toEqual(
+      expect.objectContaining({
+        class: "artifact",
+        retryable: true,
+        recommended_action: "repair_artifact"
+      })
+    );
+  });
+
+  it("classifies harness no-op artifact misses as harness failures", () => {
+    expect(classify({
+      error_message: "Agent harness produced no final response while required declared artifacts are missing: implementation_summary at agent-implementation-summary.md. This is a harness/no-op failure, not an artifact repair candidate."
+    })).toEqual(
+      expect.objectContaining({
+        class: "harness",
+        retryable: false,
+        recommended_action: "pause_for_human"
+      })
+    );
+  });
+
+  it("classifies Cursor authentication failures as harness failures", () => {
+    expect(classify({
+      result: {
+        status: "failed",
+        outcome: "failed",
+        result: { exit_code: 1 },
+        stderr: "Error: Authentication required. Please run 'cursor agent login' first, or set CURSOR_API_KEY environment variable."
+      }
+    })).toEqual(
+      expect.objectContaining({
+        class: "harness",
+        retryable: false,
+        recommended_action: "pause_for_human"
+      })
+    );
   });
 
   it("classifies context resolution errors as context failures", () => {
@@ -231,6 +267,103 @@ describe("supervisor failure classifier", () => {
         recommended_action: "pause_for_human"
       })
     );
+  });
+
+  it("classifies outcome verifier failures as outcome_verification with retry_with_guidance and finding evidence", () => {
+    const result: RuntimeNodeExecutionResult = {
+      status: "passed",
+      outcome: "failed",
+      result: {
+        outcome_verification: {
+          passed: false,
+          summary: "Verifier rejected the agent attempt because the rubric is unmet.",
+          findings: [
+            {
+              severity: "blocker",
+              category: "incorrect_output",
+              evidence: "agent claims success but the failing test still fails.",
+              recommendation: "Fix the function so the test suite passes."
+            },
+            {
+              severity: "high",
+              category: "missing_evidence",
+              evidence: "no captured test run.",
+              recommendation: "Run the test suite and capture the output."
+            }
+          ],
+          blockers: [
+            {
+              severity: "blocker",
+              category: "incorrect_output",
+              evidence: "agent claims success but the failing test still fails.",
+              recommendation: "Fix the function so the test suite passes."
+            }
+          ],
+          verifier_metadata: {
+            harness: "codex-cli",
+            duration_ms: 1234,
+            prompt_path: "/tmp/execution/verify-outcome.prompt.md",
+            response_path: "/tmp/execution/verify-outcome.raw-response.md",
+            attempt_count: 1,
+            truncated_artifacts: [],
+            workspace_diff_status: "captured",
+            parse_status: "ok"
+          }
+        }
+      }
+    };
+
+    const classification = classify({ result });
+
+    expect(classification).toEqual(
+      expect.objectContaining({
+        class: "outcome_verification",
+        retryable: true,
+        recommended_action: "retry_with_guidance",
+        summary: "Verifier rejected the agent attempt because the rubric is unmet."
+      })
+    );
+    expect(classification.evidence).toEqual(
+      expect.objectContaining({
+        outcome_verification: expect.objectContaining({
+          findings: expect.arrayContaining([
+            expect.objectContaining({ category: "incorrect_output" }),
+            expect.objectContaining({ category: "missing_evidence" })
+          ]),
+          blockers: expect.arrayContaining([
+            expect.objectContaining({ category: "incorrect_output" })
+          ])
+        })
+      })
+    );
+  });
+
+  it("ignores an outcome_verification payload that says the verifier passed", () => {
+    const result: RuntimeNodeExecutionResult = {
+      status: "passed",
+      outcome: "failed",
+      result: {
+        outcome_verification: {
+          passed: true,
+          summary: "Verifier accepted, but the node still failed for an unrelated reason.",
+          findings: [],
+          blockers: [],
+          verifier_metadata: {
+            harness: "codex-cli",
+            duration_ms: 1234,
+            prompt_path: "/tmp/execution/verify-outcome.prompt.md",
+            response_path: "/tmp/execution/verify-outcome.raw-response.md",
+            attempt_count: 1,
+            truncated_artifacts: [],
+            workspace_diff_status: "captured",
+            parse_status: "ok"
+          }
+        }
+      },
+      stderr: "operation escapes the workspace\n"
+    };
+
+    expect(classify({ result }).class).not.toBe("outcome_verification");
   });
 
   it("classifies checkpoint failures as operator decisions that need human pause handling", () => {

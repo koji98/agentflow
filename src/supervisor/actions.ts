@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { resolveExecutionArtifactsDirectory } from "../artifacts/paths.js";
 import type { CompiledAgentNode } from "../graph/compiled.js";
 import type { HarnessName, SupervisorActionKind } from "../graph/schema.js";
-import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
+import { listAttemptsForCompiledNode, type RuntimeNodeAttempt } from "../runtime/attempts.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../runtime/harness/types.js";
 import type { RuntimeSession } from "../runtime/session.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
@@ -48,6 +48,53 @@ async function readContextManifestContent(path: string): Promise<string> {
   }
 }
 
+async function existingPaths(paths: string[]): Promise<string[]> {
+  const resolved = await Promise.all(
+    paths.map(async (path) => {
+      try {
+        await access(path);
+        return path;
+      } catch {
+        return undefined;
+      }
+    })
+  );
+  return resolved.filter((path): path is string => path !== undefined);
+}
+
+async function collectPreviousAttemptEvidencePaths(
+  session: RuntimeSession,
+  node: CompiledAgentNode,
+  attempt: RuntimeNodeAttempt
+): Promise<string[]> {
+  if (!session.attempts?.by_compiled_id) {
+    return [];
+  }
+
+  const priorAttempts = listAttemptsForCompiledNode(session.attempts, attempt.compiled_id)
+    .filter((candidate) =>
+      candidate.execution_id !== attempt.execution_id
+      && candidate.attempt_index < attempt.attempt_index
+    )
+    .slice(-3);
+
+  const candidatePaths = priorAttempts.flatMap((candidate) => {
+    const outputDir = resolveExecutionArtifactsDirectory(candidate.execution_dir);
+    const priorOutputArtifacts = Object.values(node.declared_artifacts)
+      .filter((artifact) => artifact.from === "output_dir")
+      .map((artifact) => join(outputDir, artifact.path));
+    return [
+      ...Object.values(candidate.artifacts),
+      ...priorOutputArtifacts,
+      ...(candidate.result_path ? [candidate.result_path] : []),
+      ...(candidate.stdout_log_path ? [candidate.stdout_log_path] : []),
+      ...(candidate.stderr_log_path ? [candidate.stderr_log_path] : [])
+    ];
+  });
+
+  return [...new Set(await existingPaths(candidatePaths))];
+}
+
 function buildRepairInvocation(options: {
   node: CompiledAgentNode;
   attempt: RuntimeNodeAttempt;
@@ -64,6 +111,7 @@ function buildRepairInvocation(options: {
   repair_attempt: number;
   max_attempts: number;
   missing_artifacts: MissingDeclaredArtifact[];
+  previous_attempt_evidence_paths: string[];
   tool_bin_dir?: string;
   tool_env?: Record<string, string>;
   tools?: AgentInvocation["tools"];
@@ -106,6 +154,7 @@ function buildRepairInvocation(options: {
       priorResponsePath,
       stdoutLogPath: options.attempt.stdout_log_path ?? join(options.attempt.execution_dir, "logs", "stdout.log"),
       stderrLogPath: options.attempt.stderr_log_path ?? join(options.attempt.execution_dir, "logs", "stderr.log"),
+      previousAttemptEvidencePaths: options.previous_attempt_evidence_paths,
       missingArtifacts: options.missing_artifacts.map((artifact) => ({
         name: artifact.name,
         from: artifact.from,
@@ -139,6 +188,11 @@ export async function runRepairArtifactIntervention(options: {
   const interventionDir = join(options.attempt.execution_dir, "interventions", interventionId);
   const startedAt = new Date().toISOString();
   const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
+  const previousAttemptEvidencePaths = await collectPreviousAttemptEvidencePaths(
+    options.session,
+    options.node,
+    options.attempt
+  );
   const graphIntent = options.session.graph?.intent ?? {
     goal: "Repair the missing artifact without changing the authored task intent."
   };
@@ -172,6 +226,7 @@ export async function runRepairArtifactIntervention(options: {
       repair_attempt: repairAttempt,
       max_attempts: maxAttempts,
       missing_artifacts: options.missing_artifacts,
+      previous_attempt_evidence_paths: previousAttemptEvidencePaths,
       tools: options.node.tools,
       ...(options.signal ? { signal: options.signal } : {})
     });
@@ -243,6 +298,7 @@ export async function runRepairArtifactIntervention(options: {
     repair_attempt: repairAttempt,
     max_attempts: maxAttempts,
     missing_artifacts: options.missing_artifacts,
+    previous_attempt_evidence_paths: previousAttemptEvidencePaths,
     tool_bin_dir: repairToolSetup.bin_dir,
     tool_env: repairToolSetup.env,
     tools: repairToolSetup.resolved_tools,

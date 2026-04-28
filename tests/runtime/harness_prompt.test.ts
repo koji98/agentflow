@@ -65,6 +65,82 @@ describe("harness prompt rendering", () => {
     expect(prompt).not.toContain("Every declared artifact must exist before you finish");
   });
 
+  it("renders a Working Loop section that anchors iterate-until-done behavior on the agent path", () => {
+    const prompt = renderHarnessPrompt(baseInvocation());
+
+    expect(prompt).toContain("## Working Loop");
+    expect(prompt).toContain("Drive this node to completion within its boundary.");
+    expect(prompt).toContain(
+      "Default loop: inspect context and repo state, plan the smallest maintainable path, execute, run the validation named by the task or context, fix failures or open questions, then rerun validation."
+    );
+    expect(prompt).toContain("For every major scope-affecting decision");
+    expect(prompt).toContain("af log --type decision");
+    expect(prompt).toContain("--rationale <why you made that decision>");
+    expect(prompt).toContain("Final artifacts must be consistent with the decision log.");
+    expect(prompt).toContain("Investigate ambiguity instead of guessing");
+    expect(prompt).toContain("Be persistent without thrashing");
+    expect(prompt).toContain(
+      "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected."
+    );
+    const workingLoopIdx = prompt.indexOf("## Working Loop");
+    const nodeTaskIdx = prompt.indexOf("## Node Task");
+    expect(workingLoopIdx).toBeGreaterThan(-1);
+    expect(workingLoopIdx).toBeLessThan(nodeTaskIdx);
+  });
+
+  it("does not include the Working Loop on read-only ai_check, artifact_repair, or outcome_verification prompts", () => {
+    const aiCheckPrompt = renderHarnessPrompt(
+      baseInvocation({
+        promptKind: "ai_check",
+        sandbox: "read-only",
+        artifacts: {}
+      })
+    );
+    expect(aiCheckPrompt).not.toContain("## Working Loop");
+
+    const repairPrompt = renderHarnessPrompt(
+      baseInvocation({
+        promptKind: "artifact_repair",
+        artifacts: {
+          handoff: {
+            from: "output_dir",
+            path: "handoff.md",
+            description: "Markdown handoff."
+          }
+        },
+        repair: {
+          repairAttempt: 1,
+          maxAttempts: 2,
+          priorResponsePath: "/tmp/run/output/agent-response.md",
+          stdoutLogPath: "/tmp/run/logs/stdout.log",
+          stderrLogPath: "/tmp/run/logs/stderr.log",
+          previousAttemptEvidencePaths: [],
+          missingArtifacts: [
+            {
+              name: "handoff",
+              from: "output_dir",
+              path: "handoff.md",
+              description: "Markdown handoff.",
+              expectedPath: "/tmp/run/output/handoff.md"
+            }
+          ]
+        }
+      })
+    );
+    expect(repairPrompt).not.toContain("## Working Loop");
+
+    const verifierPrompt = renderHarnessPrompt(
+      baseInvocation({
+        promptKind: "outcome_verification",
+        sandbox: "read-only",
+        artifacts: {},
+        rubric: "Pre-rendered verifier prompt body."
+      })
+    );
+    expect(verifierPrompt).toBe("Pre-rendered verifier prompt body.");
+    expect(verifierPrompt).not.toContain("## Working Loop");
+  });
+
   it("renders artifact repair as a dedicated prompt kind", () => {
     const prompt = renderHarnessPrompt(baseInvocation({
       promptKind: "artifact_repair",
@@ -82,6 +158,7 @@ describe("harness prompt rendering", () => {
         priorResponsePath: "/tmp/run/output/agent-response.md",
         stdoutLogPath: "/tmp/run/logs/stdout.log",
         stderrLogPath: "/tmp/run/logs/stderr.log",
+        previousAttemptEvidencePaths: [],
         missingArtifacts: [{
           name: "handoff",
           from: "output_dir",

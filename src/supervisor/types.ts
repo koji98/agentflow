@@ -9,6 +9,7 @@ export type FailureClass =
   | "timeout"
   | "deterministic_evaluation"
   | "semantic_evaluation"
+  | "outcome_verification"
   | "scope_drift"
   | "policy_breach"
   | "operator"
@@ -61,4 +62,37 @@ export interface SupervisorInterventionRecord {
   reason: string;
   evidence: Record<string, unknown>;
   artifact_paths: Record<string, string>;
+}
+
+export interface SupervisorPromptRevision {
+  revised_goal: string;
+  must_do: string[];
+  must_not_do: string[];
+  artifact_requirements: string[];
+  resolved_conflicts: string[];
+  evidence_to_read: string[];
+  intent_preservation: string;
+  justification: string;
+}
+
+export interface SupervisorRetryGuidanceRecord {
+  compiled_id: string;
+  authored_id: string;
+  prior_execution_id: string;
+  action: SupervisorActionKind;
+  classification: FailureClass;
+  summary: string;
+  failure_fingerprint: string;
+  repeated_fingerprint_count: number;
+  guidance_brief_path: string;
+  prompt_revision_path: string;
+  prompt_revision: SupervisorPromptRevision;
+  created_at: string;
+}
+
+export interface SupervisorFailureFingerprintState {
+  fingerprint: string;
+  count: number;
+  last_execution_id: string;
+  last_seen_at: string;
 }

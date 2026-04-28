@@ -49,7 +49,7 @@ interface RuntimeMetadata {
   timeout_sec: number;
 }
 
-type RuntimeLogType = "progress" | "finding" | "blocker" | "risk" | "question" | "handoff_note";
+type RuntimeLogType = "progress" | "finding" | "blocker" | "risk" | "question" | "handoff_note" | "decision";
 
 interface RuntimeLogEntry {
   log_id: string;
@@ -63,6 +63,9 @@ interface RuntimeLogEntry {
   summary: string;
   body?: string;
   artifact_refs?: string[];
+  decision?: string;
+  rationale?: string;
+  evidence?: string[];
   created_at: string;
 }
 
@@ -369,7 +372,8 @@ function renderHelp(): string {
     "  af context show",
     "  af artifact list",
     "  af artifact write <name> (--file <path> | --content <text> | --stdin)",
-    "  af log --type <progress|finding|blocker|risk|question|handoff_note> --summary <text> [--body <text>] [--artifact <name>]",
+    "  af log --type <progress|finding|blocker|risk|question|handoff_note|decision> --summary <text> [--body <text>] [--artifact <name>]",
+    "  af log --type decision --decision <text> --rationale <text> --evidence <text> [--evidence <text>]",
     "  af spawn --brief <text> [--skills a,b] [--tools tool-a,tool-b] [--artifact name] [--wait]",
     "  af wait --agent <agent-id> [--artifact <name>] [--timeout-sec N]",
     "",
@@ -385,6 +389,7 @@ function renderHelp(): string {
     "  af status",
     "  af artifact write handoff --file /tmp/handoff.md",
     "  af log --type progress --summary \"Implemented parser changes\"",
+    "  af log --type decision --decision \"Use branch feature/foo\" --rationale \"It matches the node contract\" --evidence \"git status showed clean main\"",
     "  af context show",
     "",
     "Safety:",
@@ -522,13 +527,17 @@ function commandHelp(commandPath: string): string | undefined {
       "",
       "Usage:",
       "  af log --type <type> --summary <text> [--body <text>] [--artifact <name>]",
+      "  af log --type decision --decision <text> --rationale <text> --evidence <text> [--evidence <text>]",
       "  af log --help",
       "",
       "Options:",
-      "  --type <type>       One of progress, finding, blocker, risk, question, handoff_note. Default: progress",
-      "  --summary <text>    Short note summary. Required.",
+      "  --type <type>       One of progress, finding, blocker, risk, question, handoff_note, decision. Default: progress",
+      "  --summary <text>    Short note summary. Required except for --type decision, where it defaults to --decision.",
       "  --body <text>       Longer note body. Default: unset",
       "  --artifact <name>   Artifact reference to attach. Repeatable/comma-separated. Default: none",
+      "  --decision <text>   Decision made. Required for --type decision.",
+      "  --rationale <text>  Why the decision was made. Required for --type decision.",
+      "  --evidence <text>   Evidence supporting the rationale. Repeatable/comma-separated. Required for --type decision.",
       "  --help              Show this help and exit. Default: false",
       "",
       "Output:",
@@ -536,11 +545,12 @@ function commandHelp(commandPath: string): string | undefined {
       "",
       "Exit codes:",
       "  0 success",
-      "  1 missing summary, invalid type, or write failure",
+      "  1 missing required fields, invalid type, or write failure",
       "",
       "Examples:",
       "  af log --type progress --summary \"Implemented parser changes\"",
       "  af log --type blocker --summary \"Need migration target decision\" --body \"Two config files match.\"",
+      "  af log --type decision --decision \"Use branch feature/foo\" --rationale \"It matches the node contract\" --evidence \"git status showed clean main\"",
       "",
       "Safety:",
       "  Records structured evidence only; it is not a synchronous supervisor chat channel."
@@ -750,7 +760,7 @@ async function commandArtifactWrite(
   };
 }
 
-const runtimeLogTypes: RuntimeLogType[] = ["progress", "finding", "blocker", "risk", "question", "handoff_note"];
+const runtimeLogTypes: RuntimeLogType[] = ["progress", "finding", "blocker", "risk", "question", "handoff_note", "decision"];
 
 function createRuntimeLogEntry(
   metadata: RuntimeMetadata,
@@ -760,11 +770,25 @@ function createRuntimeLogEntry(
   if (!runtimeLogTypes.includes(type as RuntimeLogType)) {
     throw new Error(`af log --type must be one of: ${runtimeLogTypes.join(", ")}.`);
   }
-  const summary = optionString(options, "summary");
+  const decision = optionString(options, "decision");
+  const rationale = optionString(options, "rationale");
+  const evidence = optionList(options, "evidence");
+  if (type === "decision") {
+    if (!decision) {
+      throw new Error("af log --type decision requires --decision.");
+    }
+    if (!rationale) {
+      throw new Error("af log --type decision requires --rationale.");
+    }
+    if (evidence.length === 0) {
+      throw new Error("af log --type decision requires at least one --evidence value.");
+    }
+  }
+
+  const summary = optionString(options, "summary") ?? (type === "decision" ? decision : undefined);
   if (!summary) {
     throw new Error("af log requires --summary.");
   }
-
   const body = optionString(options, "body");
   const artifact_refs = optionList(options, "artifact");
   return {
@@ -779,6 +803,9 @@ function createRuntimeLogEntry(
     summary,
     ...(body ? { body } : {}),
     ...(artifact_refs.length > 0 ? { artifact_refs } : {}),
+    ...(type === "decision" && decision ? { decision } : {}),
+    ...(type === "decision" && rationale ? { rationale } : {}),
+    ...(type === "decision" && evidence.length > 0 ? { evidence } : {}),
     created_at: new Date().toISOString()
   };
 }

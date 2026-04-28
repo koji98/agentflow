@@ -86,7 +86,29 @@ async function createResumeFixture(options: {
       "codex-cli": {
         kind: "codex-cli",
         capabilities: getHarnessCapabilities("codex-cli")!,
-        async run() {
+        async run(invocation) {
+          if (invocation.promptKind === "outcome_verification") {
+            return {
+              status: "passed",
+              exitCode: 0,
+              transcript: {
+                last_message: [
+                  "```json",
+                  JSON.stringify(
+                    {
+                      passed: true,
+                      summary: "Resume fixture verifier accepts.",
+                      findings: [],
+                      blockers: []
+                    },
+                    null,
+                    2
+                  ),
+                  "```"
+                ].join("\n")
+              }
+            };
+          }
           return {
             status: "passed",
             exitCode: 0,
@@ -122,7 +144,8 @@ async function createResumeFixture(options: {
 async function buildResumedSession(
   fixture: Awaited<ReturnType<typeof createResumeFixture>>,
   graph = fixture.graph,
-  attempts = fixture.result.attempts
+  attempts = fixture.result.attempts,
+  resetSupervisorBudget = false
 ) {
   return createResumedRuntimeSession({
     run_root: fixture.runRoot,
@@ -131,7 +154,8 @@ async function buildResumedSession(
     manifest: fixture.manifest,
     prior_state: fixture.result.state,
     attempts,
-    events: fixture.result.events
+    events: fixture.result.events,
+    reset_supervisor_budget: resetSupervisorBudget
   });
 }
 
@@ -331,6 +355,74 @@ describe("runtime resume", () => {
 
     expect(resumed.preserved_node_count).toBe(1);
     expect(resumed.restarted_node_count).toBe(0);
+
+    await rm(fixture.tempRoot, { recursive: true, force: true });
+  });
+
+  it("can reset supervisor budget while preserving compatible passed work", async () => {
+    const fixture = await createResumeFixture({
+      document: {
+        version: "1",
+        graph_id: "resume-reset-supervisor-budget",
+        repos: {
+          main: { path: "." }
+        },
+        defaults: {
+          launch_profile: "default",
+          workspace_backend: "inplace"
+        },
+        profiles: {
+          default: {}
+        },
+        supervision: {
+          actions: {
+            retry_with_guidance: { max_uses: 3 },
+            repair_artifact: { max_uses: 2 }
+          },
+          max_total_interventions: 5,
+          policy: {
+            pause_on_policy_risk: true,
+            pause_on_repeated_recovery: true,
+            drift_score_threshold: 0.8
+          }
+        },
+        graph: {
+          type: "sequence",
+          id: "root",
+          steps: [
+            {
+              type: "exec",
+              id: "done",
+              repo: "main",
+              command: "placeholder"
+            }
+          ]
+        }
+      }
+    });
+
+    fixture.result.state.supervisor.status = "exhausted";
+    fixture.result.state.supervisor.budget_remaining = {
+      max_total_interventions: 0,
+      actions: {
+        retry_with_guidance: 0,
+        repair_artifact: 0
+      }
+    };
+
+    const resumed = await buildResumedSession(
+      fixture,
+      fixture.graph,
+      fixture.result.attempts,
+      true
+    );
+
+    expect(resumed.preserved_node_count).toBe(1);
+    expect(resumed.restarted_node_count).toBe(0);
+    expect(resumed.session.supervisor.status).toBe("healthy");
+    expect(resumed.session.supervisor.budget_remaining.max_total_interventions).toBe(5);
+    expect(resumed.session.supervisor.budget_remaining.actions.retry_with_guidance).toBe(3);
+    expect(resumed.session.supervisor.budget_remaining.actions.repair_artifact).toBe(2);
 
     await rm(fixture.tempRoot, { recursive: true, force: true });
   });

@@ -11,9 +11,11 @@ export const runtimeEventTypes = [
   "supervisor.intervention.started",
   "supervisor.intervention.completed",
   "supervisor.intervention.failed",
+  "supervisor.retry_scheduled",
   "supervisor.paused",
   "check.evaluated",
   "verification.recorded",
+  "outcome.verified",
   "node.completed",
   "node.blocked",
   "node.skipped",
@@ -75,6 +77,16 @@ export interface VerificationRecordedPayload {
   summary: string;
   check_kind?: "deterministic" | "ai";
   exit_code?: number;
+}
+
+export interface OutcomeVerifiedPayload {
+  passed: boolean;
+  findings_count: number;
+  blockers_count: number;
+  verify_outcome_path: string;
+  verifier_harness: string;
+  parse_status: "ok" | "recovered" | "unparseable";
+  duration_ms: number;
 }
 
 export interface RepeatIterationStartedPayload {

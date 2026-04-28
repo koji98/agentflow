@@ -38,8 +38,10 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Use `context` for node material and `artifacts` for durable handoffs.
 - Treat `repos` and `profiles` as operational authority; put scope boundaries and out-of-scope notes in `constraints`.
 - Keep downstream references on named artifacts from public node ids.
-- Use deterministic checks for hard facts and AI checks for semantic judgment.
-- Treat checks, supervisor `semantic_evaluation`, managed pattern evaluation, and `agentflow eval` as separate lanes.
+- Treat `acceptance_criteria` as a runtime contract: passing `agent` attempts are graded by the outcome verifier against graph and node intent. Vague criteria produce vague verification, so write the criteria you want the verifier to enforce.
+- Do not author boilerplate iteration guidance ("iterate until done", "investigate ambiguity", "stop only when blocked") in graph or node `constraints`. The runtime injects a `## Working Loop` section into every standard agent prompt that already covers this, and outcome verification will reject early-bailing.
+- Use deterministic checks for hard facts. Reach for AI checks only when another node depends on the gate or when the deterministic command is genuinely unavailable; do not stack an AI `check` after every agent node to re-evaluate the same acceptance criteria.
+- Treat checks, outcome verification, supervisor `semantic_evaluation`, managed pattern evaluation, and `agentflow eval` as separate lanes.
 - Make high-impact limits explicit in `constraints` before granting credential-backed, external, or mutating tools.
 - Do not widen scope through supervisor behavior; use repeat-scoped checkpoints or graph edits for planned human decisions, and reserve `pause_for_human` for supervisor safety stops.
 
@@ -50,5 +52,5 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Use `af --help` and `af <command> --help` for exact runtime CLI arguments, defaults, output shape, examples, and safety notes.
 - Prefer `af status`, `af tools list`, and `af context show` when debugging what a node actually received.
 - Prefer `af artifact write` for declared handoffs instead of ad hoc output files.
-- Use `af log --type` for worker evidence and helper coordination notes, but keep durable conclusions in artifacts.
+- Use `af log --type` for worker evidence and helper coordination notes, including `af log --type decision --decision ... --rationale ... --evidence ...` for major scope-affecting decisions, but keep durable conclusions in artifacts.
 - Treat `af spawn` helpers as supervised sessions with their own artifacts, not persistent coworkers.

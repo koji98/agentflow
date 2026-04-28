@@ -83,15 +83,40 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+const PASSING_VERIFIER_JSON = [
+  "```json",
+  JSON.stringify(
+    {
+      passed: true,
+      summary: "Test verifier accepts all agent outputs.",
+      findings: [],
+      blockers: []
+    },
+    null,
+    2
+  ),
+  "```"
+].join("\n");
+
 function createHarness(
   kind: HarnessAdapter["kind"],
   run: HarnessAdapter["run"],
   overrides: Partial<HarnessAdapter> = {}
 ): HarnessAdapter {
+  const wrappedRun: HarnessAdapter["run"] = async (invocation) => {
+    if (invocation.promptKind === "outcome_verification") {
+      return {
+        status: "passed",
+        exitCode: 0,
+        transcript: { last_message: PASSING_VERIFIER_JSON }
+      };
+    }
+    return run(invocation);
+  };
   return {
     kind,
     capabilities: getHarnessCapabilities(kind)!,
-    run,
+    run: wrappedRun,
     async cancel() {
       return;
     },
@@ -1538,6 +1563,118 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("surfaces previous attempt artifacts to artifact repair prompts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-artifact-repair-previous-attempt-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-agent-artifact-repair-previous-attempt",
+      supervision: {
+        actions: {
+          retry_with_guidance: { max_uses: 1 },
+          repair_artifact: { max_uses: 1 }
+        },
+        max_total_interventions: 2,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "write_handoff",
+            goal: "Write a durable handoff.",
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Markdown handoff for downstream nodes."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const invocations: Parameters<HarnessAdapter["run"]>[0][] = [];
+    const harness = createHarness("codex-cli", async (invocation) => {
+      invocations.push(invocation);
+
+      if (invocation.executionId.includes("__repair_artifact_")) {
+        await writeFile(join(invocation.outputDir, "handoff.md"), "repaired from previous attempt evidence\n");
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: { last_message: "repair wrote handoff" }
+        };
+      }
+
+      if (invocations.filter((entry) => entry.promptKind === "agent").length === 1) {
+        await writeFile(join(invocation.outputDir, "handoff.md"), "first attempt handoff evidence\n");
+        return {
+          status: "failed",
+          exitCode: 1,
+          stderr: "synthetic failure after writing handoff",
+          transcript: { last_message: "wrote handoff but failed validation" }
+        };
+      }
+
+      return {
+        status: "passed",
+        exitCode: 0,
+        transcript: { last_message: "passed but forgot to write handoff" }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": harness
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    const attempts = run.attempts.filter((attempt) => attempt.authored_id === "write_handoff");
+    expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
+    const repairInvocation = invocations.find((invocation) => invocation.promptKind === "artifact_repair");
+    expect(repairInvocation).toBeDefined();
+    const repairPrompt = renderHarnessPrompt(repairInvocation!);
+    const firstAttemptHandoffPath = join(resolveExecutionArtifactsDirectory(attempts[0]!.execution_dir), "handoff.md");
+    expect(repairPrompt).toContain("Previous attempts for this same node");
+    expect(repairPrompt).toContain(firstAttemptHandoffPath);
+    expect(attempts[0]!.artifacts.handoff).toBeUndefined();
+    expect(await readFile(attempts[1]!.artifacts.handoff!, "utf8")).toBe("repaired from previous attempt evidence\n");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("writes a diagnostic agent response artifact when an agent returns no final text", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-empty-agent-response-"));
     const repoDir = join(tempRoot, "repo");
@@ -1600,7 +1737,7 @@ describe("runtime engine", () => {
       join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md")
     );
     expect(await readFile(attempt.artifacts.agent_response!, "utf8")).toBe(
-      "Agent completed without a captured final response.\n"
+      "No final response was captured from the agent harness.\n"
     );
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -2909,6 +3046,448 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("retries failed agent attempts without replacing the harness failure with missing artifacts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-runtime-artifact-failure-retry-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-artifact-failure-retry",
+      supervision: {
+        actions: {
+          retry_with_guidance: { max_uses: 1 },
+          repair_artifact: { max_uses: 1 }
+        },
+        max_total_interventions: 2,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "writer",
+            repo: "main",
+            goal: "Write the handoff artifact.",
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Required handoff."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const invocations: string[] = [];
+    const harness = createHarness("codex-cli", async (invocation) => {
+      invocations.push(invocation.executionId);
+      if (invocations.length === 2) {
+        await writeFile(join(invocation.outputDir, "handoff.md"), "handoff after retry\n");
+      }
+
+      return {
+        status: invocations.length === 1 ? "failed" : "passed",
+        exitCode: invocations.length === 1 ? 1 : 0,
+        stdout: "",
+        stderr: "",
+        transcript: {
+          last_message: invocations.length === 1
+            ? "failed before writing handoff"
+            : "wrote handoff"
+        }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": harness
+      }
+    });
+
+    const attempts = run.attempts.filter((attempt) => attempt.authored_id === "writer");
+    expect(run.outcome).toBe("passed");
+    expect(attempts).toHaveLength(2);
+    expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
+    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(0);
+    expect(run.state.supervisor.budget_remaining.actions.repair_artifact).toBe(1);
+    await expect(readFile(attempts[0]!.result_path!, "utf8")).resolves.toContain("exit_code");
+    await expect(readFile(attempts[0]!.stderr_log_path!, "utf8")).resolves.toBe("");
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "supervisor.decision",
+          compiled_id: "root__writer",
+          payload: expect.objectContaining({
+            classification: "unknown",
+            action: "retry_with_guidance",
+            target_execution_id: attempts[0]!.execution_id
+          })
+        })
+      ])
+    );
+    await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain(
+      '"action":"retry_with_guidance"'
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("pauses no-op harness completions with missing declared artifacts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-runtime-noop-harness-artifact-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-noop-harness-artifact",
+      supervision: {
+        actions: {
+          retry_with_guidance: { max_uses: 2 },
+          repair_artifact: { max_uses: 2 },
+          pause_for_human: { max_uses: 1 }
+        },
+        max_total_interventions: 3,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "writer",
+            repo: "main",
+            goal: "Write the handoff artifact.",
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Required handoff."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const harness = createHarness("codex-cli", async () => ({
+      status: "passed",
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      transcript: {}
+    }));
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": harness
+      }
+    });
+
+    const attempts = run.attempts.filter((attempt) => attempt.authored_id === "writer");
+    expect(run.outcome).toBe("paused");
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.status).toBe("failed");
+    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(2);
+    expect(run.state.supervisor.budget_remaining.actions.repair_artifact).toBe(2);
+    expect(run.state.supervisor.pause?.reason).toContain("produced no final response");
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "supervisor.decision",
+          compiled_id: "root__writer",
+          payload: expect.objectContaining({
+            classification: "harness",
+            action: "pause_for_human",
+            target_execution_id: attempts[0]!.execution_id
+          })
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("pauses silent failed harness exits with missing declared artifacts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-runtime-silent-harness-artifact-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-silent-harness-artifact",
+      supervision: {
+        actions: {
+          retry_with_guidance: { max_uses: 2 },
+          repair_artifact: { max_uses: 2 },
+          pause_for_human: { max_uses: 1 }
+        },
+        max_total_interventions: 3,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "writer",
+            repo: "main",
+            goal: "Write the handoff artifact.",
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Required handoff."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const harness = createHarness("codex-cli", async () => ({
+      status: "failed",
+      exitCode: 1,
+      stdout: "",
+      stderr: "",
+      transcript: {}
+    }));
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": harness
+      }
+    });
+
+    const attempts = run.attempts.filter((attempt) => attempt.authored_id === "writer");
+    expect(run.outcome).toBe("paused");
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.status).toBe("failed");
+    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(2);
+    expect(run.state.supervisor.budget_remaining.actions.repair_artifact).toBe(2);
+    expect(run.state.supervisor.pause?.reason).toContain("failed without stdout");
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "supervisor.decision",
+          compiled_id: "root__writer",
+          payload: expect.objectContaining({
+            classification: "harness",
+            action: "pause_for_human",
+            target_execution_id: attempts[0]!.execution_id
+          })
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("injects supervisor retry guidance into retry context and prompt revisions", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-retry-guidance-context-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-supervisor-retry-guidance-context",
+      supervision: {
+        actions: {
+          retry_with_guidance: { max_uses: 2 }
+        },
+        max_total_interventions: 2,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "recover",
+            goal: "Implement the feature without guessing about ambiguous runtime evidence.",
+            acceptance_criteria: ["The retry must use supervisor evidence before passing."]
+          }
+        ]
+      }
+    });
+
+    const invocations: Parameters<HarnessAdapter["run"]>[0][] = [];
+    const harness = createHarness("codex-cli", async (invocation) => {
+      invocations.push(invocation);
+      if (invocations.length <= 2) {
+        return {
+          status: "failed",
+          exitCode: 1,
+          stderr: "synthetic transient failure",
+          transcript: { last_message: "failed with synthetic transient failure" }
+        };
+      }
+
+      return {
+        status: "passed",
+        exitCode: 0,
+        transcript: { last_message: "recovered after reading retry guidance" }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      harnesses: {
+        "codex-cli": harness
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(invocations).toHaveLength(3);
+
+    const secondPrompt = renderHarnessPrompt(invocations[1]!);
+    expect(secondPrompt).toContain("## Supervisor Revised Task");
+    expect(secondPrompt).toContain("## Original Authored Node Task (Background)");
+    expect(secondPrompt.indexOf("## Supervisor Revised Task")).toBeLessThan(
+      secondPrompt.indexOf("## Original Authored Node Task (Background)")
+    );
+    expect(secondPrompt).toContain("controlling retry objective");
+    expect(secondPrompt).toContain("Prior attempt artifacts are evidence only");
+
+    const thirdPrompt = renderHarnessPrompt(invocations[2]!);
+    expect(thirdPrompt).toContain("same failure fingerprint has appeared 2 times");
+
+    const retryManifest = await readFile(invocations[1]!.contextManifestPath, "utf8");
+    expect(retryManifest).toContain("supervisor_retry_guidance");
+    const retryPacket = JSON.parse(await readFile(invocations[1]!.contextPacketPath, "utf8")) as {
+      materials: Array<{ key: string; source: { from?: string; repeated_fingerprint_count?: number } }>;
+    };
+    const retryGuidanceMaterial = retryPacket.materials.find((material) => material.key === "supervisor_retry_guidance");
+    expect(retryGuidanceMaterial?.source).toEqual(
+      expect.objectContaining({
+        from: "runtime_supervisor_retry_guidance",
+        repeated_fingerprint_count: 1
+      })
+    );
+    expect(run.state.supervisor.active_retry_guidance).toEqual({});
+    expect(run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "supervisor.retry_scheduled",
+          payload: expect.objectContaining({
+            repeated_fingerprint_count: 1
+          })
+        }),
+        expect.objectContaining({
+          type: "supervisor.retry_scheduled",
+          payload: expect.objectContaining({
+            repeated_fingerprint_count: 2
+          })
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("fails instead of pausing when human pause supervision is disabled", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-pause-disabled-"));
     const repoDir = join(tempRoot, "repo");
@@ -3436,22 +4015,17 @@ describe("runtime engine", () => {
       "stdout.log"
     );
 
-    const harness: HarnessAdapter = {
-      kind: "codex-cli",
-      capabilities: getHarnessCapabilities("codex-cli")!,
-      async run(invocation) {
-        invocation.onStdoutChunk?.("partial output\n");
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 80));
+    const harness = createHarness("codex-cli", async (invocation) => {
+      invocation.onStdoutChunk?.("partial output\n");
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 80));
 
-        return {
-          status: "passed",
-          exitCode: 0,
-          stdout: "partial output\nfinal output\n",
-          stderr: ""
-        };
-      },
-      async cancel() {}
-    };
+      return {
+        status: "passed",
+        exitCode: 0,
+        stdout: "partial output\nfinal output\n",
+        stderr: ""
+      };
+    });
 
     try {
       const runPromise = runCompiledGraph({
