@@ -82,7 +82,7 @@ interface AttemptOutcomeVerification {
 }
 
 function readOutcomeVerificationMetadata(attempt: RuntimeNodeAttempt): AttemptOutcomeVerification | undefined {
-  const value = attempt.metadata.outcome_verification;
+  const value = attempt.metadata?.outcome_verification;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
@@ -171,7 +171,7 @@ export function collectRunDiagnostics(
 
   for (const attempt of [...attempts].reverse()) {
     const error =
-      typeof attempt.metadata.error === "string" && attempt.metadata.error.trim().length > 0
+      typeof attempt.metadata?.error === "string" && attempt.metadata.error.trim().length > 0
         ? attempt.metadata.error.trim()
         : undefined;
 
@@ -305,7 +305,7 @@ export function renderRunSummary(
 
   for (const attempt of attempts) {
     const verification =
-      attempt.metadata.verification
+      attempt.metadata?.verification
       && typeof attempt.metadata.verification === "object"
       && attempt.metadata.verification !== null
         ? attempt.metadata.verification as {

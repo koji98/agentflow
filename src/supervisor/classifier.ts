@@ -37,7 +37,7 @@ function readMessage(input: {
       ? input.result.result.metadata.error
       : undefined;
   const metadataError =
-    typeof input.attempt.metadata.error === "string"
+    typeof input.attempt.metadata?.error === "string"
       ? input.attempt.metadata.error
       : undefined;
   const resultStderr =

@@ -372,7 +372,7 @@ export function finalizeExecutionSummary(
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
     ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {}),
-    ...(attempt.metadata.verification &&
+    ...(attempt.metadata?.verification &&
     typeof attempt.metadata.verification === "object" &&
     attempt.metadata.verification !== null
       ? { verification: attempt.metadata.verification as VerificationRecordedPayload }
