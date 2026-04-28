@@ -40,6 +40,29 @@ async function writeExecutable(path: string, body: string): Promise<void> {
   await chmod(path, 0o755);
 }
 
+function passingVerifierResponse(): Awaited<ReturnType<HarnessAdapter["run"]>> {
+  return {
+    status: "passed",
+    exitCode: 0,
+    transcript: {
+      last_message: [
+        "```json",
+        JSON.stringify(
+          {
+            passed: true,
+            summary: "Test verifier accepts all agent outputs.",
+            findings: [],
+            blockers: []
+          },
+          null,
+          2
+        ),
+        "```"
+      ].join("\n")
+    }
+  };
+}
+
 function findAgentNode(
   compiledNodes: { authored_id: string }[],
   authoredId: string
@@ -1089,6 +1112,9 @@ describe("end-to-end runtime tool wiring", () => {
         kind: "codex-cli",
         capabilities: getHarnessCapabilities("codex-cli")!,
         async run(invocation) {
+          if (invocation.promptKind === "outcome_verification") {
+            return passingVerifierResponse();
+          }
           observedInvocation = invocation;
 
           // Simulate what a real harness child process would do: spawn a tool
@@ -1253,6 +1279,9 @@ describe("end-to-end runtime tool wiring", () => {
         kind: "codex-cli",
         capabilities: getHarnessCapabilities("codex-cli")!,
         async run(invocation) {
+          if (invocation.promptKind === "outcome_verification") {
+            return passingVerifierResponse();
+          }
           observedInvocation = invocation;
           return {
             status: "passed",

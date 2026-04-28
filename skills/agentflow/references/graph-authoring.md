@@ -6,9 +6,10 @@ Author graphs as supervised execution contracts. The graph should say what the t
 
 - Add `intent.goal`.
 - Add `repos` and `profiles` explicitly; use per-node `repo` and `profile` when work spans authority boundaries.
-- Add `intent.acceptance_criteria`.
+- Add `intent.acceptance_criteria`. Acceptance criteria are runtime-enforced: passing `agent` attempts are graded against them by the outcome verifier.
 - Add `intent.constraints` for scope boundaries, out-of-scope areas, and high-impact limits.
-- Keep nodes outcome-sized and give substantial agent nodes `goal` plus `acceptance_criteria`.
+- Keep nodes outcome-sized and give substantial agent nodes `goal` plus `acceptance_criteria`. Vague or decorative criteria produce vague verification, so write them as the contract you actually want enforced.
+- Do not repeat boilerplate iteration guidance in `constraints` (for example "iterate within the node boundary until acceptance criteria are met" or "investigate ambiguity rather than guessing"). The runtime injects a `## Working Loop` section into every standard agent prompt that covers persistence, the inspect→plan→execute→validate→fix loop, and the rule that the agent stops only when criteria are met or a real blocker is documented.
 - Give every downstream handoff a named artifact.
 - Set `supervision.actions.<action>.max_uses` and `supervision.max_total_interventions` to match risk.
 - Use `workspace_backend: "worktree"` for code-writing work unless the operator intentionally wants in-place execution.
@@ -30,7 +31,8 @@ Author graphs as supervised execution contracts. The graph should say what the t
 - If branches run in parallel and later work depends on them, make each branch publish named artifacts.
 - If a node uses external, secret, write, or mutation tools, put explicit limits in graph or node `constraints`.
 - If a loop needs a planned human decision, use a `checkpoint` inside the `repeat` body; do not model supervisor safety pauses as authored nodes.
-- If outcome quality needs judgment, choose the right lane: `check` for in-run sensing, managed pattern evaluation for authored repair loops, and `agentflow eval` for offline suite grading.
+- If outcome quality needs judgment, prefer authoring strong `acceptance_criteria` on the agent node — runtime outcome verification will grade the attempt against them. Use `check` nodes only for in-run sensing that needs deterministic commands or that another node depends on; do not stack an AI `check` after each agent node solely to evaluate the same acceptance criteria.
+- Use managed pattern evaluation for authored repair loops, and `agentflow eval` for offline suite grading.
 - If the compiled shape is hard to explain in prose, generate Mermaid with `validate --diagram-output` or a rendered review image with `validate --diagram-image-output`.
 
 ## Node Sizing

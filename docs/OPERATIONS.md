@@ -126,7 +126,7 @@ Runtime coordination files are under `<run-root>/runtime/`. They are useful when
 - `helpers/<helper-id>/session.json`: helper lifecycle, logs, output directory, and artifact paths.
 - `human-resume-input.jsonl`: structured human input used when resuming paused runs.
 
-Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, or handoff notes with `af log --type`. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live intervention.
+Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, handoff notes, or major decisions with `af log --type`. Decision logs use `decision`, `rationale`, and `evidence[]` so outcome verification can inspect why the node chose a scope-affecting path. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live intervention.
 
 When debugging what an agent actually received, use `technical-implementation/context-and-artifacts.md` and `technical-implementation/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation.
 
@@ -134,6 +134,8 @@ When debugging what an agent actually received, use `technical-implementation/co
 
 ```bash
 agentflow resume --run-root <run-root>
+agentflow resume --run-root <run-root> --dry-run
+agentflow resume --run-root <run-root> --reset-supervisor-budget
 agentflow resume --graph agentflow.graph.json --latest
 ```
 
@@ -141,11 +143,15 @@ Resume revalidates the current graph, recompiles it, and compares the new contra
 
 Completed work is preserved only when the node contract and graph-level `intent` and `supervision` contracts remain compatible. If the human contract or policy contract changes, affected completed work restarts so the final evidence matches the current graph.
 
-Paused runs require explicit human input:
+Use `--dry-run` before resuming a complicated run. It reports preserved nodes, restarted nodes, initially startable nodes, supervisor status, and remaining budget without reconciling artifacts, creating workspaces, or executing nodes. Use `--reset-supervisor-budget` when the previous run exhausted recovery actions and the operator has changed the graph, environment, credentials, or other blocking condition enough to justify a fresh recovery budget.
+
+Paused runs require explicit human input when actually executing the resume:
 
 ```bash
 agentflow resume --run-root <run-root> --human-action retry_with_guidance --human-note "Reviewed the policy pause; retry with this constraint."
 ```
+
+Dry-run previews of paused runs do not require `--human-action` because they do not mutate state or continue execution.
 
 Use this for supervisor pauses. Planned checkpoint prompts are handled during the original TTY run; if a checkpoint deny causes the surrounding repeat to continue, inspect the repeat attempts and operator feedback artifact rather than looking for `human-resume-input.jsonl`.
 
@@ -154,6 +160,7 @@ Use this for supervisor pauses. Planned checkpoint prompts are handled during th
 Choose the smallest evaluation lane that matches the question:
 
 - Use graph `check` nodes for in-run sensors that should gate flow or produce delivery evidence.
+- Let outcome verification grade passing `agent` attempts against authored acceptance criteria. It writes per-attempt verifier artifacts and routes rejected attempts through supervision.
 - Let supervisor `semantic_evaluation` spend intervention budget when a failed AI check or semantic uncertainty needs runtime recovery evidence.
 - Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_generate_evaluate_fix`.
 - Use `agentflow eval` for offline product or workflow suites that compare variants and write `.agentflow/evals` artifacts, including `evaluation-ledger.json`, `benchmark.json`, and `summary.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.

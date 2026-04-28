@@ -89,6 +89,8 @@ Each attempt is the unit of execution and audit. A typical agent attempt include
 - `tool-invocations.jsonl` and tool sidecar logs when generated wrappers are used
 - declared output artifacts under the attempt artifact directory or workspace paths
 - reserved artifacts such as `agent_response`, `stdout`, `stderr`, and `verification_json`
+- `workspace-changes/` snapshots for agent and exec attempts that reach the execution boundary
+- `verify-outcome.json` and `verify-outcome.md` for passing agent attempts after declared artifacts materialize
 
 The attempt boundary matters because supervisor interventions attach to a specific attempt, downstream refs select from attempts, and resume decides whether completed attempts remain compatible with the current compiled contract.
 
@@ -108,7 +110,8 @@ flowchart TD
   action --> diagnostic["run_diagnostic"]
   action --> semantic["semantic_evaluation"]
   action --> pause["pause_for_human"]
-  retry --> rerun["Restart node attempt"]
+  retry --> schedule["Write guidance, prompt revision, and retry_scheduled event"]
+  schedule --> rerun["Restart node attempt after delay"]
   repair --> verify["Verify declared artifacts exist"]
   rebuild --> rerun
   diagnostic --> classify
@@ -117,6 +120,8 @@ flowchart TD
 ```
 
 Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, `interventions.jsonl`, and state. Intervention workers write their own prompt/result/log artifacts under the affected attempt.
+
+For `retry_with_guidance`, the supervisor also records a failure fingerprint, writes a guidance brief and `prompt-revision.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the revision into the next attempt's prompt and context. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
 
 ## Resume
 
@@ -129,7 +134,9 @@ Resume is contract-aware. It does not blindly continue old state.
 5. Invalidate affected nodes and dependent work when contracts changed.
 6. Continue the scheduler loop from the reconstructed session.
 
-Paused supervisor runs additionally require explicit `--human-action` and optional `--human-note`. Planned checkpoint decisions are different: they happen during the original TTY run and are represented as checkpoint outcomes and operator feedback artifacts.
+`agentflow resume --dry-run` stops after reconstruction and reports what would be preserved, restarted, and initially startable without reconciling artifacts or creating workspaces. `--reset-supervisor-budget` keeps compatible completed work but restores the supervisor budget from the current graph, which is useful after fixing an exhausted run's graph or environment.
+
+Paused supervisor runs additionally require explicit `--human-action` and optional `--human-note` when execution actually resumes; dry-run previews do not require human input. Planned checkpoint decisions are different: they happen during the original TTY run and are represented as checkpoint outcomes and operator feedback artifacts.
 
 ## Delivery
 

@@ -5,6 +5,7 @@ import type { ArtifactDefinition } from "../../graph/authored.js";
 import type { ResolvedTool } from "../../graph/compiled.js";
 import type { HarnessCapabilities } from "../../graph/harness_capabilities.js";
 import type { ReasoningEffort } from "../../graph/schema.js";
+import type { SupervisorRetryGuidanceRecord } from "../../supervisor/types.js";
 
 export type HarnessKind = "codex-cli" | "cursor-cli";
 
@@ -21,10 +22,11 @@ export interface ArtifactRepairPromptContext {
   priorResponsePath: string;
   stdoutLogPath: string;
   stderrLogPath: string;
+  previousAttemptEvidencePaths: string[];
 }
 
 export interface AgentInvocation {
-  promptKind?: "agent" | "ai_check" | "artifact_repair";
+  promptKind?: "agent" | "ai_check" | "artifact_repair" | "outcome_verification";
   runId: string;
   executionId: string;
   repoAlias: string;
@@ -54,6 +56,7 @@ export interface AgentInvocation {
   toolEnv?: Record<string, string>;
   tools?: ResolvedTool[];
   repair?: ArtifactRepairPromptContext;
+  supervisorRetryGuidance?: SupervisorRetryGuidanceRecord;
 }
 
 export interface HarnessResult {
@@ -256,8 +259,9 @@ function formatRuntimeCliContract(): string[] {
     "- Use `af status` when you need run metadata, declared artifacts, sandbox, or granted tools.",
     "- Use `af context show` when you need to redisplay the context manifest.",
     "- Use `af artifact write <name> --file <path>` or `af artifact write <name> --content <text>` to publish declared artifacts.",
+    "- For every major scope-affecting decision, use `af log --type decision --decision <what you decided> --rationale <why you made that decision> --evidence <supporting command, artifact, file, tool output, or observed fact>` before or immediately after the decision. Repeat `--evidence` for multiple supporting facts.",
     "- Use helper commands only when the node task explicitly benefits from sub-node context management.",
-    "- Runtime logs are coordination evidence; artifacts are the durable handoff."
+    "- Runtime logs are coordination evidence; artifacts are the durable handoff. Final artifacts must be consistent with the decision log."
   ];
 }
 
@@ -364,6 +368,46 @@ function formatGraphContext(invocation: AgentInvocation): string[] {
   ];
 }
 
+function formatSupervisorRevisedTask(invocation: AgentInvocation): string[] {
+  const guidance = invocation.supervisorRetryGuidance;
+
+  if (!guidance) {
+    return [];
+  }
+
+  const revision = guidance.prompt_revision;
+  return [
+    "## Supervisor Revised Task",
+    "This is a retry after a failed prior execution. The supervisor revision below is the controlling task for this retry where it conflicts with the authored node task. It preserves graph-level acceptance criteria, constraints, sandbox, and safety boundaries.",
+    `Prior execution: \`${guidance.prior_execution_id}\`. Classification: \`${guidance.classification}\`. Fingerprint: \`${guidance.failure_fingerprint}\` (seen ${guidance.repeated_fingerprint_count} time${guidance.repeated_fingerprint_count === 1 ? "" : "s"}).`,
+    `Audit artifacts: guidance brief \`${guidance.guidance_brief_path}\`, prompt revision \`${guidance.prompt_revision_path}\`.`,
+    "",
+    "### Revised Goal",
+    revision.revised_goal,
+    "",
+    "### Must Do",
+    ...formatBullets(revision.must_do, "No retry-specific required actions were authored."),
+    "",
+    "### Must Not Do",
+    ...formatBullets(revision.must_not_do, "No retry-specific forbidden tactics were authored."),
+    "",
+    "### Artifact Requirements",
+    ...formatBullets(revision.artifact_requirements, "Follow the normal artifact contract."),
+    "",
+    "### Resolved Conflicts",
+    ...formatBullets(revision.resolved_conflicts, "No conflicts were identified; this guidance is additive."),
+    "",
+    "### Evidence To Read First",
+    ...formatBullets(revision.evidence_to_read, "Read the materialized supervisor retry guidance context and prior execution artifacts."),
+    "",
+    "### Intent Preservation",
+    revision.intent_preservation,
+    "",
+    "### Justification",
+    revision.justification
+  ];
+}
+
 function formatContextContract(invocation: AgentInvocation, target: "task" | "evaluation" | "repair task"): string[] {
   return [
     "## Context",
@@ -409,6 +453,20 @@ function formatNodeTask(
 export function renderHarnessPrompt(invocation: AgentInvocation): string {
   const graphContext = formatGraphContext(invocation);
   const toolContract = formatToolContract(invocation.tools);
+
+  if (invocation.promptKind === "outcome_verification") {
+    if (invocation.sandbox !== "read-only") {
+      throw new Error("outcome_verification prompts must run in a read-only sandbox.");
+    }
+    if (invocation.tools && invocation.tools.length > 0) {
+      throw new Error("outcome_verification prompts must not be granted plugin tools.");
+    }
+    if (typeof invocation.rubric !== "string" || invocation.rubric.length === 0) {
+      throw new Error("outcome_verification prompts require the rendered verifier prompt in `rubric`.");
+    }
+
+    return invocation.rubric;
+  }
 
   if (invocation.promptKind === "ai_check") {
     const checkTask = formatNodeTask(invocation, {
@@ -475,6 +533,12 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       `- Prior final response artifact, if present: ${repair.priorResponsePath}`,
       `- Prior stdout log: ${repair.stdoutLogPath}`,
       `- Prior stderr log: ${repair.stderrLogPath}`,
+      ...(repair.previousAttemptEvidencePaths.length > 0
+        ? [
+            "- Previous attempts for this same node:",
+            ...repair.previousAttemptEvidencePaths.map((path) => `  - ${path}`)
+          ]
+        : []),
       `- Repair attempt: ${repair.repairAttempt} of ${repair.maxAttempts}`,
       "",
       ...formatContextContract(invocation, "repair task"),
@@ -492,8 +556,10 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     ].join("\n");
   }
 
+  const hasSupervisorRevision = Boolean(invocation.supervisorRetryGuidance);
+  const supervisorRevisedTask = formatSupervisorRevisedTask(invocation);
   const nodeTask = formatNodeTask(invocation, {
-    title: "Node Task",
+    title: hasSupervisorRevision ? "Original Authored Node Task (Background)" : "Node Task",
     emptyGoal: "Complete the authored node goal.",
     emptyAcceptanceCriteria: "No node-level acceptance criteria were authored.",
     emptyConstraints: "No node-level constraints were authored."
@@ -503,8 +569,20 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "## Role",
     "Agentflow is a local graph runner for long-running engineering work.",
     "You are executing one node in a wider Agentflow graph. Complete this node's task; future nodes consume only the named artifacts and final handoff you produce.",
-    "The node task is the controlling objective. Use graph context only to understand why this node exists.",
+    hasSupervisorRevision
+      ? "A supervisor revised task appears before the authored node task. Use it as the controlling retry objective where it resolves prior failure evidence or supersedes incomplete or contradictory authored wording."
+      : "The node task is the controlling objective. Use graph context only to understand why this node exists.",
     "",
+    "## Working Loop",
+    "Drive this node to completion within its boundary. Do not stop at the first attempt when acceptance criteria are not yet met or when validation has not been run.",
+    "Default loop: inspect context and repo state, plan the smallest maintainable path, execute, run the validation named by the task or context, fix failures or open questions, then rerun validation. Repeat until every acceptance criterion is satisfied with cited evidence, or a real blocker prevents progress.",
+    "Investigate ambiguity instead of guessing: read manifest items, inspect the repo, run read-only probes, and consult `--help` on available tools before assuming behavior.",
+    "Be persistent without thrashing: if the same approach fails twice with the same symptom, change strategy (re-read context, narrow scope, try a different evidence source) or surface a concrete blocker.",
+    "Stop only when (a) every acceptance criterion is satisfied with evidence captured in the declared artifacts and final handoff, or (b) a concrete blocker (missing credentials, unauthorized action, missing upstream artifact, irreducible failure) prevents progress. Document what was tried and the next action a human should take when blocked.",
+    "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected.",
+    "",
+    ...supervisorRevisedTask,
+    ...(supervisorRevisedTask.length > 0 ? [""] : []),
     ...nodeTask,
     "",
     ...graphContext,
@@ -516,6 +594,11 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     ...formatRuntimeCliContract(),
     "",
     ...formatArtifactContract(invocation.artifacts, invocation.outputDir, invocation.repoPath, invocation.sandbox),
+    ...(hasSupervisorRevision
+      ? [
+          "- Prior attempt artifacts are evidence only. This retry must write every current-attempt declared artifact at the current output directory/workspace paths before finishing."
+        ]
+      : []),
     ...(toolContract.length > 0
       ? ["", ...toolContract]
       : []),

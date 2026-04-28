@@ -371,6 +371,7 @@ export async function createResumedRuntimeSession(options: {
   prior_state: RuntimeStateSnapshot;
   attempts: RuntimeNodeAttempt[];
   events: RuntimeEventEnvelope[];
+  reset_supervisor_budget?: boolean;
 }): Promise<{
   session: RuntimeSession;
   previous_status: RuntimeStateSnapshot["status"];
@@ -400,13 +401,42 @@ export async function createResumedRuntimeSession(options: {
   session.manifest = options.manifest;
   session.started_at = options.prior_state.started_at;
   if (fingerprintGraphRunContract(options.prior_graph) === fingerprintGraphRunContract(options.graph)) {
+    const budgetRemaining = options.reset_supervisor_budget
+      ? session.supervisor.budget_remaining
+      : {
+          max_total_interventions: options.prior_state.supervisor.budget_remaining.max_total_interventions,
+          actions: { ...options.prior_state.supervisor.budget_remaining.actions }
+        };
     session.supervisor = {
       ...options.prior_state.supervisor,
-      budget_remaining: {
-        max_total_interventions: options.prior_state.supervisor.budget_remaining.max_total_interventions,
-        actions: { ...options.prior_state.supervisor.budget_remaining.actions }
-      },
+      status:
+        options.reset_supervisor_budget && options.prior_state.supervisor.status === "exhausted"
+          ? "healthy"
+          : options.prior_state.supervisor.status,
+      budget_remaining: budgetRemaining,
       timeline: options.prior_state.supervisor.timeline.map((decision) => ({ ...decision })),
+      active_retry_guidance: Object.fromEntries(
+        Object.entries(options.prior_state.supervisor.active_retry_guidance ?? {}).map(([compiledId, guidance]) => [
+          compiledId,
+          {
+            ...guidance,
+            prompt_revision: {
+              ...guidance.prompt_revision,
+              must_do: [...guidance.prompt_revision.must_do],
+              must_not_do: [...guidance.prompt_revision.must_not_do],
+              artifact_requirements: [...guidance.prompt_revision.artifact_requirements],
+              resolved_conflicts: [...guidance.prompt_revision.resolved_conflicts],
+              evidence_to_read: [...guidance.prompt_revision.evidence_to_read]
+            }
+          }
+        ])
+      ),
+      failure_fingerprints: Object.fromEntries(
+        Object.entries(options.prior_state.supervisor.failure_fingerprints ?? {}).map(([compiledId, state]) => [
+          compiledId,
+          { ...state }
+        ])
+      ),
       ...(options.prior_state.supervisor.pause
         ? { pause: { ...options.prior_state.supervisor.pause } }
         : {}),

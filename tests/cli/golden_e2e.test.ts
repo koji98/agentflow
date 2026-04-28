@@ -115,6 +115,17 @@ process.stdin.on("end", () => {
     return result.stdout;
   };
 
+  if (prompt.includes("Agentflow outcome verifier")) {
+    const verifierJson = JSON.stringify({
+      passed: true,
+      summary: "Golden verifier accepts agent attempt.",
+      findings: [],
+      blockers: []
+    }, null, 2);
+    finish("\`\`\`json\\n" + verifierJson + "\\n\`\`\`\\n");
+    return;
+  }
+
   if (prompt.includes("Helper Task") || prompt.includes("Write helper report for golden spawn")) {
     writeFileSync(join(outputDir, "helper-report.md"), "helper ok\\n");
     runAf(["log", "--type", "finding", "--summary", "Helper produced golden spawn report"]);

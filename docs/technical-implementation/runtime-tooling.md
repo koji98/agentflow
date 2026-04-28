@@ -139,6 +139,7 @@ Common commands:
 - `af tools list`: show the granted plugin tools.
 - `af artifact list|write`: publish declared artifacts.
 - `af log --type ...`: append structured worker evidence to `runtime/log.jsonl`.
+- `af log --type decision --decision ... --rationale ... --evidence ...`: record major scope-affecting decisions with the rationale and supporting evidence strings that outcome verification can inspect.
 - `af spawn` and `af wait`: manage supervised helper sub-nodes with their own metadata and artifacts.
 
 The runtime CLI is file-backed. It coordinates through the run root and runtime directory, not through a live in-memory service exposed to the model.

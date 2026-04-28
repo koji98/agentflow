@@ -481,6 +481,12 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: String(payload.summary ?? `Supervisor intervention ${String(payload.intervention_id ?? "?")} failed.`)
       };
+    case "supervisor.retry_scheduled":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Supervisor scheduled retry after ${String(payload.delay_ms ?? 0)}ms.`
+      };
     case "supervisor.paused":
       return {
         ...(authored_id ? { authored_id } : {}),
@@ -502,6 +508,14 @@ function buildEventSummary(
         summary: payload.passed === true
           ? String(payload.summary ?? "Soft verification passed.")
           : String(payload.summary ?? "Soft verification failed.")
+      };
+    case "outcome.verified":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: payload.passed === true
+          ? `Outcome verifier passed (${String(payload.findings_count ?? 0)} findings).`
+          : `Outcome verifier rejected (${String(payload.blockers_count ?? 0)} blockers, ${String(payload.findings_count ?? 0)} findings).`
       };
     case "node.completed":
       return {

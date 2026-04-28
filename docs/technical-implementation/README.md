@@ -24,6 +24,8 @@ flowchart LR
 1. `runtime-lifecycle.md`: the full path from `agentflow validate` and `agentflow run` to node attempts, supervisor decisions, resume state, and delivery.
 2. `context-and-artifacts.md`: how authored `context` becomes files and prompt references, how `ref` resolves to prior artifacts, and how artifacts become downstream handoffs.
 3. `runtime-tooling.md`: how `af` and plugin tools are injected into an agent's `PATH`, how tool help/config/credentials are resolved, and what the harness actually sees.
+4. `node-workspace-snapshots.md`: how the engine captures a per-attempt git baseline, after-state, and diff for `agent` and `exec` nodes.
+5. `outcome-verification.md`: how every passing `agent` attempt is graded by a fresh-context verifier, what the verifier prompt and output schema look like, and how rejection routes through the supervisor.
 
 ## Medium-Level Model
 

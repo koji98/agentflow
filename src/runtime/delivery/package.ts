@@ -79,6 +79,9 @@ export interface DeliveryPackageManifest {
     declared_artifacts: number;
     tool_invocation_records: number;
     workspace_change_artifacts: number;
+    node_workspace_change_artifacts: number;
+    verifications_passed: number;
+    verifications_failed: number;
   };
   intervention_count: number;
   failed_check_count: number;
@@ -195,6 +198,22 @@ function renderImplementationSummary(evidence: DeliveryEvidence): string {
     ""
   ]);
 
+  const verificationsPassed = evidence.outcome_verifications.filter((entry) => entry.passed).length;
+  const verificationsFailed = evidence.outcome_verifications.filter((entry) => !entry.passed).length;
+  const verificationLines = evidence.outcome_verifications.flatMap((entry) => [
+    `### ${entry.authored_id} (attempt ${entry.attempt_index}${
+      entry.iteration_index !== undefined ? `, iteration ${entry.iteration_index}` : ""
+    })`,
+    "",
+    `- Verdict: \`${entry.passed ? "passed" : "failed"}\``,
+    `- Findings: \`${entry.findings_count}\` (blockers: \`${entry.blockers_count}\`)`,
+    `- Verify report (markdown): \`${entry.verify_outcome_markdown_path}\``,
+    `- Verify report (json): \`${entry.verify_outcome_json_path}\``,
+    "",
+    entry.summary,
+    ""
+  ]);
+
   return [
     "# Implementation Summary",
     "",
@@ -204,6 +223,7 @@ function renderImplementationSummary(evidence: DeliveryEvidence): string {
     `- Failed checks: \`${evidence.failed_checks.length}\``,
     `- Declared artifacts captured: \`${evidence.declared_artifacts.length}\``,
     `- Tool invocation records: \`${evidence.tool_invocations.reduce((sum, entry) => sum + entry.records.length, 0)}\``,
+    `- Outcome verifications: passed=\`${verificationsPassed}\` failed=\`${verificationsFailed}\``,
     "",
     "## Agent Responses",
     "",
@@ -212,7 +232,12 @@ function renderImplementationSummary(evidence: DeliveryEvidence): string {
     "",
     ...(declaredArtifactLines.length > 0
       ? declaredArtifactLines
-      : ["No declared handoff artifacts were captured.", ""])
+      : ["No declared handoff artifacts were captured.", ""]),
+    "## Outcome Verification",
+    "",
+    ...(verificationLines.length > 0
+      ? verificationLines
+      : ["No outcome verifications were recorded.", ""])
   ].join("\n");
 }
 
@@ -519,6 +544,29 @@ async function buildArtifactTaxonomy(options: {
       })
     )
   );
+  const outcomeVerificationEntries = await Promise.all(
+    evidence.outcome_verifications.flatMap((entry) => [
+      artifactEntry({
+        path: entry.verify_outcome_markdown_path,
+        label: `${entry.authored_id} outcome verification (${entry.passed ? "passed" : "failed"})`,
+        purpose: "Outcome verifier verdict, summary, and findings rendered for review."
+      }),
+      artifactEntry({
+        path: entry.verify_outcome_json_path,
+        label: `${entry.authored_id} outcome verification JSON`,
+        purpose: "Outcome verifier verdict, findings, and verifier metadata in machine-readable form."
+      })
+    ])
+  );
+  const nodeWorkspaceChangeEntries = await Promise.all(
+    evidence.node_workspace_changes.map((entry) =>
+      artifactEntry({
+        path: entry.artifacts.diff_patch_path,
+        label: `${entry.authored_id} node workspace diff (attempt ${entry.attempt_index})`,
+        purpose: "Per-attempt workspace diff captured against the pre-execution baseline."
+      })
+    )
+  );
   const auditTrail = await Promise.all([
     artifactEntry({
       path: runPaths.events_file,
@@ -560,6 +608,8 @@ async function buildArtifactTaxonomy(options: {
       label: "Evaluation ledger",
       purpose: "Delivery summary of failed checks, declared artifacts, and tool invocation ledgers."
     }),
+    ...outcomeVerificationEntries,
+    ...nodeWorkspaceChangeEntries,
     ...toolInvocationEntries
   ]);
   const debugPaths = [
@@ -767,7 +817,10 @@ async function buildManifest(evidence: DeliveryEvidence, runRoot: string, delive
       agent_responses: evidence.agent_responses.length,
       declared_artifacts: evidence.declared_artifacts.length,
       tool_invocation_records: evidence.tool_invocations.reduce((sum, entry) => sum + entry.records.length, 0),
-      workspace_change_artifacts: evidence.workspace_changes.length
+      workspace_change_artifacts: evidence.workspace_changes.length,
+      node_workspace_change_artifacts: evidence.node_workspace_changes.length,
+      verifications_passed: evidence.outcome_verifications.filter((entry) => entry.passed).length,
+      verifications_failed: evidence.outcome_verifications.filter((entry) => !entry.passed).length
     },
     intervention_count: evidence.interventions.length,
     failed_check_count: evidence.failed_checks.length,
@@ -823,6 +876,28 @@ export async function writeDeliveryPackage(options: {
         invocation_path: entry.invocation_path,
         count: entry.records.length,
         tools: [...new Set(entry.records.map((record) => String(record.tool ?? record.kind ?? "unknown")))].sort()
+      })),
+      outcome_verifications: evidence.outcome_verifications.map((entry) => ({
+        authored_id: entry.authored_id,
+        compiled_id: entry.compiled_id,
+        execution_id: entry.execution_id,
+        attempt_index: entry.attempt_index,
+        ...(entry.iteration_index !== undefined ? { iteration_index: entry.iteration_index } : {}),
+        passed: entry.passed,
+        summary: entry.summary,
+        findings_count: entry.findings_count,
+        blockers_count: entry.blockers_count,
+        verify_outcome_json_path: entry.verify_outcome_json_path,
+        verify_outcome_markdown_path: entry.verify_outcome_markdown_path,
+        verifier_metadata: entry.verifier_metadata
+      })),
+      node_workspace_changes: evidence.node_workspace_changes.map((entry) => ({
+        authored_id: entry.authored_id,
+        compiled_id: entry.compiled_id,
+        execution_id: entry.execution_id,
+        attempt_index: entry.attempt_index,
+        ...(entry.iteration_index !== undefined ? { iteration_index: entry.iteration_index } : {}),
+        artifacts: entry.artifacts
       }))
     }),
     writeText(manifest.sections.reviewer_guide, renderReviewerGuide(manifest, evidence)),

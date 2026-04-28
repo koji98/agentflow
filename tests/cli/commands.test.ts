@@ -1564,6 +1564,26 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
 
     await writeFile(join(repoDir, "resume-ok.txt"), "ok\n");
 
+    const dryRun = await executeCli(["resume", "--run-root", firstPayload.run_root, "--dry-run"], tempRoot);
+    const dryRunPayload = JSON.parse(dryRun.stdout);
+    const attemptsBeforeResume = await readRunExecutionAttempts(firstPayload.run_root);
+
+    expect(dryRun.exitCode).toBe(0);
+    expect(dryRunPayload.command).toBe("resume");
+    expect(dryRunPayload.status).toBe("dry_run");
+    expect(dryRunPayload.message).toContain("no nodes were executed");
+    expect(dryRunPayload.preserved_node_count).toBe(1);
+    expect(dryRunPayload.restarted_node_count).toBe(2);
+    expect(dryRunPayload.would_start_node_count).toBe(1);
+    expect(dryRunPayload.resume_plan.start_nodes.map((node: { authored_id: string }) => node.authored_id)).toEqual([
+      "gate_resume"
+    ]);
+    expect(dryRunPayload.resume_plan.restarted_nodes.map((node: { authored_id: string }) => node.authored_id)).toEqual([
+      "gate_resume",
+      "after_resume"
+    ]);
+    expect(await readRunExecutionAttempts(firstPayload.run_root)).toHaveLength(attemptsBeforeResume.length);
+
     const resumedStderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const resumedRun = await executeCli(["resume", "--run-root", firstPayload.run_root], tempRoot);
     const resumedPayload = JSON.parse(resumedRun.stdout);

@@ -132,7 +132,7 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 
 - `af status`, `af tools list`, and `af context show` read the node contract.
 - `af artifact write|list` publish and inspect declared artifacts.
-- `af log --type <progress|finding|blocker|risk|question|handoff_note>` appends structured worker evidence to `runtime/log.jsonl`.
+- `af log --type <progress|finding|blocker|risk|question|handoff_note|decision>` appends structured worker evidence to `runtime/log.jsonl`; decision entries carry `decision`, `rationale`, and `evidence[]`.
 - `af spawn` creates a helper sub-node with its own runtime metadata, selected plugin tools, output directory, logs, and artifact contract.
 - `af wait` waits for helper completion.
 
@@ -166,7 +166,7 @@ Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into
 
 Current artifact repair behavior:
 
-1. The runtime detects a required declared artifact missing after an agent attempt.
+1. The runtime detects a required declared artifact missing after a successful agent attempt.
 2. The supervisor classifies the failure and checks policy and budget.
 3. If allowed, it starts an intent-aware repair intervention using graph intent, node task, constraints, acceptance criteria, the same harness authority, and the same sandbox boundary as the node.
 4. If no harness is available and exactly one missing artifact is a human-readable text handoff, it may synthesize that handoff from `agent_response`; JSON, other machine-readable contracts, and multi-artifact contracts still require real artifacts.
@@ -174,12 +174,17 @@ Current artifact repair behavior:
 6. It accepts the repaired artifact only if the declared artifact now exists.
 7. It records the decision and result in events and `interventions.jsonl`.
 
+Failed harness attempts do not publish declared artifacts, even if they wrote files in the output directory before failing. Those files can be surfaced as prior-attempt evidence for later repair or retry prompts, but downstream refs and delivery handoffs only consume artifacts materialized from successful attempts or accepted repairs.
+
+`retry_with_guidance` produces a supervisor evidence brief plus a `prompt-revision.json` artifact under the intervention directory. The next attempt receives that revision as controlling retry guidance where it resolves ambiguous or contradictory node wording while preserving graph constraints. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
+
 Supervisor events:
 
 - `supervisor.decision`
 - `supervisor.intervention.started`
 - `supervisor.intervention.completed`
 - `supervisor.intervention.failed`
+- `supervisor.retry_scheduled`
 - `supervisor.paused`
 
 ## Human Gates And Pauses
@@ -202,9 +207,10 @@ Checks are sensors. They produce evidence for the run, not hidden control-plane 
 
 `on_failure: "continue"` keeps soft verification evidence visible while allowing control flow to continue. Operational failures such as spawn errors, timeouts, cancellation, invalid context, missing env files, and missing required artifacts remain hard failures.
 
-Evaluation has four lanes:
+Evaluation has five lanes:
 
 - Graph `check` nodes are in-run sensors. They are authored into the graph and can gate flow, repeat loops, or evidence collection.
+- Outcome verification is runtime enforcement for passing `agent` attempts. It runs after declared artifacts materialize, writes `verify-outcome.json` and `verify-outcome.md`, and can turn a claimed pass into an `outcome_verification` failure routed through supervision.
 - Supervisor `semantic_evaluation` is an intervention. It is chosen by the supervisor after a failed AI check or semantic uncertainty, spends intervention budget, and writes supervisor evidence.
 - Managed pattern evaluation is authored workflow structure. For example, `pattern_generate_evaluate_fix.evaluation` expands into evaluator and repair-loop nodes as part of the compiled graph.
 - `agentflow eval` is offline product or workflow evaluation. It runs file-backed eval suites against Agentflow workflows and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks.

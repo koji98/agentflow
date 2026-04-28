@@ -34,6 +34,7 @@ af context show
 af artifact list
 af artifact write <name> --file <path>
 af log --type finding --summary "..."
+af log --type decision --decision "..." --rationale "..." --evidence "..."
 af spawn --brief "..." --artifact helper-report.md --wait
 af wait --agent <helper-id> --artifact helper-report.md
 ```
@@ -65,6 +66,7 @@ Confirm:
 ## Evaluation Lanes
 
 - Graph `check` nodes are in-run sensors and can gate control flow.
+- Outcome verification is the always-on runtime contract for passing `agent` attempts; it produces `verify-outcome.{json,md}` and an `outcome.verified` event when a passed attempt is verified.
 - Supervisor `semantic_evaluation` is an intervention selected after runtime evidence and bounded by supervisor budget.
 - Managed pattern evaluation is authored workflow structure, especially in `pattern_generate_evaluate_fix`.
 - `agentflow eval` is offline product/workflow grading with file-backed suites and `.agentflow/evals` artifacts.
@@ -81,5 +83,13 @@ Run and resume output include:
 - delivery package manifest
 - reviewer guide
 - interventions ledger
+- outcome verification counts (`outcome_verification_counts.passed`, `failed`, and per-failed-attempt summaries)
+- per-node workspace change counts (`node_workspace_change_counts.attempts_with_changes`, `diff_paths`)
 
 Inspect output also includes recent events, failed node summaries, stderr tails, delivery paths, and delivery artifact taxonomy counts when `delivery/manifest.json` is present.
+
+## Per-Attempt Artifacts
+
+`agent` and `exec` attempts that reach the execution boundary contain a `workspace-changes/` folder with `baseline.json`, `after.json`, `status.txt`, `diff.patch`, and `changed-files.json` capturing the per-attempt git diff. Passing `agent` attempts that materialize declared artifacts also contain `verify-outcome.json` and `verify-outcome.md` with the outcome verifier's verdict, summary, findings, and verifier metadata.
+
+The runtime emits an `outcome.verified` event for each verified `agent` attempt with `passed`, `findings_count`, `blockers_count`, `verifier_harness`, `parse_status`, `duration_ms`, and the on-disk `verify_outcome_path`.

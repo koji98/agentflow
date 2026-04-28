@@ -14,6 +14,7 @@ import {
   readRunState
 } from "../../artifacts/reader.js";
 import { compileAuthoredGraph } from "../../graph/compile.js";
+import type { CompiledExecutableNode, CompiledGraph } from "../../graph/compiled.js";
 import { resolveLaunchConfig } from "../../graph/profiles.js";
 import { workspaceBackends } from "../../graph/schema.js";
 import { loadAuthoredGraphDocument } from "../../graph/validate.js";
@@ -21,6 +22,7 @@ import { resumeCompiledGraph } from "../../runtime/core/engine.js";
 import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
 import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import { createResumedRuntimeSession } from "../../runtime/resume.js";
+import type { RuntimeNodeStatus, RuntimeSession } from "../../runtime/session.js";
 import { resumeWorkspaceFromManifest } from "../../runtime/workspace/resume.js";
 import { createInteractiveCheckpointExecutor } from "../checkpoint.js";
 import {
@@ -33,6 +35,46 @@ import {
 import { createRuntimeProgressReporter } from "../progress.js";
 import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
 import { createRunTerminalFields } from "../run_output.js";
+
+function summarizeResumeNode(
+  node: CompiledExecutableNode,
+  session: RuntimeSession
+): {
+  compiled_id: string;
+  authored_id: string;
+  kind: CompiledExecutableNode["kind"];
+  status: RuntimeNodeStatus;
+  deps: string[];
+  blocked_by: string[];
+} {
+  const status = session.node_statuses.get(node.compiled_id) ?? "pending";
+  const blockedBy = node.deps.filter((dep) => session.node_statuses.get(dep) !== "passed");
+
+  return {
+    compiled_id: node.compiled_id,
+    authored_id: node.authored_id,
+    kind: node.kind,
+    status,
+    deps: [...node.deps],
+    blocked_by: blockedBy
+  };
+}
+
+function buildResumeDryRunPlan(graph: CompiledGraph, session: RuntimeSession): {
+  preserved_nodes: ReturnType<typeof summarizeResumeNode>[];
+  restarted_nodes: ReturnType<typeof summarizeResumeNode>[];
+  start_nodes: ReturnType<typeof summarizeResumeNode>[];
+} {
+  const nodeSummaries = graph.nodes.map((node) => summarizeResumeNode(node, session));
+  const preservedNodes = nodeSummaries.filter((node) => node.status === "passed");
+  const restartedNodes = nodeSummaries.filter((node) => node.status !== "passed");
+
+  return {
+    preserved_nodes: preservedNodes,
+    restarted_nodes: restartedNodes,
+    start_nodes: restartedNodes.filter((node) => node.blocked_by.length === 0)
+  };
+}
 
 async function selectLatestResumableRunRoot(
   currentWorkingDirectory: string,
@@ -166,19 +208,33 @@ function compareRepoBindings(
 
 export const resumeCommand = {
   name: "resume",
-  summary: "Recompile the original graph for a failed, canceled, or paused run root and preserve only unchanged passed work.",
+  summary: "Recompile the original graph for a failed, canceled, paused, or inactive running run root and preserve only unchanged passed work.",
   usage: "agentflow resume (--run-root <path/to/run-root> | --graph <path/to/graph> --latest)",
   examples: [
     "agentflow resume --run-root .agentflow/runs/<run-id>",
     "agentflow resume --run-root /absolute/path/to/.agentflow/runs/<run-id>",
-    "agentflow resume --graph ./agentflow.graph.json --latest"
+    "agentflow resume --graph ./agentflow.graph.json --latest",
+    "agentflow resume --run-root .agentflow/runs/<run-id> --dry-run",
+    "agentflow resume --run-root .agentflow/runs/<run-id> --reset-supervisor-budget"
   ] as const,
-  optionNames: ["run-root", "graph", "latest", "human-action", "human-note", "help"] as const,
+  optionNames: [
+    "run-root",
+    "graph",
+    "latest",
+    "human-action",
+    "human-note",
+    "dry-run",
+    "reset-supervisor-budget",
+    "help"
+  ] as const,
   helpNotes: [
     "Resume recompiles from the original graph path using the current Agentflow build.",
     "Only passed nodes whose compiled contract still matches are preserved.",
     "Repeat scopes restart from iteration 1 when they were unfinished or their compiled contract changed.",
     "Pass --graph with --latest to resume the most recent failed, canceled, or paused run discovered under the graph's runs root.",
+    "Use --dry-run to preview preserved, restarted, and initially startable nodes without executing the resumed run.",
+    "A run recorded as running is resumable only after Agentflow confirms the original run owner is no longer active.",
+    "Use --reset-supervisor-budget when resuming a failed/exhausted run after changing the graph or environment so recovery actions can be attempted again.",
     "Paused runs require --human-action approve|fail|add_context|retry_with_guidance|rebuild_context_then_retry, with optional --human-note."
   ] as const,
   async run(
@@ -190,6 +246,8 @@ export const resumeCommand = {
     const humanAction = typeof options["human-action"] === "string" ? options["human-action"] : undefined;
     const humanNote = typeof options["human-note"] === "string" ? options["human-note"] : undefined;
     const latestRequested = options.latest === true;
+    const dryRun = options["dry-run"] === true;
+    const resetSupervisorBudget = options["reset-supervisor-budget"] === true;
 
     if (latestRequested && runRootInput) {
       return {
@@ -246,7 +304,9 @@ export const resumeCommand = {
       run_root = latest.run_root;
     }
 
-    await reconcileRunArtifacts(run_root);
+    if (!dryRun) {
+      await reconcileRunArtifacts(run_root);
+    }
 
     const [
       runRecord,
@@ -303,20 +363,20 @@ export const resumeCommand = {
       };
     }
 
-    if (!["failed", "canceled", "paused"].includes(runRecord.status)) {
+    if (!["failed", "canceled", "paused", "running"].includes(runRecord.status)) {
       return {
         exitCode: 1,
         output: {
           command: "resume",
           status: "failed",
-          message: `Only failed, canceled, or paused runs can be resumed. Current status: ${runRecord.status}.`,
+          message: `Only failed, canceled, paused, or inactive running runs can be resumed. Current status: ${runRecord.status}.`,
           run_root,
           run_id: runRecord.run_id
         }
       };
     }
 
-    if (runRecord.status === "paused") {
+    if (runRecord.status === "paused" && !dryRun) {
       const allowedHumanActions = new Set([
         "approve",
         "fail",
@@ -515,7 +575,6 @@ export const resumeCommand = {
 
     const compiled_graph = compilation.compiled_graph!;
     const repo_sources = repoResolution.repo_sources;
-    const workspace = await resumeWorkspaceFromManifest(execution_manifest);
 
     const {
       session,
@@ -530,8 +589,41 @@ export const resumeCommand = {
       manifest: execution_manifest,
       prior_state: state,
       attempts,
-      events
+      events,
+      reset_supervisor_budget: resetSupervisorBudget
     });
+
+    if (dryRun) {
+      const resumePlan = buildResumeDryRunPlan(compiled_graph, session);
+
+      return {
+        exitCode: 0,
+        output: {
+          command: "resume",
+          status: "dry_run",
+          message: "Resume dry-run completed; no nodes were executed.",
+          run_id: runRecord.run_id,
+          run_root,
+          graph_path: loaded.absolute_path,
+          path_resolution: pathResolution,
+          resumed_from_status: previous_status,
+          preserved_node_count,
+          restarted_node_count,
+          would_start_node_count: resumePlan.start_nodes.length,
+          supervisor_status: session.supervisor.status,
+          intervention_count: session.supervisor.intervention_count,
+          supervisor_budget_reset: resetSupervisorBudget,
+          supervisor_budget_remaining: session.supervisor.budget_remaining,
+          resume_plan: resumePlan,
+          next_steps: {
+            resume: createResumeCliInvocation(run_root),
+            resume_with_budget_reset: `${createResumeCliInvocation(run_root)} --reset-supervisor-budget`
+          }
+        }
+      };
+    }
+
+    const workspace = await resumeWorkspaceFromManifest(execution_manifest);
 
     const progress = createRuntimeProgressReporter(compiled_graph);
     const resumed = await resumeCompiledGraph({
@@ -586,6 +678,7 @@ export const resumeCommand = {
         counts: resumed.state.counts,
         supervisor_status: resumed.state.supervisor.status,
         intervention_count: resumed.state.supervisor.intervention_count,
+        supervisor_budget_reset: resetSupervisorBudget,
         supervisor_budget_remaining: resumed.state.supervisor.budget_remaining,
         delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
         reviewer_guide: `${artifactPaths.delivery_dir}/reviewer-guide.md`,

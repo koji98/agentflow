@@ -26,6 +26,16 @@ function readMessage(input: {
     isRecord(input.result?.result) && typeof input.result.result.error === "string"
       ? input.result.result.error
       : undefined;
+  const resultMetadataError =
+    isRecord(input.result?.metadata) && typeof input.result.metadata.error === "string"
+      ? input.result.metadata.error
+      : undefined;
+  const nestedResultMetadataError =
+    isRecord(input.result?.result) &&
+    isRecord(input.result.result.metadata) &&
+    typeof input.result.result.metadata.error === "string"
+      ? input.result.result.metadata.error
+      : undefined;
   const metadataError =
     typeof input.attempt.metadata.error === "string"
       ? input.attempt.metadata.error
@@ -34,11 +44,23 @@ function readMessage(input: {
     typeof input.result?.stderr === "string" && input.result.stderr.trim().length > 0
       ? input.result.stderr.trim()
       : undefined;
+  const resultAgentResponse =
+    typeof input.result?.agent_response === "string" && input.result.agent_response.trim().length > 0
+      ? input.result.agent_response.trim()
+      : undefined;
   const resultStdout =
     typeof input.result?.stdout === "string" && input.result.stdout.trim().length > 0
       ? input.result.stdout.trim()
       : undefined;
-  return input.error_message ?? resultError ?? metadataError ?? resultStderr ?? resultStdout ?? "";
+  return input.error_message
+    ?? resultError
+    ?? resultMetadataError
+    ?? nestedResultMetadataError
+    ?? metadataError
+    ?? resultStderr
+    ?? resultAgentResponse
+    ?? resultStdout
+    ?? "";
 }
 
 function resultTimedOut(result: RuntimeNodeExecutionResult | undefined): boolean {
@@ -68,6 +90,27 @@ function isContextFailureMessage(lowerMessage: string): boolean {
   ].some((fragment) => lowerMessage.includes(fragment));
 }
 
+interface OutcomeVerificationPayloadShape {
+  passed: boolean;
+  summary?: unknown;
+  blockers?: unknown;
+  findings?: unknown;
+  verifier_metadata?: unknown;
+}
+
+function readOutcomeVerificationPayload(
+  result: RuntimeNodeExecutionResult | undefined
+): OutcomeVerificationPayloadShape | undefined {
+  if (!result || !isRecord(result.result)) {
+    return undefined;
+  }
+  const payload = result.result.outcome_verification;
+  if (!isRecord(payload) || typeof payload.passed !== "boolean") {
+    return undefined;
+  }
+  return payload as unknown as OutcomeVerificationPayloadShape;
+}
+
 export function classifyNodeFailure(input: {
   node: CompiledExecutableNode;
   attempt: RuntimeNodeAttempt;
@@ -83,6 +126,24 @@ export function classifyNodeFailure(input: {
     ...(message ? { message } : {})
   };
 
+  const verificationPayload = readOutcomeVerificationPayload(input.result);
+  if (verificationPayload && verificationPayload.passed === false) {
+    const summary =
+      typeof verificationPayload.summary === "string" && verificationPayload.summary.trim().length > 0
+        ? verificationPayload.summary.trim()
+        : "Outcome verification rejected the agent's work.";
+    return {
+      class: "outcome_verification",
+      summary,
+      retryable: true,
+      recommended_action: "retry_with_guidance",
+      evidence: {
+        ...evidence,
+        outcome_verification: verificationPayload
+      }
+    };
+  }
+
   if (
     lowerMessage.includes("must be a relative path that stays within") ||
     lowerMessage.includes("escapes the workspace") ||
@@ -97,7 +158,25 @@ export function classifyNodeFailure(input: {
     };
   }
 
-  if (lowerMessage.includes("artifact contract") || lowerMessage.includes("missing declared artifact")) {
+  if (
+    lowerMessage.includes("produced no final response")
+    || lowerMessage.includes("without a captured final response")
+    || lowerMessage.includes("harness/no-op failure")
+  ) {
+    return {
+      class: "harness",
+      summary: message || "Agent harness completed without a usable final response.",
+      retryable: false,
+      recommended_action: "pause_for_human",
+      evidence
+    };
+  }
+
+  if (
+    lowerMessage.includes("artifact contract")
+    || lowerMessage.includes("missing declared artifact")
+    || /required (output_dir|workspace) artifact "[^"]+" is missing at /u.test(lowerMessage)
+  ) {
     return {
       class: "artifact",
       summary: message || "Declared artifact contract was not satisfied.",
@@ -122,6 +201,9 @@ export function classifyNodeFailure(input: {
     || lowerMessage.includes("binary")
     || lowerMessage.includes("required harness is unavailable")
     || lowerMessage.includes("harness binary")
+    || lowerMessage.includes("authentication required")
+    || lowerMessage.includes("cursor agent login")
+    || lowerMessage.includes("cursor_api_key")
   ) {
     return {
       class: "harness",

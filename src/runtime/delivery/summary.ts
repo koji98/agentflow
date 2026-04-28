@@ -40,6 +40,13 @@ function readEventSummary(event: RuntimeEventEnvelope): string | undefined {
         : payload.passed === false
           ? "Soft verification failed."
           : undefined;
+    case "outcome.verified":
+      if (payload.passed === false) {
+        const blockers = typeof payload.blockers_count === "number" ? payload.blockers_count : 0;
+        const findings = typeof payload.findings_count === "number" ? payload.findings_count : 0;
+        return `Outcome verifier rejected the attempt (blockers=${blockers}, findings=${findings}).`;
+      }
+      return undefined;
     case "supervisor.intervention.failed":
       return typeof payload.summary === "string" ? payload.summary : "Supervisor intervention failed.";
     case "supervisor.paused":
@@ -64,6 +71,50 @@ function formatSoftVerificationCounts(state: RuntimeStateSnapshot): string {
     `passed=${state.soft_verification_counts.passed}`,
     `failed=${state.soft_verification_counts.failed}`
   ].join(" ");
+}
+
+interface AttemptOutcomeVerification {
+  passed: boolean;
+  summary?: string;
+  findings_count?: number;
+  blockers_count?: number;
+  verify_outcome_markdown_path?: string;
+}
+
+function readOutcomeVerificationMetadata(attempt: RuntimeNodeAttempt): AttemptOutcomeVerification | undefined {
+  const value = attempt.metadata.outcome_verification;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.passed !== "boolean") {
+    return undefined;
+  }
+  const findings = Array.isArray(candidate.findings) ? candidate.findings : [];
+  const blockers = Array.isArray(candidate.blockers) ? candidate.blockers : [];
+  return {
+    passed: candidate.passed,
+    ...(typeof candidate.summary === "string" ? { summary: candidate.summary } : {}),
+    findings_count: findings.length,
+    blockers_count: blockers.length
+  };
+}
+
+function formatOutcomeVerificationCounts(attempts: RuntimeNodeAttempt[]): string {
+  let passed = 0;
+  let failed = 0;
+  for (const attempt of attempts) {
+    const verification = readOutcomeVerificationMetadata(attempt);
+    if (!verification) {
+      continue;
+    }
+    if (verification.passed) {
+      passed += 1;
+    } else {
+      failed += 1;
+    }
+  }
+  return `passed=${passed} failed=${failed}`;
 }
 
 export function collectRunDiagnostics(
@@ -175,6 +226,7 @@ export function renderRunSummary(
     `- Snapshot seq: \`${state.snapshot_seq}\``,
     `- Counts: \`${formatCounts(state)}\``,
     `- Soft verification counts: \`${formatSoftVerificationCounts(state)}\``,
+    `- Outcome verification counts: \`${formatOutcomeVerificationCounts(attempts)}\``,
     ""
   ];
   const diagnostics = collectRunDiagnostics(attempts, events, state);
@@ -204,6 +256,27 @@ export function renderRunSummary(
       );
     }
 
+    lines.push("");
+  }
+
+  const outcomeVerificationEntries = attempts.flatMap((attempt) => {
+    const verification = readOutcomeVerificationMetadata(attempt);
+    return verification
+      ? [{ attempt, verification }]
+      : [];
+  });
+
+  if (outcomeVerificationEntries.length > 0) {
+    lines.push("## Outcome Verification", "");
+    for (const { attempt, verification } of outcomeVerificationEntries) {
+      lines.push(
+        `- \`${attempt.compiled_id}\` (attempt=${attempt.attempt_index}${
+          attempt.iteration_index !== undefined ? `, iteration=${attempt.iteration_index}` : ""
+        }) -> \`${verification.passed ? "passed" : "failed"}\` (findings=${verification.findings_count ?? 0}, blockers=${verification.blockers_count ?? 0})${
+          verification.summary ? ` - ${verification.summary}` : ""
+        }`
+      );
+    }
     lines.push("");
   }
 
@@ -239,6 +312,7 @@ export function renderRunSummary(
             passed?: boolean;
           }
         : undefined;
+    const outcomeVerification = readOutcomeVerificationMetadata(attempt);
 
     lines.push(
       `- \`${attempt.compiled_id}\` -> \`${attempt.status}\` (attempt=${attempt.attempt_index}${
@@ -246,6 +320,10 @@ export function renderRunSummary(
       })${
         verification
           ? ` · evidence=${verification.passed === false ? "failed" : "passed"}`
+          : ""
+      }${
+        outcomeVerification
+          ? ` · outcome=${outcomeVerification.passed ? "passed" : "failed"}`
           : ""
       }`
     );

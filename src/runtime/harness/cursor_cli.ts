@@ -140,14 +140,17 @@ async function createCursorConfig(invocation: AgentInvocation): Promise<{
     cursorPermissionEntry("Read", `${invocation.outputDir}/**`),
     ...(invocation.runtimeDir ? [cursorPermissionEntry("Read", `${invocation.runtimeDir}/**`)] : [])
   ];
-  const deny = invocation.promptKind === "ai_check" || invocation.sandbox === "read-only"
-    ? [
-        "Write(*)",
-        "Shell(*)",
-        "WebFetch(*)",
-        "Mcp(*:*)"
-      ]
-    : [];
+  const deny =
+    invocation.promptKind === "ai_check"
+    || invocation.promptKind === "outcome_verification"
+    || invocation.sandbox === "read-only"
+      ? [
+          "Write(*)",
+          "Shell(*)",
+          "WebFetch(*)",
+          "Mcp(*:*)"
+        ]
+      : [];
   const writeAllow = invocation.sandbox === "read-only"
     ? []
     : [

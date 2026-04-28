@@ -6,6 +6,8 @@ import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { RuntimeEventEnvelope, VerificationRecordedPayload } from "../events.js";
 import type { RuntimeStateSnapshot, WorkspaceChangeArtifacts } from "../session.js";
 import type { SupervisorDecision, SupervisorInterventionRecord } from "../../supervisor/types.js";
+import type { OutcomeVerificationResult } from "../verification/types.js";
+import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
 
 export interface DeliveryEvidence {
   graph_id: string;
@@ -47,6 +49,28 @@ export interface DeliveryEvidence {
     records: Array<Record<string, unknown>>;
   }>;
   workspace_changes: WorkspaceChangeArtifacts[];
+  outcome_verifications: Array<{
+    authored_id: string;
+    compiled_id: string;
+    execution_id: string;
+    attempt_index: number;
+    iteration_index?: number;
+    passed: boolean;
+    summary: string;
+    findings_count: number;
+    blockers_count: number;
+    verify_outcome_json_path: string;
+    verify_outcome_markdown_path: string;
+    verifier_metadata: OutcomeVerificationResult["verifier_metadata"];
+  }>;
+  node_workspace_changes: Array<{
+    authored_id: string;
+    compiled_id: string;
+    execution_id: string;
+    attempt_index: number;
+    iteration_index?: number;
+    artifacts: NodeWorkspaceChangeArtifacts;
+  }>;
 }
 
 async function readTextArtifact(path: string | undefined): Promise<string | undefined> {
@@ -91,6 +115,30 @@ function readVerification(attempt: RuntimeNodeAttempt): VerificationRecordedPayl
       ? attempt.metadata.verification as VerificationRecordedPayload
       : undefined
   );
+}
+
+function readOutcomeVerification(attempt: RuntimeNodeAttempt): OutcomeVerificationResult | undefined {
+  const value = attempt.metadata.outcome_verification;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.passed !== "boolean") {
+    return undefined;
+  }
+  return value as OutcomeVerificationResult;
+}
+
+function readNodeWorkspaceChanges(attempt: RuntimeNodeAttempt): NodeWorkspaceChangeArtifacts | undefined {
+  const value = attempt.metadata.node_workspace_changes;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.diff_patch_path !== "string") {
+    return undefined;
+  }
+  return value as NodeWorkspaceChangeArtifacts;
 }
 
 export async function collectDeliveryEvidence(options: {
@@ -180,6 +228,44 @@ export async function collectDeliveryEvidence(options: {
   const runtimeLogs = await readJsonlRecords(runPaths.runtime_log_file);
   const supervisorTimeline = options.state.supervisor.timeline;
 
+  const outcomeVerifications = options.attempts.flatMap((attempt) => {
+    const verification = readOutcomeVerification(attempt);
+    if (!verification) {
+      return [];
+    }
+
+    return [{
+      authored_id: attempt.authored_id,
+      compiled_id: attempt.compiled_id,
+      execution_id: attempt.execution_id,
+      attempt_index: attempt.attempt_index,
+      ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+      passed: verification.passed,
+      summary: verification.summary,
+      findings_count: verification.findings.length,
+      blockers_count: verification.blockers.length,
+      verify_outcome_json_path: `${attempt.execution_dir}/verify-outcome.json`,
+      verify_outcome_markdown_path: `${attempt.execution_dir}/verify-outcome.md`,
+      verifier_metadata: verification.verifier_metadata
+    }];
+  });
+
+  const nodeWorkspaceChanges = options.attempts.flatMap((attempt) => {
+    const artifacts = readNodeWorkspaceChanges(attempt);
+    if (!artifacts) {
+      return [];
+    }
+
+    return [{
+      authored_id: attempt.authored_id,
+      compiled_id: attempt.compiled_id,
+      execution_id: attempt.execution_id,
+      attempt_index: attempt.attempt_index,
+      ...(attempt.iteration_index !== undefined ? { iteration_index: attempt.iteration_index } : {}),
+      artifacts
+    }];
+  });
+
   return {
     graph_id: options.graph.graph_id,
     run_id: options.state.run_id,
@@ -194,6 +280,8 @@ export async function collectDeliveryEvidence(options: {
     agent_responses: agentResponses,
     declared_artifacts: declaredArtifacts,
     tool_invocations: toolInvocations,
-    workspace_changes: Object.values(options.state.workspace_change_artifacts)
+    workspace_changes: Object.values(options.state.workspace_change_artifacts),
+    outcome_verifications: outcomeVerifications,
+    node_workspace_changes: nodeWorkspaceChanges
   };
 }

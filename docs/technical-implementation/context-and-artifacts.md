@@ -86,28 +86,30 @@ Artifact refs can select attempts with:
 - `attempt`: `latest`, `latest_passed`, `latest_failed`, or a positive integer.
 - `if_available: true`: omit rather than fail when the selected material does not exist.
 
-Inside repeat bodies, Agentflow can also add repeat history context for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually.
+Inside repeat bodies, Agentflow can also add repeat history context for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually. Supervisor retry guidance can also appear as runtime-provided context after `retry_with_guidance`; it contains the guidance brief, prompt revision, failure fingerprint, and prior execution id for the retrying node.
 
 ## Artifact Production
 
-Nodes declare durable handoffs under `artifacts`. An artifact definition says where the runtime should look after the node finishes:
+Nodes declare durable handoffs under `artifacts`. An artifact definition says where the runtime should look after a node reports success:
 
 - `from: "output_dir"`: the file must exist under `$AGENTFLOW_OUTPUT_DIR`.
 - `from: "workspace"`: the file must exist under the node workspace path.
 
-Agent nodes also produce reserved automatic artifacts:
+Agent nodes also produce reserved automatic artifacts regardless of whether declared artifact materialization succeeds:
 
 - `agent_response`: final harness response.
 - `stdout`: captured stdout log.
 - `stderr`: captured stderr log.
 
-Check nodes can produce `verification_json`; local exec/check nodes capture `stdout` and `stderr`.
+Check nodes can produce `verification_json`; local exec/check nodes capture `stdout` and `stderr`. Passing agent attempts that materialize declared artifacts also receive `verify-outcome.json` and `verify-outcome.md` from outcome verification. Those verifier files are audit artifacts, not declared handoffs.
 
 ## Missing Artifacts
 
 A missing declared artifact is a runtime failure, not a graph validation failure. Validation proves the contract is well formed; execution proves the worker honored it.
 
-When an agent attempt completes but required declared artifacts are missing, the supervisor may run `repair_artifact` if policy and budget allow. The repair worker receives the same node task, graph intent, context contract, artifact contract, sandbox boundary, and available evidence. The repair is accepted only if the missing files now exist at the declared paths.
+When an agent attempt reports success but required declared artifacts are missing, the supervisor may run `repair_artifact` if policy and budget allow. The repair worker receives the same node task, graph intent, context contract, artifact contract, sandbox boundary, and available evidence. The repair is accepted only if the missing files now exist at the declared paths.
+
+When an agent harness fails, the runtime preserves the harness failure as the primary diagnostic and does not convert the attempt into a missing-artifact failure. Files written before the failure are not registered as declared artifacts for downstream refs. Later repair or retry prompts may still list those existing paths as prior-attempt evidence so the next worker can inspect useful partial work without treating it as a completed handoff.
 
 ## Why This Shape
 

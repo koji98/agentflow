@@ -76,6 +76,8 @@ const optionDescriptions: Record<string, string> = {
   "diagram-image-package": "--diagram-image-package <pkg> npx package spec used for Mermaid image rendering.",
   "human-action": "--human-action <action>      Structured action for resuming a paused run.",
   "human-note": "--human-note <text>          Human note recorded when resuming a paused run.",
+  "dry-run": "--dry-run                    Preview resume plan without executing nodes.",
+  "reset-supervisor-budget": "--reset-supervisor-budget    Reset supervisor intervention budget when resuming a failed/exhausted run.",
   repo: "--repo <alias>                Repo alias to select from run workspace changes.",
   target: "--target <path>              Git worktree where captured workspace changes should be applied.",
   "allow-dirty": "--allow-dirty                Apply onto a target repo that already has local changes.",

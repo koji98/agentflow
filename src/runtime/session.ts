@@ -3,7 +3,11 @@ import type { WorkspaceBackend } from "../graph/schema.js";
 import type { AttemptRegistry, RuntimeNodeAttempt } from "./attempts.js";
 import type { VerificationRecordedPayload } from "./events.js";
 import type { SupervisorBudgetRemaining } from "../supervisor/policy.js";
-import type { SupervisorDecision } from "../supervisor/types.js";
+import type {
+  SupervisorDecision,
+  SupervisorFailureFingerprintState,
+  SupervisorRetryGuidanceRecord
+} from "../supervisor/types.js";
 
 export type RuntimeNodeStatus =
   | "pending"
@@ -122,6 +126,8 @@ export interface RuntimeSupervisorState {
   budget_remaining: SupervisorBudgetRemaining;
   last_decision_id?: string;
   timeline: SupervisorDecision[];
+  active_retry_guidance: Record<string, SupervisorRetryGuidanceRecord>;
+  failure_fingerprints: Record<string, SupervisorFailureFingerprintState>;
   pause?: {
     decision_id: string;
     reason: string;
@@ -304,6 +310,8 @@ export function createRuntimeSession(
       intervention_count: 0,
       budget_remaining: budgetRemaining,
       timeline: [],
+      active_retry_guidance: {},
+      failure_fingerprints: {},
       escalations: []
     },
     workspace_change_artifacts: {},
@@ -427,6 +435,28 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
         actions: { ...session.supervisor.budget_remaining.actions }
       },
       timeline: session.supervisor.timeline.map((decision) => ({ ...decision })),
+      active_retry_guidance: Object.fromEntries(
+        Object.entries(session.supervisor.active_retry_guidance).map(([compiledId, guidance]) => [
+          compiledId,
+          {
+            ...guidance,
+            prompt_revision: {
+              ...guidance.prompt_revision,
+              must_do: [...guidance.prompt_revision.must_do],
+              must_not_do: [...guidance.prompt_revision.must_not_do],
+              artifact_requirements: [...guidance.prompt_revision.artifact_requirements],
+              resolved_conflicts: [...guidance.prompt_revision.resolved_conflicts],
+              evidence_to_read: [...guidance.prompt_revision.evidence_to_read]
+            }
+          }
+        ])
+      ),
+      failure_fingerprints: Object.fromEntries(
+        Object.entries(session.supervisor.failure_fingerprints).map(([compiledId, state]) => [
+          compiledId,
+          { ...state }
+        ])
+      ),
       ...(session.supervisor.pause ? { pause: { ...session.supervisor.pause } } : {}),
       escalations: session.supervisor.escalations.map((escalation) => ({ ...escalation }))
     },
