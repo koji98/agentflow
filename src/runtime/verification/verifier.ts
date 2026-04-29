@@ -373,6 +373,20 @@ function collectTruncatedArtifactNames(snippets: OutcomeVerificationPromptArtifa
   return snippets.filter((snippet) => snippet.truncated === true).map((snippet) => snippet.name);
 }
 
+function buildForcedFailureFindings(agentResponseSnippet: OutcomeVerificationPromptArtifactSnippet): OutcomeVerificationFinding[] {
+  const response = agentResponseSnippet.content ?? "";
+  if (!response.includes("INTENTIONAL_FAILURE_DO_NOT_ACCEPT")) {
+    return [];
+  }
+
+  return [{
+    severity: "blocker",
+    category: "intentional_failure_marker",
+    evidence: `The final agent response contains INTENTIONAL_FAILURE_DO_NOT_ACCEPT, which marks the attempt as an intentional failed fallback rather than terminal completion. Response excerpt: ${response.slice(0, 500)}`,
+    recommendation: "Retry with supervisor recovery evidence and finish only when the authored acceptance criteria are satisfied."
+  }];
+}
+
 export async function runOutcomeVerification(
   options: RunOutcomeVerificationOptions
 ): Promise<OutcomeVerificationResult> {
@@ -494,11 +508,16 @@ export async function runOutcomeVerification(
 
     if (parsed.ok) {
       const durationMs = nowMs(options.now) - startedAt;
+      const forcedFailureFindings = buildForcedFailureFindings(agentResponseSnippet);
+      const findings = [...forcedFailureFindings, ...parsed.data.findings];
+      const blockers = [...forcedFailureFindings, ...parsed.data.blockers];
       const result: OutcomeVerificationResult = {
-        passed: parsed.data.passed,
-        summary: parsed.data.summary,
-        findings: parsed.data.findings,
-        blockers: parsed.data.blockers,
+        passed: forcedFailureFindings.length > 0 ? false : parsed.data.passed,
+        summary: forcedFailureFindings.length > 0
+          ? "Outcome verifier returned passed=true, but the agent response contains an explicit intentional-failure marker."
+          : parsed.data.summary,
+        findings,
+        blockers,
         verifier_metadata: {
           ...metadataBase,
           duration_ms: durationMs,

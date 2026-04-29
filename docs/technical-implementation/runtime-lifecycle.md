@@ -110,7 +110,7 @@ flowchart TD
   action --> diagnostic["run_diagnostic"]
   action --> semantic["semantic_evaluation"]
   action --> pause["pause_for_human"]
-  retry --> schedule["Write guidance, prompt revision, and retry_scheduled event"]
+  retry --> schedule["Write case file, evidence, recovery plan, envelope, and retry_scheduled event"]
   schedule --> rerun["Restart node attempt after delay"]
   repair --> verify["Verify declared artifacts exist"]
   rebuild --> rerun
@@ -121,7 +121,7 @@ flowchart TD
 
 Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, `interventions.jsonl`, and state. Intervention workers write their own prompt/result/log artifacts under the affected attempt.
 
-For `retry_with_guidance`, the supervisor also records a failure fingerprint, writes a guidance brief and `prompt-revision.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the revision into the next attempt's prompt and context. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
+For retry-oriented actions, the supervisor records a failure fingerprint, writes a case file, runs evidence gatherers, merges a recovery plan, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the next attempt's prompt and context. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
 
 ## Resume
 

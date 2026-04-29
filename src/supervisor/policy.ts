@@ -85,7 +85,7 @@ export function buildBudgetExhaustedDecision(
   return {
     decision_id: `decision_${Date.now()}`,
     kind: "fail_run",
-    classification: "policy_breach",
+    classification: "policy_or_scope_risk",
     ...(target.compiled_id ? { target_compiled_id: target.compiled_id } : {}),
     ...(target.execution_id ? { target_execution_id: target.execution_id } : {}),
     action: "fail",

@@ -1,0 +1,206 @@
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import type { CompiledAgentNode } from "../../src/graph/compiled.js";
+import type { SupervisionPolicy } from "../../src/graph/authored.js";
+import type { RuntimeNodeAttempt } from "../../src/runtime/attempts.js";
+import type { RuntimeNodeExecutionResult } from "../../src/runtime/core/engine.js";
+import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
+import { classifyNodeFailure } from "../../src/supervisor/classifier.js";
+import { runSupervisorRecoveryCycle } from "../../src/supervisor/recovery.js";
+
+const policy: SupervisionPolicy = {
+  actions: {
+    retry_with_guidance: { max_uses: 2 },
+    rebuild_context: { max_uses: 2 },
+    run_diagnostic: { max_uses: 2 },
+    semantic_evaluation: { max_uses: 2 },
+    repair_artifact: { max_uses: 1 },
+    pause_for_human: { max_uses: 1 }
+  },
+  max_total_interventions: 5,
+  policy: {
+    pause_on_policy_risk: true,
+    pause_on_repeated_recovery: true,
+    drift_score_threshold: 0.8
+  }
+};
+
+function node(): CompiledAgentNode {
+  return {
+    compiled_id: "root__node",
+    authored_id: "node",
+    kind: "agent",
+    repo: "main",
+    deps: [],
+    scope_stack: ["scope__root"],
+    effective_policy: {
+      profile_name: "default",
+      harness: "codex-cli",
+      sandbox: "workspace-write",
+      timeout_sec: 60,
+      input_rules: {},
+      artifact_repair: { max_attempts: 1 }
+    },
+    context: [],
+    declared_artifacts: {},
+    goal: "Use the dependency correctly.",
+    acceptance_criteria: ["The code follows the documented dependency API."],
+    constraints: ["Do not change graph intent."],
+    tools: []
+  };
+}
+
+function attempt(root: string): RuntimeNodeAttempt {
+  return {
+    execution_id: "exec__root__node__attempt_1",
+    compiled_id: "root__node",
+    authored_id: "node",
+    kind: "agent",
+    repo_alias: "main",
+    execution_dir: root,
+    attempt_index: 1,
+    status: "failed",
+    outcome: "failed",
+    started_at: "2026-04-24T00:00:00.000Z",
+    ended_at: "2026-04-24T00:00:01.000Z",
+    duration_ms: 1000,
+    prompt_path: join(root, "prompt.md"),
+    prompt_sha256: createHash("sha256").update("exact failed prompt\n").digest("hex"),
+    context_manifest_path: join(root, "context", "manifest.md"),
+    artifacts: {},
+    metadata: {}
+  };
+}
+
+function result(): RuntimeNodeExecutionResult {
+  return {
+    status: "failed",
+    outcome: "failed",
+    result: { exit_code: 1 },
+    stdout: "",
+    stderr: "Build failed because the zod v4 API changed; missing dependency docs for package zod."
+  };
+}
+
+describe("supervisor recovery cycle", () => {
+  it("writes a case file, parallel evidence patches, a recovery plan, and retry envelope", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-cycle-"));
+    const runtimeAttempt = attempt(tempRoot);
+    await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+    const classification = classifyNodeFailure({
+      node: node(),
+      attempt: runtimeAttempt,
+      result: result(),
+      policy
+    });
+
+    const recovery = await runSupervisorRecoveryCycle({
+      action: "rebuild_context",
+      run_id: "run-1",
+      graph_intent: {
+        goal: "Graph goal.",
+        acceptance_criteria: ["Graph acceptance stays intact."],
+        constraints: []
+      },
+      node: node(),
+      attempt: runtimeAttempt,
+      result: result(),
+      decision_id: "decision-1",
+      intervention_id: "intervention-1",
+      classification,
+      failure_fingerprint: "fingerprint-1",
+      repeated_fingerprint_count: 1,
+      prior_interventions: [],
+      policy,
+      workspace_path: tempRoot
+    });
+
+    expect(recovery.recovery_plan.apply_action).toBe("retry_node");
+    expect(recovery.evidence_patches.map((patch) => patch.kind)).toEqual(["dependency_metadata", "external_context"]);
+    expect(recovery.recovery_envelope?.retry_directive.unchanged_contract).toEqual({
+      goal: true,
+      acceptance_criteria: true,
+      constraints: true,
+      repo_authority: true,
+      sandbox: true,
+      declared_artifacts: true
+    });
+    await expect(readFile(recovery.intervention.artifact_paths.case_file_json, "utf8")).resolves.toContain(
+      "exact failed prompt"
+    );
+    await expect(readFile(recovery.intervention.artifact_paths.case_file_json, "utf8")).resolves.toContain(
+      runtimeAttempt.prompt_sha256!
+    );
+    await expect(readFile(recovery.intervention.artifact_paths.recovery_plan_markdown, "utf8")).resolves.toContain(
+      "Apply action: `retry_node`"
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("pauses when gathered evidence says recovery requires changed authority", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-conflict-"));
+    const runtimeAttempt = attempt(tempRoot);
+    await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+    const classification = classifyNodeFailure({
+      node: node(),
+      attempt: runtimeAttempt,
+      result: result(),
+      policy
+    });
+    const harness: HarnessAdapter = {
+      kind: "codex-cli",
+      capabilities: {
+        supports_agent: true,
+        supports_ai_check: true
+      },
+      async run() {
+        return {
+          status: "passed",
+          exitCode: 0,
+          outputJson: {
+            claims: ["The requested fix requires changing the graph contract."],
+            retry_guidance: ["Do not retry without graph authority."],
+            conflicts: ["Graph contract change required."],
+            confidence: "high",
+            scope_or_authority_changed: true
+          }
+        };
+      },
+      async cancel() {}
+    };
+
+    const recovery = await runSupervisorRecoveryCycle({
+      action: "rebuild_context",
+      run_id: "run-1",
+      graph_intent: {
+        goal: "Graph goal.",
+        acceptance_criteria: ["Graph acceptance stays intact."],
+        constraints: []
+      },
+      node: node(),
+      attempt: runtimeAttempt,
+      result: result(),
+      decision_id: "decision-1",
+      intervention_id: "intervention-1",
+      classification,
+      failure_fingerprint: "fingerprint-1",
+      repeated_fingerprint_count: 1,
+      prior_interventions: [],
+      policy,
+      workspace_path: tempRoot,
+      harness
+    });
+
+    expect(recovery.recovery_plan.apply_action).toBe("pause_for_human");
+    expect(recovery.recovery_plan.pause_request?.unblock_request).toContain("authority");
+    expect(recovery.recovery_envelope).toBeUndefined();
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+});

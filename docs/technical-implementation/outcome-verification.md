@@ -97,9 +97,9 @@ The attempt's metadata records the verifier result as `outcome_verification` so 
 
 After an `agent` attempt's harness exits clean and declared artifacts are materialized, the engine calls `runOutcomeVerification` and emits an `outcome.verified` event with `passed`, `findings_count`, `blockers_count`, `verifier_harness`, `parse_status`, `duration_ms`, and the on-disk `verify_outcome_path`.
 
-If the verifier rejects, the engine sets `result.outcome = "failed"`, attaches the verifier payload to `result.result.outcome_verification`, and falls through to the existing failure path. The supervisor classifier detects `result.result.outcome_verification.passed === false`, returns class `outcome_verification`, and recommends `retry_with_guidance`. The retry brief embeds the verifier's blockers (and remaining findings) into `retry-guidance.md` so the next attempt's prompt cites the failed acceptance criteria with concrete recommendations.
+If the verifier rejects, the engine sets `result.outcome = "failed"`, attaches the verifier payload to `result.result.outcome_verification`, and falls through to the supervisor recovery path. The classifier treats ordinary verifier rejections as `semantic_misalignment`; if the verdict points to missing package/API documentation, it uses `missing_dependency_docs`. The recovery loop writes a case file, gathers semantic/local/external evidence as needed, merges a recovery plan, and injects a `SupervisorRecoveryEnvelope` into the next attempt while preserving the original node contract.
 
-If the supervisor budget for `retry_with_guidance` is exhausted, the run fails with the `outcome_verification` classification and the failed verifier verdict in the delivery package.
+If the relevant supervisor action budget is exhausted, the run fails with the recovery classification and the failed verifier verdict in the delivery package.
 
 ## Resume Safety
 

@@ -125,6 +125,10 @@ describe("af runtime CLI", () => {
     expect(contextShow.exitCode).toBe(0);
     expect(contextShow.stdout).toContain("context_packet_path");
     expect(contextShow.stdout).toContain("Read-only inspection");
+
+    const supervisionShow = await executeAfCli(["supervision", "show", "--help"]);
+    expect(supervisionShow.exitCode).toBe(0);
+    expect(supervisionShow.stdout).toContain("active supervisor recovery envelope");
   });
 
   it("exposes status, artifact, log, and helper commands through runtime metadata", async () => {
@@ -136,6 +140,44 @@ describe("af runtime CLI", () => {
     );
     expect(status.agent.agent_id).toBe("agent-main");
     expect(status.run.run_id).toBe("run-test");
+
+    const metadataJson = JSON.parse(await readFile(runtime.metadata, "utf8")) as Record<string, unknown>;
+    await writeFile(runtime.metadata, `${JSON.stringify({
+      ...metadataJson,
+      supervisor_recovery_envelope: {
+        envelope_id: "recovery-1",
+        compiled_id: "main",
+        authored_id: "main",
+        prior_execution_id: "exec-1",
+        recovery_plan_path: join(runtime.root, "recovery-plan.json"),
+        case_file_path: join(runtime.root, "case-file.json"),
+        action: "retry_node",
+        classification: "missing_context",
+        failure_fingerprint: "fingerprint-1",
+        repeated_fingerprint_count: 1,
+        retry_directive: {
+          summary: "Recover with rebuilt context.",
+          must_do: ["Read the recovery evidence."],
+          must_not_do: ["Do not change the graph contract."],
+          evidence_to_read: [join(runtime.root, "evidence-patch.md")],
+          validation_focus: ["Run validation."],
+          unchanged_contract: {
+            goal: true,
+            acceptance_criteria: true,
+            constraints: true,
+            repo_authority: true,
+            sandbox: true,
+            declared_artifacts: true
+          }
+        },
+        created_at: "2026-04-24T00:00:00.000Z"
+      }
+    }, null, 2)}\n`, "utf8");
+    const supervision = outputOf<{ active: boolean; recovery_envelope: { classification: string } }>(
+      await executeAfCli(["supervision", "show"])
+    );
+    expect(supervision.active).toBe(true);
+    expect(supervision.recovery_envelope.classification).toBe("missing_context");
 
     await expect(executeAfCli(["artifact", "write", "handoff", "--content", "ready\n"]))
       .resolves.toMatchObject({ exitCode: 0 });

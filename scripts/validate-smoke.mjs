@@ -9,7 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const jsonMode = process.argv.includes("--json");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const commandTimeoutMs = 20 * 60 * 1000;
+const commandTimeoutMs = 30 * 60 * 1000;
 const builtCliRelativePath = "dist/cli/index.js";
 const fixtureGraphRelativePath = "tests/graph/fixtures/repeat.graph.json";
 const fixtureGraphId = "repeat-graph";
@@ -218,10 +218,10 @@ process.stdin.on("end", () => {
   const lastMessagePath = outputIndex >= 0 ? args[outputIndex + 1] : undefined;
 
   if (lastMessagePath) {
-    writeFileSync(lastMessagePath, JSON.stringify({ passed: true, summary: "codex smoke ok" }));
+    writeFileSync(lastMessagePath, JSON.stringify({ passed: true, summary: "codex smoke ok", findings: [] }));
   }
 
-  process.stdout.write('{"passed":true,"summary":"codex smoke ok"}');
+  process.stdout.write('{"passed":true,"summary":"codex smoke ok","findings":[]}');
 });
 `;
 
@@ -237,7 +237,7 @@ process.stdout.write(JSON.stringify({
   type: "result",
   subtype: "success",
   is_error: false,
-  result: "cursor smoke ok",
+  result: JSON.stringify({ passed: true, summary: "cursor smoke ok", findings: [] }),
   session_id: "validate-smoke"
 }));
 `;

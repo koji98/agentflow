@@ -162,7 +162,11 @@ Action kinds:
 
 The graph contract configures bounded intervention actions with `supervision.actions.<action>.max_uses`, plus `max_total_interventions` and `policy` settings such as `pause_on_policy_risk`, `pause_on_repeated_recovery`, and `drift_score_threshold`.
 
-Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Bounded intervention workers attach artifacts under the target attempt's `interventions/` directory. Durable human pauses set run status to `paused` and include resume options plus an escalation brief.
+Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Bounded intervention workers attach artifacts under the target attempt's `interventions/` directory. Durable human pauses set run status to `paused` and include resume options plus the recovery plan that explains the precise unblock request.
+
+On a failed executable node attempt, retry-oriented actions enter the supervisor recovery loop. The runtime persists the exact rendered node prompt, builds an immutable case file, runs classifier-selected evidence gatherers with an internal concurrency cap, merges the evidence into one recovery plan, and applies exactly one action: retry the node, repair an artifact, pause for human authority, or fail terminally. Parallel evidence gathers are an internal detail; budget is spent once per recovery cycle on the selected graph action.
+
+Evidence gatherers can inspect local context, mine local patterns, read dependency metadata, gather read-only external context, run diagnostic probes, rejudge semantic failures, or investigate the failed attempt. External context is allowed by default for evidence gathering, but it cannot change graph intent, acceptance criteria, repo authority, sandbox authority, or declared artifacts.
 
 Current artifact repair behavior:
 
@@ -176,7 +180,7 @@ Current artifact repair behavior:
 
 Failed harness attempts do not publish declared artifacts, even if they wrote files in the output directory before failing. Those files can be surfaced as prior-attempt evidence for later repair or retry prompts, but downstream refs and delivery handoffs only consume artifacts materialized from successful attempts or accepted repairs.
 
-`retry_with_guidance` produces a supervisor evidence brief plus a `prompt-revision.json` artifact under the intervention directory. The next attempt receives that revision as controlling retry guidance where it resolves ambiguous or contradictory node wording while preserving graph constraints. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
+`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same recovery loop. A retried node receives a `SupervisorRecoveryEnvelope` before the original authored task, and the same envelope is materialized into runtime context as `supervisor_recovery_envelope`. The envelope states that the original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
 
 Supervisor events:
 

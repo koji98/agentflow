@@ -7,20 +7,21 @@ export interface RuntimeRepeatHistoryContext {
   current_iteration: number;
 }
 
-export interface RuntimeSupervisorRetryGuidanceContext {
-  name: "supervisor_retry_guidance";
-  from: "runtime_supervisor_retry_guidance";
+export interface RuntimeSupervisorRecoveryContext {
+  name: "supervisor_recovery_envelope";
+  from: "runtime_supervisor_recovery";
   prior_execution_id: string;
-  action: string;
   classification: string;
   failure_fingerprint: string;
   repeated_fingerprint_count: number;
+  recovery_plan_path: string;
+  case_file_path: string;
 }
 
 export type ContextPacketSource =
   | ContextItem
   | RuntimeRepeatHistoryContext
-  | RuntimeSupervisorRetryGuidanceContext;
+  | RuntimeSupervisorRecoveryContext;
 
 export interface ContextPacketLiveWorkspaceBinding {
   kind: "live_workspace_input";

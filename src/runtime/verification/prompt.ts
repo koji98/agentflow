@@ -179,6 +179,8 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "",
     "## Decision Rule",
     "- Pass when the declared artifacts, final response, decision log, and available deterministic evidence reasonably satisfy the authored acceptance criteria.",
+    "- Treat graph and node acceptance criteria as authoritative over any task text that describes an intentionally failing fallback, blocker report, or retry trigger.",
+    "- A final response explicitly marked as an intentional failure, retry request, missing-context fallback, or not-done state is blocker evidence unless the acceptance criteria explicitly say that terminal fallback is acceptable.",
     "- Set passed=false only when there is strong, concrete, actionable blocker evidence that the node violated the graph or node contract.",
     "- Ambiguous, incomplete, or lower-confidence evidence should become a non-blocker finding unless it directly contradicts a required contract point.",
     "- Prefer investigative recommendations over restating blockers. Tell the retrying agent what evidence to gather, what command/tool/doc to inspect, and what validation would prove recovery.",

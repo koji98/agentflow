@@ -80,14 +80,21 @@ describe("supervisor failure classifier", () => {
   it("classifies missing declared artifacts as artifact failures", () => {
     expect(classify({ error_message: "Required artifact contract is missing: summary at summary.md" })).toEqual(
       expect.objectContaining({
-        class: "artifact",
+        class: "artifact_contract_failure",
         retryable: true,
-        recommended_action: "repair_artifact"
+        recommended_action: "repair_artifact",
+        gather_plan: expect.objectContaining({
+          max_parallel: 2,
+          gathers: expect.arrayContaining([
+            expect.objectContaining({ kind: "local_context" }),
+            expect.objectContaining({ kind: "investigate_failure" })
+          ])
+        })
       })
     );
     expect(classify({ error_message: 'Required output_dir artifact "implementation_summary" is missing at agent-implementation-summary.md.' })).toEqual(
       expect.objectContaining({
-        class: "artifact",
+        class: "artifact_contract_failure",
         retryable: true,
         recommended_action: "repair_artifact"
       })
@@ -99,7 +106,7 @@ describe("supervisor failure classifier", () => {
       error_message: "Agent harness produced no final response while required declared artifacts are missing: implementation_summary at agent-implementation-summary.md. This is a harness/no-op failure, not an artifact repair candidate."
     })).toEqual(
       expect.objectContaining({
-        class: "harness",
+        class: "harness_unavailable",
         retryable: false,
         recommended_action: "pause_for_human"
       })
@@ -116,7 +123,7 @@ describe("supervisor failure classifier", () => {
       }
     })).toEqual(
       expect.objectContaining({
-        class: "harness",
+        class: "harness_unavailable",
         retryable: false,
         recommended_action: "pause_for_human"
       })
@@ -126,8 +133,15 @@ describe("supervisor failure classifier", () => {
   it("classifies context resolution errors as context failures", () => {
     expect(classify({ error_message: "Required context item could not be resolved." })).toEqual(
       expect.objectContaining({
-        class: "context",
-        recommended_action: "rebuild_context"
+        class: "missing_context",
+        recommended_action: "rebuild_context",
+        gather_plan: expect.objectContaining({
+          max_parallel: 2,
+          gathers: expect.arrayContaining([
+            expect.objectContaining({ kind: "local_context" }),
+            expect.objectContaining({ kind: "pattern_mining" })
+          ])
+        })
       })
     );
   });
@@ -137,7 +151,7 @@ describe("supervisor failure classifier", () => {
       error_message: 'Context path "../secret.txt" must be a relative path that stays within its repo or workspace root.'
     })).toEqual(
       expect.objectContaining({
-        class: "policy_breach",
+        class: "policy_or_scope_risk",
         retryable: false,
         recommended_action: "pause_for_human"
       })
@@ -166,7 +180,7 @@ describe("supervisor failure classifier", () => {
       }
     })).toEqual(
       expect.objectContaining({
-        class: "policy_breach",
+        class: "policy_or_scope_risk",
         retryable: false,
         recommended_action: "pause_for_human"
       })
@@ -176,7 +190,7 @@ describe("supervisor failure classifier", () => {
   it("classifies harness readiness errors as harness failures", () => {
     expect(classify({ error_message: 'codex-cli harness binary "codex" is unavailable.' })).toEqual(
       expect.objectContaining({
-        class: "harness",
+        class: "harness_unavailable",
         recommended_action: "pause_for_human"
       })
     );
@@ -191,16 +205,21 @@ describe("supervisor failure classifier", () => {
     );
   });
 
-  it("classifies timeouts as timeout failures", () => {
+  it("classifies timeouts as diagnostic-needed failures", () => {
     expect(classify({ result: { status: "failed", outcome: "failed", result: { timed_out: true } } as RuntimeNodeExecutionResult })).toEqual(
       expect.objectContaining({
-        class: "timeout",
-        recommended_action: "retry_with_guidance"
+        class: "diagnostic_needed",
+        recommended_action: "run_diagnostic",
+        gather_plan: expect.objectContaining({
+          gathers: expect.arrayContaining([
+            expect.objectContaining({ kind: "diagnostic_probe" })
+          ])
+        })
       })
     );
   });
 
-  it("classifies failed deterministic checks as deterministic evaluation failures", () => {
+  it("classifies failed deterministic checks as diagnostic-needed failures", () => {
     const node: CompiledCheckNode = {
       ...baseNode,
       kind: "check",
@@ -212,13 +231,13 @@ describe("supervisor failure classifier", () => {
 
     expect(classify({ node })).toEqual(
       expect.objectContaining({
-        class: "deterministic_evaluation",
-        recommended_action: "retry_with_guidance"
+        class: "diagnostic_needed",
+        recommended_action: "run_diagnostic"
       })
     );
   });
 
-  it("classifies generic AI check failures as semantic evaluation failures", () => {
+  it("classifies generic AI check failures as semantic misalignment", () => {
     const node: CompiledCheckNode = {
       ...baseNode,
       kind: "check",
@@ -232,13 +251,18 @@ describe("supervisor failure classifier", () => {
       error_message: "AI evaluator returned a failing judgment."
     })).toEqual(
       expect.objectContaining({
-        class: "semantic_evaluation",
-        recommended_action: "semantic_evaluation"
+        class: "semantic_misalignment",
+        recommended_action: "semantic_evaluation",
+        gather_plan: expect.objectContaining({
+          gathers: expect.arrayContaining([
+            expect.objectContaining({ kind: "semantic_rejudge" })
+          ])
+        })
       })
     );
   });
 
-  it("classifies semantic scope drift below threshold as scope drift", () => {
+  it("classifies semantic scope drift below threshold as policy or scope risk", () => {
     const node: CompiledCheckNode = {
       ...baseNode,
       kind: "check",
@@ -263,13 +287,13 @@ describe("supervisor failure classifier", () => {
       })
     ).toEqual(
       expect.objectContaining({
-        class: "scope_drift",
+        class: "policy_or_scope_risk",
         recommended_action: "pause_for_human"
       })
     );
   });
 
-  it("classifies outcome verifier failures as outcome_verification with retry_with_guidance and finding evidence", () => {
+  it("classifies outcome verifier failures as semantic misalignment with semantic rejudge evidence", () => {
     const result: RuntimeNodeExecutionResult = {
       status: "passed",
       outcome: "failed",
@@ -317,10 +341,17 @@ describe("supervisor failure classifier", () => {
 
     expect(classification).toEqual(
       expect.objectContaining({
-        class: "outcome_verification",
+        class: "semantic_misalignment",
         retryable: true,
-        recommended_action: "retry_with_guidance",
-        summary: "Verifier rejected the agent attempt because the rubric is unmet."
+        recommended_action: "semantic_evaluation",
+        summary: "Verifier rejected the agent attempt because the rubric is unmet.",
+        gather_plan: expect.objectContaining({
+          max_parallel: 3,
+          gathers: expect.arrayContaining([
+            expect.objectContaining({ kind: "semantic_rejudge" }),
+            expect.objectContaining({ kind: "local_context" })
+          ])
+        })
       })
     );
     expect(classification.evidence).toEqual(
@@ -381,9 +412,70 @@ describe("supervisor failure classifier", () => {
       error_message: "Operator denied the checkpoint."
     })).toEqual(
       expect.objectContaining({
-        class: "operator",
+        class: "operator_pause",
         retryable: false,
         recommended_action: "pause_for_human"
+      })
+    );
+  });
+
+  it("classifies dependency documentation gaps into external and metadata gathers", () => {
+    expect(classify({
+      error_message: "Build failed because the zod v4 API changed; missing dependency docs for package zod."
+    })).toEqual(
+      expect.objectContaining({
+        class: "missing_dependency_docs",
+        recommended_action: "rebuild_context",
+        gather_plan: expect.objectContaining({
+          max_parallel: 2,
+          gathers: expect.arrayContaining([
+            expect.objectContaining({ kind: "dependency_metadata" }),
+            expect.objectContaining({ kind: "external_context" })
+          ])
+        })
+      })
+    );
+  });
+
+  it("escalates repeated same-fingerprint failures to stronger parallel gathers", () => {
+    expect(classifyNodeFailure({
+      node: baseNode,
+      attempt: {
+        ...baseAttempt,
+        attempt_index: 3
+      },
+      error_message: "Required context item could not be resolved.",
+      policy,
+      repeated_fingerprint_count: 2
+    })).toEqual(
+      expect.objectContaining({
+        class: "repeated_failure",
+        recommended_action: "run_diagnostic",
+        gather_plan: expect.objectContaining({
+          max_parallel: 4,
+          gathers: expect.arrayContaining([
+            expect.objectContaining({ kind: "local_context" }),
+            expect.objectContaining({ kind: "diagnostic_probe" }),
+            expect.objectContaining({ kind: "semantic_rejudge" }),
+            expect.objectContaining({ kind: "external_context" })
+          ])
+        })
+      })
+    );
+  });
+
+  it("classifies explicitly non-recoverable failures without evidence gathers", () => {
+    expect(classify({
+      error_message: "Non-recoverable graph contract violation: declared artifact target is impossible without changing graph intent."
+    })).toEqual(
+      expect.objectContaining({
+        class: "non_recoverable",
+        retryable: false,
+        recommended_action: "fail",
+        gather_plan: expect.objectContaining({
+          max_parallel: 0,
+          gathers: []
+        })
       })
     );
   });

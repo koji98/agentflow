@@ -1622,7 +1622,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       })
     );
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
     expect(resumedProgress).toContain(
       "agentflow: resumed run from failed · preserved=1 restarted=2 · workspace=inplace"
@@ -1733,7 +1733,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -1886,7 +1886,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed").map((attempt) => ({
       attempt_index: attempt.attempt_index,
@@ -2095,7 +2095,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });

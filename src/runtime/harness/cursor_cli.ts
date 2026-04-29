@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createProcessTerminationController } from "../process_control.js";
@@ -99,8 +99,7 @@ function mapCursorSandbox(
   return sandbox === "danger-full-access" ? "disabled" : "enabled";
 }
 
-function buildCursorArgs(invocation: AgentInvocation): string[] {
-  const prompt = renderHarnessPrompt(invocation);
+function buildCursorArgs(invocation: AgentInvocation, prompt: string): string[] {
   const args = [
     "-p",
     "--output-format",
@@ -121,6 +120,10 @@ function buildCursorArgs(invocation: AgentInvocation): string[] {
 
   args.push(prompt);
   return args;
+}
+
+function redactPromptArg(args: string[]): string[] {
+  return args.map((arg, index) => index === args.length - 1 ? "<prompt:redacted>" : arg);
 }
 
 function cursorPermissionEntry(kind: "Read" | "Write", path: string): string {
@@ -196,7 +199,13 @@ export function createCursorCliHarness(
     },
     async run(invocation: AgentInvocation): Promise<HarnessResult> {
       await mkdir(invocation.outputDir, { recursive: true });
-      const args = buildCursorArgs(invocation);
+      const prompt = renderHarnessPrompt(invocation);
+      if (invocation.promptPath) {
+        await mkdir(dirname(invocation.promptPath), { recursive: true });
+        await writeFile(invocation.promptPath, `${prompt}\n`, "utf8");
+      }
+      const args = buildCursorArgs(invocation, prompt);
+      const metadataArgs = redactPromptArg(args);
       const cursorConfig = await createCursorConfig(invocation);
       const spawnBroker = startSpawnBroker(invocation);
 
@@ -279,7 +288,7 @@ export function createCursorCliHarness(
             ...(stderr ? { stderr } : {}),
             metadata: {
               binary,
-              args,
+              args: metadataArgs,
               cursor_config_dir: cursorConfig.config_dir,
               cursor_cli_config_path: cursorConfig.cli_config_path,
               timed_out: termination.state.timed_out,

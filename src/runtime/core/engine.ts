@@ -1,4 +1,5 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
@@ -46,7 +47,7 @@ import {
   type RuntimeEventEnvelope,
   type VerificationRecordedPayload
 } from "../events.js";
-import type { HarnessAdapter } from "../harness/types.js";
+import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../harness/types.js";
 import { substituteAgentflowTokens } from "../harness/tokens.js";
 import {
   buildRuntimeStateSnapshot,
@@ -72,8 +73,9 @@ import {
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
 import { runOutcomeVerification } from "../verification/verifier.js";
 import type { OutcomeVerificationResult } from "../verification/types.js";
-import { runEvidenceIntervention, runRepairArtifactIntervention } from "../../supervisor/actions.js";
+import { runRepairArtifactIntervention } from "../../supervisor/actions.js";
 import { classifyNodeFailure, type FailureClassification } from "../../supervisor/classifier.js";
+import { runSupervisorRecoveryCycle } from "../../supervisor/recovery.js";
 import {
   canSpendSupervisorAction,
   spendSupervisorAction,
@@ -82,8 +84,7 @@ import {
 import type {
   SupervisorDecision,
   SupervisorInterventionRecord,
-  SupervisorPromptRevision,
-  SupervisorRetryGuidanceRecord
+  SupervisorRecoveryEnvelope
 } from "../../supervisor/types.js";
 import {
   buildSchedulerTopology,
@@ -122,7 +123,7 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
   context_packet_path: string;
   context_manifest_path: string;
   context_materials?: ContextPacketMaterializedItem[];
-  supervisor_retry_guidance?: SupervisorRetryGuidanceRecord;
+  supervisor_recovery_envelope?: SupervisorRecoveryEnvelope;
   signal: AbortSignal | undefined;
   on_stdout_chunk?: (chunk: string) => void;
   on_stderr_chunk?: (chunk: string) => void;
@@ -656,9 +657,8 @@ function retryActionForClassification(classification: FailureClassification): Su
     case "rebuild_context":
     case "run_diagnostic":
     case "semantic_evaluation":
-      return classification.recommended_action;
     case "repair_artifact":
-      return "retry_with_guidance";
+      return classification.recommended_action;
     default:
       return undefined;
   }
@@ -690,104 +690,6 @@ function interventionTitle(action: SupervisorActionKind): string {
     default:
       return actionRetrySummary(action);
   }
-}
-
-interface VerifierFindingShape {
-  severity: string;
-  category: string;
-  evidence: string;
-  recommendation: string;
-  references?: string[];
-}
-
-function isVerifierFinding(value: unknown): value is VerifierFindingShape {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.severity === "string"
-    && typeof candidate.category === "string"
-    && typeof candidate.evidence === "string"
-    && typeof candidate.recommendation === "string";
-}
-
-function readClassificationFindings(
-  classification: FailureClassification
-): { findings: VerifierFindingShape[]; blockers: VerifierFindingShape[] } | undefined {
-  const payload = classification.evidence.outcome_verification as { findings?: unknown; blockers?: unknown } | undefined;
-  if (!payload) {
-    return undefined;
-  }
-  const findings = Array.isArray(payload.findings) ? payload.findings.filter(isVerifierFinding) : [];
-  const blockers = Array.isArray(payload.blockers) ? payload.blockers.filter(isVerifierFinding) : [];
-  return { findings, blockers };
-}
-
-function renderVerifierFindings(findings: VerifierFindingShape[]): string[] {
-  if (findings.length === 0) {
-    return ["- (no findings recorded)"];
-  }
-  return findings.flatMap((finding) => [
-    `- **${finding.severity}** [${finding.category}]: ${finding.evidence}`,
-    `  - Fix: ${finding.recommendation}`,
-    ...(finding.references && finding.references.length > 0
-      ? [`  - References: ${finding.references.join(", ")}`]
-      : [])
-  ]);
-}
-
-function interventionBody(options: {
-  action: SupervisorActionKind;
-  node: CompiledExecutableNode;
-  attempt: RuntimeNodeAttempt;
-  classification: FailureClassification;
-}): string {
-  const lines: string[] = [
-    `# ${interventionTitle(options.action)}`,
-    "",
-    `Node: ${options.node.authored_id} (${options.node.compiled_id})`,
-    `Execution: ${options.attempt.execution_id}`,
-    `Classification: ${options.classification.class}`,
-    `Summary: ${options.classification.summary}`,
-    ""
-  ];
-
-  if (options.classification.class === "outcome_verification") {
-    const verifier = readClassificationFindings(options.classification);
-    if (verifier) {
-      lines.push(
-        "## Outcome Verifier Verdict",
-        "An external verifier rejected the previous attempt. Address every blocker below before re-handing off.",
-        "",
-        "### Blockers (must fix)",
-        ...renderVerifierFindings(verifier.blockers),
-        "",
-        "### All Findings",
-        ...renderVerifierFindings(verifier.findings),
-        ""
-      );
-    }
-  }
-
-  lines.push(
-    "## Evidence",
-    "```json",
-    JSON.stringify(options.classification.evidence, null, 2),
-    "```",
-    "",
-    "## Recommended Next Step",
-    options.action === "pause_for_human"
-      ? "Wait for structured human input before continuing."
-      : options.action === "rebuild_context"
-        ? "Retry the authored node with this context brief available as supervisor evidence."
-        : options.action === "semantic_evaluation"
-          ? "Use this semantic assessment as retry guidance for the authored node."
-          : options.classification.class === "outcome_verification"
-            ? "Address every blocker finding above, then re-finish the node so the verifier can confirm acceptance criteria."
-            : "Retry only if this diagnostic confirms the failure is recoverable."
-  );
-
-  return lines.join("\n");
 }
 
 function normalizeFingerprintText(value: unknown): string {
@@ -863,138 +765,12 @@ function updateFailureFingerprintState(
   return count;
 }
 
-function createPromptRevision(options: {
-  action: SupervisorActionKind;
-  node: CompiledExecutableNode;
-  attempt: RuntimeNodeAttempt;
-  classification: FailureClassification;
-  failureFingerprint: string;
-  repeatedFingerprintCount: number;
-  guidanceBriefPath: string;
-}): SupervisorPromptRevision {
-  const verifier = readClassificationFindings(options.classification);
-  const blockerActions = verifier?.blockers.length
-    ? verifier.blockers.map((finding) => `${finding.category}: ${finding.recommendation}`)
-    : [];
-  const repeatedGuidance = options.repeatedFingerprintCount > 1
-    ? [
-        `This same failure fingerprint has appeared ${options.repeatedFingerprintCount} times. Change strategy before retrying: inspect prior guidance and logs, gather fresh evidence, and avoid repeating the same failed tactic.`
-      ]
-    : [];
-  const artifactEntries = Object.entries(options.node.declared_artifacts).map(([name, artifact]) =>
-    `Write current-attempt artifact \`${name}\` from \`${artifact.from}\` at \`${artifact.path}\`: ${artifact.description}`
-  );
-
-  if (options.classification.class === "outcome_verification") {
-    return {
-      revised_goal: `Recover the node after outcome verification rejected execution ${options.attempt.execution_id}. Satisfy the verifier findings, validate the corrected work, and then produce a fresh handoff for this attempt.`,
-      must_do: [
-        "Read the supervisor retry guidance and prior verifier evidence before editing.",
-        ...blockerActions,
-        "Investigate ambiguous configuration or environment mismatches by probing available options before declaring an external blocker.",
-        "Rerun the validation or smoke checks that demonstrate each acceptance criterion is now satisfied.",
-        ...repeatedGuidance
-      ],
-      must_not_do: [
-        "Do not simply restate the verifier blocker as the final answer.",
-        "Do not assume a first failing literal configuration value is irreducibly unavailable when the workspace or runtime can discover alternatives.",
-        "Do not reuse prior attempt artifacts as the current attempt handoff."
-      ],
-      artifact_requirements: artifactEntries.length > 0
-        ? artifactEntries
-        : ["No authored artifacts are declared; still produce a clear final response for the current attempt."],
-      resolved_conflicts: [
-        "If the original node wording names a stale or ambiguous implementation detail, use the verifier evidence and runtime probes to choose a compatible value within the original graph scope.",
-        "The authored node goal and acceptance criteria remain binding; this revision only clarifies the recovery tactic."
-      ],
-      evidence_to_read: [
-        options.guidanceBriefPath,
-        `${options.attempt.execution_dir}/verify-outcome.json`,
-        `${options.attempt.execution_dir}/verify-outcome.md`,
-        `${options.attempt.execution_dir}/artifacts/agent-response.md`
-      ],
-      intent_preservation: "The revision preserves the original node and graph goals by requiring the same acceptance criteria to pass, while replacing the failed tactic with evidence-driven recovery.",
-      justification: `The prior attempt failed outcome verification with fingerprint ${options.failureFingerprint}. The verifier findings are actionable, so the retry should investigate and correct them instead of repeating the generic node prompt.`
-    };
-  }
-
-  if (options.classification.class === "artifact") {
-    return {
-      revised_goal: `Recover the node after execution ${options.attempt.execution_id} missed required handoff artifacts. Reconstruct the current-attempt artifacts from prior work, logs, workspace state, and context.`,
-      must_do: [
-        "Read the supervisor retry guidance, prior response, stdout/stderr logs, and any artifacts from the failed attempt.",
-        "Write every declared artifact at the exact current output_dir or workspace path before finishing.",
-        "Use prior attempt artifacts only as evidence; recreate or copy the needed content into the current attempt paths.",
-        ...repeatedGuidance
-      ],
-      must_not_do: [
-        "Do not finish with only a final response when declared artifacts exist.",
-        "Do not assume downstream nodes can read artifacts from an older attempt directory.",
-        "Do not redo unrelated source work if the only failure is artifact handoff."
-      ],
-      artifact_requirements: artifactEntries.length > 0
-        ? artifactEntries
-        : ["No authored artifacts are declared; verify the artifact failure evidence before proceeding."],
-      resolved_conflicts: [
-        "If the original prompt suggested a handoff in prose only, the declared artifact contract wins for this retry.",
-        "The node scope remains unchanged; this retry is focused on completing the missing handoff contract."
-      ],
-      evidence_to_read: [
-        options.guidanceBriefPath,
-        `${options.attempt.execution_dir}/artifacts/agent-response.md`,
-        options.attempt.stdout_log_path ?? `${options.attempt.execution_dir}/logs/stdout.log`,
-        options.attempt.stderr_log_path ?? `${options.attempt.execution_dir}/logs/stderr.log`
-      ],
-      intent_preservation: "The revision preserves authored intent by keeping the node's completed work and acceptance criteria, while making the declared artifact contract explicit for recovery.",
-      justification: `The prior attempt failed artifact materialization with fingerprint ${options.failureFingerprint}; a retry must fix the handoff contract instead of repeating completed work.`
-    };
-  }
-
-  return {
-    revised_goal: `Retry the node after supervisor classified execution ${options.attempt.execution_id} as ${options.classification.class}. Resolve the concrete failure evidence, validate the fix, and hand off fresh current-attempt artifacts.`,
-    must_do: [
-      "Read the supervisor retry guidance and prior execution logs before acting.",
-      "Address the classified failure with a changed tactic based on evidence.",
-      "Validate the recovered work before finishing.",
-      ...repeatedGuidance
-    ],
-    must_not_do: [
-      "Do not repeat the exact failed tactic without new evidence.",
-      "Do not declare a human blocker unless the evidence shows missing credentials, forbidden approval, unsafe/destructive action, or unavailable required inputs.",
-      "Do not reuse prior attempt artifacts as current attempt artifacts."
-    ],
-    artifact_requirements: artifactEntries.length > 0
-      ? artifactEntries
-      : ["No authored artifacts are declared; produce a clear final response for the current attempt."],
-    resolved_conflicts: [
-      "The authored node goal remains binding. This revision supersedes only wording that would repeat the failed tactic without addressing the supervisor evidence."
-    ],
-    evidence_to_read: [
-      options.guidanceBriefPath,
-      `${options.attempt.execution_dir}/artifacts/agent-response.md`,
-      options.attempt.stdout_log_path ?? `${options.attempt.execution_dir}/logs/stdout.log`,
-      options.attempt.stderr_log_path ?? `${options.attempt.execution_dir}/logs/stderr.log`
-    ],
-    intent_preservation: "The revision keeps the original graph/node scope and acceptance criteria intact while making the recovery objective explicit.",
-    justification: `Supervisor classified the prior failure as ${options.classification.class} with fingerprint ${options.failureFingerprint}; the next attempt needs explicit recovery instructions to avoid blind retry.`
-  };
-}
-
-async function writePromptRevisionArtifact(options: {
-  interventionDir: string;
-  revision: SupervisorPromptRevision;
-}): Promise<string> {
-  const path = join(options.interventionDir, "prompt-revision.json");
-  await writeFile(path, `${JSON.stringify(options.revision, null, 2)}\n`, "utf8");
-  return path;
-}
-
 function retryDelayBaseMs(): number {
   const configured = Number.parseInt(process.env.AGENTFLOW_RETRY_BASE_DELAY_MS ?? "", 10);
   if (Number.isFinite(configured) && configured >= 0) {
     return configured;
   }
-  return process.env.VITEST ? 0 : 10_000;
+  return process.env.NODE_ENV === "test" || process.env.VITEST || process.env.VITEST_WORKER_ID ? 0 : 10_000;
 }
 
 function retryDelayMaxMs(): number {
@@ -1045,14 +821,26 @@ async function handleFailedNodeWithSupervisor(options: {
   result: RuntimeNodeExecutionResult;
   readyNode: ReadyNode;
 }): Promise<boolean> {
-  const classification = classifyNodeFailure({
+  let classification = classifyNodeFailure({
     node: options.node,
     attempt: options.attempt,
     result: options.result,
     policy: options.session.graph.supervision
   });
   const failureFingerprint = createFailureFingerprint(classification);
-  const repeatedFingerprintCount = updateFailureFingerprintState(
+  const previousFingerprint = options.session.supervisor.failure_fingerprints[options.node.compiled_id];
+  const repeatedFingerprintCount =
+    previousFingerprint?.fingerprint === failureFingerprint ? previousFingerprint.count + 1 : 1;
+  if (repeatedFingerprintCount >= 2) {
+    classification = classifyNodeFailure({
+      node: options.node,
+      attempt: options.attempt,
+      result: options.result,
+      policy: options.session.graph.supervision,
+      repeated_fingerprint_count: repeatedFingerprintCount
+    });
+  }
+  updateFailureFingerprintState(
     options.session,
     options.node.compiled_id,
     options.attempt.execution_id,
@@ -1067,7 +855,7 @@ async function handleFailedNodeWithSupervisor(options: {
       decision_id: decisionId,
       kind: requestedAction === "pause_for_human" ? "pause_for_human" : "fail_run",
       classification: classification.class,
-      health_state: classification.class === "scope_drift" ? "drifting" : "unhealthy",
+      health_state: classification.class === "policy_or_scope_risk" ? "drifting" : "unhealthy",
       confidence: "medium",
       target_compiled_id: options.node.compiled_id,
       target_execution_id: options.attempt.execution_id,
@@ -1125,19 +913,48 @@ async function handleFailedNodeWithSupervisor(options: {
     );
     if (requestedAction === "pause_for_human" && decision.kind === "pause_for_human") {
       const interventionId = createSupervisorInterventionId(options.attempt, "pause_for_human");
-      const intervention = await runEvidenceIntervention({
+      await emitEvent(
+        options.session,
+        options.writer,
+        options.runOwner,
+        options.events,
+        options.runOptions.on_event,
+        "supervisor.intervention.started",
+        {
+          intervention_id: interventionId,
+          decision_id: decisionId,
+          action: "pause_for_human",
+          target_compiled_id: options.node.compiled_id,
+          summary: interventionTitle("pause_for_human")
+        },
+        {
+          compiled_id: options.node.compiled_id,
+          execution_id: options.attempt.execution_id,
+          repeat_scope_id: options.attempt.repeat_scope_id,
+          iteration_index: options.attempt.iteration_index,
+          attempt_index: options.attempt.attempt_index
+        }
+      );
+      const harnessName = options.node.kind === "agent" ? options.node.effective_policy.harness : undefined;
+      const supervisorHarness = harnessName ? options.runOptions.harnesses?.[harnessName] : undefined;
+      const recovery = await runSupervisorRecoveryCycle({
         action: "pause_for_human",
+        run_id: options.session.run_id,
+        graph_intent: options.session.graph.intent,
+        node: options.node,
         attempt: options.attempt,
+        result: options.result,
         decision_id: decisionId,
         intervention_id: interventionId,
         classification,
-        title: interventionTitle("pause_for_human"),
-        body: interventionBody({
-          action: "pause_for_human",
-          node: options.node,
-          attempt: options.attempt,
-          classification
-        })
+        failure_fingerprint: failureFingerprint,
+        repeated_fingerprint_count: repeatedFingerprintCount,
+        prior_interventions: await readSupervisorInterventions(options.writer.run_root).catch(() => []),
+        policy: options.session.graph.supervision,
+        workspace_path: options.session.manifest.repo_workspaces[options.node.repo]?.workspace_path ?? options.attempt.execution_dir,
+        ...(supervisorHarness ? { harness: supervisorHarness } : {}),
+        ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
+        ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
       });
       options.session.supervisor.pause = {
         ...(options.session.supervisor.pause ?? {
@@ -1145,11 +962,36 @@ async function handleFailedNodeWithSupervisor(options: {
           reason: classification.summary,
           resume_options: ["retry_with_guidance", "fail", "add_context"]
         }),
-        ...(typeof intervention.artifact_paths.brief === "string"
-          ? { brief_path: intervention.artifact_paths.brief }
+        reason: recovery.recovery_plan.pause_request?.reason ?? classification.summary,
+        ...(typeof recovery.intervention.artifact_paths.recovery_plan_markdown === "string"
+          ? { brief_path: recovery.intervention.artifact_paths.recovery_plan_markdown }
           : {})
       };
-      await options.writer.appendSupervisorIntervention(intervention);
+      await options.writer.appendSupervisorIntervention(recovery.intervention);
+      await emitEvent(
+        options.session,
+        options.writer,
+        options.runOwner,
+        options.events,
+        options.runOptions.on_event,
+        "supervisor.intervention.completed",
+        {
+          intervention_id: recovery.intervention.intervention_id,
+          decision_id: recovery.intervention.decision_id,
+          action: recovery.intervention.action,
+          target_compiled_id: options.node.compiled_id,
+          summary: recovery.intervention.reason,
+          apply_action: recovery.recovery_plan.apply_action,
+          artifacts: recovery.intervention.artifact_paths
+        },
+        {
+          compiled_id: options.node.compiled_id,
+          execution_id: options.attempt.execution_id,
+          repeat_scope_id: options.attempt.repeat_scope_id,
+          iteration_index: options.attempt.iteration_index,
+          attempt_index: options.attempt.attempt_index
+        }
+      );
       await emitEvent(
         options.session,
         options.writer,
@@ -1161,7 +1003,7 @@ async function handleFailedNodeWithSupervisor(options: {
           decision_id: decisionId,
           target_compiled_id: options.node.compiled_id,
           target_execution_id: options.attempt.execution_id,
-          reason: classification.summary,
+          reason: recovery.recovery_plan.pause_request?.reason ?? classification.summary,
           resume_options: options.session.supervisor.pause?.resume_options ?? []
         },
         {
@@ -1265,108 +1107,109 @@ async function handleFailedNodeWithSupervisor(options: {
       attempt_index: options.attempt.attempt_index
     }
   );
-  if (
-    action === "retry_with_guidance" ||
-    action === "run_diagnostic" ||
-    action === "rebuild_context" ||
-    action === "semantic_evaluation"
-  ) {
-    const interventionId = createSupervisorInterventionId(options.attempt, action);
-    await emitEvent(
-      options.session,
-      options.writer,
-      options.runOwner,
-      options.events,
-      options.runOptions.on_event,
-      "supervisor.intervention.started",
-      {
-        intervention_id: interventionId,
-        decision_id: decisionId,
-        action,
-        target_compiled_id: options.node.compiled_id,
-        summary: interventionTitle(action)
-      },
-      {
-        compiled_id: options.node.compiled_id,
-        execution_id: options.attempt.execution_id,
-        repeat_scope_id: options.attempt.repeat_scope_id,
-        iteration_index: options.attempt.iteration_index,
-        attempt_index: options.attempt.attempt_index
-      }
-    );
-    const intervention = await runEvidenceIntervention({
-      action,
-      attempt: options.attempt,
-      decision_id: decisionId,
+  const interventionId = createSupervisorInterventionId(options.attempt, action);
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.runOptions.on_event,
+    "supervisor.intervention.started",
+    {
       intervention_id: interventionId,
-      classification,
-      title: interventionTitle(action),
-      body: interventionBody({
-        action,
-        node: options.node,
-        attempt: options.attempt,
-        classification
-      })
-    });
-    const guidanceBriefPath = intervention.artifact_paths.brief;
-    if (typeof guidanceBriefPath === "string") {
-      const interventionDir = intervention.artifact_paths.intervention_dir;
-      const promptRevision = createPromptRevision({
-        action,
-        node: options.node,
-        attempt: options.attempt,
-        classification,
-        failureFingerprint,
-        repeatedFingerprintCount,
-        guidanceBriefPath
-      });
-      const promptRevisionPath = typeof interventionDir === "string"
-        ? await writePromptRevisionArtifact({
-            interventionDir,
-            revision: promptRevision
-          })
-        : guidanceBriefPath;
-      const retryGuidance: SupervisorRetryGuidanceRecord = {
-        compiled_id: options.node.compiled_id,
-        authored_id: options.node.authored_id,
-        prior_execution_id: options.attempt.execution_id,
-        action,
-        classification: classification.class,
-        summary: classification.summary,
-        failure_fingerprint: failureFingerprint,
-        repeated_fingerprint_count: repeatedFingerprintCount,
-        guidance_brief_path: guidanceBriefPath,
-        prompt_revision_path: promptRevisionPath,
-        prompt_revision: promptRevision,
-        created_at: new Date().toISOString()
-      };
-      options.session.supervisor.active_retry_guidance[options.node.compiled_id] = retryGuidance;
+      decision_id: decisionId,
+      action,
+      target_compiled_id: options.node.compiled_id,
+      summary: interventionTitle(action)
+    },
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.attempt.repeat_scope_id,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
     }
-    await options.writer.appendSupervisorIntervention(intervention);
-    await emitEvent(
-      options.session,
-      options.writer,
-      options.runOwner,
-      options.events,
-      options.runOptions.on_event,
-      "supervisor.intervention.completed",
-      {
-        intervention_id: intervention.intervention_id,
-        decision_id: intervention.decision_id,
-        action: intervention.action,
-        target_compiled_id: options.node.compiled_id,
-        summary: intervention.reason,
-        artifacts: intervention.artifact_paths
-      },
-      {
-        compiled_id: options.node.compiled_id,
-        execution_id: options.attempt.execution_id,
-        repeat_scope_id: options.attempt.repeat_scope_id,
-        iteration_index: options.attempt.iteration_index,
-        attempt_index: options.attempt.attempt_index
-      }
-    );
+  );
+
+  const harnessName = options.node.kind === "agent" ? options.node.effective_policy.harness : undefined;
+  const supervisorHarness = harnessName ? options.runOptions.harnesses?.[harnessName] : undefined;
+  const recovery = await runSupervisorRecoveryCycle({
+    action,
+    run_id: options.session.run_id,
+    graph_intent: options.session.graph.intent,
+    node: options.node,
+    attempt: options.attempt,
+    result: options.result,
+    decision_id: decisionId,
+    intervention_id: interventionId,
+    classification,
+    failure_fingerprint: failureFingerprint,
+    repeated_fingerprint_count: repeatedFingerprintCount,
+    prior_interventions: await readSupervisorInterventions(options.writer.run_root).catch(() => []),
+    policy: options.session.graph.supervision,
+    workspace_path: options.session.manifest.repo_workspaces[options.node.repo]?.workspace_path ?? options.attempt.execution_dir,
+    ...(supervisorHarness ? { harness: supervisorHarness } : {}),
+    ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
+    ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
+  });
+
+  await options.writer.appendSupervisorIntervention(recovery.intervention);
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.runOptions.on_event,
+    "supervisor.intervention.completed",
+    {
+      intervention_id: recovery.intervention.intervention_id,
+      decision_id: recovery.intervention.decision_id,
+      action: recovery.intervention.action,
+      target_compiled_id: options.node.compiled_id,
+      summary: recovery.intervention.reason,
+      apply_action: recovery.recovery_plan.apply_action,
+      artifacts: recovery.intervention.artifact_paths
+    },
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.attempt.repeat_scope_id,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
+    }
+  );
+
+  if (recovery.recovery_plan.apply_action === "pause_for_human") {
+    options.session.supervisor.status = "paused";
+    options.session.status = "paused";
+    options.session.supervisor.pause = {
+      decision_id: decisionId,
+      reason: recovery.recovery_plan.pause_request?.reason ?? classification.summary,
+      target_compiled_id: options.node.compiled_id,
+      target_execution_id: options.attempt.execution_id,
+      ...(recovery.intervention.artifact_paths.recovery_plan_markdown
+        ? { brief_path: recovery.intervention.artifact_paths.recovery_plan_markdown }
+        : {}),
+      resume_options: ["retry_with_guidance", "fail", "add_context"]
+    };
+    return false;
   }
+
+  if (recovery.recovery_plan.apply_action === "fail_terminal") {
+    options.session.supervisor.status = "exhausted";
+    return false;
+  }
+
+  if (recovery.recovery_plan.apply_action === "repair_artifact") {
+    options.session.supervisor.status = "healthy";
+    return false;
+  }
+
+  if (recovery.recovery_plan.apply_action !== "retry_node" || !recovery.recovery_envelope) {
+    options.session.supervisor.status = "exhausted";
+    return false;
+  }
+  options.session.supervisor.active_recovery_envelopes[options.node.compiled_id] = recovery.recovery_envelope;
 
   const retryDelayMs = computeRetryDelayMs(repeatedFingerprintCount);
   options.session.supervisor.status = "healthy";
@@ -2077,6 +1920,9 @@ async function defaultAgentExecutor(
     timeout_sec: context.node.effective_policy.timeout_sec,
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
+    ...(context.supervisor_recovery_envelope
+      ? { supervisor_recovery_envelope: context.supervisor_recovery_envelope }
+      : {}),
     credential_specs: context.credential_specs ?? {}
   });
   const contextManifest = await readContextManifestContent(context.context_manifest_path);
@@ -2088,8 +1934,9 @@ async function defaultAgentExecutor(
   const agentGraphConstraints = substituteOptionalTextArray(context.graph_intent.constraints, promptTokens);
   const agentNodeAcceptanceCriteria = substituteOptionalTextArray(context.node.acceptance_criteria, promptTokens);
   const agentNodeConstraints = substituteOptionalTextArray(context.node.constraints, promptTokens);
-
-  const harnessResult = await harnesses[harnessName]!.run({
+  const promptPath = join(context.execution_dir, "prompt.md");
+  context.attempt.prompt_path = promptPath;
+  const agentInvocation: AgentInvocation = {
     promptKind: "agent",
     runId: context.run_id,
     executionId: context.attempt.execution_id,
@@ -2111,7 +1958,8 @@ async function defaultAgentExecutor(
     contextPacketPath: context.context_packet_path,
     contextManifestPath: context.context_manifest_path,
     contextManifest,
-    ...(context.supervisor_retry_guidance ? { supervisorRetryGuidance: context.supervisor_retry_guidance } : {}),
+    ...(context.supervisor_recovery_envelope ? { supervisorRecoveryEnvelope: context.supervisor_recovery_envelope } : {}),
+    promptPath,
     outputDir,
     artifacts: context.node.declared_artifacts,
     timeoutSec: context.node.effective_policy.timeout_sec,
@@ -2121,7 +1969,13 @@ async function defaultAgentExecutor(
     toolBinDir: toolSetup.bin_dir,
     toolEnv: toolSetup.env,
     tools: toolSetup.resolved_tools
-  });
+  };
+  const renderedPrompt = renderHarnessPrompt(agentInvocation);
+  await mkdir(dirname(promptPath), { recursive: true });
+  await writeFile(promptPath, `${renderedPrompt}\n`, "utf8");
+  context.attempt.prompt_sha256 = createHash("sha256").update(`${renderedPrompt}\n`).digest("hex");
+
+  const harnessResult = await harnesses[harnessName]!.run(agentInvocation);
 
   return {
     status: harnessResult.status,
@@ -2256,6 +2110,56 @@ async function collectMissingDeclaredArtifacts(
   }
 
   return missing;
+}
+
+async function materializePresentDeclaredArtifacts(options: {
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  workspacePath: string;
+  automaticArtifacts: Record<string, string>;
+}): Promise<Record<string, string>> {
+  const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
+  const artifacts: Record<string, string> = { ...options.automaticArtifacts };
+
+  for (const [name, definition] of Object.entries(options.node.declared_artifacts)) {
+    if (definition.from === "output_dir") {
+      const outputPath = resolveSubpathWithinRoot(
+        artifactsRoot,
+        definition.path,
+        `Artifact "${name}" path`
+      );
+
+      try {
+        await access(outputPath);
+        artifacts[name] = outputPath;
+      } catch {
+        // Failed attempts may not produce every declared artifact; preserve only what exists.
+      }
+      continue;
+    }
+
+    const sourcePath = resolveSubpathWithinRoot(
+      options.workspacePath,
+      definition.path,
+      `Artifact "${name}" path`
+    );
+    const destinationPath = resolveSubpathWithinRoot(
+      artifactsRoot,
+      definition.path,
+      `Materialized artifact "${name}" path`
+    );
+
+    try {
+      await access(sourcePath);
+      await mkdir(dirname(destinationPath), { recursive: true });
+      await copyFile(sourcePath, destinationPath);
+      artifacts[name] = destinationPath;
+    } catch {
+      // Failed attempts may leave workspace artifacts absent or partial.
+    }
+  }
+
+  return artifacts;
 }
 
 function isHumanTextArtifact(artifact: MissingDeclaredArtifact): boolean {
@@ -2528,7 +2432,7 @@ async function materializeDeclaredArtifactsWithRepair(options: {
       const decision: SupervisorDecision = {
         decision_id: decisionId,
         kind: "run_intervention",
-        classification: "artifact",
+        classification: "artifact_contract_failure",
         health_state: "artifact_at_risk",
         confidence: "high",
         action: "repair_artifact",
@@ -2823,7 +2727,7 @@ async function executeNode(
       }
     }
 
-    const activeRetryGuidance = session.supervisor.active_retry_guidance[node.compiled_id];
+    const activeRecoveryEnvelope = session.supervisor.active_recovery_envelopes[node.compiled_id];
     context = await resolveExecutionContext({
       compiled_graph: session.graph,
       node,
@@ -2837,7 +2741,7 @@ async function executeNode(
         ])
       ),
       attempts: session.attempts,
-      ...(activeRetryGuidance ? { retry_guidance: activeRetryGuidance } : {})
+      ...(activeRecoveryEnvelope ? { recovery_envelope: activeRecoveryEnvelope } : {})
     });
 
     let result: RuntimeNodeExecutionResult;
@@ -2859,7 +2763,7 @@ async function executeNode(
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
-            ...(activeRetryGuidance ? { supervisor_retry_guidance: activeRetryGuidance } : {}),
+            ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -2877,7 +2781,7 @@ async function executeNode(
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
-            ...(activeRetryGuidance ? { supervisor_retry_guidance: activeRetryGuidance } : {}),
+            ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -2897,7 +2801,7 @@ async function executeNode(
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
-            ...(activeRetryGuidance ? { supervisor_retry_guidance: activeRetryGuidance } : {}),
+            ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -2916,7 +2820,7 @@ async function executeNode(
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
               context_materials: context.packet.materials,
-              ...(activeRetryGuidance ? { supervisor_retry_guidance: activeRetryGuidance } : {}),
+              ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
               signal,
               on_stdout_chunk: logSink.on_stdout_chunk,
               on_stderr_chunk: logSink.on_stderr_chunk
@@ -2940,7 +2844,7 @@ async function executeNode(
         execution_dir: attempt.execution_dir,
         context_packet_path: context.packet_path,
         context_manifest_path: context.manifest_path,
-        ...(activeRetryGuidance ? { supervisor_retry_guidance: activeRetryGuidance } : {}),
+        ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
         signal,
         on_stdout_chunk: logSink.on_stdout_chunk,
         on_stderr_chunk: logSink.on_stderr_chunk
@@ -2959,7 +2863,7 @@ async function executeNode(
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
-            ...(activeRetryGuidance ? { supervisor_retry_guidance: activeRetryGuidance } : {}),
+            ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
             signal
           })
         : await defaultAgentExecutor(
@@ -2975,7 +2879,7 @@ async function executeNode(
               execution_dir: attempt.execution_dir,
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
-              ...(activeRetryGuidance ? { supervisor_retry_guidance: activeRetryGuidance } : {}),
+              ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
               signal,
               on_stdout_chunk: logSink.on_stdout_chunk,
               on_stderr_chunk: logSink.on_stderr_chunk
@@ -3018,7 +2922,14 @@ async function executeNode(
     automaticArtifacts = await writeAutomaticArtifacts(node, attempt, result);
     const materialized =
       result.status !== "passed"
-        ? { artifacts: automaticArtifacts }
+        ? {
+            artifacts: await materializePresentDeclaredArtifacts({
+              node,
+              attempt,
+              workspacePath: workspace.workspace_path,
+              automaticArtifacts
+            })
+          }
         : await materializeDeclaredArtifactsWithRepair({
             node,
             attempt,
@@ -3186,7 +3097,7 @@ async function executeNode(
     });
 
     if (result.status === "passed" && result.outcome === "passed") {
-      delete session.supervisor.active_retry_guidance[node.compiled_id];
+      delete session.supervisor.active_recovery_envelopes[node.compiled_id];
     }
 
     return {

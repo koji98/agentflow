@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { accessSync, constants } from "node:fs";
 import { access, mkdtemp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -46,6 +48,7 @@ export const realHarnessContract = {
     "run.completed event",
     "agent_response artifact"
   ],
+  scenarios: ["smoke", "supervisor-recovery"],
   supportedHarnesses: realHarnessSpecs.map((spec) => ({
     kind: spec.kind,
     envVar: spec.envVar,
@@ -277,6 +280,21 @@ export function parseRequestedHarnessKinds(argvInput = argv, env = process.env) 
       continue;
     }
 
+    if (argument === "--scenario") {
+      const value = argvInput[index + 1];
+
+      if (!value || value.startsWith("--")) {
+        throw new Error("Missing value for --scenario. Use smoke or supervisor-recovery.");
+      }
+
+      index += 1;
+      continue;
+    }
+
+    if (argument.startsWith("--scenario=")) {
+      continue;
+    }
+
     if (argument === "--harness") {
       const value = argvInput[index + 1];
 
@@ -294,7 +312,7 @@ export function parseRequestedHarnessKinds(argvInput = argv, env = process.env) 
       continue;
     }
 
-    throw new Error(`Unknown argument "${argument}". Use --harness, --json, or --help.`);
+    throw new Error(`Unknown argument "${argument}". Use --harness, --scenario, --json, or --help.`);
   }
 
   const requestedKinds =
@@ -312,6 +330,36 @@ export function parseRequestedHarnessKinds(argvInput = argv, env = process.env) 
   }
 
   return [...new Set(selectedKinds)];
+}
+
+export function parseRequestedScenario(argvInput = argv, env = process.env) {
+  let scenario = env.AGENTFLOW_REAL_HARNESS_SCENARIO?.trim() || "smoke";
+
+  for (let index = 0; index < argvInput.length; index += 1) {
+    const argument = argvInput[index];
+
+    if (argument === "--scenario") {
+      const value = argvInput[index + 1];
+
+      if (!value || value.startsWith("--")) {
+        throw new Error("Missing value for --scenario. Use smoke or supervisor-recovery.");
+      }
+
+      scenario = value.trim();
+      index += 1;
+      continue;
+    }
+
+    if (argument.startsWith("--scenario=")) {
+      scenario = argument.slice("--scenario=".length).trim();
+    }
+  }
+
+  if (!realHarnessContract.scenarios.includes(scenario)) {
+    throw new Error(`Unsupported scenario "${scenario}". Use smoke or supervisor-recovery.`);
+  }
+
+  return scenario;
 }
 
 export function inspectHarnessBinary(spec, env = process.env) {
@@ -343,12 +391,13 @@ function iconForStatus(status) {
 
 function renderUsage() {
   return [
-    "Usage: npm run validate:real-harness -- [--harness codex-cli|cursor-cli|all] [--json]",
+    "Usage: npm run validate:real-harness -- [--harness codex-cli|cursor-cli|all] [--scenario smoke|supervisor-recovery] [--json]",
     "",
     "Selection rules:",
     "- When --harness is omitted, AGENTFLOW_REAL_HARNESS is used if set.",
     "- When neither is set, the command inspects both supported harness binaries on PATH.",
     "- Missing harness binaries are reported as skipped instead of failing the deterministic gates.",
+    "- --scenario supervisor-recovery currently requires --harness codex-cli and validates the supervisor recovery loop against a local HTTP docs fixture.",
     "",
     "Binary overrides:",
     "- AGENTFLOW_CODEX_CLI_BIN",
@@ -454,6 +503,124 @@ export function buildSmokeGraphDocument(spec, env = process.env) {
   };
 }
 
+export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = process.env) {
+  const timeoutSec = realHarnessContract.smokeGraph.timeoutSec;
+  return {
+    version: "1",
+    graph_id: `real-harness-supervisor-recovery-${spec.kind}`,
+    intent: {
+      goal: "Validate that supervisor recovery can gather external context and retry a failed real harness node.",
+      acceptance_criteria: [
+        "The first node attempt is rejected.",
+        "The supervisor writes a case file, external evidence patch, recovery plan, and recovery envelope.",
+        "The retried node uses the recovery envelope and local docs fixture to pass.",
+        "The inactive fallback sentence containing `INTENTIONAL_FAILURE_DO_NOT_ACCEPT` is an intentional failed attempt and must not be accepted as terminal success."
+      ],
+      constraints: ["External context is read-only and must not change graph intent or declared artifacts."]
+    },
+    supervision: {
+      actions: {
+        semantic_evaluation: { max_uses: 2 },
+        rebuild_context: { max_uses: 2 },
+        retry_with_guidance: { max_uses: 2 },
+        run_diagnostic: { max_uses: 2 },
+        pause_for_human: { max_uses: 1 }
+      },
+      max_total_interventions: 4,
+      policy: {
+        pause_on_policy_risk: true,
+        pause_on_repeated_recovery: true,
+        drift_score_threshold: 0.8
+      }
+    },
+    repos: {
+      main: {
+        path: "./repo"
+      }
+    },
+    defaults: {
+      launch_profile: "default",
+      workspace_backend: realHarnessContract.smokeGraph.workspaceBackend
+    },
+    profiles: {
+      default: {
+        harness: spec.kind,
+        model: resolveHarnessModel(spec, env),
+        sandbox: spec.sandbox,
+        timeout_sec: timeoutSec
+      }
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "agent",
+          id: "supervisor-recovery-agent",
+          repo: "main",
+          goal: [
+            "This is a supervisor recovery validation scenario.",
+            "Run `af supervision show` before deciding what to do.",
+            "If it reports active=false, intentionally fail the node by finishing with exactly this sentence and no extra evidence: `INTENTIONAL_FAILURE_DO_NOT_ACCEPT: missing dependency docs for package fixturelib; please retry after supervisor gathers external context`.",
+            `If it reports active=true, read the supervisor recovery envelope, fetch or read the local official docs fixture at ${docsUrl}, and finish with the exact phrase: fixturelib token is RECOVERED-FIXTURE-42.`,
+            "Do not change repository files."
+          ].join(" "),
+          acceptance_criteria: [
+            "Final response includes `fixturelib token is RECOVERED-FIXTURE-42`.",
+            "The final attempt used an active supervisor recovery envelope.",
+            `The final attempt cites or uses the local docs fixture at ${docsUrl}.`,
+            "The inactive fallback sentence containing `INTENTIONAL_FAILURE_DO_NOT_ACCEPT` is deliberately non-compliant and must be rejected when it appears without an active recovery envelope."
+          ]
+        }
+      ]
+    }
+  };
+}
+
+async function startDocsFixtureServer() {
+  const body = [
+    "# fixturelib official docs",
+    "",
+    "When supervisor recovery asks for external context, use token RECOVERED-FIXTURE-42.",
+    "This local fixture is intentionally stable and read-only."
+  ].join("\n");
+  const bodyBuffer = Buffer.from(body, "utf8");
+  const server = createServer((request, response) => {
+    if (request.url === "/fixturelib" || request.url === "/fixturelib/") {
+      response.writeHead(200, {
+        "connection": "close",
+        "content-length": String(bodyBuffer.length),
+        "content-type": "text/markdown; charset=utf-8"
+      });
+      response.end(bodyBuffer);
+      return;
+    }
+
+    response.writeHead(404, {
+      "connection": "close",
+      "content-length": "9",
+      "content-type": "text/plain; charset=utf-8"
+    });
+    response.end("not found");
+  });
+
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", () => resolveListen());
+  });
+  const address = server.address();
+
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Failed to start local docs fixture server.");
+  }
+
+  return {
+    url: `http://127.0.0.1:${address.port}/fixturelib`,
+    close: () => new Promise((resolveClose) => server.close(() => resolveClose()))
+  };
+}
+
 async function createSmokeFixture(spec) {
   const tempRoot = await mkdtemp(join(tmpdir(), `agentflow-real-harness-${spec.kind}-`));
   const launchRoot = join(tempRoot, "launch");
@@ -472,6 +639,30 @@ async function createSmokeFixture(spec) {
     launchRoot: canonicalLaunchRoot,
     graphPath,
     runsRoot: join(await realpath(tempRoot), ".agentflow", "runs")
+  };
+}
+
+async function createSupervisorRecoveryFixture(spec) {
+  const docsServer = await startDocsFixtureServer();
+  const tempRoot = await mkdtemp(join(tmpdir(), `agentflow-real-harness-supervisor-recovery-${spec.kind}-`));
+  const launchRoot = join(tempRoot, "launch");
+  const repoDir = join(tempRoot, "repo");
+  const graphPath = join(tempRoot, "agentflow.graph.json");
+  const graphDocument = buildSupervisorRecoveryGraphDocument(spec, docsServer.url);
+
+  await mkdir(launchRoot, { recursive: true });
+  await mkdir(repoDir, { recursive: true });
+  const canonicalLaunchRoot = await realpath(launchRoot);
+  await initializeGitRepo(repoDir);
+  await writeFile(graphPath, `${JSON.stringify(graphDocument, null, 2)}\n`);
+
+  return {
+    tempRoot,
+    launchRoot: canonicalLaunchRoot,
+    graphPath,
+    runsRoot: join(await realpath(tempRoot), ".agentflow", "runs"),
+    docsUrl: docsServer.url,
+    close: docsServer.close
   };
 }
 
@@ -578,7 +769,8 @@ async function readExecutionRecords(runRoot) {
   return executions;
 }
 
-async function verifyRunArtifacts(runRoot, expectedRunId) {
+async function verifyRunArtifacts(runRoot, expectedRunId, options = {}) {
+  const agentId = options.agentId ?? "real-smoke-agent";
   const runRecord = expectRecord(
     JSON.parse(await readFile(join(runRoot, "run.json"), "utf8")),
     "run.json"
@@ -619,17 +811,111 @@ async function verifyRunArtifacts(runRoot, expectedRunId) {
   }
 
   const executions = await readExecutionRecords(runRoot);
-  const smokeExecution = executions.find((execution) => execution.authored_id === "real-smoke-agent");
-  if (!smokeExecution) {
-    throw new Error("real-smoke-agent execution record must exist.");
+  const agentExecution = executions.find((execution) => execution.authored_id === agentId);
+  if (!agentExecution) {
+    throw new Error(`${agentId} execution record must exist.`);
   }
 
-  const artifacts = expectRecord(smokeExecution.artifacts, "real-smoke-agent artifacts");
-  const agentResponsePath = expectString(artifacts.agent_response, "real-smoke-agent agent_response artifact");
+  const artifacts = expectRecord(agentExecution.artifacts, `${agentId} artifacts`);
+  const agentResponsePath = expectString(artifacts.agent_response, `${agentId} agent_response artifact`);
   const agentResponse = await readFile(agentResponsePath, "utf8");
 
   if (agentResponse.trim().length === 0) {
     throw new Error("agent_response artifact must be non-empty.");
+  }
+}
+
+async function findFiles(root, filename) {
+  const found = [];
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+
+    if (entry.isDirectory()) {
+      found.push(...await findFiles(path, filename));
+      continue;
+    }
+
+    if (entry.isFile() && entry.name === filename) {
+      found.push(path);
+    }
+  }
+
+  return found;
+}
+
+async function verifySupervisorRecoveryArtifacts(runRoot, expectedRunId) {
+  await verifyRunArtifacts(runRoot, expectedRunId, { agentId: "supervisor-recovery-agent" });
+  const events = (await readFile(join(runRoot, "events.jsonl"), "utf8"))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const executions = await readExecutionRecords(runRoot);
+  const nodeAttempts = executions.filter((execution) => execution.authored_id === "supervisor-recovery-agent");
+
+  if (nodeAttempts.length < 2) {
+    throw new Error("supervisor recovery scenario must execute the node at least twice.");
+  }
+
+  if (!nodeAttempts.some((execution) => execution.status === "failed")) {
+    throw new Error("supervisor recovery scenario must record a failed first attempt.");
+  }
+
+  if (!events.some((event) => event?.type === "supervisor.retry_scheduled")) {
+    throw new Error("events.jsonl must contain supervisor.retry_scheduled.");
+  }
+
+  const caseFiles = await findFiles(runRoot, "case-file.json");
+  const evidencePatches = await findFiles(runRoot, "evidence-patch.json");
+  const recoveryPlans = await findFiles(runRoot, "recovery-plan.json");
+  const recoveryEnvelopes = await findFiles(runRoot, "recovery-envelope.json");
+
+  if (caseFiles.length === 0) {
+    throw new Error("supervisor recovery scenario must write a case-file.json.");
+  }
+
+  if (recoveryPlans.length === 0) {
+    throw new Error("supervisor recovery scenario must write a recovery-plan.json.");
+  }
+
+  if (recoveryEnvelopes.length === 0) {
+    throw new Error("supervisor recovery scenario must write a recovery-envelope.json.");
+  }
+
+  const externalEvidence = [];
+  for (const patchPath of evidencePatches) {
+    const patch = JSON.parse(await readFile(patchPath, "utf8"));
+    if (patch?.kind === "external_context") {
+      externalEvidence.push(patchPath);
+    }
+  }
+
+  if (externalEvidence.length === 0) {
+    throw new Error("supervisor recovery scenario must write an external_context evidence patch.");
+  }
+
+  const retryAttempt = nodeAttempts.find((execution) => typeof execution.prompt_path === "string" && execution.prompt_path.length > 0 && execution.attempt_index > 1);
+  if (!retryAttempt) {
+    throw new Error("retried node attempt must record prompt_path.");
+  }
+
+  const retryPrompt = await readFile(retryAttempt.prompt_path, "utf8");
+  const retryPromptSha256 = createHash("sha256").update(retryPrompt).digest("hex");
+  if (retryAttempt.prompt_sha256 !== retryPromptSha256) {
+    throw new Error("retried node attempt must record prompt_sha256 for the exact prompt.");
+  }
+  if (!retryPrompt.includes("## Supervisor Recovery Envelope")) {
+    throw new Error("second node attempt must receive the supervisor recovery envelope.");
+  }
+
+  const finalAttempt = nodeAttempts.at(-1);
+  const artifacts = expectRecord(finalAttempt.artifacts, "supervisor-recovery-agent artifacts");
+  const agentResponsePath = expectString(artifacts.agent_response, "supervisor-recovery-agent agent_response artifact");
+  const agentResponse = await readFile(agentResponsePath, "utf8");
+  if (!agentResponse.includes("RECOVERED-FIXTURE-42")) {
+    throw new Error("final agent response must include the recovered fixture token.");
   }
 }
 
@@ -783,6 +1069,109 @@ async function runRealHarnessSmoke(spec, builtCliPath, inspection) {
   }
 }
 
+async function runRealHarnessSupervisorRecovery(spec, builtCliPath, inspection) {
+  if (!inspection.available) {
+    return {
+      harness: spec.kind,
+      scenario: "supervisor-recovery",
+      status: "skipped",
+      reason: renderSkipReason(spec, inspection),
+      binary: inspection.binary,
+      binary_source: inspection.binarySource
+    };
+  }
+
+  if (spec.kind !== "codex-cli") {
+    return {
+      harness: spec.kind,
+      scenario: "supervisor-recovery",
+      status: "skipped",
+      reason: "supervisor-recovery real harness scenario currently requires codex-cli.",
+      binary: inspection.binary,
+      binary_source: inspection.binarySource
+    };
+  }
+
+  const fixture = await createSupervisorRecoveryFixture(spec);
+  const startedAt = Date.now();
+  let shouldCleanup = true;
+
+  try {
+    const env = {
+      [spec.envVar]: inspection.detectedPath
+    };
+    const runResult = runCommand(
+      process.execPath,
+      [builtCliPath, "run", "--graph", fixture.graphPath],
+      `real harness supervisor recovery (${spec.kind})`,
+      {
+        cwd: fixture.launchRoot,
+        env
+      }
+    );
+
+    if (!runResult.passed) {
+      shouldCleanup = false;
+      const failedRun = await describeFailedRun(spec, inspection, runResult);
+
+      return {
+        harness: spec.kind,
+        scenario: "supervisor-recovery",
+        status: "failed",
+        reason: failedRun.reason,
+        binary: inspection.binary,
+        binary_source: inspection.binarySource,
+        detected_binary_path: inspection.detectedPath,
+        ...(failedRun.run_root ? { run_root: failedRun.run_root } : {}),
+        ...(failedRun.summary_file ? { summary_file: failedRun.summary_file } : {})
+      };
+    }
+
+    const payload = expectRecord(
+      parseJsonOutput(`real harness supervisor recovery (${spec.kind})`, runResult.stdout),
+      `run payload (${spec.kind})`
+    );
+    const runId = expectString(payload.run_id, `run payload.run_id (${spec.kind})`);
+    const runRoot = expectString(payload.run_root, `run payload.run_root (${spec.kind})`);
+
+    if (payload.status !== "passed") {
+      throw new Error(`run payload.status must equal "passed" for ${spec.kind}.`);
+    }
+
+    await verifySupervisorRecoveryArtifacts(runRoot, runId);
+
+    return {
+      harness: spec.kind,
+      scenario: "supervisor-recovery",
+      status: "passed",
+      reason: `${spec.kind} supervisor recovery scenario passed against ${inspection.detectedPath}.`,
+      binary: inspection.binary,
+      binary_source: inspection.binarySource,
+      detected_binary_path: inspection.detectedPath,
+      docs_url: fixture.docsUrl,
+      runs_root: fixture.runsRoot,
+      run_root: runRoot,
+      duration_ms: Date.now() - startedAt
+    };
+  } catch (error) {
+    shouldCleanup = false;
+    return {
+      harness: spec.kind,
+      scenario: "supervisor-recovery",
+      status: "failed",
+      reason: error instanceof Error ? error.message : String(error),
+      binary: inspection.binary,
+      binary_source: inspection.binarySource,
+      ...(inspection.detectedPath ? { detected_binary_path: inspection.detectedPath } : {})
+    };
+  } finally {
+    await fixture.close();
+    if (shouldCleanup) {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  }
+}
+
 async function main() {
   if (argv.includes("--help")) {
     process.stdout.write(`${renderUsage()}\n`);
@@ -790,9 +1179,11 @@ async function main() {
   }
 
   let requestedKinds;
+  let requestedScenario;
 
   try {
     requestedKinds = parseRequestedHarnessKinds();
+    requestedScenario = parseRequestedScenario();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
 
@@ -882,7 +1273,11 @@ async function main() {
   const results = [];
 
   for (const { spec, inspection } of inspections) {
-    results.push(await runRealHarnessSmoke(spec, builtCliPath, inspection));
+    results.push(
+      requestedScenario === "supervisor-recovery"
+        ? await runRealHarnessSupervisorRecovery(spec, builtCliPath, inspection)
+        : await runRealHarnessSmoke(spec, builtCliPath, inspection)
+    );
   }
 
   const failedCount = results.filter((result) => result.status === "failed").length;
@@ -897,9 +1292,9 @@ async function main() {
     results,
     reasons:
       status === "failed"
-        ? results.filter((result) => result.status === "failed").map((result) => result.reason)
-        : status === "passed"
-          ? [`Real harness smoke passed for ${passedCount} harness${passedCount === 1 ? "" : "es"}.`]
+      ? results.filter((result) => result.status === "failed").map((result) => result.reason)
+      : status === "passed"
+          ? [`Real harness ${requestedScenario} scenario passed for ${passedCount} harness${passedCount === 1 ? "" : "es"}.`]
           : ["No configured real harness binaries were available, so the optional smoke did not run."]
   };
 

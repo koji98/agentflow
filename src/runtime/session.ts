@@ -6,7 +6,7 @@ import type { SupervisorBudgetRemaining } from "../supervisor/policy.js";
 import type {
   SupervisorDecision,
   SupervisorFailureFingerprintState,
-  SupervisorRetryGuidanceRecord
+  SupervisorRecoveryEnvelope
 } from "../supervisor/types.js";
 
 export type RuntimeNodeStatus =
@@ -126,7 +126,7 @@ export interface RuntimeSupervisorState {
   budget_remaining: SupervisorBudgetRemaining;
   last_decision_id?: string;
   timeline: SupervisorDecision[];
-  active_retry_guidance: Record<string, SupervisorRetryGuidanceRecord>;
+  active_recovery_envelopes: Record<string, SupervisorRecoveryEnvelope>;
   failure_fingerprints: Record<string, SupervisorFailureFingerprintState>;
   pause?: {
     decision_id: string;
@@ -310,7 +310,7 @@ export function createRuntimeSession(
       intervention_count: 0,
       budget_remaining: budgetRemaining,
       timeline: [],
-      active_retry_guidance: {},
+      active_recovery_envelopes: {},
       failure_fingerprints: {},
       escalations: []
     },
@@ -435,18 +435,18 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
         actions: { ...session.supervisor.budget_remaining.actions }
       },
       timeline: session.supervisor.timeline.map((decision) => ({ ...decision })),
-      active_retry_guidance: Object.fromEntries(
-        Object.entries(session.supervisor.active_retry_guidance).map(([compiledId, guidance]) => [
+      active_recovery_envelopes: Object.fromEntries(
+        Object.entries(session.supervisor.active_recovery_envelopes).map(([compiledId, envelope]) => [
           compiledId,
           {
-            ...guidance,
-            prompt_revision: {
-              ...guidance.prompt_revision,
-              must_do: [...guidance.prompt_revision.must_do],
-              must_not_do: [...guidance.prompt_revision.must_not_do],
-              artifact_requirements: [...guidance.prompt_revision.artifact_requirements],
-              resolved_conflicts: [...guidance.prompt_revision.resolved_conflicts],
-              evidence_to_read: [...guidance.prompt_revision.evidence_to_read]
+            ...envelope,
+            retry_directive: {
+              ...envelope.retry_directive,
+              must_do: [...envelope.retry_directive.must_do],
+              must_not_do: [...envelope.retry_directive.must_not_do],
+              evidence_to_read: [...envelope.retry_directive.evidence_to_read],
+              validation_focus: [...envelope.retry_directive.validation_focus],
+              unchanged_contract: { ...envelope.retry_directive.unchanged_contract }
             }
           }
         ])

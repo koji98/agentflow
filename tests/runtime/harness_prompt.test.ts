@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { renderHarnessPrompt, type AgentInvocation } from "../../src/runtime/harness/types.js";
+import type { SupervisorRecoveryEnvelope } from "../../src/supervisor/types.js";
 
 function baseInvocation(overrides: Partial<AgentInvocation> = {}): AgentInvocation {
   return {
@@ -173,5 +174,51 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("## Missing Artifacts");
     expect(prompt).toContain("expected absolute path: `/tmp/run/output/handoff.md`");
     expect(prompt).not.toContain("## Diagnostics");
+  });
+
+  it("renders the supervisor recovery envelope before the original node task and preserves the contract", () => {
+    const envelope: SupervisorRecoveryEnvelope = {
+      envelope_id: "recovery-1",
+      compiled_id: "root__node",
+      authored_id: "node",
+      prior_execution_id: "exec-0",
+      recovery_plan_path: "/tmp/run/exec-0/interventions/recovery-1/recovery-plan.json",
+      case_file_path: "/tmp/run/exec-0/interventions/recovery-1/case-file.json",
+      action: "retry_node",
+      classification: "missing_dependency_docs",
+      failure_fingerprint: "abc123",
+      repeated_fingerprint_count: 1,
+      retry_directive: {
+        summary: "The first attempt used the wrong v4 API.",
+        must_do: ["Read the cited zod v4 docs fixture before editing."],
+        must_not_do: ["Do not change acceptance criteria."],
+        evidence_to_read: ["/tmp/run/exec-0/interventions/recovery-1/evidence/external_context/evidence-patch.md"],
+        validation_focus: ["Run the existing failing test."],
+        unchanged_contract: {
+          goal: true,
+          acceptance_criteria: true,
+          constraints: true,
+          repo_authority: true,
+          sandbox: true,
+          declared_artifacts: true
+        }
+      },
+      created_at: "2026-04-24T00:00:02.000Z"
+    };
+
+    const prompt = renderHarnessPrompt(baseInvocation({
+      supervisorRecoveryEnvelope: envelope,
+      graphAcceptanceCriteria: ["The original graph acceptance criteria stay intact."],
+      nodeAcceptanceCriteria: ["The original node acceptance criteria stay intact."],
+      nodeConstraints: ["Do not broaden scope."]
+    }));
+
+    expect(prompt).toContain("## Supervisor Recovery Envelope");
+    expect(prompt).toContain("The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.");
+    expect(prompt).toContain("Read the cited zod v4 docs fixture before editing.");
+    expect(prompt.indexOf("## Supervisor Recovery Envelope")).toBeLessThan(
+      prompt.indexOf("## Original Authored Node Task (Background)")
+    );
+    expect(prompt).not.toContain("## Supervisor Revised Task");
   });
 });

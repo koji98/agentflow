@@ -52,15 +52,15 @@ const staleSkillContractPatterns = [
   },
   {
     pattern: /\bmissing_artifact\b/u,
-    reason: 'current supervisor failure class is "artifact"'
+    reason: 'current supervisor failure class is "artifact_contract_failure"'
   },
   {
     pattern: /\bcontext_resolution\b/u,
-    reason: 'current supervisor failure class is "context"'
+    reason: 'current supervisor failure class is "missing_context"'
   },
   {
     pattern: /\bcheck_failed\b/u,
-    reason: 'current supervisor failure classes are "deterministic_evaluation" and "semantic_evaluation"'
+    reason: 'current supervisor failure classes are "diagnostic_needed" and "semantic_misalignment"'
   },
   {
     pattern: /every missing artifact/u,

@@ -5,7 +5,10 @@ import type { ArtifactDefinition } from "../../graph/authored.js";
 import type { ResolvedTool } from "../../graph/compiled.js";
 import type { HarnessCapabilities } from "../../graph/harness_capabilities.js";
 import type { ReasoningEffort } from "../../graph/schema.js";
-import type { SupervisorRetryGuidanceRecord } from "../../supervisor/types.js";
+import type {
+  SupervisorEvidenceGatherKind,
+  SupervisorRecoveryEnvelope
+} from "../../supervisor/types.js";
 
 export type HarnessKind = "codex-cli" | "cursor-cli";
 
@@ -26,7 +29,7 @@ export interface ArtifactRepairPromptContext {
 }
 
 export interface AgentInvocation {
-  promptKind?: "agent" | "ai_check" | "artifact_repair" | "outcome_verification";
+  promptKind?: "agent" | "ai_check" | "artifact_repair" | "outcome_verification" | "supervisor_evidence";
   runId: string;
   executionId: string;
   repoAlias: string;
@@ -56,7 +59,15 @@ export interface AgentInvocation {
   toolEnv?: Record<string, string>;
   tools?: ResolvedTool[];
   repair?: ArtifactRepairPromptContext;
-  supervisorRetryGuidance?: SupervisorRetryGuidanceRecord;
+  supervisorRecoveryEnvelope?: SupervisorRecoveryEnvelope;
+  supervisorEvidence?: {
+    gatherKind: SupervisorEvidenceGatherKind;
+    caseFilePath: string;
+    evidencePatchPath: string;
+    outputSchemaPath?: string;
+    instructions: string[];
+  };
+  promptPath?: string;
 }
 
 export interface HarnessResult {
@@ -368,43 +379,43 @@ function formatGraphContext(invocation: AgentInvocation): string[] {
   ];
 }
 
-function formatSupervisorRevisedTask(invocation: AgentInvocation): string[] {
-  const guidance = invocation.supervisorRetryGuidance;
+function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[] {
+  const envelope = invocation.supervisorRecoveryEnvelope;
 
-  if (!guidance) {
+  if (!envelope) {
     return [];
   }
 
-  const revision = guidance.prompt_revision;
+  const directive = envelope.retry_directive;
   return [
-    "## Supervisor Revised Task",
-    "This is a retry after a failed prior execution. The supervisor revision below is the controlling task for this retry where it conflicts with the authored node task. It preserves graph-level acceptance criteria, constraints, sandbox, and safety boundaries.",
-    `Prior execution: \`${guidance.prior_execution_id}\`. Classification: \`${guidance.classification}\`. Fingerprint: \`${guidance.failure_fingerprint}\` (seen ${guidance.repeated_fingerprint_count} time${guidance.repeated_fingerprint_count === 1 ? "" : "s"}).`,
-    `Audit artifacts: guidance brief \`${guidance.guidance_brief_path}\`, prompt revision \`${guidance.prompt_revision_path}\`.`,
+    "## Supervisor Recovery Envelope",
+    "This is a retry after a failed prior execution. The supervisor recovery envelope is additive evidence for this retry.",
+    "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
+    `Prior execution: \`${envelope.prior_execution_id}\`. Classification: \`${envelope.classification}\`. Fingerprint: \`${envelope.failure_fingerprint}\` (seen ${envelope.repeated_fingerprint_count} time${envelope.repeated_fingerprint_count === 1 ? "" : "s"}).`,
+    `Audit artifacts: case file \`${envelope.case_file_path}\`, recovery plan \`${envelope.recovery_plan_path}\`.`,
     "",
-    "### Revised Goal",
-    revision.revised_goal,
+    "### Recovery Summary",
+    directive.summary,
     "",
     "### Must Do",
-    ...formatBullets(revision.must_do, "No retry-specific required actions were authored."),
+    ...formatBullets(directive.must_do, "No retry-specific required actions were produced."),
     "",
     "### Must Not Do",
-    ...formatBullets(revision.must_not_do, "No retry-specific forbidden tactics were authored."),
-    "",
-    "### Artifact Requirements",
-    ...formatBullets(revision.artifact_requirements, "Follow the normal artifact contract."),
-    "",
-    "### Resolved Conflicts",
-    ...formatBullets(revision.resolved_conflicts, "No conflicts were identified; this guidance is additive."),
+    ...formatBullets(directive.must_not_do, "Do not violate the unchanged node contract."),
     "",
     "### Evidence To Read First",
-    ...formatBullets(revision.evidence_to_read, "Read the materialized supervisor retry guidance context and prior execution artifacts."),
+    ...formatBullets(directive.evidence_to_read, "Read the materialized supervisor recovery context and prior execution artifacts."),
     "",
-    "### Intent Preservation",
-    revision.intent_preservation,
+    "### Validation Focus",
+    ...formatBullets(directive.validation_focus, "Run the validation named by the original task or context."),
     "",
-    "### Justification",
-    revision.justification
+    "### Contract Preservation",
+    "- Goal: unchanged.",
+    "- Acceptance criteria: unchanged.",
+    "- Constraints: unchanged.",
+    "- Repo authority: unchanged.",
+    "- Sandbox: unchanged.",
+    "- Declared artifacts: unchanged."
   ];
 }
 
@@ -466,6 +477,31 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     }
 
     return invocation.rubric;
+  }
+
+  if (invocation.promptKind === "supervisor_evidence") {
+    const evidence = invocation.supervisorEvidence;
+    if (!evidence) {
+      throw new Error("supervisor_evidence prompts require supervisor evidence context.");
+    }
+
+    return [
+      "## Role",
+      "Agentflow supervisor evidence gatherer.",
+      "Gather read-only evidence for a failed node attempt. Do not change graph intent, acceptance criteria, repo authority, sandbox authority, or declared artifacts.",
+      "",
+      "## Gather Request",
+      `- Kind: \`${evidence.gatherKind}\``,
+      `- Case file: \`${evidence.caseFilePath}\``,
+      `- Evidence patch output: \`${evidence.evidencePatchPath}\``,
+      ...(evidence.outputSchemaPath ? [`- Output schema: \`${evidence.outputSchemaPath}\``] : []),
+      "",
+      "## Instructions",
+      ...formatBullets(evidence.instructions, "Inspect the case file and produce a cited evidence patch."),
+      "",
+      "## Output",
+      "Return JSON only with claims, sources, confidence, conflicts, retry_guidance, and scope_or_authority_changed."
+    ].join("\n");
   }
 
   if (invocation.promptKind === "ai_check") {
@@ -556,10 +592,10 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     ].join("\n");
   }
 
-  const hasSupervisorRevision = Boolean(invocation.supervisorRetryGuidance);
-  const supervisorRevisedTask = formatSupervisorRevisedTask(invocation);
+  const hasSupervisorRecoveryEnvelope = Boolean(invocation.supervisorRecoveryEnvelope);
+  const supervisorRecoveryEnvelope = formatSupervisorRecoveryEnvelope(invocation);
   const nodeTask = formatNodeTask(invocation, {
-    title: hasSupervisorRevision ? "Original Authored Node Task (Background)" : "Node Task",
+    title: hasSupervisorRecoveryEnvelope ? "Original Authored Node Task (Background)" : "Node Task",
     emptyGoal: "Complete the authored node goal.",
     emptyAcceptanceCriteria: "No node-level acceptance criteria were authored.",
     emptyConstraints: "No node-level constraints were authored."
@@ -569,8 +605,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "## Role",
     "Agentflow is a local graph runner for long-running engineering work.",
     "You are executing one node in a wider Agentflow graph. Complete this node's task; future nodes consume only the named artifacts and final handoff you produce.",
-    hasSupervisorRevision
-      ? "A supervisor revised task appears before the authored node task. Use it as the controlling retry objective where it resolves prior failure evidence or supersedes incomplete or contradictory authored wording."
+    hasSupervisorRecoveryEnvelope
+      ? "A supervisor recovery envelope appears before the authored node task. Use it to recover from prior failure while preserving the unchanged authored contract."
       : "The node task is the controlling objective. Use graph context only to understand why this node exists.",
     "",
     "## Working Loop",
@@ -581,8 +617,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "Stop only when (a) every acceptance criterion is satisfied with evidence captured in the declared artifacts and final handoff, or (b) a concrete blocker (missing credentials, unauthorized action, missing upstream artifact, irreducible failure) prevents progress. Document what was tried and the next action a human should take when blocked.",
     "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected.",
     "",
-    ...supervisorRevisedTask,
-    ...(supervisorRevisedTask.length > 0 ? [""] : []),
+    ...supervisorRecoveryEnvelope,
+    ...(supervisorRecoveryEnvelope.length > 0 ? [""] : []),
     ...nodeTask,
     "",
     ...graphContext,
@@ -594,7 +630,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     ...formatRuntimeCliContract(),
     "",
     ...formatArtifactContract(invocation.artifacts, invocation.outputDir, invocation.repoPath, invocation.sandbox),
-    ...(hasSupervisorRevision
+    ...(hasSupervisorRecoveryEnvelope
       ? [
           "- Prior attempt artifacts are evidence only. This retry must write every current-attempt declared artifact at the current output directory/workspace paths before finishing."
         ]
