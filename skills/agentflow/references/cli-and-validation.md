@@ -17,7 +17,7 @@ agentflow run --graph agentflow.graph.json
 agentflow inspect <run-root>
 agentflow resume --run-root <run-root>
 agentflow runs list --graph agentflow.graph.json
-agentflow eval validate --suite evals/<workflow>/suite.json
+agentflow eval validate evals/<suite-id>
 ```
 
 Agent-facing runtime commands are available as `af` inside agent nodes only. Agentflow injects the generated `af` wrapper on `PATH` with `$AGENTFLOW_RUNTIME_METADATA` pointing at the node contract.
@@ -69,7 +69,7 @@ Confirm:
 - Outcome verification is the always-on runtime contract for passing `agent` attempts; it produces `verify-outcome.{json,md}` and an `outcome.verified` event when a passed attempt is verified.
 - Supervisor `semantic_evaluation` is an intervention selected after runtime evidence and bounded by supervisor budget.
 - Managed pattern evaluation is authored workflow structure, especially in `pattern_generate_evaluate_fix`.
-- `agentflow eval` is offline product/workflow grading with file-backed suites and `.agentflow/evals` artifacts.
+- `agentflow eval` is offline product/workflow grading with file-backed suites and `.agentflow/evals` artifacts. Use `agentflow-evals` for suite authoring, graders, judges, scorecards, benchmark reports, and prompt-pack comparisons.
 
 ## Command Results
 

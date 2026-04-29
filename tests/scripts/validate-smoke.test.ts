@@ -9,6 +9,7 @@ describe("validate:smoke contract", () => {
       "docs/SCOPE.md",
       "docs/ARCHITECTURE.md",
       "docs/OPERATIONS.md",
+      "docs/EVALS.md",
       "docs/MANAGED_PATTERNS.md",
       "docs/PLUGINS.md",
       "docs/PATTERN_DEEP_RESEARCH.md",

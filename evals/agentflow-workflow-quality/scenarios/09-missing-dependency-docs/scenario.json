@@ -1,0 +1,10 @@
+{
+  "id": "missing-dependency-docs",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Supervisor should gather local HTTP docs fixture when dependency behavior is missing.",
+  "fixture": { "repo": "../../shared/repo", "docs": "../../shared/docs", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=missing-dependency-docs"] }], "forbidden_edits": ["deprecated-api.txt"], "supervisor": { "gatherers": ["external_context"] } },
+  "grading": { "dimensions": ["supervisor_recovery_quality", "evidence_use"] }
+}

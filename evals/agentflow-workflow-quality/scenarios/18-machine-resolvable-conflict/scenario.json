@@ -1,0 +1,10 @@
+{
+  "id": "machine-resolvable-conflict",
+  "bucket": "valid-noisy-evidence",
+  "difficulty": "hard",
+  "description": "Supervisor should resolve evidence conflict using machine-readable local metadata, not human pause.",
+  "fixture": { "repo": "../../shared/repo", "docs": "../../shared/docs", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=machine-resolvable-conflict"] }], "forbidden_edits": ["human-pause-needed.txt"], "supervisor": { "gatherers": ["dependency_metadata"] } },
+  "grading": { "dimensions": ["supervisor_recovery_quality", "evidence_use"] }
+}

@@ -4,219 +4,246 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { loadEvalSuite, renderGraphTemplate } from "../../src/evals/suite.js";
+import { loadEvalSuite, parseJudgeResult, renderGraphTemplate } from "../../src/evals/suite.js";
 
-describe("eval suite loading", () => {
-  it("loads cases and renders graph-template placeholders", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-suite-"));
-    const suiteDir = join(tempRoot, "suite");
-    const repoDir = join(tempRoot, "repo");
-    await mkdir(join(suiteDir, "fixtures"), { recursive: true });
-    await mkdir(repoDir, { recursive: true });
-    await writeFile(join(suiteDir, "fixtures", "input.txt"), "fixture\n");
-    await writeFile(
-      join(suiteDir, "graph.template.json"),
-      `${JSON.stringify(
-        {
-          version: "1",
-          graph_id: "eval-{{case.id}}",
-          repos: {
-            main: {
-              path: "{{case.repos.main.path}}"
-            }
-          },
-          graph: {
-            type: "sequence",
-            id: "root",
-            steps: [
-              {
-                type: "exec",
-                id: "echo",
-                command: "node",
-                args: ["-e", "console.log(process.argv[1])", "{{case.task}}"]
-              }
-            ]
-          }
-        },
-        null,
-        2
-      )}\n`
-    );
-    await writeFile(
-      join(suiteDir, "cases.jsonl"),
-      `${JSON.stringify({
-        id: "case-1",
-        task: "Say hello",
-        fixtures: ["fixtures/input.txt"],
-        repos: {
-          main: {
-            path: "../repo"
-          }
+async function writeMinimalV2Suite(root: string): Promise<string> {
+  const suiteDir = join(root, "suite");
+  const scenarioDir = join(suiteDir, "scenarios", "artifact-discipline");
+  const variantDir = join(suiteDir, "variants");
+  const judgesDir = join(suiteDir, "judges");
+  const gradersDir = join(suiteDir, "graders");
+
+  await mkdir(join(scenarioDir, "repo"), { recursive: true });
+  await mkdir(variantDir, { recursive: true });
+  await mkdir(judgesDir, { recursive: true });
+  await mkdir(gradersDir, { recursive: true });
+  await writeFile(join(scenarioDir, "repo", "README.md"), "fixture repo\n");
+  await writeFile(join(judgesDir, "artifact-quality.md"), "Rate artifact quality from 1 to 5.\n");
+  await writeFile(
+    join(gradersDir, "deterministic.mjs"),
+    "console.log(JSON.stringify({ passed: true, score: 1, assertions: [] }));\n"
+  );
+  await writeFile(
+    join(variantDir, "current.json"),
+    `${JSON.stringify({
+      id: "current",
+      description: "Current production prompts.",
+      env: {
+        AGENTFLOW_EVAL_PROMPT_PACK: "current"
+      }
+    }, null, 2)}\n`
+  );
+  await writeFile(
+    join(scenarioDir, "graph.template.json"),
+    `${JSON.stringify({
+      version: "1",
+      graph_id: "eval-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+      intent: {
+        goal: "{{scenario.description}}",
+        acceptance_criteria: ["Artifact exists."]
+      },
+      repos: {
+        main: {
+          path: "{{fixture.repo}}"
         }
-      })}\n`
-    );
-    await writeFile(
-      join(suiteDir, "suite.json"),
-      `${JSON.stringify({
-        version: "1",
-        suite_id: "demo",
-        target: {
-          graph_template: "graph.template.json"
-        },
-        cases: "cases.jsonl"
-      })}\n`
-    );
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "{{workflow.harness}}"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "write_artifact",
+            repo: "main",
+            command: "node",
+            args: ["-e", "console.log(process.argv[1])", "{{variant.id}}"]
+          }
+        ]
+      }
+    }, null, 2)}\n`
+  );
+  await writeFile(
+    join(scenarioDir, "scenario.json"),
+    `${JSON.stringify({
+      id: "artifact-discipline",
+      bucket: "valid-hard-execution",
+      difficulty: "hard",
+      description: "Node must publish a real handoff artifact.",
+      fixture: {
+        repo: "repo",
+        init_git: true
+      },
+      workflow: {
+        graph_template: "graph.template.json",
+        harness: "codex-cli",
+        workspace_backend: "inplace"
+      },
+      expected: {
+        final_outcome: "passed",
+        required_artifacts: [{ name: "handoff", contains: ["validation"] }],
+        forbidden_edits: ["forbidden.txt"],
+        supervisor: {
+          classifications: [],
+          gatherers: [],
+          apply_actions: []
+        }
+      },
+      grading: {
+        dimensions: ["artifact_quality", "graph_contract_adherence"]
+      }
+    }, null, 2)}\n`
+  );
+  await writeFile(
+    join(suiteDir, "eval.json"),
+    `${JSON.stringify({
+      version: "2",
+      suite_id: "workflow-quality",
+      objective: "Evaluate complete Agentflow workflow behavior.",
+      default_trials: 2,
+      scenarios: ["scenarios/artifact-discipline/scenario.json"],
+      variants: ["variants/current.json"],
+      graders: [{ id: "deterministic", kind: "script", command: "node graders/deterministic.mjs" }],
+      judges: [{ id: "artifact-quality", rubric: "judges/artifact-quality.md" }],
+      thresholds: {
+        pass_rate: 1,
+        max_blocker_rate: 0,
+        min_average_score: 4
+      }
+    }, null, 2)}\n`
+  );
 
-    const loaded = await loadEvalSuite(tempRoot, join(suiteDir, "suite.json"));
+  return suiteDir;
+}
+
+describe("eval suite v2 loading", () => {
+  it("loads scenario, variant, grader, judge, and renders graph placeholders", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-v2-suite-"));
+    const suiteDir = await writeMinimalV2Suite(tempRoot);
+
+    const loaded = await loadEvalSuite(tempRoot, suiteDir);
+    const scenario = loaded.scenarios[0]!;
+    const variant = loaded.variants[0]!;
     const rendered = await renderGraphTemplate({
       suite_dir: loaded.suite_dir,
-      template_path: join(suiteDir, "graph.template.json"),
-      case: loaded.cases[0]!
+      template_path: scenario.graph_template_path,
+      scenario,
+      variant,
+      trial: {
+        index: 1,
+        id: "trial-001",
+        root: "/tmp/trial"
+      },
+      fixture: {
+        repo: "/tmp/trial/repo"
+      }
     });
     const graph = rendered.graph as {
       graph_id: string;
+      intent: { goal: string };
       repos: { main: { path: string } };
+      profiles: { default: { harness: string } };
       graph: { steps: Array<{ args: string[] }> };
     };
 
     expect(loaded.diagnostics).toEqual([]);
-    expect(loaded.cases).toHaveLength(1);
+    expect(loaded.suite.version).toBe("2");
+    expect(loaded.suite.source_reference).toContain("Demystifying evals for AI agents");
+    expect(loaded.scenarios.map((entry) => entry.id)).toEqual(["artifact-discipline"]);
+    expect(loaded.variants.map((entry) => entry.id)).toEqual(["current"]);
+    expect(loaded.judges.map((entry) => entry.id)).toEqual(["artifact-quality"]);
     expect(rendered.diagnostics).toEqual([]);
-    expect(graph.graph_id).toBe("eval-case-1");
-    expect(graph.repos.main.path).toBe(repoDir);
-    expect(graph.graph.steps[0]?.args.at(-1)).toBe("Say hello");
+    expect(graph.graph_id).toBe("eval-artifact-discipline-current-1");
+    expect(graph.intent.goal).toBe("Node must publish a real handoff artifact.");
+    expect(graph.repos.main.path).toBe("/tmp/trial/repo");
+    expect(graph.profiles.default.harness).toBe("codex-cli");
+    expect(graph.graph.steps[0]?.args.at(-1)).toBe("current");
   });
 
-  it("reports duplicate cases, missing fixtures, invalid thresholds, and bad placeholders", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-suite-invalid-"));
-    const suiteDir = join(tempRoot, "suite");
-    await mkdir(suiteDir, { recursive: true });
+  it("reports unsupported v1 suites, missing fixtures, duplicate ids, and bad placeholders", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-v2-invalid-"));
+    const suiteDir = await writeMinimalV2Suite(tempRoot);
     await writeFile(
-      join(suiteDir, "graph.template.json"),
+      join(suiteDir, "eval.json"),
       `${JSON.stringify({
-        version: "1",
-        graph_id: "bad",
-        repos: {
-          main: {
-            path: "{{case.repos.main.path}}"
-          }
-        },
-        graph: {
-          type: "sequence",
-          id: "root",
-          steps: [
-            {
-              type: "exec",
-              id: "bad_placeholder",
-              command: "node",
-              args: ["-e", "console.log(process.argv[1])", "{{case.missing.value}}"]
-            }
-          ]
-        }
-      })}\n`
+        version: "2",
+        suite_id: "bad",
+        objective: "bad",
+        default_trials: 0,
+        scenarios: [
+          "scenarios/artifact-discipline/scenario.json",
+          "scenarios/artifact-discipline/scenario.json"
+        ],
+        variants: ["variants/current.json", "variants/current.json"],
+        judges: [{ id: "missing", rubric: "judges/missing.md" }],
+        thresholds: { pass_rate: 2 }
+      }, null, 2)}\n`
     );
     await writeFile(
-      join(suiteDir, "cases.jsonl"),
-      [
-        JSON.stringify({
-          id: "dupe",
-          task: "first",
-          fixtures: ["fixtures/missing.txt"],
-          repos: { main: { path: "../repo" } }
-        }),
-        JSON.stringify({
-          id: "dupe",
-          task: "second",
-          repos: { main: { path: "../repo" } }
-        })
-      ].join("\n")
+      join(suiteDir, "scenarios", "artifact-discipline", "graph.template.json"),
+      `${JSON.stringify({ graph_id: "{{scenario.missing}}" })}\n`
     );
     await writeFile(
-      join(suiteDir, "suite.json"),
+      join(suiteDir, "scenarios", "artifact-discipline", "scenario.json"),
       `${JSON.stringify({
-        version: "1",
-        suite_id: "bad-suite",
-        target: {
-          graph_template: "graph.template.json"
-        },
-        cases: "cases.jsonl",
-        thresholds: {
-          pass_rate: 2
-        }
-      })}\n`
+        id: "artifact-discipline",
+        bucket: "valid-hard-execution",
+        difficulty: "hard",
+        description: "bad",
+        fixture: { repo: "missing-repo" },
+        workflow: { graph_template: "graph.template.json", harness: "codex-cli" },
+        expected: { final_outcome: "passed" }
+      }, null, 2)}\n`
     );
 
-    const loaded = await loadEvalSuite(tempRoot, join(suiteDir, "suite.json"));
+    const loaded = await loadEvalSuite(tempRoot, suiteDir);
     const messages = loaded.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
 
-    expect(messages).toContain("pass_rate threshold");
-    expect(messages).toContain("Duplicate eval case id");
-    expect(messages).toContain("Fixture path does not exist");
+    expect(messages).toContain("default_trials");
+    expect(messages).toContain("pass_rate");
+    expect(messages).toContain("Duplicate scenario id");
+    expect(messages).toContain("Duplicate variant id");
+    expect(messages).toContain("Fixture repo path does not exist");
+    expect(messages).toContain("Judge rubric path does not exist");
     expect(messages).toContain("Unknown graph template placeholder");
+
+    await writeFile(join(suiteDir, "eval.json"), `${JSON.stringify({ version: "1" })}\n`);
+    const unsupported = await loadEvalSuite(tempRoot, suiteDir);
+    expect(unsupported.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
+      "Eval suite version must be \"2\""
+    );
   });
 
-  it("loads AI rubric grader harness selection and rejects Cursor reasoning_effort", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-suite-harness-"));
-    const suiteDir = join(tempRoot, "suite");
-    await mkdir(suiteDir, { recursive: true });
-    await writeFile(
-      join(suiteDir, "graph.template.json"),
-      `${JSON.stringify({
-        version: "1",
-        graph_id: "eval",
-        graph: {
-          type: "sequence",
-          id: "root",
-          steps: [{ type: "exec", id: "noop", command: "true" }]
-        }
-      })}\n`
-    );
-    await writeFile(join(suiteDir, "cases.jsonl"), `${JSON.stringify({ id: "case", task: "Do it" })}\n`);
-    await writeFile(join(suiteDir, "rubric.md"), "Grade strictly.\n");
-    await writeFile(
-      join(suiteDir, "suite.json"),
-      `${JSON.stringify({
-        version: "1",
-        suite_id: "harness-suite",
-        target: {
-          graph_template: "graph.template.json"
-        },
-        cases: "cases.jsonl",
-        graders: [
-          {
-            id: "cursor-grade",
-            kind: "ai_rubric",
-            harness: "cursor-cli",
-            rubric: "rubric.md",
-            model: "gpt-5.5-extra-high"
-          },
-          {
-            id: "bad-cursor-grade",
-            kind: "ai_rubric",
-            harness: "cursor-cli",
-            rubric: "rubric.md",
-            reasoning_effort: "high"
-          }
-        ]
-      })}\n`
-    );
-
-    const loaded = await loadEvalSuite(tempRoot, join(suiteDir, "suite.json"));
-
-    expect(loaded.suite.graders).toEqual([
-      expect.objectContaining({
-        id: "cursor-grade",
-        harness: "cursor-cli",
-        model: "gpt-5.5-extra-high"
+  it("parses strict judge JSON and rejects malformed judge scores", () => {
+    expect(parseJudgeResult(JSON.stringify({
+      passed_quality_bar: true,
+      score: 4,
+      dimension_scores: { artifact_quality: 4 },
+      blockers: [],
+      rationale: "Good artifact.",
+      prompt_feedback: {
+        helpful_sections: ["Artifact Contract"],
+        noisy_sections: [],
+        missing_guidance: []
+      }
+    }))).toEqual({
+      result: expect.objectContaining({
+        passed_quality_bar: true,
+        score: 4,
+        dimension_scores: { artifact_quality: 4 }
       })
-    ]);
-    expect(loaded.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graders[1].reasoning_effort",
-          message: expect.stringContaining("Cursor AI rubric graders cannot set reasoning_effort")
-        })
-      ])
-    );
+    });
+
+    expect(parseJudgeResult("{bad json").error).toContain("valid JSON");
+    expect(parseJudgeResult(JSON.stringify({ passed_quality_bar: true, score: 6 })).error).toContain("score");
+    expect(parseJudgeResult(JSON.stringify({ passed_quality_bar: true, score: 3, blockers: "none" })).error).toContain("blockers");
   });
 });

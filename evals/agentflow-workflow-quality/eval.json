@@ -1,0 +1,54 @@
+{
+  "version": "2",
+  "suite_id": "agentflow-workflow-quality",
+  "objective": "Dogfood Agentflow evals against hard local workflow scenarios for prompts, supervisor recovery, artifacts, tools, and delivery auditability.",
+  "default_trials": 1,
+  "scenarios": [
+    "scenarios/01-declared-artifact-discipline/scenario.json",
+    "scenarios/02-placeholder-artifact-rejection/scenario.json",
+    "scenarios/03-no-tools-baseline/scenario.json",
+    "scenarios/04-tool-discovery/scenario.json",
+    "scenarios/05-tool-output-changes-direction/scenario.json",
+    "scenarios/06-helper-investigation/scenario.json",
+    "scenarios/07-missing-local-pattern/scenario.json",
+    "scenarios/08-ambiguous-diagnostic/scenario.json",
+    "scenarios/09-missing-dependency-docs/scenario.json",
+    "scenarios/10-version-specific-dependency/scenario.json",
+    "scenarios/11-semantic-acceptance-failure/scenario.json",
+    "scenarios/12-artifact-repair-no-retry/scenario.json",
+    "scenarios/13-repeated-fingerprint/scenario.json",
+    "scenarios/14-parallel-evidence-gather/scenario.json",
+    "scenarios/15-noisy-context-manifest/scenario.json",
+    "scenarios/16-truncated-context-provenance/scenario.json",
+    "scenarios/17-stale-local-docs/scenario.json",
+    "scenarios/18-machine-resolvable-conflict/scenario.json",
+    "scenarios/19-human-authority-conflict/scenario.json",
+    "scenarios/20-missing-authority-credential/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json",
+    "variants/terse.json"
+  ],
+  "graders": [
+    {
+      "id": "workflow-deterministic",
+      "kind": "script",
+      "command": "node graders/workflow-deterministic.mjs"
+    }
+  ],
+  "judges": [
+    { "id": "contract-adherence", "rubric": "judges/contract-adherence.md" },
+    { "id": "artifact-quality", "rubric": "judges/artifact-quality.md" },
+    { "id": "evidence-use", "rubric": "judges/evidence-use.md" },
+    { "id": "supervisor-recovery", "rubric": "judges/supervisor-recovery.md" },
+    { "id": "context-handling", "rubric": "judges/context-handling.md" },
+    { "id": "tool-discipline", "rubric": "judges/tool-discipline.md" },
+    { "id": "noise-efficiency", "rubric": "judges/noise-efficiency.md" },
+    { "id": "delivery-auditability", "rubric": "judges/delivery-auditability.md" }
+  ],
+  "thresholds": {
+    "pass_rate": 0.5,
+    "max_blocker_rate": 1,
+    "min_average_score": 2
+  }
+}

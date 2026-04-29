@@ -41,6 +41,7 @@ export interface RunOutcomeVerificationOptions {
   workspaceChangeArtifacts?: NodeWorkspaceChangeArtifacts;
   harness: HarnessAdapter;
   runId: string;
+  baseEnv?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   runtimeDir?: string;
   now?: () => number;
@@ -270,6 +271,7 @@ function buildVerifierInvocation(options: {
   contextManifest: string;
   outputDir: string;
   runId: string;
+  baseEnv?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   runtimeDir?: string;
 }): AgentInvocation {
@@ -282,6 +284,7 @@ function buildVerifierInvocation(options: {
     sandbox: "read-only",
     skipGitRepoCheck: true,
     model: options.node.effective_policy.model,
+    ...(options.baseEnv ? { baseEnv: options.baseEnv } : {}),
     ...(options.node.effective_policy.reasoning_effort
       ? { reasoningEffort: options.node.effective_policy.reasoning_effort }
       : {}),
@@ -475,6 +478,7 @@ export async function runOutcomeVerification(
       contextManifest: options.contextManifest,
       outputDir: verifierOutputDir,
       runId: options.runId,
+      ...(options.baseEnv ? { baseEnv: options.baseEnv } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {})
     });

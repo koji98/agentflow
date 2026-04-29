@@ -1,0 +1,10 @@
+{
+  "id": "semantic-acceptance-failure",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Outcome verifier should reject superficial success that misses semantic acceptance criteria.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=semantic-acceptance-failure"] }], "forbidden_edits": ["shallow-pass.txt"], "supervisor": { "gatherers": ["semantic_rejudge"] } },
+  "grading": { "dimensions": ["supervisor_recovery_quality", "artifact_quality"] }
+}

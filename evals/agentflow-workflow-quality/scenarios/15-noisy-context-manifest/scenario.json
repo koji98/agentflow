@@ -1,0 +1,10 @@
+{
+  "id": "noisy-context-manifest",
+  "bucket": "valid-noisy-evidence",
+  "difficulty": "hard",
+  "description": "Node should prioritize relevant context when the manifest contains noisy distractors.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=noisy-context-manifest"] }], "forbidden_edits": ["distractor-output.txt"] },
+  "grading": { "dimensions": ["context_handling", "noise_efficiency"] }
+}

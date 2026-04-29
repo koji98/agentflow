@@ -11,6 +11,7 @@ export interface LocalProcessInvocation {
   cwd: string;
   env_files?: string[];
   env: Record<string, string> | undefined;
+  base_env?: NodeJS.ProcessEnv;
   runtime_env?: Record<string, string>;
   timeout_sec: number;
   signal: AbortSignal | undefined;
@@ -43,6 +44,7 @@ async function buildLocalProcessEnv(
   cwd: string,
   envFilePaths: string[] | undefined,
   envOverrides: Record<string, string> | undefined,
+  baseEnv: NodeJS.ProcessEnv,
   runtimeEnv: Record<string, string> | undefined
 ): Promise<Record<string, string>> {
   const baselineKeys =
@@ -51,7 +53,7 @@ async function buildLocalProcessEnv(
       : ["PATH", "HOME", "SHELL", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TERM"];
   const env = Object.fromEntries(
     baselineKeys
-      .map((key) => [key, process.env[key]])
+      .map((key) => [key, baseEnv[key]])
       .filter((entry): entry is [string, string] => typeof entry[1] === "string")
   );
 
@@ -297,6 +299,7 @@ export async function runLocalProcess(
     invocation.cwd,
     invocation.env_files,
     invocation.env,
+    invocation.base_env ?? process.env,
     invocation.runtime_env
   );
 

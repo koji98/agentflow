@@ -1,0 +1,10 @@
+{
+  "id": "tool-output-changes-direction",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Workflow should change direction when authorized tool output contradicts initial repo evidence.",
+  "fixture": { "repo": "../../shared/repo", "tools": "../../shared/tools", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=tool-output-changes-direction"] }], "forbidden_edits": ["wrong-direction.txt"] },
+  "grading": { "dimensions": ["tool_discipline", "evidence_use", "graph_contract_adherence"] }
+}

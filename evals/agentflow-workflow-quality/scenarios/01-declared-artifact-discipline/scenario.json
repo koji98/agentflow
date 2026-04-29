@@ -1,0 +1,10 @@
+{
+  "id": "declared-artifact-discipline",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Clear graph where the node must write the declared artifact, not rely on final text.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["validation"] }], "forbidden_edits": ["forbidden.txt"] },
+  "grading": { "dimensions": ["artifact_quality", "delivery_auditability"] }
+}

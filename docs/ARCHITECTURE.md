@@ -9,6 +9,8 @@ Agentflow has four runtime layers:
 
 The authored graph remains the source of intent. The compiled graph is the executable contract. Runtime artifacts are the audit log. The delivery package is the human review surface.
 
+Agentflow also has an offline eval system in `src/evals/`. It is outside the graph contract: eval suites use version `"2"` files to run normal version `"1"` Agentflow graphs across scenarios, variants, and trials, then grade the resulting run artifacts.
+
 For a more detailed implementation walkthrough with diagrams, see `technical-implementation/runtime-lifecycle.md`, `technical-implementation/context-and-artifacts.md`, and `technical-implementation/runtime-tooling.md`.
 
 ## Authored Graph
@@ -217,7 +219,25 @@ Evaluation has five lanes:
 - Outcome verification is runtime enforcement for passing `agent` attempts. It runs after declared artifacts materialize, writes `verify-outcome.json` and `verify-outcome.md`, and can turn a claimed pass into an `outcome_verification` failure routed through supervision.
 - Supervisor `semantic_evaluation` is an intervention. It is chosen by the supervisor after a failed AI check or semantic uncertainty, spends intervention budget, and writes supervisor evidence.
 - Managed pattern evaluation is authored workflow structure. For example, `pattern_generate_evaluate_fix.evaluation` expands into evaluator and repair-loop nodes as part of the compiled graph.
-- `agentflow eval` is offline product or workflow evaluation. It runs file-backed eval suites against Agentflow workflows and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks.
+- `agentflow eval` is offline workflow evaluation. It runs file-backed suites of scenarios, variants, and repeated trials against Agentflow workflows, grades hard facts with deterministic graders, rates qualitative behavior with LLM judges, and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents).
+
+## Offline Eval System
+
+`src/evals/` owns the workflow benchmark path:
+
+- `types.ts`: v2 suite, scenario, variant, trace packet, scorecard, and benchmark contracts.
+- `suite.ts`: suite loading, path-specific validation diagnostics, graph-template rendering, and strict judge JSON parsing.
+- `runner.ts`: trial workspace setup, local docs/tool fixture wiring, normal `agentflow run` execution, trace packet writing, scorecard aggregation, reports, inspect, and compare.
+- `trace.ts`: normalized packet extraction from run roots.
+- `graders.ts`: script grader execution and LLM judge invocation through the same Codex/Cursor-compatible harness interface as AI checks.
+
+Eval runner inputs are local files. A trial copies the scenario repo fixture, optionally initializes git, optionally starts a local docs fixture, optionally places copied tool fixtures on `PATH`, renders a graph template with scenario/variant/fixture placeholders, and runs the rendered graph through the normal runtime. When a run root exists, grading always proceeds even if the graph failed or paused so expected failure and expected pause cases can be scored.
+
+Eval artifacts are rooted at `<eval-root>` and include `eval-run.json`, `evaluation-ledger.json`, `suite-snapshot.json`, `benchmark.json`, `report.md`, and per-trial directories containing `rendered-graph.json`, `trial.json`, `trace.jsonl`, `trace-packet.json`, `deterministic-results.json`, `judge-results/`, `scorecard.json`, and `summary.md`.
+
+Deterministic grading is authoritative for hard facts: final graph status, required artifacts, forbidden edits, delivery evidence, and expected supervisor classifications/gatherers/actions. LLM judges are for qualitative dimensions such as artifact quality, evidence use, context handling, supervisor recovery quality, tool discipline, noise efficiency, and delivery auditability. Variant ids are anonymized in judge packets.
+
+See `EVALS.md` for authoring guidance, CLI usage, artifact layout, and the built-in dogfood suite.
 
 ## Plugin Tools
 

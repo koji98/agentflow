@@ -217,8 +217,9 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.");
     expect(prompt).toContain("Read the cited zod v4 docs fixture before editing.");
     expect(prompt.indexOf("## Supervisor Recovery Envelope")).toBeLessThan(
-      prompt.indexOf("## Original Authored Node Task (Background)")
+      prompt.indexOf("## Original Authored Node Task (Still Binding)")
     );
+    expect(prompt).toContain("## Original Authored Node Task (Still Binding)");
     expect(prompt).not.toContain("## Supervisor Revised Task");
   });
 });

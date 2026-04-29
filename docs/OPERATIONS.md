@@ -163,7 +163,39 @@ Choose the smallest evaluation lane that matches the question:
 - Let outcome verification grade passing `agent` attempts against authored acceptance criteria. It writes per-attempt verifier artifacts and routes rejected attempts through supervision.
 - Let supervisor `semantic_evaluation` spend intervention budget when a failed AI check or semantic uncertainty needs runtime recovery evidence.
 - Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_generate_evaluate_fix`.
-- Use `agentflow eval` for offline product or workflow suites that compare variants and write `.agentflow/evals` artifacts, including `evaluation-ledger.json`, `benchmark.json`, and `summary.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
+- Use `agentflow eval` for offline workflow suites that compare scenarios, variants, and repeated trials with deterministic graders and LLM judges. It follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and writes `.agentflow/evals` artifacts, including `eval-run.json`, `evaluation-ledger.json`, trial `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
+
+## Run Eval Suites
+
+Use `docs/EVALS.md` as the canonical eval guide. The operational loop is:
+
+```bash
+agentflow eval validate evals/agentflow-workflow-quality
+agentflow eval run evals/agentflow-workflow-quality --variant current --scenario all --trials 3 --eval-root .agentflow/evals/workflow-quality --concurrency 4
+agentflow eval report .agentflow/evals/workflow-quality --format markdown
+agentflow eval inspect .agentflow/evals/workflow-quality --scenario missing-dependency-docs --variant current --trial 1
+agentflow eval compare .agentflow/evals/workflow-quality --baseline current --candidate terse
+```
+
+Run `validate` before `run`; it catches missing scenario files, graph templates, variant files, graders, judges, and fixtures before any expensive harness work starts.
+
+Review eval output in this order:
+
+1. `<eval-root>/report.md`
+2. `<eval-root>/benchmark.json`
+3. failing trial `scorecard.json`
+4. failing trial `deterministic-results.json`
+5. judge `ai-check-result.json` and `last_message.txt`
+6. trial `trace-packet.json`
+7. the underlying Agentflow run root named in `run-root.txt`
+
+For real Codex-backed eval plumbing, run:
+
+```bash
+node scripts/validate-real-evals.mjs --harness codex-cli
+```
+
+The real validator skips only when `codex-cli` is unavailable. When the binary exists, incomplete artifacts, invalid deterministic scorecards, invalid judge output, or incorrect expected behavior fail validation.
 
 ## Delivery Review
 

@@ -1,0 +1,10 @@
+{
+  "id": "missing-local-pattern",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Supervisor should recover when the first attempt misses an established local repository pattern.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=missing-local-pattern"] }], "forbidden_edits": ["legacy-pattern.txt"], "supervisor": { "gatherers": ["pattern_mining"] } },
+  "grading": { "dimensions": ["supervisor_recovery_quality", "context_handling"] }
+}

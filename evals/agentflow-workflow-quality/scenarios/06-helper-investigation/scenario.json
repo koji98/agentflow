@@ -1,0 +1,10 @@
+{
+  "id": "helper-investigation",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Parent workflow should use bounded helper evidence without delegating away responsibility.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=helper-investigation"] }], "forbidden_edits": ["helper-owned-final.md"] },
+  "grading": { "dimensions": ["evidence_use", "delivery_auditability"] }
+}

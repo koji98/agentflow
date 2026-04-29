@@ -1,0 +1,10 @@
+{
+  "id": "no-tools-baseline",
+  "bucket": "valid-hard-execution",
+  "difficulty": "medium",
+  "description": "No-tools baseline should complete a local workflow with concise evidence.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=no-tools-baseline"] }], "forbidden_edits": ["unrelated.txt"] },
+  "grading": { "dimensions": ["noise_efficiency", "artifact_quality"] }
+}

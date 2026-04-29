@@ -17,6 +17,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Need implementation mechanics: read `docs/technical-implementation/` in the repository.
 - Need failure semantics: read [references/failure-and-validation.md](references/failure-and-validation.md).
 - Need examples: read [references/examples.md](references/examples.md).
+- Need workflow eval suites, scenarios, graders, judges, scorecards, benchmarks, or prompt-pack comparisons: use `agentflow-evals`.
 - Need reusable plugin workflows or tools: use `agentflow-plugins`.
 
 ## Default Workflow
@@ -41,7 +42,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Treat `acceptance_criteria` as a runtime contract: passing `agent` attempts are graded by the outcome verifier against graph and node intent. Vague criteria produce vague verification, so write the criteria you want the verifier to enforce.
 - Do not author boilerplate iteration guidance ("iterate until done", "investigate ambiguity", "stop only when blocked") in graph or node `constraints`. The runtime injects a `## Working Loop` section into every standard agent prompt that already covers this, and outcome verification will reject early-bailing.
 - Use deterministic checks for hard facts. Reach for AI checks only when another node depends on the gate or when the deterministic command is genuinely unavailable; do not stack an AI `check` after every agent node to re-evaluate the same acceptance criteria.
-- Treat checks, outcome verification, supervisor `semantic_evaluation`, managed pattern evaluation, and `agentflow eval` as separate lanes.
+- Treat checks, outcome verification, supervisor `semantic_evaluation`, managed pattern evaluation, and `agentflow eval` as separate lanes. Use `agentflow-evals` for the offline eval lane.
 - Make high-impact limits explicit in `constraints` before granting credential-backed, external, or mutating tools.
 - Do not widen scope through supervisor behavior; use repeat-scoped checkpoints or graph edits for planned human decisions, and reserve `pause_for_human` for supervisor safety stops.
 

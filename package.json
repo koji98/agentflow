@@ -31,7 +31,8 @@
     "validate:skills": "node scripts/validate-skills.mjs",
     "validate:smoke": "node scripts/validate-smoke.mjs",
     "validate:confidence": "node scripts/validate-confidence.mjs",
-    "validate:real-harness": "node scripts/validate-real-harness.mjs"
+    "validate:real-harness": "node scripts/validate-real-harness.mjs",
+    "validate:real-evals": "node scripts/validate-real-evals.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

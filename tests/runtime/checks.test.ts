@@ -102,6 +102,46 @@ describe("runtime checks", () => {
     expect((rendered.match(/## Context/g) ?? []).length).toBe(1);
   });
 
+  it("lets eval judges override the AI check output schema without losing raw JSON", async () => {
+    let capturedInvocation: Parameters<HarnessAdapter["run"]>[0] | undefined;
+    const harness = createHarness("codex-cli", async (invocation) => {
+      capturedInvocation = invocation;
+      return {
+        status: "passed",
+        exitCode: 0,
+        stdout: '{"passed_quality_bar":true,"score":4,"dimension_scores":{"artifact_quality":4},"blockers":[],"rationale":"ok","prompt_feedback":{"helpful_sections":[],"noisy_sections":[],"missing_guidance":[]}}'
+      };
+    });
+
+    const outputSchema = '{"passed_quality_bar":true,"score":4}';
+    const result = await runAiCheck({
+      harness,
+      run_id: "run-judge",
+      execution_id: "exec-judge",
+      repo_alias: "eval",
+      repo_path: process.cwd(),
+      model: "gpt-5-judge",
+      node_goal: "Judge the trial.",
+      rubric: "Use the eval judge schema.",
+      output_schema: outputSchema,
+      context_packet_path: "/tmp/context/packet.json",
+      context_manifest_path: "/tmp/context/manifest.md",
+      output_dir: "/tmp",
+      timeout_sec: 30,
+      signal: undefined
+    });
+
+    expect(renderHarnessPrompt(capturedInvocation!)).toContain(outputSchema);
+    expect(result.evaluation.passed).toBe(false);
+    expect(result.evaluation.summary).toContain("boolean passed");
+    expect(result.evaluation.raw).toEqual(
+      expect.objectContaining({
+        passed_quality_bar: true,
+        score: 4
+      })
+    );
+  });
+
   it("runs Cursor AI checks when the harness provides the strict read-only contract", async () => {
     const harness = createHarness("cursor-cli", async () => {
       return {

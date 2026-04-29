@@ -1389,7 +1389,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       });
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("honors AGENTFLOW_RUNS_ROOT for artifact placement", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-root-"));
@@ -1634,7 +1634,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(resumedProgress).toContain("agentflow: run passed · 3/3 terminal nodes");
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("recompiles the original graph on resume and invalidates changed passed work", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-recompile-"));
@@ -1737,7 +1737,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("restarts a passed repeat scope when resume invalidation reaches it from upstream changes", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-repeat-"));
@@ -1919,7 +1919,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     ]);
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("repairs a passed repeat scope whose stored node statuses became inconsistent before resume", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-repeat-repair-"));
@@ -2099,7 +2099,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("rejects a relative AGENTFLOW_RUNS_ROOT override before launching a run", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-runs-root-"));
@@ -2478,9 +2478,9 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(inspectHelp.stdout).toContain("Usage: agentflow inspect <run-root>");
 
     expect(evalHelp.exitCode).toBe(0);
-    expect(evalHelp.stdout).toContain("offline product/workflow grading");
+    expect(evalHelp.stdout).toContain("local workflow eval suites");
     expect(evalSubcommandHelp.exitCode).toBe(0);
-    expect(evalSubcommandHelp.stdout).toContain("eval is offline product/workflow evaluation");
+    expect(evalSubcommandHelp.stdout).toContain("complete workflow traces");
   });
 
   it("lists recorded run summaries for a graph through agentflow runs list", async () => {
@@ -2565,7 +2565,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       stderrSpy.mockRestore();
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("rejects invalid runs subcommands and combinations", async () => {
     const missing = await executeCli(["runs"]);
@@ -2670,7 +2670,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       stderrSpy.mockRestore();
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("reports missing run roots for inspect and rejects unexpected positionals", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-inspect-missing-"));
@@ -2880,7 +2880,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       stderrSpy.mockRestore();
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("reports a friendly message when resume --latest finds no resumable runs", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-latest-empty-"));

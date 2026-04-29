@@ -1,0 +1,10 @@
+{
+  "id": "stale-local-docs",
+  "bucket": "valid-noisy-evidence",
+  "difficulty": "hard",
+  "description": "Node should prefer current repo evidence over stale archived local docs.",
+  "fixture": { "repo": "../../shared/repo", "docs": "../../shared/docs", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=stale-local-docs"] }], "forbidden_edits": ["archived-doc-choice.txt"] },
+  "grading": { "dimensions": ["context_handling", "evidence_use"] }
+}

@@ -124,6 +124,8 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
   context_manifest_path: string;
   context_materials?: ContextPacketMaterializedItem[];
   supervisor_recovery_envelope?: SupervisorRecoveryEnvelope;
+  environment: NodeJS.ProcessEnv;
+  runtime_env?: Record<string, string>;
   signal: AbortSignal | undefined;
   on_stdout_chunk?: (chunk: string) => void;
   on_stderr_chunk?: (chunk: string) => void;
@@ -151,6 +153,8 @@ export interface RunCompiledGraphOptions {
   harnesses?: Partial<Record<HarnessName, HarnessAdapter>>;
   signal?: AbortSignal;
   on_event?: (event: RuntimeEventEnvelope) => Promise<void> | void;
+  environment?: NodeJS.ProcessEnv;
+  runtime_env?: Record<string, string>;
 }
 
 export interface ResumeCompiledGraphOptions extends RunCompiledGraphOptions {
@@ -1507,6 +1511,7 @@ function buildContextMaterialEnv(
 
 function buildNodeRuntimeEnv(context: RuntimeNodeExecutorContext<CompiledExecutableNode>): Record<string, string> {
   return {
+    ...(context.runtime_env ?? {}),
     AGENTFLOW_RUN_ROOT: context.run_root,
     AGENTFLOW_RUN_ID: context.run_id,
     AGENTFLOW_GRAPH_ID: context.graph_id,
@@ -1591,6 +1596,7 @@ async function defaultExecExecutor(
     cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
     ...(env_files !== undefined ? { env_files } : {}),
     env: context.node.env,
+    base_env: context.environment,
     runtime_env: buildNodeRuntimeEnv(context),
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
@@ -1649,6 +1655,7 @@ async function defaultCheckExecutor(
       cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
       ...(env_files !== undefined ? { env_files } : {}),
       env: context.node.env,
+      base_env: context.environment,
       runtime_env: buildNodeRuntimeEnv(context),
       timeout_sec: context.node.effective_policy.timeout_sec,
       pass_if: context.node.pass_if,
@@ -1744,6 +1751,7 @@ async function defaultCheckExecutor(
     repo_alias: context.node.repo,
     repo_path: context.workspace_path,
     model: context.node.effective_policy.model,
+    base_env: context.environment,
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
@@ -1946,6 +1954,7 @@ async function defaultAgentExecutor(
     sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
     ...(context.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
     model: context.node.effective_policy.model,
+    baseEnv: context.environment,
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoningEffort: context.node.effective_policy.reasoning_effort }
       : {}),
@@ -2695,6 +2704,8 @@ async function executeNode(
   result: RuntimeNodeExecutionResult;
 }> {
   const workspace = session.manifest.repo_workspaces[node.repo];
+  const runtimeEnvironment = options.environment ?? process.env;
+  const runtimeEnv = options.runtime_env;
 
   if (!workspace) {
     throw new Error(`Missing workspace binding for repo "${node.repo}".`);
@@ -2764,6 +2775,8 @@ async function executeNode(
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+            environment: runtimeEnvironment,
+            ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -2782,6 +2795,8 @@ async function executeNode(
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+            environment: runtimeEnvironment,
+            ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -2802,6 +2817,8 @@ async function executeNode(
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+            environment: runtimeEnvironment,
+            ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal,
             on_stdout_chunk: logSink.on_stdout_chunk,
             on_stderr_chunk: logSink.on_stderr_chunk
@@ -2821,6 +2838,8 @@ async function executeNode(
               context_manifest_path: context.manifest_path,
               context_materials: context.packet.materials,
               ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+              environment: runtimeEnvironment,
+              ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
               signal,
               on_stdout_chunk: logSink.on_stdout_chunk,
               on_stderr_chunk: logSink.on_stderr_chunk
@@ -2845,6 +2864,8 @@ async function executeNode(
         context_packet_path: context.packet_path,
         context_manifest_path: context.manifest_path,
         ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+        environment: runtimeEnvironment,
+        ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
         signal,
         on_stdout_chunk: logSink.on_stdout_chunk,
         on_stderr_chunk: logSink.on_stderr_chunk
@@ -2864,6 +2885,8 @@ async function executeNode(
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+            environment: runtimeEnvironment,
+            ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal
           })
         : await defaultAgentExecutor(
@@ -2880,6 +2903,8 @@ async function executeNode(
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
               ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+              environment: runtimeEnvironment,
+              ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
               signal,
               on_stdout_chunk: logSink.on_stdout_chunk,
               on_stderr_chunk: logSink.on_stderr_chunk
@@ -3016,6 +3041,7 @@ async function executeNode(
           ...(workspaceChangeArtifacts ? { workspaceChangeArtifacts } : {}),
           harness: verifierHarness,
           runId: session.run_id,
+          baseEnv: options.environment ?? process.env,
           ...(signal ? { signal } : {}),
           runtimeDir: join(options.run_root, "runtime")
         });

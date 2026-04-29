@@ -21,6 +21,12 @@ const requiredAgentflowPluginReferences = [
   "plugin-workflows.md"
 ];
 
+const requiredAgentflowEvalReferences = [
+  "suite-authoring.md",
+  "grading-and-reporting.md",
+  "operations-and-dogfood.md"
+];
+
 const staleSkillContractPatterns = [
   {
     pattern: /"required"\s*:\s*(true|false)/u,
@@ -131,19 +137,22 @@ async function validateSkills() {
 
   record(
     "packaged skills",
-    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-plugins"]),
-    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-plugins"])
-      ? "skills/agentflow and skills/agentflow-plugins are packaged."
-      : `Expected skills/agentflow and skills/agentflow-plugins, found: ${skillDirs.join(", ") || "none"}`
+    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-evals", "agentflow-plugins"]),
+    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-evals", "agentflow-plugins"])
+      ? "skills/agentflow, skills/agentflow-evals, and skills/agentflow-plugins are packaged."
+      : `Expected skills/agentflow, skills/agentflow-evals, and skills/agentflow-plugins, found: ${skillDirs.join(", ") || "none"}`
   );
 
   const requiredFiles = [
     "skills/agentflow/SKILL.md",
     "skills/agentflow/agents/openai.yaml",
+    "skills/agentflow-evals/SKILL.md",
+    "skills/agentflow-evals/agents/openai.yaml",
     "skills/agentflow-plugins/SKILL.md",
     "skills/agentflow-plugins/agents/openai.yaml",
     "skills/README.md",
     ...requiredReferences.map((reference) => `skills/agentflow/references/${reference}`),
+    ...requiredAgentflowEvalReferences.map((reference) => `skills/agentflow-evals/references/${reference}`),
     ...requiredAgentflowPluginReferences.map((reference) => `skills/agentflow-plugins/references/${reference}`)
   ];
   const missingFiles = [];
@@ -168,6 +177,7 @@ async function validateSkills() {
       ...requiredReferences.filter(
       (reference) => !skill.includes(`references/${reference}`)
       ),
+      ...(!skill.includes("agentflow-evals") ? ["agentflow-evals"] : []),
       ...(!skill.includes("agentflow-plugins") ? ["agentflow-plugins"] : [])
     ];
 
@@ -180,13 +190,35 @@ async function validateSkills() {
     );
   }
 
+  if (await fileExists("skills/agentflow-evals/SKILL.md")) {
+    const skill = await readText("skills/agentflow-evals/SKILL.md");
+    const missingReferences = [
+      ...requiredAgentflowEvalReferences.filter(
+        (reference) => !skill.includes(`references/${reference}`)
+      ),
+      ...(!skill.includes("agentflow-plugins") ? ["agentflow-plugins"] : []),
+      ...(!skill.includes("agentflow") ? ["agentflow"] : [])
+    ];
+
+    record(
+      "eval router references",
+      missingReferences.length === 0,
+      missingReferences.length === 0
+        ? "agentflow-evals/SKILL.md routes to every required reference and adjacent skill."
+        : `agentflow-evals/SKILL.md does not route to: ${missingReferences.join(", ")}`
+    );
+  }
+
   const textFiles = [
     "skills/agentflow/SKILL.md",
     "skills/agentflow/agents/openai.yaml",
+    "skills/agentflow-evals/SKILL.md",
+    "skills/agentflow-evals/agents/openai.yaml",
     "skills/agentflow-plugins/SKILL.md",
     "skills/agentflow-plugins/agents/openai.yaml",
     "skills/README.md",
     ...requiredReferences.map((reference) => `skills/agentflow/references/${reference}`),
+    ...requiredAgentflowEvalReferences.map((reference) => `skills/agentflow-evals/references/${reference}`),
     ...requiredAgentflowPluginReferences.map((reference) => `skills/agentflow-plugins/references/${reference}`)
   ];
   const patchMarkerFiles = [];

@@ -1,0 +1,25 @@
+{
+  "version": "2",
+  "suite_id": "basic-local-agentflow-eval",
+  "objective": "Run a tiny local Agentflow workflow and grade its trace packet.",
+  "default_trials": 1,
+  "scenarios": [
+    "scenarios/basic/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json"
+  ],
+  "graders": [
+    {
+      "id": "trace",
+      "kind": "script",
+      "command": "node graders/trace.mjs"
+    }
+  ],
+  "judges": [],
+  "thresholds": {
+    "pass_rate": 1,
+    "max_blocker_rate": 0,
+    "min_average_score": 4
+  }
+}

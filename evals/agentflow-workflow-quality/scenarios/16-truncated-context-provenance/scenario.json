@@ -1,0 +1,10 @@
+{
+  "id": "truncated-context-provenance",
+  "bucket": "valid-noisy-evidence",
+  "difficulty": "hard",
+  "description": "Node should inspect provenance when a context snippet is truncated.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=truncated-context-provenance"] }], "forbidden_edits": ["guessed-context.txt"] },
+  "grading": { "dimensions": ["context_handling", "evidence_use"] }
+}

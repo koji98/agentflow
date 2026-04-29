@@ -75,3 +75,9 @@ Use the same graph and switch launch profiles:
 ```
 
 Both harnesses receive the same Agentflow context, artifacts, tools, timeout, and delivery contract.
+
+## Eval Examples
+
+Eval examples live in `docs/examples/evals/` and the built-in dogfood suite lives in `evals/agentflow-workflow-quality/`.
+
+Use `agentflow-evals` for suite layout, scenario fixtures, variants, deterministic graders, LLM judges, scorecards, and benchmark reports.

@@ -1,0 +1,10 @@
+{
+  "id": "repeated-fingerprint",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Repeated failure fingerprint should escalate gatherer strength and change retry tactics.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=repeated-fingerprint"] }], "forbidden_edits": ["same-tactic.txt"], "supervisor": { "classifications": ["repeated_failure"] } },
+  "grading": { "dimensions": ["supervisor_recovery_quality", "retry_behavior"] }
+}

@@ -6,23 +6,22 @@ Agentflow treats failures as evidence for supervision and delivery. Do not hide 
 
 Supervisor classification includes:
 
-- `environment`
-- `workspace`
-- `context`
-- `artifact`
-- `harness`
-- `timeout`
-- `deterministic_evaluation`
-- `semantic_evaluation`
-- `outcome_verification`
-- `scope_drift`
-- `policy_breach`
-- `operator`
+- `missing_context`
+- `missing_dependency_docs`
+- `wrong_local_pattern`
+- `diagnostic_needed`
+- `artifact_contract_failure`
+- `semantic_misalignment`
+- `policy_or_scope_risk`
+- `harness_unavailable`
+- `operator_pause`
+- `repeated_failure`
 - `unknown`
+- `non_recoverable`
 
-`outcome_verification` failures come from the runtime outcome verifier (see "Outcome Verification" below) and route through the `retry_with_guidance` action. The verifier's findings are written into the next attempt's retry brief so the agent reacts to the rubric, not just a vague "it failed" signal.
+Outcome verifier rejections come from the runtime outcome verifier (see "Outcome Verification" below). The classifier normally maps them to `semantic_misalignment`, or to `missing_dependency_docs` when the failure indicates missing package/API documentation. The verifier's findings flow into the supervisor recovery case file and next-attempt recovery envelope so the agent reacts to concrete evidence, not just a vague "it failed" signal.
 
-Harness failures preserve the harness's own diagnostic first. Structured `result.error` or metadata errors win, then stderr, then the captured final response/stdout. This keeps failures like Cursor authentication errors (`cursor agent login` or missing `CURSOR_API_KEY`) classified as `harness` pauses instead of being hidden behind missing declared artifacts.
+Harness failures preserve the harness's own diagnostic first. Structured `result.error` or metadata errors win, then stderr, then the captured final response/stdout. This keeps failures like Cursor authentication errors (`cursor agent login` or missing `CURSOR_API_KEY`) classified as `harness_unavailable` or policy pauses instead of being hidden behind missing declared artifacts.
 
 ## Hard Failures
 
@@ -47,7 +46,7 @@ These remain hard failures even when a verifier uses soft failure behavior:
 - Outcome verification is an always-on runtime contract that grades every passing `agent` attempt against graph and node intent.
 - Supervisor `semantic_evaluation` is an intervention selected by failure classification and bounded by the supervisor budget.
 - Managed pattern evaluation is authored workflow structure that lowers into generated graph nodes.
-- `agentflow eval` is offline product/workflow evaluation with file-backed suites.
+- `agentflow eval` is offline product/workflow evaluation with file-backed suites. Use `agentflow-evals` for the eval-specific workflow.
 
 ## Outcome Verification
 
@@ -85,6 +84,19 @@ When a successful agent attempt is missing a required artifact and policy allows
 Failed harness attempts do not publish declared artifacts, even if they wrote files before failing. Existing prior output files may appear in later repair prompts as evidence, but the current retry or repair must still write the declared artifacts at the current attempt's expected paths.
 
 If no harness is available and exactly one missing artifact is a human-readable text handoff, the supervisor may synthesize that artifact from the captured `agent_response`. It does not synthesize JSON, other machine-readable artifacts, or multi-artifact contracts from prose; those remain failed until real artifacts exist.
+
+## Recovery Loop
+
+Failed executable attempts enter a recovery loop when budget and policy allow:
+
+1. Persist the exact rendered prompt for the failed attempt.
+2. Build a supervisor case file with node contract, context packet paths, result, artifacts, verifier/check output, prior interventions, and failure fingerprint.
+3. Classify the failure and select evidence gatherers.
+4. Run evidence gatherers such as `local_context`, `pattern_mining`, `dependency_metadata`, `external_context`, `diagnostic_probe`, `semantic_rejudge`, and `investigate_failure`.
+5. Merge patches into one recovery plan.
+6. Apply one action: retry the node, repair an artifact, pause for human authority, or fail terminally.
+
+External context is allowed for read-only evidence gathering, but it cannot change graph intent, acceptance criteria, repo authority, sandbox authority, or declared artifacts.
 
 ## Delivery Failure
 

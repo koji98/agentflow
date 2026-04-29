@@ -1,0 +1,10 @@
+{
+  "id": "placeholder-artifact-rejection",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Workflow should reject placeholder handoffs and require substantive artifact content.",
+  "fixture": { "repo": "../../shared/repo", "init_git": true },
+  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
+  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=placeholder-artifact-rejection", "validation"] }], "forbidden_edits": ["TODO.md"] },
+  "grading": { "dimensions": ["artifact_quality", "graph_contract_adherence"] }
+}

@@ -1,0 +1,46 @@
+{
+  "version": "1",
+  "graph_id": "basic-local-agentflow-eval-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "Run the eval case task and preserve execution evidence.",
+    "acceptance_criteria": ["The eval case completes and emits a run trace."]
+  },
+  "repos": {
+    "main": {
+      "path": "{{fixture.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "inplace"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "skip_git_repo_check": true
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "exec",
+        "id": "echo_case",
+        "repo": "main",
+        "command": "node",
+        "args": [
+          "-e",
+          "const fs=require('node:fs'); const path=require('node:path'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.md'), 'hello eval\\n');"
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Basic eval handoff."
+          }
+        }
+      }
+    ]
+  }
+}

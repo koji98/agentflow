@@ -32,7 +32,7 @@ Author graphs as supervised execution contracts. The graph should say what the t
 - If a node uses external, secret, write, or mutation tools, put explicit limits in graph or node `constraints`.
 - If a loop needs a planned human decision, use a `checkpoint` inside the `repeat` body; do not model supervisor safety pauses as authored nodes.
 - If outcome quality needs judgment, prefer authoring strong `acceptance_criteria` on the agent node — runtime outcome verification will grade the attempt against them. Use `check` nodes only for in-run sensing that needs deterministic commands or that another node depends on; do not stack an AI `check` after each agent node solely to evaluate the same acceptance criteria.
-- Use managed pattern evaluation for authored repair loops, and `agentflow eval` for offline suite grading.
+- Use managed pattern evaluation for authored repair loops, and use `agentflow-evals` when designing offline `agentflow eval` suites.
 - If the compiled shape is hard to explain in prose, generate Mermaid with `validate --diagram-output` or a rendered review image with `validate --diagram-image-output`.
 
 ## Node Sizing

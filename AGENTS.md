@@ -8,12 +8,13 @@ This repository is the current Agentflow workspace. Prefer the repository docs a
 2. `docs/SCOPE.md`
 3. `docs/OPERATIONS.md`
 4. `docs/ARCHITECTURE.md`
-5. `docs/MANAGED_PATTERNS.md`
-6. `docs/PLUGINS.md`
-7. `docs/PATTERN_DEEP_RESEARCH.md`
-8. `docs/PATTERN_SPEC_DESIGN.md`
-9. `docs/PATTERN_GENERATE_EVALUATE_FIX.md`
-10. `docs/PATTERN_REVIEW_CHANGE.md`
+5. `docs/EVALS.md`
+6. `docs/MANAGED_PATTERNS.md`
+7. `docs/PLUGINS.md`
+8. `docs/PATTERN_DEEP_RESEARCH.md`
+9. `docs/PATTERN_SPEC_DESIGN.md`
+10. `docs/PATTERN_GENERATE_EVALUATE_FIX.md`
+11. `docs/PATTERN_REVIEW_CHANGE.md`
 
 ## Canonical Surface
 
@@ -25,6 +26,7 @@ Treat these paths as the source of truth for review, implementation, and validat
 - `scripts/validate-smoke.mjs`
 - `scripts/validate-confidence.mjs`
 - `scripts/validate-real-harness.mjs`
+- `scripts/validate-real-evals.mjs`
 
 ## Generated Or Installed State
 
