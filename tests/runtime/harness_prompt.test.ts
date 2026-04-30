@@ -35,16 +35,16 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
     expect(prompt.indexOf("## Node Task")).toBeLessThan(prompt.indexOf("## Graph Context"));
     expect(prompt).toContain("The node task is the controlling objective.");
-    expect(prompt).toContain("Use this to understand why this node exists.");
+    expect(prompt).toContain("Why this node exists.");
     expect(prompt).not.toContain("## Diagnostics");
   });
 
   it("keeps context metadata just-in-time through packet and provenance paths", () => {
     const prompt = renderHarnessPrompt(baseInvocation());
 
-    expect(prompt).toContain("Read the manifest first");
-    expect(prompt).toContain("Context packet (exact materialized paths, omissions, and structured metadata): /tmp/run/context/packet.json");
-    expect(prompt).toContain("Context provenance (digests and harness instruction inputs, if needed): /tmp/run/context/provenance.json");
+    expect(prompt).toContain("Read the manifest, then open only the materialized items relevant to this task.");
+    expect(prompt).toContain("Context packet: /tmp/run/context/packet.json");
+    expect(prompt).toContain("Context provenance: /tmp/run/context/provenance.json");
     expect(prompt).not.toContain("Run ID:");
     expect(prompt).not.toContain("Execution ID:");
   });
@@ -82,26 +82,27 @@ describe("harness prompt rendering", () => {
 
     expect(prompt).toContain("copy those strings exactly into the artifact body");
     expect(prompt).toContain("`Scenario:` is not satisfied by `# Scenario` or a paraphrase");
-    expect(prompt).toContain("Do not leave placeholder text, blank link labels, unresolved template fields, or empty evidence slots.");
+    expect(prompt).toContain("do not encode newlines as literal `\\n`");
+    expect(prompt).toContain("contains no placeholder text, blank evidence slots, or unresolved template values.");
   });
 
   it("renders a Working Loop section that anchors iterate-until-done behavior on the agent path", () => {
     const prompt = renderHarnessPrompt(baseInvocation());
 
     expect(prompt).toContain("## Working Loop");
-    expect(prompt).toContain("Drive this node to completion within its boundary.");
+    expect(prompt).toContain("Drive the node to completion within its boundary");
     expect(prompt).toContain(
-      "Default loop: inspect context and repo state, plan the smallest maintainable path, execute, run the validation named by the task or context, fix failures or open questions, then rerun validation."
+      "inspect relevant context/repo state, make the smallest maintainable change, run named validation"
     );
-    expect(prompt).toContain("For every major scope-affecting decision");
+    expect(prompt).toContain("For major scope-affecting decisions");
     expect(prompt).toContain("af log --type decision");
-    expect(prompt).toContain("--rationale <why you made that decision>");
-    expect(prompt).toContain("Final artifacts must be consistent with the decision log.");
+    expect(prompt).toContain("--rationale <why>");
     expect(prompt).toContain("Investigate ambiguity instead of guessing");
-    expect(prompt).toContain("The word Agentflow names the runner, not the work target.");
-    expect(prompt).toContain("Do not consult global Agentflow skills, installed assistant skills");
-    expect(prompt).toContain("Use `af --help` or `af <command> --help` only when you need an option or output detail not shown here.");
-    expect(prompt).toContain("Be persistent without thrashing");
+    expect(prompt).toContain("Agentflow is the runner, not the work target.");
+    expect(prompt).toContain("Do not open or follow global Agentflow skills");
+    expect(prompt).toContain("stop and respond immediately");
+    expect(prompt).toContain("Use `af --help` only when the options below are insufficient.");
+    expect(prompt).toContain("If the same tactic fails twice with the same symptom");
     expect(prompt).toContain(
       "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected."
     );

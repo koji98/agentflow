@@ -50,7 +50,7 @@
       "package_manager": "npm",
       "regression_patch": "regression.patch",
       "setup_command": "npm install --ignore-scripts --no-audit --no-fund --legacy-peer-deps",
-      "focused_test_command": "npx mocha --require @babel/register test/agentflow-realworld-slug.test.js",
+      "focused_test_command": "npx mocha --require @babel/register --exit test/agentflow-realworld-slug.test.js",
       "allowed_changed_globs": [
         "src/lib/isSlug.js"
       ],

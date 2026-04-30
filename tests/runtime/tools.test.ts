@@ -941,8 +941,8 @@ describe("formatToolContract", () => {
     expect(heading).toBe("## Available Tools");
 
     const text = lines.join("\n");
-    expect(text).toContain("short selection hints, not full API docs");
-    expect(text).toContain("Run `<tool> --help` before first use");
+    expect(text).toContain("Use a tool only when it directly fits the node task.");
+    expect(text).toContain("run `<tool> --help` when usage is unclear");
     expect(text.indexOf("### alpha-cli")).toBeLessThan(text.indexOf("### zeta-poll"));
     expect(text).toContain("### alpha-cli (from plugin \"alphaplug\" (tool: alpha))");
     expect(text).toContain("### zeta-poll (from plugin \"zetaplug\" (tool: poll))");
@@ -994,8 +994,8 @@ describe("formatToolContract", () => {
 
     expect(prompt).toContain("## Available Tools");
     expect(prompt).toContain("### babysit-poll (from plugin \"babysit\" (tool: poll))");
-    expect(prompt).toContain("Run `<tool> --help` before first use");
-    expect(prompt).toContain("Use `af --help` or `af <command> --help` only when you need an option or output detail not shown here.");
+    expect(prompt).toContain("run `<tool> --help` when usage is unclear");
+    expect(prompt).toContain("Use `af --help` only when the options below are insufficient.");
   });
 
   it("renders graph and node intent into agent prompts", () => {

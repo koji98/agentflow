@@ -24,7 +24,7 @@ index 000000000..d3269d87a
 +Run:
 +
 +```bash
-+npx mocha --require @babel/register test/agentflow-realworld-url-port.test.js
++npx mocha --require @babel/register --exit test/agentflow-realworld-url-port.test.js
 +```
 +
 +## Agentflow Output Contract

@@ -27,7 +27,7 @@ index 000000000..a92de7652
 +Run:
 +
 +```bash
-+npx mocha --require @babel/register test/agentflow-realworld-slug.test.js
++npx mocha --require @babel/register --exit test/agentflow-realworld-slug.test.js
 +```
 +
 +## Agentflow Output Contract

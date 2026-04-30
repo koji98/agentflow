@@ -13,7 +13,8 @@ import {
   renderOutcomeVerificationPrompt,
   truncateForPrompt,
   type OutcomeVerificationPromptArtifactSnippet,
-  type OutcomeVerificationPromptDecisionLogEntry
+  type OutcomeVerificationPromptDecisionLogEntry,
+  type OutcomeVerificationPromptExecutionEvidence
 } from "./prompt.js";
 import type {
   OutcomeVerificationFinding,
@@ -22,6 +23,7 @@ import type {
 
 const verifierExecutionIdSuffix = "__verifier";
 const maxArtifactPromptBytes = 24 * 1024;
+const maxExecutionEvidencePromptBytes = 14 * 1024;
 const verifierMaxAttempts = 2;
 const verifierTimeoutSec = 600;
 const verifierRetryDelayMs = 250;
@@ -126,6 +128,102 @@ async function buildWorkspaceDiffSnippet(
     status_path: artifacts.status_path,
     changed_files_path: artifacts.changed_files_path,
     ...(captureError ? { capture_error: captureError } : {})
+  };
+}
+
+function tailText(value: string, maxBytes: number): { content: string; truncated: boolean } {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) {
+    return { content: value, truncated: false };
+  }
+
+  const marker = "\n... [earlier log output omitted] ...\n";
+  const buffer = Buffer.from(value, "utf8");
+  const markerBytes = Buffer.byteLength(marker, "utf8");
+  const sliced = buffer.subarray(Math.max(0, buffer.length - Math.max(0, maxBytes - markerBytes)));
+  return {
+    content: `${marker}${sliced.toString("utf8")}`,
+    truncated: true
+  };
+}
+
+function isTranscriptBoundary(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed === "thinking"
+    || trimmed === "codex"
+    || trimmed === "exec"
+    || trimmed === "apply_patch"
+    || trimmed === "file update:"
+    || trimmed.startsWith("apply_patch(");
+}
+
+function extractCommandTranscript(raw: string): string {
+  const lines = raw.split(/\r?\n/u);
+  const blocks: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index]?.trim() !== "exec") {
+      continue;
+    }
+
+    const block: string[] = [lines[index] ?? "exec"];
+    let outputLineCount = 0;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = lines[cursor] ?? "";
+      if (outputLineCount > 0 && isTranscriptBoundary(line)) {
+        break;
+      }
+
+      block.push(line);
+      outputLineCount += 1;
+      if (outputLineCount >= 22) {
+        block.push("... [command output truncated] ...");
+        break;
+      }
+    }
+
+    blocks.push(block.join("\n").trimEnd());
+  }
+
+  return blocks.slice(-10).join("\n\n");
+}
+
+async function buildExecutionEvidenceSnippet(attempt: RuntimeNodeAttempt): Promise<OutcomeVerificationPromptExecutionEvidence | undefined> {
+  if (!attempt.stdout_log_path && !attempt.stderr_log_path) {
+    return undefined;
+  }
+
+  const readErrors: string[] = [];
+  let stderr = "";
+  let stdout = "";
+
+  if (attempt.stderr_log_path) {
+    try {
+      stderr = await readFile(attempt.stderr_log_path, "utf8");
+    } catch (error) {
+      readErrors.push(`stderr: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (attempt.stdout_log_path) {
+    try {
+      stdout = await readFile(attempt.stdout_log_path, "utf8");
+    } catch (error) {
+      readErrors.push(`stdout: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const commandTranscript = stderr.length > 0 ? extractCommandTranscript(stderr) : "";
+  const fallbackTranscript = commandTranscript.length > 0
+    ? commandTranscript
+    : [stderr, stdout].filter((entry) => entry.trim().length > 0).join("\n\n");
+  const { content, truncated } = tailText(fallbackTranscript, maxExecutionEvidencePromptBytes);
+
+  return {
+    ...(attempt.stdout_log_path ? { stdout_path: attempt.stdout_log_path } : {}),
+    ...(attempt.stderr_log_path ? { stderr_path: attempt.stderr_log_path } : {}),
+    ...(content.trim().length > 0 ? { excerpt: content } : {}),
+    ...(truncated ? { truncated } : {}),
+    ...(readErrors.length > 0 ? { read_error: readErrors.join("; ") } : {})
   };
 }
 
@@ -414,6 +512,7 @@ export async function runOutcomeVerification(
   }
 
   const workspaceDiffSnippet = await buildWorkspaceDiffSnippet(options.workspaceChangeArtifacts);
+  const executionEvidence = await buildExecutionEvidenceSnippet(options.attempt);
   const decisionLogEntries = await readDecisionLogEntries({
     executionId: options.attempt.execution_id,
     ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {})
@@ -434,6 +533,7 @@ export async function runOutcomeVerification(
     agent_response_snippet: agentResponseSnippet,
     declared_artifact_snippets: declaredArtifactSnippets,
     decision_log_entries: decisionLogEntries,
+    ...(executionEvidence ? { execution_evidence: executionEvidence } : {}),
     workspace_diff_snippet: workspaceDiffSnippet,
     workspace_path: options.workspacePath,
     attempt: {

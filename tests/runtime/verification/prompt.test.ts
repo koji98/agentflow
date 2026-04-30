@@ -44,6 +44,12 @@ function buildInput(overrides: Partial<OutcomeVerificationPromptInput> = {}): Ou
         log_id: "log_decision_1"
       }
     ],
+    execution_evidence: {
+      stdout_path: "/run/widget/logs/stdout.log",
+      stderr_path: "/run/widget/logs/stderr.log",
+      excerpt: "/bin/zsh -lc 'npm test' succeeded in 1s:\nwidget tests passed\n",
+      truncated: false
+    },
     workspace_diff_snippet: {
       status: "captured",
       changed_file_count: 1,
@@ -80,6 +86,9 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("Use the existing widget module path");
     expect(prompt).toContain("The node contract asks for the focused widget module");
     expect(prompt).toContain("Context manifest listed widget.ts as the relevant source file.");
+    expect(prompt).toContain("## Captured Execution Evidence");
+    expect(prompt).toContain("/bin/zsh -lc 'npm test' succeeded in 1s");
+    expect(prompt).toContain("Prefer it over rerunning commands");
     expect(prompt).toContain("/run/widget/workspace-changes/diff.patch");
     expect(prompt).toContain("Diff excerpt: (not inlined by default");
     expect(prompt).not.toContain("export const widget = 1;");
@@ -141,6 +150,16 @@ describe("renderOutcomeVerificationPrompt", () => {
     );
     expect(prompt).toContain("Missing or sparse decision logs should usually be a warning, not a blocker");
     expect(prompt).toContain("(no decision log entries captured)");
+  });
+
+  it("does not require captured execution evidence", () => {
+    const input = buildInput();
+    delete (input as { execution_evidence?: unknown }).execution_evidence;
+
+    const prompt = renderOutcomeVerificationPrompt(input);
+
+    expect(prompt).toContain("## Captured Execution Evidence");
+    expect(prompt).toContain("(no execution transcript captured)");
   });
 
   it("instructs the model to respond with a single fenced JSON block", () => {

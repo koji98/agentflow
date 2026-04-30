@@ -280,9 +280,9 @@ describe("codex cli harness", () => {
       expect(prompt.indexOf("## Node Task")).toBeLessThan(prompt.indexOf("## Graph Context"));
       expect(prompt).toContain("## Context");
       expect(prompt).toContain("# Context Manifest");
-      expect(prompt).toContain("Context packet (exact materialized paths, omissions, and structured metadata)");
+      expect(prompt).toContain("Context packet:");
       expect(prompt).toContain(join(executionDir, "context", "packet.json"));
-      expect(prompt).toContain("Context provenance (digests and harness instruction inputs, if needed)");
+      expect(prompt).toContain("Context provenance:");
       expect(prompt).toContain("Output directory");
       expect(prompt).toContain("Sandbox: workspace-write - edit files in the workspace");
       expect(prompt).toContain("## Artifact Contract");
@@ -296,8 +296,8 @@ describe("codex cli harness", () => {
       expect(prompt).not.toContain("$AGENTFLOW_WORKSPACE/reports/junit.xml");
       expect(prompt).toContain("Expected content: JUnit XML report written by the workspace validation command.");
       expect(prompt).toContain("## Final Handoff");
-      expect(prompt).toContain("captured automatically by Agentflow as the reserved `agent_response` artifact");
-      expect(prompt).toContain("Artifacts produced: names and paths of declared artifacts you wrote.");
+      expect(prompt).toContain("captured as the reserved `agent_response` artifact");
+      expect(prompt).toContain("Summarize outcome, work completed, artifacts produced, validation, and blockers/risks.");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,

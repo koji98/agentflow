@@ -312,16 +312,16 @@ describe("cursor cli harness", () => {
       expect(prompt).toContain("Review the change.");
       expect(prompt).toContain("## Context");
       expect(prompt).toContain("# Context Manifest");
-      expect(prompt).toContain("Context packet (exact materialized paths, omissions, and structured metadata)");
+      expect(prompt).toContain("Context packet:");
       expect(prompt).toContain(join(executionDir, "context", "packet.json"));
-      expect(prompt).toContain("Context provenance (digests and harness instruction inputs, if needed)");
+      expect(prompt).toContain("Context provenance:");
       expect(prompt).toContain("Sandbox: read-only - cannot modify the workspace");
       expect(prompt).toContain("## Artifact Contract");
       expect(prompt).toContain("read-only sandbox prevents file writes");
       expect(prompt).toContain("`review_report` (from `output_dir`)");
       expect(prompt).toContain("Markdown review report for downstream nodes.");
       expect(prompt).toContain("## Final Handoff");
-      expect(prompt).toContain("captured automatically by Agentflow as the reserved `agent_response` artifact");
+      expect(prompt).toContain("captured as the reserved `agent_response` artifact");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,

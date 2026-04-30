@@ -30,7 +30,7 @@
       "model": "gpt-5.4-mini",
       "reasoning_effort": "medium",
       "sandbox": "workspace-write",
-      "timeout_sec": 1800
+      "timeout_sec": 900
     }
   },
   "supervision": {
@@ -66,12 +66,6 @@
             "name": "task",
             "from": "workspace_file",
             "path": "AGENTFLOW_EVAL_TASK.md"
-          },
-          {
-            "name": "readme",
-            "from": "workspace_glob",
-            "path": "README*",
-            "max_files": 1
           }
         ],
         "artifacts": {
