@@ -1,6 +1,6 @@
 ---
 name: agentflow-evals
-description: Use when designing, validating, running, inspecting, or improving Agentflow eval suites, scenarios, variants, deterministic graders, LLM judges, trace packets, scorecards, benchmark reports, prompt-pack experiments, or dogfood workflow-quality evals.
+description: Use when designing, validating, running, inspecting, or improving Agentflow eval suites, scenarios, variants, deterministic graders, LLM judges, trace packets, scorecards, benchmark reports, prompt-pack experiments, dogfood workflow-quality evals, or capability-workflow local repo evals.
 ---
 
 # Agentflow Evals

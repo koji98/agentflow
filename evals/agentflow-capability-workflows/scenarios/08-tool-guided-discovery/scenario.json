@@ -1,0 +1,44 @@
+{
+  "id": "08-tool-guided-discovery",
+  "bucket": "tool-discipline",
+  "difficulty": "hard",
+  "description": "Use a local CLI tool to discover required implementation data.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/08-tool-guided-discovery",
+    "tools": "../../../../eval-repos/agentflow-capability-workflows/tools",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/agent-tool.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Scenario:",
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {}
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "artifact_quality",
+      "evidence_use",
+      "context_handling",
+      "tool_discipline",
+      "supervisor_recovery_quality",
+      "retry_behavior",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  }
+}

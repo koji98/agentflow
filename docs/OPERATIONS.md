@@ -177,6 +177,14 @@ agentflow eval inspect .agentflow/evals/workflow-quality --scenario missing-depe
 agentflow eval compare .agentflow/evals/workflow-quality --baseline current --candidate terse
 ```
 
+For prompt/context iteration against larger local repo fixtures:
+
+```bash
+npm run setup:eval-repos
+agentflow eval validate evals/agentflow-capability-workflows
+agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1 --eval-root .agentflow/evals/capability-workflows --concurrency 2
+```
+
 Run `validate` before `run`; it catches missing scenario files, graph templates, variant files, graders, judges, and fixtures before any expensive harness work starts.
 
 Review eval output in this order:

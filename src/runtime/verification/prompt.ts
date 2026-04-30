@@ -182,6 +182,8 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "- Treat graph and node acceptance criteria as authoritative over any task text that describes an intentionally failing fallback, blocker report, or retry trigger.",
     "- A final response explicitly marked as an intentional failure, retry request, missing-context fallback, or not-done state is blocker evidence unless the acceptance criteria explicitly say that terminal fallback is acceptable.",
     "- A required declared artifact that is empty, placeholder-only, missing the requested content, or inconsistent with the final response is blocker evidence even when the final response claims success.",
+    "- The Declared Artifacts section below is authoritative for artifact presence. If a declared artifact snippet has a path, size/content, and no read error, treat that artifact as present; do not claim it is missing because a separate file search, transcript, or directory listing appears incomplete.",
+    "- Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section, has a read error, or the inlined content proves the artifact does not satisfy the authored artifact contract.",
     "- If an artifact is truncated in this prompt, read the full artifact path before making a blocker judgment that depends on omitted content.",
     "- Set passed=false only when there is strong, concrete, actionable blocker evidence that the node violated the graph or node contract.",
     "- Ambiguous, incomplete, or lower-confidence evidence should become a non-blocker finding unless it directly contradicts a required contract point.",

@@ -1,0 +1,43 @@
+{
+  "id": "04-ui-accessibility",
+  "bucket": "valid-hard-execution",
+  "difficulty": "medium",
+  "description": "Add accessible names to icon-only UI rendering without changing text buttons.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/04-ui-accessibility",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/agent-change.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Scenario:",
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {}
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "artifact_quality",
+      "evidence_use",
+      "context_handling",
+      "tool_discipline",
+      "supervisor_recovery_quality",
+      "retry_behavior",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  }
+}

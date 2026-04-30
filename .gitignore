@@ -12,6 +12,7 @@ prompt-iteration-runs/
 eval-output/
 evals/**/eval-output/
 evals/**/.agentflow/
+eval-repos/
 
 # Host/editor/compiler local state
 .DS_Store

@@ -141,7 +141,7 @@ Fixture behavior:
 - `docs` starts a local HTTP docs fixture and exposes `{{fixture.docs_url}}` to the graph template.
 - `tools` is copied, chmodded, and placed on `PATH` for the trial.
 
-Commit only portable fixture seeds. Do not commit cloned third-party repositories, generated trial workspaces, `.git` directories, package installs, or eval output roots. If a scenario needs a real upstream repository, add a small setup script or documented clone step that creates the fixture locally before `agentflow eval validate` runs.
+Commit only portable fixture seeds. Do not commit cloned third-party repositories, generated eval repos, generated trial workspaces, `.git` directories, package installs, or eval output roots. If a scenario needs a real upstream repository, add a small setup script or documented clone step that creates the fixture locally before `agentflow eval validate` runs.
 
 Template variables available in graph templates:
 
@@ -327,7 +327,7 @@ Store every judge packet, raw harness result, parsed output, model/harness metad
 
 Use `eval compare` to review baseline vs candidate deltas. Capability suites should include hard scenarios with room to improve; regression suites should target near-100% pass rates for behavior that must not drift.
 
-## Dogfood Suite
+## Dogfood Suites
 
 The minimal example suite is:
 
@@ -336,16 +336,26 @@ agentflow eval validate docs/examples/evals/basic
 agentflow eval run docs/examples/evals/basic --eval-root .agentflow/evals/basic --trials 1
 ```
 
-The built-in suite is:
+The lightweight built-in supervisor/runtime suite is:
 
 ```bash
 agentflow eval validate evals/agentflow-workflow-quality
 agentflow eval run evals/agentflow-workflow-quality --variant current --trials 1
 ```
 
-It contains 20 local fake-workflow scenarios covering declared artifact discipline, tool use, helper investigation, missing local context, missing dependency docs, semantic acceptance failure, artifact repair, repeated fingerprints, parallel evidence gathering, noisy evidence, stale docs, machine-resolvable conflicts, and authority-boundary pauses.
+It contains 20 committed local fake-workflow scenarios covering declared artifact discipline, tool use, helper investigation, missing local context, missing dependency docs, semantic acceptance failure, artifact repair, repeated fingerprints, parallel evidence gathering, noisy evidence, stale docs, machine-resolvable conflicts, and authority-boundary pauses.
 
 The suite is a capability eval, not a release gate that must start at 100%. Its job is to expose prompt/runtime/supervisor opportunities and regressions.
+
+The heavier real-repo-fixture suite is:
+
+```bash
+npm run setup:eval-repos
+agentflow eval validate evals/agentflow-capability-workflows
+agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1 --concurrency 2
+```
+
+It writes portable local fixture repositories under ignored `eval-repos/agentflow-capability-workflows/` and should be used for prompt/context iteration. The scenarios cover code repair, docs-backed migration, stale docs conflicts, scoped edits, noisy monorepo targeting, local tool use, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, and expected terminal failure.
 
 ## Real Validation
 

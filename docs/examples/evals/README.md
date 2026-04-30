@@ -12,11 +12,19 @@ agentflow eval report .agentflow/evals/basic --format markdown
 
 Example repos are committed as tiny seed fixtures only. They do not include `.git`, dependency installs, generated workspaces, or eval output. The eval runner copies each seed into an isolated trial workspace and initializes git there when the scenario requests it.
 
-For the full dogfood capability suite, use:
+For the committed fake-workflow dogfood suite, use:
 
 ```bash
 agentflow eval validate evals/agentflow-workflow-quality
 agentflow eval run evals/agentflow-workflow-quality --variant current --trials 1
+```
+
+For the larger local-repo capability suite used for prompt and context iteration, generate ignored fixtures first:
+
+```bash
+npm run setup:eval-repos
+agentflow eval validate evals/agentflow-capability-workflows
+agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1
 ```
 
 See `../../EVALS.md` for suite layout, scenario fixtures, variants, deterministic graders, LLM judges, trace packets, scorecards, and benchmark reports.

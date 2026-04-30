@@ -237,7 +237,7 @@ Eval artifacts are rooted at `<eval-root>` and include `eval-run.json`, `evaluat
 
 Deterministic grading is authoritative for hard facts: final graph status, required artifacts, forbidden edits, delivery evidence, and expected supervisor classifications/gatherers/actions. LLM judges are for qualitative dimensions such as artifact quality, evidence use, context handling, supervisor recovery quality, tool discipline, noise efficiency, and delivery auditability. Variant ids are anonymized in judge packets.
 
-See `EVALS.md` for authoring guidance, CLI usage, artifact layout, and the built-in dogfood suite.
+See `EVALS.md` for authoring guidance, CLI usage, artifact layout, and the built-in dogfood suites.
 
 ## Plugin Tools
 

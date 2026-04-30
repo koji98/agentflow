@@ -59,7 +59,7 @@ Required fields:
 - `workflow.workspace_backend`: `inplace` or `worktree`.
 - `expected.final_outcome`: `passed`, `failed`, `paused`, or `canceled`.
 - `expected.required_artifacts`: artifact names and optional content substrings.
-- `expected.forbidden_edits`: paths that must remain absent or unchanged.
+- `expected.forbidden_edits`: paths that must remain absent after the trial. Use a custom grader for unchanged-existing-file checks.
 - `expected.supervisor`: optional expected classifications, gatherers, and apply actions.
 - `grading.dimensions`: qualitative dimensions for judges.
 
@@ -67,7 +67,7 @@ Expected pause or fail outcomes are valid when the scenario is designed to test 
 
 ## Portable Fixtures
 
-Commit only small seed fixtures that are required to run the suite on a fresh checkout. Do not commit cloned third-party repos, `.git` directories, dependency installs, generated trial workspaces, prompt iteration outputs, or eval output roots.
+Commit only small seed fixtures that are required to run the suite on a fresh checkout. Do not commit cloned third-party repos, `.git` directories, dependency installs, generated trial workspaces, prompt iteration outputs, generated eval repos, or eval output roots.
 
 If a scenario needs a real upstream repository, provide a documented setup script or clone command that creates the fixture locally before validation. The checked-in scenario should reference the local fixture path produced by that setup step.
 

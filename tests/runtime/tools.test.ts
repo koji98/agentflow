@@ -995,7 +995,7 @@ describe("formatToolContract", () => {
     expect(prompt).toContain("## Available Tools");
     expect(prompt).toContain("### babysit-poll (from plugin \"babysit\" (tool: poll))");
     expect(prompt).toContain("Run `<tool> --help` before first use");
-    expect(prompt).toContain("Use `af --help` and `af <command> --help`");
+    expect(prompt).toContain("Use `af --help` or `af <command> --help` only when you need an option or output detail not shown here.");
   });
 
   it("renders graph and node intent into agent prompts", () => {

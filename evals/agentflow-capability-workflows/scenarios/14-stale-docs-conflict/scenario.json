@@ -1,0 +1,44 @@
+{
+  "id": "14-stale-docs-conflict",
+  "bucket": "context-conflict",
+  "difficulty": "hard",
+  "description": "Resolve stale repo docs by preferring the current local HTTP docs fixture.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/14-stale-docs-conflict",
+    "docs": "../../docs/current-api",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/agent-docs.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Scenario:",
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {}
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "artifact_quality",
+      "evidence_use",
+      "context_handling",
+      "tool_discipline",
+      "supervisor_recovery_quality",
+      "retry_behavior",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  }
+}

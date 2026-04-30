@@ -78,6 +78,6 @@ Both harnesses receive the same Agentflow context, artifacts, tools, timeout, an
 
 ## Eval Examples
 
-Eval examples live in `docs/examples/evals/` and the built-in dogfood suite lives in `evals/agentflow-workflow-quality/`.
+Eval examples live in `docs/examples/evals/`. The committed fake-workflow dogfood suite lives in `evals/agentflow-workflow-quality/`, and the larger generated local-repo capability suite lives in `evals/agentflow-capability-workflows/` after running `npm run setup:eval-repos`.
 
 Use `agentflow-evals` for suite layout, scenario fixtures, variants, deterministic graders, LLM judges, scorecards, and benchmark reports.

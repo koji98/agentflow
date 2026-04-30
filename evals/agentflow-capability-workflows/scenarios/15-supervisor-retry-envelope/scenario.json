@@ -1,0 +1,50 @@
+{
+  "id": "15-supervisor-retry-envelope",
+  "bucket": "supervisor-recovery",
+  "difficulty": "medium",
+  "description": "Confirm a failed executable node receives a supervisor recovery envelope on retry.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/15-supervisor-retry-envelope",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/exec-recovery.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Scenario:",
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {
+      "classifications": [
+        "unknown"
+      ],
+      "apply_actions": [
+        "retry_with_guidance"
+      ]
+    }
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "artifact_quality",
+      "evidence_use",
+      "context_handling",
+      "tool_discipline",
+      "supervisor_recovery_quality",
+      "retry_behavior",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  }
+}

@@ -12,6 +12,14 @@ agentflow eval inspect .agentflow/evals/workflow-quality --scenario missing-depe
 agentflow eval compare .agentflow/evals/workflow-quality --baseline current --candidate terse
 ```
 
+For the larger local-repo capability suite:
+
+```bash
+npm run setup:eval-repos
+agentflow eval validate evals/agentflow-capability-workflows
+agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1 --eval-root .agentflow/evals/capability-workflows --concurrency 2
+```
+
 `--concurrency` controls trial-level parallelism, not the scheduler behavior inside one graph run.
 
 ## Review Order
@@ -28,9 +36,9 @@ Start with:
 
 For prompt iteration, inspect `scorecard.prompt_feedback`, judge rationales, and concrete failed assertions before changing prompts or context surfaces.
 
-## Built-In Dogfood Suite
+## Built-In Dogfood Suites
 
-The built-in suite is `evals/agentflow-workflow-quality`.
+The lightweight committed suite is `evals/agentflow-workflow-quality`.
 
 It contains 20 local fake-workflow scenarios covering:
 
@@ -55,6 +63,10 @@ It contains 20 local fake-workflow scenarios covering:
 - missing credentials or authority
 
 It is a capability eval. It is useful even when the pass rate is below 100%, because failures identify where prompts, supervisor recovery, context surfacing, or delivery evidence should improve.
+
+The larger prompt/context iteration suite is `evals/agentflow-capability-workflows`.
+
+It generates ignored local repo fixtures under `eval-repos/agentflow-capability-workflows/` with `npm run setup:eval-repos`. Use it when you need harder end-to-end coverage across code repair, dependency docs, stale docs, noisy monorepos, local tools, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, and expected terminal failure.
 
 ## Real Validation
 

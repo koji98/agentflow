@@ -91,7 +91,7 @@ async function serveStaticFile(root: string, pathname: string): Promise<{
   content_type: string;
 }> {
   const decoded = decodeURIComponent(pathname.replace(/^\/+/u, ""));
-  const target = resolve(root, decoded || "index.html");
+  const target = resolve(root, decoded);
   const rootWithSep = root.endsWith("/") ? root : `${root}/`;
 
   if (!target.startsWith(rootWithSep) && target !== root) {
@@ -100,7 +100,12 @@ async function serveStaticFile(root: string, pathname: string): Promise<{
 
   try {
     const info = await stat(target);
-    const filePath = info.isDirectory() ? join(target, "index.html") : target;
+    let filePath = target;
+    if (info.isDirectory()) {
+      const htmlIndex = join(target, "index.html");
+      const markdownIndex = join(target, "index.md");
+      filePath = await pathExists(htmlIndex) ? htmlIndex : markdownIndex;
+    }
     return {
       status: 200,
       body: await readFile(filePath),

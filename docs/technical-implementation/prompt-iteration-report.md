@@ -1,118 +1,94 @@
 # Prompt Iteration Report
 
-Generated: 2026-04-29T06:46:09.074Z
+Generated: 2026-04-29T22:40:00-04:00
 
-This pass focused on the prompt and context surfaces that affect normal node execution, supervisor recovery, helper nodes, artifact repair, and verification. I followed the scenario-driven prompt iteration loop from Mirascope's prompt iteration writeup: define target behavior, run representative cases, score against explicit expectations, inspect failures/awkward traces, revise the prompt/context surface, then rerun.
+This pass used the real `codex-cli` harness through the Agentflow eval system, not the older synthetic prompt harness. The loop was: run each capability scenario five times, inspect scorecards and raw run artifacts, tune the prompt/context surface, rerun the failing clusters, then run a full suite pass.
 
 ## Run Summary
 
-- Final validation pass: 340 prompt/context scenario iterations.
-- Final pass coverage: 20 iterations across 17 scenarios.
-- Total scenario iterations across tuning passes: 940.
-- Final pass result: every scenario scored 1.0000 with no failed rules.
-- Final raw results: `prompt-iteration-runs/pass-4/results.json` (generated local output; ignored by git).
+- Baseline full run: `.agentflow/evals/capability-workflows-baseline`
+  - 80 trials, 75 passed, pass rate `0.9375`, average score `4.33`.
+- Tuned full run: `.agentflow/evals/capability-workflows-tuned-full`
+  - 80 trials, 79 passed, pass rate `0.9875`, average score `4.3713`.
+  - The single failure was scenario 08 before the local tool fixture was corrected.
+- Final targeted tool rerun: `.agentflow/evals/capability-workflows-tuned-08-pass2`
+  - 5 trials, 5 passed, average score `4.40`.
+- Effective final coverage after applying the targeted scenario 08 rerun:
+  - 80/80 passed across the 16 scenarios, with each scenario run at least 5 times.
+  - Effective average score: `4.4063`.
 
-## Scenario Coverage
+## Final Scenario Results
 
-| Scenario | Runs | Avg Score | Failed Rules |
-| --- | ---: | ---: | --- |
-| agent-no-tools | 20 | 1.0000 | none |
-| agent-declared-artifact | 20 | 1.0000 | none |
-| agent-with-tools | 20 | 1.0000 | none |
-| agent-read-only | 20 | 1.0000 | none |
-| agent-recovery-retry | 20 | 1.0000 | none |
-| supervisor-evidence-external | 20 | 1.0000 | none |
-| supervisor-evidence-local | 20 | 1.0000 | none |
-| supervisor-evidence-pattern | 20 | 1.0000 | none |
-| supervisor-evidence-dependency | 20 | 1.0000 | none |
-| supervisor-evidence-diagnostic | 20 | 1.0000 | none |
-| supervisor-evidence-semantic | 20 | 1.0000 | none |
-| supervisor-evidence-investigate | 20 | 1.0000 | none |
-| artifact-repair | 20 | 1.0000 | none |
-| ai-check | 20 | 1.0000 | none |
-| outcome-verifier | 20 | 1.0000 | none |
-| context-manifest-source | 20 | 1.0000 | none |
-| helper-prompt-source | 20 | 1.0000 | none |
+| Scenario | Runs | Passed | Avg Score | Blockers |
+| --- | ---: | ---: | ---: | ---: |
+| 01-config-deep-merge | 5 | 5 | 4.32 | 0 |
+| 02-cache-ttl-regression | 5 | 5 | 4.34 | 0 |
+| 03-api-client-docs-migration | 5 | 5 | 4.46 | 0 |
+| 04-ui-accessibility | 5 | 5 | 4.48 | 0 |
+| 05-design-token-scope | 5 | 5 | 4.56 | 0 |
+| 06-data-normalization | 5 | 5 | 4.38 | 0 |
+| 07-noisy-monorepo-targeting | 5 | 5 | 4.32 | 0 |
+| 08-tool-guided-discovery | 5 | 5 | 4.40 | 0 |
+| 09-cli-error-discipline | 5 | 5 | 4.48 | 0 |
+| 10-no-edit-audit | 5 | 5 | 4.54 | 0 |
+| 11-forbidden-scope-guard | 5 | 5 | 4.36 | 0 |
+| 12-sequence-research-implement | 5 | 5 | 4.54 | 0 |
+| 13-worktree-change-capture | 5 | 5 | 4.40 | 0 |
+| 14-stale-docs-conflict | 5 | 5 | 4.44 | 0 |
+| 15-supervisor-retry-envelope | 5 | 5 | 4.46 | 0 |
+| 16-terminal-repeated-failure | 5 | 5 | 4.02 | 0 |
 
-## Iteration Notes
-
-- Pass 1 proved the basic contract rules, but manual inspection found two prompt-quality issues: non-recovery node prompts skipped a `Start Here` number, and supervisor evidence prompts showed every gather-kind instruction instead of only the selected gatherer's instructions.
-- Pass 2 expanded iterations and caught a brittle diagnostic phrasing issue: the diagnostic prompt had the right safety rule, but the scenario expected the exact lower-case phrase `do not run mutating commands`.
-- Pass 3 confirmed the targeted fixes across 20 iterations per scenario.
-- Pass 4 added coverage for every supervisor evidence gatherer kind: `local_context`, `pattern_mining`, `dependency_metadata`, `external_context`, `diagnostic_probe`, `semantic_rejudge`, and `investigate_failure`.
-
-## Changed Surfaces
+## Findings And Changes
 
 ### Agent Node Prompt
 
 Changed in `src/runtime/harness/types.ts`.
 
-- Added a `Contract Priority` section before the working instructions. This tells the node how to resolve conflicts: authored graph contract first, then supervisor recovery envelope, then declared artifacts/runtime metadata, then retrieved context, then prior attempt outputs.
-- Added a compact `Start Here` checklist so nodes begin by reading recovery material, runtime metadata, context, artifacts, and tool availability before acting.
-- Tightened context uncertainty language: missing, truncated, stale, or contradictory context must be treated as evidence quality problems, not as permission to invent facts.
-- Tightened tool guidance: nodes must not invent tools, hidden commands, credentials, or undocumented flags, and should use structured JSON stdout where practical.
-- Clarified retry behavior: the recovery envelope changes tactics, not the task; original goal, acceptance criteria, constraints, sandbox, repo authority, and declared artifact requirements stay binding.
+- Added explicit declared-artifact discipline: if the task, acceptance criteria, or artifact description requires literal labels or phrases, the agent must copy those strings exactly into the artifact body.
+- Added a final artifact self-check: verify every declared artifact exists at the exact path and does not contain placeholders, blank link labels, unresolved template fields, or empty evidence slots.
+- Added a guard against meta detours: Agentflow is the runner, not the task target, and nodes should not consult global Agentflow skills, installed assistant skills, stale playbooks, or unrelated Agentflow docs unless the authored node explicitly asks.
+- Reduced runtime-help noise: `af --help` is now just-in-time for missing options/details, not a default first step.
 
-Why: failed or retried nodes need an explicit authority order. Without it, supervisor evidence can look like a replacement task rather than evidence that helps satisfy the original graph contract.
-
-### Supervisor Recovery Envelope
-
-Changed in `src/runtime/harness/types.ts`.
-
-- Retitled the original task block from background material to `Original Authored Node Task (Still Binding)`.
-- Added direct language that the next attempt should adapt its plan to the failed symptom after reading cited evidence.
-- Clarified that current-attempt outputs should be written normally and not into prior attempt directories.
-
-Why: retries should not drift into a new mission. The node needs to understand the recovery plan as a tactical correction under the same contract.
-
-### Supervisor Evidence Prompts
-
-Changed in `src/runtime/harness/types.ts`.
-
-- Added gather-kind-specific instructions for every internal evidence gatherer: `local_context`, `pattern_mining`, `dependency_metadata`, `external_context`, `diagnostic_probe`, `semantic_rejudge`, and `investigate_failure`.
-- Made external context explicitly read-only and bounded to evidence gathering; it cannot change graph intent, authority, acceptance criteria, sandbox, or declared artifacts.
-- Made diagnostic probes explicitly non-mutating unless the gatherer is granted authority elsewhere.
-- Required a consistent JSON object containing `claims`, `sources`, `confidence`, `conflicts`, `retry_guidance`, and `scope_or_authority_changed`.
-- Restricted each evidence prompt to only the selected gatherer's guidance.
-
-Why: the recovery loop depends on evidence patches that are specific enough to merge. Generic supervisor prompts made every intervention feel like the same static retry brief.
-
-### Context Manifest
-
-Changed in `src/runtime/context/resolve.ts`.
-
-- Reframed context as evidence, not authority.
-- Added a recommended read order: runtime supervisor recovery material first, authored task context second, repeat/prior-attempt evidence third, omitted/truncated entries only when absence matters.
-- Added omitted/truncated guidance: do not guess required facts; inspect provenance or report uncertainty.
-
-Why: nodes often fail because relevant context exists but is not prioritized, or because absent context is silently guessed. The manifest now tells the node how to use context without widening the graph contract.
+Why: scenario 12 showed that successful implementations could still miss exact artifact labels, and one trial timed out after the model detoured into global Agentflow skill behavior instead of writing a small research artifact.
 
 ### Outcome Verifier Prompt
 
 Changed in `src/runtime/verification/prompt.ts`.
 
-- Made missing, empty, placeholder, inconsistent, or content-free declared artifacts blocker evidence.
-- Told the verifier to read the full artifact path before judging a truncated snippet as a blocker.
-- Required exact citations to artifact paths, decision logs, commands, or response excerpts when making a judgment.
+- Declared artifact snippets in the verifier prompt are now authoritative for artifact presence when they include path/content/size and no read error.
+- The verifier is told not to claim an artifact is missing because a separate directory search or transcript appears incomplete.
 
-Why: verification should catch the common failure mode where the node claims success but the durable handoff is missing or meaningless.
+Why: scenario 14 had a false verification failure where `handoff.md` was inlined in the verifier prompt but the verifier still claimed it was missing.
 
-### Helper Prompt
+### Eval Docs Fixture
 
-Changed in `src/af/index.ts`.
+Changed in `src/evals/runner.ts`.
 
-- Added the same contract-priority and start-checklist structure used by main node prompts.
-- Nudged helper sessions toward `af log --type decision` for major direction changes and `af log --type note` for blockers or completion notes.
-- Kept helper outputs scoped to supervised artifacts rather than implicit side channels.
+- The local docs server now serves `index.md` for directory roots when `index.html` is absent.
 
-Why: helpers can accidentally become unsupervised agents. Their prompt now keeps them inside the node's authority and makes their useful decisions visible to the parent attempt.
+Why: docs-backed scenarios were given a valid local HTTP fixture URL, but root requests returned 404 because the fixture used Markdown. Agents then fell back to tests and negative probe evidence instead of citing the intended docs content.
 
-### Prompt Iteration Harness
+### Eval Scenario Context
 
-Added `scripts/prompt-iteration.mjs`.
+Changed in `evals/agentflow-capability-workflows/templates/*.graph.template.json` and mirrored in `scripts/setup-eval-repos.mjs`.
 
-- Exercises production prompt rendering and source strings from `dist/`.
-- Runs scenario rules repeatedly and emits raw results plus representative rendered outputs.
-- Covers node prompts, supervisor gatherer prompts, repair/check/verifier prompts, context manifests, helper prompt source, tool contracts, and recovery envelope placement.
+- `agent-sequence` now gives the implementation node explicit handoff acceptance criteria and constraints.
+- `agent-docs` now requires literal `Docs evidence:` and forbids editing `docs/**` when repo docs are stale.
+- `agent-tool` now requires a literal `Tool command:` field in the handoff.
 
-Why: prompt changes need regression coverage just like code changes. This gives Agentflow a local prompt-quality loop that can be rerun after future prompt/context edits.
+Why: the evals should test well-authored graphs. Hidden grader expectations are not useful prompt signal when the graph never asked for the behavior.
+
+### Tool Fixture
+
+Changed in `scripts/setup-eval-repos.mjs`.
+
+- Replaced the extensionless Node fixture implementation with a shell wrapper (`fixture-lookup`) that calls `fixture-lookup.cjs`.
+
+Why: direct execution of the extensionless script failed under the repository's `type: module` ancestor. Agents found workarounds, but the eval should test tool discipline, not Node module-resolution trivia.
+
+## Remaining Follow-Ups
+
+- The eval runner still emits a `MaxListenersExceededWarning` during concurrent runs. It did not affect trial outcomes, but it is noisy and should be fixed separately.
+- Judge feedback repeatedly calls out duplicated delivery artifacts (`follow-up-items.md`, `risk-notes.md`, `run-map.md`) on clean passes. Delivery packaging can probably become more compact for successful runs.
+- Several judges noted missing or stale provenance paths in packets. The trace packet should either inline the relevant provenance summary or avoid pointing at paths that are not present in the judge context.
+- Supervisor-recovery judges often need an explicit "not applicable because no intervention occurred" signal on clean-pass scenarios.

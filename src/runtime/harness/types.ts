@@ -270,7 +270,7 @@ function formatRuntimeCliContract(): string[] {
   return [
     "## Agentflow Runtime CLI",
     "`af` is on PATH for this node.",
-    "Use `af --help` and `af <command> --help` as the authoritative runtime API reference for arguments, defaults, output shape, examples, and safety notes.",
+    "The commands below cover routine node work. Use `af --help` or `af <command> --help` only when you need an option or output detail not shown here.",
     "- Use `af status` when you need run metadata, declared artifacts, sandbox, or granted tools.",
     "- Use `af context show` when you need to redisplay the context manifest.",
     "- Use `af artifact write <name> --file <path>` or `af artifact write <name> --content <text>` to publish declared artifacts.",
@@ -343,6 +343,8 @@ function formatArtifactContract(
     "- Downstream nodes can consume only named artifacts published by Agentflow.",
     "- Do not use the final response as a substitute for a declared artifact.",
     "- Prefer `af artifact write <name> --file <path>` or `af artifact write <name> --content <text>` when publishing declared artifacts; direct writes to the exact absolute path are acceptable when that is simpler.",
+    "- If the authored goal, acceptance criteria, or artifact description names required labels, fields, section headings, or exact phrases, copy those strings exactly into the artifact body. For example, `Scenario:` is not satisfied by `# Scenario` or a paraphrase.",
+    "- Before the final response, verify each declared artifact exists at its exact path and skim it for required content. Do not leave placeholder text, blank link labels, unresolved template fields, or empty evidence slots.",
     ...entries.map(([name, artifact]) => {
       const absolutePath =
         artifact.from === "output_dir"
@@ -691,13 +693,13 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
         "Read the supervisor recovery envelope and its listed evidence paths before repeating any failed tactic.",
         "Read the context manifest and materialized context needed for the authored node task.",
         "Inspect the artifact contract and workspace paths before writing durable handoffs.",
-        "Inspect available tools with `--help` before first use when exact behavior matters.",
+        "Inspect available tool help only when the task requires that tool and the prompt does not already give enough usage detail.",
         "Record major scope, implementation, or evidence decisions with `af log --type decision`."
       ]
     : [
         "Read the context manifest and materialized context needed for the authored node task.",
         "Inspect the artifact contract and workspace paths before writing durable handoffs.",
-        "Inspect available tools with `--help` before first use when exact behavior matters.",
+        "Inspect available tool help only when the task requires that tool and the prompt does not already give enough usage detail.",
         "Record major scope, implementation, or evidence decisions with `af log --type decision`."
       ];
   const nodeTask = formatNodeTask(invocation, {
@@ -714,6 +716,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     hasSupervisorRecoveryEnvelope
       ? "A supervisor recovery envelope appears before the authored node task. Use it to recover from prior failure while preserving the unchanged authored contract."
       : "The node task is the controlling objective. Use graph context only to understand why this node exists.",
+    "The word Agentflow names the runner, not the work target. Do not consult global Agentflow skills, installed assistant skills, stale local playbooks, or unrelated Agentflow documentation unless the authored node task explicitly asks for them.",
     "",
     ...formatContractPriority(hasSupervisorRecoveryEnvelope),
     "",
@@ -723,7 +726,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "## Working Loop",
     "Drive this node to completion within its boundary. Do not stop at the first attempt when acceptance criteria are not yet met or when validation has not been run.",
     "Default loop: inspect context and repo state, plan the smallest maintainable path, execute, run the validation named by the task or context, fix failures or open questions, then rerun validation. Repeat until every acceptance criterion is satisfied with cited evidence, or a real blocker prevents progress.",
-    "Investigate ambiguity instead of guessing: read manifest items, inspect the repo, run read-only probes, and consult `--help` on available tools before assuming behavior.",
+    "Investigate ambiguity instead of guessing: read manifest items, inspect the repo, run read-only probes, and consult tool help only when the needed usage is not already provided.",
     "Be persistent without thrashing: if the same approach fails twice with the same symptom, change strategy (re-read context, narrow scope, try a different evidence source) or surface a concrete blocker.",
     "Stop only when (a) every acceptance criterion is satisfied with evidence captured in the declared artifacts and final handoff, or (b) a concrete blocker (missing credentials, unauthorized action, missing upstream artifact, irreducible failure) prevents progress. Document what was tried and the next action a human should take when blocked.",
     "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected.",

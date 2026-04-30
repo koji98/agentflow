@@ -85,6 +85,14 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).not.toContain("export const widget = 1;");
   });
 
+  it("treats inlined declared artifacts as authoritative presence evidence", () => {
+    const prompt = renderOutcomeVerificationPrompt(buildInput());
+
+    expect(prompt).toContain("The Declared Artifacts section below is authoritative for artifact presence.");
+    expect(prompt).toContain("treat that artifact as present; do not claim it is missing");
+    expect(prompt).toContain("Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section");
+  });
+
   it("notes when an artifact was truncated", () => {
     const prompt = renderOutcomeVerificationPrompt(
       buildInput({

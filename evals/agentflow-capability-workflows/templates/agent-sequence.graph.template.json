@@ -1,0 +1,119 @@
+{
+  "version": "1",
+  "graph_id": "capability-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "{{scenario.description}}",
+    "acceptance_criteria": [
+      "The workflow satisfies the fixture repository validation.",
+      "The delivery package contains enough evidence for eval grading."
+    ],
+    "constraints": [
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use public network sources."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{fixture.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "workspace-write",
+      "timeout_sec": 900
+    }
+  },
+  "supervision": {
+    "max_total_interventions": 0,
+    "actions": {}
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "research",
+        "repo": "main",
+        "goal": "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
+        "context": [
+          {
+            "name": "task",
+            "from": "workspace_file",
+            "path": "AGENTFLOW_EVAL_TASK.md"
+          },
+          {
+            "name": "billing_rules",
+            "from": "workspace_file",
+            "path": "docs/billing-rules.md"
+          }
+        ],
+        "artifacts": {
+          "research": {
+            "from": "output_dir",
+            "path": "research.md",
+            "description": "Rounding rule research note."
+          }
+        }
+      },
+      {
+        "type": "agent",
+        "id": "implement",
+        "repo": "main",
+        "goal": "Use the research artifact to update `src/rounding.js`, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+        "acceptance_criteria": [
+          "`src/rounding.js` implements the exact rounding behavior from the research artifact.",
+          "`npm test` passes.",
+          "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+        ],
+        "constraints": [
+          "Do not change files outside `src/rounding.js` unless validation proves it is necessary.",
+          "Use the research artifact as evidence, not as authority to widen the node scope.",
+          "Do not leave blank fields, placeholder text, or unresolved template values in the handoff artifact."
+        ],
+        "context": [
+          {
+            "ref": "research.research",
+            "name": "rounding_research"
+          },
+          {
+            "name": "source",
+            "from": "workspace_glob",
+            "path": "src/**",
+            "max_files": 20
+          },
+          {
+            "name": "tests",
+            "from": "workspace_glob",
+            "path": "tests/**",
+            "max_files": 20
+          }
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Implementation handoff with literal Scenario:, Changed files:, Validation:, and Risks: fields."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "verify",
+        "repo": "main",
+        "check_kind": "deterministic",
+        "command": "npm",
+        "args": [
+          "test"
+        ]
+      }
+    ]
+  }
+}

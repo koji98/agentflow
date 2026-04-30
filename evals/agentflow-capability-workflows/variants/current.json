@@ -1,0 +1,7 @@
+{
+  "id": "current",
+  "description": "Current Agentflow runtime prompts and context rendering.",
+  "env": {
+    "AGENTFLOW_EVAL_PROMPT_PACK": "current"
+  }
+}

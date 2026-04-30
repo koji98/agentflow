@@ -66,6 +66,25 @@ describe("harness prompt rendering", () => {
     expect(prompt).not.toContain("Every declared artifact must exist before you finish");
   });
 
+  it("requires literal artifact labels and placeholder-free declared artifacts", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      nodeAcceptanceCriteria: [
+        "The handoff artifact includes literal `Scenario:`, `Validation:`, and `Risks:` fields."
+      ],
+      artifacts: {
+        handoff: {
+          from: "output_dir",
+          path: "handoff.md",
+          description: "Handoff with literal Scenario:, Validation:, and Risks: fields."
+        }
+      }
+    }));
+
+    expect(prompt).toContain("copy those strings exactly into the artifact body");
+    expect(prompt).toContain("`Scenario:` is not satisfied by `# Scenario` or a paraphrase");
+    expect(prompt).toContain("Do not leave placeholder text, blank link labels, unresolved template fields, or empty evidence slots.");
+  });
+
   it("renders a Working Loop section that anchors iterate-until-done behavior on the agent path", () => {
     const prompt = renderHarnessPrompt(baseInvocation());
 
@@ -79,6 +98,9 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("--rationale <why you made that decision>");
     expect(prompt).toContain("Final artifacts must be consistent with the decision log.");
     expect(prompt).toContain("Investigate ambiguity instead of guessing");
+    expect(prompt).toContain("The word Agentflow names the runner, not the work target.");
+    expect(prompt).toContain("Do not consult global Agentflow skills, installed assistant skills");
+    expect(prompt).toContain("Use `af --help` or `af <command> --help` only when you need an option or output detail not shown here.");
     expect(prompt).toContain("Be persistent without thrashing");
     expect(prompt).toContain(
       "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected."

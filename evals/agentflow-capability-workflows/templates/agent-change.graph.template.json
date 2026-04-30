@@ -1,0 +1,101 @@
+{
+  "version": "1",
+  "graph_id": "capability-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "{{scenario.description}}",
+    "acceptance_criteria": [
+      "The workflow satisfies the fixture repository validation.",
+      "The delivery package contains enough evidence for eval grading."
+    ],
+    "constraints": [
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use public network sources."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{fixture.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "workspace-write",
+      "timeout_sec": 900
+    }
+  },
+  "supervision": {
+    "max_total_interventions": 0,
+    "actions": {}
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "implement",
+        "repo": "main",
+        "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. Make the smallest code change that satisfies the task, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+        "acceptance_criteria": [
+          "The task contract in AGENTFLOW_EVAL_TASK.md is satisfied.",
+          "`npm test` passes.",
+          "The declared handoff artifact includes Scenario, Changed files, Validation, and Risks sections."
+        ],
+        "constraints": [
+          "Do not edit files outside the task scope.",
+          "Do not add dependencies or generated files.",
+          "Treat repo context as evidence; do not guess missing facts."
+        ],
+        "context": [
+          {
+            "name": "task",
+            "from": "workspace_file",
+            "path": "AGENTFLOW_EVAL_TASK.md"
+          },
+          {
+            "name": "source",
+            "from": "workspace_glob",
+            "path": "src/**",
+            "max_files": 30
+          },
+          {
+            "name": "tests",
+            "from": "workspace_glob",
+            "path": "tests/**",
+            "max_files": 20
+          },
+          {
+            "name": "docs",
+            "from": "workspace_glob",
+            "path": "docs/**",
+            "max_files": 20
+          }
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Scenario handoff with changed files, validation, and risks."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "verify",
+        "repo": "main",
+        "check_kind": "deterministic",
+        "command": "npm",
+        "args": [
+          "test"
+        ]
+      }
+    ]
+  }
+}

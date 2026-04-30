@@ -1,0 +1,43 @@
+{
+  "id": "02-cache-ttl-regression",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Repair TTL cache expiration without changing the public API.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/02-cache-ttl-regression",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/agent-change.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Scenario:",
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {}
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "artifact_quality",
+      "evidence_use",
+      "context_handling",
+      "tool_discipline",
+      "supervisor_recovery_quality",
+      "retry_behavior",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "id": "16-terminal-repeated-failure",
+  "bucket": "supervisor-boundary",
+  "difficulty": "medium",
+  "description": "Confirm repeated unrecoverable failure records terminal supervisor evidence.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/16-terminal-repeated-failure",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/exec-terminal.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "failed",
+    "required_artifacts": [],
+    "forbidden_edits": [],
+    "supervisor": {
+      "apply_actions": [
+        "retry_with_guidance"
+      ]
+    }
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "artifact_quality",
+      "evidence_use",
+      "context_handling",
+      "tool_discipline",
+      "supervisor_recovery_quality",
+      "retry_behavior",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  }
+}

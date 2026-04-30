@@ -1,0 +1,99 @@
+{
+  "version": "2",
+  "suite_id": "agentflow-capability-workflows",
+  "objective": "Evaluate Agentflow prompt, context, tool, workspace, artifact, delivery, and supervisor behavior on hard local workflow fixtures.",
+  "default_trials": 1,
+  "scenarios": [
+    "scenarios/01-config-deep-merge/scenario.json",
+    "scenarios/02-cache-ttl-regression/scenario.json",
+    "scenarios/03-api-client-docs-migration/scenario.json",
+    "scenarios/04-ui-accessibility/scenario.json",
+    "scenarios/05-design-token-scope/scenario.json",
+    "scenarios/06-data-normalization/scenario.json",
+    "scenarios/07-noisy-monorepo-targeting/scenario.json",
+    "scenarios/08-tool-guided-discovery/scenario.json",
+    "scenarios/09-cli-error-discipline/scenario.json",
+    "scenarios/10-no-edit-audit/scenario.json",
+    "scenarios/11-forbidden-scope-guard/scenario.json",
+    "scenarios/12-sequence-research-implement/scenario.json",
+    "scenarios/13-worktree-change-capture/scenario.json",
+    "scenarios/14-stale-docs-conflict/scenario.json",
+    "scenarios/15-supervisor-retry-envelope/scenario.json",
+    "scenarios/16-terminal-repeated-failure/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json",
+    "variants/terse.json"
+  ],
+  "graders": [
+    {
+      "id": "capability-deterministic",
+      "kind": "script",
+      "command": "node graders/capability-deterministic.mjs",
+      "timeout_sec": 300
+    }
+  ],
+  "judges": [
+    {
+      "id": "contract-adherence",
+      "rubric": "judges/contract-adherence.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "artifact-quality",
+      "rubric": "judges/artifact-quality.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "evidence-use",
+      "rubric": "judges/evidence-use.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "context-handling",
+      "rubric": "judges/context-handling.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "tool-discipline",
+      "rubric": "judges/tool-discipline.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "supervisor-recovery",
+      "rubric": "judges/supervisor-recovery.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "noise-efficiency",
+      "rubric": "judges/noise-efficiency.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "delivery-auditability",
+      "rubric": "judges/delivery-auditability.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    }
+  ],
+  "thresholds": {
+    "pass_rate": 0.5,
+    "max_blocker_rate": 1,
+    "min_average_score": 2
+  }
+}

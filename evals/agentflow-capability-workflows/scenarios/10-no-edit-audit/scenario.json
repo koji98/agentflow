@@ -1,0 +1,43 @@
+{
+  "id": "10-no-edit-audit",
+  "bucket": "no-edit-audit",
+  "difficulty": "medium",
+  "description": "Audit a package without modifying repo files and produce only a handoff artifact.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/10-no-edit-audit",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/agent-no-edit.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Scenario:",
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {}
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "artifact_quality",
+      "evidence_use",
+      "context_handling",
+      "tool_discipline",
+      "supervisor_recovery_quality",
+      "retry_behavior",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  }
+}

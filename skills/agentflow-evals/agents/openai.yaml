@@ -1,4 +1,4 @@
 interface:
   display_name: "Agentflow Evals"
   short_description: "Design and run workflow eval suites"
-  default_prompt: "Use $agentflow-evals for Agentflow eval suites, scenarios, variants, deterministic graders, LLM judges, trace packets, scorecards, benchmark reports, prompt-pack comparisons, and dogfood workflow-quality evals."
+  default_prompt: "Use $agentflow-evals for Agentflow eval suites, scenarios, variants, deterministic graders, LLM judges, trace packets, scorecards, benchmark reports, prompt-pack comparisons, workflow-quality evals, and capability-workflow local repo evals."

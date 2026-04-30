@@ -1,0 +1,92 @@
+{
+  "version": "1",
+  "graph_id": "capability-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "{{scenario.description}}",
+    "acceptance_criteria": [
+      "The workflow satisfies the fixture repository validation.",
+      "The delivery package contains enough evidence for eval grading."
+    ],
+    "constraints": [
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use public network sources."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{fixture.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "workspace-write",
+      "timeout_sec": 900
+    }
+  },
+  "supervision": {
+    "max_total_interventions": 0,
+    "actions": {}
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "audit",
+        "repo": "main",
+        "goal": "Audit the repository using `AGENTFLOW_EVAL_TASK.md`. Do not modify the repo. Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with findings and validation evidence.",
+        "acceptance_criteria": [
+          "No repository files are modified.",
+          "The handoff includes Scenario, Changed files, Validation, and Risks sections."
+        ],
+        "constraints": [
+          "Do not change repository files; write only the declared output artifact."
+        ],
+        "context": [
+          {
+            "name": "task",
+            "from": "workspace_file",
+            "path": "AGENTFLOW_EVAL_TASK.md"
+          },
+          {
+            "name": "source",
+            "from": "workspace_glob",
+            "path": "src/**",
+            "max_files": 20
+          },
+          {
+            "name": "tests",
+            "from": "workspace_glob",
+            "path": "tests/**",
+            "max_files": 20
+          }
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "No-edit audit handoff."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "verify",
+        "repo": "main",
+        "check_kind": "deterministic",
+        "command": "npm",
+        "args": [
+          "test"
+        ]
+      }
+    ]
+  }
+}

@@ -22,6 +22,7 @@
     "apply": "tsx src/cli/index.ts apply",
     "runs": "tsx src/cli/index.ts runs",
     "inspect": "tsx src/cli/index.ts inspect",
+    "setup:eval-repos": "node scripts/setup-eval-repos.mjs",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
     "typecheck": "tsc --noEmit -p tsconfig.json",

@@ -1,0 +1,43 @@
+{
+  "id": "13-worktree-change-capture",
+  "bucket": "workspace-backend",
+  "difficulty": "medium",
+  "description": "Run an implementation scenario through the worktree backend.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/13-worktree-change-capture",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/agent-worktree.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "worktree"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Scenario:",
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {}
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "artifact_quality",
+      "evidence_use",
+      "context_handling",
+      "tool_discipline",
+      "supervisor_recovery_quality",
+      "retry_behavior",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  }
+}

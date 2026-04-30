@@ -5,7 +5,7 @@ This repository ships installable skills under `skills/`.
 Included skills:
 
 - `agentflow`: supervised graph authoring, validation, execution, inspection, resume, supervision, delivery packages, and Codex/Cursor harness behavior.
-- `agentflow-evals`: workflow eval suites, scenarios, variants, deterministic graders, LLM judges, trace packets, scorecards, benchmark reports, and dogfood evals.
+- `agentflow-evals`: workflow eval suites, scenarios, variants, deterministic graders, LLM judges, trace packets, scorecards, benchmark reports, prompt-pack comparisons, and dogfood/capability evals.
 - `agentflow-plugins`: Git or local plugin workflows, plugin-bundled CLI tools, and secure plugin auth.
 
 The `agentflow` skill routes to compact references:
