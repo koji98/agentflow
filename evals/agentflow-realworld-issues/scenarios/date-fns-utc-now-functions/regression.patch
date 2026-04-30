@@ -1,0 +1,99 @@
+diff --git a/AGENTFLOW_EVAL_TASK.md b/AGENTFLOW_EVAL_TASK.md
+new file mode 100644
+index 0000000000..5b7e7fa7fe
+--- /dev/null
++++ b/AGENTFLOW_EVAL_TASK.md
+@@ -0,0 +1,32 @@
++# Scenario: date-fns-utc-now-functions
++
++## Source Issue
++
++`isToday(new UTCDate())` returns `false`, even though a current UTC date should be today.
++
++This is not only an `isToday` edge case. Helpers that compare an input date extension against the current date should construct "now" with the same date constructor as the input where appropriate.
++
++## Constraints
++
++- Fix production source, not the regression test.
++- Do not use the upstream PR patch, oracle commit, or live GitHub.
++- Do not edit package manifests, lockfiles, generated files, or this task file.
++- Do not edit `vitest.config.ts` or any other validation-only configuration.
++- If validation needs cache/output redirection, use the exact command below; do not persist the workaround in repo files.
++- Keep existing Date and timestamp behavior.
++- Prefer the existing local `constructNow` helper where it fits.
++
++## Validation
++
++Run:
++
++```bash
++npx vitest run src/agentflow-realworld-utc-now/test.ts --cache.dir "${TMPDIR:-/tmp}/agentflow-vitest-cache-date-fns-utc-now"; status=$?; rm -rf .vitest; exit $status
++```
++
++## Agentflow Output Contract
++
++Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with:
++- `Scenario:` date-fns-utc-now-functions
++- `Issue:` one-sentence summary
++- `Changed files:` exact files changed
++- `Validation:` exact command and result
++- `Risks:` remaining uncertainty or `none`
+diff --git a/package.json b/package.json
+index 0863d3a6b0..b8f58de3e0 100644
+--- a/package.json
++++ b/package.json
+@@ -6094,6 +6094,7 @@
+     "@babel/core": "^7.22.10",
+     "@babel/preset-env": "^7.22.10",
+     "@babel/preset-typescript": "^7.22.5",
+     "@date-fns/docs": "^0.29.0",
++    "@date-fns/utc": "^1.2.0",
+     "@octokit/core": "^3.2.5",
+     "@size-limit/esbuild": "^11.0.1",
+     "@size-limit/file": "^11.0.1",
+diff --git a/src/agentflow-realworld-utc-now/test.ts b/src/agentflow-realworld-utc-now/test.ts
+new file mode 100644
+index 0000000000..9b837c94f5
+--- /dev/null
++++ b/src/agentflow-realworld-utc-now/test.ts
+@@ -0,0 +1,40 @@
++import { UTCDate } from "@date-fns/utc";
++import sinon from "sinon";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { formatDistanceToNow } from "../formatDistanceToNow/index.js";
++import { formatDistanceToNowStrict } from "../formatDistanceToNowStrict/index.js";
++import { isThisHour } from "../isThisHour/index.js";
++import { isThisMinute } from "../isThisMinute/index.js";
++import { isToday } from "../isToday/index.js";
++import { isTomorrow } from "../isTomorrow/index.js";
++import { isYesterday } from "../isYesterday/index.js";
++
++describe("Agentflow real-world regression: UTCDate now helpers", () => {
++  let clock: sinon.SinonFakeTimers;
++
++  beforeEach(() => {
++    clock = sinon.useFakeTimers(new Date(2014, 8 /* Sep */, 25, 18, 30, 15, 500).getTime());
++  });
++
++  afterEach(() => {
++    clock.restore();
++  });
++
++  it("respects date extensions for same-day and relative day helpers", () => {
++    expect(isToday(new UTCDate(+new Date(2014, 8 /* Sep */, 25, 18, 30)))).toBe(true);
++    expect(isTomorrow(new UTCDate(+new Date(2014, 8 /* Sep */, 26, 18, 30)))).toBe(true);
++    expect(isYesterday(new UTCDate(+new Date(2014, 8 /* Sep */, 24, 18, 30)))).toBe(true);
++  });
++
++  it("respects date extensions for same-time-unit helpers", () => {
++    expect(isThisHour(new UTCDate(+new Date(2014, 8 /* Sep */, 25, 18, 0)))).toBe(true);
++    expect(isThisMinute(new UTCDate(+new Date(2014, 8 /* Sep */, 25, 18, 30, 0)))).toBe(true);
++  });
++
++  it("respects date extensions in distance-to-now helpers", () => {
++    expect(formatDistanceToNow(new UTCDate(+new Date(2014, 8 /* Sep */, 25, 17, 30, 15, 500)))).toBe("about 1 hour");
++    expect(
++      formatDistanceToNowStrict(new UTCDate(+new Date(2014, 8 /* Sep */, 25, 18, 30, 10, 500))),
++    ).toBe("5 seconds");
++  });
++});

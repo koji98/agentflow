@@ -10,6 +10,8 @@ import type {
   EvalScenarioExpected,
   EvalScenarioFixture,
   EvalScenarioGrading,
+  EvalScenarioMetadata,
+  EvalScenarioRealWorldMetadata,
   EvalScenarioWorkflow,
   EvalScriptGrader,
   EvalSuite,
@@ -35,6 +37,10 @@ function readBoolean(value: unknown): boolean | undefined {
 
 function readNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -330,6 +336,162 @@ function normalizeExpected(value: unknown): EvalScenarioExpected {
   };
 }
 
+function isValidUrl(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname === "github.com";
+  } catch {
+    return false;
+  }
+}
+
+function isFullGitSha(value: string | undefined): boolean {
+  return Boolean(value && /^[a-f0-9]{40}$/u.test(value));
+}
+
+function normalizeRealWorldMetadata(
+  value: unknown,
+  scenarioDir: string,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalScenarioRealWorldMetadata | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Real-world eval metadata must be an object." });
+    return undefined;
+  }
+
+  const source_repo = readString(value.source_repo);
+  const license = readString(value.license);
+  const base_sha = readString(value.base_sha);
+  const issue_url = readString(value.issue_url);
+  const pr_url = readString(value.pr_url);
+  const oracle_commit_sha = readString(value.oracle_commit_sha);
+  const package_manager = readString(value.package_manager);
+  const regression_patch = readString(value.regression_patch);
+  const setup_command = readString(value.setup_command);
+  const focused_test_command = readString(value.focused_test_command);
+  const allowed_changed_globs = readStringArray(value.allowed_changed_globs);
+  const forbidden_changed_globs = readStringArray(value.forbidden_changed_globs);
+  const hidden_oracle_changed_files = readStringArray(value.hidden_oracle_changed_files);
+
+  if (!source_repo) {
+    diagnostics.push({ path: `${path}.source_repo`, message: "Real-world metadata requires source_repo." });
+  }
+
+  if (license !== "MIT") {
+    diagnostics.push({ path: `${path}.license`, message: 'Real-world metadata license must be "MIT".' });
+  }
+
+  if (!isFullGitSha(base_sha)) {
+    diagnostics.push({ path: `${path}.base_sha`, message: "Real-world metadata base_sha must be a full 40-character git SHA." });
+  }
+
+  if (!isValidUrl(issue_url)) {
+    diagnostics.push({ path: `${path}.issue_url`, message: "Real-world metadata issue_url must be a GitHub https URL." });
+  }
+
+  if (!isValidUrl(pr_url)) {
+    diagnostics.push({ path: `${path}.pr_url`, message: "Real-world metadata pr_url must be a GitHub https URL." });
+  }
+
+  if (!isFullGitSha(oracle_commit_sha)) {
+    diagnostics.push({
+      path: `${path}.oracle_commit_sha`,
+      message: "Real-world metadata oracle_commit_sha must be a full 40-character git SHA."
+    });
+  }
+
+  if (!package_manager) {
+    diagnostics.push({ path: `${path}.package_manager`, message: "Real-world metadata requires package_manager." });
+  }
+
+  if (!regression_patch) {
+    diagnostics.push({ path: `${path}.regression_patch`, message: "Real-world metadata requires regression_patch." });
+  }
+
+  if (!setup_command) {
+    diagnostics.push({ path: `${path}.setup_command`, message: "Real-world metadata requires setup_command." });
+  }
+
+  if (!focused_test_command) {
+    diagnostics.push({ path: `${path}.focused_test_command`, message: "Real-world metadata requires focused_test_command." });
+  }
+
+  if (allowed_changed_globs.length === 0) {
+    diagnostics.push({
+      path: `${path}.allowed_changed_globs`,
+      message: "Real-world metadata requires at least one allowed_changed_glob."
+    });
+  }
+
+  if (
+    !source_repo ||
+    license !== "MIT" ||
+    !isFullGitSha(base_sha) ||
+    !isValidUrl(issue_url) ||
+    !isValidUrl(pr_url) ||
+    !isFullGitSha(oracle_commit_sha) ||
+    !package_manager ||
+    !regression_patch ||
+    !setup_command ||
+    !focused_test_command ||
+    allowed_changed_globs.length === 0
+  ) {
+    return undefined;
+  }
+
+  return {
+    source_repo,
+    license,
+    base_sha: base_sha!,
+    issue_url: issue_url!,
+    pr_url: pr_url!,
+    oracle_commit_sha: oracle_commit_sha!,
+    package_manager,
+    regression_patch,
+    regression_patch_path: resolveScenarioPath(scenarioDir, regression_patch),
+    setup_command,
+    focused_test_command,
+    allowed_changed_globs,
+    forbidden_changed_globs,
+    hidden_oracle_changed_files
+  };
+}
+
+function normalizeScenarioMetadata(
+  value: unknown,
+  scenarioDir: string,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalScenarioMetadata {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Eval scenario metadata must be an object." });
+    return {};
+  }
+
+  const metadata: EvalScenarioMetadata = { ...value };
+  const realworld = normalizeRealWorldMetadata(value.realworld, scenarioDir, `${path}.realworld`, diagnostics);
+  if (realworld) {
+    metadata.realworld = realworld;
+  } else {
+    delete metadata.realworld;
+  }
+
+  return metadata;
+}
+
 function normalizeScenario(
   value: unknown,
   scenarioPath: string,
@@ -356,6 +518,7 @@ function normalizeScenario(
   const workspace_backend = workflowRecord?.workspace_backend === "worktree" ? "worktree" : "inplace";
   const launch_profile = workflowRecord ? readString(workflowRecord.launch_profile) : undefined;
   const gradingRecord = isRecord(value.grading) ? value.grading : {};
+  const metadata = normalizeScenarioMetadata(value.metadata, scenarioDir, `scenario:${scenarioPath}.metadata`, diagnostics);
 
   if (!id) {
     diagnostics.push({ path: `scenario:${scenarioPath}.id`, message: "Eval scenario requires non-empty id." });
@@ -436,7 +599,8 @@ function normalizeScenario(
     expected: normalizeExpected(value.expected),
     grading: {
       dimensions
-    } satisfies EvalScenarioGrading
+    } satisfies EvalScenarioGrading,
+    metadata
   };
 }
 
@@ -583,6 +747,13 @@ async function validateLoadedPaths(loaded: LoadedEvalSuite): Promise<void> {
       diagnostics.push({
         path: `scenario:${scenario.id}.workflow.graph_template`,
         message: `Graph template does not exist: ${scenario.workflow.graph_template_path}`
+      });
+    }
+
+    if (scenario.metadata.realworld && !await pathExists(scenario.metadata.realworld.regression_patch_path)) {
+      diagnostics.push({
+        path: `scenario:${scenario.id}.metadata.realworld.regression_patch`,
+        message: `Real-world regression patch does not exist: ${scenario.metadata.realworld.regression_patch_path}`
       });
     }
   }

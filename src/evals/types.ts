@@ -91,6 +91,28 @@ export interface EvalScenarioGrading {
   dimensions: string[];
 }
 
+export interface EvalScenarioRealWorldMetadata {
+  source_repo: string;
+  license: "MIT";
+  base_sha: string;
+  issue_url: string;
+  pr_url: string;
+  oracle_commit_sha: string;
+  package_manager: string;
+  regression_patch: string;
+  regression_patch_path: string;
+  setup_command: string;
+  focused_test_command: string;
+  allowed_changed_globs: string[];
+  forbidden_changed_globs: string[];
+  hidden_oracle_changed_files: string[];
+}
+
+export interface EvalScenarioMetadata {
+  realworld?: EvalScenarioRealWorldMetadata;
+  [key: string]: unknown;
+}
+
 export interface EvalScenario {
   id: string;
   bucket: string;
@@ -102,6 +124,7 @@ export interface EvalScenario {
   workflow: EvalScenarioWorkflow;
   expected: EvalScenarioExpected;
   grading: EvalScenarioGrading;
+  metadata: EvalScenarioMetadata;
 }
 
 export interface EvalVariant {

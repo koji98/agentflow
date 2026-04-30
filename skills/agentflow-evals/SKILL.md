@@ -1,6 +1,6 @@
 ---
 name: agentflow-evals
-description: Use when designing, validating, running, inspecting, or improving Agentflow eval suites, scenarios, variants, deterministic graders, LLM judges, trace packets, scorecards, benchmark reports, prompt-pack experiments, dogfood workflow-quality evals, or capability-workflow local repo evals.
+description: Use when designing, validating, running, inspecting, or improving Agentflow eval suites, scenarios, variants, deterministic graders, LLM judges, trace packets, scorecards, benchmark reports, prompt-pack experiments, dogfood workflow-quality evals, capability-workflow local repo evals, or pinned real-world GitHub issue evals.
 ---
 
 # Agentflow Evals
@@ -19,7 +19,7 @@ Use this skill for `agentflow eval`. Use `agentflow` for graph authoring and run
 ## Default Workflow
 
 1. Decide the eval purpose: capability hill-climb, regression gate, prompt-pack comparison, supervisor recovery validation, tool discipline, or delivery auditability.
-2. Keep fixtures local and stable. Prefer local repo fixtures, local HTTP docs fixtures, and local tool fixtures over public network dependencies.
+2. Keep fixtures local and stable. Prefer local repo fixtures, local HTTP docs fixtures, pinned upstream repo SHAs, and local tool fixtures over live public network dependencies.
 3. Make each scenario hard but solvable, with expected behavior clear enough that two reviewers would grade it the same way.
 4. Put hard facts in deterministic expectations and script graders; use LLM judges only for qualitative workflow behavior.
 5. Compare variants through anonymized judge packets; never rely on variant names to influence LLM grading.

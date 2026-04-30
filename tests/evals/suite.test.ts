@@ -222,6 +222,137 @@ describe("eval suite v2 loading", () => {
     );
   });
 
+  it("validates and preserves real-world scenario metadata", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-realworld-metadata-"));
+    const suiteDir = await writeMinimalV2Suite(tempRoot);
+    const scenarioPath = join(suiteDir, "scenarios", "artifact-discipline", "scenario.json");
+    await writeFile(join(suiteDir, "scenarios", "artifact-discipline", "regression.patch"), "diff --git a/a b/a\n");
+    await writeFile(
+      scenarioPath,
+      `${JSON.stringify({
+        id: "artifact-discipline",
+        bucket: "realworld-regression",
+        difficulty: "hard",
+        description: "Node must fix a pinned real-world issue.",
+        fixture: {
+          repo: "repo",
+          init_git: true
+        },
+        workflow: {
+          graph_template: "graph.template.json",
+          harness: "codex-cli",
+          workspace_backend: "inplace"
+        },
+        expected: {
+          final_outcome: "passed",
+          required_artifacts: [{ name: "handoff", contains: ["validation"] }],
+          forbidden_edits: []
+        },
+        grading: {
+          dimensions: ["evidence_use"]
+        },
+        metadata: {
+          realworld: {
+            source_repo: "owner/project",
+            license: "MIT",
+            base_sha: "0123456789abcdef0123456789abcdef01234567",
+            issue_url: "https://github.com/owner/project/issues/1",
+            pr_url: "https://github.com/owner/project/pull/2",
+            oracle_commit_sha: "abcdef0123456789abcdef0123456789abcdef01",
+            package_manager: "npm",
+            regression_patch: "regression.patch",
+            setup_command: "npm install",
+            focused_test_command: "npm test -- --runInBand",
+            allowed_changed_globs: ["src/**"],
+            forbidden_changed_globs: ["test/**"],
+            hidden_oracle_changed_files: ["src/index.js"]
+          }
+        }
+      }, null, 2)}\n`
+    );
+
+    const loaded = await loadEvalSuite(tempRoot, suiteDir);
+
+    expect(loaded.diagnostics).toEqual([]);
+    expect(loaded.scenarios[0]?.metadata.realworld?.source_repo).toBe("owner/project");
+    expect(loaded.scenarios[0]?.metadata.realworld?.regression_patch_path).toBe(
+      join(suiteDir, "scenarios", "artifact-discipline", "regression.patch")
+    );
+
+    await writeFile(
+      scenarioPath,
+      `${JSON.stringify({
+        id: "artifact-discipline",
+        bucket: "realworld-regression",
+        difficulty: "hard",
+        description: "bad metadata",
+        fixture: { repo: "repo" },
+        workflow: { graph_template: "graph.template.json", harness: "codex-cli" },
+        expected: { final_outcome: "passed" },
+        metadata: {
+          realworld: {
+            source_repo: "owner/project",
+            license: "Apache-2.0",
+            base_sha: "short",
+            issue_url: "not-a-url",
+            pr_url: "https://example.com/pull/2",
+            oracle_commit_sha: "also-short",
+            package_manager: "npm",
+            regression_patch: "missing.patch",
+            setup_command: "npm install",
+            focused_test_command: "npm test",
+            allowed_changed_globs: []
+          }
+        }
+      }, null, 2)}\n`
+    );
+
+    const invalid = await loadEvalSuite(tempRoot, suiteDir);
+    const messages = invalid.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+
+    expect(messages).toContain('license must be "MIT"');
+    expect(messages).toContain("base_sha must be a full 40-character git SHA");
+    expect(messages).toContain("issue_url must be a GitHub https URL");
+    expect(messages).toContain("pr_url must be a GitHub https URL");
+    expect(messages).toContain("oracle_commit_sha must be a full 40-character git SHA");
+    expect(messages).toContain("at least one allowed_changed_glob");
+
+    await writeFile(
+      scenarioPath,
+      `${JSON.stringify({
+        id: "artifact-discipline",
+        bucket: "realworld-regression",
+        difficulty: "hard",
+        description: "missing patch",
+        fixture: { repo: "repo" },
+        workflow: { graph_template: "graph.template.json", harness: "codex-cli" },
+        expected: { final_outcome: "passed" },
+        metadata: {
+          realworld: {
+            source_repo: "owner/project",
+            license: "MIT",
+            base_sha: "0123456789abcdef0123456789abcdef01234567",
+            issue_url: "https://github.com/owner/project/issues/1",
+            pr_url: "https://github.com/owner/project/pull/2",
+            oracle_commit_sha: "abcdef0123456789abcdef0123456789abcdef01",
+            package_manager: "npm",
+            regression_patch: "missing.patch",
+            setup_command: "npm install",
+            focused_test_command: "npm test",
+            allowed_changed_globs: ["src/**"],
+            forbidden_changed_globs: [],
+            hidden_oracle_changed_files: []
+          }
+        }
+      }, null, 2)}\n`
+    );
+
+    const missingPatch = await loadEvalSuite(tempRoot, suiteDir);
+    expect(missingPatch.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
+      "Real-world regression patch does not exist"
+    );
+  });
+
   it("parses strict judge JSON and rejects malformed judge scores", () => {
     expect(parseJudgeResult(JSON.stringify({
       passed_quality_bar: true,

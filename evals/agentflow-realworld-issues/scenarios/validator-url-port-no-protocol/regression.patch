@@ -1,0 +1,85 @@
+diff --git a/AGENTFLOW_EVAL_TASK.md b/AGENTFLOW_EVAL_TASK.md
+new file mode 100644
+index 000000000..d3269d87a
+--- /dev/null
++++ b/AGENTFLOW_EVAL_TASK.md
+@@ -0,0 +1,31 @@
++# Scenario: validator-url-port-no-protocol
++
++## Source Issue
++
++`validator.isURL("my-3272-service:9000", { require_tld: false, require_valid_protocol: false })` currently returns `false`.
++
++The expected behavior is `true`: when protocol is not required, a hostname with a numeric port should be parsed as `hostname:port`, not as an invalid protocol.
++
++## Constraints
++
++- Fix the production source, not the regression test.
++- Do not use the upstream PR patch, oracle commit, or live GitHub.
++- Do not edit package manifests, lockfiles, generated files, or this task file.
++- Preserve custom protocol behavior and `require_protocol: true` behavior.
++
++## Validation
++
++Run:
++
++```bash
++npx mocha --require @babel/register test/agentflow-realworld-url-port.test.js
++```
++
++## Agentflow Output Contract
++
++Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with:
++- `Scenario:` validator-url-port-no-protocol
++- `Issue:` one-sentence summary
++- `Changed files:` exact files changed
++- `Validation:` exact command and result
++- `Risks:` remaining uncertainty or `none`
+diff --git a/test/agentflow-realworld-url-port.test.js b/test/agentflow-realworld-url-port.test.js
+new file mode 100644
+index 000000000..5ff52cfda
+--- /dev/null
++++ b/test/agentflow-realworld-url-port.test.js
+@@ -0,0 +1,42 @@
++import test from './testFunctions';
++
++describe('Agentflow real-world regression: URL hostnames with ports', () => {
++  it('accepts hostnames with numeric ports when protocol is not required', () => {
++    test({
++      validator: 'isURL',
++      args: [{
++        require_tld: false,
++        require_valid_protocol: false,
++      }],
++      valid: [
++        'localhost:3000',
++        'service-name:8080',
++        'my-3272-service:9000',
++        'user:pass@service-name:8080',
++        'http://localhost:3000',
++      ],
++      invalid: [],
++    });
++  });
++
++  it('still rejects protocol-less hostnames with ports when protocol is required', () => {
++    test({
++      validator: 'isURL',
++      args: [{
++        require_tld: false,
++        require_protocol: true,
++        require_valid_protocol: false,
++      }],
++      valid: [
++        'http://localhost:3000',
++        'https://service-name:8080',
++        'custom://localhost',
++      ],
++      invalid: [
++        'localhost:3000',
++        'service-name:8080',
++        'user:pass@service-name:8080',
++      ],
++    });
++  });
++});

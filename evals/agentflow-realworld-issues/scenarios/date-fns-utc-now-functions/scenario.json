@@ -1,0 +1,96 @@
+{
+  "id": "date-fns-utc-now-functions",
+  "bucket": "realworld-cross-cutting",
+  "difficulty": "hard",
+  "description": "Fix date-fns current-date helpers so date extensions such as UTCDate are used consistently when comparing against now.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-realworld-issues/date-fns-utc-now-functions",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/realworld-agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {
+      "classifications": [],
+      "gatherers": [],
+      "apply_actions": []
+    }
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "evidence_use",
+      "context_handling",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  },
+  "metadata": {
+    "realworld": {
+      "source_repo": "date-fns/date-fns",
+      "license": "MIT",
+      "base_sha": "689210d522d1c05bd9fd6eff4617424dd6f4831a",
+      "issue_url": "https://github.com/date-fns/date-fns/issues/3730",
+      "pr_url": "https://github.com/date-fns/date-fns/pull/3731",
+      "oracle_commit_sha": "c3648f3e1d24ec058fbb8debba26a5392304aef1",
+      "package_manager": "npm",
+      "regression_patch": "regression.patch",
+      "setup_command": "npm install --ignore-scripts --no-audit --no-fund --legacy-peer-deps",
+      "focused_test_command": "npx vitest run src/agentflow-realworld-utc-now/test.ts --cache.dir \"${TMPDIR:-/tmp}/agentflow-vitest-cache-date-fns-utc-now\"; status=$?; rm -rf .vitest; exit $status",
+      "allowed_changed_globs": [
+        "src/constructNow/index.ts",
+        "src/formatDistanceToNow/index.ts",
+        "src/formatDistanceToNowStrict/index.ts",
+        "src/isThisHour/index.ts",
+        "src/isThisISOWeek/index.ts",
+        "src/isThisMinute/index.ts",
+        "src/isThisMonth/index.ts",
+        "src/isThisQuarter/index.ts",
+        "src/isThisSecond/index.ts",
+        "src/isThisWeek/index.ts",
+        "src/isThisYear/index.ts",
+        "src/isToday/index.ts",
+        "src/isTomorrow/index.ts",
+        "src/isYesterday/index.ts"
+      ],
+      "forbidden_changed_globs": [
+        "AGENTFLOW_EVAL_TASK.md",
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "src/**/test.ts",
+        "**/agentflow-realworld-*"
+      ],
+      "hidden_oracle_changed_files": [
+        "package.json",
+        "src/formatDistanceToNow/index.ts",
+        "src/formatDistanceToNowStrict/index.ts",
+        "src/isThisHour/index.ts",
+        "src/isThisISOWeek/index.ts",
+        "src/isThisMinute/index.ts",
+        "src/isThisMonth/index.ts",
+        "src/isThisQuarter/index.ts",
+        "src/isThisSecond/index.ts",
+        "src/isThisWeek/index.ts",
+        "src/isThisYear/index.ts",
+        "src/isToday/index.ts",
+        "src/isTomorrow/index.ts",
+        "src/isYesterday/index.ts"
+      ]
+    }
+  }
+}

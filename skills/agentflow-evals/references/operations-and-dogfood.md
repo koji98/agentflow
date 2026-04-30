@@ -22,6 +22,16 @@ agentflow eval run evals/agentflow-capability-workflows --variant current --scen
 
 `--concurrency` controls trial-level parallelism, not the scheduler behavior inside one graph run.
 
+For the pinned real-world GitHub issue suite:
+
+```bash
+npm run setup:realworld-evals
+agentflow eval validate evals/agentflow-realworld-issues
+agentflow eval run evals/agentflow-realworld-issues --variant current --scenario all --trials 1 --eval-root .agentflow/evals/realworld-issues --concurrency 1
+```
+
+Use `--trials 5` after a single-trial pass is stable. This suite clones MIT upstream repos into ignored `eval-repos/agentflow-realworld-issues/`, applies local regression patches, and should not depend on live GitHub during normal eval runs after setup.
+
 ## Review Order
 
 Start with:
@@ -67,6 +77,10 @@ It is a capability eval. It is useful even when the pass rate is below 100%, bec
 The larger prompt/context iteration suite is `evals/agentflow-capability-workflows`.
 
 It generates ignored local repo fixtures under `eval-repos/agentflow-capability-workflows/` with `npm run setup:eval-repos`. Use it when you need harder end-to-end coverage across code repair, dependency docs, stale docs, noisy monorepos, local tools, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, and expected terminal failure.
+
+The highest-signal issue suite is `evals/agentflow-realworld-issues`.
+
+It materializes pinned MIT GitHub repos with `npm run setup:realworld-evals`. Use it when generated fixtures are too easy and you need to evaluate real repository topology, real issue ambiguity, focused reproduction commands, source-scope discipline, and delivery auditability. The node sees only the local task and regression test; upstream PR/oracle metadata is for grading and reports.
 
 ## Real Validation
 

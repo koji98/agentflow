@@ -3504,7 +3504,7 @@ describe("runtime engine", () => {
     expect(secondPrompt).toContain("Prior attempt artifacts are evidence only");
 
     const thirdPrompt = renderHarnessPrompt(nodeInvocations[2]!);
-    expect(thirdPrompt).toContain("seen 2 times");
+    expect(thirdPrompt).toContain("Repeated matching symptom count: 2.");
 
     const retryManifest = await readFile(nodeInvocations[1]!.contextManifestPath, "utf8");
     expect(retryManifest).toContain("supervisor_recovery_envelope");

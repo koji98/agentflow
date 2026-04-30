@@ -32,7 +32,7 @@ The graph is not a free-form planner. It is an accountable execution contract. T
 - Humans evaluating Agentflow should read this README, then `docs/SCOPE.md` for the product boundary and `docs/ARCHITECTURE.md` for the runtime model.
 - Graph authors should use the minimal graph below, `docs/examples/graphs/`, and `docs/OPERATIONS.md` for validation and launch.
 - Plugin authors should use `docs/PLUGINS.md` for local or Git plugin packages, workflow exports, tool exports, and secure auth.
-- Workflow evaluators should use `docs/EVALS.md` for suite layout, scenarios, variants, graders, LLM judges, benchmark reports, and the built-in dogfood suites. Use `npm run setup:eval-repos` before running the larger local-repo capability suite.
+- Workflow evaluators should use `docs/EVALS.md` for suite layout, scenarios, variants, graders, LLM judges, benchmark reports, and the built-in dogfood suites. Use `npm run setup:eval-repos` before running the generated local-repo capability suite, and `npm run setup:realworld-evals` before running the pinned GitHub issue suite.
 - Implementers and debuggers who need the mechanics should use `docs/technical-implementation/` for runtime lifecycle, context/artifact materialization, and tool injection details.
 - Operators reviewing a terminal run should start with `delivery/manifest.json` and the human entrypoints it lists.
 - Agents authoring or debugging Agentflow should use the packaged `agentflow`, `agentflow-evals`, and `agentflow-plugins` skills under `skills/`.

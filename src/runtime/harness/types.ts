@@ -418,7 +418,7 @@ function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[]
     "This is a retry after a failed prior execution. The supervisor recovery envelope is additive evidence for this retry.",
     "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
     "Use this envelope to change tactics, not to change the task. The current attempt must still produce current-attempt artifacts at the current paths.",
-    `Prior execution: \`${envelope.prior_execution_id}\`. Classification: \`${envelope.classification}\`. Fingerprint: \`${envelope.failure_fingerprint}\` (seen ${envelope.repeated_fingerprint_count} time${envelope.repeated_fingerprint_count === 1 ? "" : "s"}).`,
+    `Prior execution: \`${envelope.prior_execution_id}\`. Classification: \`${envelope.classification}\`. Repeated matching symptom count: ${envelope.repeated_fingerprint_count}.`,
     `Audit artifacts: case file \`${envelope.case_file_path}\`, recovery plan \`${envelope.recovery_plan_path}\`.`,
     "",
     "### Recovery Summary",

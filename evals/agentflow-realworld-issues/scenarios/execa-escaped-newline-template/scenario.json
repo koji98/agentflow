@@ -1,0 +1,70 @@
+{
+  "id": "execa-escaped-newline-template",
+  "bucket": "realworld-regression",
+  "difficulty": "hard",
+  "description": "Fix execa template parsing so escaped newlines keep the intended argument text.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-realworld-issues/execa-escaped-newline-template",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/realworld-agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {
+      "classifications": [],
+      "gatherers": [],
+      "apply_actions": []
+    }
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "evidence_use",
+      "context_handling",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  },
+  "metadata": {
+    "realworld": {
+      "source_repo": "sindresorhus/execa",
+      "license": "MIT",
+      "base_sha": "c8cff27a47b6e6f1cfbfec2bf7fa9dcd08cefed1",
+      "issue_url": "https://github.com/sindresorhus/execa/issues/1175",
+      "pr_url": "https://github.com/sindresorhus/execa/pull/1176",
+      "oracle_commit_sha": "2fb218809d520cade3d4d021bddd073be987460b",
+      "package_manager": "npm",
+      "regression_patch": "regression.patch",
+      "setup_command": "npm install --ignore-scripts --no-audit --no-fund --legacy-peer-deps",
+      "focused_test_command": "npx ava test/methods/agentflow-realworld-template.js",
+      "allowed_changed_globs": [
+        "lib/methods/template.js"
+      ],
+      "forbidden_changed_globs": [
+        "AGENTFLOW_EVAL_TASK.md",
+        "package.json",
+        "package-lock.json",
+        "test/**",
+        "**/agentflow-realworld-*"
+      ],
+      "hidden_oracle_changed_files": [
+        "lib/methods/template.js",
+        "test/methods/template.js"
+      ]
+    }
+  }
+}

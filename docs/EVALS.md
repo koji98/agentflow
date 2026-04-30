@@ -357,6 +357,16 @@ agentflow eval run evals/agentflow-capability-workflows --variant current --scen
 
 It writes portable local fixture repositories under ignored `eval-repos/agentflow-capability-workflows/` and should be used for prompt/context iteration. The scenarios cover code repair, docs-backed migration, stale docs conflicts, scoped edits, noisy monorepo targeting, local tool use, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, and expected terminal failure.
 
+The pinned real-world issue suite is:
+
+```bash
+npm run setup:realworld-evals
+agentflow eval validate evals/agentflow-realworld-issues
+agentflow eval run evals/agentflow-realworld-issues --variant current --scenario all --trials 1 --concurrency 1
+```
+
+It clones MIT-licensed upstream repositories at committed base SHAs into ignored `eval-repos/agentflow-realworld-issues/`, applies Agentflow-owned regression patches, and grades whether workflows fix real issues without seeing upstream PR patches. Use it for high-signal prompt/context iteration once the generated suite is too easy. It currently covers validator.js URL parsing, validator.js slug validation, date-fns UTC date-extension helpers, date-fns French ordinal formatting architecture, and execa escaped-newline template parsing.
+
 ## Real Validation
 
 Use the real eval validator when the local Codex CLI binary is available:

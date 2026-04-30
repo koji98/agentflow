@@ -1,0 +1,70 @@
+{
+  "id": "validator-slug-charset",
+  "bucket": "realworld-regression",
+  "difficulty": "hard",
+  "description": "Fix validator.js isSlug so dots and special characters are rejected consistently without breaking normal slug characters.",
+  "fixture": {
+    "repo": "../../../../eval-repos/agentflow-realworld-issues/validator-slug-charset",
+    "init_git": true
+  },
+  "workflow": {
+    "graph_template": "../../templates/realworld-agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "expected": {
+    "final_outcome": "passed",
+    "required_artifacts": [
+      {
+        "name": "handoff",
+        "contains": [
+          "Validation:"
+        ]
+      }
+    ],
+    "forbidden_edits": [],
+    "supervisor": {
+      "classifications": [],
+      "gatherers": [],
+      "apply_actions": []
+    }
+  },
+  "grading": {
+    "dimensions": [
+      "outcome_correctness",
+      "graph_contract_adherence",
+      "evidence_use",
+      "context_handling",
+      "noise_efficiency",
+      "delivery_auditability"
+    ]
+  },
+  "metadata": {
+    "realworld": {
+      "source_repo": "validatorjs/validator.js",
+      "license": "MIT",
+      "base_sha": "9fa1e3a44a3fb371bc91cf8bb7e127ee4e049331",
+      "issue_url": "https://github.com/validatorjs/validator.js/issues/2383",
+      "pr_url": "https://github.com/validatorjs/validator.js/pull/2693",
+      "oracle_commit_sha": "4f94cd11755bcb4943a54d14b71b63677938ac5e",
+      "package_manager": "npm",
+      "regression_patch": "regression.patch",
+      "setup_command": "npm install --ignore-scripts --no-audit --no-fund --legacy-peer-deps",
+      "focused_test_command": "npx mocha --require @babel/register test/agentflow-realworld-slug.test.js",
+      "allowed_changed_globs": [
+        "src/lib/isSlug.js"
+      ],
+      "forbidden_changed_globs": [
+        "AGENTFLOW_EVAL_TASK.md",
+        "package.json",
+        "package-lock.json",
+        "test/**",
+        "**/agentflow-realworld-*"
+      ],
+      "hidden_oracle_changed_files": [
+        "src/lib/isSlug.js",
+        "test/validators.test.js"
+      ]
+    }
+  }
+}

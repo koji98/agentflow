@@ -1,0 +1,67 @@
+{
+  "version": "2",
+  "suite_id": "agentflow-realworld-issues",
+  "objective": "Evaluate Agentflow on pinned real-world MIT GitHub issues with local regression fixtures and hidden PR oracles.",
+  "default_trials": 1,
+  "scenarios": [
+    "scenarios/validator-url-port-no-protocol/scenario.json",
+    "scenarios/validator-slug-charset/scenario.json",
+    "scenarios/date-fns-utc-now-functions/scenario.json",
+    "scenarios/date-fns-french-ordinal-architecture/scenario.json",
+    "scenarios/execa-escaped-newline-template/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json",
+    "variants/terse.json"
+  ],
+  "graders": [
+    {
+      "id": "realworld-deterministic",
+      "kind": "script",
+      "command": "node graders/realworld-deterministic.mjs",
+      "timeout_sec": 600
+    }
+  ],
+  "judges": [
+    {
+      "id": "contract-adherence",
+      "rubric": "judges/contract-adherence.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "evidence-use",
+      "rubric": "judges/evidence-use.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "context-handling",
+      "rubric": "judges/context-handling.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "noise-efficiency",
+      "rubric": "judges/noise-efficiency.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    },
+    {
+      "id": "delivery-auditability",
+      "rubric": "judges/delivery-auditability.md",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "required": false
+    }
+  ],
+  "thresholds": {
+    "pass_rate": 0.4,
+    "max_blocker_rate": 1,
+    "min_average_score": 2
+  }
+}

@@ -62,6 +62,7 @@ Required fields:
 - `expected.forbidden_edits`: paths that must remain absent after the trial. Use a custom grader for unchanged-existing-file checks.
 - `expected.supervisor`: optional expected classifications, gatherers, and apply actions.
 - `grading.dimensions`: qualitative dimensions for judges.
+- `metadata.realworld`: optional pinned upstream issue metadata for real-world suites.
 
 Expected pause or fail outcomes are valid when the scenario is designed to test authority, credentials, policy, or underspecified-intent boundaries.
 
@@ -70,6 +71,8 @@ Expected pause or fail outcomes are valid when the scenario is designed to test 
 Commit only small seed fixtures that are required to run the suite on a fresh checkout. Do not commit cloned third-party repos, `.git` directories, dependency installs, generated trial workspaces, prompt iteration outputs, generated eval repos, or eval output roots.
 
 If a scenario needs a real upstream repository, provide a documented setup script or clone command that creates the fixture locally before validation. The checked-in scenario should reference the local fixture path produced by that setup step.
+
+Real-world issue scenarios should keep cloned repositories out of git and commit only metadata plus local regression patches. `metadata.realworld` requires MIT license, full base/oracle SHAs, GitHub issue/PR URLs, package manager, regression patch, setup command, focused test command, allowed changed globs, forbidden changed globs, and hidden oracle changed files. Hidden oracle fields are for graders and reports; do not expose upstream PR patches in graph context.
 
 ## Graph Templates
 
