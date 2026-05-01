@@ -42,6 +42,10 @@
         "id": "research",
         "repo": "main",
         "goal": "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
+        "acceptance_criteria": [
+          "The research artifact states the exact rounding rule and cites the task/docs evidence.",
+          "The implementation node can use the artifact without rereading broad unrelated context."
+        ],
         "context": [
           {
             "name": "task",
@@ -107,6 +111,11 @@
         "type": "check",
         "id": "verify",
         "repo": "main",
+        "goal": "Run the scenario validation suite and confirm the implementation matches the researched billing rule.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "The validation evidence confirms the handoff-backed implementation is correct."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

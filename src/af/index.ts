@@ -8,9 +8,16 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 import { resolveSubpathWithinRoot } from "../path_rules.js";
-import { readRunState } from "../artifacts/reader.js";
+import {
+  readCompiledGraph,
+  readRunExecutionAttempts,
+  readRunState,
+  readSupervisorInterventions,
+  readSupervisorTimeline,
+  readTextFileIfPresent
+} from "../artifacts/reader.js";
 import type { ArtifactDefinition } from "../graph/authored.js";
-import type { ResolvedTool } from "../graph/compiled.js";
+import type { CompiledExecutableNode, CompiledGraph, ResolvedTool } from "../graph/compiled.js";
 import type { CredentialSpecMap } from "../auth/types.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
 import { buildHarnessSpawnEnv, deriveContextProvenancePath, formatToolContract } from "../runtime/harness/types.js";
@@ -77,9 +84,11 @@ interface HelperSession {
   parent_agent_id: string;
   run_id: string;
   status: "starting" | "running" | "completed" | "failed" | "canceled";
+  purpose: "helper" | "investigation" | "repair";
   brief: string;
   skills: string[];
   allowed_tools: string[];
+  sandbox: RuntimeMetadata["sandbox"];
   output_dir: string;
   log_path: string;
   prompt_path?: string;
@@ -376,11 +385,15 @@ function renderHelp(): string {
     "  af tools list",
     "  af context show",
     "  af supervision show",
+    "  af diagnose failure --json",
+    "  af diagnose graph-cone --from <node-id> --upstream|--downstream --json",
+    "  af diagnose attempt|context|artifacts|workspace|validation --node <node-id> [--attempt latest|N] --json",
+    "  af learn <failure-kind>",
     "  af artifact list",
     "  af artifact write <name> (--file <path> | --content <text> | --stdin)",
     "  af log --type <progress|finding|blocker|risk|question|handoff_note|decision> --summary <text> [--body <text>] [--artifact <name>]",
     "  af log --type decision --decision <text> --rationale <text> --evidence <text> [--evidence <text>]",
-    "  af spawn --brief <text> [--skills a,b] [--tools tool-a,tool-b] [--artifact name] [--wait]",
+    "  af spawn --brief <text> [--purpose investigation|repair] [--skills a,b] [--tools tool-a,tool-b] [--artifact name] [--wait]",
     "  af wait --agent <agent-id> [--artifact <name>] [--timeout-sec N]",
     "",
     "Output:",
@@ -497,6 +510,32 @@ function commandHelp(commandPath: string): string | undefined {
       "Safety:",
       "  Read-only inspection. The recovery envelope is evidence for retrying; it cannot change the graph contract."
     ],
+    diagnose: [
+      "af diagnose - read-only supervisor diagnostics for causal recovery.",
+      "",
+      "Usage:",
+      "  af diagnose failure --json",
+      "  af diagnose graph-cone --from <node-id> --upstream|--downstream --json",
+      "  af diagnose attempt|context|artifacts|workspace|validation --node <node-id> [--attempt latest|N] --json",
+      "",
+      "Output:",
+      "  JSON evidence packet for supervisor investigation or recovery.",
+      "",
+      "Safety:",
+      "  Read-only inspection; does not edit workspace, graph, or artifacts."
+    ],
+    learn: [
+      "af learn - print an on-demand supervisor recovery playbook.",
+      "",
+      "Usage:",
+      `  af learn <${learnKinds.join("|")}>`,
+      "",
+      "Output:",
+      "  JSON playbook with evidence to inspect, safe repairs, and authority boundaries.",
+      "",
+      "Safety:",
+      "  Read-only guidance; playbooks do not grant new authority."
+    ],
     "artifact list": [
       "af artifact list - list declared artifacts and whether each exists.",
       "",
@@ -588,10 +627,11 @@ function commandHelp(commandPath: string): string | undefined {
       "af spawn - start a focused helper agent.",
       "",
       "Usage:",
-      "  af spawn --brief <text> [--skills a,b] [--tools tool-a,tool-b] [--artifact name] [--wait]",
+      "  af spawn --brief <text> [--purpose investigation|repair] [--skills a,b] [--tools tool-a,tool-b] [--artifact name] [--wait]",
       "",
       "Options:",
       "  --brief <text>       Focused helper task. Required.",
+      "  --purpose <purpose>  investigation for read-only causal analysis, repair for scoped recovery edits. Default: helper",
       "  --skills <a,b>       Helper skills to request. Default: none",
       "  --tools <a,b>        Granted plugin tool names. Default: none",
       "  --artifact <name>    Required helper artifact name. Default: helper-report.md",
@@ -743,6 +783,342 @@ async function commandSupervision(metadata: RuntimeMetadata): Promise<AfResult> 
       recovery_envelope: envelope ?? null
     }
   };
+}
+
+const learnKinds = [
+  "semantic_rejection",
+  "failed_check",
+  "context_contract_failure",
+  "missing_artifact",
+  "bad_artifact",
+  "workspace_pollution",
+  "dependency_docs",
+  "tool_or_environment_failure",
+  "harness_failure",
+  "repeat_loop_failure",
+  "managed_pattern_failure",
+  "external_service_error",
+  "unknown_failure"
+] as const;
+
+type LearnKind = (typeof learnKinds)[number];
+
+const learnPlaybooks: Record<LearnKind, {
+  purpose: string;
+  inspect: string[];
+  safe_repairs: string[];
+  pause_boundaries: string[];
+}> = {
+  semantic_rejection: {
+    purpose: "Recover when an agent claimed success but semantic verification rejected the outcome.",
+    inspect: ["exact failed prompt", "verifier findings", "declared artifacts", "workspace diff", "node acceptance criteria"],
+    safe_repairs: ["retry the responsible node with verifier blockers first", "repair missing or weak artifacts", "add focused validation evidence"],
+    pause_boundaries: ["product intent ambiguity", "scope expansion beyond the node contract"]
+  },
+  failed_check: {
+    purpose: "Recover when an exec/check gate detects a failed condition.",
+    inspect: ["stdout/stderr", "check goal", "upstream cone", "artifact producers", "workspace state"],
+    safe_repairs: ["repair nearest upstream producer", "change validation strategy after timeout", "rerun the same gate after material delta"],
+    pause_boundaries: ["credential requirements", "graph contract amendment"]
+  },
+  context_contract_failure: {
+    purpose: "Recover when context cannot be materialized within the node contract.",
+    inspect: ["context manifest", "largest matched files", "broad glob samples", "ignored paths", "token estimates"],
+    safe_repairs: ["replace oversized context with compact index and excerpts", "preserve omitted-file provenance", "retry with repaired context packet"],
+    pause_boundaries: ["needed context is outside repo/sandbox authority"]
+  },
+  missing_artifact: {
+    purpose: "Recover when a declared artifact was not produced.",
+    inspect: ["artifact declaration", "attempt output directory", "agent response", "producer logs"],
+    safe_repairs: ["repair artifact from existing evidence", "retry producer with artifact contract first", "rerun downstream gate"],
+    pause_boundaries: ["artifact requires new product decision"]
+  },
+  bad_artifact: {
+    purpose: "Recover when an artifact exists but fails downstream quality or contract checks.",
+    inspect: ["artifact content", "downstream failure evidence", "producer prompt", "acceptance criteria"],
+    safe_repairs: ["repair producer stage", "repair artifact if source evidence is sufficient", "rerun consumer gate"],
+    pause_boundaries: ["artifact meaning is ambiguous"]
+  },
+  workspace_pollution: {
+    purpose: "Recover from unrelated or forbidden workspace edits.",
+    inspect: ["node snapshot diff", "forbidden changed files", "declared scope", "git status"],
+    safe_repairs: ["restore failed-attempt-owned unrelated edits", "retry with narrow scope guidance"],
+    pause_boundaries: ["edits may belong to the user or another active branch"]
+  },
+  dependency_docs: {
+    purpose: "Recover when missing dependency/API knowledge caused the failure.",
+    inspect: ["package manifests", "lockfiles", "versions", "official docs", "release notes"],
+    safe_repairs: ["gather read-only external docs", "cite version-matched source", "retry with docs evidence"],
+    pause_boundaries: ["new dependency adoption", "license/security approval"]
+  },
+  tool_or_environment_failure: {
+    purpose: "Recover safe local runtime/tool setup issues.",
+    inspect: ["PATH", "tool wrapper metadata", "command availability", "runtime dirs"],
+    safe_repairs: ["regenerate wrappers", "refresh PATH metadata", "run local non-global diagnostics"],
+    pause_boundaries: ["global installation", "credentials", "network/service authority"]
+  },
+  harness_failure: {
+    purpose: "Recover or pause when the selected agent harness is unavailable.",
+    inspect: ["harness binary", "auth/login state", "harness stderr", "profile selection"],
+    safe_repairs: ["retry after transient launch failure", "use configured supervisor profile for diagnostics"],
+    pause_boundaries: ["login/auth required", "harness binary missing"]
+  },
+  repeat_loop_failure: {
+    purpose: "Recover when a repeat loop exhausts or repeats without progress.",
+    inspect: ["iteration scorecards", "repeat body outputs", "until check evidence", "material deltas"],
+    safe_repairs: ["repair the earliest failing cycle cause", "change tactic before another iteration", "rerun until gate"],
+    pause_boundaries: ["completion criteria are impossible or underspecified"]
+  },
+  managed_pattern_failure: {
+    purpose: "Recover failed internal managed-pattern phases while preserving the public node contract.",
+    inspect: ["managed phase", "cycle", "public artifacts", "scorecards", "internal logs"],
+    safe_repairs: ["repair internal phase under public contract", "rerun completion criterion", "repair final public artifact"],
+    pause_boundaries: ["pattern contract needs graph amendment"]
+  },
+  external_service_error: {
+    purpose: "Distinguish remote service outages from code or workflow failures.",
+    inspect: ["HTTP status", "retry-after headers", "local evidence already gathered", "side effects"],
+    safe_repairs: ["preserve local evidence", "retry only remote proof later", "avoid modifying code for outage symptoms"],
+    pause_boundaries: ["credentials", "rate-limit policy", "external side-effect approval"]
+  },
+  unknown_failure: {
+    purpose: "Recover unclassified failures by forming a causal hypothesis before repair.",
+    inspect: ["failed attempt", "upstream cone", "context provenance", "artifacts", "workspace diff", "logs"],
+    safe_repairs: ["spawn read-only investigation helper", "rank causal targets", "apply the smallest authorized repair with a material delta"],
+    pause_boundaries: ["no safe machine repair remains", "authority or intent is unclear"]
+  }
+};
+
+async function commandLearn(positionals: string[]): Promise<AfResult> {
+  const kind = positionals[1] as LearnKind | undefined;
+  if (!kind || !learnKinds.includes(kind)) {
+    throw new Error(`af learn requires one of: ${learnKinds.join(", ")}.`);
+  }
+
+  return {
+    exitCode: 0,
+    output: {
+      command: "af learn",
+      status: "passed",
+      kind,
+      playbook: learnPlaybooks[kind]
+    }
+  };
+}
+
+function resolveCompiledNode(graph: CompiledGraph, id: string | undefined): CompiledExecutableNode | undefined {
+  if (!id) {
+    return undefined;
+  }
+  return graph.nodes.find((node) => node.compiled_id === id || node.authored_id === id);
+}
+
+function attemptsForNode(attempts: Array<{ compiled_id: string; attempt_index: number }>, compiledId: string): Array<{ compiled_id: string; attempt_index: number }> {
+  return attempts
+    .filter((attempt) => attempt.compiled_id === compiledId)
+    .sort((left, right) => left.attempt_index - right.attempt_index);
+}
+
+function attemptBySelector<TAttempt extends { compiled_id: string; attempt_index: number }>(
+  attempts: TAttempt[],
+  compiledId: string,
+  selector: string | undefined
+): TAttempt | undefined {
+  const nodeAttempts = attemptsForNode(attempts, compiledId) as TAttempt[];
+  if (selector === undefined || selector === "latest") {
+    return nodeAttempts.at(-1);
+  }
+  const index = Number(selector);
+  return Number.isInteger(index)
+    ? nodeAttempts.find((attempt) => attempt.attempt_index === index)
+    : undefined;
+}
+
+function traverseGraphCone(graph: CompiledGraph, fromCompiledId: string, direction: "upstream" | "downstream"): string[] {
+  const visited = new Set<string>();
+  const queue = [fromCompiledId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const edges = graph.edges.filter((edge) => direction === "upstream" ? edge.to === current : edge.from === current);
+    for (const edge of edges) {
+      const next = direction === "upstream" ? edge.from : edge.to;
+      if (visited.has(next)) {
+        continue;
+      }
+      visited.add(next);
+      queue.push(next);
+    }
+  }
+  return [...visited];
+}
+
+async function commandDiagnose(
+  metadata: RuntimeMetadata,
+  positionals: string[],
+  options: Record<string, string | boolean | string[]>
+): Promise<AfResult> {
+  const topic = positionals[1];
+  if (!topic) {
+    throw new Error("af diagnose requires a topic.");
+  }
+
+  const [graph, state, attempts, interventions, timeline] = await Promise.all([
+    readCompiledGraph(metadata.run_root),
+    readRunState(metadata.run_root).catch(() => undefined),
+    readRunExecutionAttempts(metadata.run_root),
+    readSupervisorInterventions(metadata.run_root),
+    readSupervisorTimeline(metadata.run_root)
+  ]);
+  const requestedNode = optionString(options, "node") ?? optionString(options, "from") ?? metadata.compiled_id;
+  const node = resolveCompiledNode(graph, requestedNode);
+  const attempt = node ? attemptBySelector(attempts, node.compiled_id, optionString(options, "attempt")) : undefined;
+
+  if (topic === "failure") {
+    const failedAttempts = attempts.filter((item) => item.status === "failed" || item.outcome === "failed").slice(-10);
+    return {
+      exitCode: 0,
+      output: {
+        command: "af diagnose failure",
+        status: "passed",
+        current_node: metadata.compiled_id,
+        active_recovery: metadata.supervisor_recovery_envelope ?? null,
+        run_status: state?.status ?? "unknown",
+        failed_attempts: failedAttempts,
+        recent_supervisor_decisions: timeline.slice(-10),
+        interventions: interventions.slice(-10)
+      }
+    };
+  }
+
+  if (!node) {
+    throw new Error(`af diagnose ${topic} could not resolve node "${requestedNode}".`);
+  }
+
+  if (topic === "graph-cone") {
+    const direction = options.downstream === true ? "downstream" : "upstream";
+    const coneIds = traverseGraphCone(graph, node.compiled_id, direction);
+    return {
+      exitCode: 0,
+      output: {
+        command: `af diagnose graph-cone`,
+        status: "passed",
+        from: node.compiled_id,
+        direction,
+        nodes: coneIds.map((compiledId) => {
+          const coneNode = graph.nodes.find((candidate) => candidate.compiled_id === compiledId);
+          return coneNode
+            ? {
+                compiled_id: coneNode.compiled_id,
+                authored_id: coneNode.authored_id,
+                kind: coneNode.kind,
+                goal: coneNode.goal,
+                acceptance_criteria: coneNode.acceptance_criteria,
+                status: state?.node_statuses?.[compiledId] ?? "unknown"
+              }
+            : { compiled_id: compiledId };
+        })
+      }
+    };
+  }
+
+  if (topic === "attempt") {
+    return {
+      exitCode: 0,
+      output: {
+        command: "af diagnose attempt",
+        status: "passed",
+        node: {
+          compiled_id: node.compiled_id,
+          authored_id: node.authored_id,
+          kind: node.kind
+        },
+        attempt: attempt ?? null
+      }
+    };
+  }
+
+  if (topic === "context") {
+    const manifestPath = attempt?.context_manifest_path ?? (node.compiled_id === metadata.compiled_id ? metadata.context_manifest_path : undefined);
+    return {
+      exitCode: 0,
+      output: {
+        command: "af diagnose context",
+        status: "passed",
+        node: node.compiled_id,
+        declared_context: node.context,
+        context_packet_path: attempt?.context_packet_path ?? (node.compiled_id === metadata.compiled_id ? metadata.context_packet_path : null),
+        context_manifest_path: manifestPath ?? null,
+        context_provenance_path: attempt?.context_provenance_path ?? null,
+        manifest: manifestPath ? await readTextFileIfPresent(manifestPath) : undefined
+      }
+    };
+  }
+
+  if (topic === "artifacts") {
+    return {
+      exitCode: 0,
+      output: {
+        command: "af diagnose artifacts",
+        status: "passed",
+        node: node.compiled_id,
+        declared_artifacts: node.declared_artifacts,
+        attempt_artifacts: attempt?.artifacts ?? {}
+      }
+    };
+  }
+
+  if (topic === "workspace") {
+    const metadataRecord = isRecord(attempt?.metadata) ? attempt?.metadata : {};
+    return {
+      exitCode: 0,
+      output: {
+        command: "af diagnose workspace",
+        status: "passed",
+        node: node.compiled_id,
+        attempt: attempt?.execution_id ?? null,
+        workspace_path: metadata.workspace_path,
+        node_workspace_changes: metadataRecord.node_workspace_changes ?? null
+      }
+    };
+  }
+
+  if (topic === "validation") {
+    return {
+      exitCode: 0,
+      output: {
+        command: "af diagnose validation",
+        status: "passed",
+        node: {
+          compiled_id: node.compiled_id,
+          authored_id: node.authored_id,
+          kind: node.kind,
+          goal: node.goal,
+          acceptance_criteria: node.acceptance_criteria,
+          constraints: node.constraints
+        },
+        validation:
+          node.kind === "check"
+            ? {
+                check_kind: node.check_kind,
+                command: node.command,
+                args: node.args,
+                pass_if: node.pass_if,
+                rubric: node.rubric
+              }
+            : node.kind === "exec"
+              ? {
+                  command: node.command,
+                  args: node.args
+                }
+              : null,
+        latest_result_path: attempt?.result_path ?? null,
+        latest_stdout_log_path: attempt?.stdout_log_path ?? null,
+        latest_stderr_log_path: attempt?.stderr_log_path ?? null
+      }
+    };
+  }
+
+  throw new Error(`Unknown af diagnose topic: ${topic}.`);
 }
 
 async function commandArtifactList(metadata: RuntimeMetadata): Promise<AfResult> {
@@ -947,6 +1323,10 @@ async function commandSpawn(
     throw new Error("af spawn requires a current harness.");
   }
 
+  const purpose = (optionString(options, "purpose") ?? "helper") as HelperSession["purpose"];
+  if (!["helper", "investigation", "repair"].includes(purpose)) {
+    throw new Error("af spawn --purpose must be one of: investigation, repair.");
+  }
   const helperId = helperIdFromBrief(brief);
   const helperRoot = join(helpersDir(metadata), helperId);
   const outputDir = join(helperRoot, "artifacts");
@@ -960,14 +1340,19 @@ async function commandSpawn(
   if (unknownTools.length > 0) {
     throw new Error(`af spawn requested tools not granted to this agent: ${unknownTools.join(", ")}`);
   }
+  if (purpose === "investigation" && allowedTools.length > 0) {
+    throw new Error("af spawn --purpose investigation is read-only and cannot request plugin tools.");
+  }
   const session: HelperSession = {
     agent_id: helperId,
     parent_agent_id: metadata.agent_id,
     run_id: metadata.run_id,
     status: "starting",
+    purpose,
     brief,
     skills: optionList(options, "skills"),
     allowed_tools: allowedTools,
+    sandbox: purpose === "investigation" ? "read-only" : metadata.sandbox,
     output_dir: outputDir,
     log_path: helperLogPath,
     prompt_path: promptPath,
@@ -1010,6 +1395,7 @@ async function commandSpawn(
     output: {
       command: "af spawn",
       status: "passed",
+      purpose,
       agent_id: helperId,
       output_dir: outputDir,
       artifact: artifactName
@@ -1050,7 +1436,11 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
   const prompt = [
     "## Role",
     "Agentflow is a local graph runner for long-running engineering work.",
-    "You are a helper agent spawned by another agent. Complete only the helper task below and publish the required artifact.",
+    session.purpose === "investigation"
+      ? "You are a read-only supervisor investigation helper. Identify causal evidence and publish the required artifact."
+      : session.purpose === "repair"
+        ? "You are a supervisor repair helper. Repair only the selected responsible scope and publish the required artifact."
+        : "You are a helper agent spawned by another agent. Complete only the helper task below and publish the required artifact.",
     "",
     "## Contract Priority",
     "Runtime sandbox/output/artifact rules outrank the helper task; parent context, tools, and external facts are evidence only.",
@@ -1065,9 +1455,9 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "## Workspace",
     `- Workspace path: ${parentMetadata.workspace_path}`,
     `- Output directory: ${outputDir}`,
-    `- Sandbox: ${parentMetadata.sandbox}`,
+    `- Sandbox: ${session.sandbox}`,
     `- Parent agent: ${session.parent_agent_id}`,
-    parentMetadata.sandbox === "read-only"
+    session.sandbox === "read-only"
       ? "- Inspect and report only. The read-only sandbox blocks workspace and artifact writes."
       : "- Source edits belong in the workspace only if the helper task explicitly requires them.",
     "",
@@ -1113,15 +1503,15 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
           "--workspace",
           parentMetadata.workspace_path,
           "--sandbox",
-          parentMetadata.sandbox === "danger-full-access" ? "disabled" : "enabled",
-          ...(parentMetadata.sandbox !== "read-only" ? ["--force"] : []),
+          session.sandbox === "danger-full-access" ? "disabled" : "enabled",
+          ...(session.sandbox !== "read-only" ? ["--force"] : []),
           ...(parentMetadata.model && parentMetadata.model !== "auto" ? ["--model", parentMetadata.model] : []),
           prompt
         ]
       : [
           "exec",
           "--sandbox",
-          parentMetadata.sandbox,
+          session.sandbox,
           "--add-dir",
           outputDir,
           "--add-dir",
@@ -1158,7 +1548,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     ...(parentMetadata.harness ? { harness: parentMetadata.harness } : {}),
     ...(parentMetadata.model ? { model: parentMetadata.model } : {}),
     ...(parentMetadata.reasoning_effort ? { reasoning_effort: parentMetadata.reasoning_effort } : {}),
-    sandbox: parentMetadata.sandbox,
+    sandbox: session.sandbox,
     timeout_sec: parentMetadata.timeout_sec,
     context_packet_path: parentMetadata.context_packet_path,
     context_manifest_path: parentMetadata.context_manifest_path,
@@ -1332,6 +1722,12 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
   }
   if (command === "supervision" && subcommand === "show") {
     return commandSupervision(metadata);
+  }
+  if (command === "diagnose") {
+    return commandDiagnose(metadata, positionals, options);
+  }
+  if (command === "learn") {
+    return commandLearn(positionals);
   }
   if (command === "artifact" && subcommand === "list") {
     return commandArtifactList(metadata);

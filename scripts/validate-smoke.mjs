@@ -307,7 +307,12 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
           type: "agent",
           id: "smoke-agent",
           repo: "main",
-          goal: `Run the ${harnessKind} smoke test.`
+          goal: `Run the ${harnessKind} smoke test.`,
+          acceptance_criteria: [
+            "The harness launches successfully and returns a passing smoke result.",
+            "The run records terminal artifacts for smoke validation."
+          ],
+          constraints: ["Do not perform external side effects."]
         }
       ]
     }

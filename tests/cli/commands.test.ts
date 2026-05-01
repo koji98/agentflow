@@ -9,9 +9,49 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
-import { executeCli, renderCliStdout } from "../../src/cli/index.js";
+import { executeCli as executeCliRaw, renderCliStdout } from "../../src/cli/index.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
+
+async function applyNodeIntentDefaultsToGraphFile(graphPath: string): Promise<void> {
+  try {
+    const graph = JSON.parse(await readFile(graphPath, "utf8")) as Record<string, unknown>;
+    await writeFile(graphPath, `${JSON.stringify(withNodeIntentDefaults(graph as never), null, 2)}\n`, "utf8");
+  } catch {
+    // Tests that intentionally pass invalid paths or non-JSON graph files should keep their original failure.
+  }
+}
+
+async function executeCli(
+  args: string[],
+  cwd?: string,
+  execution: {
+    signal?: AbortSignal;
+  } = {}
+) {
+  const graphFlagIndex = args.indexOf("--graph");
+  const graphPath = graphFlagIndex === -1 ? undefined : args[graphFlagIndex + 1];
+  if (graphPath) {
+    await applyNodeIntentDefaultsToGraphFile(graphPath);
+  }
+
+  const runRootFlagIndex = args.indexOf("--run-root");
+  const runRoot = runRootFlagIndex === -1 ? undefined : args[runRootFlagIndex + 1];
+  if (!graphPath && runRoot) {
+    try {
+      const runRecord = JSON.parse(await readFile(join(runRoot, "run.json"), "utf8")) as {
+        graph_path?: string;
+      };
+      if (runRecord.graph_path) {
+        await applyNodeIntentDefaultsToGraphFile(runRecord.graph_path);
+      }
+    } catch {
+      // Resume tests that intentionally use invalid run roots should keep their original failure.
+    }
+  }
+  return executeCliRaw(args, cwd, execution);
+}
 
 async function initGitRepo(repoDir: string): Promise<void> {
   await execFileAsync("git", ["init"], { cwd: repoDir });
@@ -1684,7 +1724,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
         restarted_node_count: 2
       })
     );
-    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(4);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
     expect(resumedProgress).toContain(
@@ -1795,7 +1835,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(resumedPayload.restarted_node_count).toBe(3);
     expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
-    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
 
@@ -1947,7 +1987,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
@@ -1964,7 +2004,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
         execution_dir: expect.stringMatching(/\/executions\/002-exec-[0-9a-f]{16}$/)
       }
     ]);
-    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output").map((attempt) => ({
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output" && attempt.iteration_index !== undefined).map((attempt) => ({
       iteration_index: attempt.iteration_index,
       iteration_attempt_index: attempt.iteration_attempt_index,
       execution_dir: attempt.execution_dir
@@ -2156,7 +2196,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
-    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);

@@ -92,6 +92,11 @@
         "type": "check",
         "id": "verify",
         "repo": "main",
+        "goal": "Run the scenario validation suite and confirm the implementation follows the current docs fixture.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "The validation evidence reflects the local docs fixture behavior."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

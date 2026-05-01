@@ -15,6 +15,7 @@ import { readExecutionManifest } from "../../src/artifacts/reader.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -28,13 +29,13 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument({
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
       goal: `Resume ${document.graph_id}.`,
       acceptance_criteria: ["Resume preserves only compatible completed work."]
     },
     ...document
-  });
+  }));
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(

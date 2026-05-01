@@ -6,6 +6,11 @@
       "type": "exec",
       "id": "poll_status",
       "repo": "main",
+      "goal": "Poll the configured pull request once and capture the raw status output.",
+      "acceptance_criteria": [
+        "The plugin command exits successfully for the configured PR.",
+        "The raw status artifact is written for the publishing node."
+      ],
       "command": "plugin://scripts/poll-pr.sh",
       "args": [
         "--pr",
@@ -25,6 +30,10 @@
       "id": "publish_status",
       "repo": "main",
       "goal": "Read the polled status from the pr_status_raw artifact and publish a clean JSON report by writing it to $AGENTFLOW_OUTPUT_DIR/pr-status.json.",
+      "acceptance_criteria": [
+        "The JSON report faithfully summarizes the raw PR status artifact.",
+        "The output is suitable for downstream workflow consumption."
+      ],
       "context": [
         {
           "ref": "poll_status.pr_status_raw",

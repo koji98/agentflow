@@ -350,14 +350,15 @@ export function classifyNodeFailure(input: {
       retryable: true,
       recommended_action: "run_diagnostic",
       gather_plan: gatherPlan([
-        gather("local_context", "Rebuild the immediate node context from the failed attempt.", 1),
-        gather("diagnostic_probe", "Run focused diagnostics for the repeated symptom.", 2),
-        gather("semantic_rejudge", "Check whether the previous intervention aligned with the node intent.", 3),
-        gather("external_context", "Gather read-only external context that may unblock missing knowledge.", 4)
+        gather("local_context", "Widen the local causal search across upstream context, artifacts, and workspace diffs.", 1),
+        gather("diagnostic_probe", "Run focused diagnostics that change the next repair tactic instead of repeating it.", 2),
+        gather("semantic_rejudge", "Rejudge the failure against the unchanged graph and node intent before selecting the next target.", 3),
+        gather("external_context", "Gather read-only external context if missing public docs or service behavior may explain the repeated symptom.", 4)
       ]),
       evidence: {
         ...evidence,
-        repeated_fingerprint_count: input.repeated_fingerprint_count
+        repeated_fingerprint_count: input.repeated_fingerprint_count,
+        causal_search_required: true
       }
     });
   }
@@ -464,10 +465,14 @@ export function classifyNodeFailure(input: {
       retryable: true,
       recommended_action: "run_diagnostic",
       gather_plan: gatherPlan([
-        gather("diagnostic_probe", "Run or inspect the deterministic check failure output.", 1),
-        gather("local_context", "Collect the check command, working directory, and relevant artifacts.", 2)
+        gather("diagnostic_probe", "Inspect the failed deterministic gate and identify the narrowest failing condition.", 1),
+        gather("local_context", "Collect upstream artifacts, context provenance, and workspace state checked by the gate.", 2),
+        gather("investigate_failure", "Determine whether the check failure is caused by the check itself or an upstream producer.", 3)
       ]),
-      evidence
+      evidence: {
+        ...evidence,
+        deterministic_check_failed: true
+      }
     });
   }
 

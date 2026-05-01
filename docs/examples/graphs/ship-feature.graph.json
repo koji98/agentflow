@@ -49,6 +49,10 @@
         "id": "draft_release_notes",
         "repo": "main",
         "goal": "Draft a tight, well-structured release-notes section that covers the most recent changes summarized from the README. Write the markdown body to `release-notes.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR).",
+        "acceptance_criteria": [
+          "The release-notes artifact is concise, specific, and grounded in README context.",
+          "The node leaves the repository unchanged."
+        ],
         "constraints": [
           "Do not modify files in the repository."
         ],
@@ -73,6 +77,10 @@
         "repo": "main",
         "profile": "review",
         "goal": "Use the `babysit-poll` plugin tool to fetch the current state of pull request `123` (run `babysit-poll --help` if you need exact syntax, then call `babysit-poll --pr 123`). Combine the polled JSON with the release-notes draft to produce a short ship-readiness handoff. Write it to `ship-handoff.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR).",
+        "acceptance_criteria": [
+          "The handoff cites the release notes and plugin-produced PR status evidence.",
+          "The node does not mutate repository files or remote services."
+        ],
         "constraints": [
           "Do not modify files in the repository."
         ],

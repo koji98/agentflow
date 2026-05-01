@@ -12,6 +12,7 @@ import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { validateAuthoredGraphDocument } from "../../src/graph/validate.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,10 +31,10 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument({
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
     intent: TEST_INTENT,
     ...document
-  });
+  }));
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -123,7 +124,7 @@ describe("sequence cleanup compilation", () => {
 
 describe("sequence cleanup validation", () => {
   it("rejects cleanup nested inside another cleanup chain", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateAuthoredGraphDocument(withNodeIntentDefaults({
       version: "1",
       graph_id: "nested-cleanup",
       intent: TEST_INTENT,
@@ -155,7 +156,7 @@ describe("sequence cleanup validation", () => {
           }
         ]
       }
-    });
+    }));
 
     expect(diagnostics.some((diag) => /cleanup is not allowed inside another cleanup chain/i.test(diag.message))).toBe(true);
   });

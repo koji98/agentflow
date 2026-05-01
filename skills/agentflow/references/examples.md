@@ -93,6 +93,11 @@ Use this as the default copy source for focused implementation work.
       {
         "type": "check",
         "id": "focused_tests",
+        "goal": "Run the focused checkout tests for the implemented timeout change.",
+        "acceptance_criteria": [
+          "The focused checkout test command exits successfully.",
+          "The command output can be cited as validation evidence."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": ["test", "--", "tests/checkout"]
@@ -145,7 +150,18 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
         }
       }
     },
-    { "type": "check", "id": "pre_review_tests", "check_kind": "deterministic", "command": "npm", "args": ["test", "--", "tests/focused"] },
+    {
+      "type": "check",
+      "id": "pre_review_tests",
+      "goal": "Run focused tests before parallel review begins.",
+      "acceptance_criteria": [
+        "The focused test command exits successfully.",
+        "The check evidence is available to reviewer nodes."
+      ],
+      "check_kind": "deterministic",
+      "command": "npm",
+      "args": ["test", "--", "tests/focused"]
+    },
     {
       "type": "parallel",
       "id": "parallel_reviewers",
@@ -208,7 +224,18 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
         }
       }
     },
-    { "type": "check", "id": "final_tests", "check_kind": "deterministic", "command": "npm", "args": ["test", "--", "tests/focused"] }
+    {
+      "type": "check",
+      "id": "final_tests",
+      "goal": "Run focused tests after reviewer-driven refinement.",
+      "acceptance_criteria": [
+        "The focused test command exits successfully.",
+        "The final handoff can cite the check as validation evidence."
+      ],
+      "check_kind": "deterministic",
+      "command": "npm",
+      "args": ["test", "--", "tests/focused"]
+    }
   ]
 }
 ```
@@ -222,6 +249,11 @@ Use this when later nodes need explicit evidence about device-local commands or 
   "type": "exec",
   "id": "tool_inventory",
   "repo": "main",
+  "goal": "Inventory useful local commands and package scripts for later nodes.",
+  "acceptance_criteria": [
+    "The command exits successfully.",
+    "Stdout lists available common CLIs and package scripts."
+  ],
   "command": "bash",
   "args": [
     "-lc",

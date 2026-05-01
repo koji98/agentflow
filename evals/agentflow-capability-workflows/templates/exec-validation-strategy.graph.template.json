@@ -41,6 +41,11 @@
         "type": "exec",
         "id": "validation_gate",
         "repo": "main",
+        "goal": "Exercise validation-strategy repair and publish a handoff when the corrected strategy succeeds.",
+        "acceptance_criteria": [
+          "The command succeeds after validation guidance changes away from the failing strategy.",
+          "The declared handoff artifact records the final validation path."
+        ],
         "command": "node",
         "args": [
           "scripts/validation-gate.js"

@@ -89,6 +89,11 @@
         "type": "check",
         "id": "verify",
         "repo": "main",
+        "goal": "Run the scenario validation suite and confirm the implementation still satisfies the repository contract.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "The check output is available as deterministic validation evidence."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

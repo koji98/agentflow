@@ -41,6 +41,11 @@
         "type": "exec",
         "id": "no_delta",
         "repo": "main",
+        "goal": "Exercise the no-material-delta failure path for supervisor recovery.",
+        "acceptance_criteria": [
+          "The command exits according to the fixture script's no-delta contract.",
+          "Supervisor evidence can distinguish repeated failure from a useful repair."
+        ],
         "command": "node",
         "args": [
           "scripts/no-delta.js"

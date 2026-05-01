@@ -88,6 +88,11 @@
         "type": "check",
         "id": "verify",
         "repo": "main",
+        "goal": "Run the focused scenario tests after any context repair and confirm the router behavior is correct.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "The check validates the repaired context led to a working implementation."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

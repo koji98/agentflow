@@ -430,6 +430,15 @@ export async function createResumedRuntimeSession(options: {
           }
         ])
       ),
+      active_recovery_chains: Object.fromEntries(
+        Object.entries(options.prior_state.supervisor.active_recovery_chains ?? {}).map(([compiledId, chain]) => [
+          compiledId,
+          {
+            ...chain,
+            resume_ready_node: { ...chain.resume_ready_node }
+          }
+        ])
+      ),
       failure_fingerprints: Object.fromEntries(
         Object.entries(options.prior_state.supervisor.failure_fingerprints ?? {}).map(([compiledId, state]) => [
           compiledId,

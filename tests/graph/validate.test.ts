@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { summarizeAuthoredGraph, validateAuthoredGraphDocument } from "../../src/graph/validate.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const fixturePath = fileURLToPath(
   new URL("./fixtures/repeat.graph.json", import.meta.url)
@@ -19,6 +20,10 @@ const TEST_INTENT = {
   goal: "Validate an Agentflow graph contract.",
   acceptance_criteria: ["Graph diagnostics reflect the targeted contract behavior."]
 };
+
+async function validateGraph(value: unknown) {
+  return validateAuthoredGraphDocument(withNodeIntentDefaults(value as never));
+}
 
 describe("graph validation", () => {
   it("normalizes and summarizes the repeat fixture", async () => {
@@ -51,7 +56,7 @@ describe("graph validation", () => {
   });
 
   it("accepts checkpoint nodes inside repeat bodies and as repeat.until targets", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "checkpoint-repeat",
       intent: TEST_INTENT,
@@ -115,7 +120,7 @@ describe("graph validation", () => {
   });
 
   it("rejects repeat.until references that do not resolve to descendant checks or checkpoints", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-repeat",
       intent: TEST_INTENT,
@@ -170,7 +175,7 @@ describe("graph validation", () => {
   });
 
   it("rejects repeat.until checks that use soft failure semantics", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-soft-repeat-until",
       intent: TEST_INTENT,
@@ -230,7 +235,7 @@ describe("graph validation", () => {
   });
 
   it("rejects checkpoint nodes outside repeat bodies", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-checkpoint-placement",
       intent: TEST_INTENT,
@@ -287,7 +292,7 @@ describe("graph validation", () => {
   });
 
   it("rejects check fields that do not apply to the selected check kind", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-check-fields",
       intent: TEST_INTENT,
@@ -356,7 +361,7 @@ describe("graph validation", () => {
   });
 
   it("rejects input paths and cwd values that escape the repo or workspace root", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-path-boundaries",
       intent: TEST_INTENT,
@@ -478,7 +483,7 @@ describe("graph validation", () => {
   });
 
   it("rejects an agent graph that has no profile and therefore no resolvable harness", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "missing-harness-agent",
       intent: TEST_INTENT,
@@ -507,7 +512,7 @@ describe("graph validation", () => {
   });
 
   it("rejects an AI check that cannot resolve a harness through the profile chain", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "missing-harness-ai-check",
       intent: TEST_INTENT,
@@ -537,7 +542,7 @@ describe("graph validation", () => {
   });
 
   it("rejects an agent node that combines a read-only sandbox with declared artifacts", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "readonly-with-artifacts",
       intent: TEST_INTENT,
@@ -575,7 +580,7 @@ describe("graph validation", () => {
   });
 
   it("allows a read-only agent node when it declares no artifacts", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "readonly-no-artifacts",
       intent: TEST_INTENT,
@@ -602,7 +607,7 @@ describe("graph validation", () => {
   });
 
   it("rejects reasoning_effort on Cursor profiles and nodes", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "cursor-reasoning-effort",
       intent: TEST_INTENT,
@@ -662,7 +667,7 @@ describe("graph validation", () => {
   });
 
   it("rejects reasoning_effort inherited by a Cursor launch profile", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "cursor-inherited-reasoning-effort",
       intent: TEST_INTENT,
@@ -708,7 +713,7 @@ describe("graph validation", () => {
   });
 
   it("does not require a harness for exec-only graphs", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "exec-only",
       intent: TEST_INTENT,

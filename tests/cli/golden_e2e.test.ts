@@ -11,6 +11,7 @@ import {
   readSupervisorTimeline
 } from "../../src/artifacts/reader.js";
 import { executeCli } from "../../src/cli/index.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -29,7 +30,7 @@ async function writeExecutable(path: string, source: string): Promise<void> {
 }
 
 async function writeGraph(path: string, graph: Record<string, unknown>): Promise<void> {
-  await writeFile(path, `${JSON.stringify(graph, null, 2)}\n`, "utf8");
+  await writeFile(path, `${JSON.stringify(withNodeIntentDefaults(graph as never), null, 2)}\n`, "utf8");
 }
 
 async function readJson<T>(path: string): Promise<T> {

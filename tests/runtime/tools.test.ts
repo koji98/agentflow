@@ -22,6 +22,7 @@ import {
 } from "../../src/runtime/harness/types.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { prepareAgentTools } from "../../src/runtime/tools/setup.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -132,7 +133,7 @@ describe("plugin tool compilation", () => {
         goal: `Compile tools for ${document.graph_id}.`,
         acceptance_criteria: ["Plugin tools obey their config and credential policy."]
       },
-      ...document
+      ...withNodeIntentDefaults(document)
     });
     expect(normalized.diagnostics).toEqual([]);
     const launch = resolveLaunchConfig(normalized.document!);
@@ -295,10 +296,10 @@ describe("plugin tool compilation", () => {
       }
     };
 
-    await expect(validateAuthoredGraphDocument({
+    await expect(validateAuthoredGraphDocument(withNodeIntentDefaults({
       ...baseDocument,
       tools: [{ from_plugin: "babysit", tool: "poll", config: { token: "ghp_should_not_be_here" } }]
-    }, { resolved_plugins: resolvedPlugins })).resolves.toEqual(expect.arrayContaining([
+    }), { resolved_plugins: resolvedPlugins })).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({
         path: "$.tools[0].config.token",
         message: expect.stringContaining("looks secret-bearing")
@@ -313,10 +314,10 @@ describe("plugin tool compilation", () => {
       })
     ]));
 
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateAuthoredGraphDocument(withNodeIntentDefaults({
       ...baseDocument,
       tools: [{ from_plugin: "babysit", tool: "poll", config: { mode: "watch" } }]
-    }, { resolved_plugins: resolvedPlugins });
+    }), { resolved_plugins: resolvedPlugins });
     expect(diagnostics).toEqual([]);
   });
 
@@ -410,7 +411,7 @@ describe("plugin tool compilation", () => {
       }
     };
 
-    await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
+    await expect(validateAuthoredGraphDocument(withNodeIntentDefaults(document), { resolved_plugins: resolvedPlugins }))
       .resolves.toEqual([]);
 
     const compilation = compileWith(document);
@@ -436,7 +437,7 @@ describe("plugin tool compilation", () => {
       }
     };
 
-    await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
+    await expect(validateAuthoredGraphDocument(withNodeIntentDefaults(document), { resolved_plugins: resolvedPlugins }))
       .resolves.toEqual(expect.arrayContaining([
         expect.objectContaining({
           path: "$.tools[0]",
@@ -1087,7 +1088,7 @@ describe("end-to-end runtime tool wiring", () => {
           goal: "Exercise plugin tool runtime wiring.",
           acceptance_criteria: ["The harness can invoke the plugin tool from PATH."]
         },
-        ...document
+        ...withNodeIntentDefaults(document)
       });
       expect(normalized.diagnostics).toEqual([]);
       const launch = resolveLaunchConfig(normalized.document!);
@@ -1259,7 +1260,7 @@ describe("end-to-end runtime tool wiring", () => {
           goal: "Surface plugin tools in the agent prompt.",
           acceptance_criteria: ["The rendered prompt names the available tool."]
         },
-        ...document
+        ...withNodeIntentDefaults(document)
       });
       expect(normalized.diagnostics).toEqual([]);
       const launch = resolveLaunchConfig(normalized.document!);

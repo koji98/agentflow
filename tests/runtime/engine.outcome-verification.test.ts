@@ -16,6 +16,7 @@ import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
 import { readExecutionManifest } from "../../src/artifacts/reader.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -34,7 +35,7 @@ function compileGraph(document: AuthoredGraphDocument) {
       goal: `Exercise ${document.graph_id}.`,
       acceptance_criteria: ["The runtime behavior matches the test contract."]
     },
-    ...document
+    ...withNodeIntentDefaults(document)
   });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);

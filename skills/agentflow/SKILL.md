@@ -10,7 +10,8 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 ## Must Know
 
 - Graphs are execution contracts: intent, authority, context, artifacts, validation, supervision, and delivery.
-- `acceptance_criteria` are runtime-enforced by outcome verification for passing `agent` attempts.
+- Every executable node (`agent`, `exec`, `check`, `checkpoint`) needs a meaningful `goal` and non-empty `acceptance_criteria`; `constraints` default to `[]`.
+- `acceptance_criteria` are runtime-enforced by outcome verification for passing `agent` attempts and used by the supervisor to interpret deterministic nodes.
 - Context is prompt design. Prefer exact, high-signal material over broad dumps; validate real token cost with `--run-ready`.
 - Artifacts are durable handoffs. Downstream nodes should consume named artifacts, not raw logs or assumed workspace state.
 - Inside `repeat` loops, prior-iteration artifacts need explicit selectors such as `iteration: "previous"` or `iteration: "latest_failed"`; Agentflow also injects `repeat_history` so retrying nodes can see what already happened.
@@ -20,7 +21,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Do not over-prescribe implementation mechanics. Give agents clear intent, authority, context, artifacts, and validation; let them decide exact files and approach unless the user specified them.
 - In GitHub repos, consider rollout strategy before authoring: prefer small reviewable PRs, `establish_base -> parallel_prs`, or `cascading_prs` over one large PR unless the user asks otherwise.
 - A graph is not complete until validation passes: plugin resolution when needed, `validate`, `--review`, `--run-ready`, and `--show-compiled`.
-- Supervisor recovery handles runtime failure. Do not author supervisor safety pauses as planned workflow nodes.
+- Supervisor recovery is graph-causal: a failed node may be a symptom of an upstream node, artifact, context, workspace, validation strategy, or environment problem. Do not author supervisor safety pauses as planned workflow nodes.
 - `repos`, `profiles`, sandbox, and tools define authority. Constraints should name scope boundaries and high-impact limits.
 
 ## Route By Task
@@ -45,7 +46,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 3. Choose the graph shape: primitive flow, common authored pattern, or managed pattern.
 4. Define authority: repos, profiles, workspace backend, sandbox, tools, credentials, and high-impact limits.
 5. Inventory relevant local CLIs and decide what stays as ordinary terminal use versus plugin-bundled tools.
-6. Define node contracts: each substantial agent gets a goal, acceptance criteria, constraints, context, and named artifacts.
+6. Define node contracts: each executable node gets a goal, acceptance criteria, constraints, context when needed, and named artifacts when it must publish durable evidence.
 7. Add checks and supervision budgets that match risk; terminal delivery is automatic.
 8. Resolve plugins when declared, then run `agentflow validate --graph <path>`.
 9. Run `agentflow validate --graph <path> --review`, `--run-ready`, and `--show-compiled` before considering the graph complete.
@@ -57,7 +58,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Use `context` for node material and `artifacts` for durable handoffs.
 - Treat `repos` and `profiles` as operational authority; put scope boundaries and out-of-scope notes in `constraints`.
 - Keep downstream references on named artifacts from public node ids.
-- Treat `acceptance_criteria` as a runtime contract: passing `agent` attempts are graded by the outcome verifier against graph and node intent. Vague criteria produce vague verification, so write the criteria you want the verifier to enforce.
+- Treat `acceptance_criteria` as a runtime contract: passing `agent` attempts are graded by the outcome verifier, and deterministic failures use the same contract for causal recovery. Vague criteria produce vague verification and weak recovery.
 - Do not author boilerplate iteration guidance ("iterate until done", "investigate ambiguity", "stop only when blocked") in graph or node `constraints`. The runtime injects a `## Working Loop` section into every standard agent prompt that already covers this, and outcome verification will reject early-bailing.
 - Use deterministic checks for hard facts. Reach for AI checks only when another node depends on the gate or when the deterministic command is genuinely unavailable; do not stack an AI `check` after every agent node to re-evaluate the same acceptance criteria.
 - Treat checks, outcome verification, supervisor `semantic_evaluation`, managed pattern evaluation, and `agentflow eval` as separate lanes. Use `agentflow-evals` for the offline eval lane.
@@ -70,6 +71,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - `af` is injected into agent nodes on `PATH` and reads `$AGENTFLOW_RUNTIME_METADATA`.
 - Use `af --help` and `af <command> --help` for exact runtime CLI arguments, defaults, output shape, examples, and safety notes.
 - Prefer `af status`, `af tools list`, and `af context show` when debugging what a node actually received.
+- During supervisor investigation, prefer `af diagnose ... --json` for stable run evidence and `af learn <failure-kind>` for focused recovery playbooks.
 - Prefer `af artifact write` for declared handoffs instead of ad hoc output files.
 - Use `af log --type` for worker evidence and helper coordination notes, including `af log --type decision --decision ... --rationale ... --evidence ...` for major scope-affecting decisions, but keep durable conclusions in artifacts.
-- Treat `af spawn` helpers as supervised sessions with their own artifacts, not persistent coworkers.
+- Treat `af spawn` helpers as supervised sessions with their own artifacts, not persistent coworkers. Use `--purpose investigation` for read-only causal analysis and `--purpose repair` only when the selected node authority allows scoped edits.

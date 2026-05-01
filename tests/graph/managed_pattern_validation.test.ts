@@ -7,7 +7,8 @@ function buildEnvelope(step) {
     version: "1",
     graph_id: "managed-pattern-validation",
     intent: {
-      goal: "Validate managed pattern contracts."
+      goal: "Validate managed pattern contracts.",
+      acceptance_criteria: ["Managed pattern diagnostics match the authored contract."]
     },
     repos: {
       main: {
@@ -82,6 +83,7 @@ describe("managed pattern normalization edges", () => {
         type: "pattern_deep_work",
         id: "implement",
         goal: "Implement a change.",
+        acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
         completion: {
           pass_threshold: 0.9,
           criteria: [
@@ -125,6 +127,7 @@ describe("managed pattern normalization edges", () => {
         type: "pattern_deep_work",
         id: "implement",
         goal: "Implement a change.",
+        acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
         completion: {
           criteria: [
             {

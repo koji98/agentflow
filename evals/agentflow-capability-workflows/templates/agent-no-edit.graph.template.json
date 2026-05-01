@@ -80,6 +80,11 @@
         "type": "check",
         "id": "verify",
         "repo": "main",
+        "goal": "Run the repository validation suite without modifying repository files.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "No repository edits are needed for this audit scenario."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

@@ -1,21 +1,60 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeAuthoredGraphDocument as normalizeRawAuthoredGraphDocument } from "../../src/graph/normalize.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 function normalizeAuthoredGraphDocument(value: unknown) {
   if (typeof value !== "object" || value === null || Array.isArray(value) || "intent" in value) {
-    return normalizeRawAuthoredGraphDocument(value);
+    return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults(value as never));
   }
 
-  return normalizeRawAuthoredGraphDocument({
+  return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
-      goal: "Test supervised graph contract."
+      goal: "Test supervised graph contract.",
+      acceptance_criteria: ["The graph normalizes under the current contract."]
     },
     ...value
-  });
+  } as never));
 }
 
 describe("graph normalization", () => {
+  it("requires goal and acceptance criteria on executable nodes", () => {
+    const normalized = normalizeRawAuthoredGraphDocument({
+      version: "1",
+      graph_id: "missing-node-intent",
+      intent: {
+        goal: "Validate node intent requirements.",
+        acceptance_criteria: ["Missing node intent is rejected."]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "run",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.graph.steps[0].goal",
+          message: "Expected a non-empty string."
+        },
+        {
+          path: "$.graph.steps[0].acceptance_criteria",
+          message: "Executable nodes require acceptance_criteria."
+        }
+      ])
+    );
+  });
+
   it("normalizes supervised v1 intent and supervision defaults", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
@@ -204,10 +243,6 @@ describe("graph normalization", () => {
         {
           path: "$.graph.steps[0].prompt",
           message: 'Unknown field "prompt" is not part of the graph contract.'
-        },
-        {
-          path: "$.graph.steps[0].goal",
-          message: "Agent nodes require goal."
         }
       ])
     );

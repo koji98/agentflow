@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { AuthoredGraphDocument } from "../../src/graph/authored.js";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
@@ -11,6 +12,7 @@ import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js
 import { closeNodeAttempt, createAttemptRegistry, openNodeAttempt } from "../../src/runtime/attempts.js";
 import { resolveExecutionContext } from "../../src/runtime/context/resolve.js";
 import type { SupervisorRecoveryEnvelope } from "../../src/supervisor/types.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const TEST_INTENT = {
   goal: "Resolve runtime context for an accountable Agentflow node.",
@@ -18,9 +20,10 @@ const TEST_INTENT = {
 };
 
 function compileGraph(document: Parameters<typeof normalizeAuthoredGraphDocument>[0]) {
+  const documentWithDefaults = withNodeIntentDefaults(document as AuthoredGraphDocument);
   const normalized = normalizeAuthoredGraphDocument({
     intent: TEST_INTENT,
-    ...(document as object)
+    ...(documentWithDefaults as object)
   });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);

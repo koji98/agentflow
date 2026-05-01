@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument as normalizeRawAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { builtInCodexReasoningEffort, resolveLaunchConfig } from "../../src/graph/profiles.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const fixturePath = fileURLToPath(
   new URL("./fixtures/repeat.graph.json", import.meta.url)
@@ -18,15 +19,16 @@ async function readFixture(): Promise<unknown> {
 
 function normalizeAuthoredGraphDocument(value: unknown) {
   if (typeof value !== "object" || value === null || Array.isArray(value) || "intent" in value) {
-    return normalizeRawAuthoredGraphDocument(value);
+    return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults(value as never));
   }
 
-  return normalizeRawAuthoredGraphDocument({
+  return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
-      goal: "Test supervised graph contract."
+      goal: "Test supervised graph contract.",
+      acceptance_criteria: ["The graph compiles under the current contract."]
     },
     ...value
-  });
+  } as never));
 }
 
 describe("graph compilation", () => {

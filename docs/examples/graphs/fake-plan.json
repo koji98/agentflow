@@ -33,6 +33,10 @@
         "id": "inspect_repo",
         "repo": "main",
         "goal": "Inspect this repository and summarize what it does, the main CLI commands a developer would use first, and any obvious operator-facing constraints.",
+        "acceptance_criteria": [
+          "The response identifies the repository purpose and first useful CLI commands.",
+          "The response names operator-facing constraints without modifying files."
+        ],
         "constraints": [
           "Do not modify files."
         ],
@@ -58,6 +62,11 @@
         "type": "check",
         "id": "verify_package_contract",
         "repo": "main",
+        "goal": "Verify that package metadata matches the expected local Agentflow package shape.",
+        "acceptance_criteria": [
+          "The package name is `agentflow`.",
+          "The package metadata exposes the expected workspace structure."
+        ],
         "check_kind": "deterministic",
         "command": "node",
         "args": [
@@ -74,6 +83,10 @@
         "id": "summarize_findings",
         "repo": "main",
         "goal": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing.",
+        "acceptance_criteria": [
+          "The handoff mentions package name, graph validation, and package metadata coherence.",
+          "The handoff uses inspection and check evidence."
+        ],
         "constraints": [
           "Do not modify files."
         ],

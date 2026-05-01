@@ -6,6 +6,7 @@ import type { SupervisorBudgetRemaining } from "../supervisor/policy.js";
 import type {
   SupervisorDecision,
   SupervisorFailureFingerprintState,
+  SupervisorRecoveryChainState,
   SupervisorRecoveryEnvelope
 } from "../supervisor/types.js";
 
@@ -128,6 +129,7 @@ export interface RuntimeSupervisorState {
   last_decision_id?: string;
   timeline: SupervisorDecision[];
   active_recovery_envelopes: Record<string, SupervisorRecoveryEnvelope>;
+  active_recovery_chains: Record<string, SupervisorRecoveryChainState>;
   failure_fingerprints: Record<string, SupervisorFailureFingerprintState>;
   pause?: {
     decision_id: string;
@@ -307,6 +309,7 @@ export function createRuntimeSession(
       budget_remaining: budgetRemaining,
       timeline: [],
       active_recovery_envelopes: {},
+      active_recovery_chains: {},
       failure_fingerprints: {},
       escalations: []
     },
@@ -443,6 +446,15 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
               validation_focus: [...envelope.retry_directive.validation_focus],
               unchanged_contract: { ...envelope.retry_directive.unchanged_contract }
             }
+          }
+        ])
+      ),
+      active_recovery_chains: Object.fromEntries(
+        Object.entries(session.supervisor.active_recovery_chains).map(([compiledId, chain]) => [
+          compiledId,
+          {
+            ...chain,
+            resume_ready_node: { ...chain.resume_ready_node }
           }
         ])
       ),

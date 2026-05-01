@@ -186,6 +186,10 @@ describe("deep research managed pattern", () => {
             type: "agent",
             id: "handoff",
             goal: "Summarize the research recommendation.",
+            acceptance_criteria: [
+              "The handoff uses the final managed summary and packet artifacts.",
+              "The handoff preserves the recommendation and key uncertainty."
+            ],
             context: [
               {
                 ref: "market_scan.agent_response",

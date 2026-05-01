@@ -12,6 +12,7 @@ export const runtimeEventTypes = [
   "supervisor.intervention.completed",
   "supervisor.intervention.failed",
   "supervisor.retry_scheduled",
+  "supervisor.gate_rerun_scheduled",
   "supervisor.paused",
   "check.evaluated",
   "verification.recorded",

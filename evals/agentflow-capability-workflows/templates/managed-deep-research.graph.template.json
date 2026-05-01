@@ -105,6 +105,11 @@
         "type": "check",
         "id": "verify",
         "repo": "main",
+        "goal": "Run the local validation suite after the research handoff and confirm the repository fixture remains healthy.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "The check evidence is available for grading the research workflow."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

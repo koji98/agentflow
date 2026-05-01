@@ -15,7 +15,7 @@ import {
   resolveExecutionArtifactsDirectory,
   resolveNodeExecutionDirectory
 } from "../../src/artifacts/paths.js";
-import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
+import { readRunExecutionAttempts, readSupervisorInterventions } from "../../src/artifacts/reader.js";
 import { buildExecutionId } from "../../src/runtime/attempts.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
@@ -33,12 +33,13 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
+  const documentWithNodeIntent = addNodeIntentDefaults(document);
   const normalized = normalizeAuthoredGraphDocument({
     intent: {
       goal: `Exercise ${document.graph_id}.`,
       acceptance_criteria: ["The runtime behavior matches the test contract."]
     },
-    ...document
+    ...documentWithNodeIntent
   });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
@@ -51,6 +52,34 @@ function compileGraph(document: AuthoredGraphDocument) {
   expect(compilation.diagnostics).toEqual([]);
   expect(compilation.compiled_graph).toBeDefined();
   return compilation.compiled_graph!;
+}
+
+function addNodeIntentDefaults(document: AuthoredGraphDocument): AuthoredGraphDocument {
+  const clone = structuredClone(document) as AuthoredGraphDocument;
+
+  function visit(node: unknown): void {
+    if (!node || typeof node !== "object" || Array.isArray(node)) {
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    const type = record.type;
+    if (["agent", "exec", "check", "checkpoint", "pattern_deep_research", "pattern_deep_work"].includes(String(type))) {
+      record.goal ??= `Complete node ${String(record.id ?? "unknown")} according to its runtime contract.`;
+      record.acceptance_criteria ??= [
+        `Node ${String(record.id ?? "unknown")} satisfies its declared runtime behavior and artifact contract.`
+      ];
+      record.constraints ??= [];
+    }
+    if (Array.isArray(record.steps)) {
+      record.steps.forEach(visit);
+    }
+    if (record.body) {
+      visit(record.body);
+    }
+  }
+
+  visit(clone.graph);
+  return clone;
 }
 
 async function waitFor(
@@ -126,6 +155,144 @@ function createHarness(
 }
 
 describe("runtime engine", () => {
+  it("repairs an upstream worker when a downstream check is the failed symptom", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-causal-supervisor-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-causal-supervisor",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            goal: "Write the implementation output that validation checks.",
+            acceptance_criteria: ["The workspace file result.txt contains ok."],
+            constraints: ["Only modify result.txt."],
+            artifacts: {
+              summary: {
+                from: "output_dir",
+                path: "summary.md",
+                description: "Implementation summary."
+              }
+            }
+          },
+          {
+            type: "check",
+            id: "validate",
+            check_kind: "deterministic",
+            goal: "Validate the implementation output.",
+            acceptance_criteria: ["The validation gate passes only when result.txt contains ok."],
+            constraints: ["Do not edit the workspace."],
+            command: "placeholder",
+            context: [
+              {
+                ref: "implement.summary",
+                name: "implementation summary"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    let implementAttempts = 0;
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        agent: async ({ workspace_path, execution_dir, supervisor_recovery_envelope }) => {
+          implementAttempts += 1;
+          await writeFile(
+            join(workspace_path, "result.txt"),
+            supervisor_recovery_envelope ? "ok\n" : "not ok yet\n"
+          );
+          await writeFile(
+            join(resolveExecutionArtifactsDirectory(execution_dir), "summary.md"),
+            supervisor_recovery_envelope
+              ? "Recovered implementation with passing result.\n"
+              : "Initial implementation is incomplete.\n"
+          );
+          return {
+            status: "passed",
+            outcome: "passed",
+            result: { implementAttempts },
+            stdout: "",
+            stderr: ""
+          };
+        },
+        check: async ({ workspace_path }) => {
+          const value = await readFile(join(workspace_path, "result.txt"), "utf8").catch(() => "");
+          const passed = value.trim() === "ok";
+          return {
+            status: passed ? "passed" : "failed",
+            outcome: passed ? "passed" : "failed",
+            result: { value },
+            stdout: value,
+            stderr: passed ? "" : "result.txt did not contain ok",
+            check: {
+              check_kind: "deterministic",
+              passed,
+              summary: passed ? "result passed" : "result failed"
+            }
+          };
+        }
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(run.attempts.filter((attempt) => attempt.authored_id === "implement")).toHaveLength(2);
+    expect(run.attempts.filter((attempt) => attempt.authored_id === "validate")).toHaveLength(2);
+    expect(run.events.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "supervisor.intervention.completed",
+        "supervisor.retry_scheduled",
+        "supervisor.gate_rerun_scheduled"
+      ])
+    );
+    const interventions = await readSupervisorInterventions(runRoot);
+    expect(interventions).toEqual([
+      expect.objectContaining({
+        target_compiled_id: "root__implement",
+        evidence: expect.objectContaining({
+          symptom_compiled_id: "root__validate",
+          recovery_target: expect.objectContaining({
+            operation: "repair_upstream_node"
+          })
+        }),
+        artifact_paths: expect.objectContaining({
+          causal_case_file_json: expect.stringContaining("causal-case-file.json"),
+          recovery_chain_json: expect.stringContaining("recovery-chain.json")
+        })
+      })
+    ]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("executes sequence, parallel, repeat, and context handoff over a compiled graph", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-"));
     const repoDir = join(tempRoot, "repo");

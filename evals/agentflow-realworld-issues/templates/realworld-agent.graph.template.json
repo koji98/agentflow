@@ -79,6 +79,11 @@
         "type": "check",
         "id": "focused_regression",
         "repo": "main",
+        "goal": "Run the real-world issue's focused regression command and confirm the upstream bug is fixed.",
+        "acceptance_criteria": [
+          "`{{scenario.metadata.realworld.focused_test_command}}` exits successfully.",
+          "The validation evidence is produced without editing regression tests, lockfiles, or forbidden source."
+        ],
         "check_kind": "deterministic",
         "command": "sh",
         "args": [

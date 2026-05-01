@@ -215,6 +215,10 @@ describe("pattern deep work", () => {
           type: "agent",
           id: "handoff",
           goal: "Summarize the final deep work package.",
+          acceptance_criteria: [
+            "The handoff uses the final managed summary and packet artifacts.",
+            "The handoff is suitable for downstream review."
+          ],
           context: [
             {
               ref: "implement_checkout.agent_response",

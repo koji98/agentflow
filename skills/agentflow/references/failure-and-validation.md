@@ -90,16 +90,16 @@ If no harness is available and exactly one missing artifact is a human-readable 
 
 ## Recovery Loop
 
-Failed executable attempts enter a recovery loop when budget and policy allow:
+Failed executable attempts enter a graph-causal recovery loop when budget and policy allow:
 
 1. Persist the exact rendered prompt for the failed attempt.
-2. Build a supervisor case file with node contract, context packet paths, result, artifacts, verifier/check output, prior interventions, and failure fingerprint.
-3. Classify the failure and select evidence gatherers.
-4. Run evidence gatherers such as `local_context`, `pattern_mining`, `dependency_metadata`, `external_context`, `diagnostic_probe`, `semantic_rejudge`, and `investigate_failure`.
-5. Merge patches into one recovery plan.
-6. Apply one runtime overlay action: repair context, repair validation strategy, repair workspace, repair environment, retry with evidence, repair an artifact, pause for authority, or fail terminally.
+2. Build a causal case file with symptom evidence, node contract, context packet paths, artifacts, verifier/check output, prior interventions, workspace diff, and failure fingerprint.
+3. Traverse the upstream cone from graph edges, artifact refs, context provenance, repeat or managed-pattern state, and prior attempt evidence.
+4. Rank candidate recovery targets: current node, upstream producer, artifact owner, context repair, validation strategy, workspace, environment, or authority boundary.
+5. Repair the nearest intent-aligned target first, then rerun the failed gate.
+6. Continue only when each retry or repair records a material delta.
 
-Retries must carry a material delta. The delta can be changed context, added evidence, changed validation guidance, workspace cleanup, environment repair, or repaired artifacts. If there is no new material delta, the supervisor should not spend budget repeating the same failed tactic.
+Retries must carry a material delta. The delta can be changed target, changed context, added evidence, changed validation guidance, workspace cleanup, environment repair, or repaired artifacts. If there is no new material delta, the supervisor should widen causal search or change tactic instead of repeating the same failed action.
 
 For `context_contract_failure`, the intervention writes `context-analysis.{json,md}`, `context-repair-patch.json`, `runtime-overlay.json`, `material-delta.json`, and a recovery envelope. The retry receives `supervisor_recovery_envelope` and `supervisor_context_repair` context before authored context. The repair packet is a compact index with omitted-entry provenance and live workspace paths; it does not change goals, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts.
 

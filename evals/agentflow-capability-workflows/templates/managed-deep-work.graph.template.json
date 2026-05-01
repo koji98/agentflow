@@ -114,6 +114,11 @@
         "type": "check",
         "id": "verify",
         "repo": "main",
+        "goal": "Run the local validation suite after deep-work completion and confirm the final workspace satisfies the task.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "The check evidence confirms the managed loop ended with a valid implementation."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

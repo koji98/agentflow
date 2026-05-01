@@ -33,6 +33,11 @@
         "type": "exec",
         "id": "write_handoff",
         "repo": "main",
+        "goal": "Write the deterministic eval handoff artifact for this workflow-quality scenario.",
+        "acceptance_criteria": [
+          "The command writes `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+          "The handoff identifies scenario, variant, and validation evidence."
+        ],
         "command": "node",
         "args": [
           "-e",

@@ -28,6 +28,11 @@
         "type": "exec",
         "id": "echo_case",
         "repo": "main",
+        "goal": "Write the basic eval handoff artifact so the suite has deterministic evidence.",
+        "acceptance_criteria": [
+          "The command writes `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+          "The run trace records this executable attempt."
+        ],
         "command": "node",
         "args": [
           "-e",

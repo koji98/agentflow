@@ -8,7 +8,8 @@ Author graphs as supervised execution contracts. A good graph states what the te
 - Add `repos`, `profiles`, and `defaults.launch_profile` explicitly.
 - Use `defaults.workspace_backend: "worktree"` for code-writing work unless the operator intentionally wants in-place execution.
 - In GitHub repos, choose a rollout strategy before node layout. Prefer small PRs, `establish_base -> parallel_prs`, or `cascading_prs` over one large PR. See `github-rollout.md`.
-- Keep substantial agent nodes outcome-sized. Give each one `goal`, `acceptance_criteria`, relevant `constraints`, high-signal `context`, and named `artifacts`.
+- Keep substantial agent nodes outcome-sized. Give each one high-signal `context` and named `artifacts`.
+- Give every executable node (`agent`, `exec`, `check`, `checkpoint`) a meaningful `goal`, non-empty `acceptance_criteria`, and relevant `constraints`. Deterministic nodes need intent too so the supervisor can diagnose whether a failure is local or upstream.
 - Use deterministic `check` nodes for hard facts that should gate control flow or delivery evidence.
 - Set `supervision.max_total_interventions` to match task risk. Add `supervision.profile` only when supervisor work should use a dedicated profile instead of the failed node's profile.
 - A graph is not complete until required validation passes. Resolve plugins when needed, run `validate`, then run `--review`, `--run-ready`, and `--show-compiled`.
@@ -123,6 +124,11 @@ Use deterministic checks for hard facts:
 {
   "type": "check",
   "id": "test",
+  "goal": "Run the focused runtime test file.",
+  "acceptance_criteria": [
+    "The test command exits successfully.",
+    "The output can serve as deterministic validation evidence."
+  ],
   "check_kind": "deterministic",
   "command": "npm",
   "args": ["test", "--", "tests/runtime/engine.test.ts"]

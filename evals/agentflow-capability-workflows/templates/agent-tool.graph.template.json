@@ -83,6 +83,11 @@
         "type": "check",
         "id": "verify",
         "repo": "main",
+        "goal": "Run the scenario validation suite and confirm the tool-discovered value was applied correctly.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "The validation evidence confirms the local fixture tool result was used."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

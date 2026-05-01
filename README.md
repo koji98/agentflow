@@ -12,7 +12,7 @@ flowchart LR
   graph --> harness["Agent harness\nCodex CLI or Cursor CLI"]
   graph --> checks["Checks and criteria\nhard gates and rubrics"]
   harness --> artifacts["Artifacts and logs\nwhat happened"]
-  checks --> supervisor["Supervisor\nrecover, repair, or stop"]
+  checks --> supervisor["Supervisor\nobserve, repair, or request authority"]
   artifacts --> supervisor
   supervisor --> delivery["Delivery package\nreview-ready evidence"]
 ```
@@ -56,10 +56,11 @@ flowchart TD
   harness --> verify["Outcome verification\nartifacts, response, diff, logs"]
   verify --> passed{"Passed?"}
   passed -- yes --> next["Next node or delivery"]
-  passed -- no --> supervisor["Supervisor recovery\ncase file, evidence, overlay"]
-  supervisor --> retry{"Machine recovery?"}
-  retry -- retry or repair --> attempt
-  retry -- terminal --> delivery["Delivery package\nor failed run evidence"]
+  passed -- no --> supervisor["Supervisor recovery\ncausal cone, target, material delta"]
+  supervisor --> target{"Recovery target"}
+  target -- current or upstream node --> attempt
+  target -- authority boundary --> delivery["Paused delivery evidence"]
+  target -- impossible runtime invariant --> delivery
   next --> delivery
 ```
 
@@ -79,20 +80,19 @@ That separation is why validation can explain the workflow before launch, execut
 
 ## Supervisor Recovery
 
-The supervisor acts at node checkpoints. It cannot silently change graph intent, widen repo authority, bypass acceptance criteria, or hide interventions. It can repair machine-fixable runtime failures and retry with material changes.
+Every executable node is a supervised checkpoint. The supervisor observes healthy attempts and stays out of the way. When a node fails or is rejected, the failed node is treated as a symptom: the supervisor builds an upstream causal cone, chooses the nearest intent-aligned recovery target, repairs within that target's existing authority, reruns the failed gate, and records the recovery chain.
 
 ```mermaid
 flowchart TD
-  failure["Failed or rejected attempt"] --> casefile["Case file\nprompt, context, logs, artifacts, diff"]
-  casefile --> classify["Classify failure\ncontext, artifact, validation, workspace, environment, semantic"]
-  classify --> evidence["Gather evidence\nlocal, external, diagnostic, semantic"]
-  evidence --> overlay["Runtime overlay\none apply action"]
-  overlay --> action{"Action"}
-  action -- repair context --> retry["Retry node\nrepaired packet"]
-  action -- repair artifact --> repair["Repair declared artifact"]
-  action -- retry with evidence --> retry
-  action -- fail terminal --> fail["Fail with evidence"]
-  action -- authority boundary --> pause["Pause for human authority"]
+  symptom["Failed or rejected checkpoint"] --> casefile["Causal case file\nprompt, context, logs, artifacts, diff"]
+  casefile --> cone["Upstream causal cone\nedges, artifacts, context, attempts"]
+  cone --> rank["Rank recovery targets\ncurrent, upstream, artifact, context, workspace"]
+  rank --> repair["Machine repair\nwithin target authority"]
+  repair --> delta["Material delta\nwhat actually changed"]
+  delta --> rerun["Rerun failed gate"]
+  rerun -- healthy --> continue["Continue graph"]
+  rerun -- new symptom --> cone
+  rank -- authority boundary --> pause["Pause for human authority"]
 ```
 
 Human pause is reserved for authority, credentials, security or compliance judgment, product intent ambiguity, explicit checkpoints, or graph-contract changes. Ordinary context, validation, artifact, workspace, and local environment failures should attempt machine recovery first.
@@ -241,6 +241,11 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
         "type": "check",
         "id": "test",
         "repo": "main",
+        "goal": "Run the repository test suite to validate the scoped change.",
+        "acceptance_criteria": [
+          "`npm test` exits successfully.",
+          "The check output is usable as reviewer evidence."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": ["test"]
@@ -308,7 +313,7 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | `prerequisites` | Local launch checks for files, commands, env vars, and repos. |
 | `graph` | The execution shape: containers, executable nodes, or managed patterns. |
 
-Executable nodes are `agent`, `exec`, `check`, and `checkpoint`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
+Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `goal` and non-empty `acceptance_criteria`, with optional `constraints` normalized to `[]`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
 
 Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime safety stops chosen after failure or risk classification and resumed with `agentflow resume`.
 

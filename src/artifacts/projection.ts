@@ -487,6 +487,12 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: `Supervisor scheduled retry after ${String(payload.delay_ms ?? 0)}ms.`
       };
+    case "supervisor.gate_rerun_scheduled":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Supervisor scheduled rerun of symptom gate ${String(payload.symptom_compiled_id ?? "unknown")}.`
+      };
     case "supervisor.paused":
       return {
         ...(authored_id ? { authored_id } : {}),

@@ -226,6 +226,111 @@ describe("af runtime CLI", () => {
     ])).rejects.toThrow("not granted");
   });
 
+  it("exposes supervisor learn and diagnose helpers", async () => {
+    const runtime = await createRuntime(tempRoot);
+    process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+    await writeFile(join(runtime.root, "compiled_graph.json"), `${JSON.stringify({
+      graph_id: "af-cli-test",
+      intent: {
+        goal: "Test diagnostics.",
+        acceptance_criteria: ["Diagnostics expose causal graph evidence."]
+      },
+      supervision: {
+        max_total_interventions: 3
+      },
+      launch: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      entry_node_ids: ["implement"],
+      nodes: [
+        {
+          compiled_id: "implement",
+          authored_id: "implement",
+          kind: "agent",
+          goal: "Implement the change.",
+          acceptance_criteria: ["The implementation satisfies downstream validation."],
+          constraints: [],
+          repo: "main",
+          deps: [],
+          scope_stack: ["root"],
+          effective_policy: {
+            profile_name: "default",
+            sandbox: "workspace-write",
+            timeout_sec: 10,
+            input_rules: {},
+            artifact_repair: { max_attempts: 1 }
+          },
+          context: [],
+          declared_artifacts: {},
+          tools: []
+        },
+        {
+          compiled_id: "validate",
+          authored_id: "validate",
+          kind: "check",
+          check_kind: "deterministic",
+          goal: "Validate implementation behavior.",
+          acceptance_criteria: ["The focused validation command exits successfully."],
+          constraints: [],
+          repo: "main",
+          deps: ["implement"],
+          scope_stack: ["root"],
+          effective_policy: {
+            profile_name: "default",
+            sandbox: "workspace-write",
+            timeout_sec: 10,
+            input_rules: {},
+            artifact_repair: { max_attempts: 1 }
+          },
+          context: [],
+          declared_artifacts: {},
+          on_failure: "fail",
+          command: "npm",
+          args: ["test"]
+        }
+      ],
+      edges: [{ edge_id: "implement__validate", from: "implement", to: "validate", on: "passed", kind: "flow" }],
+      scopes: [],
+      authored_to_compiled: {
+        implement: ["implement"],
+        validate: ["validate"]
+      },
+      prerequisites: { checks: [] }
+    }, null, 2)}\n`, "utf8");
+    await writeFile(join(runtime.root, "state.json"), `${JSON.stringify({
+      run_id: "run-test",
+      graph_id: "af-cli-test",
+      status: "running",
+      counts: {},
+      node_statuses: {
+        implement: "passed",
+        validate: "failed"
+      },
+      supervisor: {}
+    }, null, 2)}\n`, "utf8");
+
+    const playbook = outputOf<{ kind: string; playbook: { safe_repairs: string[] } }>(
+      await executeAfCli(["learn", "failed_check"])
+    );
+    expect(playbook.kind).toBe("failed_check");
+    expect(playbook.playbook.safe_repairs.join(" ")).toContain("upstream");
+
+    const cone = outputOf<{ direction: string; nodes: Array<{ compiled_id: string }> }>(
+      await executeAfCli(["diagnose", "graph-cone", "--from", "validate", "--upstream", "--json"])
+    );
+    expect(cone.direction).toBe("upstream");
+    expect(cone.nodes).toEqual([
+      expect.objectContaining({ compiled_id: "implement" })
+    ]);
+
+    const validation = outputOf<{ validation: { command: string; args: string[] } }>(
+      await executeAfCli(["diagnose", "validation", "--node", "validate", "--json"])
+    );
+    expect(validation.validation.command).toBe("npm");
+    expect(validation.validation.args).toEqual(["test"]);
+  });
+
   it("records af stdout sidecar logs in the invocation ledger", async () => {
     const runtime = await createRuntime(tempRoot);
     process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;

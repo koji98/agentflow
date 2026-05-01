@@ -101,6 +101,11 @@
         "type": "check",
         "id": "validate_skill_docs",
         "repo": "main",
+        "goal": "Run the skill documentation validation command after the managed-pattern research handoff.",
+        "acceptance_criteria": [
+          "`npm run validate:skills` exits successfully.",
+          "The validation evidence supports the final handoff."
+        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [

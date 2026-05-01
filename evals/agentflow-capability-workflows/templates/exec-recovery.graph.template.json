@@ -41,6 +41,11 @@
         "type": "exec",
         "id": "retry_gate",
         "repo": "main",
+        "goal": "Exercise the retry-envelope recovery gate and publish the recovery handoff when the fixture allows it.",
+        "acceptance_criteria": [
+          "The command succeeds only after receiving useful supervisor recovery context.",
+          "The declared handoff artifact records the recovery evidence."
+        ],
         "command": "node",
         "args": [
           "scripts/retry-gate.js"

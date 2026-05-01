@@ -16,15 +16,16 @@ import {
 } from "../../src/artifacts/reader.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument({
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
       goal: `Exercise ${document.graph_id}.`,
       acceptance_criteria: ["Failure-mode behavior matches the runtime contract."]
     },
     ...document
-  });
+  }));
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(

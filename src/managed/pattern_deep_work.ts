@@ -428,6 +428,7 @@ function buildCriterionNode(
       command: "sh",
       args: ["-lc", criterion.command],
       on_failure: "continue",
+      goal: `Run deterministic completion criterion \`${criterion.id}\` for the current deep work cycle.`,
       context: [
         artifactContext("work_notes", generateValidateId, "work_notes")
       ],
@@ -614,6 +615,12 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     check_kind: "deterministic",
     command: "node",
     args: ["-e", buildGateScript(config.completion.criteria, config.completion.pass_threshold)],
+    goal: "Aggregate completion criterion results and decide whether the managed deep work loop is complete.",
+    acceptance_criteria: [
+      "The scorecard records every completion criterion result.",
+      "Required criterion failures block completion regardless of weighted score.",
+      `The weighted score must meet or exceed ${config.completion.pass_threshold} to pass.`
+    ],
     pass_if: {
       json_path: "$.passed",
       equals: true

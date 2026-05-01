@@ -46,6 +46,62 @@ export interface SupervisorEvidenceGatherPlan {
   gathers: SupervisorEvidenceGatherRequest[];
 }
 
+export type SupervisorRecoveryOperation =
+  | "repair_current_node"
+  | "repair_upstream_node"
+  | "repair_artifact"
+  | "repair_context"
+  | "repair_validation_strategy"
+  | "repair_workspace"
+  | "repair_environment"
+  | "investigate_causal_cone"
+  | "pause_for_authority";
+
+export interface SupervisorCausalCaseFile {
+  symptom: {
+    compiled_id: string;
+    authored_id: string;
+    kind: string;
+    execution_id: string;
+    failure_class: FailureClass;
+    summary: string;
+  };
+  upstream_cone: Array<{
+    compiled_id: string;
+    authored_id: string;
+    kind: string;
+    distance: number;
+    status?: string;
+    latest_execution_id?: string;
+    latest_outcome?: string;
+    repo_alias: string;
+    artifact_names: string[];
+    context_artifact_refs: Array<{
+      node: string;
+      artifact: string;
+    }>;
+  }>;
+  target_candidates: SupervisorCausalTargetRecord[];
+  selected_target: SupervisorCausalTargetRecord;
+}
+
+export interface SupervisorCausalTargetRecord {
+    operation: SupervisorRecoveryOperation;
+    target_compiled_id: string;
+    target_authored_id: string;
+    target_kind: string;
+    confidence: "low" | "medium" | "high";
+    reason: string;
+    evidence: string[];
+    resume_compiled_id: string;
+    resume_authored_id: string;
+    target_prior_execution_id?: string;
+    symptom_compiled_id: string;
+    symptom_authored_id: string;
+    symptom_execution_id: string;
+    requires_investigation: boolean;
+}
+
 export interface SupervisorCaseFile {
   case_id: string;
   compiled_id: string;
@@ -77,6 +133,7 @@ export interface SupervisorCaseFile {
   artifacts: Record<string, string>;
   prior_interventions: SupervisorInterventionRecord[];
   evidence: Record<string, unknown>;
+  causal?: SupervisorCausalCaseFile;
   supervisor_profile?: {
     profile_name: string;
     harness?: string;
@@ -174,7 +231,8 @@ export interface SupervisorMaterialDelta {
     | "artifact_repaired"
     | "validation_strategy_changed"
     | "environment_repaired"
-    | "evidence_added";
+    | "evidence_added"
+    | "recovery_target_changed";
   summary: string;
   artifact_paths?: Record<string, string>;
 }
@@ -195,6 +253,8 @@ export interface SupervisorRecoveryPlan {
   case_id: string;
   classification: FailureClass;
   apply_action: SupervisorApplyAction;
+  operation?: SupervisorRecoveryOperation;
+  recovery_target?: SupervisorCausalTargetRecord;
   retry_directive?: SupervisorRecoveryEnvelope["retry_directive"];
   runtime_overlay?: SupervisorRuntimeOverlay;
   repair_directive?: {
@@ -222,6 +282,9 @@ export interface SupervisorRecoveryEnvelope {
   compiled_id: string;
   authored_id: string;
   prior_execution_id: string;
+  symptom_compiled_id?: string;
+  symptom_authored_id?: string;
+  symptom_execution_id?: string;
   recovery_plan_path: string;
   case_file_path: string;
   action: "retry_node";
@@ -294,6 +357,29 @@ export interface SupervisorInterventionRecord {
   reason: string;
   evidence: Record<string, unknown>;
   artifact_paths: Record<string, string>;
+}
+
+export interface SupervisorRecoveryChainState {
+  chain_id: string;
+  intervention_id: string;
+  decision_id: string;
+  status: "recovering" | "resuming" | "completed" | "failed";
+  symptom_compiled_id: string;
+  symptom_authored_id: string;
+  symptom_execution_id: string;
+  target_compiled_id: string;
+  target_authored_id: string;
+  operation: SupervisorRecoveryOperation;
+  resume_ready_node: {
+    compiled_id: string;
+    deps_satisfied: string[];
+    repeat_scope_id?: string;
+    iteration_index?: number;
+  };
+  recovery_plan_path?: string;
+  recovery_chain_path?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SupervisorFailureFingerprintState {

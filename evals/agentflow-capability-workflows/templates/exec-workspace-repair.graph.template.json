@@ -41,6 +41,11 @@
         "type": "exec",
         "id": "workspace_gate",
         "repo": "main",
+        "goal": "Exercise workspace repair by detecting and recovering from failed-attempt-owned pollution.",
+        "acceptance_criteria": [
+          "The command succeeds after recoverable workspace pollution is cleaned.",
+          "The declared handoff artifact records the repair evidence."
+        ],
         "command": "node",
         "args": [
           "scripts/workspace-gate.js"

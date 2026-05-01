@@ -41,6 +41,11 @@
         "type": "exec",
         "id": "always_fail",
         "repo": "main",
+        "goal": "Exercise an unrecoverable exec failure for eval grading.",
+        "acceptance_criteria": [
+          "The fixture command fails deterministically.",
+          "The run records terminal failure evidence without fabricating success."
+        ],
         "command": "node",
         "args": [
           "scripts/always-fail.js"

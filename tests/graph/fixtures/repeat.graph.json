@@ -43,6 +43,10 @@
         "id": "understand",
         "repo": "main",
         "goal": "Inspect the checkout timeout flow.",
+        "acceptance_criteria": [
+          "The notes artifact explains the relevant timeout flow and likely repair areas."
+        ],
+        "constraints": [],
         "artifacts": {
           "notes": {
             "from": "output_dir",
@@ -60,6 +64,11 @@
             "type": "exec",
             "id": "lint",
             "repo": "main",
+            "goal": "Run lint before the repair loop.",
+            "acceptance_criteria": [
+              "The lint command exits successfully."
+            ],
+            "constraints": [],
             "command": "npm",
             "args": [
               "run",
@@ -70,6 +79,11 @@
             "type": "exec",
             "id": "typecheck",
             "repo": "main",
+            "goal": "Run typecheck before the repair loop.",
+            "acceptance_criteria": [
+              "The typecheck command exits successfully."
+            ],
+            "constraints": [],
             "command": "npm",
             "args": [
               "run",
@@ -91,6 +105,10 @@
               "id": "implement_fix",
               "repo": "main",
               "goal": "Implement the timeout fix.",
+              "acceptance_criteria": [
+                "The timeout behavior is fixed in source while preserving existing architecture."
+              ],
+              "constraints": [],
               "context": [
                 {
                   "name": "sources",
@@ -110,6 +128,10 @@
               "repo": "main",
               "profile": "review",
               "goal": "Review the fix and tighten any rough edges.",
+              "acceptance_criteria": [
+                "The review identifies and addresses correctness or maintainability issues in the fix."
+              ],
+              "constraints": [],
               "context": [
                 {
                   "ref": "implement_fix.agent_response",
@@ -122,6 +144,13 @@
               "id": "verify_fix",
               "repo": "main",
               "check_kind": "deterministic",
+              "goal": "Validate the timeout fix.",
+              "acceptance_criteria": [
+                "The test command exits with code 0 and writes the verification artifact."
+              ],
+              "constraints": [
+                "Do not modify workspace files."
+              ],
               "command": "npm",
               "args": [
                 "test"
@@ -148,6 +177,10 @@
         "id": "handoff",
         "repo": "main",
         "goal": "Summarize the fix and remaining risks.",
+        "acceptance_criteria": [
+          "The final handoff cites validation evidence and any remaining risks."
+        ],
+        "constraints": [],
         "context": [
           {
             "ref": "verify_fix.verification",

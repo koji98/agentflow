@@ -48,7 +48,7 @@ Executable nodes can also carry intent:
 }
 ```
 
-Agent nodes require `goal`. Node goals, acceptance criteria, and constraints are rendered to Codex CLI and Cursor CLI prompts, supervisor repair prompts, and resume fingerprints.
+Executable nodes require `goal` and a non-empty `acceptance_criteria` array. This includes `agent`, `exec`, `check`, and `checkpoint`. `constraints` are optional in authored graphs and normalize to `[]`. Node goals, acceptance criteria, and constraints are rendered to Codex CLI and Cursor CLI prompts, deterministic checkpoint diagnostics, supervisor repair prompts, and resume fingerprints.
 
 ## Supervision
 

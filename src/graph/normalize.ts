@@ -1317,13 +1317,24 @@ function normalizeExecutableBase(
   const label = readOptionalString(record.label, `${path}.label`, diagnostics);
   const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
   const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
-  const goal = readOptionalString(record.goal, `${path}.goal`, diagnostics);
+  const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
   const acceptance_criteria = readStringArray(
     record.acceptance_criteria,
     `${path}.acceptance_criteria`,
     diagnostics
   );
-  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
+  if (record.acceptance_criteria === undefined) {
+    diagnostics.push({
+      path: `${path}.acceptance_criteria`,
+      message: "Executable nodes require acceptance_criteria."
+    });
+  } else if (acceptance_criteria && acceptance_criteria.length === 0) {
+    diagnostics.push({
+      path: `${path}.acceptance_criteria`,
+      message: "Executable nodes require at least one acceptance_criteria entry."
+    });
+  }
+  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics) ?? [];
   const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
   const artifacts = allow_artifacts
     ? normalizeArtifacts(record.artifacts, `${path}.artifacts`, diagnostics)
@@ -1337,7 +1348,7 @@ function normalizeExecutableBase(
     });
   }
 
-  if (!id) {
+  if (!id || !goal || !acceptance_criteria || acceptance_criteria.length === 0) {
     return undefined;
   }
 
@@ -1346,9 +1357,9 @@ function normalizeExecutableBase(
     ...(label ? { label } : {}),
     ...(repo ? { repo } : {}),
     ...(profile ? { profile } : {}),
-    ...(goal ? { goal } : {}),
-    ...(acceptance_criteria ? { acceptance_criteria } : {}),
-    ...(constraints ? { constraints } : {}),
+    goal,
+    acceptance_criteria,
+    constraints,
     ...(context ? { context } : {}),
     ...(artifacts ? { artifacts } : {}),
     ...(timeout_sec !== undefined ? { timeout_sec } : {})
