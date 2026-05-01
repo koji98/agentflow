@@ -33,19 +33,15 @@
         "id": "managed_patterns_research",
         "repo": "main",
         "profile": "default",
-        "brief": {
-          "question": "What should Agentflow's first managed patterns be and how should deep research behave?",
-          "objective": "Produce a grounded recommendation for Agentflow's managed pattern roadmap.",
-          "audience": "engineering",
-          "scope_cues": [
-            "managed pattern contracts",
-            "compiled subgraph behavior"
-          ],
-          "success_bar": [
-            "capture competing agent patterns",
-            "preserve uncertainty and contradictions"
-          ]
-        },
+        "goal": "Recommend how Agentflow managed patterns should be used for research, review, and implementation work.",
+        "acceptance_criteria": [
+          "The summary explains when to use deep research versus deep work.",
+          "The packet preserves findings, evidence, uncertainty, confidence, and next actions."
+        ],
+        "constraints": [
+          "Do not change files during this research showcase.",
+          "Repository docs and source are primary authority."
+        ],
         "context": [
           {
             "name": "readme",
@@ -58,40 +54,19 @@
             "path": "docs/product/managed-patterns.md"
           }
         ],
-        "context_policy": {
-          "web": true,
-          "files": true,
-          "apps": false,
-          "allow_domains": [
-            "openai.com",
-            "help.openai.com",
-            "developers.openai.com",
-            "google.com",
-            "anthropic.com",
-            "perplexity.ai"
+        "research": {
+          "angles": [
+            "Investigate the intended user-facing contract for deep research and deep work.",
+            "Identify how public artifacts should be shaped so downstream nodes can consume them without internal ids.",
+            "Assess how supervisor recovery should interact with managed-pattern internal failures and loop feedback."
           ]
         },
-        "approval_policy": {
-          "require_plan_approval": false
-        },
-        "strategy": {
-          "depth": "standard",
-          "coverage_mode": "balanced",
-          "followup_passes": 1,
-          "final_critique": true
-        },
-        "delivery": {
-          "format": "report",
-          "citation_style": "inline",
-          "sections": [
-            "patterns",
-            "proposed managed patterns",
-            "deep research design",
-            "recommendation"
-          ]
-        },
-        "runtime": {
-          "max_concurrency": 2
+        "artifacts": {
+          "recommendation_matrix": {
+            "from": "output_dir",
+            "path": "recommendation-matrix.md",
+            "description": "Comparison matrix for managed-pattern usage decisions."
+          }
         }
       },
       {
@@ -99,17 +74,36 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "goal": "Summarize the deep research result for a human operator. Mention the question, the recommended managed patterns, and the command a user should run next to inspect the graph.",
+        "goal": "Summarize the deep research result for a human operator and mention the command to inspect the compiled graph.",
+        "acceptance_criteria": [
+          "The handoff cites the managed research summary and packet.",
+          "The handoff includes concrete validation or inspection guidance."
+        ],
         "context": [
           {
-            "ref": "managed_patterns_research.agent_response",
-            "name": "research_response"
+            "ref": "managed_patterns_research.summary",
+            "name": "research_summary"
           },
           {
-            "ref": "managed_patterns_research.research_report",
-            "name": "research_report"
+            "ref": "managed_patterns_research.packet",
+            "name": "research_packet"
           }
-        ]
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Operator-facing summary of the managed deep research result."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "validate_skill_docs",
+        "repo": "main",
+        "check_kind": "deterministic",
+        "command": "npm",
+        "args": ["run", "validate:skills"]
       }
     ]
   },
@@ -119,7 +113,7 @@
       "The package preserves findings, uncertainty, and a recommendation."
     ],
     "constraints": [
-      "Use only the approved research domains."
+      "Use repository docs and source as primary evidence."
     ]
   },
   "supervision": {

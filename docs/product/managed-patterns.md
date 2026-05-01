@@ -1,119 +1,92 @@
 # Managed Patterns
 
-Managed patterns are authored shortcuts for common outcome-oriented workflows. They compile into normal Agentflow primitive nodes, preserve a public authored node id, and publish named artifacts that fit the delivery package.
+Managed patterns are authored shortcuts for common outcome-oriented workflows. They compile into normal Agentflow primitive nodes, preserve one public authored node id, and publish named artifacts through the same `artifacts` contract as agent nodes.
 
-Use a managed pattern when the operator wants a known lifecycle rather than hand-authoring every phase. Use primitive nodes when the workflow is one-off or needs very specific control.
+Use a managed pattern when the operator wants a known lifecycle with inspectable lowered nodes. Use primitive nodes or common authored patterns when the workflow is one-off or needs exact custom control.
 
-## Pattern Principles
+## Shared Contract
 
-- Patterns publish reviewable artifacts, not just final text.
-- Patterns lower to inspectable primitive subgraphs.
-- The public pattern node id remains the downstream handoff boundary.
-- Generated internal node ids are private to the compiled shape.
-- Pattern nodes should remain large enough to represent real engineering outcomes.
+Managed nodes use regular node fields:
+
+- `goal`
+- `acceptance_criteria`
+- `constraints`
+- `context`
+- `artifacts`
+- normal runtime fields such as `repo`, `profile`, `timeout_sec`, `sandbox`, `model`, `reasoning_effort`, `artifact_repair`, and `tools`
+
+Every managed pattern publishes public artifacts from the authored node id. If `artifacts` is omitted, Agentflow provides:
+
+- `summary`: `summary.md`
+- `packet`: `packet.json`
+
+Authored artifacts merge with these defaults. Internal artifacts are private implementation evidence; downstream nodes should reference only public artifacts such as `my_research.summary` or `my_work.packet`.
 
 ## Canonical Patterns
 
 ### `pattern_deep_research`
 
-Research an open question and publish a sourced package.
+Use when the job is “go learn enough and report back.”
 
-Primary artifacts:
-
-- `research_report`
-- `research_packet`
-- `source_ledger`
-- `uncertainties`
-- `interim_findings`
-
-Use for strategy, technical discovery, comparison, risk mapping, and recommendation work.
-
-### `pattern_spec_design`
-
-Turn a problem into an implementation-ready design package.
-
-Primary artifacts:
-
-- `design_spec`
-- `design_packet`
-- `direction_proposal`
-- `tradeoff_matrix`
-- `decision_log`
-- `implementation_readiness`
-- `critique_merged`
-- `quality_review`
-
-Use for architecture and product design that should feed a later implementation node or generate/evaluate/fix pattern.
-
-### `pattern_generate_evaluate_fix`
-
-Implement an accountable slice, run independent evaluators, and iterate within a bounded repair loop.
-
-This pattern's `evaluation` block is authored workflow structure. It lowers into normal nodes and artifacts inside the compiled graph; it is not the same lane as a standalone graph `check`, a supervisor `semantic_evaluation` intervention, or an offline `agentflow eval` suite. Use `evals.md` for offline workflow benchmarks.
-
-Primary artifacts:
-
-- `change_summary`
-- `change_packet`
-- `evaluation_ledger`
-- `fix_log`
-
-Use when the task source is already clear enough to implement and the evaluation criteria can be expressed as commands or structured review checks.
-
-### `pattern_review_change`
-
-Review a change package with specialized reviewer roles and publish calibrated findings.
-
-Primary artifacts:
-
-- `review_summary`
-- `review_bundle`
-- `raw_findings`
-- `calibrated_findings`
-- `recommended_actions`
-
-Use when the goal is review quality: correctness, tests, regressions, maintainability, security, or release risk.
-
-## Example Chain
+Add:
 
 ```json
 {
-  "type": "sequence",
-  "id": "root",
-  "steps": [
-    {
-      "type": "pattern_spec_design",
-      "id": "checkout_timeout_design",
-      "brief": {
-        "problem": "Checkout requests can hang without a clear timeout path.",
-        "goal": "Design a typed timeout flow that keeps public APIs stable."
-      }
-    },
-    {
-      "type": "pattern_generate_evaluate_fix",
-      "id": "checkout_timeout_impl",
-      "task_source": {
-        "kind": "managed_node",
-        "node": "checkout_timeout_design"
-      },
-      "evaluation": {
-        "commands": ["npm test -- tests/checkout"],
-        "required": true
-      }
-    },
-    {
-      "type": "pattern_review_change",
-      "id": "checkout_timeout_review",
-      "review_source": {
-        "kind": "managed_node",
-        "node": "checkout_timeout_impl"
-      }
-    }
-  ]
+  "research": {
+    "angles": [
+      "Investigate whether the implementation follows the repo's established architecture.",
+      "Identify correctness, maintainability, and rollout risks in the proposed change."
+    ]
+  }
 }
 ```
 
-Downstream context should reference public artifacts from `checkout_timeout_design`, `checkout_timeout_impl`, or `checkout_timeout_review`, not generated internal ids.
+The pattern runs authored angles in parallel, synthesizes research packets in balanced batches of at most three inputs, then publishes the public summary, packet, and any authored artifacts. Angle and synthesis artifacts are private evidence packets; the final publisher owns the public artifact shape and required field labels. Synthesis preserves major findings, collapses redundancy, keeps provenance attached to claims, and surfaces uncertainty or conflicts. It is useful for product research, architecture research, implementation research, and multi-axis code review.
+
+### `pattern_deep_work`
+
+Use when the job is “work, validate, critique, and fix until done.”
+
+Add:
+
+```json
+{
+  "completion": {
+    "max_cycles": 3,
+    "pass_threshold": 0.85,
+    "criteria": [
+      {
+        "id": "focused_tests",
+        "kind": "command",
+        "command": "npm test -- tests/checkout",
+        "weight": 0.4,
+        "required": true
+      },
+      {
+        "id": "acceptance_rubric",
+        "kind": "rubric",
+        "rubric": "The workspace satisfies the goal and acceptance criteria without violating constraints.",
+        "weight": 0.4
+      },
+      {
+        "id": "handoff_quality",
+        "kind": "artifact_rubric",
+        "artifact": "summary",
+        "rubric": "The summary clearly describes changes, validation evidence, and residual risks.",
+        "weight": 0.2
+      }
+    ]
+  }
+}
+```
+
+Criteria weights must sum to `1`. Required criteria are hard blockers. Each cycle plans the next move, generates and validates a candidate, grades completion criteria, writes a completion scorecard, and retries with feedback until the score reaches `pass_threshold` or `max_cycles` is exhausted.
+
+## Supervisor Role
+
+Managed patterns do not have a second supervisor. The normal runtime supervisor still handles internal node failures: context repair, harness failure, artifact repair, malformed grader output, environment issues, workspace cleanup, and recoverable validation strategy failures.
+
+For `pattern_deep_work`, a failed command criterion, low rubric score, or weak artifact is normal loop feedback and does not spend supervisor budget. Runtime failures still go to the normal supervisor: context repair, harness failure, artifact repair, malformed evaluator output, environment issues, workspace cleanup, and recoverable validation strategy failures. Max-cycle exhaustion fails the managed node with scorecard evidence unless the supervisor can produce a real material delta.
 
 ## Validation
 
@@ -128,7 +101,7 @@ Inspect:
 - `lowered_managed_nodes`
 - generated primitive node kinds
 - public artifact declarations
-- repeat limits
-- evaluator commands
-- checkpoint placement
-- delivery-compatible artifacts
+- deep work repeat limits
+- deep research balanced synthesis layers
+- completion criteria
+- supervisor budgets and delivery-compatible artifacts

@@ -2,94 +2,97 @@
 
 Managed patterns are compiler-supported `pattern_*` nodes. They are not the same as common authored primitive compositions in `common-patterns.md`.
 
-Use a managed pattern when the operator wants a known lifecycle with standard artifacts and inspectable lowered nodes. Use primitive nodes or common authored patterns when the workflow is one-off or needs exact custom control. Use ordinary repo/device CLIs directly when a command or script already solves the job; do not create a managed pattern just to wrap a mature tool.
+Use a managed pattern when the operator wants a known lifecycle with standard public artifacts and inspectable lowered nodes. Use primitive nodes or common authored patterns when the workflow is one-off or needs exact custom control.
+
+## Shared Rules
+
+- Managed patterns use normal node fields: `goal`, `acceptance_criteria`, `constraints`, `context`, and `artifacts`.
+- Default public artifacts are `summary` and `packet`; authored artifacts merge with those defaults.
+- Downstream nodes reference artifacts from the public authored pattern id.
+- Never depend on generated internal ids from the compiled graph.
+- The runtime supervisor still handles internal node failures; pattern loops handle normal criterion feedback.
+- Agents running inside managed patterns do not need to know Agentflow internals. The compiler explains that internal helper artifacts are private working material and public artifacts are the durable downstream contract.
 
 ## Pattern Selection
 
 ### `pattern_deep_research`
 
-Use when an open question needs repo-grounded or external-source research before decisions or implementation.
+Use when the task is “go learn enough and report back.”
 
-- Do not use for routine local inspection an implementation agent can do inside its node.
-- Common inputs: `brief.question`, `brief.objective`, `brief.audience`, `context`, `context_policy`, `strategy`.
-- Public artifacts: `research_report`, `research_packet`, `source_ledger`, `uncertainties`, `interim_findings`.
-- Downstream nodes usually consume `research_report` or `research_packet`.
-
-### `pattern_spec_design`
-
-Use when implementation should wait for explicit alternatives, tradeoffs, decisions, file plan, and readiness criteria.
-
-- Do not use when the task packet is already implementation-ready.
-- Common inputs: `brief.problem`, `brief.goal`, `brief.constraints`, `brief.decision_drivers`, `brief.scope`, `context`, `strategy`.
-- Public artifacts: `design_spec`, `design_packet`, `direction_proposal`, `tradeoff_matrix`, `decision_log`, `implementation_readiness`, `critique_merged`, `quality_review`.
-- Downstream implementation should consume `design_spec` or use `task_source.kind: "managed_node"`.
-
-### `pattern_generate_evaluate_fix`
-
-Use when a task source is clear enough to implement and evaluators can judge the result.
-
-- Do not use when the work still needs discovery or product direction first.
-- Common inputs: `brief.objective`, `brief.scope`, `task_source`, `context_policy`, `evaluation`, `strategy`.
-- Public artifacts: `change_summary`, `change_packet`, `evaluation_ledger`, `fix_log`.
-- This pattern's evaluation block is authored workflow structure. It is distinct from graph `check`, supervisor `semantic_evaluation`, and offline `agentflow eval`.
-
-### `pattern_review_change`
-
-Use when a completed change package needs calibrated review across specialized axes.
-
-- Do not use as a generic "think again" step before any concrete change exists.
-- Common inputs: `review_source`, `brief.review_goal`, `strategy.reviewer_profiles`, `delivery`.
-- Public artifacts: `review_summary`, `review_bundle`, `raw_findings`, `calibrated_findings`, `recommended_actions`.
-- Good reviewer profiles include correctness, testing, maintainability, security, release risk, and scope drift.
-
-## Handoff Rules
-
-Downstream nodes should reference artifacts from the public authored pattern id:
-
-```json
-{ "ref": "checkout_timeout_impl.evaluation_ledger" }
-```
-
-Do not depend on generated internal ids from the compiled graph.
-
-## Example Chain
+- Good for product research, architecture research, implementation research, and review across authored angles.
+- Special key: `research.angles`.
+- Angles should be sentence-style prompts, not single-word axes.
+- Public artifacts: `summary`, `packet`, and any authored extras.
+- Angle workers may use local repo files, provided context, local CLIs, docs, or web research, whichever best serves the angle.
+- More than three research packets are synthesized in balanced batches of at most three inputs. Seven angles become `2`, `2`, and `3`, then final synthesis.
+- Synthesis preserves major findings, collapses redundancy, keeps provenance, and carries uncertainty or conflicts forward.
+- Angle and synthesis artifacts are private evidence packets. The final publisher owns the authored public artifact shape, including required handoff fields or labels.
 
 ```json
 {
-  "type": "sequence",
-  "id": "root",
-  "steps": [
-    {
-      "type": "pattern_spec_design",
-      "id": "checkout_timeout_design",
-      "brief": {
-        "problem": "Checkout requests can hang without a typed timeout path.",
-        "goal": "Design a focused implementation plan that keeps public APIs stable."
-      }
-    },
-    {
-      "type": "pattern_generate_evaluate_fix",
-      "id": "checkout_timeout_impl",
-      "task_source": {
-        "kind": "managed_node",
-        "node": "checkout_timeout_design"
+  "type": "pattern_deep_research",
+  "id": "checkout_research",
+  "goal": "Recommend whether the checkout timeout implementation is ready to ship.",
+  "acceptance_criteria": [
+    "The recommendation covers architecture fit, correctness risk, and rollout risk."
+  ],
+  "research": {
+    "angles": [
+      "Investigate whether the implementation follows existing checkout architecture.",
+      "Identify correctness and edge-case risks in timeout behavior.",
+      "Assess test coverage, release risk, and follow-up work."
+    ]
+  }
+}
+```
+
+### `pattern_deep_work`
+
+Use when the task is “work, validate, critique, and fix until done.”
+
+- Good for implementation, migration, cleanup, docs+code changes, and bounded repair loops.
+- Special key: `completion`.
+- Criteria weights must sum to `1`.
+- Criteria can be marked as hard blockers when failure must prevent success.
+- Failed criteria become loop feedback; runtime failures still go to the supervisor.
+- Each cycle is `plan -> generate_and_validate -> completion criteria -> deterministic score gate`.
+- The planning agent does not edit; it writes the smallest credible plan from task context and prior feedback.
+- The generate-and-validate agent does the work, uses available CLIs naturally, runs focused validation when feasible, fixes clear validation failures, and writes draft public artifacts before the criteria panel grades them.
+
+```json
+{
+  "type": "pattern_deep_work",
+  "id": "checkout_timeout_impl",
+  "goal": "Implement a typed checkout timeout path and publish validation evidence.",
+  "acceptance_criteria": [
+    "Focused checkout tests pass.",
+    "The final summary explains changes, validation, and residual risks."
+  ],
+  "completion": {
+    "max_cycles": 3,
+    "pass_threshold": 0.85,
+    "criteria": [
+      {
+        "id": "focused_tests",
+        "kind": "command",
+        "command": "npm test -- tests/checkout",
+        "weight": 0.4
       },
-      "evaluation": {
-        "commands": ["npm test -- tests/checkout"]
-      }
-    },
-    {
-      "type": "pattern_review_change",
-      "id": "checkout_timeout_review",
-      "review_source": {
-        "kind": "managed_node",
-        "node": "checkout_timeout_impl"
+      {
+        "id": "acceptance_rubric",
+        "kind": "rubric",
+        "rubric": "The workspace satisfies the goal and acceptance criteria without violating constraints.",
+        "weight": 0.4
       },
-      "strategy": {
-        "reviewer_profiles": ["correctness", "testing", "maintainability"]
+      {
+        "id": "handoff_quality",
+        "kind": "artifact_rubric",
+        "artifact": "summary",
+        "rubric": "The summary clearly describes changes, validation evidence, and residual risks.",
+        "weight": 0.2
       }
-    }
-  ]
+    ]
+  }
 }
 ```
 
@@ -103,4 +106,4 @@ agentflow validate --graph agentflow.graph.json --diagram-output compiled-graph.
 agentflow validate --graph agentflow.graph.json --diagram-image-output compiled-graph.svg
 ```
 
-Inspect `lowered_managed_nodes`, generated scopes, repeat limits, evaluator commands, public artifacts, and delivery compatibility. Use the diagram when reviewers need to audit expanded repeat or parallel structure.
+Inspect `lowered_managed_nodes`, generated scopes, balanced deep research synthesis layers, deep work repeat limits, completion criteria, public artifacts, and delivery compatibility.

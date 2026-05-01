@@ -162,7 +162,7 @@ Choose the smallest evaluation lane that matches the question:
 - Use graph `check` nodes for in-run sensors that should gate flow or produce delivery evidence.
 - Let outcome verification grade passing `agent` attempts against authored acceptance criteria. It writes per-attempt verifier artifacts and routes rejected attempts through supervision.
 - Let supervisor `semantic_evaluation` spend intervention budget when a failed AI check or semantic uncertainty needs runtime recovery evidence.
-- Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_generate_evaluate_fix`.
+- Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_deep_work`.
 - Use `agentflow eval` for offline workflow suites that compare scenarios, variants, and repeated trials with required criteria, quality criteria, trajectory checks, and deterministic environment simulation. It follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), adopts useful ADK eval mechanics, and writes `.agentflow/evals` artifacts, including `eval-run.json`, `evaluation-ledger.json`, trial `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
 
 ## Run Eval Suites

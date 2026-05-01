@@ -84,7 +84,7 @@ Confirm:
 - Graph `check` nodes are in-run sensors and can gate control flow.
 - Outcome verification is the always-on runtime contract for passing `agent` attempts; it produces `verify-outcome.{json,md}` and an `outcome.verified` event when a passed attempt is verified.
 - Supervisor `semantic_evaluation` is an intervention selected after runtime evidence and bounded by supervisor budget.
-- Managed pattern evaluation is authored workflow structure, especially in `pattern_generate_evaluate_fix`.
+- Managed pattern evaluation is authored workflow structure, especially the completion scorecard loop in `pattern_deep_work`.
 - `agentflow eval` is offline product/workflow grading with file-backed suites and `.agentflow/evals` artifacts. Use `agentflow-evals` for suite authoring, criteria, environment simulation, trajectory checks, scorecards, benchmark reports, and prompt-pack comparisons.
 
 ## Command Results

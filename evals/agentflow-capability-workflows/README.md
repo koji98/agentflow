@@ -40,6 +40,8 @@ agentflow eval run evals/agentflow-capability-workflows --variant current --scen
 | `19-validation-timeout-strategy` | `validation-repair` | Confirm timeout-like failures receive changed validation strategy before retry. |
 | `20-workspace-pollution-cleanup` | `workspace-repair` | Confirm failed-attempt workspace pollution is cleaned before retry. |
 | `21-no-delta-recovery-stop` | `supervisor-boundary` | Confirm recovery stops when no material delta can be produced. |
+| `22-managed-deep-research-repo` | `managed-patterns` | Use managed deep research on a real local repo fixture with seven balanced research angles. |
+| `23-managed-deep-work-repo` | `managed-patterns` | Use managed deep work to plan, generate, validate, grade, and publish a real local repo fix. |
 
 The suite intentionally includes expected-pass workflows, a no-repo-edit audit, tool-required discovery, local HTTP docs, stale/noisy context, sequence handoff, worktree backend behavior, supervisor retry envelope behavior, and expected terminal failure.
 

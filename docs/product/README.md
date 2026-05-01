@@ -18,6 +18,4 @@ These docs explain how to use Agentflow well: what belongs in the graph contract
 - `plugins.md`: plugin manifests, workflow exports, CLI tool exports, credentials, and consumer usage.
 - `managed-patterns.md`: managed pattern catalog and shared behavior.
 - `patterns/deep-research.md`: deep research pattern.
-- `patterns/spec-design.md`: spec/design pattern.
-- `patterns/generate-evaluate-fix.md`: generate/evaluate/fix pattern.
-- `patterns/review-change.md`: review change pattern.
+- `patterns/deep-work.md`: deep work pattern.

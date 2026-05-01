@@ -18,10 +18,8 @@ Included examples:
 
 - `fake-plan.json`: small read-only primitive graph.
 - `feature-showcase.json`: primitive graph covering profiles, parallelism, repeat, checks, artifacts, and delivery.
-- `pattern-deep-research-showcase.json`: research pattern plus downstream handoff.
-- `pattern-spec-design-showcase.json`: spec-design pattern plus downstream handoff.
-- `pattern-generate-evaluate-fix-showcase.json`: design to implementation with evaluation and repair loop.
-- `pattern-review-change-showcase.json`: implementation to structured review.
+- `pattern-deep-research-showcase.json`: explicit research angles plus downstream handoff.
+- `pattern-deep-work-showcase.json`: completion criteria, scorecard loop, and downstream handoff.
 - `ship-feature.graph.json`: Codex/Cursor-compatible plugin tool example using the local babysit plugin.
 
 Validate an example:

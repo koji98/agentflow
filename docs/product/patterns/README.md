@@ -4,9 +4,7 @@ These pages describe the managed workflow patterns that compile into normal Agen
 
 ## Pattern Chooser
 
-- `deep-research.md`: use when the output is a sourced research package or recommendation.
-- `spec-design.md`: use when the next useful artifact is an implementation-ready design.
-- `generate-evaluate-fix.md`: use when a draft artifact should be judged and repaired before publication.
-- `review-change.md`: use when a change needs structured multi-axis review evidence.
+- `deep-research.md`: use when the output is a sourced research package, recommendation, or multi-angle review.
+- `deep-work.md`: use when an agent should work, validate, critique, and fix until a weighted completion rubric passes.
 
 For the catalog and shared managed-pattern behavior, see `../managed-patterns.md`.

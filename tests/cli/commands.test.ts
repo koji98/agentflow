@@ -2461,7 +2461,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(graphHelp.exitCode).toBe(0);
     expect(graphHelp.stdout).toContain("Executable node kinds: agent, exec, check, checkpoint");
     expect(graphHelp.stdout).toContain(
-      "Managed pattern scaffolds: pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, pattern_review_change"
+      "Managed pattern scaffolds: pattern_deep_research, pattern_deep_work"
     );
     expect(graphHelp.stdout).not.toContain("Legacy thin aliases");
     expect(graphHelp.stdout).toContain(`"version": "1"`);

@@ -1,14 +1,27 @@
 import type {
   AgentNode,
   ArtifactDefinition,
+  ArtifactRepairPolicy,
   BaseExecutableNode,
+  CheckNode,
   ContextItem
 } from "../graph/authored.js";
-import type { ContextSelector } from "../graph/schema.js";
+import type { ContextSelector, ReasoningEffort, SandboxMode } from "../graph/schema.js";
+import type { ToolDeclaration } from "../graph/authored.js";
 
 export interface ManagedPatternRuntime {
   max_concurrency?: number;
 }
+
+export interface ManagedPatternAgentOptions {
+  model?: string;
+  reasoning_effort?: ReasoningEffort;
+  sandbox?: SandboxMode;
+  artifact_repair?: ArtifactRepairPolicy;
+  tools?: ToolDeclaration[];
+}
+
+export type ManagedPatternExecutableConfig = BaseExecutableNode & ManagedPatternAgentOptions;
 
 export interface PromptSection {
   title?: string;
@@ -29,6 +42,29 @@ export function sharedNodeBase(
   };
 }
 
+export function sharedAgentBase(
+  config: ManagedPatternExecutableConfig
+): Pick<AgentNode, "repo" | "profile" | "timeout_sec" | "model" | "reasoning_effort" | "sandbox" | "artifact_repair" | "tools"> {
+  return {
+    ...sharedNodeBase(config),
+    ...(config.model ? { model: config.model } : {}),
+    ...(config.reasoning_effort ? { reasoning_effort: config.reasoning_effort } : {}),
+    ...(config.sandbox ? { sandbox: config.sandbox } : {}),
+    ...(config.artifact_repair ? { artifact_repair: config.artifact_repair } : {}),
+    ...(config.tools && config.tools.length > 0 ? { tools: config.tools } : {})
+  };
+}
+
+export function sharedAiCheckBase(
+  config: ManagedPatternExecutableConfig
+): Pick<CheckNode, "repo" | "profile" | "timeout_sec" | "model" | "reasoning_effort"> {
+  return {
+    ...sharedNodeBase(config),
+    ...(config.model ? { model: config.model } : {}),
+    ...(config.reasoning_effort ? { reasoning_effort: config.reasoning_effort } : {})
+  };
+}
+
 export function mergeArtifacts(
   ...artifacts: Array<Record<string, ArtifactDefinition>>
 ): Record<string, ArtifactDefinition> {
@@ -46,6 +82,19 @@ function defaultArtifactDescription(name: string, path: string): string {
         : "Durable";
 
   return `${format} artifact containing the ${readableName} expected from this node.`;
+}
+
+export function defaultManagedPublicArtifacts(): Record<string, ArtifactDefinition> {
+  return mergeArtifacts(
+    outputDirArtifact("summary", "summary.md", "Human-readable final summary for the managed pattern."),
+    outputDirArtifact("packet", "packet.json", "Machine-readable final packet for downstream Agentflow nodes.")
+  );
+}
+
+export function mergeManagedPublicArtifacts(
+  artifacts: Record<string, ArtifactDefinition> | undefined
+): Record<string, ArtifactDefinition> {
+  return mergeArtifacts(defaultManagedPublicArtifacts(), artifacts ?? {});
 }
 
 export function outputDirArtifact(

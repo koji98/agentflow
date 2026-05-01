@@ -1,0 +1,131 @@
+{
+  "version": "1",
+  "graph_id": "capability-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "{{scenario.description}}",
+    "acceptance_criteria": [
+      "The workflow satisfies the fixture repository validation.",
+      "The delivery package contains enough evidence for eval grading."
+    ],
+    "constraints": [
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use public network sources."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "workspace-write",
+      "timeout_sec": 900
+    }
+  },
+  "supervision": {
+    "max_total_interventions": 4,
+    "actions": {
+      "retry_with_guidance": { "max_uses": 1 },
+      "repair_artifact": { "max_uses": 1 },
+      "run_diagnostic": { "max_uses": 1 },
+      "semantic_evaluation": { "max_uses": 1 }
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_deep_work",
+        "id": "repo_fix",
+        "repo": "main",
+        "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
+        "acceptance_criteria": [
+          "`src/tax.js` applies discount before tax while preserving the exported API.",
+          "`npm test` passes.",
+          "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+        ],
+        "constraints": [
+          "Do not edit files outside `src/tax.js` unless validation proves it is necessary.",
+          "Do not add dependencies or generated files.",
+          "Use local repo files and tests as primary authority."
+        ],
+        "context": [
+          {
+            "name": "task",
+            "from": "workspace_file",
+            "path": "AGENTFLOW_EVAL_TASK.md"
+          },
+          {
+            "name": "source",
+            "from": "workspace_glob",
+            "path": "src/**",
+            "max_files": 20
+          },
+          {
+            "name": "tests",
+            "from": "workspace_glob",
+            "path": "tests/**",
+            "max_files": 20
+          },
+          {
+            "name": "package",
+            "from": "workspace_file",
+            "path": "package.json"
+          }
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Managed deep work handoff with Scenario:, Changed files:, Validation:, and Risks: fields."
+          }
+        },
+        "completion": {
+          "max_cycles": 3,
+          "pass_threshold": 0.85,
+          "criteria": [
+            {
+              "id": "focused_tests",
+              "kind": "command",
+              "command": "npm test",
+              "weight": 0.55,
+              "required": true
+            },
+            {
+              "id": "acceptance_rubric",
+              "kind": "rubric",
+              "rubric": "The workspace satisfies the repository task, preserves the exported API, and stays within the stated constraints.",
+              "weight": 0.25
+            },
+            {
+              "id": "handoff_quality",
+              "kind": "artifact_rubric",
+              "artifact": "handoff",
+              "rubric": "The handoff clearly documents scenario id, changed files, validation evidence, and residual risks without placeholder text.",
+              "weight": 0.2
+            }
+          ]
+        }
+      },
+      {
+        "type": "check",
+        "id": "verify",
+        "repo": "main",
+        "check_kind": "deterministic",
+        "command": "npm",
+        "args": [
+          "test"
+        ]
+      }
+    ]
+  }
+}

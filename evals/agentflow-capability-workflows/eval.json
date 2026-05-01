@@ -24,7 +24,9 @@
     "scenarios/18-noisy-generated-tree/scenario.json",
     "scenarios/19-validation-timeout-strategy/scenario.json",
     "scenarios/20-workspace-pollution-cleanup/scenario.json",
-    "scenarios/21-no-delta-recovery-stop/scenario.json"
+    "scenarios/21-no-delta-recovery-stop/scenario.json",
+    "scenarios/22-managed-deep-research-repo/scenario.json",
+    "scenarios/23-managed-deep-work-repo/scenario.json"
   ],
   "variants": [
     "variants/current.json",

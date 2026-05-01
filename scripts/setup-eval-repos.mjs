@@ -453,6 +453,69 @@ const repos = {
     "package.json": packageJson("no-delta-recovery-stop"),
     "AGENTFLOW_EVAL_TASK.md": "No-delta recovery fixture.\n",
     "scripts/no-delta.js": "console.error('Forbidden edit: unexpected workspace change, but no workspace diff exists'); process.exit(1);\n"
+  },
+  "22-managed-deep-research-repo": {
+    "package.json": packageJson("managed-deep-research-repo"),
+    "AGENTFLOW_EVAL_TASK.md": task(
+      "Scenario: managed-deep-research-repo",
+      "Use the managed deep research pattern to investigate this repository's job pipeline design. Do not edit repository files. Produce public research artifacts and a handoff that recommends whether the pipeline is ready for a retry/backoff change."
+    ),
+    "README.md": [
+      "# Managed Research Fixture",
+      "",
+      "The job pipeline routes accepted jobs through normalize, enqueue, execute, and settle phases.",
+      "Retry behavior is intentionally documented in code and tests rather than in this README.",
+      ""
+    ].join("\n"),
+    "docs/operations.md": [
+      "# Operations",
+      "",
+      "Retry changes should preserve idempotency and keep terminal failure reasons visible for audit.",
+      ""
+    ].join("\n"),
+    "src/pipeline.js": [
+      "function normalizeJob(job) {",
+      "  return { id: String(job.id), payload: job.payload ?? {}, attempts: job.attempts ?? 0 };",
+      "}",
+      "",
+      "function shouldRetry(job, error) {",
+      "  return job.attempts < 2 && error && error.retryable === true;",
+      "}",
+      "",
+      "function settle(job, result) {",
+      "  return result.ok ? { status: 'complete', id: job.id } : { status: 'failed', id: job.id, reason: result.reason };",
+      "}",
+      "",
+      "module.exports = { normalizeJob, shouldRetry, settle };",
+      ""
+    ].join("\n"),
+    "tests/verify.js": verifier([
+      "const { normalizeJob, shouldRetry, settle } = require('../src/pipeline');",
+      "assert.deepEqual(normalizeJob({ id: 7 }), { id: '7', payload: {}, attempts: 0 });",
+      "assert.equal(shouldRetry({ attempts: 1 }, { retryable: true }), true);",
+      "assert.equal(shouldRetry({ attempts: 2 }, { retryable: true }), false);",
+      "assert.deepEqual(settle({ id: '7' }, { ok: false, reason: 'timeout' }), { status: 'failed', id: '7', reason: 'timeout' });"
+    ])
+  },
+  "23-managed-deep-work-repo": {
+    "package.json": packageJson("managed-deep-work-repo"),
+    "AGENTFLOW_EVAL_TASK.md": task(
+      "Scenario: managed-deep-work-repo",
+      "Use the managed deep work pattern to fix `src/tax.js`. `totalWithTax({ subtotal, taxRate, discount })` should apply discount before tax, round to two decimals, and keep the exported API unchanged."
+    ),
+    "src/tax.js": [
+      "function totalWithTax({ subtotal, taxRate, discount = 0 }) {",
+      "  return Math.round(subtotal * (1 + taxRate) * 100) / 100;",
+      "}",
+      "",
+      "module.exports = { totalWithTax };",
+      ""
+    ].join("\n"),
+    "tests/verify.js": verifier([
+      "const { totalWithTax } = require('../src/tax');",
+      "assert.equal(totalWithTax({ subtotal: 100, taxRate: 0.0825, discount: 10 }), 97.43);",
+      "assert.equal(totalWithTax({ subtotal: 12.345, taxRate: 0.1, discount: 0 }), 13.58);"
+    ])
   }
 };
 
@@ -477,7 +540,9 @@ const scenarios = [
   ["18-noisy-generated-tree", "agent-noisy-context", "context-noise-control", "hard", "Confirm broad context ignores generated dependency-style trees while preserving useful task context."],
   ["19-validation-timeout-strategy", "exec-validation-strategy", "validation-repair", "hard", "Confirm timeout-like failures receive changed validation strategy before retry."],
   ["20-workspace-pollution-cleanup", "exec-workspace-repair", "workspace-repair", "hard", "Confirm failed-attempt workspace pollution is cleaned before retry."],
-  ["21-no-delta-recovery-stop", "exec-no-delta", "supervisor-boundary", "hard", "Confirm recovery stops when no material delta can be produced."]
+  ["21-no-delta-recovery-stop", "exec-no-delta", "supervisor-boundary", "hard", "Confirm recovery stops when no material delta can be produced."],
+  ["22-managed-deep-research-repo", "managed-deep-research", "managed-patterns", "hard", "Use managed deep research on a real local repo fixture with seven balanced research angles."],
+  ["23-managed-deep-work-repo", "managed-deep-work", "managed-patterns", "hard", "Use managed deep work to plan, generate, validate, grade, and publish a real local repo fix."]
 ];
 
 const expectedChangedFiles = {
@@ -501,8 +566,23 @@ const expectedChangedFiles = {
   "18-noisy-generated-tree": ["src/status.js"],
   "19-validation-timeout-strategy": [],
   "20-workspace-pollution-cleanup": [],
-  "21-no-delta-recovery-stop": []
+  "21-no-delta-recovery-stop": [],
+  "22-managed-deep-research-repo": [],
+  "23-managed-deep-work-repo": ["src/tax.js"]
 };
+
+const qualityDimensions = [
+  "outcome_correctness",
+  "graph_contract_adherence",
+  "artifact_quality",
+  "evidence_use",
+  "context_handling",
+  "tool_discipline",
+  "supervisor_recovery_quality",
+  "retry_behavior",
+  "noise_efficiency",
+  "delivery_auditability"
+];
 
 const templates = {
   "agent-change": {
@@ -709,6 +789,122 @@ const templates = {
               path: "handoff.md",
               description: "Implementation handoff with literal Scenario:, Changed files:, Validation:, and Risks: fields."
             }
+          }
+        },
+        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+      ]
+    }
+  },
+  "managed-deep-research": {
+    supervision: { max_total_interventions: 0, actions: {} },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "pattern_deep_research",
+          id: "repo_research",
+          repo: "main",
+          goal: "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research handoff about whether the job pipeline is ready for a retry/backoff change.",
+          acceptance_criteria: [
+            "The research covers all authored angles.",
+            "No repository files are modified.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+          ],
+          constraints: [
+            "Do not edit repository files.",
+            "Use local repository files as primary authority.",
+            "Do not use public network sources in this eval scenario."
+          ],
+          context: [
+            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "readme", from: "workspace_file", path: "README.md" },
+            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 },
+            { name: "docs", from: "workspace_glob", path: "docs/**", max_files: 20 }
+          ],
+          research: {
+            angles: [
+              "Investigate the current job pipeline architecture and phase responsibilities.",
+              "Identify retry and idempotency constraints visible in source and tests.",
+              "Assess how terminal failures and reasons are preserved for audit.",
+              "Review whether the repository has enough local validation evidence for a retry/backoff change.",
+              "Identify rollout risks if retry behavior changes.",
+              "Assess maintainability risks in the current pipeline design.",
+              "Recommend the smallest safe next change direction based on local evidence."
+            ]
+          },
+          artifacts: {
+            handoff: {
+              from: "output_dir",
+              path: "handoff.md",
+              description: "Managed deep research handoff with Scenario:, Changed files:, Validation:, and Risks: fields."
+            }
+          }
+        },
+        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+      ]
+    }
+  },
+  "managed-deep-work": {
+    supervision: { max_total_interventions: 0, actions: {} },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "pattern_deep_work",
+          id: "repo_fix",
+          repo: "main",
+          goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
+          acceptance_criteria: [
+            "`src/tax.js` applies discount before tax while preserving the exported API.",
+            "`npm test` passes.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+          ],
+          constraints: [
+            "Do not edit files outside `src/tax.js` unless validation proves it is necessary.",
+            "Do not add dependencies or generated files.",
+            "Use local repo files and tests as primary authority."
+          ],
+          context: [
+            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 },
+            { name: "package", from: "workspace_file", path: "package.json" }
+          ],
+          artifacts: {
+            handoff: {
+              from: "output_dir",
+              path: "handoff.md",
+              description: "Managed deep work handoff with Scenario:, Changed files:, Validation:, and Risks: fields."
+            }
+          },
+          completion: {
+            max_cycles: 3,
+            pass_threshold: 0.85,
+            criteria: [
+              {
+                id: "focused_tests",
+                kind: "command",
+                command: "npm test",
+                weight: 0.55,
+                required: true
+              },
+              {
+                id: "acceptance_rubric",
+                kind: "rubric",
+                rubric: "The workspace satisfies the repository task, preserves the exported API, and stays within the stated constraints.",
+                weight: 0.25
+              },
+              {
+                id: "handoff_quality",
+                kind: "artifact_rubric",
+                artifact: "handoff",
+                rubric: "The handoff clearly documents scenario id, changed files, validation evidence, and residual risks without placeholder text.",
+                weight: 0.2
+              }
+            ]
           }
         },
         { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
@@ -1016,16 +1212,16 @@ function scenarioJson([id, template, bucket, difficulty, description]) {
     bucket,
     difficulty,
     description,
-    environment: {
-      repo: `../../../../eval-repos/${suiteId}/${id}`,
-      ...(template === "agent-docs" ? { docs: "../../docs/current-api" } : {}),
-      ...(template === "agent-tool" ? { tools: `../../../../eval-repos/${suiteId}/tools` } : {}),
-      init_git: true
-    },
     workflow: {
       graph_template: `../../templates/${template}.graph.template.json`,
       harness: "codex-cli",
       workspace_backend: template === "agent-worktree" ? "worktree" : "inplace"
+    },
+    environment: {
+      repo: `../../../../eval-repos/${suiteId}/${id}`,
+      init_git: true,
+      ...(template === "agent-docs" ? { docs: "../../docs/current-api" } : {}),
+      ...(template === "agent-tool" ? { tools: `../../../../eval-repos/${suiteId}/tools` } : {})
     },
     criteria: {
       outcome: { status: outcome },
@@ -1034,27 +1230,14 @@ function scenarioJson([id, template, bucket, difficulty, description]) {
       supervisor,
       delivery: { required: outcome === "passed" },
       "capability-deterministic": {},
-      "contract-adherence": {},
-      "artifact-quality": {},
-      "evidence-use": {},
-      "context-handling": {},
-      "tool-discipline": {},
-      "supervisor-recovery": {},
-      "noise-efficiency": {},
-      "delivery-auditability": {
-        dimensions: [
-        "outcome_correctness",
-        "graph_contract_adherence",
-        "artifact_quality",
-        "evidence_use",
-        "context_handling",
-        "tool_discipline",
-        "supervisor_recovery_quality",
-        "retry_behavior",
-        "noise_efficiency",
-        "delivery_auditability"
-        ]
-      }
+      "contract-adherence": { dimensions: qualityDimensions },
+      "artifact-quality": { dimensions: qualityDimensions },
+      "evidence-use": { dimensions: qualityDimensions },
+      "context-handling": { dimensions: qualityDimensions },
+      "tool-discipline": { dimensions: qualityDimensions },
+      "supervisor-recovery": { dimensions: qualityDimensions },
+      "noise-efficiency": { dimensions: qualityDimensions },
+      "delivery-auditability": { dimensions: qualityDimensions }
     }
   };
 }
@@ -1262,32 +1445,33 @@ async function writeSuite() {
     default_trials: 1,
     scenarios: scenarios.map(([id]) => `scenarios/${id}/scenario.json`),
     variants: ["variants/current.json", "variants/terse.json"],
+    thresholds: { pass_rate: 0.5, max_blocker_rate: 1, min_average_score: 2 },
     criteria: [
       { id: "outcome", kind: "outcome", required: true, description: "Final graph status matches the scenario expectation." },
       { id: "artifact", kind: "artifact", required: true, description: "Declared artifacts exist and contain required evidence." },
       { id: "workspace", kind: "workspace", required: true, description: "Forbidden workspace edits did not occur." },
-      { id: "supervisor", kind: "supervisor", required: true, description: "Expected supervisor behavior occurred." },
-      { id: "delivery", kind: "delivery", required: true, description: "Delivery manifest is present when required." },
+      { id: "supervisor", kind: "supervisor", required: true, description: "Expected supervisor classifications, gatherers, and apply actions occurred." },
+      { id: "delivery", kind: "delivery", required: true, description: "Delivery manifest is present when the workflow completes." },
       {
         id: "capability-deterministic",
         kind: "custom_script",
         command: "node graders/capability-deterministic.mjs",
         timeout_sec: 300,
-        required: true
+        required: true,
+        description: "Suite-specific deterministic assertions."
       },
       ...Object.keys(judgeFocus).map((id) => ({
         id,
         kind: "quality",
+        required: false,
         rubric: `judges/${id}.md`,
         dimensions: [id.replace(/-/g, "_")],
         threshold: 4,
         harness: "codex-cli",
         model: "gpt-5.4-mini",
-        reasoning_effort: "low",
-        required: false
+        reasoning_effort: "low"
       }))
     ],
-    thresholds: { pass_rate: 0.5, max_blocker_rate: 1, min_average_score: 2 }
   }));
 
   await write(resolve(suiteDir, "variants/current.json"), json({

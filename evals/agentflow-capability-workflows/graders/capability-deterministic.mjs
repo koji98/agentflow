@@ -59,7 +59,11 @@ const expectedChangedFiles = {
   ],
   "19-validation-timeout-strategy": [],
   "20-workspace-pollution-cleanup": [],
-  "21-no-delta-recovery-stop": []
+  "21-no-delta-recovery-stop": [],
+  "22-managed-deep-research-repo": [],
+  "23-managed-deep-work-repo": [
+    "src/tax.js"
+  ]
 };
 
 function loadScenario(id) {
