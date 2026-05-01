@@ -404,8 +404,7 @@ export async function createResumedRuntimeSession(options: {
     const budgetRemaining = options.reset_supervisor_budget
       ? session.supervisor.budget_remaining
       : {
-          max_total_interventions: options.prior_state.supervisor.budget_remaining.max_total_interventions,
-          actions: { ...options.prior_state.supervisor.budget_remaining.actions }
+          max_total_interventions: options.prior_state.supervisor.budget_remaining.max_total_interventions
         };
     session.supervisor = {
       ...options.prior_state.supervisor,

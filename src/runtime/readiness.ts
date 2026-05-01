@@ -350,7 +350,7 @@ function collectRuntimeCommandChecks(graph: Pick<CompiledGraph, "nodes">): Array
   return checks;
 }
 
-function collectRequiredHarnesses(graph: Pick<CompiledGraph, "nodes">): HarnessName[] {
+function collectRequiredHarnesses(graph: Pick<CompiledGraph, "nodes" | "supervisor_effective_policy">): HarnessName[] {
   const harnesses = new Set<HarnessName>();
 
   for (const node of graph.nodes) {
@@ -359,6 +359,10 @@ function collectRequiredHarnesses(graph: Pick<CompiledGraph, "nodes">): HarnessN
     if (needsHarness && node.effective_policy.harness) {
       harnesses.add(node.effective_policy.harness);
     }
+  }
+
+  if (graph.supervisor_effective_policy?.harness) {
+    harnesses.add(graph.supervisor_effective_policy.harness);
   }
 
   return [...harnesses].sort();
@@ -571,7 +575,7 @@ async function evaluateCredentialReadiness(
 }
 
 async function evaluateMachineReadiness(options: {
-  graph: Pick<CompiledGraph, "launch" | "nodes"> & Partial<Pick<CompiledGraph, "credential_specs">>;
+  graph: Pick<CompiledGraph, "launch" | "nodes"> & Partial<Pick<CompiledGraph, "credential_specs" | "supervisor_effective_policy">>;
   repo_sources: Record<string, string>;
   env: NodeJS.ProcessEnv;
   harnesses?: Partial<Record<HarnessName, HarnessAdapter>>;
@@ -640,7 +644,7 @@ async function evaluateMachineReadiness(options: {
 }
 
 export async function evaluateGraphReadiness(options: {
-  graph: Pick<CompiledGraph, "prerequisites"> & Partial<Pick<CompiledGraph, "launch" | "nodes" | "credential_specs">>;
+  graph: Pick<CompiledGraph, "prerequisites"> & Partial<Pick<CompiledGraph, "launch" | "nodes" | "credential_specs" | "supervisor_effective_policy">>;
   repo_sources: Record<string, string>;
   repo_source_diagnostics?: Array<{ path: string; message: string }>;
   env?: NodeJS.ProcessEnv;

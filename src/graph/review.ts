@@ -480,21 +480,15 @@ function reviewSupervision(
     });
   }
 
-  Object.entries(supervision.actions).forEach(([action, policy]) => {
-    if (!policy) {
-      return;
-    }
-
-    if (policy.max_uses > 5) {
-      pushFinding(findings, {
-        severity: "warning",
-        category: "supervision",
-        path: `$.supervision.actions.${action}.max_uses`,
-        message: `Supervisor action "${action}" allows ${policy.max_uses} uses.`,
-        recommendation: "Keep individual recovery actions tightly bounded and prefer explicit graph checkpoints for major decisions."
-      });
-    }
-  });
+  if (supervision.profile === undefined) {
+    pushFinding(findings, {
+      severity: "info",
+      category: "supervision",
+      path: "$.supervision.profile",
+      message: "Supervisor profile is not set.",
+      recommendation: "Set supervision.profile when supervisor calls should use a different harness/model profile than the failed node."
+    });
+  }
 }
 
 function buildArtifactHandoffs(graph: CompiledGraph): GraphReviewArtifactHandoff[] {

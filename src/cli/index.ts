@@ -122,7 +122,7 @@ function renderGraphHelp(): string {
     '  "profiles": {',
     '    "default": { "harness": "codex-cli" }',
     "  },",
-    '  "supervision": { "actions": { "retry_with_guidance": { "max_uses": 1 } }, "max_total_interventions": 2 },',
+    '  "supervision": { "max_total_interventions": 2 },',
     '  "graph": {',
     '    "type": "sequence",',
     '    "id": "root",',

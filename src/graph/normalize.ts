@@ -48,7 +48,6 @@ import {
   reasoningEfforts,
   reservedArtifactNames,
   sandboxModes,
-  supervisorActionKinds,
   toolNamePattern,
   workspaceBackends
 } from "./schema.js";
@@ -100,20 +99,7 @@ const checkpointOperatorFeedbackArtifact: ArtifactDefinition = {
 };
 
 export const defaultSupervisionPolicy: SupervisionPolicy = {
-  actions: {
-    retry_with_guidance: { max_uses: 2 },
-    repair_artifact: { max_uses: 2 },
-    rebuild_context: { max_uses: 1 },
-    run_diagnostic: { max_uses: 3 },
-    pause_for_human: { max_uses: 1 },
-    semantic_evaluation: { max_uses: 2 }
-  },
-  max_total_interventions: 8,
-  policy: {
-    pause_on_policy_risk: true,
-    pause_on_repeated_recovery: true,
-    drift_score_threshold: 0.8
-  }
+  max_total_interventions: 3
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -824,16 +810,7 @@ function normalizeSupervisionPolicy(
   diagnostics: GraphDiagnostic[]
 ): SupervisionPolicy {
   if (value === undefined) {
-    return {
-      actions: Object.fromEntries(
-        Object.entries(defaultSupervisionPolicy.actions).map(([action, policy]) => [
-          action,
-          { ...policy }
-        ])
-      ),
-      max_total_interventions: defaultSupervisionPolicy.max_total_interventions,
-      policy: { ...defaultSupervisionPolicy.policy }
-    };
+    return { ...defaultSupervisionPolicy };
   }
 
   const record = asRecord(value);
@@ -848,56 +825,9 @@ function normalizeSupervisionPolicy(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["actions", "max_total_interventions", "policy"],
+    ["profile", "max_total_interventions"],
     diagnostics
   );
-
-  const actionRecord = record.actions === undefined ? undefined : asRecord(record.actions);
-  if (record.actions !== undefined && !actionRecord) {
-    diagnostics.push({
-      path: `${path}.actions`,
-      message: "supervision.actions must be an object when provided."
-    });
-  }
-  const actions: SupervisionPolicy["actions"] = {};
-  const actionSource = actionRecord ?? defaultSupervisionPolicy.actions;
-  if (actionRecord) {
-    pushUnknownKeyDiagnostics(actionRecord, `${path}.actions`, supervisorActionKinds, diagnostics);
-  }
-  for (const action of supervisorActionKinds) {
-    const defaultAction = defaultSupervisionPolicy.actions[action];
-    const actionPath = `${path}.actions.${action}`;
-    const valueForAction = actionSource[action];
-    if (valueForAction === undefined) {
-      if (defaultAction) {
-        actions[action] = { ...defaultAction };
-      }
-      continue;
-    }
-
-    const actionPolicyRecord = asRecord(valueForAction);
-    if (!actionPolicyRecord) {
-      diagnostics.push({
-        path: actionPath,
-        message: "supervision.actions entries must be objects when provided."
-      });
-      if (defaultAction) {
-        actions[action] = { ...defaultAction };
-      }
-      continue;
-    }
-    pushUnknownKeyDiagnostics(actionPolicyRecord, actionPath, ["max_uses"], diagnostics);
-    const maxUses =
-      readBoundedInteger(
-        actionPolicyRecord.max_uses,
-        `${actionPath}.max_uses`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultAction?.max_uses;
-    if (maxUses !== undefined && maxUses > 0) {
-      actions[action] = { max_uses: maxUses };
-    }
-  }
 
   const max_total_interventions =
     readBoundedInteger(
@@ -906,54 +836,11 @@ function normalizeSupervisionPolicy(
       diagnostics,
       { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
     ) ?? defaultSupervisionPolicy.max_total_interventions;
-
-  const policyRecord = record.policy === undefined ? undefined : asRecord(record.policy);
-  if (record.policy !== undefined && !policyRecord) {
-    diagnostics.push({
-      path: `${path}.policy`,
-      message: "supervision.policy must be an object when provided."
-    });
-  }
-  if (policyRecord) {
-    pushUnknownKeyDiagnostics(
-      policyRecord,
-      `${path}.policy`,
-      ["pause_on_policy_risk", "pause_on_repeated_recovery", "drift_score_threshold", "evaluator_profile"],
-      diagnostics
-    );
-  }
-  const drift_score_threshold =
-    readBoundedNumber(
-      policyRecord?.drift_score_threshold,
-      `${path}.policy.drift_score_threshold`,
-      diagnostics,
-      { minimum: 0, maximum: 1 }
-    ) ?? defaultSupervisionPolicy.policy.drift_score_threshold;
-  const evaluator_profile = readOptionalString(
-    policyRecord?.evaluator_profile,
-    `${path}.policy.evaluator_profile`,
-    diagnostics
-  );
+  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
 
   return {
-    actions,
-    max_total_interventions,
-    policy: {
-      pause_on_policy_risk:
-        readBoolean(
-          policyRecord?.pause_on_policy_risk,
-          `${path}.policy.pause_on_policy_risk`,
-          diagnostics
-        ) ?? defaultSupervisionPolicy.policy.pause_on_policy_risk,
-      pause_on_repeated_recovery:
-        readBoolean(
-          policyRecord?.pause_on_repeated_recovery,
-          `${path}.policy.pause_on_repeated_recovery`,
-          diagnostics
-        ) ?? defaultSupervisionPolicy.policy.pause_on_repeated_recovery,
-      drift_score_threshold,
-      ...(evaluator_profile ? { evaluator_profile } : {})
-    }
+    ...(profile ? { profile } : {}),
+    max_total_interventions
   };
 }
 
@@ -2564,6 +2451,13 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     diagnostics.push({
       path: "$.defaults.launch_profile",
       message: `defaults.launch_profile references unknown profile "${defaults.launch_profile}".`
+    });
+  }
+
+  if (supervision.profile && !(supervision.profile in profiles)) {
+    diagnostics.push({
+      path: "$.supervision.profile",
+      message: `supervision.profile references unknown profile "${supervision.profile}".`
     });
   }
 

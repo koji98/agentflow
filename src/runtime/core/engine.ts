@@ -14,7 +14,8 @@ import type {
 } from "../../graph/compiled.js";
 import { collectReferencedRepoAliases } from "../../graph/repo_aliases.js";
 import { createRunOwnerRecord, type RunOwnerRecord } from "../../artifacts/owner.js";
-import type { GraphDiagnostic, GraphOutcome, HarnessName, SupervisorActionKind } from "../../graph/schema.js";
+import type { GraphDiagnostic, GraphOutcome, HarnessName } from "../../graph/schema.js";
+import type { EffectiveSupervisorPolicy } from "../../graph/profiles.js";
 import { ArtifactWriter } from "../../artifacts/writer.js";
 import {
   readRunEvents,
@@ -85,7 +86,8 @@ import {
 import type {
   SupervisorDecision,
   SupervisorInterventionRecord,
-  SupervisorRecoveryEnvelope
+  SupervisorRecoveryEnvelope,
+  SupervisorActionKind
 } from "../../supervisor/types.js";
 import {
   buildSchedulerTopology,
@@ -636,6 +638,44 @@ function canSpendRuntimeSupervisorAction(session: RuntimeSession, action: Superv
   }, action);
 }
 
+function resolveSupervisorPolicyForNode(
+  session: RuntimeSession,
+  node: CompiledExecutableNode
+): EffectiveSupervisorPolicy {
+  return session.graph.supervisor_effective_policy ?? {
+    profile_name: node.effective_policy.profile_name,
+    ...(node.effective_policy.harness ? { harness: node.effective_policy.harness } : {}),
+    ...(node.effective_policy.model ? { model: node.effective_policy.model } : {}),
+    ...(node.effective_policy.reasoning_effort ? { reasoning_effort: node.effective_policy.reasoning_effort } : {}),
+    ...(node.effective_policy.sandbox ? { sandbox: node.effective_policy.sandbox } : {}),
+    ...(node.effective_policy.skip_git_repo_check !== undefined
+      ? { skip_git_repo_check: node.effective_policy.skip_git_repo_check }
+      : {}),
+    timeout_sec: node.effective_policy.timeout_sec
+  };
+}
+
+function resolveSupervisorHarness(
+  session: RuntimeSession,
+  node: CompiledExecutableNode,
+  harnesses: RunCompiledGraphOptions["harnesses"]
+): {
+  policy: EffectiveSupervisorPolicy;
+  harnessName?: HarnessName;
+  harness?: HarnessAdapter;
+} {
+  const policy = resolveSupervisorPolicyForNode(session, node);
+  const harnessName =
+    session.graph.supervisor_effective_policy || node.kind === "agent" || node.kind === "check"
+      ? policy.harness
+      : undefined;
+  return {
+    policy,
+    ...(harnessName ? { harnessName } : {}),
+    ...(harnessName && harnesses?.[harnessName] ? { harness: harnesses[harnessName] } : {})
+  };
+}
+
 function spendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): void {
   const spent = spendSupervisorAction({
     remaining: session.supervisor.budget_remaining,
@@ -855,8 +895,7 @@ async function handleFailedNodeWithSupervisor(options: {
   let classification = classifyNodeFailure({
     node: options.node,
     attempt: options.attempt,
-    result: options.result,
-    policy: options.session.graph.supervision
+    result: options.result
   });
   const failureFingerprint = createFailureFingerprint(classification);
   const previousFingerprint = options.session.supervisor.failure_fingerprints[options.node.compiled_id];
@@ -867,7 +906,6 @@ async function handleFailedNodeWithSupervisor(options: {
       node: options.node,
       attempt: options.attempt,
       result: options.result,
-      policy: options.session.graph.supervision,
       repeated_fingerprint_count: repeatedFingerprintCount
     });
   }
@@ -966,8 +1004,7 @@ async function handleFailedNodeWithSupervisor(options: {
           attempt_index: options.attempt.attempt_index
         }
       );
-      const harnessName = options.node.kind === "agent" ? options.node.effective_policy.harness : undefined;
-      const supervisorHarness = harnessName ? options.runOptions.harnesses?.[harnessName] : undefined;
+      const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.runOptions.harnesses);
       const recovery = await runSupervisorRecoveryCycle({
         action: "pause_for_human",
         run_id: options.session.run_id,
@@ -981,7 +1018,6 @@ async function handleFailedNodeWithSupervisor(options: {
         failure_fingerprint: failureFingerprint,
         repeated_fingerprint_count: repeatedFingerprintCount,
         prior_interventions: await readSupervisorInterventions(options.writer.run_root).catch(() => []),
-        policy: options.session.graph.supervision,
         workspace_path: options.session.manifest.repo_workspaces[options.node.repo]?.workspace_path ?? options.attempt.execution_dir,
         repo_workspaces: Object.fromEntries(
           Object.entries(options.session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
@@ -989,7 +1025,8 @@ async function handleFailedNodeWithSupervisor(options: {
             binding.workspace_path
           ])
         ),
-        ...(supervisorHarness ? { harness: supervisorHarness } : {}),
+        supervisor_policy: supervisorHarness.policy,
+        ...(supervisorHarness.harness ? { harness: supervisorHarness.harness } : {}),
         ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
         ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
       });
@@ -1168,8 +1205,7 @@ async function handleFailedNodeWithSupervisor(options: {
     }
   );
 
-  const harnessName = options.node.kind === "agent" ? options.node.effective_policy.harness : undefined;
-  const supervisorHarness = harnessName ? options.runOptions.harnesses?.[harnessName] : undefined;
+  const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.runOptions.harnesses);
   const recovery = await runSupervisorRecoveryCycle({
     action,
     run_id: options.session.run_id,
@@ -1183,7 +1219,6 @@ async function handleFailedNodeWithSupervisor(options: {
     failure_fingerprint: failureFingerprint,
     repeated_fingerprint_count: repeatedFingerprintCount,
     prior_interventions: await readSupervisorInterventions(options.writer.run_root).catch(() => []),
-    policy: options.session.graph.supervision,
     workspace_path: options.session.manifest.repo_workspaces[options.node.repo]?.workspace_path ?? options.attempt.execution_dir,
     repo_workspaces: Object.fromEntries(
       Object.entries(options.session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
@@ -1191,7 +1226,8 @@ async function handleFailedNodeWithSupervisor(options: {
         binding.workspace_path
       ])
     ),
-    ...(supervisorHarness ? { harness: supervisorHarness } : {}),
+    supervisor_policy: supervisorHarness.policy,
+    ...(supervisorHarness.harness ? { harness: supervisorHarness.harness } : {}),
     ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
     ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
   });
@@ -2451,10 +2487,10 @@ async function materializeDeclaredArtifactsWithRepair(options: {
       );
     }
 
-    const maxAttempts =
-      options.node.effective_policy.artifact_repair?.max_attempts
-      ?? options.session.supervisor.budget_remaining.actions.repair_artifact
-      ?? 0;
+    const maxAttempts = Math.min(
+      options.node.effective_policy.artifact_repair?.max_attempts ?? 1,
+      options.session.supervisor.budget_remaining.max_total_interventions
+    );
 
     if (maxAttempts <= 0) {
       throw error;
@@ -2553,8 +2589,8 @@ async function materializeDeclaredArtifactsWithRepair(options: {
         }
       );
 
-      const harnessName = options.node.effective_policy.harness;
-      const harnessAvailable = Boolean(harnessName && options.harnesses[harnessName]);
+      const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.harnesses);
+      const harnessAvailable = Boolean(supervisorHarness.harnessName && supervisorHarness.harness);
       const synthesizedIntervention = harnessAvailable
         ? undefined
         : await synthesizeMissingArtifactsFromAgentResponse({
@@ -2576,6 +2612,7 @@ async function materializeDeclaredArtifactsWithRepair(options: {
         context_packet_path: options.contextPacketPath,
         context_manifest_path: options.contextManifestPath,
         harnesses: options.harnesses,
+        supervisor_policy: supervisorHarness.policy,
         decision_id: decisionId,
         intervention_id: interventionId,
         repair_attempt: repairAttempt,
@@ -3047,8 +3084,9 @@ async function executeNode(
       && !materialized.canceled
       && !usedCustomAgentExecutor
     ) {
-      const harnessName = node.effective_policy.harness;
-      const verifierHarness = harnessName ? options.harnesses?.[harnessName] : undefined;
+      const supervisorHarness = resolveSupervisorHarness(session, node, options.harnesses);
+      const harnessName = supervisorHarness.harnessName;
+      const verifierHarness = supervisorHarness.harness;
 
       if (!verifierHarness) {
         const message = `Outcome verification requires harness "${harnessName ?? "unknown"}" but it is not available.`;
@@ -3098,6 +3136,7 @@ async function executeNode(
           declaredArtifactPaths: artifacts,
           ...(workspaceChangeArtifacts ? { workspaceChangeArtifacts } : {}),
           harness: verifierHarness,
+          supervisorPolicy: supervisorHarness.policy,
           runId: session.run_id,
           baseEnv: options.environment ?? process.env,
           ...(signal ? { signal } : {}),

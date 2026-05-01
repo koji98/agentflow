@@ -15,7 +15,7 @@ import type {
   LoweredManagedKind
 } from "./schema.js";
 import type { CheckKind, ExecutableNodeKind } from "./schema.js";
-import type { EffectiveNodePolicy, LaunchResolution } from "./profiles.js";
+import type { EffectiveNodePolicy, EffectiveSupervisorPolicy, LaunchResolution } from "./profiles.js";
 import type { CredentialSpecMap } from "../auth/types.js";
 
 export interface CompiledExecutableNodeBase {
@@ -146,6 +146,7 @@ export interface CompiledGraph {
   graph_id: string;
   intent: GraphIntent;
   supervision: SupervisionPolicy;
+  supervisor_effective_policy?: EffectiveSupervisorPolicy;
   launch: Pick<LaunchResolution, "launch_profile" | "workspace_backend">;
   entry_node_ids: string[];
   nodes: CompiledExecutableNode[];

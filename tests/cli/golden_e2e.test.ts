@@ -494,19 +494,7 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         }
       }
     ], {
-      supervision: {
-        actions: {
-          repair_artifact: {
-            max_uses: 1
-          }
-        },
-        max_total_interventions: 1,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      }
+      supervision: { max_total_interventions: 1 }
     }));
 
     const result = await executeCli(["run", "--graph", graphPath], tempRoot);
@@ -544,19 +532,7 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         goal
       }
     ], {
-      supervision: {
-        actions: {
-          pause_for_human: {
-            max_uses: 1
-          }
-        },
-        max_total_interventions: 1,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      }
+      supervision: { max_total_interventions: 1 }
     });
     await writeGraph(graphPath, graph("Pause Human Golden: trigger a policy pause."));
 

@@ -1,4 +1,14 @@
-import type { SupervisorActionKind } from "../graph/schema.js";
+export const supervisorActionKinds = [
+  "retry_with_guidance",
+  "repair_artifact",
+  "rebuild_context",
+  "run_diagnostic",
+  "pause_for_human",
+  "semantic_evaluation",
+  "fail"
+] as const;
+
+export type SupervisorActionKind = (typeof supervisorActionKinds)[number];
 
 export type FailureClass =
   | "context_contract_failure"
@@ -67,6 +77,13 @@ export interface SupervisorCaseFile {
   artifacts: Record<string, string>;
   prior_interventions: SupervisorInterventionRecord[];
   evidence: Record<string, unknown>;
+  supervisor_profile?: {
+    profile_name: string;
+    harness?: string;
+    model?: string;
+    reasoning_effort?: string;
+    timeout_sec: number;
+  };
 }
 
 export interface SupervisorEvidencePatch {

@@ -374,18 +374,7 @@ describe("runtime resume", () => {
         profiles: {
           default: {}
         },
-        supervision: {
-          actions: {
-            retry_with_guidance: { max_uses: 3 },
-            repair_artifact: { max_uses: 2 }
-          },
-          max_total_interventions: 5,
-          policy: {
-            pause_on_policy_risk: true,
-            pause_on_repeated_recovery: true,
-            drift_score_threshold: 0.8
-          }
-        },
+        supervision: { max_total_interventions: 5 },
         graph: {
           type: "sequence",
           id: "root",
@@ -403,11 +392,7 @@ describe("runtime resume", () => {
 
     fixture.result.state.supervisor.status = "exhausted";
     fixture.result.state.supervisor.budget_remaining = {
-      max_total_interventions: 0,
-      actions: {
-        retry_with_guidance: 0,
-        repair_artifact: 0
-      }
+      max_total_interventions: 0
     };
 
     const resumed = await buildResumedSession(
@@ -421,8 +406,6 @@ describe("runtime resume", () => {
     expect(resumed.restarted_node_count).toBe(0);
     expect(resumed.session.supervisor.status).toBe("healthy");
     expect(resumed.session.supervisor.budget_remaining.max_total_interventions).toBe(5);
-    expect(resumed.session.supervisor.budget_remaining.actions.retry_with_guidance).toBe(3);
-    expect(resumed.session.supervisor.budget_remaining.actions.repair_artifact).toBe(2);
 
     await rm(fixture.tempRoot, { recursive: true, force: true });
   });

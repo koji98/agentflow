@@ -58,7 +58,7 @@ Compilation lowers the authored graph into primitive runtime structures:
 - resolved profiles and workspace policy
 - resolved plugin workflow expansions
 - resolved plugin tool contracts
-- supervision policy copied into the compiled graph
+- supervision contract copied into the compiled graph
 - graph and node intent copied into executable nodes
 
 Managed patterns compile into generated primitive subgraphs. The public authored node id remains the handoff boundary; generated internal ids are implementation details visible through `validate --show-compiled`.
@@ -162,7 +162,7 @@ Action kinds:
 - `semantic_evaluation`
 - `fail`
 
-The graph contract configures bounded intervention actions with `supervision.actions.<action>.max_uses`, plus `max_total_interventions` and `policy` settings such as `pause_on_policy_risk`, `pause_on_repeated_recovery`, and `drift_score_threshold`. These graph action names are budget entry points. Internal recovery can apply a more specific runtime overlay such as context repair, evidence-backed retry, validation-strategy repair, workspace repair, environment repair, artifact repair, terminal fail, or authority pause without adding graph fields.
+The graph contract exposes one recovery budget, `supervision.max_total_interventions`, and an optional `supervision.profile`. When no supervisor profile is set, recovery workers inherit the failed node's effective profile. When a supervisor profile is set, evidence gathering, artifact repair, and outcome verification use that profile while still respecting node authority boundaries. Internal recovery can apply a specific runtime overlay such as context repair, evidence-backed retry, validation-strategy repair, workspace repair, environment repair, artifact repair, terminal fail, or authority pause without adding graph fields.
 
 Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Bounded intervention workers attach artifacts under the target attempt's `interventions/` directory. Durable human pauses set run status to `paused` and include resume options plus the recovery plan that explains the precise unblock request.
 

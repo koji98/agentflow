@@ -586,7 +586,7 @@ const qualityDimensions = [
 
 const templates = {
   "agent-change": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -632,7 +632,7 @@ const templates = {
     }
   },
   "agent-docs": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -674,7 +674,7 @@ const templates = {
     }
   },
   "agent-tool": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -712,7 +712,7 @@ const templates = {
     }
   },
   "agent-no-edit": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -745,7 +745,7 @@ const templates = {
     }
   },
   "agent-sequence": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -796,7 +796,7 @@ const templates = {
     }
   },
   "managed-deep-research": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -847,7 +847,7 @@ const templates = {
     }
   },
   "managed-deep-work": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -912,15 +912,12 @@ const templates = {
     }
   },
   "agent-worktree": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     defaults: { workspace_backend: "worktree" },
     graph: null
   },
   "exec-recovery": {
-    supervision: {
-      max_total_interventions: 1,
-      actions: { retry_with_guidance: { max_uses: 1 } }
-    },
+    supervision: { max_total_interventions: 1 },
     graph: {
       type: "sequence",
       id: "root",
@@ -939,10 +936,7 @@ const templates = {
     }
   },
   "exec-terminal": {
-    supervision: {
-      max_total_interventions: 2,
-      actions: { retry_with_guidance: { max_uses: 2 }, run_diagnostic: { max_uses: 2 } }
-    },
+    supervision: { max_total_interventions: 2 },
     graph: {
       type: "sequence",
       id: "root",
@@ -952,10 +946,7 @@ const templates = {
     }
   },
   "exec-validation-strategy": {
-    supervision: {
-      max_total_interventions: 1,
-      actions: { run_diagnostic: { max_uses: 1 } }
-    },
+    supervision: { max_total_interventions: 1 },
     graph: {
       type: "sequence",
       id: "root",
@@ -978,10 +969,7 @@ const templates = {
     }
   },
   "exec-workspace-repair": {
-    supervision: {
-      max_total_interventions: 1,
-      actions: { run_diagnostic: { max_uses: 1 } }
-    },
+    supervision: { max_total_interventions: 1 },
     graph: {
       type: "sequence",
       id: "root",
@@ -1004,10 +992,7 @@ const templates = {
     }
   },
   "exec-no-delta": {
-    supervision: {
-      max_total_interventions: 2,
-      actions: { run_diagnostic: { max_uses: 2 } }
-    },
+    supervision: { max_total_interventions: 2 },
     graph: {
       type: "sequence",
       id: "root",
@@ -1017,10 +1002,7 @@ const templates = {
     }
   },
   "agent-context-overflow": {
-    supervision: {
-      max_total_interventions: 1,
-      actions: { rebuild_context: { max_uses: 1 } }
-    },
+    supervision: { max_total_interventions: 1 },
     profile: {
       input_rules: {
         max_total_tokens: 700,
@@ -1065,7 +1047,7 @@ const templates = {
     }
   },
   "agent-noisy-context": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { max_total_interventions: 0 },
     profile: {
       input_rules: {
         max_total_tokens: 1600,

@@ -1,12 +1,12 @@
 import type { SupervisionPolicy } from "../graph/authored.js";
-import type { SupervisorActionKind } from "../graph/schema.js";
-import type { SupervisorDecision } from "./types.js";
+import type { SupervisorActionKind, SupervisorDecision } from "./types.js";
 
-export type SupervisorBudgetSpent = { total: number } & Partial<Record<SupervisorActionKind, number>>;
+export interface SupervisorBudgetSpent {
+  total: number;
+}
 
 export interface SupervisorBudgetRemaining {
   max_total_interventions: number;
-  actions: Partial<Record<SupervisorActionKind, number>>;
 }
 
 export interface SupervisorBudgetState {
@@ -23,13 +23,7 @@ function createEmptySpent(): SupervisorBudgetSpent {
 export function createSupervisorBudget(policy: SupervisionPolicy): SupervisorBudgetState {
   return {
     remaining: {
-      max_total_interventions: policy.max_total_interventions,
-      actions: Object.fromEntries(
-        Object.entries(policy.actions).map(([action, config]) => [
-          action,
-          config?.max_uses ?? 0
-        ])
-      )
+      max_total_interventions: policy.max_total_interventions
     },
     spent: createEmptySpent()
   };
@@ -40,8 +34,7 @@ export function canSpendSupervisorAction(
   action: SupervisorActionKind
 ): boolean {
   return (
-    state.remaining.max_total_interventions > 0 &&
-    (state.remaining.actions[action] ?? 0) > 0
+    state.remaining.max_total_interventions > 0
   );
 }
 
@@ -57,18 +50,15 @@ export function spendSupervisorAction(
   }
 
   const remaining: SupervisorBudgetRemaining = {
-    max_total_interventions: state.remaining.max_total_interventions,
-    actions: { ...state.remaining.actions }
+    max_total_interventions: state.remaining.max_total_interventions
   };
   remaining.max_total_interventions = Math.max(0, remaining.max_total_interventions - 1);
-  remaining.actions[action] = Math.max(0, (remaining.actions[action] ?? 0) - 1);
 
   return {
     remaining,
     spent: {
       ...state.spent,
-      total: state.spent.total + 1,
-      [action]: (state.spent[action] ?? 0) + 1
+      total: state.spent.total + 1
     }
   };
 }

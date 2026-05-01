@@ -100,20 +100,7 @@ Use this as the default copy source for focused implementation work.
     ]
   },
   "supervision": {
-    "actions": {
-      "retry_with_guidance": { "max_uses": 2 },
-      "repair_artifact": { "max_uses": 1 },
-      "rebuild_context": { "max_uses": 1 },
-      "run_diagnostic": { "max_uses": 1 },
-      "pause_for_human": { "max_uses": 1 },
-      "semantic_evaluation": { "max_uses": 1 }
-    },
-    "max_total_interventions": 4,
-    "policy": {
-      "pause_on_policy_risk": true,
-      "pause_on_repeated_recovery": true,
-      "drift_score_threshold": 0.8
-    }
+    "max_total_interventions": 4
   }
 }
 ```

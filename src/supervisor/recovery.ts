@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
-import type { ArtifactDefinition, SupervisionPolicy } from "../graph/authored.js";
+import type { ArtifactDefinition } from "../graph/authored.js";
 import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js";
-import type { SupervisorActionKind } from "../graph/schema.js";
+import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
 import {
   analyzeNodeContext,
@@ -20,6 +20,7 @@ import type { FailureClassification } from "./classifier.js";
 import type {
   SupervisorCaseFile,
   SupervisorContextRepairPatch,
+  SupervisorActionKind,
   SupervisorEvidenceGatherKind,
   SupervisorEvidenceGatherRequest,
   SupervisorEvidencePatch,
@@ -373,6 +374,8 @@ async function writeEvidencePatch(options: {
   caseFileJsonPath: string;
   harness?: HarnessAdapter;
   model?: string;
+  reasoning_effort?: EffectiveSupervisorPolicy["reasoning_effort"];
+  timeout_sec?: number;
   runId: string;
   workspacePath: string;
   contextManifestPath?: string;
@@ -449,12 +452,13 @@ async function writeEvidencePatch(options: {
         repoPath: options.workspacePath,
         sandbox: "read-only",
         model: options.model,
+        ...(options.reasoning_effort ? { reasoningEffort: options.reasoning_effort } : {}),
         contextPacketPath: options.caseFileJsonPath,
         contextManifestPath: options.contextManifestPath ?? options.caseFileJsonPath,
         contextManifest: options.contextManifest ?? `Case file: ${options.caseFileJsonPath}`,
         outputDir: gatherDir,
         artifacts: {},
-        timeoutSec: 300,
+        timeoutSec: Math.min(options.timeout_sec ?? 300, 300),
         signal: options.signal,
         promptPath,
         supervisorEvidence: {
@@ -920,10 +924,10 @@ export async function runSupervisorRecoveryCycle(options: {
   failure_fingerprint: string;
   repeated_fingerprint_count: number;
   prior_interventions: SupervisorInterventionRecord[];
-  policy: SupervisionPolicy;
   workspace_path: string;
   repo_workspaces?: Record<string, string>;
   harness?: HarnessAdapter;
+  supervisor_policy?: EffectiveSupervisorPolicy;
   context_manifest_path?: string;
   signal?: AbortSignal;
 }): Promise<{
@@ -986,7 +990,20 @@ export async function runSupervisorRecoveryCycle(options: {
     },
     artifacts: options.attempt.artifacts,
     prior_interventions: options.prior_interventions,
-    evidence: options.classification.evidence
+    evidence: options.classification.evidence,
+    ...(options.supervisor_policy
+      ? {
+          supervisor_profile: {
+            profile_name: options.supervisor_policy.profile_name,
+            ...(options.supervisor_policy.harness ? { harness: options.supervisor_policy.harness } : {}),
+            ...(options.supervisor_policy.model ? { model: options.supervisor_policy.model } : {}),
+            ...(options.supervisor_policy.reasoning_effort
+              ? { reasoning_effort: options.supervisor_policy.reasoning_effort }
+              : {}),
+            timeout_sec: options.supervisor_policy.timeout_sec
+          }
+        }
+      : {})
   };
   await writeFile(caseFileJsonPath, `${JSON.stringify(caseFile, null, 2)}\n`, "utf8");
   await writeFile(caseFileMarkdownPath, `${renderCaseFileMarkdown(caseFile)}\n`, "utf8");
@@ -1033,7 +1050,13 @@ export async function runSupervisorRecoveryCycle(options: {
         caseFile,
         caseFileJsonPath,
         ...(options.harness ? { harness: options.harness } : {}),
-        ...(options.node.effective_policy.model ? { model: options.node.effective_policy.model } : {}),
+        ...(options.supervisor_policy?.model ?? options.node.effective_policy.model
+          ? { model: options.supervisor_policy?.model ?? options.node.effective_policy.model }
+          : {}),
+        ...(options.supervisor_policy?.reasoning_effort
+          ? { reasoning_effort: options.supervisor_policy.reasoning_effort }
+          : {}),
+        ...(options.supervisor_policy?.timeout_sec ? { timeout_sec: options.supervisor_policy.timeout_sec } : {}),
         runId: options.run_id,
         workspacePath: options.workspace_path,
         ...(options.context_manifest_path ? { contextManifestPath: options.context_manifest_path } : {}),

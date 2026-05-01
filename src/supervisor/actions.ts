@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { resolveExecutionArtifactsDirectory } from "../artifacts/paths.js";
 import type { CompiledAgentNode } from "../graph/compiled.js";
+import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { HarnessName } from "../graph/schema.js";
 import { listAttemptsForCompiledNode, type RuntimeNodeAttempt } from "../runtime/attempts.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../runtime/harness/types.js";
@@ -94,6 +95,24 @@ async function collectPreviousAttemptEvidencePaths(
   return [...new Set(await existingPaths(candidatePaths))];
 }
 
+const sandboxRank = {
+  "read-only": 0,
+  "workspace-write": 1,
+  "danger-full-access": 2
+} as const;
+
+function clampRepairSandbox(
+  nodeSandbox: NonNullable<CompiledAgentNode["effective_policy"]["sandbox"]>,
+  supervisorSandbox: EffectiveSupervisorPolicy["sandbox"] | undefined
+): NonNullable<CompiledAgentNode["effective_policy"]["sandbox"]> {
+  if (!supervisorSandbox) {
+    return nodeSandbox;
+  }
+  return sandboxRank[supervisorSandbox] < sandboxRank[nodeSandbox]
+    ? supervisorSandbox
+    : nodeSandbox;
+}
+
 function buildRepairInvocation(options: {
   node: CompiledAgentNode;
   attempt: RuntimeNodeAttempt;
@@ -114,20 +133,26 @@ function buildRepairInvocation(options: {
   tool_bin_dir?: string;
   tool_env?: Record<string, string>;
   tools?: AgentInvocation["tools"];
+  supervisor_policy?: EffectiveSupervisorPolicy;
   signal?: AbortSignal;
 }): AgentInvocation {
   const priorResponsePath = join(options.artifacts_root, "agent-response.md");
+  const supervisorPolicy = options.supervisor_policy;
+  const sandbox = clampRepairSandbox(
+    options.node.effective_policy.sandbox ?? "workspace-write",
+    supervisorPolicy?.sandbox
+  );
   return {
     promptKind: "artifact_repair",
     runId: options.run_id,
     executionId: options.execution_id ?? options.attempt.execution_id,
     repoAlias: options.node.repo,
     repoPath: options.workspace_path,
-    sandbox: options.node.effective_policy.sandbox ?? "workspace-write",
-    ...(options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
-    model: options.node.effective_policy.model,
-    ...(options.node.effective_policy.reasoning_effort
-      ? { reasoningEffort: options.node.effective_policy.reasoning_effort }
+    sandbox,
+    ...(supervisorPolicy?.skip_git_repo_check ?? options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
+    model: supervisorPolicy?.model ?? options.node.effective_policy.model,
+    ...(supervisorPolicy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort
+      ? { reasoningEffort: supervisorPolicy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort }
       : {}),
     graphGoal: options.graph_goal,
     ...(options.graph_acceptance_criteria ? { graphAcceptanceCriteria: options.graph_acceptance_criteria } : {}),
@@ -142,7 +167,7 @@ function buildRepairInvocation(options: {
     contextManifest: options.context_manifest,
     outputDir: options.artifacts_root,
     artifacts: options.node.declared_artifacts,
-    timeoutSec: options.node.effective_policy.timeout_sec,
+    timeoutSec: supervisorPolicy?.timeout_sec ?? options.node.effective_policy.timeout_sec,
     signal: options.signal,
     ...(options.tool_bin_dir ? { toolBinDir: options.tool_bin_dir } : {}),
     ...(options.tool_env ? { toolEnv: options.tool_env } : {}),
@@ -174,6 +199,7 @@ export async function runRepairArtifactIntervention(options: {
   context_packet_path: string;
   context_manifest_path: string;
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
+  supervisor_policy?: EffectiveSupervisorPolicy;
   signal?: AbortSignal;
   decision_id?: string;
   intervention_id?: string;
@@ -203,7 +229,7 @@ export async function runRepairArtifactIntervention(options: {
   await mkdir(interventionDir, { recursive: true });
   const contextManifest = await readContextManifestContent(options.context_manifest_path);
 
-  const harnessName = options.node.effective_policy.harness;
+  const harnessName = options.supervisor_policy?.harness ?? options.node.effective_policy.harness;
   const harness = harnessName ? options.harnesses[harnessName] : undefined;
 
   if (!harnessName || !harness) {
@@ -227,6 +253,7 @@ export async function runRepairArtifactIntervention(options: {
       missing_artifacts: options.missing_artifacts,
       previous_attempt_evidence_paths: previousAttemptEvidencePaths,
       tools: options.node.tools,
+      ...(options.supervisor_policy ? { supervisor_policy: options.supervisor_policy } : {}),
       ...(options.signal ? { signal: options.signal } : {})
     });
     await writeFile(promptPath, `${renderHarnessPrompt(unavailableInvocation)}\n`, "utf8");
@@ -301,6 +328,7 @@ export async function runRepairArtifactIntervention(options: {
     tool_bin_dir: repairToolSetup.bin_dir,
     tool_env: repairToolSetup.env,
     tools: repairToolSetup.resolved_tools,
+    ...(options.supervisor_policy ? { supervisor_policy: options.supervisor_policy } : {}),
     ...(options.signal ? { signal: options.signal } : {})
   });
   await writeFile(promptPath, `${renderHarnessPrompt(invocation)}\n`, "utf8");

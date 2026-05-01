@@ -38,20 +38,7 @@ describe("graph compilation", () => {
         goal: "Ship the supervised runtime.",
         acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
       },
-      supervision: {
-        actions: {
-          retry_with_guidance: { max_uses: 1 },
-          run_diagnostic: { max_uses: 1 },
-          semantic_evaluation: { max_uses: 1 },
-          pause_for_human: { max_uses: 1 }
-        },
-        max_total_interventions: 3,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.9
-        }
-      },
+      supervision: { max_total_interventions: 3 },
       repos: {
         main: {
           path: "."
@@ -94,16 +81,71 @@ describe("graph compilation", () => {
           acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
         }),
         supervision: expect.objectContaining({
-          actions: expect.objectContaining({
-            retry_with_guidance: { max_uses: 1 },
-            run_diagnostic: { max_uses: 1 }
-          }),
-          policy: {
-            pause_on_policy_risk: true,
-            pause_on_repeated_recovery: true,
-            drift_score_threshold: 0.9
+          max_total_interventions: 3
+        })
+      })
+    );
+  });
+
+  it("compiles a dedicated supervisor profile when authored", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "compiled-supervisor-profile",
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          model: "gpt-5-codex",
+          sandbox: "workspace-write"
+        },
+        supervisor: {
+          model: "gpt-5.2",
+          reasoning_effort: "high",
+          sandbox: "read-only",
+          timeout_sec: 300
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "version",
+            command: "node",
+            args: ["--version"]
           }
-        }),
+        ]
+      }
+    });
+
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+
+    expect(compilation.diagnostics).toEqual([]);
+    expect(compilation.compiled_graph?.supervisor_effective_policy).toEqual(
+      expect.objectContaining({
+        profile_name: "supervisor",
+        harness: "codex-cli",
+        model: "gpt-5.2",
+        reasoning_effort: "high",
+        sandbox: "read-only",
+        timeout_sec: 300
       })
     );
   });

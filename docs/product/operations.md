@@ -141,7 +141,7 @@ agentflow resume --graph agentflow.graph.json --latest
 
 Resume revalidates the current graph, recompiles it, and compares the new contract with the prior run.
 
-Completed work is preserved only when the node contract and graph-level `intent` and `supervision` contracts remain compatible. If the human contract or policy contract changes, affected completed work restarts so the final evidence matches the current graph.
+Completed work is preserved only when the node contract and graph-level `intent` and `supervision` contracts remain compatible. If the human contract or supervision contract changes, affected completed work restarts so the final evidence matches the current graph.
 
 Use `--dry-run` before resuming a complicated run. It reports preserved nodes, restarted nodes, initially startable nodes, supervisor status, and remaining budget without reconciling artifacts, creating workspaces, or executing nodes. Use `--reset-supervisor-budget` when the previous run exhausted recovery actions and the operator has changed the graph, environment, credentials, or other blocking condition enough to justify a fresh recovery budget.
 

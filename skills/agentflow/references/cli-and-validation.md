@@ -76,7 +76,7 @@ Confirm:
 - write-capable nodes use a write-capable sandbox.
 - plugin tools have clear descriptions, expected credential scopes, valid non-secret config, and passing `--help` output.
 - managed patterns publish the artifacts downstream nodes reference.
-- `supervision.actions.<action>.max_uses` and `supervision.max_total_interventions` are intentionally bounded.
+- `supervision.max_total_interventions` is intentionally bounded, and any `supervision.profile` points at a real profile.
 - terminal delivery is automatic and reviewer-facing.
 
 ## Evaluation Lanes

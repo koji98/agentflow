@@ -54,6 +54,7 @@ export interface ExecutionManifest {
   graph_id: string;
   launch_profile: string;
   workspace_backend: WorkspaceBackend;
+  supervisor_effective_policy?: CompiledGraph["supervisor_effective_policy"];
   repo_workspaces: Record<string, WorkspaceBinding>;
   nodes: ExecutionManifestEntry[];
 }
@@ -244,6 +245,7 @@ export function buildExecutionManifest(
     graph_id: graph.graph_id,
     launch_profile: graph.launch.launch_profile,
     workspace_backend: graph.launch.workspace_backend,
+    ...(graph.supervisor_effective_policy ? { supervisor_effective_policy: graph.supervisor_effective_policy } : {}),
     repo_workspaces: repoWorkspaces,
     nodes: graph.nodes.map((node) => ({
       compiled_id: node.compiled_id,
@@ -267,13 +269,7 @@ export function createRuntimeSession(
 ): RuntimeSession {
   const started_at = new Date().toISOString();
   const budgetRemaining: SupervisorBudgetRemaining = {
-    max_total_interventions: graph.supervision.max_total_interventions,
-    actions: Object.fromEntries(
-      Object.entries(graph.supervision.actions).map(([action, policy]) => [
-        action,
-        policy?.max_uses ?? 0
-      ])
-    )
+    max_total_interventions: graph.supervision.max_total_interventions
   };
   const repeat_scopes = new Map<string, RepeatScopeState>(
     graph.scopes
@@ -431,8 +427,7 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     supervisor: {
       ...session.supervisor,
       budget_remaining: {
-        max_total_interventions: session.supervisor.budget_remaining.max_total_interventions,
-        actions: { ...session.supervisor.budget_remaining.actions }
+        max_total_interventions: session.supervisor.budget_remaining.max_total_interventions
       },
       timeline: session.supervisor.timeline.map((decision) => ({ ...decision })),
       active_recovery_envelopes: Object.fromEntries(

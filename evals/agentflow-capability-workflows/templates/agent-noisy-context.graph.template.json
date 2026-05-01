@@ -35,8 +35,7 @@
     }
   },
   "supervision": {
-    "max_total_interventions": 0,
-    "actions": {}
+    "max_total_interventions": 0
   },
   "graph": {
     "type": "sequence",

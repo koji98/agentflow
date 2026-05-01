@@ -6,29 +6,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { CompiledAgentNode } from "../../src/graph/compiled.js";
-import type { SupervisionPolicy } from "../../src/graph/authored.js";
 import type { RuntimeNodeAttempt } from "../../src/runtime/attempts.js";
 import type { RuntimeNodeExecutionResult } from "../../src/runtime/core/engine.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { classifyNodeFailure } from "../../src/supervisor/classifier.js";
 import { runSupervisorRecoveryCycle } from "../../src/supervisor/recovery.js";
-
-const policy: SupervisionPolicy = {
-  actions: {
-    retry_with_guidance: { max_uses: 2 },
-    rebuild_context: { max_uses: 2 },
-    run_diagnostic: { max_uses: 2 },
-    semantic_evaluation: { max_uses: 2 },
-    repair_artifact: { max_uses: 1 },
-    pause_for_human: { max_uses: 1 }
-  },
-  max_total_interventions: 5,
-  policy: {
-    pause_on_policy_risk: true,
-    pause_on_repeated_recovery: true,
-    drift_score_threshold: 0.8
-  }
-};
 
 function node(): CompiledAgentNode {
   return {
@@ -95,8 +77,7 @@ describe("supervisor recovery cycle", () => {
     const classification = classifyNodeFailure({
       node: node(),
       attempt: runtimeAttempt,
-      result: result(),
-      policy
+      result: result()
     });
 
     const recovery = await runSupervisorRecoveryCycle({
@@ -116,7 +97,6 @@ describe("supervisor recovery cycle", () => {
       failure_fingerprint: "fingerprint-1",
       repeated_fingerprint_count: 1,
       prior_interventions: [],
-      policy,
       workspace_path: tempRoot
     });
 
@@ -157,8 +137,7 @@ describe("supervisor recovery cycle", () => {
     const classification = classifyNodeFailure({
       node: node(),
       attempt: runtimeAttempt,
-      result: result(),
-      policy
+      result: result()
     });
     const harness: HarnessAdapter = {
       kind: "codex-cli",
@@ -199,7 +178,6 @@ describe("supervisor recovery cycle", () => {
       failure_fingerprint: "fingerprint-1",
       repeated_fingerprint_count: 1,
       prior_interventions: [],
-      policy,
       workspace_path: tempRoot,
       harness
     });
@@ -223,8 +201,7 @@ describe("supervisor recovery cycle", () => {
         outcome: "failed",
         result: { timed_out: true },
         stderr: "npm test timed out after 900s"
-      },
-      policy
+      }
     });
 
     const recovery = await runSupervisorRecoveryCycle({
@@ -249,7 +226,6 @@ describe("supervisor recovery cycle", () => {
       failure_fingerprint: "fingerprint-1",
       repeated_fingerprint_count: 1,
       prior_interventions: [],
-      policy,
       workspace_path: tempRoot
     });
 
@@ -294,8 +270,7 @@ describe("supervisor recovery cycle", () => {
     const classification = classifyNodeFailure({
       node: node(),
       attempt: runtimeAttempt,
-      result: failedResult,
-      policy
+      result: failedResult
     });
 
     const recovery = await runSupervisorRecoveryCycle({
@@ -315,7 +290,6 @@ describe("supervisor recovery cycle", () => {
       failure_fingerprint: "fingerprint-1",
       repeated_fingerprint_count: 1,
       prior_interventions: [],
-      policy,
       workspace_path: tempRoot
     });
 

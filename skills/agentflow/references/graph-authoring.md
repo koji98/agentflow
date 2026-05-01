@@ -10,7 +10,7 @@ Author graphs as supervised execution contracts. A good graph states what the te
 - In GitHub repos, choose a rollout strategy before node layout. Prefer small PRs, `establish_base -> parallel_prs`, or `cascading_prs` over one large PR. See `github-rollout.md`.
 - Keep substantial agent nodes outcome-sized. Give each one `goal`, `acceptance_criteria`, relevant `constraints`, high-signal `context`, and named `artifacts`.
 - Use deterministic `check` nodes for hard facts that should gate control flow or delivery evidence.
-- Set `supervision.actions.<action>.max_uses` and `supervision.max_total_interventions` to match task risk.
+- Set `supervision.max_total_interventions` to match task risk. Add `supervision.profile` only when supervisor work should use a dedicated profile instead of the failed node's profile.
 - A graph is not complete until required validation passes. Resolve plugins when needed, run `validate`, then run `--review`, `--run-ready`, and `--show-compiled`.
 
 ## Agent Mental Model

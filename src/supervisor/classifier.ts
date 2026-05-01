@@ -1,9 +1,7 @@
 import type { CompiledExecutableNode } from "../graph/compiled.js";
-import type { SupervisionPolicy } from "../graph/authored.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
 import type { RuntimeNodeExecutionResult } from "../runtime/core/engine.js";
-import type { SupervisorActionKind } from "../graph/schema.js";
-import type { FailureClass, SupervisorEvidenceGatherKind, SupervisorEvidenceGatherPlan } from "./types.js";
+import type { FailureClass, SupervisorActionKind, SupervisorEvidenceGatherKind, SupervisorEvidenceGatherPlan } from "./types.js";
 
 export interface FailureClassification {
   class: FailureClass;
@@ -15,6 +13,7 @@ export interface FailureClassification {
 }
 
 const maxGatherConcurrency = 4;
+const scopeDriftThreshold = 0.8;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -181,7 +180,6 @@ export function classifyNodeFailure(input: {
   attempt: RuntimeNodeAttempt;
   result?: RuntimeNodeExecutionResult;
   error_message?: string;
-  policy: SupervisionPolicy;
   repeated_fingerprint_count?: number;
 }): FailureClassification {
   const message = readMessage(input);
@@ -444,7 +442,7 @@ export function classifyNodeFailure(input: {
   }
 
   const scopeDriftScore = readScopeDriftScore(input.result);
-  if (scopeDriftScore !== undefined && scopeDriftScore < input.policy.policy.drift_score_threshold) {
+  if (scopeDriftScore !== undefined && scopeDriftScore < scopeDriftThreshold) {
     return classifyResult({
       class: "policy_or_scope_risk",
       summary: message || "Scope drift detected.",
@@ -454,7 +452,7 @@ export function classifyNodeFailure(input: {
       evidence: {
         ...evidence,
         scope_drift_score: scopeDriftScore,
-        threshold: input.policy.policy.drift_score_threshold
+        threshold: scopeDriftThreshold
       }
     });
   }

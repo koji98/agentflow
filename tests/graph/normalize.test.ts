@@ -52,23 +52,98 @@ describe("graph normalization", () => {
           constraints: ["Keep public API names stable inside this repo."],
           acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."]
         },
-        supervision: {
-          actions: {
-            retry_with_guidance: { max_uses: 2 },
-            repair_artifact: { max_uses: 2 },
-            rebuild_context: { max_uses: 1 },
-            run_diagnostic: { max_uses: 3 },
-            pause_for_human: { max_uses: 1 },
-            semantic_evaluation: { max_uses: 2 }
-          },
-          max_total_interventions: 8,
-          policy: {
-            pause_on_policy_risk: true,
-            pause_on_repeated_recovery: true,
-            drift_score_threshold: 0.8
-          }
-        }
+        supervision: { max_total_interventions: 3 }
       })
+    );
+  });
+
+  it("rejects legacy supervision action and policy fields", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "legacy-supervision",
+      supervision: {
+        actions: {
+          retry_with_guidance: { max_uses: 1 }
+        },
+        max_total_interventions: 3,
+        policy: {
+          pause_on_policy_risk: true
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "echo",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.supervision.actions",
+          message: 'Unknown field "actions" is not part of the graph contract.'
+        },
+        {
+          path: "$.supervision.policy",
+          message: 'Unknown field "policy" is not part of the graph contract.'
+        }
+      ])
+    );
+  });
+
+  it("rejects supervision profiles that do not exist", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "unknown-supervisor-profile",
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "echo",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.supervision.profile",
+          message: 'supervision.profile references unknown profile "supervisor".'
+        }
+      ])
     );
   });
 

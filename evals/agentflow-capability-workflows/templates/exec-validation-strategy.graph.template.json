@@ -31,12 +31,7 @@
     }
   },
   "supervision": {
-    "max_total_interventions": 1,
-    "actions": {
-      "run_diagnostic": {
-        "max_uses": 1
-      }
-    }
+    "max_total_interventions": 1
   },
   "graph": {
     "type": "sequence",

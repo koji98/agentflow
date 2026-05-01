@@ -73,19 +73,7 @@ describe("runtime failure modes", () => {
           harness: "codex-cli"
         }
       },
-      supervision: {
-        actions: {
-          repair_artifact: {
-            max_uses: 1
-          }
-        },
-        max_total_interventions: 1,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 1 },
       graph: {
         type: "sequence",
         id: "root",

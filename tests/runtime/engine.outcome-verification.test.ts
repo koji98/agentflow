@@ -183,6 +183,88 @@ describe("runtime engine outcome verification", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("uses the dedicated supervisor profile for outcome verification when configured", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-verify-supervisor-profile-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "verify-supervisor-profile",
+      intent: {
+        goal: "Run verifier with dedicated supervisor profile.",
+        acceptance_criteria: ["The supervisor verifier accepts."]
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          model: "worker-model",
+          reasoning_effort: "low"
+        },
+        supervisor: {
+          model: "supervisor-model",
+          reasoning_effort: "high",
+          sandbox: "read-only",
+          timeout_sec: 300
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            goal: "Write evidence for the verifier."
+          }
+        ]
+      }
+    });
+
+    const invocations: AgentInvocation[] = [];
+    const harness = buildHarness(async (invocation) => {
+      invocations.push(invocation);
+      if (invocation.promptKind === "outcome_verification") {
+        return harnessOk(invocation, passingVerification("Supervisor verifier OK."));
+      }
+      await writeFile(join(invocation.outputDir, "agent-response.md"), "Agent did the work.\n", "utf8");
+      return harnessOk(invocation);
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: { "codex-cli": harness }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(invocations.find((invocation) => invocation.promptKind !== "outcome_verification")).toEqual(
+      expect.objectContaining({
+        model: "worker-model",
+        reasoningEffort: "low"
+      })
+    );
+    expect(invocations.find((invocation) => invocation.promptKind === "outcome_verification")).toEqual(
+      expect.objectContaining({
+        model: "supervisor-model",
+        reasoningEffort: "high",
+        sandbox: "read-only",
+        timeoutSec: 300
+      })
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("includes decision logs and keeps workspace diff as supporting evidence in outcome verification", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-verify-decision-log-"));
     const repoDir = join(tempRoot, "repo");

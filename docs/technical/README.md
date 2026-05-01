@@ -31,7 +31,7 @@ flowchart LR
 
 Agentflow keeps three contracts separate:
 
-- The authored graph is the human contract: intent, repos, profiles, graph shape, constraints, context, artifacts, tools, checks, and supervision policy.
+- The authored graph is the human contract: intent, repos, profiles, graph shape, constraints, context, artifacts, tools, checks, and supervision contract.
 - The compiled graph is the runtime contract: primitive nodes, stable compiled ids, dependency edges, scopes, resolved profiles, resolved tools, credential specs, and artifact refs.
 - The run root is the audit contract: compiled graph snapshot, state, events, attempts, context packets, logs, tool invocations, intervention records, workspace changes, and delivery files.
 

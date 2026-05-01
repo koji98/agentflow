@@ -1579,18 +1579,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-agent-artifact-repair-previous-attempt",
-      supervision: {
-        actions: {
-          retry_with_guidance: { max_uses: 1 },
-          repair_artifact: { max_uses: 1 }
-        },
-        max_total_interventions: 2,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 2 },
       repos: {
         main: {
           path: "."
@@ -2315,15 +2304,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-terminal-failure",
-      supervision: {
-        actions: {},
-        max_total_interventions: 0,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 0 },
       repos: {
         main: {
           path: "."
@@ -2411,15 +2392,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-terminal-cancel",
-      supervision: {
-        actions: {},
-        max_total_interventions: 0,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 0 },
       repos: {
         main: {
           path: "."
@@ -2950,17 +2923,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-supervisor-retry",
-      supervision: {
-        actions: {
-          run_diagnostic: { max_uses: 1 }
-        },
-        max_total_interventions: 1,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 1 },
       repos: {
         main: {
           path: "."
@@ -3024,7 +2987,7 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("passed");
     expect(calls).toBe(2);
     expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
-    expect(run.state.supervisor.budget_remaining.actions.run_diagnostic).toBe(0);
+    expect(run.state.supervisor.budget_remaining.max_total_interventions).toBe(0);
     expect(run.state.supervisor.intervention_count).toBe(1);
     expect(run.events).toEqual(
       expect.arrayContaining([
@@ -3071,18 +3034,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-artifact-failure-retry",
-      supervision: {
-        actions: {
-          retry_with_guidance: { max_uses: 1 },
-          repair_artifact: { max_uses: 1 }
-        },
-        max_total_interventions: 2,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 2 },
       repos: {
         main: {
           path: "."
@@ -3170,8 +3122,7 @@ describe("runtime engine", () => {
     expect(nodeInvocations).toBe(2);
     expect(attempts).toHaveLength(2);
     expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
-    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(0);
-    expect(run.state.supervisor.budget_remaining.actions.repair_artifact).toBe(1);
+    expect(run.state.supervisor.budget_remaining.max_total_interventions).toBe(1);
     await expect(readFile(attempts[0]!.result_path!, "utf8")).resolves.toContain("exit_code");
     await expect(readFile(attempts[0]!.stderr_log_path!, "utf8")).resolves.toBe("");
     expect(run.events).toEqual(
@@ -3203,19 +3154,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-noop-harness-artifact",
-      supervision: {
-        actions: {
-          retry_with_guidance: { max_uses: 2 },
-          repair_artifact: { max_uses: 2 },
-          pause_for_human: { max_uses: 1 }
-        },
-        max_total_interventions: 3,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 3 },
       repos: {
         main: {
           path: "."
@@ -3274,8 +3213,7 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("paused");
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.status).toBe("failed");
-    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(2);
-    expect(run.state.supervisor.budget_remaining.actions.repair_artifact).toBe(2);
+    expect(run.state.supervisor.budget_remaining.max_total_interventions).toBe(2);
     expect(run.state.supervisor.pause?.reason).toContain("produced no final response");
     expect(run.events).toEqual(
       expect.arrayContaining([
@@ -3303,19 +3241,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-silent-harness-artifact",
-      supervision: {
-        actions: {
-          retry_with_guidance: { max_uses: 2 },
-          repair_artifact: { max_uses: 2 },
-          pause_for_human: { max_uses: 1 }
-        },
-        max_total_interventions: 3,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 3 },
       repos: {
         main: {
           path: "."
@@ -3374,8 +3300,7 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("paused");
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.status).toBe("failed");
-    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(2);
-    expect(run.state.supervisor.budget_remaining.actions.repair_artifact).toBe(2);
+    expect(run.state.supervisor.budget_remaining.max_total_interventions).toBe(2);
     expect(run.state.supervisor.pause?.reason).toContain("failed without stdout");
     expect(run.events).toEqual(
       expect.arrayContaining([
@@ -3404,17 +3329,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-supervisor-recovery-envelope-context",
-      supervision: {
-        actions: {
-          retry_with_guidance: { max_uses: 2 }
-        },
-        max_total_interventions: 2,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 2 },
       repos: {
         main: {
           path: "."
@@ -3553,17 +3468,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-context-repair",
-      supervision: {
-        actions: {
-          rebuild_context: { max_uses: 1 }
-        },
-        max_total_interventions: 1,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 1 },
       repos: {
         main: { path: "." }
       },
@@ -3644,17 +3549,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-pause-disabled",
-      supervision: {
-        actions: {
-          pause_for_human: { max_uses: 0 }
-        },
-        max_total_interventions: 0,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 0 },
       repos: {
         main: {
           path: "."
@@ -3725,17 +3620,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-pause-options",
-      supervision: {
-        actions: {
-          pause_for_human: { max_uses: 1 }
-        },
-        max_total_interventions: 1,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { max_total_interventions: 1 },
       repos: {
         main: {
           path: "."

@@ -52,28 +52,12 @@ Agent nodes require `goal`. Node goals, acceptance criteria, and constraints are
 
 ## Supervision
 
-Configured action kinds:
+Fields:
 
-- `retry_with_guidance`
-- `repair_artifact`
-- `rebuild_context`
-- `run_diagnostic`
-- `pause_for_human`
-- `semantic_evaluation`
-- `fail`
+- `max_total_interventions`: total machine-recovery budget for the run.
+- `profile`: optional profile name for supervisor evidence gathering, repair, and outcome verification.
 
-`pause_for_human` is a supervisor safety pause chosen at runtime. It is distinct from authored `checkpoint` nodes.
-
-Budget fields:
-
-- `actions.<action>.max_uses`
-- `max_total_interventions`
-
-Policy fields:
-
-- `pause_on_policy_risk`
-- `pause_on_repeated_recovery`
-- `drift_score_threshold`
+When `profile` is omitted, supervisor work inherits the failed node's effective profile. Use a read-only supervisor profile when you only want evidence gathering and verification isolated from worker settings; use a write-capable supervisor profile when artifact or workspace repair should be available. `pause_for_human` is a runtime safety decision, not an authored budget field, and remains distinct from authored `checkpoint` nodes.
 
 ## Nodes
 

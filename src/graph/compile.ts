@@ -20,7 +20,8 @@ import type {
 import type { LoweredManagedNode } from "./normalize.js";
 import {
   resolveExecutableRepoAlias,
-  resolveNodePolicy
+  resolveNodePolicy,
+  resolveSupervisorPolicy
 } from "./profiles.js";
 import type { LaunchResolution } from "./profiles.js";
 import type { GraphDiagnostic, LoweredManagedKind } from "./schema.js";
@@ -945,6 +946,8 @@ export function compileAuthoredGraph(
     credential_specs,
     diagnostics: compileDiagnostics
   });
+  const supervisorPolicyResolution = resolveSupervisorPolicy(document, launch);
+  compileDiagnostics.push(...supervisorPolicyResolution.diagnostics);
 
   const context: CompileContext = {
     document,
@@ -971,6 +974,9 @@ export function compileAuthoredGraph(
     graph_id: document.graph_id,
     intent: document.intent,
     supervision: document.supervision,
+    ...(supervisorPolicyResolution.policy
+      ? { supervisor_effective_policy: supervisorPolicyResolution.policy }
+      : {}),
     launch: {
       launch_profile: launch.launch_profile,
       workspace_backend: launch.workspace_backend

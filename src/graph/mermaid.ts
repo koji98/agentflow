@@ -120,14 +120,10 @@ export function renderCompiledGraphMermaid(graph: CompiledGraph): string {
   const terminalNodeIds = graph.nodes
     .filter((node) => !graph.edges.some((edge) => edge.from === node.compiled_id))
     .map((node) => nodeId(node));
-  const actionSummary = Object.entries(graph.supervision.actions)
-    .filter(([, policy]) => policy !== undefined)
-    .map(([action, policy]) => `${action}: ${policy?.max_uses}`)
-    .join(", ");
   lines.push(
     `  supervision["${[
       `supervision budget: ${graph.supervision.max_total_interventions}`,
-      actionSummary
+      graph.supervision.profile ? `supervisor profile: ${graph.supervision.profile}` : undefined
     ].filter((value): value is string => Boolean(value)).map(escapeLabel).join("<br/>")}"]:::note;`
   );
   lines.push(`  delivery["${["delivery package", "review artifacts"].map(escapeLabel).join("<br/>")}"]:::note;`);

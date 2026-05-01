@@ -137,7 +137,7 @@ Resume is contract-aware. It does not blindly continue old state.
 1. Load the prior run root and run state.
 2. Re-load and recompile the current graph.
 3. Compare the prior compiled graph and current compiled graph.
-4. Preserve completed attempts only when the graph intent, supervision policy, and node contracts remain compatible.
+4. Preserve completed attempts only when the graph intent, supervision contract, and node contracts remain compatible.
 5. Invalidate affected nodes and dependent work when contracts changed.
 6. Continue the scheduler loop from the reconstructed session.
 

@@ -14,7 +14,8 @@ import {
   builtInInputRules,
   builtInTimeoutSeconds,
   resolveLaunchConfig,
-  resolveNodePolicy
+  resolveNodePolicy,
+  resolveSupervisorPolicy
 } from "../../src/graph/profiles.js";
 
 function createDocument(
@@ -337,5 +338,47 @@ describe("graph profile resolution", () => {
     expect(cursorResolution.diagnostics).toEqual([]);
     expect(cursorResolution.policy.harness).toBe("cursor-cli");
     expect(cursorResolution.policy.skip_git_repo_check).toBeUndefined();
+  });
+
+  it("resolves an optional dedicated supervisor profile", () => {
+    const document = createDocument(
+      {
+        default: {
+          harness: "codex-cli",
+          model: "gpt-5-codex",
+          sandbox: "workspace-write",
+          timeout_sec: 1800
+        },
+        supervisor: {
+          model: "gpt-5.2",
+          reasoning_effort: "high",
+          sandbox: "read-only",
+          timeout_sec: 300,
+          skip_git_repo_check: true
+        }
+      },
+      {
+        launch_profile: "default",
+        workspace_backend: "worktree"
+      }
+    );
+    document.supervision = {
+      profile: "supervisor",
+      max_total_interventions: 3
+    };
+
+    const launch = resolveLaunchConfig(document);
+    const resolution = resolveSupervisorPolicy(document, launch);
+
+    expect(resolution.diagnostics).toEqual([]);
+    expect(resolution.policy).toEqual({
+      profile_name: "supervisor",
+      harness: "codex-cli",
+      model: "gpt-5.2",
+      reasoning_effort: "high",
+      sandbox: "read-only",
+      timeout_sec: 300,
+      skip_git_repo_check: true
+    });
   });
 });

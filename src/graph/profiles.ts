@@ -34,6 +34,16 @@ export interface EffectiveNodePolicy {
   artifact_repair?: Required<ArtifactRepairPolicy>;
 }
 
+export interface EffectiveSupervisorPolicy {
+  profile_name: string;
+  harness?: HarnessName;
+  model?: string;
+  reasoning_effort?: ReasoningEffort;
+  sandbox?: SandboxMode;
+  skip_git_repo_check?: boolean;
+  timeout_sec: number;
+}
+
 export interface LaunchResolution {
   launch_profile: string;
   workspace_backend: WorkspaceBackend;
@@ -295,5 +305,83 @@ export function resolveNodePolicy(
     profile_name,
     ...(launch_profile ? { launch_profile } : {}),
     ...(node_profile ? { node_profile } : {})
+  };
+}
+
+export function resolveSupervisorPolicy(
+  document: AuthoredGraphDocument,
+  launch: LaunchResolution
+): {
+  policy?: EffectiveSupervisorPolicy;
+  diagnostics: GraphDiagnostic[];
+  profile_name?: string;
+  launch_profile?: GraphProfile;
+  supervisor_profile?: GraphProfile;
+} {
+  const profile_name = document.supervision.profile;
+  if (!profile_name) {
+    return { diagnostics: [] };
+  }
+
+  const diagnostics: GraphDiagnostic[] = [];
+  const launch_profile = launch.profile;
+  const supervisor_profile = document.profiles?.[profile_name];
+
+  if (!supervisor_profile) {
+    diagnostics.push({
+      path: "$.supervision.profile",
+      message: `supervision.profile references unknown profile "${profile_name}".`
+    });
+    return {
+      diagnostics,
+      profile_name,
+      ...(launch_profile ? { launch_profile } : {})
+    };
+  }
+
+  const harness = supervisor_profile.harness ?? launch_profile?.harness;
+  const timeout_sec =
+    supervisor_profile.timeout_sec ??
+    launch_profile?.timeout_sec ??
+    builtInTimeoutSeconds;
+  const model =
+    supervisor_profile.model ??
+    (canInheritLaunchModel(launch_profile, supervisor_profile) ? launch_profile?.model : undefined);
+  const reasoning_effort =
+    supervisor_profile.reasoning_effort ??
+    (canInheritLaunchModel(launch_profile, supervisor_profile)
+      ? launch_profile?.reasoning_effort ?? defaultReasoningEffortForHarness(launch_profile?.harness)
+      : undefined) ??
+    defaultReasoningEffortForHarness(harness);
+  const sandbox = supervisor_profile.sandbox ?? launch_profile?.sandbox ?? "read-only";
+  const skip_git_repo_check =
+    harness === "codex-cli"
+      ? supervisor_profile.skip_git_repo_check ??
+        (canInheritLaunchModel(launch_profile, supervisor_profile)
+          ? launch_profile?.skip_git_repo_check
+          : undefined)
+      : undefined;
+
+  if (!harness) {
+    diagnostics.push({
+      path: "$.supervision.profile",
+      message: "supervision.profile must resolve a harness from the supervisor or launch profile."
+    });
+  }
+
+  return {
+    policy: {
+      profile_name,
+      ...(harness ? { harness } : {}),
+      ...(model ? { model } : {}),
+      ...(reasoning_effort ? { reasoning_effort } : {}),
+      ...(sandbox ? { sandbox } : {}),
+      ...(skip_git_repo_check !== undefined ? { skip_git_repo_check } : {}),
+      timeout_sec
+    },
+    diagnostics,
+    profile_name,
+    ...(launch_profile ? { launch_profile } : {}),
+    supervisor_profile
   };
 }

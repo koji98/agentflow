@@ -518,21 +518,7 @@ export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = proces
       ],
       constraints: ["External context is read-only and must not change graph intent or declared artifacts."]
     },
-    supervision: {
-      actions: {
-        semantic_evaluation: { max_uses: 2 },
-        rebuild_context: { max_uses: 2 },
-        retry_with_guidance: { max_uses: 2 },
-        run_diagnostic: { max_uses: 2 },
-        pause_for_human: { max_uses: 1 }
-      },
-      max_total_interventions: 4,
-      policy: {
-        pause_on_policy_risk: true,
-        pause_on_repeated_recovery: true,
-        drift_score_threshold: 0.8
-      }
-    },
+    supervision: { max_total_interventions: 4 },
     repos: {
       main: {
         path: "./repo"
