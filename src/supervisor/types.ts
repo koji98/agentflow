@@ -117,9 +117,11 @@ export interface SupervisorCaseFile {
   prompt_sha256?: string;
   rendered_prompt?: string;
   node_contract: {
-    goal?: string;
-    acceptance_criteria?: string[];
-    constraints?: string[];
+    intent: {
+      goal: string;
+      acceptance_criteria: string[];
+      constraints: string[];
+    };
     declared_artifacts: Record<string, unknown>;
     sandbox: string;
     repo_alias: string;

@@ -21,7 +21,11 @@ const baseNode: CompiledExecutableNode = {
   },
   context: [],
   declared_artifacts: {},
-  goal: "Do work.",
+  intent: {
+    goal: "Do work.",
+    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+    constraints: []
+  },
   tools: []
 };
 
@@ -274,7 +278,11 @@ describe("supervisor failure classifier", () => {
       kind: "check",
       check_kind: "ai",
       on_failure: "fail",
-      goal: "Evaluate whether the implementation satisfies the rubric."
+      intent: {
+        goal: "Evaluate whether the implementation satisfies the rubric.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     };
 
     expect(classify({
@@ -299,7 +307,11 @@ describe("supervisor failure classifier", () => {
       kind: "check",
       check_kind: "ai",
       on_failure: "fail",
-      goal: "Evaluate scope."
+      intent: {
+        goal: "Evaluate scope.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     };
 
     expect(

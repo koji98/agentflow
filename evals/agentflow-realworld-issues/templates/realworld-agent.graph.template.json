@@ -31,10 +31,15 @@
       "reasoning_effort": "medium",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 0
+    "max_total_interventions": 0,
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -44,22 +49,6 @@
         "type": "agent",
         "id": "fix_issue",
         "repo": "main",
-        "goal": "Fix the real-world issue described in `AGENTFLOW_EVAL_TASK.md`. Reproduce the failure with the exact focused command, make the smallest production source change that fixes it, rerun that exact command, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
-        "acceptance_criteria": [
-          "`{{scenario.metadata.realworld.focused_test_command}}` passes.",
-          "Only source files necessary for the fix are changed.",
-          "Regression tests, package manifests, lockfiles, and generated files are unchanged.",
-          "`handoff.md` includes the exact labels `Scenario:`, `Issue:`, `Changed files:`, `Validation:`, and `Risks:`."
-        ],
-        "constraints": [
-          "Do not use the upstream PR patch, oracle commit, or live GitHub.",
-          "Do not edit `AGENTFLOW_EVAL_TASK.md` or files matching `agentflow-realworld-*`.",
-          "Do not edit test-runner configuration, package manifests, lockfiles, regression tests, generated files, or validation cache/output files unless the issue itself requires that production change.",
-          "Do not add dependencies.",
-          "If validation needs cache or output redirection, use command-line flags or temporary paths outside the repo; do not persist validation-only configuration in the workspace.",
-          "Use repository search to find the relevant implementation and nearby tests; do not read broad source directories when the task can be narrowed first.",
-          "Prefer repository-local patterns and focused tests over broad rewrites."
-        ],
         "context": [
           {
             "name": "task",
@@ -73,23 +62,44 @@
             "path": "handoff.md",
             "description": "Real-world issue handoff with issue summary, changed files, validation command/result, and risks."
           }
+        },
+        "intent": {
+          "goal": "Fix the real-world issue described in `AGENTFLOW_EVAL_TASK.md`. Reproduce the failure with the exact focused command, make the smallest production source change that fixes it, rerun that exact command, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+          "acceptance_criteria": [
+            "`{{scenario.metadata.realworld.focused_test_command}}` passes.",
+            "Only source files necessary for the fix are changed.",
+            "Regression tests, package manifests, lockfiles, and generated files are unchanged.",
+            "`handoff.md` includes the exact labels `Scenario:`, `Issue:`, `Changed files:`, `Validation:`, and `Risks:`."
+          ],
+          "constraints": [
+            "Do not use the upstream PR patch, oracle commit, or live GitHub.",
+            "Do not edit `AGENTFLOW_EVAL_TASK.md` or files matching `agentflow-realworld-*`.",
+            "Do not edit test-runner configuration, package manifests, lockfiles, regression tests, generated files, or validation cache/output files unless the issue itself requires that production change.",
+            "Do not add dependencies.",
+            "If validation needs cache or output redirection, use command-line flags or temporary paths outside the repo; do not persist validation-only configuration in the workspace.",
+            "Use repository search to find the relevant implementation and nearby tests; do not read broad source directories when the task can be narrowed first.",
+            "Prefer repository-local patterns and focused tests over broad rewrites."
+          ]
         }
       },
       {
         "type": "check",
         "id": "focused_regression",
         "repo": "main",
-        "goal": "Run the real-world issue's focused regression command and confirm the upstream bug is fixed.",
-        "acceptance_criteria": [
-          "`{{scenario.metadata.realworld.focused_test_command}}` exits successfully.",
-          "The validation evidence is produced without editing regression tests, lockfiles, or forbidden source."
-        ],
         "check_kind": "deterministic",
         "command": "sh",
         "args": [
           "-lc",
           "{{scenario.metadata.realworld.focused_test_command}}"
-        ]
+        ],
+        "intent": {
+          "goal": "Run the real-world issue's focused regression command and confirm the upstream bug is fixed.",
+          "acceptance_criteria": [
+            "`{{scenario.metadata.realworld.focused_test_command}}` exits successfully.",
+            "The validation evidence is produced without editing regression tests, lockfiles, or forbidden source."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

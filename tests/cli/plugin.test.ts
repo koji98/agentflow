@@ -91,11 +91,14 @@ async function createFixturePlugin(root: string): Promise<string> {
             type: "agent",
             id: "inspect",
             repo: "main",
-            goal: "Inspect the repo and use {{config.message}}.",
-            acceptance_criteria: [
+            intent: {
+              goal: "Inspect the repo and use {{config.message}}.",
+              acceptance_criteria: [
               "The notes artifact references the fixture config message.",
               "The notes artifact preserves enough context for the publish step."
             ],
+              constraints: []
+            },
             context: [
               {
                 name: "guidance",
@@ -115,11 +118,14 @@ async function createFixturePlugin(root: string): Promise<string> {
             type: "agent",
             id: "publish",
             repo: "main",
-            goal: "Publish the public packet.",
-            acceptance_criteria: [
+            intent: {
+              goal: "Publish the public packet.",
+              acceptance_criteria: [
               "The packet artifact is written to the workflow's public artifact path.",
               "The packet reflects the inspected notes."
             ],
+              constraints: []
+            },
             context: [
               {
                 ref: "inspect.notes",
@@ -211,11 +217,14 @@ async function createRootResourcePlugin(root: string): Promise<string> {
           {
             type: "exec",
             id: "publish",
-            goal: "Run the rooted plugin tool and publish root resource evidence.",
-            acceptance_criteria: [
+            intent: {
+              goal: "Run the rooted plugin tool and publish root resource evidence.",
+              acceptance_criteria: [
               "The plugin-root executable exits successfully.",
               "Workflow-local and plugin-root context resources are available to the node."
             ],
+              constraints: []
+            },
             command: "plugin://tools/root-check.sh",
             args: ["{{config.message}}"],
             context: [
@@ -346,7 +355,15 @@ describe("plugin workflows", () => {
           profiles: {
             default: {
               harness: "codex-cli"
+            },
+            supervisor: {
+              harness: "codex-cli",
+              sandbox: "read-only"
             }
+          },
+          supervision: {
+            profile: "supervisor",
+            max_total_interventions: 3
           },
           graph: {
             type: "sequence",
@@ -364,11 +381,14 @@ describe("plugin workflows", () => {
                 type: "agent",
                 id: "consume",
                 repo: "main",
-                goal: "Consume the plugin packet.",
-                acceptance_criteria: [
+                intent: {
+                  goal: "Consume the plugin packet.",
+                  acceptance_criteria: [
                   "The node reads the plugin packet artifact.",
                   "The node can produce a reviewable response from the packet context."
                 ],
+                  constraints: []
+                },
                 context: [
                   {
                     ref: "handoff.packet",
@@ -467,7 +487,15 @@ describe("plugin workflows", () => {
           profiles: {
             default: {
               harness: "codex-cli"
+            },
+            supervisor: {
+              harness: "codex-cli",
+              sandbox: "read-only"
             }
+          },
+          supervision: {
+            profile: "supervisor",
+            max_total_interventions: 3
           },
           graph: {
             type: "sequence",
@@ -564,7 +592,15 @@ describe("plugin workflows", () => {
           profiles: {
             default: {
               harness: "codex-cli"
+            },
+            supervisor: {
+              harness: "codex-cli",
+              sandbox: "read-only"
             }
+          },
+          supervision: {
+            profile: "supervisor",
+            max_total_interventions: 3
           },
           graph: {
             type: "sequence",
@@ -632,7 +668,15 @@ describe("plugin workflows", () => {
           profiles: {
             default: {
               harness: "codex-cli"
+            },
+            supervisor: {
+              harness: "codex-cli",
+              sandbox: "read-only"
             }
+          },
+          supervision: {
+            profile: "supervisor",
+            max_total_interventions: 3
           },
           graph: {
             type: "sequence",
@@ -651,11 +695,14 @@ describe("plugin workflows", () => {
                 type: "agent",
                 id: "consume",
                 repo: "main",
-                goal: "Consume the plugin packet.",
-                acceptance_criteria: [
+                intent: {
+                  goal: "Consume the plugin packet.",
+                  acceptance_criteria: [
                   "The node reads the plugin packet artifact.",
                   "The node can produce a reviewable response from the packet context."
                 ],
+                  constraints: []
+                },
                 context: [
                   {
                     ref: "handoff.packet",

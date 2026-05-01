@@ -123,8 +123,8 @@ export function renderCompiledGraphMermaid(graph: CompiledGraph): string {
   lines.push(
     `  supervision["${[
       `supervision budget: ${graph.supervision.max_total_interventions}`,
-      graph.supervision.profile ? `supervisor profile: ${graph.supervision.profile}` : undefined
-    ].filter((value): value is string => Boolean(value)).map(escapeLabel).join("<br/>")}"]:::note;`
+      `supervisor profile: ${graph.supervision.profile}`
+    ].map(escapeLabel).join("<br/>")}"]:::note;`
   );
   lines.push(`  delivery["${["delivery package", "review artifacts"].map(escapeLabel).join("<br/>")}"]:::note;`);
 

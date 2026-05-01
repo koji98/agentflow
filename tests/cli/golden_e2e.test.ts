@@ -261,8 +261,11 @@ describe("golden end-to-end graph runs", () => {
         type: "agent",
         id: "research",
         repo: "main",
-        goal: "Research Package Golden: publish a sourced research package.",
-        acceptance_criteria: ["The report, source ledger, and uncertainty notes are present."],
+        intent: {
+          goal: "Research Package Golden: publish a sourced research package.",
+          acceptance_criteria: ["The report, source ledger, and uncertainty notes are present."],
+          constraints: []
+        },
         artifacts: {
           research_report: {
             from: "output_dir",
@@ -394,8 +397,11 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         type: "agent",
         id: "use_tool",
         repo: "main",
-        goal: "Plugin Tool Golden: call the fixture inspect tool and publish its output.",
-        acceptance_criteria: ["The plugin tool output is captured as a declared artifact."],
+        intent: {
+          goal: "Plugin Tool Golden: call the fixture inspect tool and publish its output.",
+          acceptance_criteria: ["The plugin tool output is captured as a declared artifact."],
+          constraints: []
+        },
         tools: [
           {
             from_plugin: "fixture",
@@ -445,8 +451,11 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         type: "agent",
         id: "spawn_helper",
         repo: "main",
-        goal: "Spawn Helper Golden: use af spawn and wait for helper output.",
-        acceptance_criteria: ["The parent summary names the completed helper."],
+        intent: {
+          goal: "Spawn Helper Golden: use af spawn and wait for helper output.",
+          acceptance_criteria: ["The parent summary names the completed helper."],
+          constraints: []
+        },
         artifacts: {
           spawn_summary: {
             from: "output_dir",
@@ -481,8 +490,11 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         type: "agent",
         id: "repairable",
         repo: "main",
-        goal: "Repairable Golden: initially omit the declared handoff so the supervisor repairs it.",
-        acceptance_criteria: ["The final handoff artifact exists after repair."],
+        intent: {
+          goal: "Repairable Golden: initially omit the declared handoff so the supervisor repairs it.",
+          acceptance_criteria: ["The final handoff artifact exists after repair."],
+          constraints: []
+        },
         artifact_repair: {
           max_attempts: 1
         },
@@ -495,7 +507,7 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         }
       }
     ], {
-      supervision: { max_total_interventions: 1 }
+      supervision: { profile: "supervisor", max_total_interventions: 1 }
     }));
 
     const result = await executeCli(["run", "--graph", graphPath], tempRoot);
@@ -530,10 +542,14 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         type: "agent",
         id: "policy_sensitive_step",
         repo: "main",
-        goal
+        intent: {
+          goal,
+          acceptance_criteria: ["The policy-sensitive step either pauses for authority or completes after human review."],
+          constraints: []
+        }
       }
     ], {
-      supervision: { max_total_interventions: 1 }
+      supervision: { profile: "supervisor", max_total_interventions: 1 }
     });
     await writeGraph(graphPath, graph("Pause Human Golden: trigger a policy pause."));
 

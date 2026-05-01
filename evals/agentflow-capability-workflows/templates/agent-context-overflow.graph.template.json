@@ -32,10 +32,15 @@
         "max_total_tokens": 700,
         "max_tokens_per_item": 160
       }
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 1
+    "max_total_interventions": 1,
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -45,18 +50,6 @@
         "type": "agent",
         "id": "implement",
         "repo": "main",
-        "goal": "Fix `src/router.js` for the context-overflow-repair scenario: normalize duplicate slashes, preserve one leading slash, drop trailing slash except root, preserve query strings, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
-        "acceptance_criteria": [
-          "The first attempt may fail before harness execution because authored markdown context is too large.",
-          "The retry uses the supervisor context repair overlay without changing the task contract.",
-          "`npm test` passes.",
-          "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, `Supervisor context:`, and `Risks:` fields."
-        ],
-        "constraints": [
-          "Do not edit noise files under `notes/**`.",
-          "Do not add dependencies.",
-          "If a supervisor context repair packet is present, use it as the index and open live workspace paths only as needed."
-        ],
         "context": [
           {
             "name": "all_markdown",
@@ -82,22 +75,39 @@
             "path": "handoff.md",
             "description": "Context-repair handoff with validation and supervisor context evidence."
           }
+        },
+        "intent": {
+          "goal": "Fix `src/router.js` for the context-overflow-repair scenario: normalize duplicate slashes, preserve one leading slash, drop trailing slash except root, preserve query strings, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+          "acceptance_criteria": [
+            "The first attempt may fail before harness execution because authored markdown context is too large.",
+            "The retry uses the supervisor context repair overlay without changing the task contract.",
+            "`npm test` passes.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, `Supervisor context:`, and `Risks:` fields."
+          ],
+          "constraints": [
+            "Do not edit noise files under `notes/**`.",
+            "Do not add dependencies.",
+            "If a supervisor context repair packet is present, use it as the index and open live workspace paths only as needed."
+          ]
         }
       },
       {
         "type": "check",
         "id": "verify",
         "repo": "main",
-        "goal": "Run the focused scenario tests after any context repair and confirm the router behavior is correct.",
-        "acceptance_criteria": [
-          "`npm test` exits successfully.",
-          "The check validates the repaired context led to a working implementation."
-        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "test"
-        ]
+        ],
+        "intent": {
+          "goal": "Run the focused scenario tests after any context repair and confirm the router behavior is correct.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully.",
+            "The check validates the repaired context led to a working implementation."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

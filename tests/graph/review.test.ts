@@ -114,7 +114,11 @@ describe("compiled graph authoring review", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement the scoped change.",
+            intent: {
+              goal: "Implement the scoped change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               {
                 name: "wide_scan",

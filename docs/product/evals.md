@@ -46,17 +46,55 @@ evals/<suite-id>/
   "suite_id": "agentflow-workflow-quality",
   "objective": "Measure workflow quality across local hard scenarios.",
   "default_trials": 3,
-  "scenarios": ["scenarios/missing-docs/scenario.json"],
-  "variants": ["variants/current.json", "variants/terse.json"],
+  "scenarios": [
+    "scenarios/missing-docs/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json",
+    "variants/terse.json"
+  ],
   "criteria": [
-    { "id": "outcome", "kind": "outcome", "required": true },
-    { "id": "artifact", "kind": "artifact", "required": true },
-    { "id": "workspace", "kind": "workspace", "required": true },
-    { "id": "supervisor", "kind": "supervisor", "required": true },
-    { "id": "trajectory", "kind": "trajectory", "required": false },
-    { "id": "delivery", "kind": "delivery", "required": true },
-    { "id": "workflow-deterministic", "kind": "custom_script", "command": "node graders/workflow-deterministic.mjs" },
-    { "id": "artifact-quality", "kind": "quality", "rubric": "judges/artifact-quality.md", "required": false }
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace",
+      "required": true
+    },
+    {
+      "id": "supervisor",
+      "kind": "supervisor",
+      "required": true
+    },
+    {
+      "id": "trajectory",
+      "kind": "trajectory",
+      "required": false
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true
+    },
+    {
+      "id": "workflow-deterministic",
+      "kind": "custom_script",
+      "command": "node graders/workflow-deterministic.mjs"
+    },
+    {
+      "id": "artifact-quality",
+      "kind": "quality",
+      "rubric": "judges/artifact-quality.md",
+      "required": false
+    }
   ],
   "thresholds": {
     "pass_rate": 0.8,
@@ -98,8 +136,15 @@ Legacy `expected`, `grading`, top-level `graders`, top-level `judges`, and `fixt
         {
           "id": "docs-503",
           "command": "docs-fetch",
-          "match": { "argv_contains": ["--url"] },
-          "error": { "stderr": "maintenance", "exit_code": 503 },
+          "match": {
+            "argv_contains": [
+              "--url"
+            ]
+          },
+          "error": {
+            "stderr": "maintenance",
+            "exit_code": 503
+          },
           "latency_ms": 50,
           "probability": 1
         }
@@ -112,22 +157,52 @@ Legacy `expected`, `grading`, top-level `graders`, top-level `judges`, and `fixt
     "workspace_backend": "inplace"
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["stableMethod"] }] },
-    "workspace": { "forbidden_edits": ["forbidden.txt"] },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "stableMethod"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "forbidden.txt"
+      ]
+    },
     "supervisor": {
-      "classifications": ["missing_dependency_docs"],
-      "gatherers": ["external_context"],
-      "apply_actions": ["retry_node"]
+      "classifications": [
+        "missing_dependency_docs"
+      ],
+      "gatherers": [
+        "external_context"
+      ],
+      "apply_actions": [
+        "retry_node"
+      ]
     },
     "trajectory": {
       "match": "contains_ordered",
       "events": [
-        { "kind": "simulation_tool_call", "rule_id": "docs-503", "matched": true },
-        { "kind": "artifact_write", "artifact": "handoff" }
+        {
+          "kind": "simulation_tool_call",
+          "rule_id": "docs-503",
+          "matched": true
+        },
+        {
+          "kind": "artifact_write",
+          "artifact": "handoff"
+        }
       ]
     },
-    "delivery": { "required": true }
+    "delivery": {
+      "required": true
+    }
   }
 }
 ```
@@ -182,7 +257,11 @@ They must print JSON:
   "score": 5,
   "summary": "hard facts pass",
   "assertions": [
-    { "id": "artifact", "passed": true, "evidence": "handoff exists" }
+    {
+      "id": "artifact",
+      "passed": true,
+      "evidence": "handoff exists"
+    }
   ],
   "metrics": {
     "tool_calls": 2

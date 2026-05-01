@@ -74,7 +74,7 @@ describe("runtime failure modes", () => {
           harness: "codex-cli"
         }
       },
-      supervision: { max_total_interventions: 1 },
+      supervision: { profile: "supervisor", max_total_interventions: 1 },
       graph: {
         type: "sequence",
         id: "root",
@@ -82,7 +82,11 @@ describe("runtime failure modes", () => {
           {
             type: "agent",
             id: "repairable",
-            goal: "Finish but omit the declared artifact so repair starts.",
+            intent: {
+              goal: "Finish but omit the declared artifact so repair starts.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifact_repair: {
               max_attempts: 1
             },

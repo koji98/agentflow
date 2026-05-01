@@ -28,12 +28,18 @@ Common:
 ```json
 {
   "goal": "Ship checkout timeout handling.",
-  "constraints": ["Keep public APIs stable.", "Do not modify payment provider configuration."],
-  "acceptance_criteria": ["Timeouts return typed errors.", "Tests cover retry behavior."]
+  "constraints": [
+    "Keep public APIs stable.",
+    "Do not modify payment provider configuration."
+  ],
+  "acceptance_criteria": [
+    "Timeouts return typed errors.",
+    "Tests cover retry behavior."
+  ]
 }
 ```
 
-`intent.goal` is required. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; scope boundaries and high-impact limits belong in plain `constraints`.
+Top-level `intent.goal` is required. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; scope boundaries and high-impact limits belong in graph-level or node-level `intent.constraints`.
 
 Executable nodes can also carry intent:
 
@@ -43,21 +49,27 @@ Executable nodes can also carry intent:
   "id": "implement_timeout",
   "repo": "main",
   "profile": "default",
-  "goal": "Implement timeout handling and publish reviewer evidence.",
-  "acceptance_criteria": ["Tests pass.", "The handoff names changed files and risks."]
+  "intent": {
+    "goal": "Implement timeout handling and publish reviewer evidence.",
+    "acceptance_criteria": [
+      "Tests pass.",
+      "The handoff names changed files and risks."
+    ],
+    "constraints": []
+  }
 }
 ```
 
-Executable nodes require `goal` and a non-empty `acceptance_criteria` array. This includes `agent`, `exec`, `check`, and `checkpoint`. `constraints` are optional in authored graphs and normalize to `[]`. Node goals, acceptance criteria, and constraints are rendered to Codex CLI and Cursor CLI prompts, deterministic checkpoint diagnostics, supervisor repair prompts, and resume fingerprints.
+Executable nodes require an `intent` object with `goal` and a non-empty `acceptance_criteria` array. This includes `agent`, `exec`, `check`, and `checkpoint`. `intent.constraints` are optional in authored graphs and normalize to `[]`. Node intent is rendered to Codex CLI and Cursor CLI prompts, deterministic checkpoint diagnostics, supervisor repair prompts, and resume fingerprints.
 
 ## Supervision
 
 Fields:
 
 - `max_total_interventions`: total machine-recovery budget for the run.
-- `profile`: optional profile name for supervisor evidence gathering, repair, and outcome verification.
+- `profile`: required profile name for supervisor evidence gathering, repair, outcome verification, and helper work.
 
-When `profile` is omitted, supervisor work inherits the failed node's effective profile. Use a read-only supervisor profile when you only want evidence gathering and verification isolated from worker settings; use a write-capable supervisor profile when artifact or workspace repair should be available. `pause_for_human` is a runtime authority decision, not an authored budget field, and remains distinct from authored `checkpoint` nodes.
+The supervisor profile must reference a real top-level `profiles` entry. Use a read-only supervisor profile when you only want evidence gathering and verification isolated from worker settings; use a write-capable supervisor profile when artifact or workspace repair should be available. The supervisor profile does not grant broader repo, credential, sandbox, or plugin-tool authority than the selected recovery target already has. `pause_for_human` is a runtime authority decision, not an authored budget field, and remains distinct from authored `checkpoint` nodes.
 
 ## Nodes
 

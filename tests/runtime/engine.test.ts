@@ -64,11 +64,15 @@ function addNodeIntentDefaults(document: AuthoredGraphDocument): AuthoredGraphDo
     const record = node as Record<string, unknown>;
     const type = record.type;
     if (["agent", "exec", "check", "checkpoint", "pattern_deep_research", "pattern_deep_work"].includes(String(type))) {
-      record.goal ??= `Complete node ${String(record.id ?? "unknown")} according to its runtime contract.`;
-      record.acceptance_criteria ??= [
+      const intent = (record.intent && typeof record.intent === "object" && !Array.isArray(record.intent))
+        ? record.intent as Record<string, unknown>
+        : {};
+      intent.goal ??= `Complete node ${String(record.id ?? "unknown")} according to its runtime contract.`;
+      intent.acceptance_criteria ??= [
         `Node ${String(record.id ?? "unknown")} satisfies its declared runtime behavior and artifact contract.`
       ];
-      record.constraints ??= [];
+      intent.constraints ??= [];
+      record.intent = intent;
     }
     if (Array.isArray(record.steps)) {
       record.steps.forEach(visit);
@@ -78,6 +82,17 @@ function addNodeIntentDefaults(document: AuthoredGraphDocument): AuthoredGraphDo
     }
   }
 
+  const profiles =
+    clone.profiles && typeof clone.profiles === "object" && !Array.isArray(clone.profiles)
+      ? clone.profiles as Record<string, unknown>
+      : {};
+  profiles.default ??= { harness: "codex-cli" };
+  profiles.supervisor ??= { harness: "codex-cli", sandbox: "read-only" };
+  clone.profiles = profiles as AuthoredGraphDocument["profiles"];
+  clone.supervision ??= { profile: "supervisor", max_total_interventions: 3 };
+  if (!clone.supervision.profile) {
+    clone.supervision.profile = "supervisor";
+  }
   visit(clone.graph);
   return clone;
 }
@@ -186,9 +201,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Write the implementation output that validation checks.",
-            acceptance_criteria: ["The workspace file result.txt contains ok."],
-            constraints: ["Only modify result.txt."],
+            intent: {
+              goal: "Write the implementation output that validation checks.",
+              acceptance_criteria: ["The workspace file result.txt contains ok."],
+              constraints: ["Only modify result.txt."]
+            },
             artifacts: {
               summary: {
                 from: "output_dir",
@@ -201,9 +218,11 @@ describe("runtime engine", () => {
             type: "check",
             id: "validate",
             check_kind: "deterministic",
-            goal: "Validate the implementation output.",
-            acceptance_criteria: ["The validation gate passes only when result.txt contains ok."],
-            constraints: ["Do not edit the workspace."],
+            intent: {
+              goal: "Validate the implementation output.",
+              acceptance_criteria: ["The validation gate passes only when result.txt contains ok."],
+              constraints: ["Do not edit the workspace."]
+            },
             command: "placeholder",
             context: [
               {
@@ -354,7 +373,11 @@ describe("runtime engine", () => {
                 {
                   type: "agent",
                   id: "implement",
-                  goal: "Increment the counter.",
+                  intent: {
+                    goal: "Increment the counter.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     notes: {
                       from: "output_dir",
@@ -936,8 +959,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Produce the review handoff.",
-            acceptance_criteria: ["The handoff explains validation."],
+            intent: {
+              goal: "Produce the review handoff.",
+              acceptance_criteria: ["The handoff explains validation."],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -1279,7 +1305,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "package_handoff",
-            goal: "Write the handoff file.",
+            intent: {
+              goal: "Write the handoff file.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -1375,13 +1405,17 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_with_paths",
-            goal: [
+            intent: {
+              goal: [
               "Save your draft to ${AGENTFLOW_OUTPUT_DIR}/draft.md.",
               "The workspace lives at $AGENTFLOW_WORKSPACE.",
               "The packet path is AGENTFLOW_CONTEXT_PACKET.",
               "An unrelated identifier $AGENTFLOW_WORKSPACE_OTHER must remain literal.",
               "Unknown tokens like $AGENTFLOW_DOES_NOT_EXIST must remain literal."
             ].join("\n"),
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               draft: {
                 from: "output_dir",
@@ -1460,7 +1494,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Write a handoff after inspecting the repo.",
+            intent: {
+              goal: "Write a handoff after inspecting the repo.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifact_repair: {
               max_attempts: 2
             },
@@ -1573,7 +1611,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Write summary and handoff artifacts.",
+            intent: {
+              goal: "Write summary and handoff artifacts.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               summary: {
                 from: "output_dir",
@@ -1671,7 +1713,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Write a handoff.",
+            intent: {
+              goal: "Write a handoff.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -1746,7 +1792,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-agent-artifact-repair-previous-attempt",
-      supervision: { max_total_interventions: 2 },
+      supervision: { profile: "supervisor", max_total_interventions: 2 },
       repos: {
         main: {
           path: "."
@@ -1768,7 +1814,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Write a durable handoff.",
+            intent: {
+              goal: "Write a durable handoff.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -1869,7 +1919,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "silent_agent",
-            goal: "Return nothing."
+            intent: {
+              goal: "Return nothing.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -1937,11 +1991,14 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Implement the checkout timeout change and produce reviewer evidence.",
-            acceptance_criteria: [
+            intent: {
+              goal: "Implement the checkout timeout change and produce reviewer evidence.",
+              acceptance_criteria: [
               "The final handoff explains what changed.",
               "The final handoff lists validation performed."
             ],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -2039,7 +2096,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Produce separate human handoff artifacts.",
+            intent: {
+              goal: "Produce separate human handoff artifacts.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               change_map: {
                 from: "output_dir",
@@ -2125,7 +2186,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Write a handoff.",
+            intent: {
+              goal: "Write a handoff.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -2305,7 +2370,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "reader",
-            goal: "Read the input.",
+            intent: {
+              goal: "Read the input.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               {
                 name: "secret",
@@ -2471,7 +2540,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-terminal-failure",
-      supervision: { max_total_interventions: 0 },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
       repos: {
         main: {
           path: "."
@@ -2559,7 +2628,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-terminal-cancel",
-      supervision: { max_total_interventions: 0 },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
       repos: {
         main: {
           path: "."
@@ -2832,7 +2901,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Attempt a harness run."
+            intent: {
+              goal: "Attempt a harness run.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -2938,7 +3011,11 @@ describe("runtime engine", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  goal: "Review the draft.",
+                  intent: {
+                    goal: "Review the draft.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"
@@ -3029,7 +3106,11 @@ describe("runtime engine", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Evaluate the latest patch."
+            intent: {
+              goal: "Evaluate the latest patch.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -3090,7 +3171,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-supervisor-retry",
-      supervision: { max_total_interventions: 1 },
+      supervision: { profile: "supervisor", max_total_interventions: 1 },
       repos: {
         main: {
           path: "."
@@ -3201,7 +3282,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-artifact-failure-retry",
-      supervision: { max_total_interventions: 2 },
+      supervision: { profile: "supervisor", max_total_interventions: 2 },
       repos: {
         main: {
           path: "."
@@ -3224,7 +3305,11 @@ describe("runtime engine", () => {
             type: "agent",
             id: "writer",
             repo: "main",
-            goal: "Write the handoff artifact.",
+            intent: {
+              goal: "Write the handoff artifact.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -3321,7 +3406,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-noop-harness-artifact",
-      supervision: { max_total_interventions: 3 },
+      supervision: { profile: "supervisor", max_total_interventions: 3 },
       repos: {
         main: {
           path: "."
@@ -3344,7 +3429,11 @@ describe("runtime engine", () => {
             type: "agent",
             id: "writer",
             repo: "main",
-            goal: "Write the handoff artifact.",
+            intent: {
+              goal: "Write the handoff artifact.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -3408,7 +3497,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-silent-harness-artifact",
-      supervision: { max_total_interventions: 3 },
+      supervision: { profile: "supervisor", max_total_interventions: 3 },
       repos: {
         main: {
           path: "."
@@ -3431,7 +3520,11 @@ describe("runtime engine", () => {
             type: "agent",
             id: "writer",
             repo: "main",
-            goal: "Write the handoff artifact.",
+            intent: {
+              goal: "Write the handoff artifact.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -3496,7 +3589,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-supervisor-recovery-envelope-context",
-      supervision: { max_total_interventions: 2 },
+      supervision: { profile: "supervisor", max_total_interventions: 2 },
       repos: {
         main: {
           path: "."
@@ -3518,8 +3611,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "recover",
-            goal: "Implement the feature without guessing about ambiguous runtime evidence.",
-            acceptance_criteria: ["The retry must use supervisor evidence before passing."]
+            intent: {
+              goal: "Implement the feature without guessing about ambiguous runtime evidence.",
+              acceptance_criteria: ["The retry must use supervisor evidence before passing."],
+              constraints: []
+            },
           }
         ]
       }
@@ -3635,7 +3731,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-context-repair",
-      supervision: { max_total_interventions: 1 },
+      supervision: { profile: "supervisor", max_total_interventions: 1 },
       repos: {
         main: { path: "." }
       },
@@ -3659,8 +3755,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "recover_context",
-            goal: "Use the repaired context package and complete the node.",
-            acceptance_criteria: ["The retry receives a context repair overlay."],
+            intent: {
+              goal: "Use the repaired context package and complete the node.",
+              acceptance_criteria: ["The retry receives a context repair overlay."],
+              constraints: []
+            },
             context: [{ name: "markdown", from: "workspace_glob", path: "*.md" }]
           }
         ]
@@ -3716,7 +3815,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-pause-disabled",
-      supervision: { max_total_interventions: 0 },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
       repos: {
         main: {
           path: "."
@@ -3787,7 +3886,7 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-pause-options",
-      supervision: { max_total_interventions: 1 },
+      supervision: { profile: "supervisor", max_total_interventions: 1 },
       repos: {
         main: {
           path: "."
@@ -3874,7 +3973,11 @@ describe("runtime engine", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Evaluate the latest patch."
+            intent: {
+              goal: "Evaluate the latest patch.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -3973,14 +4076,22 @@ describe("runtime engine", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Judge whether reviewer evidence is complete against $AGENTFLOW_OUTPUT_DIR.",
+            intent: {
+              goal: "Judge whether reviewer evidence is complete against $AGENTFLOW_OUTPUT_DIR.",
+              acceptance_criteria: ["Incomplete evidence is recorded as a warning."],
+              constraints: []
+            },
             rubric: "Return JSON with pass/fail and issues.",
-            acceptance_criteria: ["Incomplete evidence is recorded as a warning."],
             on_failure: "continue"
           },
           {
             type: "exec",
             id: "after",
+            intent: {
+              goal: "Continue after a non-blocking AI check warning.",
+              acceptance_criteria: ["The continuation command exits successfully."],
+              constraints: []
+            },
             command: "sh",
             args: ["-lc", "exit 0"]
           }
@@ -4104,7 +4215,11 @@ describe("runtime engine", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Evaluate the latest patch."
+            intent: {
+              goal: "Evaluate the latest patch.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -4192,7 +4307,11 @@ describe("runtime engine", () => {
           {
             type: "agent",
             id: "stream_logs",
-            goal: "Stream a partial response before completion."
+            intent: {
+              goal: "Stream a partial response before completion.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -4594,7 +4713,11 @@ describe("runtime engine", () => {
             type: "agent",
             id: "never_runs",
             repo: "main",
-            goal: "Should stay blocked."
+            intent: {
+              goal: "Should stay blocked.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -4657,7 +4780,11 @@ describe("runtime engine", () => {
             type: "agent",
             id: "implement",
             repo: "main",
-            goal: "Implement the change."
+            intent: {
+              goal: "Implement the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }

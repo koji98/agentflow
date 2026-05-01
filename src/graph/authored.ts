@@ -80,8 +80,14 @@ export interface GraphIntent {
   acceptance_criteria?: string[];
 }
 
+export interface ExecutableNodeIntent {
+  goal: string;
+  acceptance_criteria: string[];
+  constraints: string[];
+}
+
 export interface SupervisionPolicy {
-  profile?: string;
+  profile: string;
   max_total_interventions: number;
 }
 
@@ -174,9 +180,7 @@ export interface BaseNode {
 export interface BaseExecutableNode extends BaseNode {
   repo?: string;
   profile?: string;
-  goal?: string;
-  acceptance_criteria?: string[];
-  constraints?: string[];
+  intent: ExecutableNodeIntent;
   context?: ContextItem[];
   artifacts?: Record<string, ArtifactDefinition>;
   timeout_sec?: number;

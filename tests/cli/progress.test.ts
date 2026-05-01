@@ -35,7 +35,11 @@ function createCompiledGraph(): CompiledGraph {
         },
         context: [],
         declared_artifacts: {},
-        goal: "Inspect the repo."
+        intent: {
+          goal: "Inspect the repo.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        },
       },
       {
         compiled_id: "root__verify",
@@ -61,7 +65,11 @@ function createCompiledGraph(): CompiledGraph {
         context: [],
         declared_artifacts: {},
         check_kind: "ai",
-        goal: "Check quality."
+        intent: {
+          goal: "Check quality.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        },
       }
     ],
     edges: [],

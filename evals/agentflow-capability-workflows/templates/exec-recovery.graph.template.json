@@ -28,10 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 1
+    "max_total_interventions": 1,
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -41,11 +46,6 @@
         "type": "exec",
         "id": "retry_gate",
         "repo": "main",
-        "goal": "Exercise the retry-envelope recovery gate and publish the recovery handoff when the fixture allows it.",
-        "acceptance_criteria": [
-          "The command succeeds only after receiving useful supervisor recovery context.",
-          "The declared handoff artifact records the recovery evidence."
-        ],
         "command": "node",
         "args": [
           "scripts/retry-gate.js"
@@ -56,6 +56,14 @@
             "path": "handoff.md",
             "description": "Recovery envelope handoff."
           }
+        },
+        "intent": {
+          "goal": "Exercise the retry-envelope recovery gate and publish the recovery handoff when the fixture allows it.",
+          "acceptance_criteria": [
+            "The command succeeds only after receiving useful supervisor recovery context.",
+            "The declared handoff artifact records the recovery evidence."
+          ],
+          "constraints": []
         }
       }
     ]

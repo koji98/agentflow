@@ -18,9 +18,11 @@ const implementNode: CompiledAgentNode = {
   compiled_id: "implement",
   authored_id: "implement",
   kind: "agent",
-  goal: "Implement checkout behavior.",
-  acceptance_criteria: ["The implementation satisfies the downstream validation gate."],
-  constraints: [],
+  intent: {
+    goal: "Implement checkout behavior.",
+    acceptance_criteria: ["The implementation satisfies the downstream validation gate."],
+    constraints: []
+  },
   repo: "main",
   deps: [],
   scope_stack: ["root"],
@@ -41,9 +43,11 @@ const validateNode: CompiledCheckNode = {
   authored_id: "validate",
   kind: "check",
   check_kind: "deterministic",
-  goal: "Validate checkout behavior.",
-  acceptance_criteria: ["The focused validation command exits successfully."],
-  constraints: [],
+  intent: {
+    goal: "Validate checkout behavior.",
+    acceptance_criteria: ["The focused validation command exits successfully."],
+    constraints: []
+  },
   repo: "main",
   deps: ["implement"],
   scope_stack: ["root"],

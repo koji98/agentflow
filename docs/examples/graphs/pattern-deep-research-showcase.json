@@ -22,6 +22,10 @@
         "max_total_tokens": 128000,
         "max_tokens_per_item": 32000
       }
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "graph": {
@@ -33,15 +37,6 @@
         "id": "managed_patterns_research",
         "repo": "main",
         "profile": "default",
-        "goal": "Recommend how Agentflow managed patterns should be used for research, review, and implementation work.",
-        "acceptance_criteria": [
-          "The summary explains when to use deep research versus deep work.",
-          "The packet preserves findings, evidence, uncertainty, confidence, and next actions."
-        ],
-        "constraints": [
-          "Do not change files during this research showcase.",
-          "Repository docs and source are primary authority."
-        ],
         "context": [
           {
             "name": "readme",
@@ -67,6 +62,17 @@
             "path": "recommendation-matrix.md",
             "description": "Comparison matrix for managed-pattern usage decisions."
           }
+        },
+        "intent": {
+          "goal": "Recommend how Agentflow managed patterns should be used for research, review, and implementation work.",
+          "acceptance_criteria": [
+            "The summary explains when to use deep research versus deep work.",
+            "The packet preserves findings, evidence, uncertainty, confidence, and next actions."
+          ],
+          "constraints": [
+            "Do not change files during this research showcase.",
+            "Repository docs and source are primary authority."
+          ]
         }
       },
       {
@@ -74,11 +80,6 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "goal": "Summarize the deep research result for a human operator and mention the command to inspect the compiled graph.",
-        "acceptance_criteria": [
-          "The handoff cites the managed research summary and packet.",
-          "The handoff includes concrete validation or inspection guidance."
-        ],
         "context": [
           {
             "ref": "managed_patterns_research.summary",
@@ -95,23 +96,34 @@
             "path": "handoff.md",
             "description": "Operator-facing summary of the managed deep research result."
           }
+        },
+        "intent": {
+          "goal": "Summarize the deep research result for a human operator and mention the command to inspect the compiled graph.",
+          "acceptance_criteria": [
+            "The handoff cites the managed research summary and packet.",
+            "The handoff includes concrete validation or inspection guidance."
+          ],
+          "constraints": []
         }
       },
       {
         "type": "check",
         "id": "validate_skill_docs",
         "repo": "main",
-        "goal": "Run the skill documentation validation command after the managed-pattern research handoff.",
-        "acceptance_criteria": [
-          "`npm run validate:skills` exits successfully.",
-          "The validation evidence supports the final handoff."
-        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "run",
           "validate:skills"
-        ]
+        ],
+        "intent": {
+          "goal": "Run the skill documentation validation command after the managed-pattern research handoff.",
+          "acceptance_criteria": [
+            "`npm run validate:skills` exits successfully.",
+            "The validation evidence supports the final handoff."
+          ],
+          "constraints": []
+        }
       }
     ]
   },
@@ -125,6 +137,7 @@
     ]
   },
   "supervision": {
-    "max_total_interventions": 6
+    "max_total_interventions": 6,
+    "profile": "supervisor"
   }
 }

@@ -319,10 +319,6 @@ export function resolveSupervisorPolicy(
   supervisor_profile?: GraphProfile;
 } {
   const profile_name = document.supervision.profile;
-  if (!profile_name) {
-    return { diagnostics: [] };
-  }
-
   const diagnostics: GraphDiagnostic[] = [];
   const launch_profile = launch.profile;
   const supervisor_profile = document.profiles?.[profile_name];

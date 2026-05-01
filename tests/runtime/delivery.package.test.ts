@@ -18,7 +18,7 @@ const graph: CompiledGraph = {
     constraints: ["Do not change provider credentials."],
     acceptance_criteria: ["Tests pass.", "Reviewer guide names risk."]
   },
-  supervision: { max_total_interventions: 2 },
+  supervision: { profile: "supervisor", max_total_interventions: 2 },
   launch: {
     launch_profile: "default",
     workspace_backend: "inplace"
@@ -54,7 +54,11 @@ const graph: CompiledGraph = {
           description: "Human reviewer handoff produced by the implement node."
         }
       },
-      goal: "Implement checkout timeout handling.",
+      intent: {
+        goal: "Implement checkout timeout handling.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
       tools: []
     }
   ],

@@ -56,7 +56,11 @@ function createCheckpointNode(): CompiledCheckpointNode {
         description: "Test artifact produced at operator-feedback.md."
       }
     },
-    goal: "Review the draft.",
+    intent: {
+      goal: "Review the draft.",
+      acceptance_criteria: ["The node satisfies its acceptance criteria."],
+      constraints: []
+    },
     review_from: {
       node: "draft",
       artifact: "draft_spec"

@@ -10,13 +10,13 @@ Required fields:
 
 - `type`: `"pattern_deep_research"`
 - `id`
-- `goal`
+- `intent.goal`
+- `intent.acceptance_criteria`
 - `research.angles`
 
 Common fields:
 
-- `acceptance_criteria`
-- `constraints`
+- `intent.constraints`
 - `repo`
 - `profile`
 - `context`
@@ -51,14 +51,16 @@ Angle and synthesis artifacts are private evidence packets. They support the fin
   "id": "storage_research",
   "repo": "main",
   "profile": "research",
-  "goal": "Recommend the storage design that best supports resumable supervised runs.",
-  "acceptance_criteria": [
-    "The recommendation compares viable alternatives.",
-    "The packet preserves evidence, uncertainty, and next actions."
-  ],
-  "constraints": [
-    "Repository conventions remain primary authority."
-  ],
+  "intent": {
+    "goal": "Recommend the storage design that best supports resumable supervised runs.",
+    "acceptance_criteria": [
+      "The recommendation compares viable alternatives.",
+      "The packet preserves evidence, uncertainty, and next actions."
+    ],
+    "constraints": [
+      "Repository conventions remain primary authority."
+    ]
+  },
   "context": [
     {
       "name": "runtime_docs",

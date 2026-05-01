@@ -280,7 +280,7 @@ export function buildSupervisorCausalContext(options: {
         confidence: "high",
         reason: "The check is a detector. Its failure most likely points to the nearest upstream worker that produced the checked state.",
         evidence: [
-          `Failed check goal: ${options.symptomNode.goal ?? "unspecified"}`,
+          `Failed check goal: ${options.symptomNode.intent.goal}`,
           `Nearest upstream worker: ${upstreamWorker.authored_id}`
         ],
         requiresInvestigation: options.repeatedFingerprintCount >= 2

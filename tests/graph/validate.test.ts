@@ -40,7 +40,7 @@ describe("graph validation", () => {
       node_count: 11,
       executable_node_count: 7,
       container_node_count: 4,
-      profile_count: 2,
+      profile_count: 3,
       repo_count: 1,
       repeat_count: 1,
       node_kind_counts: {
@@ -88,7 +88,11 @@ describe("graph validation", () => {
                 {
                   type: "agent",
                   id: "draft",
-                  goal: "Draft the artifact.",
+                  intent: {
+                    goal: "Draft the artifact.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     draft_spec: {
                       from: "output_dir",
@@ -100,7 +104,11 @@ describe("graph validation", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  goal: "Review the draft.",
+                  intent: {
+                    goal: "Review the draft.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"
@@ -205,7 +213,11 @@ describe("graph validation", () => {
                 {
                   type: "agent",
                   id: "fix",
-                  goal: "Apply the fix."
+                  intent: {
+                    goal: "Apply the fix.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                 },
                 {
                   type: "check",
@@ -259,7 +271,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "draft",
-            goal: "Draft the artifact.",
+            intent: {
+              goal: "Draft the artifact.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               draft_spec: {
                 from: "output_dir",
@@ -271,7 +287,11 @@ describe("graph validation", () => {
           {
             type: "checkpoint",
             id: "review",
-            goal: "Review the draft.",
+            intent: {
+              goal: "Review the draft.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             review_from: {
               node: "draft",
               artifact: "draft_spec"
@@ -318,14 +338,22 @@ describe("graph validation", () => {
             id: "deterministic_gate",
             check_kind: "deterministic",
             command: "npm",
-            goal: "This should not be allowed.",
+            intent: {
+              goal: "This should not be allowed.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             model: "gpt-5"
           },
           {
             type: "check",
             id: "ai_gate",
             check_kind: "ai",
-            goal: "Evaluate the change.",
+            intent: {
+              goal: "Evaluate the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             command: "npm",
             env: {
               SHOULD_NOT_EXIST: "true"
@@ -386,7 +414,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "reader",
-            goal: "Read files.",
+            intent: {
+              goal: "Read files.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               {
                 name: "secret",
@@ -483,11 +515,21 @@ describe("graph validation", () => {
   });
 
   it("rejects an agent graph that has no profile and therefore no resolvable harness", async () => {
-    const diagnostics = await validateGraph({
+    const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "missing-harness-agent",
       intent: TEST_INTENT,
       repos: { main: { path: "." } },
+      profiles: {
+        supervisor: {
+          harness: "codex-cli",
+          sandbox: "read-only"
+        }
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
       graph: {
         type: "sequence",
         id: "root",
@@ -495,7 +537,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement the requested change."
+            intent: {
+              goal: "Implement the requested change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            }
           }
         ]
       }
@@ -512,11 +558,21 @@ describe("graph validation", () => {
   });
 
   it("rejects an AI check that cannot resolve a harness through the profile chain", async () => {
-    const diagnostics = await validateGraph({
+    const diagnostics = await validateAuthoredGraphDocument({
       version: "1",
       graph_id: "missing-harness-ai-check",
       intent: TEST_INTENT,
       repos: { main: { path: "." } },
+      profiles: {
+        supervisor: {
+          harness: "codex-cli",
+          sandbox: "read-only"
+        }
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
       graph: {
         type: "sequence",
         id: "root",
@@ -525,7 +581,11 @@ describe("graph validation", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Judge the current state."
+            intent: {
+              goal: "Judge the current state.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            }
           }
         ]
       }
@@ -556,7 +616,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "summarize",
-            goal: "Summarize the change.",
+            intent: {
+              goal: "Summarize the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               summary: {
                 from: "output_dir",
@@ -594,7 +658,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "inspect",
-            goal: "Read the code and respond with observations only."
+            intent: {
+              goal: "Read the code and respond with observations only.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -630,14 +698,22 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement the change.",
+            intent: {
+              goal: "Implement the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             reasoning_effort: "medium"
           },
           {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Judge the current state.",
+            intent: {
+              goal: "Judge the current state.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             reasoning_effort: "high"
           }
         ]
@@ -696,7 +772,11 @@ describe("graph validation", () => {
             type: "agent",
             id: "implement",
             profile: "node_defaults",
-            goal: "Implement the change."
+            intent: {
+              goal: "Implement the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }

@@ -40,7 +40,7 @@ describe("graph compilation", () => {
         goal: "Ship the supervised runtime.",
         acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
       },
-      supervision: { max_total_interventions: 3 },
+      supervision: { profile: "supervisor", max_total_interventions: 3 },
       repos: {
         main: {
           path: "."
@@ -152,7 +152,7 @@ describe("graph compilation", () => {
     );
   });
 
-  it("compiles node goals and acceptance criteria into the executable contract", () => {
+  it("compiles node intent into the executable contract", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "compiled-node-intent",
@@ -176,12 +176,14 @@ describe("graph compilation", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement timeout handling with a reviewable handoff.",
-            acceptance_criteria: [
+            intent: {
+              goal: "Implement timeout handling with a reviewable handoff.",
+              acceptance_criteria: [
               "Timeout behavior is tested.",
               "The handoff lists changed files and risk."
             ],
-            constraints: ["Implement timeout handling with a reviewable handoff."]
+              constraints: ["Implement timeout handling with a reviewable handoff."]
+            },
           }
         ]
       }
@@ -198,12 +200,14 @@ describe("graph compilation", () => {
       expect.objectContaining({
         kind: "agent",
         authored_id: "implement",
-        goal: "Implement timeout handling with a reviewable handoff.",
-        acceptance_criteria: [
+        intent: {
+          goal: "Implement timeout handling with a reviewable handoff.",
+          acceptance_criteria: [
           "Timeout behavior is tested.",
           "The handoff lists changed files and risk."
         ],
-        constraints: ["Implement timeout handling with a reviewable handoff."]
+          constraints: ["Implement timeout handling with a reviewable handoff."]
+        },
       })
     ]);
   });
@@ -309,7 +313,11 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "draft",
-                  goal: "Draft the artifact.",
+                  intent: {
+                    goal: "Draft the artifact.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     draft_spec: {
                       from: "output_dir",
@@ -321,7 +329,11 @@ describe("graph compilation", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  goal: "Review the draft.",
+                  intent: {
+                    goal: "Review the draft.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"
@@ -416,7 +428,11 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "fix",
-                  goal: "Apply the fix."
+                  intent: {
+                    goal: "Apply the fix.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                 },
                 {
                   type: "check",
@@ -433,7 +449,11 @@ describe("graph compilation", () => {
           {
             type: "agent",
             id: "handoff",
-            goal: "Summarize the run.",
+            intent: {
+              goal: "Summarize the run.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               {
                 ref: "fix.agent_response",
@@ -498,7 +518,11 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "summarize",
-                  goal: "Summarize the latest attempt."
+                  intent: {
+                    goal: "Summarize the latest attempt.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                 }
               ]
             },
@@ -555,12 +579,20 @@ describe("graph compilation", () => {
               {
                 type: "agent",
                 id: "inspect",
-                goal: "Inspect the repo."
+                intent: {
+                  goal: "Inspect the repo.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
               },
               {
                 type: "agent",
                 id: "report",
-                goal: "Write the report.",
+                intent: {
+                  goal: "Write the report.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
                 context: [
                   {
                     ref: "inspect.agent_response",
@@ -643,7 +675,11 @@ describe("graph compilation", () => {
             type: "check",
             id: "ai_gate",
             check_kind: "ai",
-            goal: "Evaluate the change."
+            intent: {
+              goal: "Evaluate the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -739,7 +775,11 @@ describe("graph compilation", () => {
           {
             type: "agent",
             id: "inspect",
-            goal: "Inspect the codebase."
+            intent: {
+              goal: "Inspect the codebase.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           },
           {
             type: "exec",
@@ -752,7 +792,11 @@ describe("graph compilation", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Judge the change."
+            intent: {
+              goal: "Judge the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -849,14 +893,22 @@ describe("graph compilation", () => {
             type: "agent",
             id: "review_patch",
             profile: "review",
-            goal: "Review the patch."
+            intent: {
+              goal: "Review the patch.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           },
           {
             type: "check",
             id: "judge_patch",
             profile: "review",
             check_kind: "ai",
-            goal: "Judge the patch."
+            intent: {
+              goal: "Judge the patch.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }

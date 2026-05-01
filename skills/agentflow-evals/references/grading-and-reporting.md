@@ -70,7 +70,11 @@ They must print structured JSON:
   "score": 5,
   "summary": "hard facts pass",
   "assertions": [
-    { "id": "artifact", "passed": true, "evidence": "handoff exists" }
+    {
+      "id": "artifact",
+      "passed": true,
+      "evidence": "handoff exists"
+    }
   ],
   "metrics": {
     "tool_calls": 2

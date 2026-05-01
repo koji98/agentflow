@@ -30,9 +30,11 @@ function node(): CompiledAgentNode {
     },
     context: [],
     declared_artifacts: {},
-    goal: "Use the dependency correctly.",
-    acceptance_criteria: ["The code follows the documented dependency API."],
-    constraints: ["Do not change graph intent."],
+    intent: {
+      goal: "Use the dependency correctly.",
+      acceptance_criteria: ["The code follows the documented dependency API."],
+      constraints: ["Do not change graph intent."]
+    },
     tools: []
   };
 }

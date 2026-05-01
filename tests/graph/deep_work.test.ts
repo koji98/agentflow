@@ -15,12 +15,14 @@ function buildPatternStep(stepOverrides = {}) {
     id: "implement_checkout",
     repo: "main",
     profile: "default",
-    goal: "Implement checkout rounding and publish a clear handoff.",
-    acceptance_criteria: [
+    intent: {
+      goal: "Implement checkout rounding and publish a clear handoff.",
+      acceptance_criteria: [
       "Focused tests pass.",
       "The summary and packet explain validation evidence and risks."
     ],
-    constraints: ["Do not edit lockfiles."],
+      constraints: ["Do not edit lockfiles."]
+    },
     artifacts: {
       validation_log: {
         from: "output_dir",
@@ -75,7 +77,15 @@ function buildDocument(steps) {
       default: {
         harness: "codex-cli",
         sandbox: "read-only"
+      },
+      supervisor: {
+        harness: "codex-cli",
+        sandbox: "read-only"
       }
+    },
+    supervision: {
+      profile: "supervisor",
+      max_total_interventions: 3
     },
     graph: {
       type: "sequence",
@@ -214,11 +224,14 @@ describe("pattern deep work", () => {
         {
           type: "agent",
           id: "handoff",
-          goal: "Summarize the final deep work package.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Summarize the final deep work package.",
+            acceptance_criteria: [
             "The handoff uses the final managed summary and packet artifacts.",
             "The handoff is suitable for downstream review."
           ],
+            constraints: []
+          },
           context: [
             {
               ref: "implement_checkout.agent_response",

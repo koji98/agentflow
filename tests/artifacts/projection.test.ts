@@ -133,7 +133,11 @@ async function createFixtureRun() {
         {
           type: "agent",
           id: "inspect",
-          goal: "Inspect the repository.",
+          intent: {
+            goal: "Inspect the repository.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          },
           artifacts: {
             notes: {
               from: "output_dir",
@@ -153,7 +157,11 @@ async function createFixtureRun() {
               {
                 type: "agent",
                 id: "apply-fix",
-                goal: "Apply the fix.",
+                intent: {
+                  goal: "Apply the fix.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
                 artifacts: {
                   patch: {
                     from: "output_dir",
@@ -329,7 +337,11 @@ async function createAiTimeoutRun() {
           id: "judge-fix",
           repo: "main",
           check_kind: "ai",
-          goal: "Judge the graph output."
+          intent: {
+            goal: "Judge the graph output.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          },
         }
       ]
     }

@@ -53,7 +53,7 @@ These remain hard failures even when a verifier uses soft failure behavior:
 
 ## Outcome Verification
 
-The standard agent prompt already includes a `## Working Loop` section that tells the agent to drive the node to completion: inspect, plan, execute, validate, fix, revalidate; investigate ambiguity instead of guessing; and stop only when criteria are met or a concrete blocker is documented. Outcome verification then grades the result, so authors should not repeat that iteration framing in node `constraints`.
+The standard agent prompt already includes a `## Working Loop` section that tells the agent to drive the node to completion: inspect, plan, execute, validate, fix, revalidate; investigate ambiguity instead of guessing; and stop only when criteria are met or a concrete blocker is documented. Outcome verification then grades the result, so authors should not repeat that iteration framing in node `intent.constraints`.
 
 Every `agent` node attempt that exits cleanly with all declared artifacts is sent to a fresh-context outcome verifier before it is allowed to remain `passed`. The verifier:
 

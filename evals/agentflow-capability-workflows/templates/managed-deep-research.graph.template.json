@@ -28,10 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 4
+    "max_total_interventions": 4,
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -41,17 +46,6 @@
         "type": "pattern_deep_research",
         "id": "repo_research",
         "repo": "main",
-        "goal": "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research handoff about whether the job pipeline is ready for a retry/backoff change.",
-        "acceptance_criteria": [
-          "The research covers all authored angles.",
-          "No repository files are modified.",
-          "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
-        ],
-        "constraints": [
-          "Do not edit repository files.",
-          "Use local repository files as primary authority.",
-          "Do not use public network sources in this eval scenario."
-        ],
         "context": [
           {
             "name": "task",
@@ -99,22 +93,38 @@
             "path": "handoff.md",
             "description": "Managed deep research handoff with Scenario:, Changed files:, Validation:, and Risks: fields."
           }
+        },
+        "intent": {
+          "goal": "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research handoff about whether the job pipeline is ready for a retry/backoff change.",
+          "acceptance_criteria": [
+            "The research covers all authored angles.",
+            "No repository files are modified.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+          ],
+          "constraints": [
+            "Do not edit repository files.",
+            "Use local repository files as primary authority.",
+            "Do not use public network sources in this eval scenario."
+          ]
         }
       },
       {
         "type": "check",
         "id": "verify",
         "repo": "main",
-        "goal": "Run the local validation suite after the research handoff and confirm the repository fixture remains healthy.",
-        "acceptance_criteria": [
-          "`npm test` exits successfully.",
-          "The check evidence is available for grading the research workflow."
-        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "test"
-        ]
+        ],
+        "intent": {
+          "goal": "Run the local validation suite after the research handoff and confirm the repository fixture remains healthy.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully.",
+            "The check evidence is available for grading the research workflow."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

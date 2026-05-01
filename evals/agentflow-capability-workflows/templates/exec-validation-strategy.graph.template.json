@@ -28,10 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 1
+    "max_total_interventions": 1,
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -41,11 +46,6 @@
         "type": "exec",
         "id": "validation_gate",
         "repo": "main",
-        "goal": "Exercise validation-strategy repair and publish a handoff when the corrected strategy succeeds.",
-        "acceptance_criteria": [
-          "The command succeeds after validation guidance changes away from the failing strategy.",
-          "The declared handoff artifact records the final validation path."
-        ],
         "command": "node",
         "args": [
           "scripts/validation-gate.js"
@@ -56,6 +56,14 @@
             "path": "handoff.md",
             "description": "Validation-strategy handoff written after supervisor retry."
           }
+        },
+        "intent": {
+          "goal": "Exercise validation-strategy repair and publish a handoff when the corrected strategy succeeds.",
+          "acceptance_criteria": [
+            "The command succeeds after validation guidance changes away from the failing strategy.",
+            "The declared handoff artifact records the final validation path."
+          ],
+          "constraints": []
         }
       }
     ]

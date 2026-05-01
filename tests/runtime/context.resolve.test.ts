@@ -370,7 +370,11 @@ describe("context resolution", () => {
                 {
                   type: "agent",
                   id: "implement",
-                  goal: "Implement the fix.",
+                  intent: {
+                    goal: "Implement the fix.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     fix_log: {
                       from: "output_dir",
@@ -532,7 +536,11 @@ describe("context resolution", () => {
                 {
                   type: "agent",
                   id: "implement",
-                  goal: "Implement the fix."
+                  intent: {
+                    goal: "Implement the fix.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                 },
                 {
                   type: "check",

@@ -157,11 +157,11 @@ function buildRepairInvocation(options: {
     graphGoal: options.graph_goal,
     ...(options.graph_acceptance_criteria ? { graphAcceptanceCriteria: options.graph_acceptance_criteria } : {}),
     ...(options.graph_constraints ? { graphConstraints: options.graph_constraints } : {}),
-    nodeGoal: options.node.goal
-      ? `Produce the missing declared artifacts while preserving the original node goal:\n${options.node.goal}`
+    nodeGoal: options.node.intent.goal
+      ? `Produce the missing declared artifacts while preserving the original node intent goal:\n${options.node.intent.goal}`
       : "Produce the missing declared artifacts for the previously executed node.",
-    ...(options.node.acceptance_criteria ? { nodeAcceptanceCriteria: options.node.acceptance_criteria } : {}),
-    ...(options.node.constraints ? { nodeConstraints: options.node.constraints } : {}),
+    ...(options.node.intent.acceptance_criteria ? { nodeAcceptanceCriteria: options.node.intent.acceptance_criteria } : {}),
+    ...(options.node.intent.constraints ? { nodeConstraints: options.node.intent.constraints } : {}),
     contextPacketPath: options.context_packet_path,
     contextManifestPath: options.context_manifest_path,
     contextManifest: options.context_manifest,

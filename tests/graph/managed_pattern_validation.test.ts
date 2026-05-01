@@ -22,7 +22,15 @@ function buildEnvelope(step) {
       default: {
         harness: "codex-cli",
         sandbox: "read-only"
+      },
+      supervisor: {
+        harness: "codex-cli",
+        sandbox: "read-only"
       }
+    },
+    supervision: {
+      profile: "supervisor",
+      max_total_interventions: 3
     },
     graph: {
       type: "sequence",
@@ -59,7 +67,11 @@ describe("managed pattern normalization edges", () => {
       buildEnvelope({
         type: "pattern_deep_research",
         id: "market_scan",
-        goal: "Research a managed pattern change.",
+        intent: {
+          goal: "Research a managed pattern change.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        },
         research: {
           angles: ["architecture"]
         }
@@ -82,8 +94,11 @@ describe("managed pattern normalization edges", () => {
       buildEnvelope({
         type: "pattern_deep_work",
         id: "implement",
-        goal: "Implement a change.",
-        acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
+        intent: {
+          goal: "Implement a change.",
+          acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
+          constraints: []
+        },
         completion: {
           pass_threshold: 0.9,
           criteria: [
@@ -126,8 +141,11 @@ describe("managed pattern normalization edges", () => {
       buildEnvelope({
         type: "pattern_deep_work",
         id: "implement",
-        goal: "Implement a change.",
-        acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
+        intent: {
+          goal: "Implement a change.",
+          acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
+          constraints: []
+        },
         completion: {
           criteria: [
             {

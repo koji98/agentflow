@@ -28,10 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 0
+    "max_total_interventions": 0,
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -41,14 +46,6 @@
         "type": "agent",
         "id": "audit",
         "repo": "main",
-        "goal": "Audit the repository using `AGENTFLOW_EVAL_TASK.md`. Do not modify the repo. Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with findings and validation evidence.",
-        "acceptance_criteria": [
-          "No repository files are modified.",
-          "The handoff includes Scenario, Changed files, Validation, and Risks sections."
-        ],
-        "constraints": [
-          "Do not change repository files; write only the declared output artifact."
-        ],
         "context": [
           {
             "name": "task",
@@ -74,22 +71,35 @@
             "path": "handoff.md",
             "description": "No-edit audit handoff."
           }
+        },
+        "intent": {
+          "goal": "Audit the repository using `AGENTFLOW_EVAL_TASK.md`. Do not modify the repo. Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with findings and validation evidence.",
+          "acceptance_criteria": [
+            "No repository files are modified.",
+            "The handoff includes Scenario, Changed files, Validation, and Risks sections."
+          ],
+          "constraints": [
+            "Do not change repository files; write only the declared output artifact."
+          ]
         }
       },
       {
         "type": "check",
         "id": "verify",
         "repo": "main",
-        "goal": "Run the repository validation suite without modifying repository files.",
-        "acceptance_criteria": [
-          "`npm test` exits successfully.",
-          "No repository edits are needed for this audit scenario."
-        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "test"
-        ]
+        ],
+        "intent": {
+          "goal": "Run the repository validation suite without modifying repository files.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully.",
+            "No repository edits are needed for this audit scenario."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

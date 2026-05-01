@@ -419,7 +419,7 @@ export function createCompactContextIndex(report: ContextAnalysisNode): string {
     "# Supervisor context repair",
     "",
     "The authored context package could not be materialized within the node token budget.",
-    "Graph intent, node goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
+    "Graph intent, node intent, repo authority, sandbox, and declared artifacts are unchanged.",
     "",
     `Projected authored context tokens: ${report.projected_total_tokens} / ${report.max_total_tokens}.`,
     "",

@@ -28,10 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 0
+    "max_total_interventions": 0,
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -41,11 +46,6 @@
         "type": "agent",
         "id": "research",
         "repo": "main",
-        "goal": "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
-        "acceptance_criteria": [
-          "The research artifact states the exact rounding rule and cites the task/docs evidence.",
-          "The implementation node can use the artifact without rereading broad unrelated context."
-        ],
         "context": [
           {
             "name": "task",
@@ -64,23 +64,20 @@
             "path": "research.md",
             "description": "Rounding rule research note."
           }
+        },
+        "intent": {
+          "goal": "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
+          "acceptance_criteria": [
+            "The research artifact states the exact rounding rule and cites the task/docs evidence.",
+            "The implementation node can use the artifact without rereading broad unrelated context."
+          ],
+          "constraints": []
         }
       },
       {
         "type": "agent",
         "id": "implement",
         "repo": "main",
-        "goal": "Use the research artifact to update `src/rounding.js`, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
-        "acceptance_criteria": [
-          "`src/rounding.js` implements the exact rounding behavior from the research artifact.",
-          "`npm test` passes.",
-          "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
-        ],
-        "constraints": [
-          "Do not change files outside `src/rounding.js` unless validation proves it is necessary.",
-          "Use the research artifact as evidence, not as authority to widen the node scope.",
-          "Do not leave blank fields, placeholder text, or unresolved template values in the handoff artifact."
-        ],
         "context": [
           {
             "ref": "research.research",
@@ -105,22 +102,38 @@
             "path": "handoff.md",
             "description": "Implementation handoff with literal Scenario:, Changed files:, Validation:, and Risks: fields."
           }
+        },
+        "intent": {
+          "goal": "Use the research artifact to update `src/rounding.js`, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+          "acceptance_criteria": [
+            "`src/rounding.js` implements the exact rounding behavior from the research artifact.",
+            "`npm test` passes.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+          ],
+          "constraints": [
+            "Do not change files outside `src/rounding.js` unless validation proves it is necessary.",
+            "Use the research artifact as evidence, not as authority to widen the node scope.",
+            "Do not leave blank fields, placeholder text, or unresolved template values in the handoff artifact."
+          ]
         }
       },
       {
         "type": "check",
         "id": "verify",
         "repo": "main",
-        "goal": "Run the scenario validation suite and confirm the implementation matches the researched billing rule.",
-        "acceptance_criteria": [
-          "`npm test` exits successfully.",
-          "The validation evidence confirms the handoff-backed implementation is correct."
-        ],
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "test"
-        ]
+        ],
+        "intent": {
+          "goal": "Run the scenario validation suite and confirm the implementation matches the researched billing rule.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully.",
+            "The validation evidence confirms the handoff-backed implementation is correct."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

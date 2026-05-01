@@ -3,6 +3,7 @@ import type {
   ArtifactReference,
   ContextItem,
   DeterministicPassIf,
+  ExecutableNodeIntent,
   GraphIntent,
   GraphPrerequisites,
   SupervisionPolicy
@@ -23,9 +24,7 @@ export interface CompiledExecutableNodeBase {
   authored_id: string;
   kind: ExecutableNodeKind;
   label?: string;
-  goal?: string;
-  acceptance_criteria?: string[];
-  constraints?: string[];
+  intent: ExecutableNodeIntent;
   repo: string;
   deps: string[];
   scope_stack: string[];

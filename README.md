@@ -154,7 +154,7 @@ npm run validate:smoke
 
 ## Minimal Graph
 
-This is the canonical small graph shape: explicit repo, profiles, supervisor profile, node-level contract, declared artifact, and deterministic check.
+This is the canonical small graph shape: explicit repo, profiles, supervisor profile, node-level `intent`, declared artifact, and deterministic check.
 
 ```json
 {
@@ -173,7 +173,9 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
     ]
   },
   "repos": {
-    "main": { "path": "." }
+    "main": {
+      "path": "."
+    }
   },
   "defaults": {
     "launch_profile": "codex",
@@ -214,14 +216,16 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
         "id": "implement_slice",
         "repo": "main",
         "profile": "codex",
-        "goal": "Implement the scoped change and leave reviewer-ready evidence.",
-        "acceptance_criteria": [
-          "Targeted validation is run or clearly explained.",
-          "The handoff names changed files, validation, and residual risks."
-        ],
-        "constraints": [
-          "Write a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md."
-        ],
+        "intent": {
+          "goal": "Implement the scoped change and leave reviewer-ready evidence.",
+          "acceptance_criteria": [
+            "Targeted validation is run or clearly explained.",
+            "The handoff names changed files, validation, and residual risks."
+          ],
+          "constraints": [
+            "Write a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md."
+          ]
+        },
         "context": [
           {
             "name": "goal",
@@ -241,14 +245,19 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
         "type": "check",
         "id": "test",
         "repo": "main",
-        "goal": "Run the repository test suite to validate the scoped change.",
-        "acceptance_criteria": [
-          "`npm test` exits successfully.",
-          "The check output is usable as reviewer evidence."
-        ],
+        "intent": {
+          "goal": "Run the repository test suite to validate the scoped change.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully.",
+            "The check output is usable as reviewer evidence."
+          ],
+          "constraints": []
+        },
         "check_kind": "deterministic",
         "command": "npm",
-        "args": ["test"]
+        "args": [
+          "test"
+        ]
       }
     ]
   }
@@ -308,12 +317,12 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | `repos` | Local repository aliases. Defaults to `main` at `.` when omitted. |
 | `defaults` | Launch profile and workspace backend defaults. |
 | `profiles` | Harness, model, sandbox, env, timeout, tool policy, and budget settings. |
-| `supervision` | Total recovery budget and optional dedicated supervisor profile. |
+| `supervision` | Required supervisor profile plus total recovery budget. |
 | `plugins` and `tools` | Plugin-bundled CLI capabilities exposed to eligible nodes. |
 | `prerequisites` | Local launch checks for files, commands, env vars, and repos. |
 | `graph` | The execution shape: containers, executable nodes, or managed patterns. |
 
-Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `goal` and non-empty `acceptance_criteria`, with optional `constraints` normalized to `[]`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
+Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
 
 Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime pauses chosen only when recovery needs credentials, scope, product intent, security/compliance judgment, or graph-contract authority that the runtime must not infer.
 

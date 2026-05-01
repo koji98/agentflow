@@ -28,10 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 2
+    "max_total_interventions": 2,
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -41,15 +46,18 @@
         "type": "exec",
         "id": "always_fail",
         "repo": "main",
-        "goal": "Exercise an unrecoverable exec failure for eval grading.",
-        "acceptance_criteria": [
-          "The fixture command fails deterministically.",
-          "The run records terminal failure evidence without fabricating success."
-        ],
         "command": "node",
         "args": [
           "scripts/always-fail.js"
-        ]
+        ],
+        "intent": {
+          "goal": "Exercise an unrecoverable exec failure for eval grading.",
+          "acceptance_criteria": [
+            "The fixture command fails deterministically.",
+            "The run records terminal failure evidence without fabricating success."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

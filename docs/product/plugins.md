@@ -97,11 +97,15 @@ Minimal `agentflow.plugin.json`:
     "poll": {
       "executable": "tools/poll-pr.sh",
       "description": "Poll a pull request and print a JSON status object.",
-      "credentials": ["github"],
+      "credentials": [
+        "github"
+      ],
       "config_schema": {
         "type": "object",
         "properties": {
-          "poll_interval_ms": { "type": "string" }
+          "poll_interval_ms": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       }
@@ -215,11 +219,15 @@ Example:
     "poll": {
       "executable": "bin/babysit-poll.js",
       "description": "Poll a pull request and print a JSON status object.",
-      "credentials": ["github"],
+      "credentials": [
+        "github"
+      ],
       "config_schema": {
         "type": "object",
         "properties": {
-          "poll_interval_ms": { "type": "string" }
+          "poll_interval_ms": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       }
@@ -274,7 +282,7 @@ Secret fields are stored in macOS Keychain. Secret values must be supplied throu
 
 ## Tool Policy
 
-Tool risk is described in the tool `description` and bounded by the graph or node `constraints`.
+Tool risk is described in the tool `description` and bounded by graph or node `intent.constraints`.
 
 - Declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent.
 - Tools share the node sandbox and timeout.

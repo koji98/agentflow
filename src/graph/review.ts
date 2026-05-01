@@ -159,7 +159,7 @@ function isHighImpactTool(tool: CompiledAgentNode["tools"][number]): boolean {
 }
 
 function nodeHasExplicitConstraint(document: AuthoredGraphDocument, node: CompiledExecutableNode): boolean {
-  return hasAnyText(document.intent.constraints) || hasAnyText(node.constraints);
+  return hasAnyText(document.intent.constraints) || hasAnyText(node.intent.constraints);
 }
 
 function isWriteCapable(node: CompiledExecutableNode): boolean {
@@ -170,7 +170,7 @@ function isImplementationGraph(document: AuthoredGraphDocument, graph: CompiledG
   const text = [
     document.intent.goal,
     ...(document.intent.acceptance_criteria ?? []),
-    ...graph.nodes.map((node) => node.goal ?? "")
+    ...graph.nodes.map((node) => node.intent.goal ?? "")
   ].join("\n");
 
   return implementationIntentPattern.test(text);
@@ -239,16 +239,16 @@ function reviewExecutableNode(
 
   if (
     (node.kind === "agent" || (node.kind === "check" && node.check_kind === "ai")) &&
-    !hasAnyText(node.acceptance_criteria)
+    !hasAnyText(node.intent.acceptance_criteria)
   ) {
     pushFinding(findings, {
       severity: "warning",
       category: "node_purpose",
-      ...(path ? { path: `${path}.acceptance_criteria` } : {}),
+      ...(path ? { path: `${path}.intent.acceptance_criteria` } : {}),
       node_id: node.authored_id,
       compiled_id: node.compiled_id,
-      message: `${node.kind === "agent" ? "Agent" : "AI check"} node "${node.authored_id}" has no node-level acceptance criteria.`,
-      recommendation: "Add node acceptance criteria that define the artifact quality or evaluation bar for this node."
+      message: `${node.kind === "agent" ? "Agent" : "AI check"} node "${node.authored_id}" has no node intent acceptance criteria.`,
+      recommendation: "Add node intent acceptance criteria that define the artifact quality or evaluation bar for this node."
     });
   }
 
@@ -262,7 +262,7 @@ function reviewExecutableNode(
         node_id: node.authored_id,
         compiled_id: node.compiled_id,
         message: `Agent node "${node.authored_id}" grants ${credentialToolDescription} tools without explicit constraints.`,
-        recommendation: "Add graph or node constraints that bound the approved credential use and any external or mutating behavior described by the tool."
+        recommendation: "Add graph or node intent constraints that bound the approved credential use and any external or mutating behavior described by the tool."
       });
     }
   }
@@ -271,11 +271,11 @@ function reviewExecutableNode(
     return;
   }
 
-  if ((node.kind === "agent" || node.kind === "check") && !hasText(node.goal)) {
+  if ((node.kind === "agent" || node.kind === "check") && !hasText(node.intent.goal)) {
     pushFinding(findings, {
       severity: "warning",
       category: "node_purpose",
-      ...(path ? { path: `${path}.goal` } : {}),
+      ...(path ? { path: `${path}.intent.goal` } : {}),
       node_id: node.authored_id,
       compiled_id: node.compiled_id,
       message: `Node "${node.authored_id}" has no explicit goal.`,
@@ -480,15 +480,6 @@ function reviewSupervision(
     });
   }
 
-  if (supervision.profile === undefined) {
-    pushFinding(findings, {
-      severity: "info",
-      category: "supervision",
-      path: "$.supervision.profile",
-      message: "Supervisor profile is not set.",
-      recommendation: "Set supervision.profile when supervisor calls should use a different harness/model profile than the failed node."
-    });
-  }
 }
 
 function buildArtifactHandoffs(graph: CompiledGraph): GraphReviewArtifactHandoff[] {

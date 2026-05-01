@@ -189,7 +189,11 @@ describe("graph CLI", () => {
                 type: "agent",
                 id: "implement",
                 repo: "main",
-                goal: "Implement the requested change."
+                intent: {
+                  goal: "Implement the requested change.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
               }
             ]
           }
@@ -638,7 +642,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
                 type: "agent",
                 id: "implement",
                 repo: "main",
-                goal: "Implement the change."
+                intent: {
+                  goal: "Implement the change.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
               }
             ]
           }
@@ -925,7 +933,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
                 type: "agent",
                 id: "inspect",
                 repo: "main",
-                goal: "Use the fixture inspect tool.",
+                intent: {
+                  goal: "Use the fixture inspect tool.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
                 tools: [
                   {
                     from_plugin: "fixture",
@@ -1442,7 +1454,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
                       type: "checkpoint",
                       id: "review",
                       repo: "main",
-                      goal: "Review the artifact.",
+                      intent: {
+                        goal: "Review the artifact.",
+                        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                        constraints: []
+                      },
                       review_from: {
                         node: "draft",
                         artifact: "draft_spec"
@@ -2438,7 +2454,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     }
   });
 
-  it("surfaces missing authored launch settings from the graph itself", async () => {
+  it("surfaces unknown authored launch profiles from the graph itself", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-launch-settings-"));
     const graphPath = join(tempRoot, "invalid-launch.graph.json");
     await writeFile(
@@ -2454,19 +2470,32 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
             }
           },
           defaults: {
+            launch_profile: "missing",
             workspace_backend: "inplace"
           },
           profiles: {
-            review: {}
+            review: {},
+            supervisor: {
+              harness: "codex-cli",
+              sandbox: "read-only"
+            }
+          },
+          supervision: {
+            profile: "supervisor",
+            max_total_interventions: 3
           },
           graph: {
             type: "sequence",
             id: "root",
             steps: [
               {
-                type: "exec",
-                id: "noop",
-                command: "placeholder"
+                type: "agent",
+                id: "implement",
+                intent: {
+                  goal: "Implement the requested change.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                }
               }
             ]
           }
@@ -2481,13 +2510,12 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
 
     expect(invalidValidate.exitCode).toBe(1);
     expect(invalidValidatePayload.command).toBe("validate");
-    expect(invalidValidatePayload.message).toContain("Launch settings could not be resolved from the graph");
-    expect(invalidValidatePayload.available_profiles).toContain("review");
-    expect(invalidValidatePayload.supported_workspace_backends).toContain("worktree");
+    expect(invalidValidatePayload.message).toContain("Graph could not be loaded or normalized from --graph");
     expect(invalidValidatePayload.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          message: expect.stringContaining("No launch profile could be resolved")
+          path: "$.defaults.launch_profile",
+          message: expect.stringContaining('defaults.launch_profile references unknown profile "missing"')
         })
       ])
     );

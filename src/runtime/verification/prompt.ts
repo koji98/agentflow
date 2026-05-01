@@ -254,10 +254,10 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
       input.attempt.iteration_index !== undefined ? `, iteration ${input.attempt.iteration_index}` : ""
     })`,
     "",
-    `Goal: ${input.node_goal.length > 0 ? input.node_goal : "(no node goal authored)"}`,
+    `Goal: ${input.node_goal.length > 0 ? input.node_goal : "(no node intent goal authored)"}`,
     "",
     "Acceptance criteria:",
-    ...bullets(input.node_acceptance_criteria, "No node-level acceptance criteria were authored."),
+    ...bullets(input.node_acceptance_criteria, "No node intent acceptance criteria were authored."),
     "",
     "Constraints:",
     ...bullets(input.node_constraints, "No node-level constraints were authored."),

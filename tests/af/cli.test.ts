@@ -248,9 +248,11 @@ describe("af runtime CLI", () => {
           compiled_id: "implement",
           authored_id: "implement",
           kind: "agent",
-          goal: "Implement the change.",
-          acceptance_criteria: ["The implementation satisfies downstream validation."],
-          constraints: [],
+          intent: {
+            goal: "Implement the change.",
+            acceptance_criteria: ["The implementation satisfies downstream validation."],
+            constraints: []
+          },
           repo: "main",
           deps: [],
           scope_stack: ["root"],
@@ -270,9 +272,11 @@ describe("af runtime CLI", () => {
           authored_id: "validate",
           kind: "check",
           check_kind: "deterministic",
-          goal: "Validate implementation behavior.",
-          acceptance_criteria: ["The focused validation command exits successfully."],
-          constraints: [],
+          intent: {
+            goal: "Validate implementation behavior.",
+            acceptance_criteria: ["The focused validation command exits successfully."],
+            constraints: []
+          },
           repo: "main",
           deps: ["implement"],
           scope_stack: ["root"],

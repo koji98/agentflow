@@ -1011,8 +1011,7 @@ async function commandDiagnose(
                 compiled_id: coneNode.compiled_id,
                 authored_id: coneNode.authored_id,
                 kind: coneNode.kind,
-                goal: coneNode.goal,
-                acceptance_criteria: coneNode.acceptance_criteria,
+                intent: coneNode.intent,
                 status: state?.node_statuses?.[compiledId] ?? "unknown"
               }
             : { compiled_id: compiledId };
@@ -1092,9 +1091,7 @@ async function commandDiagnose(
           compiled_id: node.compiled_id,
           authored_id: node.authored_id,
           kind: node.kind,
-          goal: node.goal,
-          acceptance_criteria: node.acceptance_criteria,
-          constraints: node.constraints
+          intent: node.intent
         },
         validation:
           node.kind === "check"

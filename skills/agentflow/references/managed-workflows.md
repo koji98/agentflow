@@ -6,7 +6,7 @@ Use a managed pattern when the operator wants a known lifecycle with standard pu
 
 ## Shared Rules
 
-- Managed patterns use normal node fields: `goal`, `acceptance_criteria`, `constraints`, `context`, and `artifacts`.
+- Managed patterns use normal node fields: `intent`, `context`, and `artifacts`.
 - Default public artifacts are `summary` and `packet`; authored artifacts merge with those defaults.
 - Downstream nodes reference artifacts from the public authored pattern id.
 - Never depend on generated internal ids from the compiled graph.
@@ -32,10 +32,13 @@ Use when the task is “go learn enough and report back.”
 {
   "type": "pattern_deep_research",
   "id": "checkout_research",
-  "goal": "Recommend whether the checkout timeout implementation is ready to ship.",
-  "acceptance_criteria": [
-    "The recommendation covers architecture fit, correctness risk, and rollout risk."
-  ],
+  "intent": {
+    "goal": "Recommend whether the checkout timeout implementation is ready to ship.",
+    "acceptance_criteria": [
+      "The recommendation covers architecture fit, correctness risk, and rollout risk."
+    ],
+    "constraints": []
+  },
   "research": {
     "angles": [
       "Investigate whether the implementation follows existing checkout architecture.",
@@ -63,11 +66,14 @@ Use when the task is “work, validate, critique, and fix until done.”
 {
   "type": "pattern_deep_work",
   "id": "checkout_timeout_impl",
-  "goal": "Implement a typed checkout timeout path and publish validation evidence.",
-  "acceptance_criteria": [
-    "Focused checkout tests pass.",
-    "The final summary explains changes, validation, and residual risks."
-  ],
+  "intent": {
+    "goal": "Implement a typed checkout timeout path and publish validation evidence.",
+    "acceptance_criteria": [
+      "Focused checkout tests pass.",
+      "The final summary explains changes, validation, and residual risks."
+    ],
+    "constraints": []
+  },
   "completion": {
     "max_cycles": 3,
     "pass_threshold": 0.85,

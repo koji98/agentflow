@@ -8,9 +8,7 @@ Use a managed pattern when the operator wants a known lifecycle with inspectable
 
 Managed nodes use regular node fields:
 
-- `goal`
-- `acceptance_criteria`
-- `constraints`
+- `intent`
 - `context`
 - `artifacts`
 - normal runtime fields such as `repo`, `profile`, `timeout_sec`, `sandbox`, `model`, `reasoning_effort`, `artifact_repair`, and `tools`

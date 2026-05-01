@@ -159,7 +159,11 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            goal: "Draft something."
+            intent: {
+              goal: "Draft something.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -190,7 +194,11 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "watch",
-            goal: "Watch the PR."
+            intent: {
+              goal: "Watch the PR.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -236,12 +244,20 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            goal: "Draft."
+            intent: {
+              goal: "Draft.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           },
           {
             type: "agent",
             id: "refine",
-            goal: "Refine.",
+            intent: {
+              goal: "Refine.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             tools: [
               {
                 from_plugin: "babysit",
@@ -292,7 +308,11 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "use_tool", goal: "Use tool." }]
+        steps: [{ type: "agent", id: "use_tool", intent: {
+          goal: "Use tool.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        }, }]
       }
     };
 
@@ -363,7 +383,11 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "watch", goal: "Watch the PR." }]
+        steps: [{ type: "agent", id: "watch", intent: {
+          goal: "Watch the PR.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        }, }]
       }
     };
 
@@ -407,7 +431,11 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "inspect", goal: "Inspect only." }]
+        steps: [{ type: "agent", id: "inspect", intent: {
+          goal: "Inspect only.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        }, }]
       }
     };
 
@@ -433,7 +461,11 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "use_tool", goal: "Use tool." }]
+        steps: [{ type: "agent", id: "use_tool", intent: {
+          goal: "Use tool.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        }, }]
       }
     };
 
@@ -466,7 +498,11 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            goal: "Draft.",
+            intent: {
+              goal: "Draft.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             tools: [
               {
                 from_plugin: "babysit",
@@ -506,7 +542,11 @@ describe("plugin tool compilation", () => {
         type: "sequence",
         id: "root",
         steps: [
-          { type: "agent", id: "draft", goal: "Draft." }
+          { type: "agent", id: "draft", intent: {
+            goal: "Draft.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          }, }
         ]
       }
     };
@@ -539,7 +579,11 @@ describe("plugin tool compilation", () => {
         type: "sequence",
         id: "root",
         steps: [
-          { type: "agent", id: "draft", goal: "Draft." }
+          { type: "agent", id: "draft", intent: {
+            goal: "Draft.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          }, }
         ]
       }
     };
@@ -1077,7 +1121,11 @@ describe("end-to-end runtime tool wiring", () => {
             {
               type: "agent",
               id: "use_tool",
-              goal: "Run babysit-poll --pr 42 to check the PR."
+              intent: {
+                goal: "Run babysit-poll --pr 42 to check the PR.",
+                acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                constraints: []
+              },
             }
           ]
         }
@@ -1249,7 +1297,11 @@ describe("end-to-end runtime tool wiring", () => {
             {
               type: "agent",
               id: "demo",
-              goal: "Use babysit-poll."
+              intent: {
+                goal: "Use babysit-poll.",
+                acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                constraints: []
+              },
             }
           ]
         }

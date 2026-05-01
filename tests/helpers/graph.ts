@@ -12,11 +12,15 @@ export function withNodeIntentDefaults<TDocument extends AuthoredGraphDocument |
     const record = node as Record<string, unknown>;
     const type = String(record.type ?? "");
     if (["agent", "exec", "check", "checkpoint", "pattern_deep_research", "pattern_deep_work"].includes(type)) {
-      record.goal ??= `Complete node ${String(record.id ?? "unknown")} according to its runtime contract.`;
-      record.acceptance_criteria ??= [
+      const intent = (record.intent && typeof record.intent === "object" && !Array.isArray(record.intent))
+        ? record.intent as Record<string, unknown>
+        : {};
+      intent.goal ??= `Complete node ${String(record.id ?? "unknown")} according to its runtime contract.`;
+      intent.acceptance_criteria ??= [
         `Node ${String(record.id ?? "unknown")} satisfies its declared runtime behavior and artifact contract.`
       ];
-      record.constraints ??= [];
+      intent.constraints ??= [];
+      record.intent = intent;
     }
     if (Array.isArray(record.steps)) {
       record.steps.forEach(visit);
@@ -30,7 +34,24 @@ export function withNodeIntentDefaults<TDocument extends AuthoredGraphDocument |
   }
 
   if (clone && typeof clone === "object" && "graph" in (clone as Record<string, unknown>)) {
-    visit((clone as Record<string, unknown>).graph);
+    const document = clone as Record<string, unknown>;
+    const profiles =
+      document.profiles && typeof document.profiles === "object" && !Array.isArray(document.profiles)
+        ? document.profiles as Record<string, unknown>
+        : {};
+    profiles.default ??= { harness: "codex-cli" };
+    profiles.supervisor ??= { harness: "codex-cli", sandbox: "read-only" };
+    document.profiles = profiles;
+    document.supervision ??= { profile: "supervisor", max_total_interventions: 3 };
+    if (
+      document.supervision &&
+      typeof document.supervision === "object" &&
+      !Array.isArray(document.supervision) &&
+      !("profile" in document.supervision)
+    ) {
+      (document.supervision as Record<string, unknown>).profile = "supervisor";
+    }
+    visit(document.graph);
   }
   return clone;
 }

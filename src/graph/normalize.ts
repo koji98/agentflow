@@ -16,6 +16,7 @@ import type {
   DeterministicPassIf,
   EnvPrerequisite,
   ExecNode,
+  ExecutableNodeIntent,
   ExecutableGraphNode,
   FilePrerequisite,
   GraphPrerequisiteCheck,
@@ -99,6 +100,7 @@ const checkpointOperatorFeedbackArtifact: ArtifactDefinition = {
 };
 
 export const defaultSupervisionPolicy: SupervisionPolicy = {
+  profile: "supervisor",
   max_total_interventions: 3
 };
 
@@ -804,22 +806,78 @@ function normalizeGraphIntent(
   };
 }
 
+function normalizeExecutableNodeIntent(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ExecutableNodeIntent | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "Executable nodes require intent."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["goal", "constraints", "acceptance_criteria"],
+    diagnostics
+  );
+
+  const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
+  const acceptance_criteria = readStringArray(
+    record.acceptance_criteria,
+    `${path}.acceptance_criteria`,
+    diagnostics
+  );
+  if (record.acceptance_criteria === undefined) {
+    diagnostics.push({
+      path: `${path}.acceptance_criteria`,
+      message: "Executable node intent requires acceptance_criteria."
+    });
+  } else if (acceptance_criteria && acceptance_criteria.length === 0) {
+    diagnostics.push({
+      path: `${path}.acceptance_criteria`,
+      message: "Executable node intent requires at least one acceptance_criteria entry."
+    });
+  }
+  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics) ?? [];
+
+  if (!goal || !acceptance_criteria || acceptance_criteria.length === 0) {
+    return undefined;
+  }
+
+  return {
+    goal,
+    acceptance_criteria,
+    constraints
+  };
+}
+
 function normalizeSupervisionPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SupervisionPolicy {
+): SupervisionPolicy | undefined {
   if (value === undefined) {
-    return { ...defaultSupervisionPolicy };
+    diagnostics.push({
+      path: `${path}.profile`,
+      message: "supervision.profile is required."
+    });
+    return undefined;
   }
 
   const record = asRecord(value);
   if (!record) {
     diagnostics.push({
       path,
-      message: "supervision must be an object when provided."
+      message: "supervision must be an object."
     });
-    return defaultSupervisionPolicy;
+    return undefined;
   }
 
   pushUnknownKeyDiagnostics(
@@ -836,10 +894,14 @@ function normalizeSupervisionPolicy(
       diagnostics,
       { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
     ) ?? defaultSupervisionPolicy.max_total_interventions;
-  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
+  const profile = readRequiredString(record.profile, `${path}.profile`, diagnostics);
+
+  if (!profile) {
+    return undefined;
+  }
 
   return {
-    ...(profile ? { profile } : {}),
+    profile,
     max_total_interventions
   };
 }
@@ -1317,24 +1379,7 @@ function normalizeExecutableBase(
   const label = readOptionalString(record.label, `${path}.label`, diagnostics);
   const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
   const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
-  const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
-  const acceptance_criteria = readStringArray(
-    record.acceptance_criteria,
-    `${path}.acceptance_criteria`,
-    diagnostics
-  );
-  if (record.acceptance_criteria === undefined) {
-    diagnostics.push({
-      path: `${path}.acceptance_criteria`,
-      message: "Executable nodes require acceptance_criteria."
-    });
-  } else if (acceptance_criteria && acceptance_criteria.length === 0) {
-    diagnostics.push({
-      path: `${path}.acceptance_criteria`,
-      message: "Executable nodes require at least one acceptance_criteria entry."
-    });
-  }
-  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics) ?? [];
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
   const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
   const artifacts = allow_artifacts
     ? normalizeArtifacts(record.artifacts, `${path}.artifacts`, diagnostics)
@@ -1348,7 +1393,7 @@ function normalizeExecutableBase(
     });
   }
 
-  if (!id || !goal || !acceptance_criteria || acceptance_criteria.length === 0) {
+  if (!id || !intent) {
     return undefined;
   }
 
@@ -1357,9 +1402,7 @@ function normalizeExecutableBase(
     ...(label ? { label } : {}),
     ...(repo ? { repo } : {}),
     ...(profile ? { profile } : {}),
-    goal,
-    acceptance_criteria,
-    constraints,
+    intent,
     ...(context ? { context } : {}),
     ...(artifacts ? { artifacts } : {}),
     ...(timeout_sec !== undefined ? { timeout_sec } : {})
@@ -1445,9 +1488,7 @@ function normalizeAgentNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1476,14 +1517,7 @@ function normalizeAgentNode(
   );
   const tools = normalizeToolDeclarations(record.tools, `${path}.tools`, diagnostics);
 
-  if (base && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "Agent nodes require goal."
-    });
-  }
-
-  if (!base || !base.goal) {
+  if (!base) {
     return undefined;
   }
 
@@ -1512,9 +1546,7 @@ function normalizeExecNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1566,9 +1598,7 @@ function normalizeCheckNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1640,13 +1670,6 @@ function normalizeCheckNode(
     });
   }
 
-  if (check_kind === "ai" && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "AI checks require goal."
-    });
-  }
-
   return {
     type: "check",
     ...base,
@@ -1678,9 +1701,7 @@ function normalizeCheckpointNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1698,14 +1719,7 @@ function normalizeCheckpointNode(
     diagnostics
   );
 
-  if (base && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "Checkpoint nodes require goal."
-    });
-  }
-
-  if (!base || !base.goal || !review_from) {
+  if (!base || !review_from) {
     return undefined;
   }
 
@@ -1990,9 +2004,7 @@ function normalizePatternDeepResearchNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -2012,14 +2024,7 @@ function normalizePatternDeepResearchNode(
   const research = normalizePatternDeepResearchConfig(record.research, `${path}.research`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (base && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "Managed pattern nodes require goal."
-    });
-  }
-
-  if (!base || !base.goal || !research) {
+  if (!base || !research) {
     return undefined;
   }
 
@@ -2032,7 +2037,6 @@ function normalizePatternDeepResearchNode(
   return buildPatternDeepResearch({
     ...base,
     ...agentOptions,
-    goal: base.goal,
     research,
     runtime
   });
@@ -2250,9 +2254,7 @@ function normalizePatternDeepWorkNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -2281,14 +2283,7 @@ function normalizePatternDeepWorkNode(
   );
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (base && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "Managed pattern nodes require goal."
-    });
-  }
-
-  if (!base || !base.goal || !completion) {
+  if (!base || !completion) {
     return undefined;
   }
 
@@ -2301,7 +2296,6 @@ function normalizePatternDeepWorkNode(
   return buildPatternDeepWork({
     ...base,
     ...agentOptions,
-    goal: base.goal,
     completion,
     runtime
   });
@@ -2465,7 +2459,7 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     });
   }
 
-  if (supervision.profile && !(supervision.profile in profiles)) {
+  if (supervision && !(supervision.profile in profiles)) {
     diagnostics.push({
       path: "$.supervision.profile",
       message: `supervision.profile references unknown profile "${supervision.profile}".`
@@ -2527,7 +2521,7 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     resolveArtifactContextRefs(normalizedGraph, "$.graph", diagnostics);
   }
 
-  if (diagnostics.length > 0 || !graph_id || !intent || !normalizedGraph || Object.keys(repos).length === 0) {
+  if (diagnostics.length > 0 || !graph_id || !intent || !supervision || !normalizedGraph || Object.keys(repos).length === 0) {
     return {
       diagnostics,
       lowered_managed_nodes

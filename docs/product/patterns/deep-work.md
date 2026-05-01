@@ -10,13 +10,13 @@ Required fields:
 
 - `type`: `"pattern_deep_work"`
 - `id`
-- `goal`
+- `intent.goal`
+- `intent.acceptance_criteria`
 - `completion.criteria`
 
 Common fields:
 
-- `acceptance_criteria`
-- `constraints`
+- `intent.constraints`
 - `repo`
 - `profile`
 - `context`
@@ -66,16 +66,18 @@ The completion criteria panel is not the first validation attempt. The generate-
   "id": "checkout_timeout_impl",
   "repo": "main",
   "profile": "default",
-  "goal": "Implement a typed checkout timeout path and publish validation evidence.",
-  "acceptance_criteria": [
-    "Focused checkout tests pass.",
-    "The implementation follows existing error-handling conventions.",
-    "The final handoff documents validation and residual risk."
-  ],
-  "constraints": [
-    "Do not change public API names.",
-    "Do not edit lockfiles."
-  ],
+  "intent": {
+    "goal": "Implement a typed checkout timeout path and publish validation evidence.",
+    "acceptance_criteria": [
+      "Focused checkout tests pass.",
+      "The implementation follows existing error-handling conventions.",
+      "The final handoff documents validation and residual risk."
+    ],
+    "constraints": [
+      "Do not change public API names.",
+      "Do not edit lockfiles."
+    ]
+  },
   "context": [
     {
       "name": "task",

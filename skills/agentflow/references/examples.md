@@ -53,6 +53,11 @@ Use this as the default copy source for focused implementation work.
         "max_total_tokens": 128000,
         "max_tokens_per_item": 32000
       }
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only",
+      "timeout_sec": 900
     }
   },
   "graph": {
@@ -64,12 +69,15 @@ Use this as the default copy source for focused implementation work.
         "id": "implement_timeout",
         "repo": "main",
         "profile": "default",
-        "goal": "Implement the timeout fix and publish a reviewable handoff.",
-        "acceptance_criteria": [
-          "The implementation is scoped to checkout timeout behavior.",
-          "A focused validation command is run or a concrete blocker is documented.",
-          "The handoff includes changed files, validation, and risks."
-        ],
+        "intent": {
+          "goal": "Implement the timeout fix and publish a reviewable handoff.",
+          "acceptance_criteria": [
+            "The implementation is scoped to checkout timeout behavior.",
+            "A focused validation command is run or a concrete blocker is documented.",
+            "The handoff includes changed files, validation, and risks."
+          ],
+          "constraints": []
+        },
         "context": [
           {
             "name": "task",
@@ -93,18 +101,26 @@ Use this as the default copy source for focused implementation work.
       {
         "type": "check",
         "id": "focused_tests",
-        "goal": "Run the focused checkout tests for the implemented timeout change.",
-        "acceptance_criteria": [
-          "The focused checkout test command exits successfully.",
-          "The command output can be cited as validation evidence."
-        ],
+        "intent": {
+          "goal": "Run the focused checkout tests for the implemented timeout change.",
+          "acceptance_criteria": [
+            "The focused checkout test command exits successfully.",
+            "The command output can be cited as validation evidence."
+          ],
+          "constraints": []
+        },
         "check_kind": "deterministic",
         "command": "npm",
-        "args": ["test", "--", "tests/checkout"]
+        "args": [
+          "test",
+          "--",
+          "tests/checkout"
+        ]
       }
     ]
   },
   "supervision": {
+    "profile": "supervisor",
     "max_total_interventions": 4
   }
 }
@@ -126,8 +142,13 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
     {
       "type": "agent",
       "id": "design",
-      "goal": "Design the scoped change and publish an implementation-ready brief.",
-      "acceptance_criteria": ["The design names scope, file plan, validation plan, and risks."],
+      "intent": {
+        "goal": "Design the scoped change and publish an implementation-ready brief.",
+        "acceptance_criteria": [
+          "The design names scope, file plan, validation plan, and risks."
+        ],
+        "constraints": []
+      },
       "artifacts": {
         "design_brief": {
           "from": "output_dir",
@@ -139,9 +160,20 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
     {
       "type": "agent",
       "id": "implement",
-      "goal": "Implement the accepted design and publish a change summary.",
-      "acceptance_criteria": ["The implementation follows the design brief.", "Validation evidence or blockers are recorded."],
-      "context": [{ "ref": "design.design_brief", "name": "design_brief" }],
+      "intent": {
+        "goal": "Implement the accepted design and publish a change summary.",
+        "acceptance_criteria": [
+          "The implementation follows the design brief.",
+          "Validation evidence or blockers are recorded."
+        ],
+        "constraints": []
+      },
+      "context": [
+        {
+          "ref": "design.design_brief",
+          "name": "design_brief"
+        }
+      ],
       "artifacts": {
         "change_summary": {
           "from": "output_dir",
@@ -153,14 +185,21 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
     {
       "type": "check",
       "id": "pre_review_tests",
-      "goal": "Run focused tests before parallel review begins.",
-      "acceptance_criteria": [
-        "The focused test command exits successfully.",
-        "The check evidence is available to reviewer nodes."
-      ],
+      "intent": {
+        "goal": "Run focused tests before parallel review begins.",
+        "acceptance_criteria": [
+          "The focused test command exits successfully.",
+          "The check evidence is available to reviewer nodes."
+        ],
+        "constraints": []
+      },
       "check_kind": "deterministic",
       "command": "npm",
-      "args": ["test", "--", "tests/focused"]
+      "args": [
+        "test",
+        "--",
+        "tests/focused"
+      ]
     },
     {
       "type": "parallel",
@@ -169,8 +208,19 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
         {
           "type": "agent",
           "id": "review_correctness",
-          "goal": "Review correctness risks and publish findings.",
-          "context": [{ "ref": "implement.change_summary", "name": "change_summary" }],
+          "intent": {
+            "goal": "Review correctness risks and publish findings.",
+            "acceptance_criteria": [
+              "The node satisfies its acceptance criteria."
+            ],
+            "constraints": []
+          },
+          "context": [
+            {
+              "ref": "implement.change_summary",
+              "name": "change_summary"
+            }
+          ],
           "artifacts": {
             "correctness_review": {
               "from": "output_dir",
@@ -182,8 +232,19 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
         {
           "type": "agent",
           "id": "review_tests",
-          "goal": "Review test and regression risk and publish findings.",
-          "context": [{ "ref": "implement.change_summary", "name": "change_summary" }],
+          "intent": {
+            "goal": "Review test and regression risk and publish findings.",
+            "acceptance_criteria": [
+              "The node satisfies its acceptance criteria."
+            ],
+            "constraints": []
+          },
+          "context": [
+            {
+              "ref": "implement.change_summary",
+              "name": "change_summary"
+            }
+          ],
           "artifacts": {
             "test_review": {
               "from": "output_dir",
@@ -195,8 +256,19 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
         {
           "type": "agent",
           "id": "review_maintainability",
-          "goal": "Review maintainability and simplicity and publish findings.",
-          "context": [{ "ref": "implement.change_summary", "name": "change_summary" }],
+          "intent": {
+            "goal": "Review maintainability and simplicity and publish findings.",
+            "acceptance_criteria": [
+              "The node satisfies its acceptance criteria."
+            ],
+            "constraints": []
+          },
+          "context": [
+            {
+              "ref": "implement.change_summary",
+              "name": "change_summary"
+            }
+          ],
           "artifacts": {
             "maintainability_review": {
               "from": "output_dir",
@@ -210,11 +282,26 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
     {
       "type": "agent",
       "id": "refine",
-      "goal": "Refine the implementation using all reviewer artifacts and publish the final handoff.",
+      "intent": {
+        "goal": "Refine the implementation using all reviewer artifacts and publish the final handoff.",
+        "acceptance_criteria": [
+          "The node satisfies its acceptance criteria."
+        ],
+        "constraints": []
+      },
       "context": [
-        { "ref": "review_correctness.correctness_review", "name": "correctness_review" },
-        { "ref": "review_tests.test_review", "name": "test_review" },
-        { "ref": "review_maintainability.maintainability_review", "name": "maintainability_review" }
+        {
+          "ref": "review_correctness.correctness_review",
+          "name": "correctness_review"
+        },
+        {
+          "ref": "review_tests.test_review",
+          "name": "test_review"
+        },
+        {
+          "ref": "review_maintainability.maintainability_review",
+          "name": "maintainability_review"
+        }
       ],
       "artifacts": {
         "final_handoff": {
@@ -227,14 +314,21 @@ Use for the common `design -> implement -> validate -> parallel reviewers -> ref
     {
       "type": "check",
       "id": "final_tests",
-      "goal": "Run focused tests after reviewer-driven refinement.",
-      "acceptance_criteria": [
-        "The focused test command exits successfully.",
-        "The final handoff can cite the check as validation evidence."
-      ],
+      "intent": {
+        "goal": "Run focused tests after reviewer-driven refinement.",
+        "acceptance_criteria": [
+          "The focused test command exits successfully.",
+          "The final handoff can cite the check as validation evidence."
+        ],
+        "constraints": []
+      },
       "check_kind": "deterministic",
       "command": "npm",
-      "args": ["test", "--", "tests/focused"]
+      "args": [
+        "test",
+        "--",
+        "tests/focused"
+      ]
     }
   ]
 }
@@ -249,11 +343,14 @@ Use this when later nodes need explicit evidence about device-local commands or 
   "type": "exec",
   "id": "tool_inventory",
   "repo": "main",
-  "goal": "Inventory useful local commands and package scripts for later nodes.",
-  "acceptance_criteria": [
-    "The command exits successfully.",
-    "Stdout lists available common CLIs and package scripts."
-  ],
+  "intent": {
+    "goal": "Inventory useful local commands and package scripts for later nodes.",
+    "acceptance_criteria": [
+      "The command exits successfully.",
+      "Stdout lists available common CLIs and package scripts."
+    ],
+    "constraints": []
+  },
   "command": "bash",
   "args": [
     "-lc",
@@ -278,10 +375,26 @@ Use the same graph and switch launch profiles:
 ```json
 {
   "profiles": {
-    "codex": { "harness": "codex-cli", "sandbox": "workspace-write" },
-    "cursor": { "harness": "cursor-cli", "sandbox": "workspace-write" }
+    "codex": {
+      "harness": "codex-cli",
+      "sandbox": "workspace-write"
+    },
+    "cursor": {
+      "harness": "cursor-cli",
+      "sandbox": "workspace-write"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
   },
-  "defaults": { "launch_profile": "codex" }
+  "defaults": {
+    "launch_profile": "codex"
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
+  }
 }
 ```
 

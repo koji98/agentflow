@@ -22,7 +22,7 @@ Use when several independent PRs need the same foundation.
 
 Authoring notes:
 
-- Make branch ownership explicit in node `constraints`.
+- Make branch ownership explicit in node `intent.constraints`.
 - Require each branch to publish changed files, validation, risks, and intended base/head branch.
 - Use deterministic checks per branch when possible.
 - Include a final node that explains merge order and cross-PR risk.

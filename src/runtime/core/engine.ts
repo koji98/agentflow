@@ -1906,11 +1906,11 @@ async function defaultCheckExecutor(
     aiCheckPromptTokens
   );
   const renderedNodeAcceptanceCriteria = substituteOptionalTextArray(
-    context.node.acceptance_criteria,
+    context.node.intent.acceptance_criteria,
     aiCheckPromptTokens
   );
   const renderedNodeConstraints = substituteOptionalTextArray(
-    context.node.constraints,
+    context.node.intent.constraints,
     aiCheckPromptTokens
   );
 
@@ -1930,7 +1930,7 @@ async function defaultCheckExecutor(
     graph_goal: substituteAgentflowTokens(context.graph_intent.goal, aiCheckPromptTokens),
     ...(renderedGraphAcceptanceCriteria ? { graph_acceptance_criteria: renderedGraphAcceptanceCriteria } : {}),
     ...(renderedGraphConstraints ? { graph_constraints: renderedGraphConstraints } : {}),
-    ...(context.node.goal ? { node_goal: substituteAgentflowTokens(context.node.goal, aiCheckPromptTokens) } : {}),
+    ...(context.node.intent.goal ? { node_goal: substituteAgentflowTokens(context.node.intent.goal, aiCheckPromptTokens) } : {}),
     ...(renderedNodeAcceptanceCriteria ? { node_acceptance_criteria: renderedNodeAcceptanceCriteria } : {}),
     ...(renderedNodeConstraints ? { node_constraints: renderedNodeConstraints } : {}),
     context_packet_path: context.context_packet_path,
@@ -2110,8 +2110,8 @@ async function defaultAgentExecutor(
     promptTokens
   );
   const agentGraphConstraints = substituteOptionalTextArray(context.graph_intent.constraints, promptTokens);
-  const agentNodeAcceptanceCriteria = substituteOptionalTextArray(context.node.acceptance_criteria, promptTokens);
-  const agentNodeConstraints = substituteOptionalTextArray(context.node.constraints, promptTokens);
+  const agentNodeAcceptanceCriteria = substituteOptionalTextArray(context.node.intent.acceptance_criteria, promptTokens);
+  const agentNodeConstraints = substituteOptionalTextArray(context.node.intent.constraints, promptTokens);
   const promptPath = join(context.execution_dir, "prompt.md");
   context.attempt.prompt_path = promptPath;
   const agentInvocation: AgentInvocation = {
@@ -2131,7 +2131,7 @@ async function defaultAgentExecutor(
     graphGoal: substituteAgentflowTokens(context.graph_intent.goal, promptTokens),
     ...(agentGraphAcceptanceCriteria ? { graphAcceptanceCriteria: agentGraphAcceptanceCriteria } : {}),
     ...(agentGraphConstraints ? { graphConstraints: agentGraphConstraints } : {}),
-    ...(context.node.goal ? { nodeGoal: substituteAgentflowTokens(context.node.goal, promptTokens) } : {}),
+    ...(context.node.intent.goal ? { nodeGoal: substituteAgentflowTokens(context.node.intent.goal, promptTokens) } : {}),
     ...(agentNodeAcceptanceCriteria ? { nodeAcceptanceCriteria: agentNodeAcceptanceCriteria } : {}),
     ...(agentNodeConstraints ? { nodeConstraints: agentNodeConstraints } : {}),
     contextPacketPath: context.context_packet_path,
@@ -2430,7 +2430,7 @@ async function synthesizeMissingArtifactsFromAgentResponse(options: {
         "",
         "## Node Task",
         "",
-        options.node.goal,
+        options.node.intent.goal,
         "",
         "## Recovered Artifacts",
         formatMissingArtifactList(options.missingArtifacts)

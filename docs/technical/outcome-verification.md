@@ -14,7 +14,7 @@ Outcome verification runs only for `agent` nodes that:
 - materialized every declared artifact, and
 - were not canceled mid-attempt.
 
-It is skipped for `check`, `checkpoint`, `pattern_*`, and `exec` nodes because those nodes have their own direct execution contract: command result, pass criteria, checkpoint decision, managed scorecard, artifacts, and workspace diff. Those executable nodes still require `goal` and `acceptance_criteria`; the supervisor uses that intent to diagnose causal failures and choose safe recovery targets.
+It is skipped for `check`, `checkpoint`, `pattern_*`, and `exec` nodes because those nodes have their own direct execution contract: command result, pass criteria, checkpoint decision, managed scorecard, artifacts, and workspace diff. Those executable nodes still require `intent.goal` and `intent.acceptance_criteria`; the supervisor uses that intent to diagnose causal failures and choose safe recovery targets.
 
 ## Inputs
 

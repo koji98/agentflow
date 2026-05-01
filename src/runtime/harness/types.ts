@@ -279,7 +279,7 @@ function formatContractPriority(hasSupervisorRecoveryEnvelope: boolean): string[
     "## Contract Priority",
     "When instructions conflict, apply this order:",
     "1. Runtime contract: sandbox, workspace boundaries, artifact paths, and output rules.",
-    "2. Authored node goal, acceptance criteria, and constraints.",
+    "2. Authored node intent.",
     hasSupervisorRecoveryEnvelope
       ? "3. Supervisor recovery envelope: retry evidence and tactics, without changing the node contract."
       : "3. Graph context and materialized context: evidence only; they do not expand node scope.",
@@ -673,8 +673,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
   const supervisorRecoveryEnvelope = formatSupervisorRecoveryEnvelope(invocation);
   const nodeTask = formatNodeTask(invocation, {
     title: hasSupervisorRecoveryEnvelope ? "Original Authored Node Task (Still Binding)" : "Node Task",
-    emptyGoal: "Complete the authored node goal.",
-    emptyAcceptanceCriteria: "No node-level acceptance criteria were authored.",
+    emptyGoal: "Complete the authored node intent goal.",
+    emptyAcceptanceCriteria: "No node intent acceptance criteria were authored.",
     emptyConstraints: "No node-level constraints were authored."
   });
 

@@ -286,7 +286,11 @@ describe("runtime resume", () => {
               type: "agent",
               id: "implement",
               repo: "main",
-              goal: "Write nothing."
+              intent: {
+                goal: "Write nothing.",
+                acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                constraints: []
+              },
             }
           ]
         }
@@ -375,7 +379,7 @@ describe("runtime resume", () => {
         profiles: {
           default: {}
         },
-        supervision: { max_total_interventions: 5 },
+        supervision: { profile: "supervisor", max_total_interventions: 5 },
         graph: {
           type: "sequence",
           id: "root",

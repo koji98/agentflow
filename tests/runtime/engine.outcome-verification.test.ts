@@ -103,8 +103,11 @@ function makeAgentGraph(graphId: string, agentNodeId = "implement") {
         {
           type: "agent",
           id: agentNodeId,
-          goal: "Implement the change such that the verifier passes.",
-          acceptance_criteria: ["The implementation actually does the work."]
+          intent: {
+            goal: "Implement the change such that the verifier passes.",
+            acceptance_criteria: ["The implementation actually does the work."],
+            constraints: []
+          },
         }
       ]
     }
@@ -224,7 +227,11 @@ describe("runtime engine outcome verification", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Write evidence for the verifier."
+            intent: {
+              goal: "Write evidence for the verifier.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -290,8 +297,11 @@ describe("runtime engine outcome verification", () => {
           {
             type: "agent",
             id: "publish_pr",
-            goal: "Publish a PR-style handoff.",
-            acceptance_criteria: ["The decision log records the branch decision."],
+            intent: {
+              goal: "Publish a PR-style handoff.",
+              acceptance_criteria: ["The decision log records the branch decision."],
+              constraints: []
+            },
             artifacts: {
               pr_handoff: {
                 from: "output_dir",

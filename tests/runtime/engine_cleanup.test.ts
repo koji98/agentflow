@@ -55,7 +55,7 @@ function buildGraphWithCleanup(
     version: "1",
     graph_id: "cleanup-test",
     intent: TEST_INTENT,
-    supervision: { max_total_interventions: 0 },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     repos: {
       main: {
         path: "."

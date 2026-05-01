@@ -265,7 +265,7 @@ function patchGuidance(kind: SupervisorEvidenceGatherKind, caseFile: SupervisorC
     default:
       return [
         "Read the supervisor case file and evidence patches before retrying.",
-        "Preserve the original node goal, acceptance criteria, constraints, sandbox, repo authority, and declared artifacts.",
+        "Preserve the original node intent, sandbox, repo authority, and declared artifacts.",
         ...promptGuidance
       ];
   }
@@ -1135,9 +1135,7 @@ export async function runSupervisorRecoveryCycle(options: {
     ...(options.attempt.prompt_sha256 ? { prompt_sha256: options.attempt.prompt_sha256 } : {}),
     ...(renderedPrompt ? { rendered_prompt: renderedPrompt } : {}),
     node_contract: {
-      ...(options.node.goal ? { goal: options.node.goal } : {}),
-      ...(options.node.acceptance_criteria ? { acceptance_criteria: options.node.acceptance_criteria } : {}),
-      ...(options.node.constraints ? { constraints: options.node.constraints } : {}),
+      intent: options.node.intent,
       declared_artifacts: options.node.declared_artifacts as Record<string, ArtifactDefinition>,
       sandbox: options.node.effective_policy.sandbox ?? "workspace-write",
       repo_alias: options.node.repo

@@ -22,6 +22,10 @@
         "max_total_tokens": 128000,
         "max_tokens_per_item": 32000
       }
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "graph": {
@@ -33,15 +37,6 @@
         "id": "managed_pattern_docs_update",
         "repo": "main",
         "profile": "default",
-        "goal": "Update managed-pattern documentation to explain deep research and deep work clearly.",
-        "acceptance_criteria": [
-          "Docs describe only the supported managed patterns.",
-          "The final summary documents validation evidence and residual risks."
-        ],
-        "constraints": [
-          "Do not change runtime source in this showcase.",
-          "Do not edit package manifests or lockfiles."
-        ],
         "context": [
           {
             "name": "managed_patterns_doc",
@@ -86,6 +81,17 @@
               "weight": 0.25
             }
           ]
+        },
+        "intent": {
+          "goal": "Update managed-pattern documentation to explain deep research and deep work clearly.",
+          "acceptance_criteria": [
+            "Docs describe only the supported managed patterns.",
+            "The final summary documents validation evidence and residual risks."
+          ],
+          "constraints": [
+            "Do not change runtime source in this showcase.",
+            "Do not edit package manifests or lockfiles."
+          ]
         }
       },
       {
@@ -93,11 +99,6 @@
         "id": "handoff",
         "repo": "main",
         "profile": "default",
-        "goal": "Summarize the deep work package for a human operator and mention the command to inspect the graph.",
-        "acceptance_criteria": [
-          "The handoff cites the managed deep work summary, packet, and validation log.",
-          "The handoff names validation evidence and residual risks."
-        ],
         "context": [
           {
             "ref": "managed_pattern_docs_update.summary",
@@ -118,6 +119,14 @@
             "path": "handoff.md",
             "description": "Operator-facing summary of the managed deep work result."
           }
+        },
+        "intent": {
+          "goal": "Summarize the deep work package for a human operator and mention the command to inspect the graph.",
+          "acceptance_criteria": [
+            "The handoff cites the managed deep work summary, packet, and validation log.",
+            "The handoff names validation evidence and residual risks."
+          ],
+          "constraints": []
         }
       }
     ]
@@ -132,6 +141,7 @@
     ]
   },
   "supervision": {
-    "max_total_interventions": 6
+    "max_total_interventions": 6,
+    "profile": "supervisor"
   }
 }

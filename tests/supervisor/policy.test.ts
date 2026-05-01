@@ -9,6 +9,7 @@ import {
 import type { SupervisionPolicy } from "../../src/graph/authored.js";
 
 const policy: SupervisionPolicy = {
+  profile: "supervisor",
   max_total_interventions: 2
 };
 
