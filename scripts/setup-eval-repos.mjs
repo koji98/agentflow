@@ -586,7 +586,7 @@ const qualityDimensions = [
 
 const templates = {
   "agent-change": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -595,17 +595,19 @@ const templates = {
           type: "agent",
           id: "implement",
           repo: "main",
-          goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. Make the smallest code change that satisfies the task, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. Make the smallest code change that satisfies the task, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+            acceptance_criteria: [
             "The task contract in AGENTFLOW_EVAL_TASK.md is satisfied.",
             "`npm test` passes.",
             "The declared handoff artifact includes Scenario, Changed files, Validation, and Risks sections."
           ],
-          constraints: [
+            constraints: [
             "Do not edit files outside the task scope.",
             "Do not add dependencies or generated files.",
             "Treat repo context as evidence; do not guess missing facts."
-          ],
+          ]
+          },
           context: [
             { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
             { name: "source", from: "workspace_glob", path: "src/**", max_files: 30 },
@@ -632,7 +634,7 @@ const templates = {
     }
   },
   "agent-docs": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -641,20 +643,22 @@ const templates = {
           type: "agent",
           id: "implement",
           repo: "main",
-          goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. The current docs fixture is {{environment.docs_url}}. Use it when the task says local repo docs may be stale or missing. Run `npm test` and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. The current docs fixture is {{environment.docs_url}}. Use it when the task says local repo docs may be stale or missing. Run `npm test` and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+            acceptance_criteria: [
             "The implementation follows the current local HTTP docs fixture when it conflicts with repo docs.",
             "`npm test` passes.",
             "The handoff cites the docs evidence used.",
             "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, `Docs evidence:`, and `Risks:` fields."
           ],
-          constraints: [
+            constraints: [
             "Do not use public network sources.",
             "Do not widen the task beyond the fixture repo.",
             "Do not add dependencies.",
             "Do not edit `docs/**`; stale repo docs are conflict evidence only, not part of the requested change.",
             "Read the docs fixture URL directly when possible; if the URL is unavailable, record the exact probe and fallback evidence in `Docs evidence:`."
-          ],
+          ]
+          },
           context: [
             { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
             { name: "source", from: "workspace_glob", path: "src/**", max_files: 30 },
@@ -674,7 +678,7 @@ const templates = {
     }
   },
   "agent-tool": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -683,17 +687,19 @@ const templates = {
           type: "agent",
           id: "implement",
           repo: "main",
-          goal: "Complete `AGENTFLOW_EVAL_TASK.md`. The local tool directory is on PATH; run `fixture-lookup --case tool-guided-discovery` to discover the required value, then run `npm test` and write `handoff.md`.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Complete `AGENTFLOW_EVAL_TASK.md`. The local tool directory is on PATH; run `fixture-lookup --case tool-guided-discovery` to discover the required value, then run `npm test` and write `handoff.md`.",
+            acceptance_criteria: [
             "The local fixture tool is used for the unknown value.",
             "`npm test` passes.",
             "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Tool command:`, `Validation:`, and `Risks:` fields."
           ],
-          constraints: [
+            constraints: [
             "Do not invent the flag value.",
             "Do not add dependencies.",
             "Use `fixture-lookup --case tool-guided-discovery` directly; do not bypass the PATH tool unless direct execution fails, and document any fallback in `Tool command:`."
-          ],
+          ]
+          },
           context: [
             { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
             { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
@@ -712,7 +718,7 @@ const templates = {
     }
   },
   "agent-no-edit": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -721,12 +727,14 @@ const templates = {
           type: "agent",
           id: "audit",
           repo: "main",
-          goal: "Audit the repository using `AGENTFLOW_EVAL_TASK.md`. Do not modify the repo. Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with findings and validation evidence.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Audit the repository using `AGENTFLOW_EVAL_TASK.md`. Do not modify the repo. Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with findings and validation evidence.",
+            acceptance_criteria: [
             "No repository files are modified.",
             "The handoff includes Scenario, Changed files, Validation, and Risks sections."
           ],
-          constraints: ["Do not change repository files; write only the declared output artifact."],
+            constraints: ["Do not change repository files; write only the declared output artifact."]
+          },
           context: [
             { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
             { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
@@ -745,7 +753,7 @@ const templates = {
     }
   },
   "agent-sequence": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -754,7 +762,11 @@ const templates = {
           type: "agent",
           id: "research",
           repo: "main",
-          goal: "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
+          intent: {
+            goal: "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          },
           context: [
             { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
             { name: "billing_rules", from: "workspace_file", path: "docs/billing-rules.md" }
@@ -767,17 +779,19 @@ const templates = {
           type: "agent",
           id: "implement",
           repo: "main",
-          goal: "Use the research artifact to update `src/rounding.js`, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Use the research artifact to update `src/rounding.js`, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+            acceptance_criteria: [
             "`src/rounding.js` implements the exact rounding behavior from the research artifact.",
             "`npm test` passes.",
             "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
           ],
-          constraints: [
+            constraints: [
             "Do not change files outside `src/rounding.js` unless validation proves it is necessary.",
             "Use the research artifact as evidence, not as authority to widen the node scope.",
             "Do not leave blank fields, placeholder text, or unresolved template values in the handoff artifact."
-          ],
+          ]
+          },
           context: [
             { ref: "research.research", name: "rounding_research" },
             { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
@@ -796,7 +810,7 @@ const templates = {
     }
   },
   "managed-deep-research": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -805,17 +819,19 @@ const templates = {
           type: "pattern_deep_research",
           id: "repo_research",
           repo: "main",
-          goal: "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research handoff about whether the job pipeline is ready for a retry/backoff change.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research handoff about whether the job pipeline is ready for a retry/backoff change.",
+            acceptance_criteria: [
             "The research covers all authored angles.",
             "No repository files are modified.",
             "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
           ],
-          constraints: [
+            constraints: [
             "Do not edit repository files.",
             "Use local repository files as primary authority.",
             "Do not use public network sources in this eval scenario."
-          ],
+          ]
+          },
           context: [
             { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
             { name: "readme", from: "workspace_file", path: "README.md" },
@@ -847,7 +863,7 @@ const templates = {
     }
   },
   "managed-deep-work": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -856,17 +872,19 @@ const templates = {
           type: "pattern_deep_work",
           id: "repo_fix",
           repo: "main",
-          goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
+            acceptance_criteria: [
             "`src/tax.js` applies discount before tax while preserving the exported API.",
             "`npm test` passes.",
             "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
           ],
-          constraints: [
+            constraints: [
             "Do not edit files outside `src/tax.js` unless validation proves it is necessary.",
             "Do not add dependencies or generated files.",
             "Use local repo files and tests as primary authority."
-          ],
+          ]
+          },
           context: [
             { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
             { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
@@ -912,15 +930,12 @@ const templates = {
     }
   },
   "agent-worktree": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     defaults: { workspace_backend: "worktree" },
     graph: null
   },
   "exec-recovery": {
-    supervision: {
-      max_total_interventions: 1,
-      actions: { retry_with_guidance: { max_uses: 1 } }
-    },
+    supervision: { profile: "supervisor", max_total_interventions: 1 },
     graph: {
       type: "sequence",
       id: "root",
@@ -939,10 +954,7 @@ const templates = {
     }
   },
   "exec-terminal": {
-    supervision: {
-      max_total_interventions: 2,
-      actions: { retry_with_guidance: { max_uses: 2 }, run_diagnostic: { max_uses: 2 } }
-    },
+    supervision: { profile: "supervisor", max_total_interventions: 2 },
     graph: {
       type: "sequence",
       id: "root",
@@ -952,10 +964,7 @@ const templates = {
     }
   },
   "exec-validation-strategy": {
-    supervision: {
-      max_total_interventions: 1,
-      actions: { run_diagnostic: { max_uses: 1 } }
-    },
+    supervision: { profile: "supervisor", max_total_interventions: 1 },
     graph: {
       type: "sequence",
       id: "root",
@@ -978,10 +987,7 @@ const templates = {
     }
   },
   "exec-workspace-repair": {
-    supervision: {
-      max_total_interventions: 1,
-      actions: { run_diagnostic: { max_uses: 1 } }
-    },
+    supervision: { profile: "supervisor", max_total_interventions: 1 },
     graph: {
       type: "sequence",
       id: "root",
@@ -1004,10 +1010,7 @@ const templates = {
     }
   },
   "exec-no-delta": {
-    supervision: {
-      max_total_interventions: 2,
-      actions: { run_diagnostic: { max_uses: 2 } }
-    },
+    supervision: { profile: "supervisor", max_total_interventions: 2 },
     graph: {
       type: "sequence",
       id: "root",
@@ -1017,10 +1020,7 @@ const templates = {
     }
   },
   "agent-context-overflow": {
-    supervision: {
-      max_total_interventions: 1,
-      actions: { rebuild_context: { max_uses: 1 } }
-    },
+    supervision: { profile: "supervisor", max_total_interventions: 1 },
     profile: {
       input_rules: {
         max_total_tokens: 700,
@@ -1035,18 +1035,20 @@ const templates = {
           type: "agent",
           id: "implement",
           repo: "main",
-          goal: "Fix `src/router.js` for the context-overflow-repair scenario: normalize duplicate slashes, preserve one leading slash, drop trailing slash except root, preserve query strings, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Fix `src/router.js` for the context-overflow-repair scenario: normalize duplicate slashes, preserve one leading slash, drop trailing slash except root, preserve query strings, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+            acceptance_criteria: [
             "The first attempt may fail before harness execution because authored markdown context is too large.",
             "The retry uses the supervisor context repair overlay without changing the task contract.",
             "`npm test` passes.",
             "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, `Supervisor context:`, and `Risks:` fields."
           ],
-          constraints: [
+            constraints: [
             "Do not edit noise files under `notes/**`.",
             "Do not add dependencies.",
             "If a supervisor context repair packet is present, use it as the index and open live workspace paths only as needed."
-          ],
+          ]
+          },
           context: [
             { name: "all_markdown", from: "workspace_glob", path: "**/*.md" },
             { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
@@ -1065,7 +1067,7 @@ const templates = {
     }
   },
   "agent-noisy-context": {
-    supervision: { max_total_interventions: 0, actions: {} },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     profile: {
       input_rules: {
         max_total_tokens: 1600,
@@ -1080,18 +1082,20 @@ const templates = {
           type: "agent",
           id: "implement",
           repo: "main",
-          goal: "Complete the noisy-generated-tree scenario in `AGENTFLOW_EVAL_TASK.md`. Use source and tests, ignore generated context noise unless explicitly needed, run `npm test`, and write `handoff.md`.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Complete the noisy-generated-tree scenario in `AGENTFLOW_EVAL_TASK.md`. Use source and tests, ignore generated context noise unless explicitly needed, run `npm test`, and write `handoff.md`.",
+            acceptance_criteria: [
             "Generated tree files are not treated as task authority.",
             "`src/status.js` implements the expected priority order.",
             "`npm test` passes.",
             "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
           ],
-          constraints: [
+            constraints: [
             "Do not edit `generated/**`.",
             "Do not add dependencies.",
             "Prefer specific source and test files over broad generated context."
-          ],
+          ]
+          },
           context: [
             { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
             { name: "broad_markdown", from: "workspace_glob", path: "**/*.md", max_files: 80 },
@@ -1147,9 +1151,19 @@ function graphDocument(templateName) {
         sandbox: "workspace-write",
         timeout_sec: 900,
         ...(template.profile?.input_rules ? { input_rules: template.profile.input_rules } : {})
+      },
+      supervisor: {
+        harness: "{{workflow.harness}}",
+        model: "gpt-5.4-mini",
+        reasoning_effort: "low",
+        sandbox: "read-only",
+        timeout_sec: 900
       }
     },
-    supervision: template.supervision,
+    supervision: {
+      profile: "supervisor",
+      ...template.supervision
+    },
     graph: template.graph
   };
 }

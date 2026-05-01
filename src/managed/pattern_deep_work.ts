@@ -55,7 +55,6 @@ export interface PatternDeepWorkArtifactRubricCriterion extends PatternDeepWorkC
 }
 
 export interface PatternDeepWorkConfig extends BaseExecutableNode, ManagedPatternAgentOptions {
-  goal: string;
   completion: {
     max_cycles: number;
     pass_threshold: number;
@@ -121,9 +120,9 @@ function buildPlanPrompt(
     body("You are a senior implementation planner preparing the next cycle of a managed work loop. You do not edit files in this phase. Your job is to understand the contract, feedback, and repository state well enough to give the execution agent the smallest credible plan."),
     section("Managed Workflow Contract", [
       "This managed workflow node has one public contract: the goal, acceptance criteria, constraints, and declared public artifacts below. Internal plans, notes, scorecards, and drafts are private working material.",
-      `Goal: ${config.goal}`,
-      ...formatList("Acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+      `Goal: ${config.intent.goal}`,
+      ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Completion Model", [
       `Maximum cycles: ${cycleCount}`,
@@ -153,9 +152,9 @@ function buildGenerateValidatePrompt(
     body("You are a meticulous implementation agent responsible for completing and validating this work cycle. Do not stop at a plausible change. Work until you are confident the candidate satisfies the goal, acceptance criteria, and constraints, or until you have concrete evidence of what remains."),
     section("Managed Workflow Contract", [
       "This is one cycle inside a managed work loop. If the completion criteria do not pass, another cycle may use your notes and feedback to continue. Write concrete validation evidence and residual risks so the next cycle can improve rather than restart.",
-      `Goal: ${config.goal}`,
-      ...formatList("Acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+      `Goal: ${config.intent.goal}`,
+      ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Completion Criteria", [
       `Pass threshold: ${config.completion.pass_threshold}`,
@@ -231,9 +230,9 @@ function buildFinalPublishPrompt(
   return renderPrompt([
     body("You are publishing the final public artifacts from the latest passing managed work cycle. Downstream work will read only these public artifacts, so make them complete, concrete, and evidence-backed."),
     section("Managed Workflow Contract", [
-      `Goal: ${config.goal}`,
-      ...formatList("Acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+      `Goal: ${config.intent.goal}`,
+      ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Current Context", [
       "Use the latest passing completion scorecard, work notes, and draft artifact materials.",
@@ -431,9 +430,13 @@ function buildCriterionNode(
       context: [
         artifactContext("work_notes", generateValidateId, "work_notes")
       ],
-      acceptance_criteria: [
-        "The command result is captured as completion feedback for the deterministic gate."
-      ]
+      intent: {
+        goal: `Run deterministic completion criterion \`${criterion.id}\` for the current deep work cycle.`,
+        acceptance_criteria: [
+          "The command result is captured as completion feedback for the deterministic gate."
+        ],
+        constraints: config.intent.constraints
+      }
     };
   }
 
@@ -445,14 +448,17 @@ function buildCriterionNode(
     check_kind: "ai",
     on_failure: "continue",
     context: buildCriterionContext(generateValidateId, publicArtifacts, criterion),
-    goal: criterion.kind === "artifact_rubric"
-      ? buildArtifactRubricGoal(criterion)
-      : buildRubricGoal(criterion),
     rubric: criterion.rubric,
-    acceptance_criteria: [
-      "The evaluator returns valid JSON with passed, score, summary, and issues fields.",
-      "The evaluator grades only evidence in context and does not require work outside the managed workflow contract."
-    ]
+    intent: {
+      goal: criterion.kind === "artifact_rubric"
+        ? buildArtifactRubricGoal(criterion)
+        : buildRubricGoal(criterion),
+      acceptance_criteria: [
+        "The evaluator returns valid JSON with passed, score, summary, and issues fields.",
+        "The evaluator grades only evidence in context and does not require work outside the managed workflow contract."
+      ],
+      constraints: config.intent.constraints
+    }
   };
 }
 
@@ -571,13 +577,15 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     ...agentShared,
     context: buildPlanContext(config, generateValidateId, gateId),
     artifacts: outputDirArtifact("cycle_plan", "cycle-plan.md", "Focused plan for the next deep work cycle."),
-    goal: buildPlanPrompt(config, config.completion.max_cycles),
-    acceptance_criteria: [
-      "The plan addresses the managed workflow contract and any prior failed completion criteria.",
-      "The plan identifies focused validation the execution agent should run when feasible.",
-      "The plan does not edit the workspace."
-    ],
-    ...(config.constraints ? { constraints: config.constraints } : {})
+    intent: {
+      goal: buildPlanPrompt(config, config.completion.max_cycles),
+      acceptance_criteria: [
+        "The plan addresses the managed workflow contract and any prior failed completion criteria.",
+        "The plan identifies focused validation the execution agent should run when feasible.",
+        "The plan does not edit the workspace."
+      ],
+      constraints: config.intent.constraints
+    }
   };
 
   const generateValidateNode: AgentNode = {
@@ -597,13 +605,15 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
       outputDirArtifact("work_notes", "work-notes.md", "Notes from the current deep work cycle."),
       buildDraftArtifacts(publicArtifacts)
     ),
-    goal: buildGenerateValidatePrompt(config, publicArtifacts),
-    acceptance_criteria: [
-      "The cycle implements the plan or records why the plan had to change.",
-      "Focused validation is run when feasible, with exact results recorded in work notes and draft artifacts.",
-      "Draft public artifacts exist so completion criteria can grade the result."
-    ],
-    ...(config.constraints ? { constraints: config.constraints } : {})
+    intent: {
+      goal: buildGenerateValidatePrompt(config, publicArtifacts),
+      acceptance_criteria: [
+        "The cycle implements the plan or records why the plan had to change.",
+        "Focused validation is run when feasible, with exact results recorded in work notes and draft artifacts.",
+        "Draft public artifacts exist so completion criteria can grade the result."
+      ],
+      constraints: config.intent.constraints
+    }
   };
 
   const gateNode: CheckNode = {
@@ -614,6 +624,15 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     check_kind: "deterministic",
     command: "node",
     args: ["-e", buildGateScript(config.completion.criteria, config.completion.pass_threshold)],
+    intent: {
+      goal: "Aggregate completion criterion results and decide whether the managed deep work loop is complete.",
+      acceptance_criteria: [
+        "The scorecard records every completion criterion result.",
+        "Required criterion failures block completion regardless of weighted score.",
+        `The weighted score must meet or exceed ${config.completion.pass_threshold} to pass.`
+      ],
+      constraints: config.intent.constraints
+    },
     pass_if: {
       json_path: "$.passed",
       equals: true
@@ -660,9 +679,11 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
         ...agentShared,
         context: buildPublishContext(config, publicArtifacts, generateValidateId, gateId),
         artifacts: publicArtifacts,
-        goal: buildFinalPublishPrompt(config, publicArtifacts),
-        ...(config.acceptance_criteria ? { acceptance_criteria: config.acceptance_criteria } : {}),
-        ...(config.constraints ? { constraints: config.constraints } : {})
+        intent: {
+          goal: buildFinalPublishPrompt(config, publicArtifacts),
+          acceptance_criteria: config.intent.acceptance_criteria,
+          constraints: config.intent.constraints
+        }
       }
     ]
   };

@@ -33,7 +33,7 @@ A good node owns a meaningful outcome:
 - implement an accountable slice and publish change evidence
 - review a change package and publish calibrated findings
 
-The graph must preserve human control through clear `constraints`, planned repeat-scoped `checkpoint` gates when human input is required, supervisor `pause_for_human` for safety stops, and explicit approval before exposing plugin tools to agents.
+The graph must preserve human control through clear `constraints`, planned repeat-scoped `checkpoint` gates when human input is required, supervisor `pause_for_human` authority pauses for runtime boundaries the system must not infer, and explicit approval before exposing plugin tools to agents.
 
 ## Runtime Bar
 
@@ -47,7 +47,7 @@ Required behavior:
 - enforce sandbox, timeout, env, workspace, and tool constraints consistently for Codex CLI and Cursor CLI
 - record supervisor decisions and interventions durably
 - preserve run state for inspection and resume
-- distinguish planned checkpoint gates from supervisor safety pauses in validation, operations, and delivery evidence
+- distinguish planned checkpoint gates from supervisor authority pauses in validation, operations, and delivery evidence
 - produce a delivery package for terminal runs
 - evaluate workflow quality offline through local suites, scenario environments, variants, repeated trials, criteria, trajectory checks, deterministic simulation, and benchmark reports
 

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { summarizeAuthoredGraph, validateAuthoredGraphDocument } from "../../src/graph/validate.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const fixturePath = fileURLToPath(
   new URL("./fixtures/repeat.graph.json", import.meta.url)
@@ -19,6 +20,10 @@ const TEST_INTENT = {
   goal: "Validate an Agentflow graph contract.",
   acceptance_criteria: ["Graph diagnostics reflect the targeted contract behavior."]
 };
+
+async function validateGraph(value: unknown) {
+  return validateAuthoredGraphDocument(withNodeIntentDefaults(value as never));
+}
 
 describe("graph validation", () => {
   it("normalizes and summarizes the repeat fixture", async () => {
@@ -35,7 +40,7 @@ describe("graph validation", () => {
       node_count: 11,
       executable_node_count: 7,
       container_node_count: 4,
-      profile_count: 2,
+      profile_count: 3,
       repo_count: 1,
       repeat_count: 1,
       node_kind_counts: {
@@ -51,7 +56,7 @@ describe("graph validation", () => {
   });
 
   it("accepts checkpoint nodes inside repeat bodies and as repeat.until targets", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "checkpoint-repeat",
       intent: TEST_INTENT,
@@ -83,7 +88,11 @@ describe("graph validation", () => {
                 {
                   type: "agent",
                   id: "draft",
-                  goal: "Draft the artifact.",
+                  intent: {
+                    goal: "Draft the artifact.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     draft_spec: {
                       from: "output_dir",
@@ -95,7 +104,11 @@ describe("graph validation", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  goal: "Review the draft.",
+                  intent: {
+                    goal: "Review the draft.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"
@@ -115,7 +128,7 @@ describe("graph validation", () => {
   });
 
   it("rejects repeat.until references that do not resolve to descendant checks or checkpoints", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-repeat",
       intent: TEST_INTENT,
@@ -170,7 +183,7 @@ describe("graph validation", () => {
   });
 
   it("rejects repeat.until checks that use soft failure semantics", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-soft-repeat-until",
       intent: TEST_INTENT,
@@ -200,7 +213,11 @@ describe("graph validation", () => {
                 {
                   type: "agent",
                   id: "fix",
-                  goal: "Apply the fix."
+                  intent: {
+                    goal: "Apply the fix.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                 },
                 {
                   type: "check",
@@ -230,7 +247,7 @@ describe("graph validation", () => {
   });
 
   it("rejects checkpoint nodes outside repeat bodies", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-checkpoint-placement",
       intent: TEST_INTENT,
@@ -254,7 +271,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "draft",
-            goal: "Draft the artifact.",
+            intent: {
+              goal: "Draft the artifact.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               draft_spec: {
                 from: "output_dir",
@@ -266,7 +287,11 @@ describe("graph validation", () => {
           {
             type: "checkpoint",
             id: "review",
-            goal: "Review the draft.",
+            intent: {
+              goal: "Review the draft.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             review_from: {
               node: "draft",
               artifact: "draft_spec"
@@ -287,7 +312,7 @@ describe("graph validation", () => {
   });
 
   it("rejects check fields that do not apply to the selected check kind", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-check-fields",
       intent: TEST_INTENT,
@@ -313,14 +338,22 @@ describe("graph validation", () => {
             id: "deterministic_gate",
             check_kind: "deterministic",
             command: "npm",
-            goal: "This should not be allowed.",
+            intent: {
+              goal: "This should not be allowed.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             model: "gpt-5"
           },
           {
             type: "check",
             id: "ai_gate",
             check_kind: "ai",
-            goal: "Evaluate the change.",
+            intent: {
+              goal: "Evaluate the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             command: "npm",
             env: {
               SHOULD_NOT_EXIST: "true"
@@ -356,7 +389,7 @@ describe("graph validation", () => {
   });
 
   it("rejects input paths and cwd values that escape the repo or workspace root", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "invalid-path-boundaries",
       intent: TEST_INTENT,
@@ -381,7 +414,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "reader",
-            goal: "Read files.",
+            intent: {
+              goal: "Read files.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               {
                 name: "secret",
@@ -483,6 +520,16 @@ describe("graph validation", () => {
       graph_id: "missing-harness-agent",
       intent: TEST_INTENT,
       repos: { main: { path: "." } },
+      profiles: {
+        supervisor: {
+          harness: "codex-cli",
+          sandbox: "read-only"
+        }
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
       graph: {
         type: "sequence",
         id: "root",
@@ -490,7 +537,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement the requested change."
+            intent: {
+              goal: "Implement the requested change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            }
           }
         ]
       }
@@ -512,6 +563,16 @@ describe("graph validation", () => {
       graph_id: "missing-harness-ai-check",
       intent: TEST_INTENT,
       repos: { main: { path: "." } },
+      profiles: {
+        supervisor: {
+          harness: "codex-cli",
+          sandbox: "read-only"
+        }
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
       graph: {
         type: "sequence",
         id: "root",
@@ -520,7 +581,11 @@ describe("graph validation", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Judge the current state."
+            intent: {
+              goal: "Judge the current state.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            }
           }
         ]
       }
@@ -537,7 +602,7 @@ describe("graph validation", () => {
   });
 
   it("rejects an agent node that combines a read-only sandbox with declared artifacts", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "readonly-with-artifacts",
       intent: TEST_INTENT,
@@ -551,7 +616,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "summarize",
-            goal: "Summarize the change.",
+            intent: {
+              goal: "Summarize the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               summary: {
                 from: "output_dir",
@@ -575,7 +644,7 @@ describe("graph validation", () => {
   });
 
   it("allows a read-only agent node when it declares no artifacts", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "readonly-no-artifacts",
       intent: TEST_INTENT,
@@ -589,7 +658,11 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "inspect",
-            goal: "Read the code and respond with observations only."
+            intent: {
+              goal: "Read the code and respond with observations only.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -602,7 +675,7 @@ describe("graph validation", () => {
   });
 
   it("rejects reasoning_effort on Cursor profiles and nodes", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "cursor-reasoning-effort",
       intent: TEST_INTENT,
@@ -625,14 +698,22 @@ describe("graph validation", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement the change.",
+            intent: {
+              goal: "Implement the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             reasoning_effort: "medium"
           },
           {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Judge the current state.",
+            intent: {
+              goal: "Judge the current state.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             reasoning_effort: "high"
           }
         ]
@@ -662,7 +743,7 @@ describe("graph validation", () => {
   });
 
   it("rejects reasoning_effort inherited by a Cursor launch profile", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "cursor-inherited-reasoning-effort",
       intent: TEST_INTENT,
@@ -691,7 +772,11 @@ describe("graph validation", () => {
             type: "agent",
             id: "implement",
             profile: "node_defaults",
-            goal: "Implement the change."
+            intent: {
+              goal: "Implement the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -708,7 +793,7 @@ describe("graph validation", () => {
   });
 
   it("does not require a harness for exec-only graphs", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateGraph({
       version: "1",
       graph_id: "exec-only",
       intent: TEST_INTENT,

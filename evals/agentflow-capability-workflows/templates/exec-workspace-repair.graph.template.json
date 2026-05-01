@@ -28,15 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
     "max_total_interventions": 1,
-    "actions": {
-      "run_diagnostic": {
-        "max_uses": 1
-      }
-    }
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -56,6 +56,14 @@
             "path": "handoff.md",
             "description": "Workspace-repair handoff written after supervisor cleanup."
           }
+        },
+        "intent": {
+          "goal": "Exercise workspace repair by detecting and recovering from failed-attempt-owned pollution.",
+          "acceptance_criteria": [
+            "The command succeeds after recoverable workspace pollution is cleaned.",
+            "The declared handoff artifact records the repair evidence."
+          ],
+          "constraints": []
         }
       }
     ]

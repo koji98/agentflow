@@ -15,6 +15,7 @@ import { readExecutionManifest } from "../../src/artifacts/reader.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -28,13 +29,13 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument({
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
       goal: `Resume ${document.graph_id}.`,
       acceptance_criteria: ["Resume preserves only compatible completed work."]
     },
     ...document
-  });
+  }));
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -285,7 +286,11 @@ describe("runtime resume", () => {
               type: "agent",
               id: "implement",
               repo: "main",
-              goal: "Write nothing."
+              intent: {
+                goal: "Write nothing.",
+                acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                constraints: []
+              },
             }
           ]
         }
@@ -374,18 +379,7 @@ describe("runtime resume", () => {
         profiles: {
           default: {}
         },
-        supervision: {
-          actions: {
-            retry_with_guidance: { max_uses: 3 },
-            repair_artifact: { max_uses: 2 }
-          },
-          max_total_interventions: 5,
-          policy: {
-            pause_on_policy_risk: true,
-            pause_on_repeated_recovery: true,
-            drift_score_threshold: 0.8
-          }
-        },
+        supervision: { profile: "supervisor", max_total_interventions: 5 },
         graph: {
           type: "sequence",
           id: "root",
@@ -403,11 +397,7 @@ describe("runtime resume", () => {
 
     fixture.result.state.supervisor.status = "exhausted";
     fixture.result.state.supervisor.budget_remaining = {
-      max_total_interventions: 0,
-      actions: {
-        retry_with_guidance: 0,
-        repair_artifact: 0
-      }
+      max_total_interventions: 0
     };
 
     const resumed = await buildResumedSession(
@@ -421,8 +411,6 @@ describe("runtime resume", () => {
     expect(resumed.restarted_node_count).toBe(0);
     expect(resumed.session.supervisor.status).toBe("healthy");
     expect(resumed.session.supervisor.budget_remaining.max_total_interventions).toBe(5);
-    expect(resumed.session.supervisor.budget_remaining.actions.retry_with_guidance).toBe(3);
-    expect(resumed.session.supervisor.budget_remaining.actions.repair_artifact).toBe(2);
 
     await rm(fixture.tempRoot, { recursive: true, force: true });
   });

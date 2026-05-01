@@ -16,6 +16,7 @@ import type {
   DeterministicPassIf,
   EnvPrerequisite,
   ExecNode,
+  ExecutableNodeIntent,
   ExecutableGraphNode,
   FilePrerequisite,
   GraphPrerequisiteCheck,
@@ -48,7 +49,6 @@ import {
   reasoningEfforts,
   reservedArtifactNames,
   sandboxModes,
-  supervisorActionKinds,
   toolNamePattern,
   workspaceBackends
 } from "./schema.js";
@@ -100,20 +100,8 @@ const checkpointOperatorFeedbackArtifact: ArtifactDefinition = {
 };
 
 export const defaultSupervisionPolicy: SupervisionPolicy = {
-  actions: {
-    retry_with_guidance: { max_uses: 2 },
-    repair_artifact: { max_uses: 2 },
-    rebuild_context: { max_uses: 1 },
-    run_diagnostic: { max_uses: 3 },
-    pause_for_human: { max_uses: 1 },
-    semantic_evaluation: { max_uses: 2 }
-  },
-  max_total_interventions: 8,
-  policy: {
-    pause_on_policy_risk: true,
-    pause_on_repeated_recovery: true,
-    drift_score_threshold: 0.8
-  }
+  profile: "supervisor",
+  max_total_interventions: 3
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -818,86 +806,86 @@ function normalizeGraphIntent(
   };
 }
 
+function normalizeExecutableNodeIntent(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ExecutableNodeIntent | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "Executable nodes require intent."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["goal", "constraints", "acceptance_criteria"],
+    diagnostics
+  );
+
+  const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
+  const acceptance_criteria = readStringArray(
+    record.acceptance_criteria,
+    `${path}.acceptance_criteria`,
+    diagnostics
+  );
+  if (record.acceptance_criteria === undefined) {
+    diagnostics.push({
+      path: `${path}.acceptance_criteria`,
+      message: "Executable node intent requires acceptance_criteria."
+    });
+  } else if (acceptance_criteria && acceptance_criteria.length === 0) {
+    diagnostics.push({
+      path: `${path}.acceptance_criteria`,
+      message: "Executable node intent requires at least one acceptance_criteria entry."
+    });
+  }
+  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics) ?? [];
+
+  if (!goal || !acceptance_criteria || acceptance_criteria.length === 0) {
+    return undefined;
+  }
+
+  return {
+    goal,
+    acceptance_criteria,
+    constraints
+  };
+}
+
 function normalizeSupervisionPolicy(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): SupervisionPolicy {
+): SupervisionPolicy | undefined {
   if (value === undefined) {
-    return {
-      actions: Object.fromEntries(
-        Object.entries(defaultSupervisionPolicy.actions).map(([action, policy]) => [
-          action,
-          { ...policy }
-        ])
-      ),
-      max_total_interventions: defaultSupervisionPolicy.max_total_interventions,
-      policy: { ...defaultSupervisionPolicy.policy }
-    };
+    diagnostics.push({
+      path: `${path}.profile`,
+      message: "supervision.profile is required."
+    });
+    return undefined;
   }
 
   const record = asRecord(value);
   if (!record) {
     diagnostics.push({
       path,
-      message: "supervision must be an object when provided."
+      message: "supervision must be an object."
     });
-    return defaultSupervisionPolicy;
+    return undefined;
   }
 
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["actions", "max_total_interventions", "policy"],
+    ["profile", "max_total_interventions"],
     diagnostics
   );
-
-  const actionRecord = record.actions === undefined ? undefined : asRecord(record.actions);
-  if (record.actions !== undefined && !actionRecord) {
-    diagnostics.push({
-      path: `${path}.actions`,
-      message: "supervision.actions must be an object when provided."
-    });
-  }
-  const actions: SupervisionPolicy["actions"] = {};
-  const actionSource = actionRecord ?? defaultSupervisionPolicy.actions;
-  if (actionRecord) {
-    pushUnknownKeyDiagnostics(actionRecord, `${path}.actions`, supervisorActionKinds, diagnostics);
-  }
-  for (const action of supervisorActionKinds) {
-    const defaultAction = defaultSupervisionPolicy.actions[action];
-    const actionPath = `${path}.actions.${action}`;
-    const valueForAction = actionSource[action];
-    if (valueForAction === undefined) {
-      if (defaultAction) {
-        actions[action] = { ...defaultAction };
-      }
-      continue;
-    }
-
-    const actionPolicyRecord = asRecord(valueForAction);
-    if (!actionPolicyRecord) {
-      diagnostics.push({
-        path: actionPath,
-        message: "supervision.actions entries must be objects when provided."
-      });
-      if (defaultAction) {
-        actions[action] = { ...defaultAction };
-      }
-      continue;
-    }
-    pushUnknownKeyDiagnostics(actionPolicyRecord, actionPath, ["max_uses"], diagnostics);
-    const maxUses =
-      readBoundedInteger(
-        actionPolicyRecord.max_uses,
-        `${actionPath}.max_uses`,
-        diagnostics,
-        { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
-      ) ?? defaultAction?.max_uses;
-    if (maxUses !== undefined && maxUses > 0) {
-      actions[action] = { max_uses: maxUses };
-    }
-  }
 
   const max_total_interventions =
     readBoundedInteger(
@@ -906,54 +894,15 @@ function normalizeSupervisionPolicy(
       diagnostics,
       { minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
     ) ?? defaultSupervisionPolicy.max_total_interventions;
+  const profile = readRequiredString(record.profile, `${path}.profile`, diagnostics);
 
-  const policyRecord = record.policy === undefined ? undefined : asRecord(record.policy);
-  if (record.policy !== undefined && !policyRecord) {
-    diagnostics.push({
-      path: `${path}.policy`,
-      message: "supervision.policy must be an object when provided."
-    });
+  if (!profile) {
+    return undefined;
   }
-  if (policyRecord) {
-    pushUnknownKeyDiagnostics(
-      policyRecord,
-      `${path}.policy`,
-      ["pause_on_policy_risk", "pause_on_repeated_recovery", "drift_score_threshold", "evaluator_profile"],
-      diagnostics
-    );
-  }
-  const drift_score_threshold =
-    readBoundedNumber(
-      policyRecord?.drift_score_threshold,
-      `${path}.policy.drift_score_threshold`,
-      diagnostics,
-      { minimum: 0, maximum: 1 }
-    ) ?? defaultSupervisionPolicy.policy.drift_score_threshold;
-  const evaluator_profile = readOptionalString(
-    policyRecord?.evaluator_profile,
-    `${path}.policy.evaluator_profile`,
-    diagnostics
-  );
 
   return {
-    actions,
-    max_total_interventions,
-    policy: {
-      pause_on_policy_risk:
-        readBoolean(
-          policyRecord?.pause_on_policy_risk,
-          `${path}.policy.pause_on_policy_risk`,
-          diagnostics
-        ) ?? defaultSupervisionPolicy.policy.pause_on_policy_risk,
-      pause_on_repeated_recovery:
-        readBoolean(
-          policyRecord?.pause_on_repeated_recovery,
-          `${path}.policy.pause_on_repeated_recovery`,
-          diagnostics
-        ) ?? defaultSupervisionPolicy.policy.pause_on_repeated_recovery,
-      drift_score_threshold,
-      ...(evaluator_profile ? { evaluator_profile } : {})
-    }
+    profile,
+    max_total_interventions
   };
 }
 
@@ -1430,13 +1379,7 @@ function normalizeExecutableBase(
   const label = readOptionalString(record.label, `${path}.label`, diagnostics);
   const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
   const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
-  const goal = readOptionalString(record.goal, `${path}.goal`, diagnostics);
-  const acceptance_criteria = readStringArray(
-    record.acceptance_criteria,
-    `${path}.acceptance_criteria`,
-    diagnostics
-  );
-  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
+  const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
   const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
   const artifacts = allow_artifacts
     ? normalizeArtifacts(record.artifacts, `${path}.artifacts`, diagnostics)
@@ -1450,7 +1393,7 @@ function normalizeExecutableBase(
     });
   }
 
-  if (!id) {
+  if (!id || !intent) {
     return undefined;
   }
 
@@ -1459,9 +1402,7 @@ function normalizeExecutableBase(
     ...(label ? { label } : {}),
     ...(repo ? { repo } : {}),
     ...(profile ? { profile } : {}),
-    ...(goal ? { goal } : {}),
-    ...(acceptance_criteria ? { acceptance_criteria } : {}),
-    ...(constraints ? { constraints } : {}),
+    intent,
     ...(context ? { context } : {}),
     ...(artifacts ? { artifacts } : {}),
     ...(timeout_sec !== undefined ? { timeout_sec } : {})
@@ -1547,9 +1488,7 @@ function normalizeAgentNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1578,14 +1517,7 @@ function normalizeAgentNode(
   );
   const tools = normalizeToolDeclarations(record.tools, `${path}.tools`, diagnostics);
 
-  if (base && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "Agent nodes require goal."
-    });
-  }
-
-  if (!base || !base.goal) {
+  if (!base) {
     return undefined;
   }
 
@@ -1614,9 +1546,7 @@ function normalizeExecNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1668,9 +1598,7 @@ function normalizeCheckNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1742,13 +1670,6 @@ function normalizeCheckNode(
     });
   }
 
-  if (check_kind === "ai" && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "AI checks require goal."
-    });
-  }
-
   return {
     type: "check",
     ...base,
@@ -1780,9 +1701,7 @@ function normalizeCheckpointNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -1800,14 +1719,7 @@ function normalizeCheckpointNode(
     diagnostics
   );
 
-  if (base && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "Checkpoint nodes require goal."
-    });
-  }
-
-  if (!base || !base.goal || !review_from) {
+  if (!base || !review_from) {
     return undefined;
   }
 
@@ -2092,9 +2004,7 @@ function normalizePatternDeepResearchNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -2114,14 +2024,7 @@ function normalizePatternDeepResearchNode(
   const research = normalizePatternDeepResearchConfig(record.research, `${path}.research`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (base && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "Managed pattern nodes require goal."
-    });
-  }
-
-  if (!base || !base.goal || !research) {
+  if (!base || !research) {
     return undefined;
   }
 
@@ -2134,7 +2037,6 @@ function normalizePatternDeepResearchNode(
   return buildPatternDeepResearch({
     ...base,
     ...agentOptions,
-    goal: base.goal,
     research,
     runtime
   });
@@ -2352,9 +2254,7 @@ function normalizePatternDeepWorkNode(
       "label",
       "repo",
       "profile",
-      "goal",
-      "acceptance_criteria",
-      "constraints",
+      "intent",
       "context",
       "artifacts",
       "timeout_sec",
@@ -2383,14 +2283,7 @@ function normalizePatternDeepWorkNode(
   );
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (base && !base.goal) {
-    diagnostics.push({
-      path: `${path}.goal`,
-      message: "Managed pattern nodes require goal."
-    });
-  }
-
-  if (!base || !base.goal || !completion) {
+  if (!base || !completion) {
     return undefined;
   }
 
@@ -2403,7 +2296,6 @@ function normalizePatternDeepWorkNode(
   return buildPatternDeepWork({
     ...base,
     ...agentOptions,
-    goal: base.goal,
     completion,
     runtime
   });
@@ -2567,6 +2459,13 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     });
   }
 
+  if (supervision && !(supervision.profile in profiles)) {
+    diagnostics.push({
+      path: "$.supervision.profile",
+      message: `supervision.profile references unknown profile "${supervision.profile}".`
+    });
+  }
+
   const effectiveDefaults: GraphDefaults = {
     workspace_backend: defaults?.workspace_backend ?? "inplace",
     ...(defaults?.launch_profile
@@ -2622,7 +2521,7 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     resolveArtifactContextRefs(normalizedGraph, "$.graph", diagnostics);
   }
 
-  if (diagnostics.length > 0 || !graph_id || !intent || !normalizedGraph || Object.keys(repos).length === 0) {
+  if (diagnostics.length > 0 || !graph_id || !intent || !supervision || !normalizedGraph || Object.keys(repos).length === 0) {
     return {
       diagnostics,
       lowered_managed_nodes

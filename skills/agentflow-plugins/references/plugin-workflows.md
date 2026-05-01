@@ -138,11 +138,15 @@ Minimal `agentflow.plugin.json`:
     "poll": {
       "executable": "tools/poll-pr.sh",
       "description": "Poll a pull request and print a JSON status object.",
-      "credentials": ["github"],
+      "credentials": [
+        "github"
+      ],
       "config_schema": {
         "type": "object",
         "properties": {
-          "poll_interval_ms": { "type": "string" }
+          "poll_interval_ms": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       }

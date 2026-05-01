@@ -16,15 +16,16 @@ import {
 } from "../../src/artifacts/reader.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument({
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
       goal: `Exercise ${document.graph_id}.`,
       acceptance_criteria: ["Failure-mode behavior matches the runtime contract."]
     },
     ...document
-  });
+  }));
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -73,19 +74,7 @@ describe("runtime failure modes", () => {
           harness: "codex-cli"
         }
       },
-      supervision: {
-        actions: {
-          repair_artifact: {
-            max_uses: 1
-          }
-        },
-        max_total_interventions: 1,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.8
-        }
-      },
+      supervision: { profile: "supervisor", max_total_interventions: 1 },
       graph: {
         type: "sequence",
         id: "root",
@@ -93,7 +82,11 @@ describe("runtime failure modes", () => {
           {
             type: "agent",
             id: "repairable",
-            goal: "Finish but omit the declared artifact so repair starts.",
+            intent: {
+              goal: "Finish but omit the declared artifact so repair starts.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifact_repair: {
               max_attempts: 1
             },

@@ -53,7 +53,7 @@ These remain hard failures even when a verifier uses soft failure behavior:
 
 ## Outcome Verification
 
-The standard agent prompt already includes a `## Working Loop` section that tells the agent to drive the node to completion: inspect, plan, execute, validate, fix, revalidate; investigate ambiguity instead of guessing; and stop only when criteria are met or a concrete blocker is documented. Outcome verification then grades the result, so authors should not repeat that iteration framing in node `constraints`.
+The standard agent prompt already includes a `## Working Loop` section that tells the agent to drive the node to completion: inspect, plan, execute, validate, fix, revalidate; investigate ambiguity instead of guessing; and stop only when criteria are met or a concrete blocker is documented. Outcome verification then grades the result, so authors should not repeat that iteration framing in node `intent.constraints`.
 
 Every `agent` node attempt that exits cleanly with all declared artifacts is sent to a fresh-context outcome verifier before it is allowed to remain `passed`. The verifier:
 
@@ -66,7 +66,7 @@ When the verifier rejects an attempt, the engine reclassifies it as `outcome_ver
 
 ## Human Gates
 
-`checkpoint` is a planned human gate inside a repeat body. `pause_for_human` is a supervisor safety pause for runtime risk or failure conditions and resumes through structured human input.
+`checkpoint` is a planned human gate inside a repeat body. `pause_for_human` is a supervisor authority pause for credentials, scope expansion, product intent, security/compliance judgment, graph-contract changes, or another operator decision the runtime must not infer. It resumes through structured human input.
 
 ## Repeat
 
@@ -90,16 +90,16 @@ If no harness is available and exactly one missing artifact is a human-readable 
 
 ## Recovery Loop
 
-Failed executable attempts enter a recovery loop when budget and policy allow:
+Failed executable attempts enter a graph-causal recovery loop when budget and policy allow:
 
 1. Persist the exact rendered prompt for the failed attempt.
-2. Build a supervisor case file with node contract, context packet paths, result, artifacts, verifier/check output, prior interventions, and failure fingerprint.
-3. Classify the failure and select evidence gatherers.
-4. Run evidence gatherers such as `local_context`, `pattern_mining`, `dependency_metadata`, `external_context`, `diagnostic_probe`, `semantic_rejudge`, and `investigate_failure`.
-5. Merge patches into one recovery plan.
-6. Apply one runtime overlay action: repair context, repair validation strategy, repair workspace, repair environment, retry with evidence, repair an artifact, pause for authority, or fail terminally.
+2. Build a causal case file with symptom evidence, node contract, context packet paths, artifacts, verifier/check output, prior interventions, workspace diff, and failure fingerprint.
+3. Traverse the upstream cone from graph edges, artifact refs, context provenance, repeat or managed-pattern state, and prior attempt evidence.
+4. Rank candidate recovery targets: current node, upstream producer, artifact owner, context repair, validation strategy, workspace, environment, or authority boundary.
+5. Repair the nearest intent-aligned target first, then rerun the failed gate.
+6. Continue only when each retry or repair records a material delta.
 
-Retries must carry a material delta. The delta can be changed context, added evidence, changed validation guidance, workspace cleanup, environment repair, or repaired artifacts. If there is no new material delta, the supervisor should not spend budget repeating the same failed tactic.
+Retries must carry a material delta. The delta can be changed target, changed context, added evidence, changed validation guidance, workspace cleanup, environment repair, or repaired artifacts. If there is no new material delta, the supervisor should widen causal search or change tactic instead of repeating the same failed action.
 
 For `context_contract_failure`, the intervention writes `context-analysis.{json,md}`, `context-repair-patch.json`, `runtime-overlay.json`, `material-delta.json`, and a recovery envelope. The retry receives `supervisor_recovery_envelope` and `supervisor_context_repair` context before authored context. The repair packet is a compact index with omitted-entry provenance and live workspace paths; it does not change goals, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts.
 

@@ -100,7 +100,7 @@ It is a capability eval. It is useful even when the pass rate is below 100%, bec
 
 The larger prompt/context iteration suite is `evals/agentflow-capability-workflows`.
 
-It generates ignored local repo fixtures under `eval-repos/agentflow-capability-workflows/` with `npm run setup:eval-repos`. Use it when you need harder end-to-end coverage across code repair, dependency docs, stale docs, noisy monorepos, local tools, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, expected terminal failure, context-overflow repair, and generated-tree noise control.
+It generates ignored local repo fixtures under `eval-repos/agentflow-capability-workflows/` with `npm run setup:eval-repos`. Use it when you need harder end-to-end coverage across code repair, dependency docs, stale docs, noisy monorepos, local tools, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, exhausted-recovery boundaries, context-overflow repair, and generated-tree noise control.
 
 The highest-signal issue suite is `evals/agentflow-realworld-issues`.
 

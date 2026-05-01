@@ -4,9 +4,10 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { reviewCompiledGraph } from "../../src/graph/review.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 function compileReviewGraph(value: unknown) {
-  const normalized = normalizeAuthoredGraphDocument(value);
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(value as never));
   expect(normalized.diagnostics).toEqual([]);
   expect(normalized.document).toBeDefined();
 
@@ -113,7 +114,11 @@ describe("compiled graph authoring review", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement the scoped change.",
+            intent: {
+              goal: "Implement the scoped change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               {
                 name: "wide_scan",

@@ -9,15 +9,16 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { analyzeGraphContext } from "../../src/runtime/context/analyze.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument({
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
       goal: "Analyze node context before launch.",
       acceptance_criteria: ["Context analysis reports launch-time token risk."]
     },
     ...document
-  });
+  }));
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(

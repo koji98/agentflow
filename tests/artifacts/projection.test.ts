@@ -28,6 +28,7 @@ import {
   readRunState
 } from "../../src/artifacts/reader.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -41,12 +42,13 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
+  const documentWithDefaults = withNodeIntentDefaults(document);
   const normalized = normalizeAuthoredGraphDocument({
     intent: {
       goal: `Project ${document.graph_id}.`,
       acceptance_criteria: ["Projection exposes durable run state."]
     },
-    ...document
+    ...documentWithDefaults
   });
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
@@ -131,7 +133,11 @@ async function createFixtureRun() {
         {
           type: "agent",
           id: "inspect",
-          goal: "Inspect the repository.",
+          intent: {
+            goal: "Inspect the repository.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          },
           artifacts: {
             notes: {
               from: "output_dir",
@@ -151,7 +157,11 @@ async function createFixtureRun() {
               {
                 type: "agent",
                 id: "apply-fix",
-                goal: "Apply the fix.",
+                intent: {
+                  goal: "Apply the fix.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
                 artifacts: {
                   patch: {
                     from: "output_dir",
@@ -327,7 +337,11 @@ async function createAiTimeoutRun() {
           id: "judge-fix",
           repo: "main",
           check_kind: "ai",
-          goal: "Judge the graph output."
+          intent: {
+            goal: "Judge the graph output.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          },
         }
       ]
     }

@@ -8,7 +8,6 @@ import type {
   PrerequisiteKind,
   ReasoningEffort,
   SandboxMode,
-  SupervisorActionKind,
   WorkspaceBackend
 } from "./schema.js";
 
@@ -81,19 +80,15 @@ export interface GraphIntent {
   acceptance_criteria?: string[];
 }
 
-export interface SupervisionActionPolicy {
-  max_uses: number;
+export interface ExecutableNodeIntent {
+  goal: string;
+  acceptance_criteria: string[];
+  constraints: string[];
 }
 
 export interface SupervisionPolicy {
-  actions: Partial<Record<SupervisorActionKind, SupervisionActionPolicy>>;
+  profile: string;
   max_total_interventions: number;
-  policy: {
-    pause_on_policy_risk: boolean;
-    pause_on_repeated_recovery: boolean;
-    drift_score_threshold: number;
-    evaluator_profile?: string;
-  };
 }
 
 export interface FileInput {
@@ -185,9 +180,7 @@ export interface BaseNode {
 export interface BaseExecutableNode extends BaseNode {
   repo?: string;
   profile?: string;
-  goal?: string;
-  acceptance_criteria?: string[];
-  constraints?: string[];
+  intent: ExecutableNodeIntent;
   context?: ContextItem[];
   artifacts?: Record<string, ArtifactDefinition>;
   timeout_sec?: number;

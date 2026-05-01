@@ -9,27 +9,15 @@ import {
 import type { SupervisionPolicy } from "../../src/graph/authored.js";
 
 const policy: SupervisionPolicy = {
-  actions: {
-    retry_with_guidance: { max_uses: 1 },
-    repair_artifact: { max_uses: 1 }
-  },
-  max_total_interventions: 2,
-  policy: {
-    pause_on_policy_risk: true,
-    pause_on_repeated_recovery: true,
-    drift_score_threshold: 0.8
-  }
+  profile: "supervisor",
+  max_total_interventions: 2
 };
 
 describe("supervisor policy", () => {
   it("creates budget state from graph supervision policy", () => {
     expect(createSupervisorBudget(policy)).toEqual({
       remaining: {
-        max_total_interventions: 2,
-        actions: {
-          retry_with_guidance: 1,
-          repair_artifact: 1
-        }
+        max_total_interventions: 2
       },
       spent: {
         total: 0
@@ -37,15 +25,18 @@ describe("supervisor policy", () => {
     });
   });
 
-  it("spends both total and action-specific budget", () => {
+  it("spends total supervisor budget for any recovery action", () => {
     const state = spendSupervisorAction(createSupervisorBudget(policy), "retry_with_guidance");
 
     expect(state.remaining.max_total_interventions).toBe(1);
-    expect(state.remaining.actions.retry_with_guidance).toBe(0);
     expect(state.spent.total).toBe(1);
-    expect(state.spent.retry_with_guidance).toBe(1);
-    expect(canSpendSupervisorAction(state, "retry_with_guidance")).toBe(false);
+    expect(canSpendSupervisorAction(state, "retry_with_guidance")).toBe(true);
     expect(canSpendSupervisorAction(state, "repair_artifact")).toBe(true);
+
+    const exhausted = spendSupervisorAction(state, "repair_artifact");
+    expect(exhausted.remaining.max_total_interventions).toBe(0);
+    expect(exhausted.spent.total).toBe(2);
+    expect(canSpendSupervisorAction(exhausted, "retry_with_guidance")).toBe(false);
   });
 
   it("builds an escalation decision when budget is exhausted", () => {

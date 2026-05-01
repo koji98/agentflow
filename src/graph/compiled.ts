@@ -3,6 +3,7 @@ import type {
   ArtifactReference,
   ContextItem,
   DeterministicPassIf,
+  ExecutableNodeIntent,
   GraphIntent,
   GraphPrerequisites,
   SupervisionPolicy
@@ -15,7 +16,7 @@ import type {
   LoweredManagedKind
 } from "./schema.js";
 import type { CheckKind, ExecutableNodeKind } from "./schema.js";
-import type { EffectiveNodePolicy, LaunchResolution } from "./profiles.js";
+import type { EffectiveNodePolicy, EffectiveSupervisorPolicy, LaunchResolution } from "./profiles.js";
 import type { CredentialSpecMap } from "../auth/types.js";
 
 export interface CompiledExecutableNodeBase {
@@ -23,9 +24,7 @@ export interface CompiledExecutableNodeBase {
   authored_id: string;
   kind: ExecutableNodeKind;
   label?: string;
-  goal?: string;
-  acceptance_criteria?: string[];
-  constraints?: string[];
+  intent: ExecutableNodeIntent;
   repo: string;
   deps: string[];
   scope_stack: string[];
@@ -146,6 +145,7 @@ export interface CompiledGraph {
   graph_id: string;
   intent: GraphIntent;
   supervision: SupervisionPolicy;
+  supervisor_effective_policy?: EffectiveSupervisorPolicy;
   launch: Pick<LaunchResolution, "launch_profile" | "workspace_backend">;
   entry_node_ids: string[];
   nodes: CompiledExecutableNode[];

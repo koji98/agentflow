@@ -26,7 +26,15 @@ function buildDocument(stepOverrides = {}) {
       default: {
         harness: "codex-cli",
         sandbox: "read-only"
+      },
+      supervisor: {
+        harness: "codex-cli",
+        sandbox: "read-only"
       }
+    },
+    supervision: {
+      profile: "supervisor",
+      max_total_interventions: 3
     },
     graph: {
       type: "sequence",
@@ -37,12 +45,14 @@ function buildDocument(stepOverrides = {}) {
           id: "market_scan",
           repo: "main",
           profile: "default",
-          goal: "Produce a grounded recommendation for Agentflow managed pattern design.",
-          acceptance_criteria: [
+          intent: {
+            goal: "Produce a grounded recommendation for Agentflow managed pattern design.",
+            acceptance_criteria: [
             "The research summary answers all authored angles.",
             "The packet preserves evidence, uncertainty, confidence, and next actions."
           ],
-          constraints: ["Do not change the graph contract."],
+            constraints: ["Do not change the graph contract."]
+          },
           research: {
             angles: [
               "Investigate whether the implementation follows established Agentflow architecture.",
@@ -185,7 +195,14 @@ describe("deep research managed pattern", () => {
           {
             type: "agent",
             id: "handoff",
-            goal: "Summarize the research recommendation.",
+            intent: {
+              goal: "Summarize the research recommendation.",
+              acceptance_criteria: [
+              "The handoff uses the final managed summary and packet artifacts.",
+              "The handoff preserves the recommendation and key uncertainty."
+            ],
+              constraints: []
+            },
             context: [
               {
                 ref: "market_scan.agent_response",

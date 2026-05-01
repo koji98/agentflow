@@ -486,7 +486,17 @@ export function buildSmokeGraphDocument(spec, env = process.env) {
         model: resolveHarnessModel(spec, env),
         sandbox: spec.sandbox,
         timeout_sec: timeoutSec
+      },
+      supervisor: {
+        harness: spec.kind,
+        model: resolveHarnessModel(spec, env),
+        sandbox: "read-only",
+        timeout_sec: timeoutSec
       }
+    },
+    supervision: {
+      profile: "supervisor",
+      max_total_interventions: 3
     },
     graph: {
       type: "sequence",
@@ -496,7 +506,11 @@ export function buildSmokeGraphDocument(spec, env = process.env) {
           type: "agent",
           id: "real-smoke-agent",
           repo: "main",
-          goal: buildSmokePrompt(spec.kind)
+          intent: {
+            goal: buildSmokePrompt(spec.kind),
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          },
         }
       ]
     }
@@ -519,19 +533,8 @@ export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = proces
       constraints: ["External context is read-only and must not change graph intent or declared artifacts."]
     },
     supervision: {
-      actions: {
-        semantic_evaluation: { max_uses: 2 },
-        rebuild_context: { max_uses: 2 },
-        retry_with_guidance: { max_uses: 2 },
-        run_diagnostic: { max_uses: 2 },
-        pause_for_human: { max_uses: 1 }
-      },
-      max_total_interventions: 4,
-      policy: {
-        pause_on_policy_risk: true,
-        pause_on_repeated_recovery: true,
-        drift_score_threshold: 0.8
-      }
+      profile: "supervisor",
+      max_total_interventions: 4
     },
     repos: {
       main: {
@@ -548,6 +551,12 @@ export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = proces
         model: resolveHarnessModel(spec, env),
         sandbox: spec.sandbox,
         timeout_sec: timeoutSec
+      },
+      supervisor: {
+        harness: spec.kind,
+        model: resolveHarnessModel(spec, env),
+        sandbox: "read-only",
+        timeout_sec: timeoutSec
       }
     },
     graph: {
@@ -558,19 +567,22 @@ export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = proces
           type: "agent",
           id: "supervisor-recovery-agent",
           repo: "main",
-          goal: [
+          intent: {
+            goal: [
             "This is a supervisor recovery validation scenario.",
             "Run `af supervision show` before deciding what to do.",
             "If it reports active=false, intentionally fail the node by finishing with exactly this sentence and no extra evidence: `INTENTIONAL_FAILURE_DO_NOT_ACCEPT: missing dependency docs for package fixturelib; please retry after supervisor gathers external context`.",
             `If it reports active=true, read the supervisor recovery envelope, fetch or read the local official docs fixture at ${docsUrl}, and finish with the exact phrase: fixturelib token is RECOVERED-FIXTURE-42.`,
             "Do not change repository files."
           ].join(" "),
-          acceptance_criteria: [
+            acceptance_criteria: [
             "Final response includes `fixturelib token is RECOVERED-FIXTURE-42`.",
             "The final attempt used an active supervisor recovery envelope.",
             `The final attempt cites or uses the local docs fixture at ${docsUrl}.`,
             "The inactive fallback sentence containing `INTENTIONAL_FAILURE_DO_NOT_ACCEPT` is deliberately non-compliant and must be rejected when it appears without an active recovery envelope."
-          ]
+          ],
+            constraints: []
+          },
         }
       ]
     }

@@ -12,6 +12,7 @@ import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { validateAuthoredGraphDocument } from "../../src/graph/validate.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,10 +31,10 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument({
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
     intent: TEST_INTENT,
     ...document
-  });
+  }));
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -54,15 +55,7 @@ function buildGraphWithCleanup(
     version: "1",
     graph_id: "cleanup-test",
     intent: TEST_INTENT,
-    supervision: {
-      actions: {},
-      max_total_interventions: 0,
-      policy: {
-        pause_on_policy_risk: true,
-        pause_on_repeated_recovery: true,
-        drift_score_threshold: 0.8
-      }
-    },
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     repos: {
       main: {
         path: "."
@@ -131,7 +124,7 @@ describe("sequence cleanup compilation", () => {
 
 describe("sequence cleanup validation", () => {
   it("rejects cleanup nested inside another cleanup chain", async () => {
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateAuthoredGraphDocument(withNodeIntentDefaults({
       version: "1",
       graph_id: "nested-cleanup",
       intent: TEST_INTENT,
@@ -163,7 +156,7 @@ describe("sequence cleanup validation", () => {
           }
         ]
       }
-    });
+    }));
 
     expect(diagnostics.some((diag) => /cleanup is not allowed inside another cleanup chain/i.test(diag.message))).toBe(true);
   });

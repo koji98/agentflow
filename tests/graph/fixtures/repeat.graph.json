@@ -32,6 +32,10 @@
       "harness": "cursor-cli",
       "sandbox": "read-only",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "graph": {
@@ -42,13 +46,19 @@
         "type": "agent",
         "id": "understand",
         "repo": "main",
-        "goal": "Inspect the checkout timeout flow.",
         "artifacts": {
           "notes": {
             "from": "output_dir",
             "path": "notes.md",
             "description": "Markdown notes from the initial repository inspection."
           }
+        },
+        "intent": {
+          "goal": "Inspect the checkout timeout flow.",
+          "acceptance_criteria": [
+            "The notes artifact explains the relevant timeout flow and likely repair areas."
+          ],
+          "constraints": []
         }
       },
       {
@@ -64,7 +74,14 @@
             "args": [
               "run",
               "lint"
-            ]
+            ],
+            "intent": {
+              "goal": "Run lint before the repair loop.",
+              "acceptance_criteria": [
+                "The lint command exits successfully."
+              ],
+              "constraints": []
+            }
           },
           {
             "type": "exec",
@@ -74,7 +91,14 @@
             "args": [
               "run",
               "typecheck"
-            ]
+            ],
+            "intent": {
+              "goal": "Run typecheck before the repair loop.",
+              "acceptance_criteria": [
+                "The typecheck command exits successfully."
+              ],
+              "constraints": []
+            }
           }
         ]
       },
@@ -90,7 +114,6 @@
               "type": "agent",
               "id": "implement_fix",
               "repo": "main",
-              "goal": "Implement the timeout fix.",
               "context": [
                 {
                   "name": "sources",
@@ -102,20 +125,33 @@
                   "ref": "understand.agent_response",
                   "name": "understand_response"
                 }
-              ]
+              ],
+              "intent": {
+                "goal": "Implement the timeout fix.",
+                "acceptance_criteria": [
+                  "The timeout behavior is fixed in source while preserving existing architecture."
+                ],
+                "constraints": []
+              }
             },
             {
               "type": "agent",
               "id": "repair_notes",
               "repo": "main",
               "profile": "review",
-              "goal": "Review the fix and tighten any rough edges.",
               "context": [
                 {
                   "ref": "implement_fix.agent_response",
                   "name": "implementation_response"
                 }
-              ]
+              ],
+              "intent": {
+                "goal": "Review the fix and tighten any rough edges.",
+                "acceptance_criteria": [
+                  "The review identifies and addresses correctness or maintainability issues in the fix."
+                ],
+                "constraints": []
+              }
             },
             {
               "type": "check",
@@ -135,6 +171,15 @@
                   "path": "verification.json",
                   "description": "Structured JSON verification result for the repair loop."
                 }
+              },
+              "intent": {
+                "goal": "Validate the timeout fix.",
+                "acceptance_criteria": [
+                  "The test command exits with code 0 and writes the verification artifact."
+                ],
+                "constraints": [
+                  "Do not modify workspace files."
+                ]
               }
             }
           ]
@@ -147,15 +192,25 @@
         "type": "agent",
         "id": "handoff",
         "repo": "main",
-        "goal": "Summarize the fix and remaining risks.",
         "context": [
           {
             "ref": "verify_fix.verification",
             "name": "verification",
             "iteration": "latest_passed"
           }
-        ]
+        ],
+        "intent": {
+          "goal": "Summarize the fix and remaining risks.",
+          "acceptance_criteria": [
+            "The final handoff cites validation evidence and any remaining risks."
+          ],
+          "constraints": []
+        }
       }
     ]
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
   }
 }

@@ -93,24 +93,58 @@ Common scenario criteria:
 ```json
 {
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["Validation:"] }] },
-    "workspace": { "forbidden_edits": ["forbidden.txt"] },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Validation:"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "forbidden.txt"
+      ]
+    },
     "supervisor": {
-      "classifications": ["missing_dependency_docs"],
-      "gatherers": ["external_context"],
-      "apply_actions": ["retry_node"]
+      "classifications": [
+        "missing_dependency_docs"
+      ],
+      "gatherers": [
+        "external_context"
+      ],
+      "apply_actions": [
+        "retry_node"
+      ]
     },
     "trajectory": {
       "match": "contains_ordered",
       "events": [
-        { "kind": "simulation_tool_call", "rule_id": "docs-ok", "matched": true },
-        { "kind": "artifact_write", "artifact": "handoff" }
+        {
+          "kind": "simulation_tool_call",
+          "rule_id": "docs-ok",
+          "matched": true
+        },
+        {
+          "kind": "artifact_write",
+          "artifact": "handoff"
+        }
       ]
     },
-    "delivery": { "required": true },
+    "delivery": {
+      "required": true
+    },
     "workflow-deterministic": {},
-    "artifact-quality": { "dimensions": ["artifact_quality"] }
+    "artifact-quality": {
+      "dimensions": [
+        "artifact_quality"
+      ]
+    }
   }
 }
 ```
@@ -131,8 +165,16 @@ Use `environment.simulation` to test tool outages, fixed API responses, latency,
         {
           "id": "github-503",
           "command": "gh",
-          "match": { "argv_contains": ["pr", "checks"] },
-          "error": { "stderr": "GitHub maintenance", "exit_code": 503 },
+          "match": {
+            "argv_contains": [
+              "pr",
+              "checks"
+            ]
+          },
+          "error": {
+            "stderr": "GitHub maintenance",
+            "exit_code": 503
+          },
           "latency_ms": 100,
           "probability": 1
         }

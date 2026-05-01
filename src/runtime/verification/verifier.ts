@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { CompiledAgentNode, CompiledGraph } from "../../graph/compiled.js";
+import type { EffectiveSupervisorPolicy } from "../../graph/profiles.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { AgentInvocation, HarnessAdapter } from "../harness/types.js";
 import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
@@ -42,6 +43,7 @@ export interface RunOutcomeVerificationOptions {
   declaredArtifactPaths: Record<string, string>;
   workspaceChangeArtifacts?: NodeWorkspaceChangeArtifacts;
   harness: HarnessAdapter;
+  supervisorPolicy?: EffectiveSupervisorPolicy;
   runId: string;
   baseEnv?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
@@ -372,7 +374,9 @@ function buildVerifierInvocation(options: {
   baseEnv?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   runtimeDir?: string;
+  supervisorPolicy?: EffectiveSupervisorPolicy;
 }): AgentInvocation {
+  const policy = options.supervisorPolicy;
   return {
     promptKind: "outcome_verification",
     runId: options.runId,
@@ -381,10 +385,10 @@ function buildVerifierInvocation(options: {
     repoPath: options.workspacePath,
     sandbox: "read-only",
     skipGitRepoCheck: true,
-    model: options.node.effective_policy.model,
+    model: policy?.model ?? options.node.effective_policy.model,
     ...(options.baseEnv ? { baseEnv: options.baseEnv } : {}),
-    ...(options.node.effective_policy.reasoning_effort
-      ? { reasoningEffort: options.node.effective_policy.reasoning_effort }
+    ...(policy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort
+      ? { reasoningEffort: policy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort }
       : {}),
     ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {}),
     nodeGoal: "Audit the just-finished node attempt against the captured prompt.",
@@ -401,7 +405,7 @@ function buildVerifierInvocation(options: {
     contextManifest: options.contextManifest,
     outputDir: options.outputDir,
     artifacts: {},
-    timeoutSec: verifierTimeoutSec,
+    timeoutSec: Math.min(policy?.timeout_sec ?? verifierTimeoutSec, verifierTimeoutSec),
     signal: options.signal,
     rubric: options.prompt
   };
@@ -527,9 +531,9 @@ export async function runOutcomeVerification(
     graph_constraints: options.graph.intent.constraints ?? [],
     node_authored_id: options.node.authored_id,
     node_compiled_id: options.node.compiled_id,
-    node_goal: options.node.goal ?? "",
-    node_acceptance_criteria: options.node.acceptance_criteria ?? [],
-    node_constraints: options.node.constraints ?? [],
+    node_goal: options.node.intent.goal ?? "",
+    node_acceptance_criteria: options.node.intent.acceptance_criteria ?? [],
+    node_constraints: options.node.intent.constraints ?? [],
     agent_response_snippet: agentResponseSnippet,
     declared_artifact_snippets: declaredArtifactSnippets,
     decision_log_entries: decisionLogEntries,
@@ -551,7 +555,10 @@ export async function runOutcomeVerification(
   const startedAt = nowMs(options.now);
   const metadataBase = {
     harness: options.harness.kind,
-    ...(options.node.effective_policy.model ? { model: options.node.effective_policy.model } : {}),
+    ...(options.supervisorPolicy?.profile_name ? { profile_name: options.supervisorPolicy.profile_name } : {}),
+    ...(options.supervisorPolicy?.model ?? options.node.effective_policy.model
+      ? { model: options.supervisorPolicy?.model ?? options.node.effective_policy.model }
+      : {}),
     duration_ms: 0,
     prompt_path: promptPath,
     response_path: responsePath,
@@ -580,7 +587,8 @@ export async function runOutcomeVerification(
       runId: options.runId,
       ...(options.baseEnv ? { baseEnv: options.baseEnv } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
-      ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {})
+      ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {}),
+      ...(options.supervisorPolicy ? { supervisorPolicy: options.supervisorPolicy } : {})
     });
 
     let harnessResult: Awaited<ReturnType<HarnessAdapter["run"]>>;

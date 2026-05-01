@@ -47,7 +47,11 @@ describe("supervisor actions", () => {
           description: "Markdown handoff."
         }
       },
-      goal: "Write a handoff.",
+      intent: {
+        goal: "Write a handoff.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
       tools: []
     };
     const attempt: RuntimeNodeAttempt = {

@@ -39,14 +39,20 @@ Common top-level fields:
 ```json
 {
   "goal": "Ship checkout timeout handling.",
-  "constraints": ["Keep the public API stable.", "Avoid unrelated refactors."],
-  "acceptance_criteria": ["Timeouts return a typed error.", "Tests cover retry behavior."]
+  "constraints": [
+    "Keep the public API stable.",
+    "Avoid unrelated refactors."
+  ],
+  "acceptance_criteria": [
+    "Timeouts return a typed error.",
+    "Tests cover retry behavior."
+  ]
 }
 ```
 
 The normalizer rejects unknown graph fields and invalid enum values. Missing `intent.goal` is a hard schema error.
 
-Repository and profile authority stay explicit outside `intent`. Top-level `repos` bind aliases to local checkouts, top-level `profiles` define harness authority, and executable nodes choose `repo` and `profile`. Scope boundaries and out-of-scope notes are authored as plain `constraints`.
+Repository and profile authority stay explicit outside `intent`. Top-level `repos` bind aliases to local checkouts, top-level `profiles` define harness authority, and executable nodes choose `repo` and `profile`. Scope boundaries and out-of-scope notes are authored in graph-level or node-level `intent.constraints`.
 
 ## Compilation
 
@@ -58,7 +64,7 @@ Compilation lowers the authored graph into primitive runtime structures:
 - resolved profiles and workspace policy
 - resolved plugin workflow expansions
 - resolved plugin tool contracts
-- supervision policy copied into the compiled graph
+- supervision contract copied into the compiled graph
 - graph and node intent copied into executable nodes
 
 Managed patterns compile into generated primitive subgraphs. The public authored node id remains the handoff boundary; generated internal ids are implementation details visible through `validate --show-compiled`.
@@ -148,7 +154,7 @@ See `runtime-tooling.md` for the generated `af` wrapper, plugin launcher, creden
 
 ## Supervision
 
-The supervisor is engine-side runtime logic, not a second always-running agent. It observes worker evidence while a node attempt runs, then evaluates the completed attempt against graph goal, node goal, constraints, acceptance criteria, declared artifacts, tool usage, and workspace changes at a scheduler boundary.
+The supervisor is engine-side runtime logic, not a second always-running agent. Every executable node is a supervised checkpoint: `agent`, `exec`, `check`, `checkpoint`, and managed-pattern internals all carry an `intent` block with `goal`, `acceptance_criteria`, and normalized `constraints`. The supervisor observes each attempt, records health evidence, and stays out of the way when the checkpoint is healthy.
 
 Action kinds:
 
@@ -162,31 +168,25 @@ Action kinds:
 - `semantic_evaluation`
 - `fail`
 
-The graph contract configures bounded intervention actions with `supervision.actions.<action>.max_uses`, plus `max_total_interventions` and `policy` settings such as `pause_on_policy_risk`, `pause_on_repeated_recovery`, and `drift_score_threshold`. These graph action names are budget entry points. Internal recovery can apply a more specific runtime overlay such as context repair, evidence-backed retry, validation-strategy repair, workspace repair, environment repair, artifact repair, terminal fail, or authority pause without adding graph fields.
+The graph contract exposes one required supervisor profile, `supervision.profile`, plus one recovery budget, `supervision.max_total_interventions`. Evidence gathering, artifact repair, outcome verification, and supervisor helper work use the supervisor profile while still respecting the selected target node's repo, sandbox, credential, and tool authority. This keeps supervisor work explicit even when the failed checkpoint is a deterministic `check`, `exec`, or `checkpoint` with no authored worker profile. Internal recovery can apply a runtime operation such as current-node repair, upstream-node repair, artifact repair, context repair, validation-strategy repair, workspace repair, environment repair, causal-cone investigation, or authority pause without adding graph fields.
 
-Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Bounded intervention workers attach artifacts under the target attempt's `interventions/` directory. Durable human pauses set run status to `paused` and include resume options plus the recovery plan that explains the precise unblock request.
+Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Budget-spending recovery chains attach artifacts under the symptom attempt's `interventions/` directory, while any repaired upstream target writes normal attempt folders that are linked from the chain. Durable human pauses set run status to `paused` and include resume options plus the recovery plan that explains the precise unblock request.
 
-On a failed executable node attempt, retry-oriented actions enter the supervisor recovery loop. The runtime persists the exact rendered node prompt, builds an immutable case file, runs classifier-selected evidence gatherers with an internal concurrency cap, merges the evidence into one recovery plan, and applies exactly one runtime overlay action. Retries are allowed only when the overlay records a material delta: context changed, evidence added, validation guidance changed, workspace repaired, environment repaired, or an artifact was repaired. Parallel evidence gathers are an internal detail; budget is spent once per recovery cycle on the selected graph action.
+On a failed or rejected executable attempt, the symptom is not automatically treated as the cause. The runtime persists the exact rendered prompt, builds a causal case file, constructs an upstream cone from graph edges, artifact producers, context provenance, prior attempts, workspace diffs, repeat/managed state, and verification evidence, then ranks likely recovery targets. The supervisor repairs the nearest intent-aligned cause first, reruns the failed gate, and continues only when each retry records a material delta: target changed, context changed, evidence added, validation guidance changed, workspace repaired, environment repaired, or an artifact was repaired. Budget is spent once per recovery chain, not once per helper, gatherer, target attempt, or rerun gate.
 
-Context contract failures are deterministic recovery cases. If authored context cannot be packaged because it exceeds `max_total_tokens`, explodes through broad globs, includes non-tokenizable material, or otherwise cannot fit the context contract, the supervisor writes `context-analysis.{json,md}`, writes `context-repair-patch.json`, and retries with a compact repair packet before the authored context. The repair packet contains a bounded file index, sample matches, largest files, default ignored roots, omitted-entry provenance, and live workspace paths for manual inspection. It does not change graph intent, node goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts.
+Context contract failures are deterministic recovery cases. If authored context cannot be packaged because it exceeds `max_total_tokens`, explodes through broad globs, includes non-tokenizable material, or otherwise cannot fit the context contract, the supervisor writes `context-analysis.{json,md}`, writes `context-repair-patch.json`, and retries with a compact repair packet before the authored context. The repair packet contains a bounded file index, sample matches, largest files, default ignored roots, omitted-entry provenance, and live workspace paths for manual inspection. It does not change graph intent, node intent, repo authority, sandbox, or declared artifacts.
 
 Workspace and environment repair are also runtime overlays, not graph contract features. Workspace repair consumes the node snapshot artifacts for the failed attempt and restores only that attempt's tracked/untracked diff before retry. Environment repair is limited to safe local substrate refresh, such as regenerating Agentflow tool wrappers and PATH/runtime metadata for the next attempt.
 
 Evidence gatherers can inspect local context, mine local patterns, read dependency metadata, gather read-only external context, run diagnostic probes, rejudge semantic failures, or investigate the failed attempt. External context is allowed by default for evidence gathering, but it cannot change graph intent, acceptance criteria, repo authority, sandbox authority, or declared artifacts.
 
-Current artifact repair behavior:
-
-1. The runtime detects a required declared artifact missing after a successful agent attempt.
-2. The supervisor classifies the failure and checks policy and budget.
-3. If allowed, it starts an intent-aware repair intervention using graph intent, node task, constraints, acceptance criteria, the same harness authority, and the same sandbox boundary as the node.
-4. If no harness is available and exactly one missing artifact is a human-readable text handoff, it may synthesize that handoff from `agent_response`; JSON, other machine-readable contracts, and multi-artifact contracts still require real artifacts.
-5. It writes intervention prompt, stdout, stderr, result, and ledger records under the node attempt.
-6. It accepts the repaired artifact only if the declared artifact now exists.
-7. It records the decision and result in events and `interventions.jsonl`.
+Artifact repair is part of the same causal recovery chain. A downstream failed check can target the upstream artifact producer; a missing or bad artifact can target the node that owned that artifact contract; a malformed final publish can target the public managed node's publish phase. Repair prompts receive the responsible node contract, downstream failed evidence, prior attempts, relevant artifacts and context, and the exact authority boundary they may use. The repaired artifact is accepted only if it satisfies the declared artifact contract.
 
 Failed harness attempts do not publish declared artifacts, even if they wrote files in the output directory before failing. Those files can be surfaced as prior-attempt evidence for later repair or retry prompts, but downstream refs and delivery handoffs only consume artifacts materialized from successful attempts or accepted repairs.
 
-`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same recovery loop. A retried node receives a `SupervisorRecoveryEnvelope` before the original authored task, and the same envelope is materialized into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af context show` also shows the `supervisor_context_repair` material and the authored entries omitted by the overlay. The envelope states that the original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
+`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same causal recovery loop. A retried or repaired target receives a `SupervisorRecoveryEnvelope` before the original authored task, and the same envelope is materialized into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af context show` also shows the `supervisor_context_repair` material and the authored entries omitted by the overlay. The envelope names the symptom node, the selected recovery target, the material delta, and states that graph intent, node intent, repo authority, sandbox, and declared artifacts are unchanged. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
+
+Supervisor helpers can use read-only diagnostics through `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, and `af diagnose validation`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. `af spawn --purpose investigation` creates read-only causal-analysis helpers; `af spawn --purpose repair` creates scoped repair helpers that can use only the selected target node's existing authority.
 
 Supervisor events:
 
@@ -194,6 +194,7 @@ Supervisor events:
 - `supervisor.intervention.started`
 - `supervisor.intervention.completed`
 - `supervisor.intervention.failed`
+- `supervisor.gate_rerun_scheduled`
 - `supervisor.retry_scheduled`
 - `supervisor.paused`
 
@@ -203,7 +204,7 @@ Agentflow has two human-in-the-loop mechanisms, and they are intentionally diffe
 
 `checkpoint` is authored workflow structure. It is a planned human gate that reviews a declared artifact at a known point in the graph. In this release, checkpoints are valid only inside `repeat` bodies so a deny decision can feed the next iteration with operator feedback. A checkpoint used as the repeat `until` node behaves like the loop's human approval sensor: pass exits the loop, deny can drive another iteration, and abort cancels the run.
 
-`pause_for_human` is supervisor safety behavior. It is not an authored node, and internally it is treated as `pause_for_authority`. The supervisor chooses it only when recovery needs authority the runtime must not infer: missing credentials, explicit human checkpoint boundaries, product or intent ambiguity, security or compliance judgment, repo/sandbox/scope expansion, or graph contract amendment. Ordinary local context, validation, artifact, workspace, and recoverable environment failures should attempt machine repair first. A pause writes durable run state, records `supervisor.paused`, sets the run status to `paused`, and waits for `agentflow resume --human-action ...`.
+`pause_for_human` is supervisor authority behavior. It is not an authored node, and internally it is treated as `pause_for_authority`. The supervisor chooses it only when recovery needs authority the runtime must not infer: missing credentials, explicit human checkpoint boundaries, product or intent ambiguity, security or compliance judgment, repo/sandbox/scope expansion, or graph contract amendment. Ordinary local context, validation, artifact, workspace, and recoverable environment failures should attempt machine repair first. A pause writes durable run state, records `supervisor.paused`, sets the run status to `paused`, and waits for `agentflow resume --human-action ...`.
 
 This mirrors the durable interrupt/resume shape used by production agent runtimes: the run state is persisted before asking a human, resources are released, and resume input is recorded as part of the audit trail. Agentflow implements that locally through run-root artifacts rather than a remote checkpoint database.
 

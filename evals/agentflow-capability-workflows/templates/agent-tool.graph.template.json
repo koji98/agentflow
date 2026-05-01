@@ -28,11 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
     "max_total_interventions": 0,
-    "actions": {}
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -42,17 +46,6 @@
         "type": "agent",
         "id": "implement",
         "repo": "main",
-        "goal": "Complete `AGENTFLOW_EVAL_TASK.md`. The local tool directory is on PATH; run `fixture-lookup --case tool-guided-discovery` to discover the required value, then run `npm test` and write `handoff.md`.",
-        "acceptance_criteria": [
-          "The local fixture tool is used for the unknown value.",
-          "`npm test` passes.",
-          "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Tool command:`, `Validation:`, and `Risks:` fields."
-        ],
-        "constraints": [
-          "Do not invent the flag value.",
-          "Do not add dependencies.",
-          "Use `fixture-lookup --case tool-guided-discovery` directly; do not bypass the PATH tool unless direct execution fails, and document any fallback in `Tool command:`."
-        ],
         "context": [
           {
             "name": "task",
@@ -78,6 +71,19 @@
             "path": "handoff.md",
             "description": "Tool-use handoff with literal Scenario:, Changed files:, Tool command:, Validation:, and Risks: fields."
           }
+        },
+        "intent": {
+          "goal": "Complete `AGENTFLOW_EVAL_TASK.md`. The local tool directory is on PATH; run `fixture-lookup --case tool-guided-discovery` to discover the required value, then run `npm test` and write `handoff.md`.",
+          "acceptance_criteria": [
+            "The local fixture tool is used for the unknown value.",
+            "`npm test` passes.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Tool command:`, `Validation:`, and `Risks:` fields."
+          ],
+          "constraints": [
+            "Do not invent the flag value.",
+            "Do not add dependencies.",
+            "Use `fixture-lookup --case tool-guided-discovery` directly; do not bypass the PATH tool unless direct execution fails, and document any fallback in `Tool command:`."
+          ]
         }
       },
       {
@@ -88,7 +94,15 @@
         "command": "npm",
         "args": [
           "test"
-        ]
+        ],
+        "intent": {
+          "goal": "Run the scenario validation suite and confirm the tool-discovered value was applied correctly.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully.",
+            "The validation evidence confirms the local fixture tool result was used."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

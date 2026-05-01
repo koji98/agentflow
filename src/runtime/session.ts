@@ -6,6 +6,7 @@ import type { SupervisorBudgetRemaining } from "../supervisor/policy.js";
 import type {
   SupervisorDecision,
   SupervisorFailureFingerprintState,
+  SupervisorRecoveryChainState,
   SupervisorRecoveryEnvelope
 } from "../supervisor/types.js";
 
@@ -54,6 +55,7 @@ export interface ExecutionManifest {
   graph_id: string;
   launch_profile: string;
   workspace_backend: WorkspaceBackend;
+  supervisor_effective_policy?: CompiledGraph["supervisor_effective_policy"];
   repo_workspaces: Record<string, WorkspaceBinding>;
   nodes: ExecutionManifestEntry[];
 }
@@ -127,6 +129,7 @@ export interface RuntimeSupervisorState {
   last_decision_id?: string;
   timeline: SupervisorDecision[];
   active_recovery_envelopes: Record<string, SupervisorRecoveryEnvelope>;
+  active_recovery_chains: Record<string, SupervisorRecoveryChainState>;
   failure_fingerprints: Record<string, SupervisorFailureFingerprintState>;
   pause?: {
     decision_id: string;
@@ -244,6 +247,7 @@ export function buildExecutionManifest(
     graph_id: graph.graph_id,
     launch_profile: graph.launch.launch_profile,
     workspace_backend: graph.launch.workspace_backend,
+    ...(graph.supervisor_effective_policy ? { supervisor_effective_policy: graph.supervisor_effective_policy } : {}),
     repo_workspaces: repoWorkspaces,
     nodes: graph.nodes.map((node) => ({
       compiled_id: node.compiled_id,
@@ -267,13 +271,7 @@ export function createRuntimeSession(
 ): RuntimeSession {
   const started_at = new Date().toISOString();
   const budgetRemaining: SupervisorBudgetRemaining = {
-    max_total_interventions: graph.supervision.max_total_interventions,
-    actions: Object.fromEntries(
-      Object.entries(graph.supervision.actions).map(([action, policy]) => [
-        action,
-        policy?.max_uses ?? 0
-      ])
-    )
+    max_total_interventions: graph.supervision.max_total_interventions
   };
   const repeat_scopes = new Map<string, RepeatScopeState>(
     graph.scopes
@@ -311,6 +309,7 @@ export function createRuntimeSession(
       budget_remaining: budgetRemaining,
       timeline: [],
       active_recovery_envelopes: {},
+      active_recovery_chains: {},
       failure_fingerprints: {},
       escalations: []
     },
@@ -431,8 +430,7 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     supervisor: {
       ...session.supervisor,
       budget_remaining: {
-        max_total_interventions: session.supervisor.budget_remaining.max_total_interventions,
-        actions: { ...session.supervisor.budget_remaining.actions }
+        max_total_interventions: session.supervisor.budget_remaining.max_total_interventions
       },
       timeline: session.supervisor.timeline.map((decision) => ({ ...decision })),
       active_recovery_envelopes: Object.fromEntries(
@@ -448,6 +446,15 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
               validation_focus: [...envelope.retry_directive.validation_focus],
               unchanged_contract: { ...envelope.retry_directive.unchanged_contract }
             }
+          }
+        ])
+      ),
+      active_recovery_chains: Object.fromEntries(
+        Object.entries(session.supervisor.active_recovery_chains).map(([compiledId, chain]) => [
+          compiledId,
+          {
+            ...chain,
+            resume_ready_node: { ...chain.resume_ready_node }
           }
         ])
       ),

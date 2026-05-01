@@ -92,7 +92,15 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
       profiles: {
         default: {
           harness: "{{workflow.harness}}"
+        },
+        supervisor: {
+          harness: "{{workflow.harness}}",
+          sandbox: "read-only"
         }
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
       },
       graph: {
         type: "sequence",
@@ -102,6 +110,14 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
             type: "exec",
             id: "simulated_remote",
             repo: "main",
+            intent: {
+              goal: "Call the simulated remote tool so the eval trace records a deterministic tool event.",
+              acceptance_criteria: [
+              "The fixture-remote simulation rule matches.",
+              "The command exits successfully before the handoff writer runs."
+            ],
+              constraints: []
+            },
             command: "fixture-remote",
             args: ["--url", "local"]
           },
@@ -109,6 +125,14 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
             type: "exec",
             id: "write_handoff",
             repo: "main",
+            intent: {
+              goal: "Write the declared handoff artifact for eval grading.",
+              acceptance_criteria: [
+              "The handoff artifact exists in the output directory.",
+              "The handoff includes validation evidence text."
+            ],
+              constraints: []
+            },
             command: "node",
             args: [
               "-e",

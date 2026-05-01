@@ -3,7 +3,9 @@
   "graph_id": "basic-local-agentflow-eval-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
   "intent": {
     "goal": "Run the eval case task and preserve execution evidence.",
-    "acceptance_criteria": ["The eval case completes and emits a run trace."]
+    "acceptance_criteria": [
+      "The eval case completes and emits a run trace."
+    ]
   },
   "repos": {
     "main": {
@@ -18,6 +20,10 @@
     "default": {
       "harness": "codex-cli",
       "skip_git_repo_check": true
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "graph": {
@@ -39,8 +45,20 @@
             "path": "handoff.md",
             "description": "Basic eval handoff."
           }
+        },
+        "intent": {
+          "goal": "Write the basic eval handoff artifact so the suite has deterministic evidence.",
+          "acceptance_criteria": [
+            "The command writes `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+            "The run trace records this executable attempt."
+          ],
+          "constraints": []
         }
       }
     ]
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
   }
 }

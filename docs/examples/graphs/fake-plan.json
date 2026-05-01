@@ -22,6 +22,10 @@
         "max_total_tokens": 64000,
         "max_tokens_per_item": 32000
       }
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "graph": {
@@ -32,10 +36,6 @@
         "type": "agent",
         "id": "inspect_repo",
         "repo": "main",
-        "goal": "Inspect this repository and summarize what it does, the main CLI commands a developer would use first, and any obvious operator-facing constraints.",
-        "constraints": [
-          "Do not modify files."
-        ],
         "context": [
           {
             "name": "readme",
@@ -52,7 +52,17 @@
             "from": "workspace_file",
             "path": "docs/product/scope.md"
           }
-        ]
+        ],
+        "intent": {
+          "goal": "Inspect this repository and summarize what it does, the main CLI commands a developer would use first, and any obvious operator-facing constraints.",
+          "acceptance_criteria": [
+            "The response identifies the repository purpose and first useful CLI commands.",
+            "The response names operator-facing constraints without modifying files."
+          ],
+          "constraints": [
+            "Do not modify files."
+          ]
+        }
       },
       {
         "type": "check",
@@ -67,16 +77,20 @@
         "pass_if": {
           "json_path": "$.passed",
           "equals": true
+        },
+        "intent": {
+          "goal": "Verify that package metadata matches the expected local Agentflow package shape.",
+          "acceptance_criteria": [
+            "The package name is `agentflow`.",
+            "The package metadata exposes the expected workspace structure."
+          ],
+          "constraints": []
         }
       },
       {
         "type": "agent",
         "id": "summarize_findings",
         "repo": "main",
-        "goal": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing.",
-        "constraints": [
-          "Do not modify files."
-        ],
         "context": [
           {
             "ref": "inspect_repo.agent_response",
@@ -86,7 +100,17 @@
             "ref": "verify_package_contract.verification_json",
             "name": "package_contract_result"
           }
-        ]
+        ],
+        "intent": {
+          "goal": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing.",
+          "acceptance_criteria": [
+            "The handoff mentions package name, graph validation, and package metadata coherence.",
+            "The handoff uses inspection and check evidence."
+          ],
+          "constraints": [
+            "Do not modify files."
+          ]
+        }
       }
     ]
   },
@@ -101,19 +125,7 @@
     ]
   },
   "supervision": {
-    "actions": {
-      "retry_with_guidance": { "max_uses": 2 },
-      "repair_artifact": { "max_uses": 2 },
-      "rebuild_context": { "max_uses": 1 },
-      "run_diagnostic": { "max_uses": 2 },
-      "pause_for_human": { "max_uses": 1 },
-      "semantic_evaluation": { "max_uses": 1 }
-    },
     "max_total_interventions": 6,
-    "policy": {
-      "pause_on_policy_risk": true,
-      "pause_on_repeated_recovery": true,
-      "drift_score_threshold": 0.8
-    }
+    "profile": "supervisor"
   }
 }

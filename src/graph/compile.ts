@@ -20,7 +20,8 @@ import type {
 import type { LoweredManagedNode } from "./normalize.js";
 import {
   resolveExecutableRepoAlias,
-  resolveNodePolicy
+  resolveNodePolicy,
+  resolveSupervisorPolicy
 } from "./profiles.js";
 import type { LaunchResolution } from "./profiles.js";
 import type { GraphDiagnostic, LoweredManagedKind } from "./schema.js";
@@ -375,9 +376,7 @@ function compileExecutableNode(
     authored_id: node.id,
     kind: node.type,
     ...(node.label ? { label: node.label } : {}),
-    ...(node.goal ? { goal: node.goal } : {}),
-    ...(node.acceptance_criteria ? { acceptance_criteria: node.acceptance_criteria } : {}),
-    ...(node.constraints ? { constraints: node.constraints } : {}),
+    intent: node.intent,
     repo,
     deps: [],
     scope_stack: scopeFrame.scope_stack,
@@ -945,6 +944,8 @@ export function compileAuthoredGraph(
     credential_specs,
     diagnostics: compileDiagnostics
   });
+  const supervisorPolicyResolution = resolveSupervisorPolicy(document, launch);
+  compileDiagnostics.push(...supervisorPolicyResolution.diagnostics);
 
   const context: CompileContext = {
     document,
@@ -971,6 +972,9 @@ export function compileAuthoredGraph(
     graph_id: document.graph_id,
     intent: document.intent,
     supervision: document.supervision,
+    ...(supervisorPolicyResolution.policy
+      ? { supervisor_effective_policy: supervisorPolicyResolution.policy }
+      : {}),
     launch: {
       launch_profile: launch.launch_profile,
       workspace_backend: launch.workspace_backend

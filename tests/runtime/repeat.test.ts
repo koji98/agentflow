@@ -12,6 +12,7 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,10 +31,10 @@ async function initGitRepo(repoDir: string): Promise<void> {
 }
 
 function compileGraph(document: AuthoredGraphDocument) {
-  const normalized = normalizeAuthoredGraphDocument({
+  const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
     intent: TEST_INTENT,
     ...document
-  });
+  }));
   expect(normalized.diagnostics).toEqual([]);
   const launch = resolveLaunchConfig(normalized.document!);
   const compilation = compileAuthoredGraph(
@@ -87,7 +88,11 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "implement",
-                  goal: "Attempt a fix."
+                  intent: {
+                    goal: "Attempt a fix.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                 },
                 {
                   type: "check",
@@ -201,7 +206,11 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "revise",
-                  goal: "Revise the spec.",
+                  intent: {
+                    goal: "Revise the spec.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   context: [
                     {
                       ref: "merge_feedback.critique_merged",
@@ -233,7 +242,11 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "merge_feedback",
-                  goal: "Merge feedback.",
+                  intent: {
+                    goal: "Merge feedback.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     critique_merged: {
                       from: "output_dir",
@@ -245,7 +258,11 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "quality_review",
-                  goal: "Evaluate the revision.",
+                  intent: {
+                    goal: "Evaluate the revision.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     quality_review: {
                       from: "output_dir",
@@ -257,7 +274,11 @@ describe("runtime repeat", () => {
                 {
                   type: "checkpoint",
                   id: "human_review",
-                  goal: "Review the spec revision.",
+                  intent: {
+                    goal: "Review the spec revision.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   review_from: {
                     node: "revise",
                     artifact: "spec_revision"
@@ -417,7 +438,11 @@ describe("runtime repeat", () => {
                 {
                   type: "agent",
                   id: "draft",
-                  goal: "Draft the artifact.",
+                  intent: {
+                    goal: "Draft the artifact.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     draft_spec: {
                       from: "output_dir",
@@ -429,7 +454,11 @@ describe("runtime repeat", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  goal: "Review the draft.",
+                  intent: {
+                    goal: "Review the draft.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"

@@ -44,6 +44,10 @@
         "model": "gpt-5-codex",
         "reasoning_effort": "medium"
       }
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "graph": {
@@ -55,10 +59,6 @@
         "id": "survey_repo",
         "repo": "main",
         "profile": "analysis",
-        "goal": "Inspect this repository and summarize the product shape, the main CLI workflow, and any operator-facing constraints.",
-        "constraints": [
-          "Do not modify files."
-        ],
         "context": [
           {
             "name": "readme",
@@ -83,6 +83,16 @@
             "path": "survey-notes.md",
             "description": "Markdown notes from the repository survey."
           }
+        },
+        "intent": {
+          "goal": "Inspect this repository and summarize the product shape, the main CLI workflow, and any operator-facing constraints.",
+          "acceptance_criteria": [
+            "The survey artifact identifies product shape, CLI workflow, and operator-facing constraints.",
+            "The survey remains read-only and evidence-backed."
+          ],
+          "constraints": [
+            "Do not modify files."
+          ]
         }
       },
       {
@@ -98,7 +108,15 @@
             "args": [
               "-e",
               "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); console.log(JSON.stringify({name: pkg.name, scripts: Object.keys(pkg.scripts).slice(0, 8)}, null, 2));"
-            ]
+            ],
+            "intent": {
+              "goal": "Print a compact package summary for downstream inspection.",
+              "acceptance_criteria": [
+                "The command exits successfully.",
+                "Stdout includes package name and a bounded list of script names."
+              ],
+              "constraints": []
+            }
           },
           {
             "type": "check",
@@ -120,6 +138,14 @@
                 "path": "verification.json",
                 "description": "Structured JSON result from the package contract check."
               }
+            },
+            "intent": {
+              "goal": "Verify package metadata has the expected Agentflow CLI command scripts.",
+              "acceptance_criteria": [
+                "The package name is `agentflow`.",
+                "The package scripts include validate, compile, and run entries."
+              ],
+              "constraints": []
             }
           }
         ]
@@ -129,10 +155,6 @@
         "id": "synthesize_constraints",
         "repo": "main",
         "profile": "analysis",
-        "goal": "Using the repository survey and package contract output, write a concise set of constraints and observations that a human operator should know before running a graph in this repository.",
-        "constraints": [
-          "Do not modify files."
-        ],
         "context": [
           {
             "ref": "survey_repo.agent_response",
@@ -149,6 +171,16 @@
             "path": "constraints-brief.md",
             "description": "Markdown constraints and observations for running Agentflow in this repository."
           }
+        },
+        "intent": {
+          "goal": "Using the repository survey and package contract output, write a concise set of constraints and observations that a human operator should know before running a graph in this repository.",
+          "acceptance_criteria": [
+            "The constraints brief is grounded in the survey and package contract artifacts.",
+            "The brief is concise enough for an operator to use before launch."
+          ],
+          "constraints": [
+            "Do not modify files."
+          ]
         }
       },
       {
@@ -164,10 +196,6 @@
               "id": "draft_walkthrough",
               "repo": "main",
               "profile": "analysis",
-              "goal": "Draft a concise operator walkthrough for this repository that explains how to validate, compile, run, and inspect a graph.",
-              "constraints": [
-                "Keep it read-only and do not modify files."
-              ],
               "context": [
                 {
                   "ref": "synthesize_constraints.agent_response",
@@ -184,6 +212,16 @@
                   "path": "walkthrough-draft.md",
                   "description": "Markdown draft of the operator walkthrough."
                 }
+              },
+              "intent": {
+                "goal": "Draft a concise operator walkthrough for this repository that explains how to validate, compile, run, and inspect a graph.",
+                "acceptance_criteria": [
+                  "The walkthrough draft explains validate, compile, run, and inspect steps.",
+                  "The walkthrough draft stays read-only and uses prior artifacts as context."
+                ],
+                "constraints": [
+                  "Keep it read-only and do not modify files."
+                ]
               }
             },
             {
@@ -191,10 +229,6 @@
               "id": "tighten_walkthrough",
               "repo": "main",
               "profile": "review",
-              "goal": "Review the drafted walkthrough, tighten weak spots, and make sure it clearly explains the CLI order, the role of the web UI, and the read-only nature of this showcase.",
-              "constraints": [
-                "Do not modify files."
-              ],
               "context": [
                 {
                   "ref": "draft_walkthrough.agent_response",
@@ -217,6 +251,16 @@
                   "path": "walkthrough-final.md",
                   "description": "Markdown final walkthrough after review tightening."
                 }
+              },
+              "intent": {
+                "goal": "Review the drafted walkthrough, tighten weak spots, and make sure it clearly explains the CLI order, the role of the web UI, and the read-only nature of this showcase.",
+                "acceptance_criteria": [
+                  "The final walkthrough fixes clarity gaps from the draft.",
+                  "The final walkthrough explains CLI order, web UI role, and read-only behavior."
+                ],
+                "constraints": [
+                  "Do not modify files."
+                ]
               }
             },
             {
@@ -225,7 +269,6 @@
               "repo": "main",
               "profile": "review",
               "check_kind": "ai",
-              "goal": "Review the current walkthrough and decide whether it is clear, concrete, and sufficient for a developer to validate, compile, run, and inspect a graph in this repository.",
               "rubric": "Pass only if the walkthrough clearly mentions validate, compile, run, and ui or web monitor flow, accurately describes the repository as local-first, and does not claim the showcase edits files. Fail if any of those are missing or misleading.",
               "context": [
                 {
@@ -236,7 +279,15 @@
                   "ref": "synthesize_constraints.agent_response",
                   "name": "constraints_response"
                 }
-              ]
+              ],
+              "intent": {
+                "goal": "Review the current walkthrough and decide whether it is clear, concrete, and sufficient for a developer to validate, compile, run, and inspect a graph in this repository.",
+                "acceptance_criteria": [
+                  "The walkthrough mentions validate, compile, run, and inspect or monitor flow.",
+                  "The walkthrough is accurate about local-first and read-only behavior."
+                ],
+                "constraints": []
+              }
             }
           ]
         },
@@ -249,10 +300,6 @@
         "id": "final_handoff",
         "repo": "main",
         "profile": "default",
-        "goal": "Produce a final handoff that explains what this showcase run demonstrated. Mention the graph version, the node kinds used, the profile strategy, the deterministic package contract check, the AI walkthrough review, and the final commands a user would run next.",
-        "constraints": [
-          "Do not modify files."
-        ],
         "context": [
           {
             "ref": "survey_repo.agent_response",
@@ -267,7 +314,17 @@
             "name": "review_report",
             "iteration": "latest_passed"
           }
-        ]
+        ],
+        "intent": {
+          "goal": "Produce a final handoff that explains what this showcase run demonstrated. Mention the graph version, the node kinds used, the profile strategy, the deterministic package contract check, the AI walkthrough review, and the final commands a user would run next.",
+          "acceptance_criteria": [
+            "The handoff summarizes the showcased node kinds, profiles, checks, and review loop.",
+            "The handoff names the next validation/run commands a user should execute."
+          ],
+          "constraints": [
+            "Do not modify files."
+          ]
+        }
       }
     ]
   },
@@ -282,19 +339,7 @@
     ]
   },
   "supervision": {
-    "actions": {
-      "retry_with_guidance": { "max_uses": 2 },
-      "repair_artifact": { "max_uses": 2 },
-      "rebuild_context": { "max_uses": 1 },
-      "run_diagnostic": { "max_uses": 2 },
-      "pause_for_human": { "max_uses": 1 },
-      "semantic_evaluation": { "max_uses": 1 }
-    },
     "max_total_interventions": 6,
-    "policy": {
-      "pause_on_policy_risk": true,
-      "pause_on_repeated_recovery": true,
-      "drift_score_threshold": 0.8
-    }
+    "profile": "supervisor"
   }
 }

@@ -14,6 +14,7 @@ import {
   validateConfigAgainstSchema
 } from "../../src/graph/config.js";
 import { loadAuthoredGraphDocument } from "../../src/graph/validate.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 describe("graph config helpers", () => {
   it("reads scalar values via dotted paths", () => {
@@ -158,7 +159,7 @@ describe("loadAuthoredGraphDocument with config", () => {
 
   async function writeGraph(document: unknown): Promise<string> {
     const path = join(workspace, "agentflow.graph.json");
-    await writeFile(path, JSON.stringify(document, null, 2));
+    await writeFile(path, JSON.stringify(withNodeIntentDefaults(document as never), null, 2));
     return path;
   }
 

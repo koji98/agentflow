@@ -18,19 +18,7 @@ const graph: CompiledGraph = {
     constraints: ["Do not change provider credentials."],
     acceptance_criteria: ["Tests pass.", "Reviewer guide names risk."]
   },
-  supervision: {
-    actions: {
-      retry_with_guidance: { max_uses: 1 },
-      repair_artifact: { max_uses: 1 },
-      pause_for_human: { max_uses: 1 }
-    },
-    max_total_interventions: 2,
-    policy: {
-      pause_on_policy_risk: true,
-      pause_on_repeated_recovery: true,
-      drift_score_threshold: 0.8
-    }
-  },
+  supervision: { profile: "supervisor", max_total_interventions: 2 },
   launch: {
     launch_profile: "default",
     workspace_backend: "inplace"
@@ -66,7 +54,11 @@ const graph: CompiledGraph = {
           description: "Human reviewer handoff produced by the implement node."
         }
       },
-      goal: "Implement checkout timeout handling.",
+      intent: {
+        goal: "Implement checkout timeout handling.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
       tools: []
     }
   ],
@@ -107,12 +99,7 @@ const state: RuntimeStateSnapshot = {
     status: "healthy",
     intervention_count: 0,
     budget_remaining: {
-      max_total_interventions: 2,
-      actions: {
-        retry_with_guidance: 1,
-        repair_artifact: 1,
-        pause_for_human: 1
-      }
+      max_total_interventions: 2
     },
     timeline: [],
     escalations: []

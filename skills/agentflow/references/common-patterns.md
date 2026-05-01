@@ -103,7 +103,7 @@ Use when the graph needs planned product, scope, or authority judgment.
 
 - Shape: `repeat(sequence(research/design -> checkpoint -> optional implementation), until checkpoint)`.
 - Key artifacts: options brief and selected direction.
-- Use checkpoint for planned human decisions; reserve supervisor `pause_for_human` for runtime safety pauses.
+- Use checkpoint for planned human decisions; reserve supervisor `pause_for_human` for authority boundaries the runtime must not infer.
 - Avoid when: the supervisor can recover with machine evidence or runtime overlay.
 
 ### Release Or Delivery Gate

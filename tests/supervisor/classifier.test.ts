@@ -1,26 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { CompiledCheckNode, CompiledExecutableNode } from "../../src/graph/compiled.js";
-import type { SupervisionPolicy } from "../../src/graph/authored.js";
 import type { RuntimeNodeAttempt } from "../../src/runtime/attempts.js";
 import type { RuntimeNodeExecutionResult } from "../../src/runtime/core/engine.js";
 import { classifyNodeFailure } from "../../src/supervisor/classifier.js";
-
-const policy: SupervisionPolicy = {
-  actions: {
-    retry_with_guidance: { max_uses: 1 },
-    repair_artifact: { max_uses: 1 },
-    rebuild_context: { max_uses: 1 },
-    pause_for_human: { max_uses: 1 },
-    semantic_evaluation: { max_uses: 1 }
-  },
-  max_total_interventions: 5,
-  policy: {
-    pause_on_policy_risk: true,
-    pause_on_repeated_recovery: true,
-    drift_score_threshold: 0.8
-  }
-};
 
 const baseNode: CompiledExecutableNode = {
   compiled_id: "root__node",
@@ -38,7 +21,11 @@ const baseNode: CompiledExecutableNode = {
   },
   context: [],
   declared_artifacts: {},
-  goal: "Do work.",
+  intent: {
+    goal: "Do work.",
+    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+    constraints: []
+  },
   tools: []
 };
 
@@ -71,8 +58,7 @@ function classify(
     node: overrides.node ?? baseNode,
     attempt: overrides.attempt ?? baseAttempt,
     ...(overrides.result ? { result: overrides.result } : {}),
-    ...(overrides.error_message ? { error_message: overrides.error_message } : {}),
-    policy
+    ...(overrides.error_message ? { error_message: overrides.error_message } : {})
   });
 }
 
@@ -292,7 +278,11 @@ describe("supervisor failure classifier", () => {
       kind: "check",
       check_kind: "ai",
       on_failure: "fail",
-      goal: "Evaluate whether the implementation satisfies the rubric."
+      intent: {
+        goal: "Evaluate whether the implementation satisfies the rubric.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     };
 
     expect(classify({
@@ -317,7 +307,11 @@ describe("supervisor failure classifier", () => {
       kind: "check",
       check_kind: "ai",
       on_failure: "fail",
-      goal: "Evaluate scope."
+      intent: {
+        goal: "Evaluate scope.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     };
 
     expect(
@@ -494,7 +488,6 @@ describe("supervisor failure classifier", () => {
         attempt_index: 3
       },
       error_message: "Required context item could not be resolved.",
-      policy,
       repeated_fingerprint_count: 2
     })).toEqual(
       expect.objectContaining({

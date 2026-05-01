@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument as normalizeRawAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { builtInCodexReasoningEffort, resolveLaunchConfig } from "../../src/graph/profiles.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const fixturePath = fileURLToPath(
   new URL("./fixtures/repeat.graph.json", import.meta.url)
@@ -18,15 +19,16 @@ async function readFixture(): Promise<unknown> {
 
 function normalizeAuthoredGraphDocument(value: unknown) {
   if (typeof value !== "object" || value === null || Array.isArray(value) || "intent" in value) {
-    return normalizeRawAuthoredGraphDocument(value);
+    return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults(value as never));
   }
 
-  return normalizeRawAuthoredGraphDocument({
+  return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
-      goal: "Test supervised graph contract."
+      goal: "Test supervised graph contract.",
+      acceptance_criteria: ["The graph compiles under the current contract."]
     },
     ...value
-  });
+  } as never));
 }
 
 describe("graph compilation", () => {
@@ -38,20 +40,7 @@ describe("graph compilation", () => {
         goal: "Ship the supervised runtime.",
         acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
       },
-      supervision: {
-        actions: {
-          retry_with_guidance: { max_uses: 1 },
-          run_diagnostic: { max_uses: 1 },
-          semantic_evaluation: { max_uses: 1 },
-          pause_for_human: { max_uses: 1 }
-        },
-        max_total_interventions: 3,
-        policy: {
-          pause_on_policy_risk: true,
-          pause_on_repeated_recovery: true,
-          drift_score_threshold: 0.9
-        }
-      },
+      supervision: { profile: "supervisor", max_total_interventions: 3 },
       repos: {
         main: {
           path: "."
@@ -94,21 +83,76 @@ describe("graph compilation", () => {
           acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
         }),
         supervision: expect.objectContaining({
-          actions: expect.objectContaining({
-            retry_with_guidance: { max_uses: 1 },
-            run_diagnostic: { max_uses: 1 }
-          }),
-          policy: {
-            pause_on_policy_risk: true,
-            pause_on_repeated_recovery: true,
-            drift_score_threshold: 0.9
-          }
-        }),
+          max_total_interventions: 3
+        })
       })
     );
   });
 
-  it("compiles node goals and acceptance criteria into the executable contract", () => {
+  it("compiles a dedicated supervisor profile when authored", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "compiled-supervisor-profile",
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          model: "gpt-5-codex",
+          sandbox: "workspace-write"
+        },
+        supervisor: {
+          model: "gpt-5.2",
+          reasoning_effort: "high",
+          sandbox: "read-only",
+          timeout_sec: 300
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "version",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    const launch = resolveLaunchConfig(normalized.document!);
+    const compilation = compileAuthoredGraph(
+      normalized.document!,
+      launch,
+      normalized.lowered_managed_nodes
+    );
+
+    expect(compilation.diagnostics).toEqual([]);
+    expect(compilation.compiled_graph?.supervisor_effective_policy).toEqual(
+      expect.objectContaining({
+        profile_name: "supervisor",
+        harness: "codex-cli",
+        model: "gpt-5.2",
+        reasoning_effort: "high",
+        sandbox: "read-only",
+        timeout_sec: 300
+      })
+    );
+  });
+
+  it("compiles node intent into the executable contract", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "compiled-node-intent",
@@ -132,12 +176,14 @@ describe("graph compilation", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement timeout handling with a reviewable handoff.",
-            acceptance_criteria: [
+            intent: {
+              goal: "Implement timeout handling with a reviewable handoff.",
+              acceptance_criteria: [
               "Timeout behavior is tested.",
               "The handoff lists changed files and risk."
             ],
-            constraints: ["Implement timeout handling with a reviewable handoff."]
+              constraints: ["Implement timeout handling with a reviewable handoff."]
+            },
           }
         ]
       }
@@ -154,12 +200,14 @@ describe("graph compilation", () => {
       expect.objectContaining({
         kind: "agent",
         authored_id: "implement",
-        goal: "Implement timeout handling with a reviewable handoff.",
-        acceptance_criteria: [
+        intent: {
+          goal: "Implement timeout handling with a reviewable handoff.",
+          acceptance_criteria: [
           "Timeout behavior is tested.",
           "The handoff lists changed files and risk."
         ],
-        constraints: ["Implement timeout handling with a reviewable handoff."]
+          constraints: ["Implement timeout handling with a reviewable handoff."]
+        },
       })
     ]);
   });
@@ -265,7 +313,11 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "draft",
-                  goal: "Draft the artifact.",
+                  intent: {
+                    goal: "Draft the artifact.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   artifacts: {
                     draft_spec: {
                       from: "output_dir",
@@ -277,7 +329,11 @@ describe("graph compilation", () => {
                 {
                   type: "checkpoint",
                   id: "review",
-                  goal: "Review the draft.",
+                  intent: {
+                    goal: "Review the draft.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                   review_from: {
                     node: "draft",
                     artifact: "draft_spec"
@@ -372,7 +428,11 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "fix",
-                  goal: "Apply the fix."
+                  intent: {
+                    goal: "Apply the fix.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                 },
                 {
                   type: "check",
@@ -389,7 +449,11 @@ describe("graph compilation", () => {
           {
             type: "agent",
             id: "handoff",
-            goal: "Summarize the run.",
+            intent: {
+              goal: "Summarize the run.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               {
                 ref: "fix.agent_response",
@@ -454,7 +518,11 @@ describe("graph compilation", () => {
                 {
                   type: "agent",
                   id: "summarize",
-                  goal: "Summarize the latest attempt."
+                  intent: {
+                    goal: "Summarize the latest attempt.",
+                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                    constraints: []
+                  },
                 }
               ]
             },
@@ -511,12 +579,20 @@ describe("graph compilation", () => {
               {
                 type: "agent",
                 id: "inspect",
-                goal: "Inspect the repo."
+                intent: {
+                  goal: "Inspect the repo.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
               },
               {
                 type: "agent",
                 id: "report",
-                goal: "Write the report.",
+                intent: {
+                  goal: "Write the report.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
                 context: [
                   {
                     ref: "inspect.agent_response",
@@ -599,7 +675,11 @@ describe("graph compilation", () => {
             type: "check",
             id: "ai_gate",
             check_kind: "ai",
-            goal: "Evaluate the change."
+            intent: {
+              goal: "Evaluate the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -695,7 +775,11 @@ describe("graph compilation", () => {
           {
             type: "agent",
             id: "inspect",
-            goal: "Inspect the codebase."
+            intent: {
+              goal: "Inspect the codebase.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           },
           {
             type: "exec",
@@ -708,7 +792,11 @@ describe("graph compilation", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Judge the change."
+            intent: {
+              goal: "Judge the change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -805,14 +893,22 @@ describe("graph compilation", () => {
             type: "agent",
             id: "review_patch",
             profile: "review",
-            goal: "Review the patch."
+            intent: {
+              goal: "Review the patch.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           },
           {
             type: "check",
             id: "judge_patch",
             profile: "review",
             check_kind: "ai",
-            goal: "Judge the patch."
+            intent: {
+              goal: "Judge the patch.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }

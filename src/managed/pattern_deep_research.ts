@@ -19,7 +19,6 @@ import {
 } from "./foundation.js";
 
 export interface PatternDeepResearchConfig extends BaseExecutableNode, ManagedPatternAgentOptions {
-  goal: string;
   research: {
     angles: string[];
   };
@@ -89,9 +88,9 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: string, inde
     section("Final Managed Workflow Contract", [
       "This is a private helper node inside a managed workflow. The final managed node owns the public artifact shape and final acceptance criteria below.",
       "Use this contract to understand what your evidence must support, but do not format this private angle report as the final public artifact unless the private output contract below says so.",
-      `Goal: ${config.goal}`,
-      ...formatList("Final acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+      `Goal: ${config.intent.goal}`,
+      ...formatList("Final acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Assigned Angle", [
       angle,
@@ -102,7 +101,7 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: string, inde
       "Prefer authoritative local/source evidence when the question is repo-specific.",
       "Use external or web context when docs, package behavior, standards, release notes, or broader comparisons would materially improve the answer.",
       "Preserve source paths, commands, URLs, and uncertainty so final synthesis can audit the claim.",
-      "Do not change graph intent, node goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts."
+      "Do not change graph intent, node intent, repo authority, sandbox, or declared artifacts."
     ]),
     section("Output Contract", [
       "Write `angle-report.md` and `packet.json` to the output directory.",
@@ -128,9 +127,9 @@ function buildSynthesisPrompt(
     section("Final Managed Workflow Contract", [
       "This is a private synthesis step inside a larger managed research workflow. The final public result will be published later.",
       "Use the final contract to preserve relevant evidence, but do not format this private synthesis as the final public artifact unless the private output contract below says so.",
-      `Goal: ${config.goal}`,
-      ...formatList("Final acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+      `Goal: ${config.intent.goal}`,
+      ...formatList("Final acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Synthesis Task", [
       "Preserve every major finding from the input material.",
@@ -156,9 +155,9 @@ function buildFinalPrompt(
     body(`You are the final research lead publishing the managed deep research result from ${inputCount} research packet${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
     section("Managed Workflow Contract", [
       "This final publisher owns the managed workflow's public artifact contract. Internal helper reports are only evidence.",
-      `Goal: ${config.goal}`,
-      ...formatList("Acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+      `Goal: ${config.intent.goal}`,
+      ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Research Angles", config.research.angles.map((angle) => `- ${angle}`)),
     section("Current Context", [
@@ -229,12 +228,14 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       ...agentShared,
       ...(config.context ? { context: config.context } : {}),
       artifacts: buildAngleArtifacts(index),
-      goal: buildAnglePrompt(config, angle, index),
-      acceptance_criteria: [
-        "The angle report answers the assigned angle with sourced evidence.",
-        "The packet preserves enough provenance, uncertainty, and confidence for final synthesis."
-      ],
-      ...(config.constraints ? { constraints: config.constraints } : {})
+      intent: {
+        goal: buildAnglePrompt(config, angle, index),
+        acceptance_criteria: [
+          "The angle report answers the assigned angle with sourced evidence.",
+          "The packet preserves enough provenance, uncertainty, and confidence for final synthesis."
+        ],
+        constraints: config.intent.constraints
+      }
     };
   });
 
@@ -272,12 +273,14 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         ...agentShared,
         context: materialContexts(groupMaterials),
         artifacts: buildSynthesisArtifacts(layer, group),
-        goal: buildSynthesisPrompt(config, groupMaterials.length, layer, group),
-        acceptance_criteria: [
-          "The synthesis preserves all major findings from its input research packets.",
-          "The synthesis collapses redundant claims without dropping provenance, uncertainty, or conflicts."
-        ],
-        ...(config.constraints ? { constraints: config.constraints } : {})
+        intent: {
+          goal: buildSynthesisPrompt(config, groupMaterials.length, layer, group),
+          acceptance_criteria: [
+            "The synthesis preserves all major findings from its input research packets.",
+            "The synthesis collapses redundant claims without dropping provenance, uncertainty, or conflicts."
+          ],
+          constraints: config.intent.constraints
+        }
       };
     });
 
@@ -316,9 +319,11 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         ...agentShared,
         context: materialContexts(materials),
         artifacts: publicArtifacts,
-        goal: buildFinalPrompt(config, publicArtifacts, materials.length),
-        ...(config.acceptance_criteria ? { acceptance_criteria: config.acceptance_criteria } : {}),
-        ...(config.constraints ? { constraints: config.constraints } : {})
+        intent: {
+          goal: buildFinalPrompt(config, publicArtifacts, materials.length),
+          acceptance_criteria: config.intent.acceptance_criteria,
+          constraints: config.intent.constraints
+        }
       }
     ]
   };

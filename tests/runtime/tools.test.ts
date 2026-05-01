@@ -22,6 +22,7 @@ import {
 } from "../../src/runtime/harness/types.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { prepareAgentTools } from "../../src/runtime/tools/setup.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -132,7 +133,7 @@ describe("plugin tool compilation", () => {
         goal: `Compile tools for ${document.graph_id}.`,
         acceptance_criteria: ["Plugin tools obey their config and credential policy."]
       },
-      ...document
+      ...withNodeIntentDefaults(document)
     });
     expect(normalized.diagnostics).toEqual([]);
     const launch = resolveLaunchConfig(normalized.document!);
@@ -158,7 +159,11 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            goal: "Draft something."
+            intent: {
+              goal: "Draft something.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -189,7 +194,11 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "watch",
-            goal: "Watch the PR."
+            intent: {
+              goal: "Watch the PR.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -235,12 +244,20 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            goal: "Draft."
+            intent: {
+              goal: "Draft.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           },
           {
             type: "agent",
             id: "refine",
-            goal: "Refine.",
+            intent: {
+              goal: "Refine.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             tools: [
               {
                 from_plugin: "babysit",
@@ -291,14 +308,18 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "use_tool", goal: "Use tool." }]
+        steps: [{ type: "agent", id: "use_tool", intent: {
+          goal: "Use tool.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        }, }]
       }
     };
 
-    await expect(validateAuthoredGraphDocument({
+    await expect(validateAuthoredGraphDocument(withNodeIntentDefaults({
       ...baseDocument,
       tools: [{ from_plugin: "babysit", tool: "poll", config: { token: "ghp_should_not_be_here" } }]
-    }, { resolved_plugins: resolvedPlugins })).resolves.toEqual(expect.arrayContaining([
+    }), { resolved_plugins: resolvedPlugins })).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({
         path: "$.tools[0].config.token",
         message: expect.stringContaining("looks secret-bearing")
@@ -313,10 +334,10 @@ describe("plugin tool compilation", () => {
       })
     ]));
 
-    const diagnostics = await validateAuthoredGraphDocument({
+    const diagnostics = await validateAuthoredGraphDocument(withNodeIntentDefaults({
       ...baseDocument,
       tools: [{ from_plugin: "babysit", tool: "poll", config: { mode: "watch" } }]
-    }, { resolved_plugins: resolvedPlugins });
+    }), { resolved_plugins: resolvedPlugins });
     expect(diagnostics).toEqual([]);
   });
 
@@ -362,7 +383,11 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "watch", goal: "Watch the PR." }]
+        steps: [{ type: "agent", id: "watch", intent: {
+          goal: "Watch the PR.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        }, }]
       }
     };
 
@@ -406,11 +431,15 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "inspect", goal: "Inspect only." }]
+        steps: [{ type: "agent", id: "inspect", intent: {
+          goal: "Inspect only.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        }, }]
       }
     };
 
-    await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
+    await expect(validateAuthoredGraphDocument(withNodeIntentDefaults(document), { resolved_plugins: resolvedPlugins }))
       .resolves.toEqual([]);
 
     const compilation = compileWith(document);
@@ -432,11 +461,15 @@ describe("plugin tool compilation", () => {
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "agent", id: "use_tool", goal: "Use tool." }]
+        steps: [{ type: "agent", id: "use_tool", intent: {
+          goal: "Use tool.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        }, }]
       }
     };
 
-    await expect(validateAuthoredGraphDocument(document, { resolved_plugins: resolvedPlugins }))
+    await expect(validateAuthoredGraphDocument(withNodeIntentDefaults(document), { resolved_plugins: resolvedPlugins }))
       .resolves.toEqual(expect.arrayContaining([
         expect.objectContaining({
           path: "$.tools[0]",
@@ -465,7 +498,11 @@ describe("plugin tool compilation", () => {
           {
             type: "agent",
             id: "draft",
-            goal: "Draft.",
+            intent: {
+              goal: "Draft.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             tools: [
               {
                 from_plugin: "babysit",
@@ -505,7 +542,11 @@ describe("plugin tool compilation", () => {
         type: "sequence",
         id: "root",
         steps: [
-          { type: "agent", id: "draft", goal: "Draft." }
+          { type: "agent", id: "draft", intent: {
+            goal: "Draft.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          }, }
         ]
       }
     };
@@ -538,7 +579,11 @@ describe("plugin tool compilation", () => {
         type: "sequence",
         id: "root",
         steps: [
-          { type: "agent", id: "draft", goal: "Draft." }
+          { type: "agent", id: "draft", intent: {
+            goal: "Draft.",
+            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+            constraints: []
+          }, }
         ]
       }
     };
@@ -1076,7 +1121,11 @@ describe("end-to-end runtime tool wiring", () => {
             {
               type: "agent",
               id: "use_tool",
-              goal: "Run babysit-poll --pr 42 to check the PR."
+              intent: {
+                goal: "Run babysit-poll --pr 42 to check the PR.",
+                acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                constraints: []
+              },
             }
           ]
         }
@@ -1087,7 +1136,7 @@ describe("end-to-end runtime tool wiring", () => {
           goal: "Exercise plugin tool runtime wiring.",
           acceptance_criteria: ["The harness can invoke the plugin tool from PATH."]
         },
-        ...document
+        ...withNodeIntentDefaults(document)
       });
       expect(normalized.diagnostics).toEqual([]);
       const launch = resolveLaunchConfig(normalized.document!);
@@ -1248,7 +1297,11 @@ describe("end-to-end runtime tool wiring", () => {
             {
               type: "agent",
               id: "demo",
-              goal: "Use babysit-poll."
+              intent: {
+                goal: "Use babysit-poll.",
+                acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                constraints: []
+              },
             }
           ]
         }
@@ -1259,7 +1312,7 @@ describe("end-to-end runtime tool wiring", () => {
           goal: "Surface plugin tools in the agent prompt.",
           acceptance_criteria: ["The rendered prompt names the available tool."]
         },
-        ...document
+        ...withNodeIntentDefaults(document)
       });
       expect(normalized.diagnostics).toEqual([]);
       const launch = resolveLaunchConfig(normalized.document!);

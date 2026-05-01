@@ -9,9 +9,49 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
-import { executeCli, renderCliStdout } from "../../src/cli/index.js";
+import { executeCli as executeCliRaw, renderCliStdout } from "../../src/cli/index.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 const execFileAsync = promisify(execFile);
+
+async function applyNodeIntentDefaultsToGraphFile(graphPath: string): Promise<void> {
+  try {
+    const graph = JSON.parse(await readFile(graphPath, "utf8")) as Record<string, unknown>;
+    await writeFile(graphPath, `${JSON.stringify(withNodeIntentDefaults(graph as never), null, 2)}\n`, "utf8");
+  } catch {
+    // Tests that intentionally pass invalid paths or non-JSON graph files should keep their original failure.
+  }
+}
+
+async function executeCli(
+  args: string[],
+  cwd?: string,
+  execution: {
+    signal?: AbortSignal;
+  } = {}
+) {
+  const graphFlagIndex = args.indexOf("--graph");
+  const graphPath = graphFlagIndex === -1 ? undefined : args[graphFlagIndex + 1];
+  if (graphPath) {
+    await applyNodeIntentDefaultsToGraphFile(graphPath);
+  }
+
+  const runRootFlagIndex = args.indexOf("--run-root");
+  const runRoot = runRootFlagIndex === -1 ? undefined : args[runRootFlagIndex + 1];
+  if (!graphPath && runRoot) {
+    try {
+      const runRecord = JSON.parse(await readFile(join(runRoot, "run.json"), "utf8")) as {
+        graph_path?: string;
+      };
+      if (runRecord.graph_path) {
+        await applyNodeIntentDefaultsToGraphFile(runRecord.graph_path);
+      }
+    } catch {
+      // Resume tests that intentionally use invalid run roots should keep their original failure.
+    }
+  }
+  return executeCliRaw(args, cwd, execution);
+}
 
 async function initGitRepo(repoDir: string): Promise<void> {
   await execFileAsync("git", ["init"], { cwd: repoDir });
@@ -149,7 +189,11 @@ describe("graph CLI", () => {
                 type: "agent",
                 id: "implement",
                 repo: "main",
-                goal: "Implement the requested change."
+                intent: {
+                  goal: "Implement the requested change.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
               }
             ]
           }
@@ -598,7 +642,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
                 type: "agent",
                 id: "implement",
                 repo: "main",
-                goal: "Implement the change."
+                intent: {
+                  goal: "Implement the change.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
               }
             ]
           }
@@ -885,7 +933,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
                 type: "agent",
                 id: "inspect",
                 repo: "main",
-                goal: "Use the fixture inspect tool.",
+                intent: {
+                  goal: "Use the fixture inspect tool.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
                 tools: [
                   {
                     from_plugin: "fixture",
@@ -1402,7 +1454,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
                       type: "checkpoint",
                       id: "review",
                       repo: "main",
-                      goal: "Review the artifact.",
+                      intent: {
+                        goal: "Review the artifact.",
+                        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                        constraints: []
+                      },
                       review_from: {
                         node: "draft",
                         artifact: "draft_spec"
@@ -1684,7 +1740,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
         restarted_node_count: 2
       })
     );
-    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(4);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
     expect(resumedProgress).toContain(
@@ -1795,7 +1851,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(resumedPayload.restarted_node_count).toBe(3);
     expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
-    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
 
@@ -1947,7 +2003,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
@@ -1964,7 +2020,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
         execution_dir: expect.stringMatching(/\/executions\/002-exec-[0-9a-f]{16}$/)
       }
     ]);
-    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output").map((attempt) => ({
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output" && attempt.iteration_index !== undefined).map((attempt) => ({
       iteration_index: attempt.iteration_index,
       iteration_attempt_index: attempt.iteration_attempt_index,
       execution_dir: attempt.execution_dir
@@ -2156,7 +2212,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
-    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
@@ -2398,7 +2454,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     }
   });
 
-  it("surfaces missing authored launch settings from the graph itself", async () => {
+  it("surfaces unknown authored launch profiles from the graph itself", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-launch-settings-"));
     const graphPath = join(tempRoot, "invalid-launch.graph.json");
     await writeFile(
@@ -2414,19 +2470,32 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
             }
           },
           defaults: {
+            launch_profile: "missing",
             workspace_backend: "inplace"
           },
           profiles: {
-            review: {}
+            review: {},
+            supervisor: {
+              harness: "codex-cli",
+              sandbox: "read-only"
+            }
+          },
+          supervision: {
+            profile: "supervisor",
+            max_total_interventions: 3
           },
           graph: {
             type: "sequence",
             id: "root",
             steps: [
               {
-                type: "exec",
-                id: "noop",
-                command: "placeholder"
+                type: "agent",
+                id: "implement",
+                intent: {
+                  goal: "Implement the requested change.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                }
               }
             ]
           }
@@ -2441,13 +2510,12 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
 
     expect(invalidValidate.exitCode).toBe(1);
     expect(invalidValidatePayload.command).toBe("validate");
-    expect(invalidValidatePayload.message).toContain("Launch settings could not be resolved from the graph");
-    expect(invalidValidatePayload.available_profiles).toContain("review");
-    expect(invalidValidatePayload.supported_workspace_backends).toContain("worktree");
+    expect(invalidValidatePayload.message).toContain("Graph could not be loaded or normalized from --graph");
     expect(invalidValidatePayload.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          message: expect.stringContaining("No launch profile could be resolved")
+          path: "$.defaults.launch_profile",
+          message: expect.stringContaining('defaults.launch_profile references unknown profile "missing"')
         })
       ])
     );

@@ -68,9 +68,7 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     kind: node.kind,
     repo: node.repo,
     deps: node.deps,
-    ...(node.goal ? { goal: node.goal } : {}),
-    ...(node.acceptance_criteria ? { acceptance_criteria: node.acceptance_criteria } : {}),
-    ...(node.constraints ? { constraints: node.constraints } : {}),
+    intent: node.intent,
     effective_policy: node.effective_policy,
     context: node.context,
     declared_artifacts: node.declared_artifacts,
@@ -404,8 +402,7 @@ export async function createResumedRuntimeSession(options: {
     const budgetRemaining = options.reset_supervisor_budget
       ? session.supervisor.budget_remaining
       : {
-          max_total_interventions: options.prior_state.supervisor.budget_remaining.max_total_interventions,
-          actions: { ...options.prior_state.supervisor.budget_remaining.actions }
+          max_total_interventions: options.prior_state.supervisor.budget_remaining.max_total_interventions
         };
     session.supervisor = {
       ...options.prior_state.supervisor,
@@ -428,6 +425,15 @@ export async function createResumedRuntimeSession(options: {
               validation_focus: [...envelope.retry_directive.validation_focus],
               unchanged_contract: { ...envelope.retry_directive.unchanged_contract }
             }
+          }
+        ])
+      ),
+      active_recovery_chains: Object.fromEntries(
+        Object.entries(options.prior_state.supervisor.active_recovery_chains ?? {}).map(([compiledId, chain]) => [
+          compiledId,
+          {
+            ...chain,
+            resume_ready_node: { ...chain.resume_ready_node }
           }
         ])
       ),

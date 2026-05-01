@@ -28,16 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
     "max_total_interventions": 4,
-    "actions": {
-      "retry_with_guidance": { "max_uses": 1 },
-      "repair_artifact": { "max_uses": 1 },
-      "run_diagnostic": { "max_uses": 1 },
-      "semantic_evaluation": { "max_uses": 1 }
-    }
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -47,17 +46,6 @@
         "type": "pattern_deep_work",
         "id": "repo_fix",
         "repo": "main",
-        "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
-        "acceptance_criteria": [
-          "`src/tax.js` applies discount before tax while preserving the exported API.",
-          "`npm test` passes.",
-          "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
-        ],
-        "constraints": [
-          "Do not edit files outside `src/tax.js` unless validation proves it is necessary.",
-          "Do not add dependencies or generated files.",
-          "Use local repo files and tests as primary authority."
-        ],
         "context": [
           {
             "name": "task",
@@ -114,6 +102,19 @@
               "weight": 0.2
             }
           ]
+        },
+        "intent": {
+          "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
+          "acceptance_criteria": [
+            "`src/tax.js` applies discount before tax while preserving the exported API.",
+            "`npm test` passes.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+          ],
+          "constraints": [
+            "Do not edit files outside `src/tax.js` unless validation proves it is necessary.",
+            "Do not add dependencies or generated files.",
+            "Use local repo files and tests as primary authority."
+          ]
         }
       },
       {
@@ -124,7 +125,15 @@
         "command": "npm",
         "args": [
           "test"
-        ]
+        ],
+        "intent": {
+          "goal": "Run the local validation suite after deep-work completion and confirm the final workspace satisfies the task.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully.",
+            "The check evidence confirms the managed loop ended with a valid implementation."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

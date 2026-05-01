@@ -1,22 +1,57 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeAuthoredGraphDocument as normalizeRawAuthoredGraphDocument } from "../../src/graph/normalize.js";
+import { withNodeIntentDefaults } from "../helpers/graph.js";
 
 function normalizeAuthoredGraphDocument(value: unknown) {
   if (typeof value !== "object" || value === null || Array.isArray(value) || "intent" in value) {
-    return normalizeRawAuthoredGraphDocument(value);
+    return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults(value as never));
   }
 
-  return normalizeRawAuthoredGraphDocument({
+  return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults({
     intent: {
-      goal: "Test supervised graph contract."
+      goal: "Test supervised graph contract.",
+      acceptance_criteria: ["The graph normalizes under the current contract."]
     },
     ...value
-  });
+  } as never));
 }
 
 describe("graph normalization", () => {
-  it("normalizes supervised v1 intent and supervision defaults", () => {
+  it("requires an intent block on executable nodes", () => {
+    const normalized = normalizeRawAuthoredGraphDocument({
+      version: "1",
+      graph_id: "missing-node-intent",
+      intent: {
+        goal: "Validate node intent requirements.",
+        acceptance_criteria: ["Missing node intent is rejected."]
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "run",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.graph.steps[0].intent",
+          message: "Executable nodes require intent."
+        }
+      ])
+    );
+  });
+
+  it("normalizes supervised v1 intent and required supervisor profile", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "ship-trusted-change",
@@ -29,6 +64,19 @@ describe("graph normalization", () => {
         main: {
           path: "."
         }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        },
+        supervisor: {
+          harness: "codex-cli",
+          sandbox: "read-only"
+        }
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
       },
       graph: {
         type: "sequence",
@@ -52,23 +100,150 @@ describe("graph normalization", () => {
           constraints: ["Keep public API names stable inside this repo."],
           acceptance_criteria: ["Targeted checkout tests pass.", "Reviewer guide names risky files."]
         },
-        supervision: {
-          actions: {
-            retry_with_guidance: { max_uses: 2 },
-            repair_artifact: { max_uses: 2 },
-            rebuild_context: { max_uses: 1 },
-            run_diagnostic: { max_uses: 3 },
-            pause_for_human: { max_uses: 1 },
-            semantic_evaluation: { max_uses: 2 }
-          },
-          max_total_interventions: 8,
-          policy: {
-            pause_on_policy_risk: true,
-            pause_on_repeated_recovery: true,
-            drift_score_threshold: 0.8
-          }
-        }
+        supervision: { profile: "supervisor", max_total_interventions: 3 }
       })
+    );
+  });
+
+  it("rejects legacy supervision action and policy fields", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "legacy-supervision",
+      supervision: {
+        actions: {
+          retry_with_guidance: { max_uses: 1 }
+        },
+        max_total_interventions: 3,
+        policy: {
+          pause_on_policy_risk: true
+        }
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "echo",
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.supervision.actions",
+          message: 'Unknown field "actions" is not part of the graph contract.'
+        },
+        {
+          path: "$.supervision.policy",
+          message: 'Unknown field "policy" is not part of the graph contract.'
+        }
+      ])
+    );
+  });
+
+  it("requires a supervisor profile", () => {
+    const normalized = normalizeRawAuthoredGraphDocument({
+      version: "1",
+      graph_id: "missing-supervisor-profile",
+      intent: {
+        goal: "Validate supervisor profile requirements.",
+        acceptance_criteria: ["Missing supervisor profile is rejected."]
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "echo",
+            intent: {
+              goal: "Print the Node version.",
+              acceptance_criteria: ["The command exits successfully."],
+              constraints: []
+            },
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.supervision.profile",
+          message: "supervision.profile is required."
+        }
+      ])
+    );
+  });
+
+  it("rejects supervision profiles that do not exist", () => {
+    const normalized = normalizeRawAuthoredGraphDocument({
+      version: "1",
+      graph_id: "unknown-supervisor-profile",
+      intent: {
+        goal: "Test supervised graph contract.",
+        acceptance_criteria: ["The graph normalizes under the current contract."]
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "echo",
+            intent: {
+              goal: "Print the Node version.",
+              acceptance_criteria: ["The command exits successfully."],
+              constraints: []
+            },
+            command: "node",
+            args: ["--version"]
+          }
+        ]
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.supervision.profile",
+          message: 'supervision.profile references unknown profile "supervisor".'
+        }
+      ])
     );
   });
 
@@ -129,16 +304,12 @@ describe("graph normalization", () => {
         {
           path: "$.graph.steps[0].prompt",
           message: 'Unknown field "prompt" is not part of the graph contract.'
-        },
-        {
-          path: "$.graph.steps[0].goal",
-          message: "Agent nodes require goal."
         }
       ])
     );
   });
 
-  it("normalizes agent node goals and acceptance criteria without requiring a prompt", () => {
+  it("normalizes agent node intent without requiring a prompt", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",
       graph_id: "node-intent-contract",
@@ -154,11 +325,14 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "implement",
-            goal: "Implement timeout handling with clear reviewer evidence.",
-            acceptance_criteria: [
+            intent: {
+              goal: "Implement timeout handling with clear reviewer evidence.",
+              acceptance_criteria: [
               "Checkout timeout tests pass.",
               "The handoff explains changed files and residual risks."
             ],
+              constraints: []
+            },
             artifacts: {
               handoff: {
                 from: "output_dir",
@@ -178,11 +352,14 @@ describe("graph normalization", () => {
           expect.objectContaining({
             type: "agent",
             id: "implement",
-            goal: "Implement timeout handling with clear reviewer evidence.",
-            acceptance_criteria: [
+            intent: {
+              goal: "Implement timeout handling with clear reviewer evidence.",
+              acceptance_criteria: [
               "Checkout timeout tests pass.",
               "The handoff explains changed files and residual risks."
-            ]
+            ],
+              constraints: []
+            },
           })
         ]
       })
@@ -213,7 +390,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "inspect",
-            goal: "Inspect the repository."
+            intent: {
+              goal: "Inspect the repository.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           },
           {
             type: "parallel",
@@ -222,12 +403,20 @@ describe("graph normalization", () => {
               {
                 type: "agent",
                 id: "fix",
-                goal: "Repair the issue."
+                intent: {
+                  goal: "Repair the issue.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
               },
               {
                 type: "agent",
                 id: "handoff",
-                goal: "Summarize the work.",
+                intent: {
+                  goal: "Summarize the work.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                },
                 context: [
                   {
                     ref: "inspect.agent_response",
@@ -261,7 +450,11 @@ describe("graph normalization", () => {
       expect.objectContaining({
         type: "agent",
         id: "inspect",
-        goal: "Inspect the repository."
+        intent: {
+          goal: "Inspect the repository.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        },
       })
     );
 
@@ -273,7 +466,11 @@ describe("graph normalization", () => {
       expect.objectContaining({
         type: "agent",
         id: "fix",
-        goal: "Repair the issue."
+        intent: {
+          goal: "Repair the issue.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        },
       })
     );
     expect(fanout.steps[1]).toEqual(
@@ -316,7 +513,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "bad",
-            goal: "Legacy fields.",
+            intent: {
+              goal: "Legacy fields.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             inputs: [],
             context_from: [],
             outputs: []
@@ -365,7 +566,11 @@ describe("graph normalization", () => {
           {
             type: "pattern_deep_work",
             id: "implement",
-            goal: "Implement the requested change.",
+            intent: {
+              goal: "Implement the requested change.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             completion: {
               criteria: [
                 {
@@ -424,7 +629,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "consume",
-            goal: "Consume a prior response.",
+            intent: {
+              goal: "Consume a prior response.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               {
                 ref: "inspect.agent_response",
@@ -472,7 +681,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "bad",
-            goal: "Try to redefine automatic artifacts.",
+            intent: {
+              goal: "Try to redefine automatic artifacts.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               agent_response: {
                 from: "output_dir",
@@ -525,7 +738,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "bad",
-            goal: "Write a packet.",
+            intent: {
+              goal: "Write a packet.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               packet: {
                 from: "output_dir",
@@ -658,7 +875,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "inspect",
-            goal: "Inspect the repository.",
+            intent: {
+              goal: "Inspect the repository.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             reasoning_effort: "xhigh"
           }
         ]
@@ -700,7 +921,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Write the handoff.",
+            intent: {
+              goal: "Write the handoff.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifact_repair: {
               max_attempts: 0
             }
@@ -748,7 +973,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "write_handoff",
-            goal: "Write the handoff.",
+            intent: {
+              goal: "Write the handoff.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifact_repair: {
               max_attempts: -1
             }
@@ -968,7 +1197,11 @@ describe("graph normalization", () => {
             type: "check",
             id: "judge",
             check_kind: "ai",
-            goal: "Judge it.",
+            intent: {
+              goal: "Judge it.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             env_files: [".env"]
           }
         ]
@@ -1010,7 +1243,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "inspect",
-            goal: "Inspect the repo."
+            intent: {
+              goal: "Inspect the repo.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -1056,7 +1293,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "inspect",
-            goal: "Inspect the repo."
+            intent: {
+              goal: "Inspect the repo.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
           }
         ]
       }
@@ -1137,19 +1378,42 @@ describe("graph normalization", () => {
   });
 
   it("does not synthesize launch_profile when no default profile exists", () => {
-    const normalized = normalizeAuthoredGraphDocument({
+    const normalized = normalizeRawAuthoredGraphDocument({
       version: "1",
       graph_id: "no-default-profile",
+      intent: {
+        goal: "Test launch profile defaults.",
+        acceptance_criteria: ["The graph keeps launch profile unset when there is no default profile."]
+      },
       repos: { main: { path: "." } },
       profiles: {
         review: {
           harness: "cursor-cli"
+        },
+        supervisor: {
+          harness: "codex-cli",
+          sandbox: "read-only"
         }
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
       },
       graph: {
         type: "sequence",
         id: "root",
-        steps: [{ type: "exec", id: "noop", command: "true" }]
+        steps: [
+          {
+            type: "exec",
+            id: "noop",
+            intent: {
+              goal: "Run a no-op command.",
+              acceptance_criteria: ["The command exits successfully."],
+              constraints: []
+            },
+            command: "true"
+          }
+        ]
       }
     });
 
@@ -1175,7 +1439,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "consume",
-            goal: "Consume earlier outputs.",
+            intent: {
+              goal: "Consume earlier outputs.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               { ref: "produce.stdout" } as never,
               { ref: "produce" } as never
@@ -1216,7 +1484,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "consume",
-            goal: "Consume.",
+            intent: {
+              goal: "Consume.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               { ref: "ghost" } as never
             ]
@@ -1249,7 +1521,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "merge",
-            goal: "Merge both stdouts.",
+            intent: {
+              goal: "Merge both stdouts.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             context: [
               { ref: "left.stdout" } as never,
               { ref: "right.stdout" } as never
@@ -1281,7 +1557,11 @@ describe("graph normalization", () => {
           {
             type: "agent",
             id: "produce",
-            goal: "Write artifacts.",
+            intent: {
+              goal: "Write artifacts.",
+              acceptance_criteria: ["The node satisfies its acceptance criteria."],
+              constraints: []
+            },
             artifacts: {
               "bad.name": {
                 from: "output_dir",

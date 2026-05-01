@@ -8,9 +8,10 @@ Author graphs as supervised execution contracts. A good graph states what the te
 - Add `repos`, `profiles`, and `defaults.launch_profile` explicitly.
 - Use `defaults.workspace_backend: "worktree"` for code-writing work unless the operator intentionally wants in-place execution.
 - In GitHub repos, choose a rollout strategy before node layout. Prefer small PRs, `establish_base -> parallel_prs`, or `cascading_prs` over one large PR. See `github-rollout.md`.
-- Keep substantial agent nodes outcome-sized. Give each one `goal`, `acceptance_criteria`, relevant `constraints`, high-signal `context`, and named `artifacts`.
+- Keep substantial agent nodes outcome-sized. Give each one high-signal `context` and named `artifacts`.
+- Give every executable node (`agent`, `exec`, `check`, `checkpoint`) a meaningful `intent.goal`, non-empty `intent.acceptance_criteria`, and relevant `intent.constraints`. Deterministic nodes need intent too so the supervisor can diagnose whether a failure is local or upstream.
 - Use deterministic `check` nodes for hard facts that should gate control flow or delivery evidence.
-- Set `supervision.actions.<action>.max_uses` and `supervision.max_total_interventions` to match task risk.
+- Set `supervision.profile` to a real profile and `supervision.max_total_interventions` to match task risk. The supervisor profile is required so recovery and verification have explicit harness/model settings even when the failed checkpoint is deterministic.
 - A graph is not complete until required validation passes. Resolve plugins when needed, run `validate`, then run `--review`, `--run-ready`, and `--show-compiled`.
 
 ## Agent Mental Model
@@ -96,14 +97,25 @@ Use artifacts for durable handoffs that later nodes or reviewers need:
 {
   "type": "agent",
   "id": "implement_slice",
-  "goal": "Implement the scoped change and leave a reviewable handoff.",
-  "acceptance_criteria": [
-    "The changed files are summarized.",
-    "Validation and residual risks are named."
-  ],
+  "intent": {
+    "goal": "Implement the scoped change and leave a reviewable handoff.",
+    "acceptance_criteria": [
+      "The changed files are summarized.",
+      "Validation and residual risks are named."
+    ],
+    "constraints": []
+  },
   "context": [
-    { "name": "task", "from": "text", "text": "Keep the change focused." },
-    { "name": "target_files", "from": "workspace_glob", "path": "src/runtime/**/*.ts" }
+    {
+      "name": "task",
+      "from": "text",
+      "text": "Keep the change focused."
+    },
+    {
+      "name": "target_files",
+      "from": "workspace_glob",
+      "path": "src/runtime/**/*.ts"
+    }
   ],
   "artifacts": {
     "change_summary": {
@@ -123,9 +135,21 @@ Use deterministic checks for hard facts:
 {
   "type": "check",
   "id": "test",
+  "intent": {
+    "goal": "Run the focused runtime test file.",
+    "acceptance_criteria": [
+      "The test command exits successfully.",
+      "The output can serve as deterministic validation evidence."
+    ],
+    "constraints": []
+  },
   "check_kind": "deterministic",
   "command": "npm",
-  "args": ["test", "--", "tests/runtime/engine.test.ts"]
+  "args": [
+    "test",
+    "--",
+    "tests/runtime/engine.test.ts"
+  ]
 }
 ```
 
@@ -178,7 +202,7 @@ Plugin tools should still match the node's job.
 - Adding AI checks after every agent node as a substitute for good acceptance criteria.
 - Wrapping mature local CLIs in custom helpers that remove useful flags, help text, or error messages.
 - Creating plugin tools before checking whether existing repo/device commands are enough.
-- Modeling supervisor safety pauses as planned workflow steps.
+- Modeling supervisor authority pauses as planned workflow steps.
 - Depending on generated internal ids from managed pattern expansion.
 
 ## Final Review

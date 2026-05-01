@@ -28,15 +28,15 @@
       "reasoning_effort": "low",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "supervision": {
     "max_total_interventions": 2,
-    "actions": {
-      "run_diagnostic": {
-        "max_uses": 2
-      }
-    }
+    "profile": "supervisor"
   },
   "graph": {
     "type": "sequence",
@@ -49,7 +49,15 @@
         "command": "node",
         "args": [
           "scripts/no-delta.js"
-        ]
+        ],
+        "intent": {
+          "goal": "Exercise the no-material-delta failure path for supervisor recovery.",
+          "acceptance_criteria": [
+            "The command exits according to the fixture script's no-delta contract.",
+            "Supervisor evidence can distinguish repeated failure from a useful repair."
+          ],
+          "constraints": []
+        }
       }
     ]
   }

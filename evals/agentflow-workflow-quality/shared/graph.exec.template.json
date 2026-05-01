@@ -23,6 +23,10 @@
   "profiles": {
     "default": {
       "harness": "{{workflow.harness}}"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "graph": {
@@ -44,8 +48,20 @@
             "path": "handoff.md",
             "description": "Eval handoff artifact."
           }
+        },
+        "intent": {
+          "goal": "Write the deterministic eval handoff artifact for this workflow-quality scenario.",
+          "acceptance_criteria": [
+            "The command writes `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+            "The handoff identifies scenario, variant, and validation evidence."
+          ],
+          "constraints": []
         }
       }
     ]
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
   }
 }

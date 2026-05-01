@@ -27,6 +27,10 @@
       "model": "auto",
       "sandbox": "workspace-write",
       "timeout_sec": 900
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     }
   },
   "plugins": {
@@ -48,10 +52,6 @@
         "type": "agent",
         "id": "draft_release_notes",
         "repo": "main",
-        "goal": "Draft a tight, well-structured release-notes section that covers the most recent changes summarized from the README. Write the markdown body to `release-notes.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR).",
-        "constraints": [
-          "Do not modify files in the repository."
-        ],
         "context": [
           {
             "name": "readme",
@@ -65,6 +65,16 @@
             "path": "release-notes.md",
             "description": "Draft release-notes section produced by the agent."
           }
+        },
+        "intent": {
+          "goal": "Draft a tight, well-structured release-notes section that covers the most recent changes summarized from the README. Write the markdown body to `release-notes.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR).",
+          "acceptance_criteria": [
+            "The release-notes artifact is concise, specific, and grounded in README context.",
+            "The node leaves the repository unchanged."
+          ],
+          "constraints": [
+            "Do not modify files in the repository."
+          ]
         }
       },
       {
@@ -72,10 +82,6 @@
         "id": "watch_pr",
         "repo": "main",
         "profile": "review",
-        "goal": "Use the `babysit-poll` plugin tool to fetch the current state of pull request `123` (run `babysit-poll --help` if you need exact syntax, then call `babysit-poll --pr 123`). Combine the polled JSON with the release-notes draft to produce a short ship-readiness handoff. Write it to `ship-handoff.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR).",
-        "constraints": [
-          "Do not modify files in the repository."
-        ],
         "context": [
           {
             "ref": "draft_release_notes.release_notes",
@@ -88,6 +94,16 @@
             "path": "ship-handoff.md",
             "description": "Final ship-readiness handoff combining release notes and PR status."
           }
+        },
+        "intent": {
+          "goal": "Use the `babysit-poll` plugin tool to fetch the current state of pull request `123` (run `babysit-poll --help` if you need exact syntax, then call `babysit-poll --pr 123`). Combine the polled JSON with the release-notes draft to produce a short ship-readiness handoff. Write it to `ship-handoff.md` inside the agentflow output directory ($AGENTFLOW_OUTPUT_DIR).",
+          "acceptance_criteria": [
+            "The handoff cites the release notes and plugin-produced PR status evidence.",
+            "The node does not mutate repository files or remote services."
+          ],
+          "constraints": [
+            "Do not modify files in the repository."
+          ]
         }
       }
     ]
@@ -103,19 +119,7 @@
     ]
   },
   "supervision": {
-    "actions": {
-      "retry_with_guidance": { "max_uses": 2 },
-      "repair_artifact": { "max_uses": 2 },
-      "rebuild_context": { "max_uses": 1 },
-      "run_diagnostic": { "max_uses": 2 },
-      "pause_for_human": { "max_uses": 1 },
-      "semantic_evaluation": { "max_uses": 1 }
-    },
     "max_total_interventions": 6,
-    "policy": {
-      "pause_on_policy_risk": true,
-      "pause_on_repeated_recovery": true,
-      "drift_score_threshold": 0.8
-    }
+    "profile": "supervisor"
   }
 }

@@ -14,7 +14,7 @@ Outcome verification runs only for `agent` nodes that:
 - materialized every declared artifact, and
 - were not canceled mid-attempt.
 
-It is skipped for `check`, `checkpoint`, and `pattern_*` nodes (their contracts already exist) and for `exec` nodes (their exit code is the contract). The per-attempt workspace snapshot still runs for `exec` nodes so review and apply workflows have the diff.
+It is skipped for `check`, `checkpoint`, `pattern_*`, and `exec` nodes because those nodes have their own direct execution contract: command result, pass criteria, checkpoint decision, managed scorecard, artifacts, and workspace diff. Those executable nodes still require `intent.goal` and `intent.acceptance_criteria`; the supervisor uses that intent to diagnose causal failures and choose safe recovery targets.
 
 ## Inputs
 
@@ -107,4 +107,4 @@ Verifier verdicts are file-backed under the attempt directory. Resumed runs reus
 
 ## What This Replaces
 
-Authors no longer need to add an AI `check` after every substantive agent node solely to evaluate the same acceptance criteria — the runtime already grades the attempt against `acceptance_criteria` on the agent node. Use `check` nodes for in-run sensors (deterministic facts, downstream gating) and managed pattern evaluation for authored repair loops; outcome verification covers the rubric grade.
+Authors no longer need to add an AI `check` after every substantive agent node solely to evaluate the same acceptance criteria — the runtime already grades the attempt against `acceptance_criteria` on the agent node. Use `check` nodes for in-run sensors and downstream gates with their own goal and acceptance criteria; causal supervisor recovery can then tell whether a failed gate points at the check, an upstream producer, context, workspace, validation strategy, or environment.

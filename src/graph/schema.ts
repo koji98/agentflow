@@ -32,15 +32,6 @@ export const toolNamePattern = /^[a-z0-9][a-z0-9-]*$/;
 export const edgeOutcomes = ["passed", "failed"] as const;
 export const failureBehaviors = ["fail", "continue"] as const;
 export const prerequisiteKinds = ["file", "command", "env", "repo"] as const;
-export const supervisorActionKinds = [
-  "retry_with_guidance",
-  "repair_artifact",
-  "rebuild_context",
-  "run_diagnostic",
-  "pause_for_human",
-  "semantic_evaluation",
-  "fail"
-] as const;
 export const deliverySections = [
   "task_brief",
   "implementation_summary",
@@ -72,7 +63,6 @@ export type CanonicalNodeArtifactKind = keyof typeof canonicalNodeArtifacts;
 export type GraphOutcome = (typeof edgeOutcomes)[number];
 export type FailureBehavior = (typeof failureBehaviors)[number];
 export type PrerequisiteKind = (typeof prerequisiteKinds)[number];
-export type SupervisorActionKind = (typeof supervisorActionKinds)[number];
 export type DeliverySection = (typeof deliverySections)[number];
 
 export interface GraphDiagnostic {

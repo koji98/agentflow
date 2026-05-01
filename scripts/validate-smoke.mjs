@@ -297,7 +297,16 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
         model: harnessKind === "codex-cli" ? "gpt-5-codex" : "gpt-5-cursor",
         sandbox: harnessKind === "codex-cli" ? "workspace-write" : "read-only",
         timeout_sec: 30
+      },
+      supervisor: {
+        harness: harnessKind,
+        sandbox: "read-only",
+        timeout_sec: 30
       }
+    },
+    supervision: {
+      profile: "supervisor",
+      max_total_interventions: 3
     },
     graph: {
       type: "sequence",
@@ -307,7 +316,14 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
           type: "agent",
           id: "smoke-agent",
           repo: "main",
-          goal: `Run the ${harnessKind} smoke test.`
+          intent: {
+            goal: `Run the ${harnessKind} smoke test.`,
+            acceptance_criteria: [
+              "The harness launches successfully and returns a passing smoke result.",
+              "The run records terminal artifacts for smoke validation."
+            ],
+            constraints: ["Do not perform external side effects."]
+          }
         }
       ]
     }

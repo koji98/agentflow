@@ -14,7 +14,8 @@ import {
   builtInInputRules,
   builtInTimeoutSeconds,
   resolveLaunchConfig,
-  resolveNodePolicy
+  resolveNodePolicy,
+  resolveSupervisorPolicy
 } from "../../src/graph/profiles.js";
 
 function createDocument(
@@ -51,7 +52,11 @@ describe("graph profile resolution", () => {
     const resolution = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "implement",
-      goal: "Implement the change."
+      intent: {
+        goal: "Implement the change.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     } satisfies AgentNode);
 
     expect(launch).toEqual({
@@ -178,18 +183,30 @@ describe("graph profile resolution", () => {
     const inherited = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "inherited",
-      goal: "Write artifacts."
+      intent: {
+        goal: "Write artifacts.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     } satisfies AgentNode);
     const profileOverride = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "profile_override",
       profile: "disabled",
-      goal: "Write artifacts."
+      intent: {
+        goal: "Write artifacts.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     } satisfies AgentNode);
     const nodeOverride = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "node_override",
-      goal: "Write artifacts.",
+      intent: {
+        goal: "Write artifacts.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
       artifact_repair: {
         max_attempts: 3
       }
@@ -241,14 +258,22 @@ describe("graph profile resolution", () => {
       id: "judge_same",
       profile: "same_harness",
       check_kind: "ai",
-      goal: "Judge the patch."
+      intent: {
+        goal: "Judge the patch.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     } satisfies CheckNode);
     const isolated = resolveNodePolicy(document, launch, {
       type: "check",
       id: "judge_cross",
       profile: "different_harness",
       check_kind: "ai",
-      goal: "Judge the patch."
+      intent: {
+        goal: "Judge the patch.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     } satisfies CheckNode);
 
     expect(inherited.diagnostics).toEqual([]);
@@ -290,7 +315,11 @@ describe("graph profile resolution", () => {
     const resolution = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "implement",
-      goal: "Implement the change.",
+      intent: {
+        goal: "Implement the change.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
       reasoning_effort: "xhigh"
     } satisfies AgentNode);
 
@@ -318,13 +347,21 @@ describe("graph profile resolution", () => {
     const codexResolution = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "implement",
-      goal: "Implement the change."
+      intent: {
+        goal: "Implement the change.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     } satisfies AgentNode);
     const cursorResolution = resolveNodePolicy(document, launch, {
       type: "agent",
       id: "cursor_implement",
       profile: "cursor",
-      goal: "Implement the change."
+      intent: {
+        goal: "Implement the change.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
     } satisfies AgentNode);
 
     expect(codexResolution.diagnostics).toEqual([]);
@@ -337,5 +374,47 @@ describe("graph profile resolution", () => {
     expect(cursorResolution.diagnostics).toEqual([]);
     expect(cursorResolution.policy.harness).toBe("cursor-cli");
     expect(cursorResolution.policy.skip_git_repo_check).toBeUndefined();
+  });
+
+  it("resolves a dedicated supervisor profile", () => {
+    const document = createDocument(
+      {
+        default: {
+          harness: "codex-cli",
+          model: "gpt-5-codex",
+          sandbox: "workspace-write",
+          timeout_sec: 1800
+        },
+        supervisor: {
+          model: "gpt-5.2",
+          reasoning_effort: "high",
+          sandbox: "read-only",
+          timeout_sec: 300,
+          skip_git_repo_check: true
+        }
+      },
+      {
+        launch_profile: "default",
+        workspace_backend: "worktree"
+      }
+    );
+    document.supervision = {
+      profile: "supervisor",
+      max_total_interventions: 3
+    };
+
+    const launch = resolveLaunchConfig(document);
+    const resolution = resolveSupervisorPolicy(document, launch);
+
+    expect(resolution.diagnostics).toEqual([]);
+    expect(resolution.policy).toEqual({
+      profile_name: "supervisor",
+      harness: "codex-cli",
+      model: "gpt-5.2",
+      reasoning_effort: "high",
+      sandbox: "read-only",
+      timeout_sec: 300,
+      skip_git_repo_check: true
+    });
   });
 });
