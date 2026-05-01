@@ -1,0 +1,97 @@
+{
+  "id": "tool-output-changes-direction",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Workflow should change direction when authorized tool output contradicts initial repo evidence.",
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true,
+    "tools": "../../shared/tools"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=tool-output-changes-direction"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "wrong-direction.txt"
+      ]
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use",
+        "graph_contract_adherence"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use",
+        "graph_contract_adherence"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use",
+        "graph_contract_adherence"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use",
+        "graph_contract_adherence"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use",
+        "graph_contract_adherence"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use",
+        "graph_contract_adherence"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use",
+        "graph_contract_adherence"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use",
+        "graph_contract_adherence"
+      ]
+    }
+  }
+}

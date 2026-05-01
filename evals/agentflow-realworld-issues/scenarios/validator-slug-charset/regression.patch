@@ -1,0 +1,76 @@
+diff --git a/AGENTFLOW_EVAL_TASK.md b/AGENTFLOW_EVAL_TASK.md
+new file mode 100644
+index 000000000..a92de7652
+--- /dev/null
++++ b/AGENTFLOW_EVAL_TASK.md
+@@ -0,0 +1,29 @@
++# Scenario: validator-slug-charset
++
++## Source Issue
++
++`isSlug` is inconsistent for dotted inputs:
++
++- `isSlug("i.am.not.a.slug")` returns `false`
++- `isSlug("slug.is.cool")` returns `true`
++
++Both should be invalid slugs. Valid slugs should remain lowercase alphanumeric strings that may contain single hyphens or underscores internally.
++
++## Constraints
++
++- Fix the production source, not the regression test.
++- Do not use the upstream PR patch, oracle commit, or live GitHub.
++- Do not edit package manifests, lockfiles, generated files, or this task file.
++- Preserve valid simple slugs such as `foo`, `foo-bar`, `foo_bar`, and `a1-b2_c3`.
++
++## Validation
++
++Run:
++
++```bash
++npx mocha --require @babel/register --exit test/agentflow-realworld-slug.test.js
++```
++
++## Agentflow Output Contract
++
++Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with Scenario, Issue, Changed files, Validation, and Risks sections.
+diff --git a/test/agentflow-realworld-slug.test.js b/test/agentflow-realworld-slug.test.js
+new file mode 100644
+index 000000000..63602609e
+--- /dev/null
++++ b/test/agentflow-realworld-slug.test.js
+@@ -0,0 +1,35 @@
++import test from './testFunctions';
++
++describe('Agentflow real-world regression: slug charset', () => {
++  it('accepts normal lowercase slug characters and rejects dots or symbols consistently', () => {
++    test({
++      validator: 'isSlug',
++      valid: [
++        'f',
++        'fo',
++        'foo',
++        'foo-bar',
++        'foo_bar',
++        'foo-bar-foo',
++        'foo-bar_foo',
++        'foo-75-b4r-foo',
++        'a1-b2_c3',
++      ],
++      invalid: [
++        'not-----------slug',
++        '@#_$@',
++        '-not-slug',
++        'not-slug-',
++        '_not-slug',
++        'not-slug_',
++        'not slug',
++        'i.am.not.a.slug',
++        'slug.is.cool',
++        'foo-bar_foo*75-b4r-**_foo',
++        'foo-bar_foo*75-b4r-**_foo-&&',
++        'Foo-Bar',
++        'a:b',
++      ],
++    });
++  });
++});

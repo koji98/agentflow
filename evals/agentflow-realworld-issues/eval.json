@@ -1,0 +1,127 @@
+{
+  "version": "1",
+  "suite_id": "agentflow-realworld-issues",
+  "objective": "Evaluate Agentflow on pinned real-world MIT GitHub issues with local regression fixtures and hidden PR oracles.",
+  "default_trials": 1,
+  "scenarios": [
+    "scenarios/validator-url-port-no-protocol/scenario.json",
+    "scenarios/validator-slug-charset/scenario.json",
+    "scenarios/date-fns-utc-now-functions/scenario.json",
+    "scenarios/date-fns-french-ordinal-architecture/scenario.json",
+    "scenarios/execa-escaped-newline-template/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json",
+    "variants/terse.json"
+  ],
+  "thresholds": {
+    "pass_rate": 0.4,
+    "max_blocker_rate": 1,
+    "min_average_score": 2
+  },
+  "criteria": [
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true,
+      "description": "Final graph status matches the scenario expectation."
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true,
+      "description": "Declared artifacts exist and contain required evidence."
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace",
+      "required": true,
+      "description": "Forbidden workspace edits did not occur."
+    },
+    {
+      "id": "supervisor",
+      "kind": "supervisor",
+      "required": true,
+      "description": "Expected supervisor classifications, gatherers, and apply actions occurred."
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true,
+      "description": "Delivery manifest is present when the workflow completes."
+    },
+    {
+      "id": "realworld-deterministic",
+      "kind": "custom_script",
+      "command": "node graders/realworld-deterministic.mjs",
+      "timeout_sec": 600,
+      "required": true,
+      "description": "Suite-specific deterministic assertions."
+    },
+    {
+      "id": "contract-adherence",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/contract-adherence.md",
+      "dimensions": [
+        "contract_adherence"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "evidence-use",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/evidence-use.md",
+      "dimensions": [
+        "evidence_use"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "context-handling",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/context-handling.md",
+      "dimensions": [
+        "context_handling"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "noise-efficiency",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/noise-efficiency.md",
+      "dimensions": [
+        "noise_efficiency"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "delivery-auditability",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/delivery-auditability.md",
+      "dimensions": [
+        "delivery_auditability"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    }
+  ]
+}

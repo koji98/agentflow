@@ -2,68 +2,27 @@ import type {
   AgentNode,
   ArtifactDefinition,
   BaseExecutableNode,
-  CheckNode,
   ContextItem,
   ParallelNode,
-  RepeatNode,
   SequenceNode
 } from "../graph/authored.js";
 import {
   artifactContext,
   body,
   managedId,
-  maxConcurrency,
-  mergeArtifacts,
-  outputDirArtifact,
+  mergeManagedPublicArtifacts,
   renderPrompt,
   section,
-  sharedNodeBase,
-  type ManagedPatternRuntime,
-  workflowBriefOutput,
-  workflowPlanJsonOutput,
-  workflowPlanMarkdownOutput
+  sharedAgentBase,
+  type ManagedPatternAgentOptions,
+  type ManagedPatternRuntime
 } from "./foundation.js";
 
-export interface PatternDeepResearchBrief {
-  question: string;
-  objective: string;
-  audience?: string;
-  scope_cues?: string[];
-  success_bar?: string[];
-}
-
-export interface PatternDeepResearchContextPolicy {
-  web?: boolean;
-  files?: boolean;
-  apps?: boolean;
-  allow_domains?: string[];
-  deny_domains?: string[];
-  preferred_sources?: string[];
-}
-
-export interface PatternDeepResearchApprovalPolicy {
-  require_plan_approval?: boolean;
-}
-
-export interface PatternDeepResearchStrategy {
-  depth?: "shallow" | "standard" | "deep";
-  coverage_mode?: "breadth" | "balanced" | "depth_first";
-  followup_passes?: number;
-  final_critique?: boolean;
-}
-
-export interface PatternDeepResearchDelivery {
-  format?: string;
-  citation_style?: string;
-  sections?: string[];
-}
-
-export interface PatternDeepResearchConfig extends BaseExecutableNode {
-  brief: PatternDeepResearchBrief;
-  context_policy: PatternDeepResearchContextPolicy;
-  approval_policy: PatternDeepResearchApprovalPolicy;
-  strategy: PatternDeepResearchStrategy;
-  delivery: PatternDeepResearchDelivery;
+export interface PatternDeepResearchConfig extends BaseExecutableNode, ManagedPatternAgentOptions {
+  goal: string;
+  research: {
+    angles: string[];
+  };
   runtime?: ManagedPatternRuntime;
 }
 
@@ -75,570 +34,292 @@ function zeroPad(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-function depthTrackCount(depth: PatternDeepResearchStrategy["depth"]): number {
-  switch (depth) {
-    case "shallow":
-      return 3;
-    case "deep":
-      return 7;
-    default:
-      return 5;
+function formatList(title: string, values: string[] | undefined, fallback: string): string[] {
+  return values && values.length > 0
+    ? [title, ...values.map((value) => `- ${value}`)]
+    : [`${title}: ${fallback}`];
+}
+
+function formatArtifactContract(artifacts: Record<string, ArtifactDefinition>): string[] {
+  return Object.entries(artifacts).flatMap(([name, artifact]) => [
+    `- ${name}: ${artifact.from}:${artifact.path}`,
+    `  ${artifact.description}`
+  ]);
+}
+
+interface ResearchMaterial {
+  nodeId: string;
+  reportArtifact: string;
+  packetArtifact: string;
+  contextPrefix: string;
+}
+
+function materialContexts(materials: ResearchMaterial[]): ContextItem[] {
+  return materials.flatMap((material) => [
+    artifactContext(`${material.contextPrefix}_report`, material.nodeId, material.reportArtifact),
+    artifactContext(`${material.contextPrefix}_packet`, material.nodeId, material.packetArtifact)
+  ]);
+}
+
+function balancedGroups<T>(items: T[], maxGroupSize = 3): T[][] {
+  if (items.length <= maxGroupSize) {
+    return [items];
   }
-}
 
-function formatContextPolicy(policy: PatternDeepResearchContextPolicy): string[] {
-  return [
-    `- Web research: ${policy.web === false ? "disabled" : "enabled"}`,
-    `- Local file research: ${policy.files === false ? "disabled" : "enabled"}`,
-    `- App or connector research: ${policy.apps ? "enabled" : "disabled"}`,
-    ...(policy.allow_domains && policy.allow_domains.length > 0
-      ? [`- Allowed domains: ${policy.allow_domains.join(", ")}`]
-      : []),
-    ...(policy.deny_domains && policy.deny_domains.length > 0
-      ? [`- Denied domains: ${policy.deny_domains.join(", ")}`]
-      : []),
-    ...(policy.preferred_sources && policy.preferred_sources.length > 0
-      ? [`- Preferred source types: ${policy.preferred_sources.join(", ")}`]
-      : [])
-  ];
-}
-
-function formatStrategy(strategy: PatternDeepResearchStrategy): string[] {
-  return [
-    `- Depth: ${strategy.depth ?? "standard"}`,
-    `- Coverage mode: ${strategy.coverage_mode ?? "balanced"}`,
-    `- Follow-up passes: ${strategy.followup_passes ?? 1}`,
-    `- Final critique: ${strategy.final_critique ? "enabled" : "disabled"}`
-  ];
-}
-
-function formatDelivery(delivery: PatternDeepResearchDelivery): string[] {
-  return [
-    `- Format: ${delivery.format ?? "report"}`,
-    `- Citation style: ${delivery.citation_style ?? "inline"}`,
-    ...(delivery.sections && delivery.sections.length > 0
-      ? [`- Required sections: ${delivery.sections.join(", ")}`]
-      : [])
-  ];
-}
-
-function formatBrief(brief: PatternDeepResearchBrief): string[] {
-  return [
-    `Question: ${brief.question}`,
-    `Objective: ${brief.objective}`,
-    ...(brief.audience ? [`Audience: ${brief.audience}`] : []),
-    ...(brief.scope_cues && brief.scope_cues.length > 0
-      ? ["Scope cues:", ...brief.scope_cues.map((cue) => `- ${cue}`)]
-      : []),
-    ...(brief.success_bar && brief.success_bar.length > 0
-      ? ["Success bar:", ...brief.success_bar.map((item) => `- ${item}`)]
-      : [])
-  ];
-}
-
-function buildBriefPrompt(config: PatternDeepResearchConfig): string {
-  return renderPrompt([
-    body("Rewrite the research ask into a concrete, execution-ready research brief."),
-    section("Objective", formatBrief(config.brief)),
-    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
-    section("Quality Bar", [
-      "Define what a strong final report must prove.",
-      "Make uncertainty, contradiction handling, and evidence quality explicit."
-    ]),
-    section("Output Contract", [
-      "Write `research-brief.md` and `workflow-brief.md` to the output directory.",
-      "`workflow-brief.md` should be the compact operator-facing version of the longer research brief."
-    ])
-  ]);
-}
-
-function buildPlanPrompt(config: PatternDeepResearchConfig, trackCount: number): string {
-  return renderPrompt([
-    body("Build the research plan that will drive the investigation."),
-    section("Objective", formatBrief(config.brief)),
-    section("Current Context", [
-      `Target investigation tracks: ${trackCount}`,
-      "Use the research brief in context."
-    ]),
-    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
-    section("Quality Bar", [
-      "Define distinct research dimensions that collectively cover the question.",
-      "Set explicit success criteria, source expectations, and unresolved-risk thresholds."
-    ]),
-    section("Output Contract", [
-      "Write `research-plan.md`, `research-plan.json`, `workflow-plan.md`, and `workflow-plan.json` to the output directory.",
-      "Use this JSON schema exactly for `research-plan.json` and `workflow-plan.json`:",
-      '{"tracks":[{"track_id":"track-01","title":"...","focus":"...","questions":["..."],"success_criteria":["..."],"source_priorities":["..."]}],"coverage_checks":["..."],"open_risks":["..."]}'
-    ]),
-    section("Blocker and Escalation Rules", [
-      "Do not produce scheduler advice or runtime tuning.",
-      "The plan should describe research intent, coverage, and evidence requirements only."
-    ])
-  ]);
-}
-
-function buildPlanCheckpointPrompt(): string {
-  return renderPrompt([
-    body("Review the proposed research plan before the workflow fans out into investigation."),
-    section("Quality Bar", [
-      "Pass when the plan covers the main dimensions of the question, has clear evidence expectations, and does not waste work on redundant tracks.",
-      "Deny when the plan misses key dimensions, over-focuses one narrative, or needs scope correction."
-    ]),
-    section("Blocker and Escalation Rules", [
-      "When denying, describe the exact missing dimension, evidence bar, or scope correction needed."
-    ])
-  ]);
-}
-
-function buildTrackPrompt(config: PatternDeepResearchConfig): string {
-  return renderPrompt([
-    body("Derive the concrete investigation briefs from the approved research plan."),
-    section("Objective", formatBrief(config.brief)),
-    section("Current Context", [
-      "Use the research brief and latest approved research plan in context."
-    ]),
-    section("Output Contract", [
-      "Write `track-briefs.json` to the output directory.",
-      "Use this exact schema:",
-      '[{"track_id":"track-01","title":"...","focus":"...","questions":["..."],"success_criteria":["..."],"source_priorities":["..."]}]'
-    ])
-  ]);
-}
-
-function buildWorkerPrompt(config: PatternDeepResearchConfig, trackIndex: number, phaseLabel: string): string {
-  const trackNumber = zeroPad(trackIndex + 1);
-
-  return renderPrompt([
-    body(`Investigate ${phaseLabel} research worker ${trackNumber}.`),
-    section("Objective", formatBrief(config.brief)),
-    section("Current Context", [
-      "Read the relevant track brief in context and execute only that investigative slice.",
-      "Maximize unique coverage rather than repeating other workers."
-    ]),
-    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
-    section("Quality Bar", [
-      "Preserve uncertainty, note source quality, and keep evidence traceable.",
-      "Do not flatten disagreements into premature conclusions."
-    ]),
-    section("Output Contract", [
-      "Write `track-report.md`, `track-summary.md`, and `sources.json` to the output directory."
-    ])
-  ]);
-}
-
-function buildContradictionPrompt(): string {
-  return renderPrompt([
-    body("Scan the investigation summaries for contradictions, overlap, evidence gaps, and missing angles."),
-    section("Output Contract", [
-      "Write `contradictions.md` to the output directory."
-    ]),
-    section("Quality Bar", [
-      "Keep contradictions explicit so follow-up passes and final synthesis can address them directly."
-    ])
-  ]);
-}
-
-function buildFollowupPlanPrompt(passIndex: number): string {
-  return renderPrompt([
-    body(`Plan follow-up research pass ${passIndex + 1}.`),
-    section("Current Context", [
-      "Use the approved research plan, track briefs, contradictions, and prior findings in context."
-    ]),
-    section("Output Contract", [
-      `Write \`followup-plan-pass-${zeroPad(passIndex + 1)}.json\` to the output directory.`,
-      "Use this exact schema:",
-      '[{"track_id":"track-01","focus":"...","questions":["..."],"why_now":"..."}]'
-    ]),
-    section("Quality Bar", [
-      "Focus only on unresolved evidence gaps, not broad rework of already-covered material."
-    ])
-  ]);
-}
-
-function buildConsolidatePrompt(config: PatternDeepResearchConfig): string {
-  return renderPrompt([
-    body("Consolidate the investigation artifacts into machine-readable interim findings, provenance, and uncertainty artifacts."),
-    section("Objective", formatBrief(config.brief)),
-    section("Current Context", [
-      "Use track summaries, track source ledgers, contradiction notes, and any follow-up artifacts in context."
-    ]),
-    section("Output Contract", [
-      "Write `interim-findings.jsonl`, `source-ledger.json`, and `uncertainties.md` to the output directory."
-    ]),
-    section("Quality Bar", [
-      "Every high-signal finding should remain traceable to evidence.",
-      "Uncertainty should be explicit, not relegated to optional side notes."
-    ]),
-    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy))
-  ]);
-}
-
-function buildFinalPrompt(config: PatternDeepResearchConfig): string {
-  return renderPrompt([
-    body("Publish the final deep research package."),
-    section("Objective", formatBrief(config.brief)),
-    section("Current Context", [
-      "Use the research brief, latest approved plan, interim findings, source ledger, and uncertainty register in context."
-    ]),
-    section("Allowed Sources and Tools", formatContextPolicy(config.context_policy)),
-    section("Output Contract", [
-      "Write `research-report.md`, `research-packet.json`, `source-ledger.json`, `uncertainties.md`, and `interim-findings.jsonl` to the output directory.",
-      "Use this exact schema for `research-packet.json`:",
-      '{"question":"...","objective":"...","top_findings":["..."],"major_uncertainties":["..."],"source_summary":["..."],"recommended_downstream_uses":["..."]}',
-      ...formatDelivery(config.delivery)
-    ]),
-    section("Quality Bar", [
-      "Preserve contradictions and unresolved questions as first-class content.",
-      "The final report must not read like a shallow summary of one dominant track."
-    ])
-  ]);
-}
-
-function buildFinalCritiquePrompt(config: PatternDeepResearchConfig): string {
-  return renderPrompt([
-    body("Review whether the final research report is complete, balanced, and grounded in the gathered evidence."),
-    section("Objective", formatBrief(config.brief)),
-    section("Current Context", [
-      "Use the final report, source ledger, uncertainties, and workflow plan in context."
-    ])
-  ]);
-}
-
-function buildFinalCritiqueRubric(config: PatternDeepResearchConfig): string {
-  const sectionRequirement =
-    config.delivery.sections && config.delivery.sections.length > 0
-      ? `Pass only if the report covers: ${config.delivery.sections.join(", ")}.`
-      : "Pass only if the report covers the main problem, analysis, and recommendation clearly.";
-
-  return [
-    sectionRequirement,
-    "Fail if major contradictions are dropped, if evidence provenance is weak, or if the strongest uncertainties are missing."
-  ].join(" ");
-}
-
-function buildWorkerArtifacts(trackIndex: number): Record<string, ArtifactDefinition> {
-  const suffix = zeroPad(trackIndex + 1);
-
-  return mergeArtifacts(
-    outputDirArtifact(`track_report_${suffix}`, "track-report.md"),
-    outputDirArtifact(`track_summary_${suffix}`, "track-summary.md"),
-    outputDirArtifact(`track_sources_${suffix}`, "sources.json")
+  const groupCount = Math.ceil(items.length / maxGroupSize);
+  const baseSize = Math.floor(items.length / groupCount);
+  const largerGroupCount = items.length % groupCount;
+  const sizes = Array.from({ length: groupCount }, (_, index) =>
+    index >= groupCount - largerGroupCount ? baseSize + 1 : baseSize
   );
+  const groups: T[][] = [];
+  let cursor = 0;
+
+  for (const size of sizes) {
+    groups.push(items.slice(cursor, cursor + size));
+    cursor += size;
+  }
+
+  return groups;
 }
 
-function buildFollowupArtifacts(passIndex: number, trackIndex: number): Record<string, ArtifactDefinition> {
-  const passSuffix = zeroPad(passIndex + 1);
-  const trackSuffix = zeroPad(trackIndex + 1);
+function buildAnglePrompt(config: PatternDeepResearchConfig, angle: string, index: number): string {
+  return renderPrompt([
+    body("You are an expert deep researcher investigating one assigned angle for a larger managed research workflow. Your private report will be synthesized later, so gather strong useful evidence and preserve uncertainty clearly."),
+    section("Final Managed Workflow Contract", [
+      "This is a private helper node inside a managed workflow. The final managed node owns the public artifact shape and final acceptance criteria below.",
+      "Use this contract to understand what your evidence must support, but do not format this private angle report as the final public artifact unless the private output contract below says so.",
+      `Goal: ${config.goal}`,
+      ...formatList("Final acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+    ]),
+    section("Assigned Angle", [
+      angle,
+      "Stay focused on this angle. Do not duplicate the other angle workers unless overlap is needed to explain a conflict."
+    ]),
+    section("Research Method", [
+      "Use local repository files, provided context, available local CLIs, docs, or web research, whichever best serves this angle.",
+      "Prefer authoritative local/source evidence when the question is repo-specific.",
+      "Use external or web context when docs, package behavior, standards, release notes, or broader comparisons would materially improve the answer.",
+      "Preserve source paths, commands, URLs, and uncertainty so final synthesis can audit the claim.",
+      "Do not change graph intent, node goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts."
+    ]),
+    section("Output Contract", [
+      "Write `angle-report.md` and `packet.json` to the output directory.",
+      "These are private research artifacts for synthesis, not the final public handoff.",
+      "The report should be readable by a human researcher and focused on the assigned angle.",
+      "The packet must be JSON with `angle`, `findings`, `evidence`, `sources`, `conflicts`, `uncertainty`, and `confidence` fields."
+    ]),
+    section("Quality Bar", [
+      "Do not produce a shallow summary. Produce the most useful evidence-backed answer for this angle.",
+      "Mark uncertainty instead of guessing. Include minority or conflicting evidence when it matters."
+    ])
+  ]);
+}
 
-  return mergeArtifacts(
-    outputDirArtifact(`followup_report_${passSuffix}_${trackSuffix}`, "track-report.md"),
-    outputDirArtifact(`followup_summary_${passSuffix}_${trackSuffix}`, "track-summary.md"),
-    outputDirArtifact(`followup_sources_${passSuffix}_${trackSuffix}`, "sources.json")
-  );
+function buildSynthesisPrompt(
+  config: PatternDeepResearchConfig,
+  inputCount: number,
+  layer: number,
+  group: number
+): string {
+  return renderPrompt([
+    body(`You are an expert research lead synthesizing ${inputCount} research packets into one higher-signal research packet.`),
+    section("Final Managed Workflow Contract", [
+      "This is a private synthesis step inside a larger managed research workflow. The final public result will be published later.",
+      "Use the final contract to preserve relevant evidence, but do not format this private synthesis as the final public artifact unless the private output contract below says so.",
+      `Goal: ${config.goal}`,
+      ...formatList("Final acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+    ]),
+    section("Synthesis Task", [
+      "Preserve every major finding from the input material.",
+      "Collapse redundant claims while keeping the strongest provenance.",
+      "Keep evidence attached to claims; do not detach conclusions from sources.",
+      "Surface conflicts, weak evidence, missing coverage, and uncertainty.",
+      "Do not discard a unique major finding just because it appears in only one packet."
+    ]),
+    section("Output Contract", [
+      `Write \`synthesis-${zeroPad(layer)}-${zeroPad(group)}.md\` and \`synthesis-${zeroPad(layer)}-${zeroPad(group)}.json\` to the output directory.`,
+      "These are private synthesis artifacts for the final publisher, not the final public handoff.",
+      "The JSON packet must include `findings`, `evidence`, `sources`, `conflicts`, `uncertainty`, `confidence`, and `collapsed_duplicates`."
+    ])
+  ]);
+}
+
+function buildFinalPrompt(
+  config: PatternDeepResearchConfig,
+  publicArtifacts: Record<string, ArtifactDefinition>,
+  inputCount: number
+): string {
+  return renderPrompt([
+    body(`You are the final research lead publishing the managed deep research result from ${inputCount} research packet${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
+    section("Managed Workflow Contract", [
+      "This final publisher owns the managed workflow's public artifact contract. Internal helper reports are only evidence.",
+      `Goal: ${config.goal}`,
+      ...formatList("Acceptance criteria", config.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.constraints, "Stay inside the authored graph contract.")
+    ]),
+    section("Research Angles", config.research.angles.map((angle) => `- ${angle}`)),
+    section("Current Context", [
+      "Use the research reports and packets in context as authority.",
+      "Resolve disagreements explicitly. Preserve uncertainty and cite the evidence behind important claims.",
+      "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
+    ]),
+    section("Public Artifact Contract", [
+      "Write exactly the declared public artifacts.",
+      ...formatArtifactContract(publicArtifacts),
+      "Honor each artifact description literally, including any required field labels or handoff sections.",
+      "The `packet` artifact must include answer, findings, evidence, sources, uncertainties, confidence, and recommended next actions."
+    ]),
+    section("Quality Bar", [
+      "The final package should be useful for a downstream design, implementation, review, or decision node without making the reader inspect private internal artifacts.",
+      "Do not bury uncertainty or present one angle's evidence as the whole answer."
+    ])
+  ]);
+}
+
+function buildAngleArtifacts(index: number): Record<string, ArtifactDefinition> {
+  const suffix = zeroPad(index + 1);
+
+  return {
+    [`angle_report_${suffix}`]: {
+      from: "output_dir",
+      path: "angle-report.md",
+      description: `Markdown findings for research angle ${suffix}.`
+    },
+    [`angle_packet_${suffix}`]: {
+      from: "output_dir",
+      path: "packet.json",
+      description: `Structured findings, evidence, sources, conflicts, and uncertainty for research angle ${suffix}.`
+    }
+  };
+}
+
+function buildSynthesisArtifacts(layer: number, group: number): Record<string, ArtifactDefinition> {
+  const suffix = `${zeroPad(layer)}_${zeroPad(group)}`;
+
+  return {
+    [`synthesis_report_${suffix}`]: {
+      from: "output_dir",
+      path: `synthesis-${zeroPad(layer)}-${zeroPad(group)}.md`,
+      description: `Markdown synthesis report for research layer ${zeroPad(layer)} group ${zeroPad(group)}.`
+    },
+    [`synthesis_packet_${suffix}`]: {
+      from: "output_dir",
+      path: `synthesis-${zeroPad(layer)}-${zeroPad(group)}.json`,
+      description: `Structured synthesis packet for research layer ${zeroPad(layer)} group ${zeroPad(group)}.`
+    }
+  };
 }
 
 export function buildPatternDeepResearch(config: PatternDeepResearchConfig): SequenceNode {
-  const shared = sharedNodeBase(config);
   const workflowId = workflowNodeId(config.id, "workflow");
-  const trackCount = depthTrackCount(config.strategy.depth);
-  const concurrency = maxConcurrency(config.runtime, trackCount);
+  const fanoutId = workflowNodeId(config.id, "angle_fanout");
+  const publicArtifacts = mergeManagedPublicArtifacts(config.artifacts);
+  const agentShared = sharedAgentBase(config);
 
-  const briefId = workflowNodeId(config.id, "clarify_brief");
-  const planId = workflowNodeId(config.id, "plan_research");
-  const planCheckpointId = workflowNodeId(config.id, "approve_research_plan");
-  const planningLoopId = workflowNodeId(config.id, "planning_loop");
-  const planningBodyId = workflowNodeId(config.id, "planning_body");
-  const trackId = workflowNodeId(config.id, "derive_tracks");
-  const trackFanoutId = workflowNodeId(config.id, "investigation_fanout");
-  const contradictionId = workflowNodeId(config.id, "scan_contradictions");
-  const consolidateId = workflowNodeId(config.id, "consolidate_findings");
+  const angleNodes: AgentNode[] = config.research.angles.map((angle, index) => {
+    const suffix = zeroPad(index + 1);
 
-  const steps: SequenceNode["steps"] = [
-    {
+    return {
       type: "agent",
-      id: briefId,
-      label: "Clarify Research Brief",
-      ...shared,
+      id: workflowNodeId(config.id, `angle_${suffix}`),
+      label: `Research Angle ${suffix}`,
+      ...agentShared,
       ...(config.context ? { context: config.context } : {}),
-      artifacts: mergeArtifacts(
-        outputDirArtifact("research_brief", "research-brief.md"),
-        workflowBriefOutput()
-      ),
-      goal: buildBriefPrompt(config)
-    }
-  ];
-
-  const planContext: ContextItem[] = [
-    artifactContext("research_brief", briefId, "research_brief")
-  ];
-
-  if (config.approval_policy.require_plan_approval) {
-    const planningLoop: RepeatNode = {
-      type: "repeat",
-      id: planningLoopId,
-      label: "Research Plan Approval Loop",
-      max_attempts: 3,
-      body: {
-        type: "sequence",
-        id: planningBodyId,
-        label: "Research Plan Approval Body",
-        steps: [
-          {
-            type: "agent",
-            id: planId,
-            label: "Draft Research Plan",
-            ...shared,
-            context: [
-              ...planContext,
-              artifactContext("operator_feedback", planCheckpointId, "operator_feedback", {
-                iteration: "latest_failed",
-                if_available: true
-              })
-            ],
-            artifacts: mergeArtifacts(
-              outputDirArtifact("research_plan_markdown", "research-plan.md"),
-              outputDirArtifact("research_plan_json", "research-plan.json"),
-              workflowPlanMarkdownOutput(),
-              workflowPlanJsonOutput()
-            ),
-            goal: buildPlanPrompt(config, trackCount)
-          },
-          {
-            type: "checkpoint",
-            id: planCheckpointId,
-            label: "Approve Research Plan",
-            ...shared,
-            context: [
-              artifactContext("research_plan_json", planId, "research_plan_json")
-            ],
-            review_from: {
-              node: planId,
-              artifact: "research_plan_markdown"
-            },
-            goal: buildPlanCheckpointPrompt()
-          }
-        ]
-      },
-      until: {
-        node: planCheckpointId
-      }
+      artifacts: buildAngleArtifacts(index),
+      goal: buildAnglePrompt(config, angle, index),
+      acceptance_criteria: [
+        "The angle report answers the assigned angle with sourced evidence.",
+        "The packet preserves enough provenance, uncertainty, and confidence for final synthesis."
+      ],
+      ...(config.constraints ? { constraints: config.constraints } : {})
     };
+  });
 
-    steps.push(planningLoop);
-  } else {
-    steps.push({
-      type: "agent",
-      id: planId,
-      label: "Plan Research",
-      ...shared,
-      context: planContext,
-      artifacts: mergeArtifacts(
-        outputDirArtifact("research_plan_markdown", "research-plan.md"),
-        outputDirArtifact("research_plan_json", "research-plan.json"),
-        workflowPlanMarkdownOutput(),
-        workflowPlanJsonOutput()
-      ),
-      goal: buildPlanPrompt(config, trackCount)
+  let materials: ResearchMaterial[] = config.research.angles.map((_, index) => {
+    const suffix = zeroPad(index + 1);
+
+    return {
+      nodeId: workflowNodeId(config.id, `angle_${suffix}`),
+      reportArtifact: `angle_report_${suffix}`,
+      packetArtifact: `angle_packet_${suffix}`,
+      contextPrefix: `angle_${suffix}`
+    };
+  });
+
+  const fanout: ParallelNode = {
+    type: "parallel",
+    id: fanoutId,
+    label: "Research Angles",
+    max_concurrency: angleNodes.length,
+    steps: angleNodes
+  };
+  const synthesisLayers: ParallelNode[] = [];
+  let layer = 1;
+
+  while (materials.length > 3) {
+    const groups = balancedGroups(materials, 3);
+    const synthesisNodes: AgentNode[] = groups.map((groupMaterials, groupIndex) => {
+      const group = groupIndex + 1;
+      const suffix = `${zeroPad(layer)}_${zeroPad(group)}`;
+
+      return {
+        type: "agent",
+        id: workflowNodeId(config.id, `synthesis_${suffix}`),
+        label: `Research Synthesis ${zeroPad(layer)}.${zeroPad(group)}`,
+        ...agentShared,
+        context: materialContexts(groupMaterials),
+        artifacts: buildSynthesisArtifacts(layer, group),
+        goal: buildSynthesisPrompt(config, groupMaterials.length, layer, group),
+        acceptance_criteria: [
+          "The synthesis preserves all major findings from its input research packets.",
+          "The synthesis collapses redundant claims without dropping provenance, uncertainty, or conflicts."
+        ],
+        ...(config.constraints ? { constraints: config.constraints } : {})
+      };
     });
-  }
 
-  const latestPlanRef = artifactContext("research_plan_markdown", planId, "research_plan_markdown", {
-    ...(config.approval_policy.require_plan_approval ? { iteration: "latest_passed" as const } : {})
-  });
-
-  const latestPlanJsonRef = artifactContext("research_plan_json", planId, "research_plan_json", {
-    ...(config.approval_policy.require_plan_approval ? { iteration: "latest_passed" as const } : {})
-  });
-
-  steps.push(
-    {
-      type: "agent",
-      id: trackId,
-      label: "Derive Investigation Tracks",
-      ...shared,
-      context: [
-        artifactContext("research_brief", briefId, "research_brief"),
-        latestPlanJsonRef
-      ],
-      artifacts: outputDirArtifact("track_briefs", "track-briefs.json"),
-      goal: buildTrackPrompt(config)
-    },
-    {
+    synthesisLayers.push({
       type: "parallel",
-      id: trackFanoutId,
-      label: "Investigate In Parallel",
-      max_concurrency: concurrency,
-      steps: Array.from({ length: trackCount }, (_, index): AgentNode => ({
-        type: "agent",
-        id: workflowNodeId(config.id, `track_${zeroPad(index + 1)}`),
-        label: `Investigation Track ${zeroPad(index + 1)}`,
-        ...shared,
-        context: [
-          artifactContext("track_briefs", trackId, "track_briefs"),
-          artifactContext("research_brief", briefId, "research_brief"),
-          latestPlanRef
-        ],
-        artifacts: buildWorkerArtifacts(index),
-        goal: buildWorkerPrompt(config, index, "initial")
-      }))
-    },
-    {
-      type: "agent",
-      id: contradictionId,
-      label: "Scan Contradictions",
-      ...shared,
-      context: Array.from({ length: trackCount }, (_, index): ContextItem => {
-        const suffix = zeroPad(index + 1);
-        return artifactContext(`track_summary_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_summary_${suffix}`);
-      }),
-      artifacts: outputDirArtifact("contradictions", "contradictions.md"),
-    goal: buildContradictionPrompt()
-    }
-  );
+      id: workflowNodeId(config.id, `synthesis_layer_${zeroPad(layer)}`),
+      label: `Research Synthesis Layer ${zeroPad(layer)}`,
+      max_concurrency: synthesisNodes.length,
+      steps: synthesisNodes
+    });
 
-  const consolidationContext: ContextItem[] = [
-    latestPlanJsonRef,
-    artifactContext("contradictions", contradictionId, "contradictions"),
-    ...Array.from({ length: trackCount }, (_, index): ContextItem => {
-      const suffix = zeroPad(index + 1);
-      return artifactContext(`track_summary_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_summary_${suffix}`);
-    }),
-    ...Array.from({ length: trackCount }, (_, index): ContextItem => {
-      const suffix = zeroPad(index + 1);
-      return artifactContext(`track_sources_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_sources_${suffix}`);
-    })
-  ];
+    materials = synthesisNodes.map((node, index) => {
+      const suffix = `${zeroPad(layer)}_${zeroPad(index + 1)}`;
 
-  for (let passIndex = 0; passIndex < (config.strategy.followup_passes ?? 1); passIndex += 1) {
-    const followupPlanId = workflowNodeId(config.id, `followup_plan_${zeroPad(passIndex + 1)}`);
-    const followupFanoutId = workflowNodeId(config.id, `followup_fanout_${zeroPad(passIndex + 1)}`);
-
-    steps.push(
-      {
-        type: "agent",
-        id: followupPlanId,
-        label: `Plan Follow-up Pass ${zeroPad(passIndex + 1)}`,
-        ...shared,
-        context: [
-          latestPlanJsonRef,
-          artifactContext("contradictions", contradictionId, "contradictions"),
-          ...Array.from({ length: trackCount }, (_, index): ContextItem => {
-            const suffix = zeroPad(index + 1);
-            return artifactContext(`track_summary_${suffix}`, workflowNodeId(config.id, `track_${suffix}`), `track_summary_${suffix}`);
-          })
-        ],
-        artifacts: outputDirArtifact(`followup_plan_${zeroPad(passIndex + 1)}`, `followup-plan-pass-${zeroPad(passIndex + 1)}.json`),
-        goal: buildFollowupPlanPrompt(passIndex)
-      },
-      {
-        type: "parallel",
-        id: followupFanoutId,
-        label: `Follow-up Pass ${zeroPad(passIndex + 1)}`,
-        max_concurrency: concurrency,
-        steps: Array.from({ length: trackCount }, (_, index): AgentNode => ({
-          type: "agent",
-          id: workflowNodeId(config.id, `followup_${zeroPad(passIndex + 1)}_${zeroPad(index + 1)}`),
-          label: `Follow-up ${zeroPad(passIndex + 1)} Track ${zeroPad(index + 1)}`,
-          ...shared,
-          context: [
-            artifactContext(`followup_plan_${zeroPad(passIndex + 1)}`, followupPlanId, `followup_plan_${zeroPad(passIndex + 1)}`),
-            artifactContext("research_brief", briefId, "research_brief")
-          ],
-          artifacts: buildFollowupArtifacts(passIndex, index),
-          goal: buildWorkerPrompt(config, index, `follow-up pass ${zeroPad(passIndex + 1)}`)
-        }))
-      }
-    );
-
-    consolidationContext.push(
-      artifactContext(`followup_plan_${zeroPad(passIndex + 1)}`, followupPlanId, `followup_plan_${zeroPad(passIndex + 1)}`)
-    );
-
-    consolidationContext.push(
-      ...Array.from({ length: trackCount }, (_, index): ContextItem => {
-        const passSuffix = zeroPad(passIndex + 1);
-        const trackSuffix = zeroPad(index + 1);
-        return artifactContext(
-          `followup_summary_${passSuffix}_${trackSuffix}`,
-          workflowNodeId(config.id, `followup_${passSuffix}_${trackSuffix}`),
-          `followup_summary_${passSuffix}_${trackSuffix}`
-        );
-      })
-    );
-    consolidationContext.push(
-      ...Array.from({ length: trackCount }, (_, index): ContextItem => {
-        const passSuffix = zeroPad(passIndex + 1);
-        const trackSuffix = zeroPad(index + 1);
-        return artifactContext(
-          `followup_sources_${passSuffix}_${trackSuffix}`,
-          workflowNodeId(config.id, `followup_${passSuffix}_${trackSuffix}`),
-          `followup_sources_${passSuffix}_${trackSuffix}`
-        );
-      })
-    );
-  }
-
-  steps.push({
-    type: "agent",
-    id: consolidateId,
-    label: "Consolidate Findings",
-    ...shared,
-    context: consolidationContext,
-    artifacts: mergeArtifacts(
-      outputDirArtifact("interim_findings", "interim-findings.jsonl"),
-      outputDirArtifact("source_ledger", "source-ledger.json"),
-      outputDirArtifact("uncertainties", "uncertainties.md")
-    ),
-    goal: buildConsolidatePrompt(config)
-  });
-
-  const publishedArtifacts = mergeArtifacts(
-    outputDirArtifact("research_report", "research-report.md"),
-    outputDirArtifact("research_packet", "research-packet.json"),
-    outputDirArtifact("source_ledger", "source-ledger.json"),
-    outputDirArtifact("uncertainties", "uncertainties.md"),
-    outputDirArtifact("interim_findings", "interim-findings.jsonl")
-  );
-
-  steps.push({
-    type: "agent",
-    id: config.id,
-    ...(config.label ? { label: config.label } : { label: "Publish Research Package" }),
-    ...shared,
-    context: [
-      artifactContext("research_brief", briefId, "research_brief"),
-      latestPlanRef,
-      latestPlanJsonRef,
-      artifactContext("interim_findings", consolidateId, "interim_findings"),
-      artifactContext("source_ledger", consolidateId, "source_ledger"),
-      artifactContext("uncertainties", consolidateId, "uncertainties")
-    ],
-    artifacts: publishedArtifacts,
-    goal: buildFinalPrompt(config)
-  });
-
-  if (config.strategy.final_critique) {
-    steps.push({
-      type: "check",
-      id: workflowNodeId(config.id, "final_critique"),
-      label: "Critique Final Report",
-      ...shared,
-      check_kind: "ai",
-      context: [
-        artifactContext("research_report", config.id, "research_report"),
-        artifactContext("source_ledger", config.id, "source_ledger"),
-        artifactContext("uncertainties", config.id, "uncertainties"),
-        latestPlanRef
-      ],
-      goal: buildFinalCritiquePrompt(config),
-      rubric: buildFinalCritiqueRubric(config)
-    } satisfies CheckNode);
+      return {
+        nodeId: node.id,
+        reportArtifact: `synthesis_report_${suffix}`,
+        packetArtifact: `synthesis_packet_${suffix}`,
+        contextPrefix: `synthesis_${suffix}`
+      };
+    });
+    layer += 1;
   }
 
   return {
     type: "sequence",
     id: workflowId,
     label: config.label ? `${config.label} Workflow` : "Deep Research Workflow",
-    steps
+    steps: [
+      fanout,
+      ...synthesisLayers,
+      {
+        type: "agent",
+        id: config.id,
+        ...(config.label ? { label: config.label } : { label: "Publish Deep Research" }),
+        ...agentShared,
+        context: materialContexts(materials),
+        artifacts: publicArtifacts,
+        goal: buildFinalPrompt(config, publicArtifacts, materials.length),
+        ...(config.acceptance_criteria ? { acceptance_criteria: config.acceptance_criteria } : {}),
+        ...(config.constraints ? { constraints: config.constraints } : {})
+      }
+    ]
   };
 }

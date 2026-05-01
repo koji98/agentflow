@@ -19,6 +19,7 @@ export interface RunAiCheckInvocation {
   repo_path: string;
   model: string | undefined;
   reasoning_effort?: ReasoningEffort;
+  base_env?: NodeJS.ProcessEnv;
   skip_git_repo_check?: boolean;
   rubric: string | undefined;
   graph_goal?: string;
@@ -27,6 +28,7 @@ export interface RunAiCheckInvocation {
   node_goal?: string;
   node_acceptance_criteria?: string[];
   node_constraints?: string[];
+  output_schema?: string;
   context_packet_path: string;
   context_manifest_path: string;
   output_dir: string;
@@ -90,11 +92,12 @@ function parseStructuredPayload(text: string): Record<string, unknown> | undefin
   }
 }
 
-function createMalformedResult(message: string): AiCheckResult {
+function createMalformedResult(message: string, raw?: Record<string, unknown>): AiCheckResult {
   return {
     passed: false,
     summary: message,
-    issues: [message]
+    issues: [message],
+    ...(raw ? { raw } : {})
   };
 }
 
@@ -158,7 +161,7 @@ export function parseAiCheckResult(payload: unknown): AiCheckResult {
   }
 
   if (typeof record.passed !== "boolean") {
-    return createMalformedResult("AI check output must include boolean passed.");
+    return createMalformedResult("AI check output must include boolean passed.", record);
   }
 
   return {
@@ -212,6 +215,7 @@ export async function runAiCheck(
       ...(invocation.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
       model: invocation.model,
       ...(invocation.reasoning_effort ? { reasoningEffort: invocation.reasoning_effort } : {}),
+      ...(invocation.base_env ? { baseEnv: invocation.base_env } : {}),
       ...(invocation.rubric ? { rubric: invocation.rubric } : {}),
       ...(invocation.graph_goal ? { graphGoal: invocation.graph_goal } : {}),
       ...(invocation.graph_acceptance_criteria
@@ -223,6 +227,7 @@ export async function runAiCheck(
         ? { nodeAcceptanceCriteria: invocation.node_acceptance_criteria }
         : {}),
       ...(invocation.node_constraints ? { nodeConstraints: invocation.node_constraints } : {}),
+      ...(invocation.output_schema ? { aiCheckOutputSchema: invocation.output_schema } : {}),
       contextPacketPath: invocation.context_packet_path,
       contextManifestPath: invocation.context_manifest_path,
       contextManifest,

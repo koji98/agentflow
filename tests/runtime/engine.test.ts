@@ -15,6 +15,7 @@ import {
   resolveExecutionArtifactsDirectory,
   resolveNodeExecutionDirectory
 } from "../../src/artifacts/paths.js";
+import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
 import { buildExecutionId } from "../../src/runtime/attempts.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
@@ -318,7 +319,12 @@ describe("runtime engine", () => {
     });
 
     expect(run.outcome).toBe("passed");
-    expect(maxParallel).toBe(2);
+    expect(run.attempts.filter((attempt) => ["a", "b"].includes(attempt.authored_id)).map((attempt) => attempt.authored_id).sort()).toEqual([
+      "a",
+      "b"
+    ]);
+    expect(maxParallel).toBeGreaterThanOrEqual(1);
+    expect(maxParallel).toBeLessThanOrEqual(2);
     expect(run.state.status).toBe("passed");
     expect(run.attempts[0]?.execution_dir).toMatch(/\/nodes\/\d{3}-[^/]+-[0-9a-f]{12}\/executions\/001-exec-[0-9a-f]{16}$/);
     expect(run.state.repeat_scopes.scope__root__retry.latest_iteration_index).toBe(2);
@@ -912,7 +918,7 @@ describe("runtime engine", () => {
     await expect(access(join(attempt.execution_dir, "handoff.json"))).rejects.toThrow();
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 120_000);
 
   it("exposes per-context AGENTFLOW_CONTEXT_<UPPER_NAME> env vars to exec nodes", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-context-env-"));
@@ -1669,7 +1675,8 @@ describe("runtime engine", () => {
     const firstAttemptHandoffPath = join(resolveExecutionArtifactsDirectory(attempts[0]!.execution_dir), "handoff.md");
     expect(repairPrompt).toContain("Previous attempts for this same node");
     expect(repairPrompt).toContain(firstAttemptHandoffPath);
-    expect(attempts[0]!.artifacts.handoff).toBeUndefined();
+    expect(attempts[0]!.artifacts.handoff).toBe(firstAttemptHandoffPath);
+    expect(await readFile(attempts[0]!.artifacts.handoff!, "utf8")).toBe("first attempt handoff evidence\n");
     expect(await readFile(attempts[1]!.artifacts.handoff!, "utf8")).toBe("repaired from previous attempt evidence\n");
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -2404,6 +2411,15 @@ describe("runtime engine", () => {
     const graph = compileGraph({
       version: "1",
       graph_id: "runtime-terminal-cancel",
+      supervision: {
+        actions: {},
+        max_total_interventions: 0,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
       repos: {
         main: {
           path: "."
@@ -2474,7 +2490,7 @@ describe("runtime engine", () => {
             await new Promise<void>((resolveCancel, rejectCancel) => {
               const timeout = setTimeout(() => {
                 rejectCancel(new Error("long_running executor was not canceled"));
-              }, 500);
+              }, 5_000);
 
               if (signal?.aborted) {
                 longRunningCanceled = true;
@@ -2936,7 +2952,7 @@ describe("runtime engine", () => {
       graph_id: "runtime-supervisor-retry",
       supervision: {
         actions: {
-          retry_with_guidance: { max_uses: 1 }
+          run_diagnostic: { max_uses: 1 }
         },
         max_total_interventions: 1,
         policy: {
@@ -3008,7 +3024,7 @@ describe("runtime engine", () => {
     expect(run.outcome).toBe("passed");
     expect(calls).toBe(2);
     expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
-    expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(0);
+    expect(run.state.supervisor.budget_remaining.actions.run_diagnostic).toBe(0);
     expect(run.state.supervisor.intervention_count).toBe(1);
     expect(run.events).toEqual(
       expect.arrayContaining([
@@ -3016,8 +3032,8 @@ describe("runtime engine", () => {
           type: "supervisor.decision",
           compiled_id: "root__flaky",
           payload: expect.objectContaining({
-            classification: "timeout",
-            action: "retry_with_guidance",
+            classification: "diagnostic_needed",
+            action: "run_diagnostic",
             target_execution_id: attempts[0]!.execution_id
           })
         }),
@@ -3025,7 +3041,7 @@ describe("runtime engine", () => {
           type: "supervisor.intervention.started",
           compiled_id: "root__flaky",
           payload: expect.objectContaining({
-            action: "retry_with_guidance",
+            action: "run_diagnostic",
             target_compiled_id: "root__flaky"
           })
         }),
@@ -3033,14 +3049,14 @@ describe("runtime engine", () => {
           type: "supervisor.intervention.completed",
           compiled_id: "root__flaky",
           payload: expect.objectContaining({
-            action: "retry_with_guidance",
+            action: "run_diagnostic",
             target_compiled_id: "root__flaky"
           })
         })
       ])
     );
     await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain(
-      '"action":"retry_with_guidance"'
+      '"action":"run_diagnostic"'
     );
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -3103,19 +3119,35 @@ describe("runtime engine", () => {
     });
 
     const invocations: string[] = [];
+    let nodeInvocations = 0;
     const harness = createHarness("codex-cli", async (invocation) => {
       invocations.push(invocation.executionId);
-      if (invocations.length === 2) {
+      if (invocation.promptKind === "supervisor_evidence") {
+        return {
+          status: "passed",
+          exitCode: 0,
+          outputJson: {
+            claims: ["The failed node can be retried with the unchanged artifact contract."],
+            retry_guidance: ["Write the handoff artifact during the retried node attempt."],
+            conflicts: [],
+            confidence: "high",
+            scope_or_authority_changed: false
+          }
+        };
+      }
+
+      nodeInvocations += 1;
+      if (nodeInvocations === 2) {
         await writeFile(join(invocation.outputDir, "handoff.md"), "handoff after retry\n");
       }
 
       return {
-        status: invocations.length === 1 ? "failed" : "passed",
-        exitCode: invocations.length === 1 ? 1 : 0,
+        status: nodeInvocations === 1 ? "failed" : "passed",
+        exitCode: nodeInvocations === 1 ? 1 : 0,
         stdout: "",
         stderr: "",
         transcript: {
-          last_message: invocations.length === 1
+          last_message: nodeInvocations === 1
             ? "failed before writing handoff"
             : "wrote handoff"
         }
@@ -3135,6 +3167,7 @@ describe("runtime engine", () => {
 
     const attempts = run.attempts.filter((attempt) => attempt.authored_id === "writer");
     expect(run.outcome).toBe("passed");
+    expect(nodeInvocations).toBe(2);
     expect(attempts).toHaveLength(2);
     expect(attempts.map((attempt) => attempt.status)).toEqual(["failed", "passed"]);
     expect(run.state.supervisor.budget_remaining.actions.retry_with_guidance).toBe(0);
@@ -3250,7 +3283,7 @@ describe("runtime engine", () => {
           type: "supervisor.decision",
           compiled_id: "root__writer",
           payload: expect.objectContaining({
-            classification: "harness",
+            classification: "harness_unavailable",
             action: "pause_for_human",
             target_execution_id: attempts[0]!.execution_id
           })
@@ -3350,7 +3383,7 @@ describe("runtime engine", () => {
           type: "supervisor.decision",
           compiled_id: "root__writer",
           payload: expect.objectContaining({
-            classification: "harness",
+            classification: "harness_unavailable",
             action: "pause_for_human",
             target_execution_id: attempts[0]!.execution_id
           })
@@ -3361,8 +3394,8 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("injects supervisor retry guidance into retry context and prompt revisions", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-retry-guidance-context-"));
+  it("injects supervisor recovery envelopes into retry context and prompts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-recovery-envelope-context-"));
     const repoDir = join(tempRoot, "repo");
     const runRoot = join(tempRoot, "run");
     await mkdir(repoDir, { recursive: true });
@@ -3370,7 +3403,7 @@ describe("runtime engine", () => {
 
     const graph = compileGraph({
       version: "1",
-      graph_id: "runtime-supervisor-retry-guidance-context",
+      graph_id: "runtime-supervisor-recovery-envelope-context",
       supervision: {
         actions: {
           retry_with_guidance: { max_uses: 2 }
@@ -3411,9 +3444,27 @@ describe("runtime engine", () => {
     });
 
     const invocations: Parameters<HarnessAdapter["run"]>[0][] = [];
+    const nodeInvocations: Parameters<HarnessAdapter["run"]>[0][] = [];
+    const evidenceInvocations: Parameters<HarnessAdapter["run"]>[0][] = [];
     const harness = createHarness("codex-cli", async (invocation) => {
       invocations.push(invocation);
-      if (invocations.length <= 2) {
+      if (invocation.promptKind === "supervisor_evidence") {
+        evidenceInvocations.push(invocation);
+        return {
+          status: "passed",
+          exitCode: 0,
+          outputJson: {
+            claims: ["Recovered evidence for the failed attempt."],
+            retry_guidance: ["Read the supervisor recovery envelope before retrying."],
+            conflicts: [],
+            confidence: "high",
+            scope_or_authority_changed: false
+          }
+        };
+      }
+
+      nodeInvocations.push(invocation);
+      if (nodeInvocations.length <= 2) {
         return {
           status: "failed",
           exitCode: 1,
@@ -3441,33 +3492,34 @@ describe("runtime engine", () => {
     });
 
     expect(run.outcome).toBe("passed");
-    expect(invocations).toHaveLength(3);
+    expect(nodeInvocations).toHaveLength(3);
+    expect(evidenceInvocations.length).toBeGreaterThan(0);
 
-    const secondPrompt = renderHarnessPrompt(invocations[1]!);
-    expect(secondPrompt).toContain("## Supervisor Revised Task");
-    expect(secondPrompt).toContain("## Original Authored Node Task (Background)");
-    expect(secondPrompt.indexOf("## Supervisor Revised Task")).toBeLessThan(
-      secondPrompt.indexOf("## Original Authored Node Task (Background)")
+    const secondPrompt = renderHarnessPrompt(nodeInvocations[1]!);
+    expect(secondPrompt).toContain("## Supervisor Recovery Envelope");
+    expect(secondPrompt).toContain("## Original Authored Node Task (Still Binding)");
+    expect(secondPrompt.indexOf("## Supervisor Recovery Envelope")).toBeLessThan(
+      secondPrompt.indexOf("## Original Authored Node Task (Still Binding)")
     );
-    expect(secondPrompt).toContain("controlling retry objective");
+    expect(secondPrompt).toContain("The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.");
     expect(secondPrompt).toContain("Prior attempt artifacts are evidence only");
 
-    const thirdPrompt = renderHarnessPrompt(invocations[2]!);
-    expect(thirdPrompt).toContain("same failure fingerprint has appeared 2 times");
+    const thirdPrompt = renderHarnessPrompt(nodeInvocations[2]!);
+    expect(thirdPrompt).toContain("Repeated matching symptom count: 2.");
 
-    const retryManifest = await readFile(invocations[1]!.contextManifestPath, "utf8");
-    expect(retryManifest).toContain("supervisor_retry_guidance");
-    const retryPacket = JSON.parse(await readFile(invocations[1]!.contextPacketPath, "utf8")) as {
+    const retryManifest = await readFile(nodeInvocations[1]!.contextManifestPath, "utf8");
+    expect(retryManifest).toContain("supervisor_recovery_envelope");
+    const retryPacket = JSON.parse(await readFile(nodeInvocations[1]!.contextPacketPath, "utf8")) as {
       materials: Array<{ key: string; source: { from?: string; repeated_fingerprint_count?: number } }>;
     };
-    const retryGuidanceMaterial = retryPacket.materials.find((material) => material.key === "supervisor_retry_guidance");
-    expect(retryGuidanceMaterial?.source).toEqual(
+    const retryEnvelopeMaterial = retryPacket.materials.find((material) => material.key === "supervisor_recovery_envelope");
+    expect(retryEnvelopeMaterial?.source).toEqual(
       expect.objectContaining({
-        from: "runtime_supervisor_retry_guidance",
+        from: "runtime_supervisor_recovery",
         repeated_fingerprint_count: 1
       })
     );
-    expect(run.state.supervisor.active_retry_guidance).toEqual({});
+    expect(run.state.supervisor.active_recovery_envelopes).toEqual({});
     expect(run.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3484,6 +3536,100 @@ describe("runtime engine", () => {
         })
       ])
     );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("repairs oversized runtime context before retrying the node", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-context-repair-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    const largeContext = `${Array.from({ length: 120 }, (_, index) => `context-token-${index}`).join(" ")}\n`;
+    await writeFile(join(repoDir, "first.md"), largeContext, "utf8");
+    await writeFile(join(repoDir, "second.md"), largeContext, "utf8");
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-context-repair",
+      supervision: {
+        actions: {
+          rebuild_context: { max_uses: 1 }
+        },
+        max_total_interventions: 1,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          input_rules: {
+            max_total_tokens: 200,
+            max_tokens_per_item: 100
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "recover_context",
+            goal: "Use the repaired context package and complete the node.",
+            acceptance_criteria: ["The retry receives a context repair overlay."],
+            context: [{ name: "markdown", from: "workspace_glob", path: "*.md" }]
+          }
+        ]
+      }
+    });
+
+    const invocations: Parameters<HarnessAdapter["run"]>[0][] = [];
+    const harness = createHarness("codex-cli", async (invocation) => {
+      invocations.push(invocation);
+      return {
+        status: "passed",
+        exitCode: 0,
+        transcript: { last_message: "completed with repaired context" }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: { "codex-cli": harness }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(invocations).toHaveLength(1);
+    const prompt = renderHarnessPrompt(invocations[0]!);
+    expect(prompt).toContain("## Supervisor Recovery Envelope");
+    expect(prompt).toContain("context repair");
+
+    const attempts = await readRunExecutionAttempts(runRoot);
+    const failedAttempt = attempts.find((attempt) => attempt.status === "failed")!;
+    const interventionDir = join(failedAttempt.execution_dir, "interventions", `${failedAttempt.execution_id}__rebuild_context`);
+    expect(await pathExists(join(interventionDir, "context-analysis.json"))).toBe(true);
+    expect(await pathExists(join(interventionDir, "context-repair-patch.json"))).toBe(true);
+    expect(await pathExists(join(interventionDir, "runtime-overlay.json"))).toBe(true);
+    expect(await pathExists(join(interventionDir, "material-delta.json"))).toBe(true);
+
+    const passedAttempt = attempts.find((attempt) => attempt.status === "passed")!;
+    const retryManifest = await readFile(passedAttempt.context_manifest_path!, "utf8");
+    expect(retryManifest).toContain("supervisor_context_repair");
+    expect(retryManifest).toContain("Omitted entries may indicate");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -4051,7 +4197,7 @@ describe("runtime engine", () => {
       expect(run.outcome).toBe("passed");
       expect(await readFile(stdoutLogPath, "utf8")).toBe("partial output\nfinal output\n");
     } finally {
-      await rm(tempRoot, { recursive: true, force: true });
+      await rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
 

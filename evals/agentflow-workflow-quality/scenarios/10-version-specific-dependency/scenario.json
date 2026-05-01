@@ -1,0 +1,94 @@
+{
+  "id": "version-specific-dependency",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Supervisor should combine package metadata with docs to select version-correct behavior.",
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true,
+    "docs": "../../shared/docs"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=version-specific-dependency"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "wrong-version.txt"
+      ]
+    },
+    "supervisor": {
+      "gatherers": [
+        "dependency_metadata",
+        "external_context"
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "evidence_use"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "evidence_use"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "evidence_use"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "evidence_use"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "evidence_use"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "evidence_use"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "evidence_use"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "evidence_use"
+      ]
+    }
+  }
+}

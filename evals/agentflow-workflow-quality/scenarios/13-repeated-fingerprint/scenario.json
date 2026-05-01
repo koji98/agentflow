@@ -1,0 +1,92 @@
+{
+  "id": "repeated-fingerprint",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Repeated failure fingerprint should escalate gatherer strength and change retry tactics.",
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=repeated-fingerprint"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "same-tactic.txt"
+      ]
+    },
+    "supervisor": {
+      "classifications": [
+        "repeated_failure"
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "retry_behavior"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "retry_behavior"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "retry_behavior"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "retry_behavior"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "retry_behavior"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "retry_behavior"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "retry_behavior"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "retry_behavior"
+      ]
+    }
+  }
+}

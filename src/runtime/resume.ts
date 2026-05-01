@@ -39,7 +39,7 @@ function buildLatestExecutionSummary(attempt: RuntimeNodeAttempt): LatestExecuti
     started_at: attempt.started_at,
     ...(attempt.ended_at ? { ended_at: attempt.ended_at } : {}),
     ...(attempt.duration_ms !== undefined ? { duration_ms: attempt.duration_ms } : {}),
-    ...(attempt.metadata.verification &&
+    ...(attempt.metadata?.verification &&
     typeof attempt.metadata.verification === "object" &&
     attempt.metadata.verification !== null
       ? { verification: attempt.metadata.verification as VerificationRecordedPayload }
@@ -415,18 +415,18 @@ export async function createResumedRuntimeSession(options: {
           : options.prior_state.supervisor.status,
       budget_remaining: budgetRemaining,
       timeline: options.prior_state.supervisor.timeline.map((decision) => ({ ...decision })),
-      active_retry_guidance: Object.fromEntries(
-        Object.entries(options.prior_state.supervisor.active_retry_guidance ?? {}).map(([compiledId, guidance]) => [
+      active_recovery_envelopes: Object.fromEntries(
+        Object.entries(options.prior_state.supervisor.active_recovery_envelopes ?? {}).map(([compiledId, envelope]) => [
           compiledId,
           {
-            ...guidance,
-            prompt_revision: {
-              ...guidance.prompt_revision,
-              must_do: [...guidance.prompt_revision.must_do],
-              must_not_do: [...guidance.prompt_revision.must_not_do],
-              artifact_requirements: [...guidance.prompt_revision.artifact_requirements],
-              resolved_conflicts: [...guidance.prompt_revision.resolved_conflicts],
-              evidence_to_read: [...guidance.prompt_revision.evidence_to_read]
+            ...envelope,
+            retry_directive: {
+              ...envelope.retry_directive,
+              must_do: [...envelope.retry_directive.must_do],
+              must_not_do: [...envelope.retry_directive.must_not_do],
+              evidence_to_read: [...envelope.retry_directive.evidence_to_read],
+              validation_focus: [...envelope.retry_directive.validation_focus],
+              unchanged_contract: { ...envelope.retry_directive.unchanged_contract }
             }
           }
         ])

@@ -5,7 +5,35 @@ import ignore, { type Ignore } from "ignore";
 
 import { normalizeRelativePath } from "./common.js";
 
-const hardExcludedDirectories = new Set([".git", ".agentflow", "node_modules"]);
+export const defaultContextIgnoredRoots = [
+  ".git",
+  ".agentflow",
+  "node_modules",
+  ".venv",
+  "venv",
+  ".tox",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".next",
+  ".nuxt",
+  ".turbo",
+  ".cache",
+  "dist",
+  "build",
+  "coverage",
+  "target",
+  "vendor",
+  "vendors",
+  "third_party",
+  "generated",
+  "gen",
+  "__generated__",
+  "bazel-bin",
+  "bazel-out"
+] as const;
+
+const hardExcludedDirectories = new Set<string>(defaultContextIgnoredRoots);
 
 async function readIgnoreFile(rootPath: string, fileName: string): Promise<string | undefined> {
   try {
@@ -15,16 +43,13 @@ async function readIgnoreFile(rootPath: string, fileName: string): Promise<strin
   }
 }
 
-async function buildIgnoreMatcher(rootPath: string): Promise<Ignore> {
+async function buildIgnoreMatcher(rootPath: string, includeIgnoredRoot?: string): Promise<Ignore> {
   const matcher = ignore();
-  matcher.add([
-    ".git",
-    ".git/**",
-    ".agentflow",
-    ".agentflow/**",
-    "node_modules",
-    "node_modules/**"
-  ]);
+  matcher.add(
+    defaultContextIgnoredRoots
+      .filter((root) => root !== includeIgnoredRoot)
+      .flatMap((root) => [root, `${root}/**`])
+  );
 
   const [gitignore, dotIgnore] = await Promise.all([
     readIgnoreFile(rootPath, ".gitignore"),
@@ -44,7 +69,8 @@ async function buildIgnoreMatcher(rootPath: string): Promise<Ignore> {
 
 export async function walkRelativeFilesSorted(
   rootPath: string,
-  currentRelativePath = ""
+  currentRelativePath = "",
+  includeIgnoredRoot?: string
 ): Promise<string[]> {
   const currentPath =
     currentRelativePath.length > 0 ? join(rootPath, currentRelativePath) : rootPath;
@@ -53,7 +79,15 @@ export async function walkRelativeFilesSorted(
   const files: string[] = [];
 
   for (const entry of sortedEntries) {
-    if (entry.isDirectory() && hardExcludedDirectories.has(entry.name)) {
+    const isExplicitlyIncludedIgnoredRoot =
+      currentRelativePath.length === 0
+      && includeIgnoredRoot !== undefined
+      && entry.name === includeIgnoredRoot;
+    if (
+      entry.isDirectory()
+      && hardExcludedDirectories.has(entry.name)
+      && !isExplicitlyIncludedIgnoredRoot
+    ) {
       continue;
     }
 
@@ -63,7 +97,7 @@ export async function walkRelativeFilesSorted(
         : entry.name;
 
     if (entry.isDirectory()) {
-      files.push(...(await walkRelativeFilesSorted(rootPath, nextRelativePath)));
+      files.push(...(await walkRelativeFilesSorted(rootPath, nextRelativePath, includeIgnoredRoot)));
       continue;
     }
 
@@ -77,19 +111,38 @@ export async function walkRelativeFilesSorted(
 
 export async function listRepoFiles(
   repoRoot: string,
-  cache?: Map<string, string[]>
+  cache?: Map<string, string[]>,
+  options: {
+    include_ignored_root?: string;
+  } = {}
 ): Promise<string[]> {
-  const cached = cache?.get(repoRoot);
+  const cacheKey = options.include_ignored_root ? `${repoRoot}\0${options.include_ignored_root}` : repoRoot;
+  const cached = cache?.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
   const [allFiles, matcher] = await Promise.all([
-    walkRelativeFilesSorted(repoRoot),
-    buildIgnoreMatcher(repoRoot)
+    walkRelativeFilesSorted(repoRoot, "", options.include_ignored_root),
+    buildIgnoreMatcher(repoRoot, options.include_ignored_root)
   ]);
   const files = allFiles.filter((filePath) => !matcher.ignores(filePath));
-  cache?.set(repoRoot, files);
+  cache?.set(cacheKey, files);
   return files;
+}
+
+export async function listRepoFilesDetailed(
+  repoRoot: string,
+  options: {
+    include_ignored_root?: string;
+  } = {}
+): Promise<{
+  files: string[];
+  ignored_roots: string[];
+}> {
+  return {
+    files: await listRepoFiles(repoRoot, undefined, options),
+    ignored_roots: defaultContextIgnoredRoots.filter((root) => root !== options.include_ignored_root)
+  };
 }

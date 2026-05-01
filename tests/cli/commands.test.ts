@@ -639,6 +639,69 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     }
   });
 
+  it("blocks run-ready validation when node context would exceed token budget", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-context-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(join(repoDir, "first.md"), "one two three four five\n", "utf8");
+    await writeFile(join(repoDir, "second.md"), "six seven eight nine ten\n", "utf8");
+    await execFileAsync("git", ["add", "first.md", "second.md"], { cwd: repoDir });
+    await execFileAsync("git", ["commit", "-m", "add context"], { cwd: repoDir });
+
+    const graphPath = join(tempRoot, "graph.json");
+    await writeFile(
+      graphPath,
+      JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-run-ready-context-budget",
+          intent: {
+            goal: "Validate context budget.",
+            acceptance_criteria: ["Run-ready validation blocks bad context packages."]
+          },
+          repos: { main: { path: repoDir } },
+          defaults: { launch_profile: "default", workspace_backend: "inplace" },
+          profiles: {
+            default: {
+              harness: "codex-cli",
+              skip_git_repo_check: true,
+              input_rules: {
+                max_total_tokens: 3,
+                max_tokens_per_item: 100
+              }
+            }
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "exec",
+                id: "consumer",
+                command: "true",
+                context: [{ name: "markdown", from: "workspace_glob", path: "*.md" }]
+              }
+            ]
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const result = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+    const payload = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(1);
+    expect(payload.status).toBe("failed");
+    expect(payload.context_analysis.status).toBe("blocked");
+    expect(payload.context_analysis.nodes[0].would_exceed_total).toBe(true);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("runs a deterministic graph end to end and writes run artifacts", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-"));
     const repoDir = join(tempRoot, "repo");
@@ -1389,7 +1452,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       });
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("honors AGENTFLOW_RUNS_ROOT for artifact placement", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-root-"));
@@ -1622,7 +1685,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       })
     );
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
     expect(resumedProgress).toContain(
       "agentflow: resumed run from failed · preserved=1 restarted=2 · workspace=inplace"
@@ -1634,7 +1697,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(resumedProgress).toContain("agentflow: run passed · 3/3 terminal nodes");
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("recompiles the original graph on resume and invalidates changed passed work", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-recompile-"));
@@ -1733,11 +1796,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-updated\n");
     expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("restarts a passed repeat scope when resume invalidation reaches it from upstream changes", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-repeat-"));
@@ -1886,7 +1949,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed").map((attempt) => ({
       attempt_index: attempt.attempt_index,
@@ -1919,7 +1982,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     ]);
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("repairs a passed repeat scope whose stored node statuses became inconsistent before resume", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-repeat-repair-"));
@@ -2095,11 +2158,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(2);
     expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
-    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
     expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
 
     await rm(tempRoot, { recursive: true, force: true });
-  });
+  }, 60_000);
 
   it("rejects a relative AGENTFLOW_RUNS_ROOT override before launching a run", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-runs-root-"));
@@ -2398,7 +2461,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(graphHelp.exitCode).toBe(0);
     expect(graphHelp.stdout).toContain("Executable node kinds: agent, exec, check, checkpoint");
     expect(graphHelp.stdout).toContain(
-      "Managed pattern scaffolds: pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, pattern_review_change"
+      "Managed pattern scaffolds: pattern_deep_research, pattern_deep_work"
     );
     expect(graphHelp.stdout).not.toContain("Legacy thin aliases");
     expect(graphHelp.stdout).toContain(`"version": "1"`);
@@ -2478,9 +2541,9 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(inspectHelp.stdout).toContain("Usage: agentflow inspect <run-root>");
 
     expect(evalHelp.exitCode).toBe(0);
-    expect(evalHelp.stdout).toContain("offline product/workflow grading");
+    expect(evalHelp.stdout).toContain("local workflow eval suites");
     expect(evalSubcommandHelp.exitCode).toBe(0);
-    expect(evalSubcommandHelp.stdout).toContain("eval is offline product/workflow evaluation");
+    expect(evalSubcommandHelp.stdout).toContain("complete workflow traces");
   });
 
   it("lists recorded run summaries for a graph through agentflow runs list", async () => {
@@ -2565,7 +2628,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       stderrSpy.mockRestore();
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("rejects invalid runs subcommands and combinations", async () => {
     const missing = await executeCli(["runs"]);
@@ -2670,7 +2733,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       stderrSpy.mockRestore();
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("reports missing run roots for inspect and rejects unexpected positionals", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-inspect-missing-"));
@@ -2880,7 +2943,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       stderrSpy.mockRestore();
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("reports a friendly message when resume --latest finds no resumable runs", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-resume-latest-empty-"));

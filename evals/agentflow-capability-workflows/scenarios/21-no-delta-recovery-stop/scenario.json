@@ -1,0 +1,154 @@
+{
+  "id": "21-no-delta-recovery-stop",
+  "bucket": "supervisor-boundary",
+  "difficulty": "hard",
+  "description": "Confirm recovery stops when no material delta can be produced.",
+  "workflow": {
+    "graph_template": "../../templates/exec-no-delta.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/21-no-delta-recovery-stop",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "failed"
+    },
+    "artifact": {
+      "required": []
+    },
+    "workspace": {
+      "forbidden_edits": []
+    },
+    "supervisor": {
+      "classifications": [
+        "wrong_local_pattern"
+      ],
+      "gatherers": [
+        "local_context",
+        "investigate_failure"
+      ],
+      "apply_actions": [
+        "repair_workspace"
+      ]
+    },
+    "delivery": {
+      "required": false
+    },
+    "capability-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    }
+  }
+}

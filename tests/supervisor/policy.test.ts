@@ -58,7 +58,7 @@ describe("supervisor policy", () => {
     expect(decision).toEqual(
       expect.objectContaining({
         kind: "fail_run",
-        classification: "policy_breach",
+        classification: "policy_or_scope_risk",
         action: "fail",
         target_compiled_id: "root__fix",
         target_execution_id: "exec__root__fix__attempt_1"

@@ -1,39 +1,42 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 
 import { harnessNames, reasoningEfforts } from "../graph/schema.js";
 import type {
-  EvalAiRubricGrader,
-  EvalCase,
+  EvalCriterion,
+  EvalCriterionKind,
   EvalDiagnostic,
-  EvalGrader,
-  EvalScriptGrader,
+  EvalEnvironmentSimulation,
+  EvalJudgePayload,
+  EvalScenario,
+  EvalScenarioEnvironment,
+  EvalScenarioMetadata,
+  EvalScenarioRealWorldMetadata,
+  EvalScenarioWorkflow,
+  EvalSimulationMatch,
+  EvalSimulationRule,
   EvalSuite,
   EvalSuiteThresholds,
-  EvalSuiteVariant,
-  EvalVariantResolution,
+  EvalTemplateEnvironmentContext,
+  EvalTemplateTrialContext,
+  EvalVariant,
   LoadedEvalSuite
 } from "./types.js";
+import { evalSourceReference } from "./types.js";
+
+const criterionKinds = new Set<EvalCriterionKind>([
+  "outcome",
+  "artifact",
+  "workspace",
+  "supervisor",
+  "trajectory",
+  "quality",
+  "delivery",
+  "custom_script"
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isReasoningEffort(value: unknown): value is EvalAiRubricGrader["reasoning_effort"] {
-  return typeof value === "string" && (reasoningEfforts as readonly string[]).includes(value);
-}
-
-function isHarnessName(value: unknown): value is EvalAiRubricGrader["harness"] {
-  return typeof value === "string" && (harnessNames as readonly string[]).includes(value);
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function readString(value: unknown): string | undefined {
@@ -48,453 +51,954 @@ function readNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveSuitePath(suiteDir: string, path: string): string {
   return isAbsolute(path) ? path : resolve(suiteDir, path);
 }
 
-function normalizeGrader(value: unknown, path: string, diagnostics: EvalDiagnostic[]): EvalGrader | undefined {
+function resolveScenarioPath(scenarioDir: string, path: string): string {
+  return isAbsolute(path) ? path : resolve(scenarioDir, path);
+}
+
+async function resolveSuiteInput(currentWorkingDirectory: string, suiteInput: string): Promise<{
+  suite_path: string;
+  suite_dir: string;
+}> {
+  const resolved = resolve(currentWorkingDirectory, suiteInput);
+
+  try {
+    const info = await stat(resolved);
+    if (info.isDirectory()) {
+      return {
+        suite_path: resolve(resolved, "eval.json"),
+        suite_dir: resolved
+      };
+    }
+  } catch {
+    // Let readJson produce the final diagnostic.
+  }
+
+  return {
+    suite_path: resolved,
+    suite_dir: dirname(resolved)
+  };
+}
+
+function normalizeThresholds(value: unknown, diagnostics: EvalDiagnostic[]): EvalSuiteThresholds {
+  if (value === undefined) {
+    return {};
+  }
+
   if (!isRecord(value)) {
-    diagnostics.push({ path, message: "Eval grader must be an object." });
+    diagnostics.push({ path: "$.thresholds", message: "Eval thresholds must be an object." });
+    return {};
+  }
+
+  const thresholds: EvalSuiteThresholds = {};
+  const passRate = readNumber(value.pass_rate);
+  const maxBlockerRate = readNumber(value.max_blocker_rate);
+  const minAverageScore = readNumber(value.min_average_score);
+
+  if (value.pass_rate !== undefined && (passRate === undefined || passRate < 0 || passRate > 1)) {
+    diagnostics.push({ path: "$.thresholds.pass_rate", message: "pass_rate threshold must be a number between 0 and 1." });
+  } else if (passRate !== undefined) {
+    thresholds.pass_rate = passRate;
+  }
+
+  if (value.max_blocker_rate !== undefined && (maxBlockerRate === undefined || maxBlockerRate < 0 || maxBlockerRate > 1)) {
+    diagnostics.push({
+      path: "$.thresholds.max_blocker_rate",
+      message: "max_blocker_rate threshold must be a number between 0 and 1."
+    });
+  } else if (maxBlockerRate !== undefined) {
+    thresholds.max_blocker_rate = maxBlockerRate;
+  }
+
+  if (value.min_average_score !== undefined && (minAverageScore === undefined || minAverageScore < 1 || minAverageScore > 5)) {
+    diagnostics.push({
+      path: "$.thresholds.min_average_score",
+      message: "min_average_score threshold must be a number between 1 and 5."
+    });
+  } else if (minAverageScore !== undefined) {
+    thresholds.min_average_score = minAverageScore;
+  }
+
+  return thresholds;
+}
+
+function normalizeCriterion(
+  value: unknown,
+  suiteDir: string,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalCriterion | undefined {
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Eval criterion must be an object." });
     return undefined;
   }
 
   const id = readString(value.id);
   const kind = readString(value.kind);
   const required = readBoolean(value.required);
-  const timeout_sec = readNumber(value.timeout_sec);
+  const description = readString(value.description);
+  const command = readString(value.command);
+  const rubric = readString(value.rubric);
+  const dimensions = readStringArray(value.dimensions);
+  const threshold = readNumber(value.threshold);
+  const harness = readString(value.harness) ?? "codex-cli";
+  const model = readString(value.model);
+  const reasoningEffort = value.reasoning_effort;
+  const timeoutSec = readNumber(value.timeout_sec);
 
   if (!id) {
-    diagnostics.push({ path: `${path}.id`, message: "Eval grader requires non-empty id." });
+    diagnostics.push({ path: `${path}.id`, message: "Eval criterion requires non-empty id." });
   }
 
-  if (kind === "script") {
-    const command = readString(value.command);
-
-    if (!command) {
-      diagnostics.push({ path: `${path}.command`, message: "Script grader requires non-empty command." });
-    }
-
-    if (!id || !command) {
-      return undefined;
-    }
-
-    return {
-      id,
-      kind,
-      command,
-      ...(required !== undefined ? { required } : {}),
-      ...(timeout_sec !== undefined ? { timeout_sec } : {})
-    } satisfies EvalScriptGrader;
-  }
-
-  if (kind === "ai_rubric") {
-    const rubric = readString(value.rubric);
-    const harness = value.harness;
-    const model = readString(value.model);
-    const reasoning_effort = value.reasoning_effort;
-
-    if (!rubric) {
-      diagnostics.push({ path: `${path}.rubric`, message: "AI rubric grader requires non-empty rubric path." });
-    }
-
-    if (reasoning_effort !== undefined && !isReasoningEffort(reasoning_effort)) {
-      diagnostics.push({ path: `${path}.reasoning_effort`, message: "AI rubric grader has invalid reasoning_effort." });
-    }
-
-    if (harness !== undefined && !isHarnessName(harness)) {
-      diagnostics.push({ path: `${path}.harness`, message: "AI rubric grader has invalid harness." });
-    }
-
-    if (harness === "cursor-cli" && reasoning_effort !== undefined) {
-      diagnostics.push({
-        path: `${path}.reasoning_effort`,
-        message: "Cursor AI rubric graders cannot set reasoning_effort; choose the appropriate Cursor model id instead."
-      });
-    }
-
-    if (
-      !id ||
-      !rubric ||
-      (harness !== undefined && !isHarnessName(harness)) ||
-      (reasoning_effort !== undefined && !isReasoningEffort(reasoning_effort)) ||
-      (harness === "cursor-cli" && reasoning_effort !== undefined)
-    ) {
-      return undefined;
-    }
-
-    return {
-      id,
-      kind,
-      rubric,
-      ...(required !== undefined ? { required } : {}),
-      ...(harness ? { harness } : {}),
-      ...(model ? { model } : {}),
-      ...(reasoning_effort ? { reasoning_effort } : {}),
-      ...(timeout_sec !== undefined ? { timeout_sec } : {})
-    } satisfies EvalAiRubricGrader;
-  }
-
-  diagnostics.push({ path: `${path}.kind`, message: 'Eval grader kind must be "script" or "ai_rubric".' });
-  return undefined;
-}
-
-function normalizeThresholds(
-  value: unknown,
-  path: string,
-  diagnostics: EvalDiagnostic[]
-): EvalSuiteThresholds {
-  if (value === undefined) {
-    return {};
-  }
-
-  if (!isRecord(value)) {
-    diagnostics.push({ path, message: "Eval thresholds must be an object." });
-    return {};
-  }
-
-  const pass_rate = readNumber(value.pass_rate);
-  const critical_failures = readNumber(value.critical_failures);
-
-  if (value.pass_rate !== undefined && (pass_rate === undefined || pass_rate < 0 || pass_rate > 1)) {
-    diagnostics.push({ path: `${path}.pass_rate`, message: "pass_rate threshold must be a number between 0 and 1." });
-  }
-
-  if (
-    value.critical_failures !== undefined &&
-    (critical_failures === undefined || critical_failures < 0 || !Number.isInteger(critical_failures))
-  ) {
+  if (!kind || !criterionKinds.has(kind as EvalCriterionKind)) {
     diagnostics.push({
-      path: `${path}.critical_failures`,
-      message: "critical_failures threshold must be a non-negative integer."
+      path: `${path}.kind`,
+      message: `Eval criterion kind must be one of ${[...criterionKinds].join(", ")}.`
     });
   }
 
-  return {
-    ...(pass_rate !== undefined && pass_rate >= 0 && pass_rate <= 1 ? { pass_rate } : {}),
-    ...(critical_failures !== undefined && critical_failures >= 0 && Number.isInteger(critical_failures)
-      ? { critical_failures }
-      : {})
+  if (kind === "custom_script" && !command) {
+    diagnostics.push({ path: `${path}.command`, message: "custom_script criteria require non-empty command." });
+  }
+
+  if (kind === "quality") {
+    if (!rubric) {
+      diagnostics.push({ path: `${path}.rubric`, message: "quality criteria require non-empty rubric path." });
+    }
+
+    if (!(harnessNames as readonly string[]).includes(harness)) {
+      diagnostics.push({ path: `${path}.harness`, message: "quality criterion harness must be codex-cli or cursor-cli." });
+    }
+
+    if (reasoningEffort !== undefined && !(reasoningEfforts as readonly unknown[]).includes(reasoningEffort)) {
+      diagnostics.push({ path: `${path}.reasoning_effort`, message: "quality criterion has invalid reasoning_effort." });
+    }
+
+    if (harness === "cursor-cli" && reasoningEffort !== undefined) {
+      diagnostics.push({
+        path: `${path}.reasoning_effort`,
+        message: "Cursor quality criteria cannot set reasoning_effort; choose the appropriate Cursor model id instead."
+      });
+    }
+
+    if (threshold !== undefined && (threshold < 1 || threshold > 5)) {
+      diagnostics.push({ path: `${path}.threshold`, message: "quality criterion threshold must be between 1 and 5." });
+    }
+  }
+
+  if (!id || !kind || !criterionKinds.has(kind as EvalCriterionKind)) {
+    return undefined;
+  }
+
+  if (kind === "custom_script" && !command) {
+    return undefined;
+  }
+
+  if (
+    kind === "quality" &&
+    (!rubric || !(harnessNames as readonly string[]).includes(harness) ||
+      (reasoningEffort !== undefined && !(reasoningEfforts as readonly unknown[]).includes(reasoningEffort)))
+  ) {
+    return undefined;
+  }
+
+  const criterion: EvalCriterion = {
+    id,
+    kind: kind as EvalCriterionKind,
+    required: required ?? true
   };
-}
 
-function normalizeVariants(
-  value: unknown,
-  path: string,
-  diagnostics: EvalDiagnostic[]
-): Record<string, EvalSuiteVariant> | undefined {
-  if (value === undefined) {
-    return undefined;
+  if (description) {
+    criterion.description = description;
   }
 
-  if (!isRecord(value)) {
-    diagnostics.push({ path, message: "Eval variants must be an object." });
-    return undefined;
+  if (command) {
+    criterion.command = command;
   }
 
-  const variants: Record<string, EvalSuiteVariant> = {};
+  if (rubric) {
+    criterion.rubric = rubric;
+    criterion.rubric_path = resolveSuitePath(suiteDir, rubric);
+  }
 
-  Object.entries(value).forEach(([id, variant], index) => {
-    const variantPath = `${path}.${id || index}`;
+  if (dimensions.length > 0) {
+    criterion.dimensions = dimensions;
+  }
 
-    if (!id.trim()) {
-      diagnostics.push({ path: variantPath, message: "Variant id must be non-empty." });
-      return;
-    }
+  if (threshold !== undefined) {
+    criterion.threshold = threshold;
+  }
 
-    if (!isRecord(variant)) {
-      diagnostics.push({ path: variantPath, message: "Variant must be an object." });
-      return;
-    }
+  if (kind === "quality") {
+    criterion.harness = harness as NonNullable<EvalCriterion["harness"]>;
+  }
 
-    const graph_template = readString(variant.graph_template);
-    const optional = readBoolean(variant.optional);
+  if (model) {
+    criterion.model = model;
+  }
 
-    variants[id] = {
-      ...(graph_template ? { graph_template } : {}),
-      ...(optional !== undefined ? { optional } : {})
-    };
-  });
+  if (typeof reasoningEffort === "string" && (reasoningEfforts as readonly string[]).includes(reasoningEffort)) {
+    criterion.reasoning_effort = reasoningEffort as NonNullable<EvalCriterion["reasoning_effort"]>;
+  }
 
-  return variants;
+  if (timeoutSec !== undefined) {
+    criterion.timeout_sec = timeoutSec;
+  }
+
+  return criterion;
 }
 
-function normalizeSuite(value: unknown, diagnostics: EvalDiagnostic[]): EvalSuite | undefined {
+function normalizeSuite(value: unknown, suiteDir: string, diagnostics: EvalDiagnostic[]): EvalSuite | undefined {
   if (!isRecord(value)) {
     diagnostics.push({ path: "$", message: "Eval suite must be a JSON object." });
     return undefined;
   }
 
   const version = value.version;
-  const suite_id = readString(value.suite_id);
-  const cases = readString(value.cases);
-  const target = value.target;
-  const gradersValue = value.graders;
+  const suiteId = readString(value.suite_id);
+  const objective = readString(value.objective);
+  const defaultTrials = readNumber(value.default_trials);
+  const scenarios = Array.isArray(value.scenarios) ? value.scenarios.filter((item): item is string => typeof item === "string") : [];
+  const variants = Array.isArray(value.variants) ? value.variants.filter((item): item is string => typeof item === "string") : [];
+  const criteria = Array.isArray(value.criteria)
+    ? value.criteria
+        .map((criterion, index) => normalizeCriterion(criterion, suiteDir, `$.criteria[${index}]`, diagnostics))
+        .filter((criterion): criterion is EvalCriterion => criterion !== undefined)
+    : [];
+  const thresholds = normalizeThresholds(value.thresholds, diagnostics);
 
   if (version !== "1") {
     diagnostics.push({ path: "$.version", message: 'Eval suite version must be "1".' });
   }
 
-  if (!suite_id) {
+  if (value.graders !== undefined) {
+    diagnostics.push({ path: "$.graders", message: "Legacy top-level graders are not supported; use criteria with kind custom_script." });
+  }
+
+  if (value.judges !== undefined) {
+    diagnostics.push({ path: "$.judges", message: "Legacy top-level judges are not supported; use criteria with kind quality." });
+  }
+
+  if (!suiteId) {
     diagnostics.push({ path: "$.suite_id", message: "Eval suite requires non-empty suite_id." });
   }
 
-  if (!cases) {
-    diagnostics.push({ path: "$.cases", message: "Eval suite requires non-empty cases path." });
+  if (!objective) {
+    diagnostics.push({ path: "$.objective", message: "Eval suite requires non-empty objective." });
   }
 
-  let graph_template: string | undefined;
-  if (!isRecord(target)) {
-    diagnostics.push({ path: "$.target", message: "Eval suite target must be an object." });
-  } else {
-    graph_template = readString(target.graph_template);
-    if (!graph_template) {
-      diagnostics.push({ path: "$.target.graph_template", message: "Eval suite target requires graph_template." });
-    }
+  if (defaultTrials === undefined || !Number.isInteger(defaultTrials) || defaultTrials < 1) {
+    diagnostics.push({ path: "$.default_trials", message: "default_trials must be a positive integer." });
   }
 
-  let graders: EvalGrader[] | undefined;
-  if (gradersValue !== undefined) {
-    if (!Array.isArray(gradersValue)) {
-      diagnostics.push({ path: "$.graders", message: "Eval graders must be an array." });
-    } else {
-      graders = gradersValue
-        .map((grader, index) => normalizeGrader(grader, `$.graders[${index}]`, diagnostics))
-        .filter((grader): grader is EvalGrader => grader !== undefined);
-    }
+  if (!Array.isArray(value.scenarios) || scenarios.length === 0) {
+    diagnostics.push({ path: "$.scenarios", message: "Eval suite requires at least one scenario path." });
   }
 
-  const variants = normalizeVariants(value.variants, "$.variants", diagnostics);
-  const thresholds = normalizeThresholds(value.thresholds, "$.thresholds", diagnostics);
+  if (!Array.isArray(value.variants) || variants.length === 0) {
+    diagnostics.push({ path: "$.variants", message: "Eval suite requires at least one variant path." });
+  }
 
-  if (version !== "1" || !suite_id || !cases || !graph_template) {
+  if (!Array.isArray(value.criteria) || criteria.length === 0) {
+    diagnostics.push({ path: "$.criteria", message: "Eval suite requires at least one criterion." });
+  }
+
+  if (version !== "1" || !suiteId || !objective) {
     return undefined;
   }
 
   return {
     version,
-    suite_id,
-    target: {
-      graph_template
-    },
-    cases,
-    ...(variants ? { variants } : {}),
-    ...(graders ? { graders } : {}),
-    ...(Object.keys(thresholds).length > 0 ? { thresholds } : {})
+    suite_id: suiteId,
+    objective,
+    source_reference: evalSourceReference,
+    default_trials: defaultTrials !== undefined && Number.isInteger(defaultTrials) && defaultTrials > 0 ? defaultTrials : 1,
+    scenarios,
+    variants,
+    criteria,
+    thresholds
   };
 }
 
-function normalizeCase(value: unknown, path: string, diagnostics: EvalDiagnostic[]): EvalCase | undefined {
+function normalizeVariant(value: unknown, variantPath: string, diagnostics: EvalDiagnostic[]): EvalVariant | undefined {
   if (!isRecord(value)) {
-    diagnostics.push({ path, message: "Eval case must be an object." });
+    diagnostics.push({ path: `variant:${variantPath}`, message: "Eval variant must be an object." });
     return undefined;
   }
 
   const id = readString(value.id);
-  const task = readString(value.task);
+  const description = readString(value.description);
+  const graphTemplate = readString(value.graph_template);
+  const promptPack = readString(value.prompt_pack);
+  const envValue = value.env;
+  const env =
+    isRecord(envValue)
+      ? Object.fromEntries(Object.entries(envValue).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+      : {};
 
   if (!id) {
-    diagnostics.push({ path: `${path}.id`, message: "Eval case requires non-empty id." });
+    diagnostics.push({ path: `variant:${variantPath}.id`, message: "Eval variant requires non-empty id." });
   }
 
-  if (!task) {
-    diagnostics.push({ path: `${path}.task`, message: "Eval case requires non-empty task." });
+  if (!description) {
+    diagnostics.push({ path: `variant:${variantPath}.description`, message: "Eval variant requires non-empty description." });
   }
 
-  if (value.tags !== undefined && (!Array.isArray(value.tags) || value.tags.some((tag) => typeof tag !== "string"))) {
-    diagnostics.push({ path: `${path}.tags`, message: "Eval case tags must be an array of strings." });
+  if (envValue !== undefined && !isRecord(envValue)) {
+    diagnostics.push({ path: `variant:${variantPath}.env`, message: "Eval variant env must be an object of string values." });
   }
 
-  if (
-    value.fixtures !== undefined &&
-    !(
-      Array.isArray(value.fixtures) && value.fixtures.every((fixture) => typeof fixture === "string") ||
-      isRecord(value.fixtures) && Object.values(value.fixtures).every((fixture) => typeof fixture === "string")
-    )
-  ) {
-    diagnostics.push({
-      path: `${path}.fixtures`,
-      message: "Eval case fixtures must be an array of paths or an object of named paths."
-    });
-  }
-
-  if (
-    value.repos !== undefined &&
-    !(
-      isRecord(value.repos) &&
-      Object.values(value.repos).every(
-        (repo) => typeof repo === "string" || isRecord(repo) && typeof repo.path === "string"
-      )
-    )
-  ) {
-    diagnostics.push({
-      path: `${path}.repos`,
-      message: "Eval case repos must be an object of repo aliases to paths or { path } objects."
-    });
-  }
-
-  if (!id || !task) {
+  if (!id || !description) {
     return undefined;
   }
 
   return {
-    ...value,
     id,
-    task
-  } as EvalCase;
+    description,
+    variant_path: variantPath,
+    ...(graphTemplate ? { graph_template: graphTemplate } : {}),
+    ...(promptPack ? { prompt_pack: promptPack } : {}),
+    env
+  };
 }
 
-async function loadCases(casesPath: string, diagnostics: EvalDiagnostic[]): Promise<EvalCase[]> {
-  let contents: string;
+function isValidUrl(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
 
   try {
-    contents = await readFile(casesPath, "utf8");
-  } catch (error) {
-    diagnostics.push({
-      path: "$.cases",
-      message: `Eval cases could not be read: ${error instanceof Error ? error.message : String(error)}`
-    });
-    return [];
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname === "github.com";
+  } catch {
+    return false;
   }
-
-  const cases: EvalCase[] = [];
-  const seen = new Set<string>();
-
-  contents.split(/\r?\n/u).forEach((rawLine, index) => {
-    const line = rawLine.trim();
-    const path = `${casesPath}:${index + 1}`;
-
-    if (!line) {
-      return;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch (error) {
-      diagnostics.push({
-        path,
-        message: `Eval case line is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
-      });
-      return;
-    }
-
-    const evalCase = normalizeCase(parsed, path, diagnostics);
-    if (!evalCase) {
-      return;
-    }
-
-    if (seen.has(evalCase.id)) {
-      diagnostics.push({ path, message: `Duplicate eval case id "${evalCase.id}".` });
-      return;
-    }
-
-    seen.add(evalCase.id);
-    cases.push(evalCase);
-  });
-
-  if (cases.length === 0) {
-    diagnostics.push({ path: "$.cases", message: "Eval suite must include at least one case." });
-  }
-
-  return cases;
 }
 
-async function validateFixturePaths(
-  suiteDir: string,
-  cases: EvalCase[],
+function isFullGitSha(value: string | undefined): boolean {
+  return Boolean(value && /^[a-f0-9]{40}$/u.test(value));
+}
+
+function normalizeRealWorldMetadata(
+  value: unknown,
+  scenarioDir: string,
+  path: string,
   diagnostics: EvalDiagnostic[]
-): Promise<void> {
-  for (const evalCase of cases) {
-    const fixtures = evalCase.fixtures;
-    const fixtureEntries = Array.isArray(fixtures)
-      ? fixtures.map((fixture, index) => [`${index}`, fixture] as const)
-      : fixtures && typeof fixtures === "object"
-        ? Object.entries(fixtures)
-        : [];
-
-    for (const [key, fixturePath] of fixtureEntries) {
-      const absolutePath = resolveSuitePath(suiteDir, fixturePath);
-
-      if (!await pathExists(absolutePath)) {
-        diagnostics.push({
-          path: `case:${evalCase.id}.fixtures.${key}`,
-          message: `Fixture path does not exist: ${absolutePath}`
-        });
-      }
-    }
+): EvalScenarioRealWorldMetadata | undefined {
+  if (value === undefined) {
+    return undefined;
   }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Real-world eval metadata must be an object." });
+    return undefined;
+  }
+
+  const sourceRepo = readString(value.source_repo);
+  const license = readString(value.license);
+  const baseSha = readString(value.base_sha);
+  const issueUrl = readString(value.issue_url);
+  const prUrl = readString(value.pr_url);
+  const oracleCommitSha = readString(value.oracle_commit_sha);
+  const packageManager = readString(value.package_manager);
+  const regressionPatch = readString(value.regression_patch);
+  const setupCommand = readString(value.setup_command);
+  const focusedTestCommand = readString(value.focused_test_command);
+  const allowedChangedGlobs = readStringArray(value.allowed_changed_globs);
+  const forbiddenChangedGlobs = readStringArray(value.forbidden_changed_globs);
+  const hiddenOracleChangedFiles = readStringArray(value.hidden_oracle_changed_files);
+
+  if (!sourceRepo) {
+    diagnostics.push({ path: `${path}.source_repo`, message: "Real-world metadata requires source_repo." });
+  }
+
+  if (license !== "MIT") {
+    diagnostics.push({ path: `${path}.license`, message: 'Real-world metadata license must be "MIT".' });
+  }
+
+  if (!isFullGitSha(baseSha)) {
+    diagnostics.push({ path: `${path}.base_sha`, message: "Real-world metadata base_sha must be a full 40-character git SHA." });
+  }
+
+  if (!isValidUrl(issueUrl)) {
+    diagnostics.push({ path: `${path}.issue_url`, message: "Real-world metadata issue_url must be a GitHub https URL." });
+  }
+
+  if (!isValidUrl(prUrl)) {
+    diagnostics.push({ path: `${path}.pr_url`, message: "Real-world metadata pr_url must be a GitHub https URL." });
+  }
+
+  if (!isFullGitSha(oracleCommitSha)) {
+    diagnostics.push({
+      path: `${path}.oracle_commit_sha`,
+      message: "Real-world metadata oracle_commit_sha must be a full 40-character git SHA."
+    });
+  }
+
+  if (!packageManager) {
+    diagnostics.push({ path: `${path}.package_manager`, message: "Real-world metadata requires package_manager." });
+  }
+
+  if (!regressionPatch) {
+    diagnostics.push({ path: `${path}.regression_patch`, message: "Real-world metadata requires regression_patch." });
+  }
+
+  if (!setupCommand) {
+    diagnostics.push({ path: `${path}.setup_command`, message: "Real-world metadata requires setup_command." });
+  }
+
+  if (!focusedTestCommand) {
+    diagnostics.push({ path: `${path}.focused_test_command`, message: "Real-world metadata requires focused_test_command." });
+  }
+
+  if (allowedChangedGlobs.length === 0) {
+    diagnostics.push({
+      path: `${path}.allowed_changed_globs`,
+      message: "Real-world metadata requires at least one allowed_changed_glob."
+    });
+  }
+
+  if (
+    !sourceRepo ||
+    license !== "MIT" ||
+    !isFullGitSha(baseSha) ||
+    !isValidUrl(issueUrl) ||
+    !isValidUrl(prUrl) ||
+    !isFullGitSha(oracleCommitSha) ||
+    !packageManager ||
+    !regressionPatch ||
+    !setupCommand ||
+    !focusedTestCommand ||
+    allowedChangedGlobs.length === 0
+  ) {
+    return undefined;
+  }
+
+  return {
+    source_repo: sourceRepo,
+    license,
+    base_sha: baseSha!,
+    issue_url: issueUrl!,
+    pr_url: prUrl!,
+    oracle_commit_sha: oracleCommitSha!,
+    package_manager: packageManager,
+    regression_patch: regressionPatch,
+    regression_patch_path: resolveScenarioPath(scenarioDir, regressionPatch),
+    setup_command: setupCommand,
+    focused_test_command: focusedTestCommand,
+    allowed_changed_globs: allowedChangedGlobs,
+    forbidden_changed_globs: forbiddenChangedGlobs,
+    hidden_oracle_changed_files: hiddenOracleChangedFiles
+  };
 }
 
-export function resolveEvalVariants(
-  suite: EvalSuite,
-  suiteDir: string,
-  requestedVariant?: string
-): EvalVariantResolution[] {
-  const variants = suite.variants ?? {
-    candidate: {}
+function normalizeScenarioMetadata(
+  value: unknown,
+  scenarioDir: string,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalScenarioMetadata {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Eval scenario metadata must be an object." });
+    return {};
+  }
+
+  const metadata: EvalScenarioMetadata = { ...value };
+  const realworld = normalizeRealWorldMetadata(value.realworld, scenarioDir, `${path}.realworld`, diagnostics);
+  if (realworld) {
+    metadata.realworld = realworld;
+  } else {
+    delete metadata.realworld;
+  }
+
+  return metadata;
+}
+
+function normalizeSimulationMatch(value: unknown, path: string, diagnostics: EvalDiagnostic[]): EvalSimulationMatch {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Simulation match must be an object." });
+    return {};
+  }
+
+  const argvExact = readStringArray(value.argv_exact);
+  const argvContains = readStringArray(value.argv_contains);
+  const cwdContains = readString(value.cwd_contains);
+  const match: EvalSimulationMatch = {};
+
+  if (value.argv_exact !== undefined && !Array.isArray(value.argv_exact)) {
+    diagnostics.push({ path: `${path}.argv_exact`, message: "argv_exact must be an array of strings." });
+  }
+
+  if (value.argv_contains !== undefined && !Array.isArray(value.argv_contains)) {
+    diagnostics.push({ path: `${path}.argv_contains`, message: "argv_contains must be an array of strings." });
+  }
+
+  if (argvExact.length > 0) {
+    match.argv_exact = argvExact;
+  }
+
+  if (argvContains.length > 0) {
+    match.argv_contains = argvContains;
+  }
+
+  if (cwdContains) {
+    match.cwd_contains = cwdContains;
+  }
+
+  return match;
+}
+
+function normalizeSimulationRule(
+  value: unknown,
+  scenarioDir: string,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalSimulationRule | undefined {
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Simulation tool call rule must be an object." });
+    return undefined;
+  }
+
+  const id = readString(value.id);
+  const command = readString(value.command);
+  const match = normalizeSimulationMatch(value.match, `${path}.match`, diagnostics);
+  const responseRecord = isRecord(value.response) ? value.response : undefined;
+  const errorRecord = isRecord(value.error) ? value.error : undefined;
+  const responseFile = readString(value.response_file);
+  const latencyMs = readNumber(value.latency_ms);
+  const probability = readNumber(value.probability);
+
+  if (!id) {
+    diagnostics.push({ path: `${path}.id`, message: "Simulation tool call rule requires non-empty id." });
+  }
+
+  if (!command) {
+    diagnostics.push({ path: `${path}.command`, message: "Simulation tool call rule requires non-empty command." });
+  } else if (command.includes("/") || command.includes("\\")) {
+    diagnostics.push({ path: `${path}.command`, message: "Simulation command must be a command name, not a path." });
+  }
+
+  if (value.response !== undefined && !responseRecord) {
+    diagnostics.push({ path: `${path}.response`, message: "Simulation response must be an object." });
+  }
+
+  if (value.error !== undefined && !errorRecord) {
+    diagnostics.push({ path: `${path}.error`, message: "Simulation error must be an object." });
+  }
+
+  if (!responseRecord && !errorRecord && !responseFile) {
+    diagnostics.push({ path, message: "Simulation rule requires response, response_file, or error." });
+  }
+
+  if (responseRecord && errorRecord) {
+    diagnostics.push({ path, message: "Simulation rule cannot define both response and error." });
+  }
+
+  if (latencyMs !== undefined && (latencyMs < 0 || !Number.isInteger(latencyMs))) {
+    diagnostics.push({ path: `${path}.latency_ms`, message: "Simulation latency_ms must be a non-negative integer." });
+  }
+
+  if (probability !== undefined && (probability < 0 || probability > 1)) {
+    diagnostics.push({ path: `${path}.probability`, message: "Simulation probability must be between 0 and 1." });
+  }
+
+  if (!id || !command || command.includes("/") || command.includes("\\") || (!responseRecord && !errorRecord && !responseFile) || (responseRecord && errorRecord)) {
+    return undefined;
+  }
+
+  const rule: EvalSimulationRule = {
+    id,
+    command,
+    match
   };
 
-  return Object.entries(variants)
-    .filter(([id]) => !requestedVariant || id === requestedVariant)
-    .map(([id, variant]) => {
-      const graphTemplate = variant.graph_template ?? suite.target.graph_template;
-      const graphTemplatePath = resolveSuitePath(suiteDir, graphTemplate);
+  if (responseRecord) {
+    rule.response = {
+      ...(typeof responseRecord.stdout === "string" ? { stdout: responseRecord.stdout } : {}),
+      ...(typeof responseRecord.stderr === "string" ? { stderr: responseRecord.stderr } : {}),
+      ...(typeof responseRecord.exit_code === "number" && Number.isInteger(responseRecord.exit_code)
+        ? { exit_code: responseRecord.exit_code }
+        : {})
+    };
+  }
 
-      return {
-        id,
-        graph_template: graphTemplate,
-        graph_template_path: graphTemplatePath,
-        optional: variant.optional ?? false
-      };
-    });
+  if (responseFile) {
+    rule.response_file = responseFile;
+    rule.response_file_path = resolveScenarioPath(scenarioDir, responseFile);
+  }
+
+  if (errorRecord) {
+    rule.error = {
+      stderr: typeof errorRecord.stderr === "string" ? errorRecord.stderr : "simulated tool error",
+      ...(typeof errorRecord.exit_code === "number" && Number.isInteger(errorRecord.exit_code)
+        ? { exit_code: errorRecord.exit_code }
+        : {})
+    };
+  }
+
+  if (latencyMs !== undefined && Number.isInteger(latencyMs) && latencyMs >= 0) {
+    rule.latency_ms = latencyMs;
+  }
+
+  if (probability !== undefined && probability >= 0 && probability <= 1) {
+    rule.probability = probability;
+  }
+
+  return rule;
 }
 
-async function validateVariantTemplates(
-  suite: EvalSuite,
-  suiteDir: string,
-  cases: EvalCase[],
+function normalizeSimulation(
+  value: unknown,
+  scenarioDir: string,
+  path: string,
   diagnostics: EvalDiagnostic[]
-): Promise<void> {
-  const variants = resolveEvalVariants(suite, suiteDir);
-  const seenGraderIds = new Set<string>();
+): EvalEnvironmentSimulation | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
 
-  suite.graders?.forEach((grader) => {
-    if (seenGraderIds.has(grader.id)) {
-      diagnostics.push({ path: "$.graders", message: `Duplicate grader id "${grader.id}".` });
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Eval environment simulation must be an object." });
+    return undefined;
+  }
+
+  const seedValue = readString(value.seed) ?? (typeof value.seed === "number" ? String(value.seed) : undefined);
+  const rawToolCalls = Array.isArray(value.tool_calls) ? value.tool_calls : [];
+
+  if (!Array.isArray(value.tool_calls)) {
+    diagnostics.push({ path: `${path}.tool_calls`, message: "Environment simulation requires tool_calls array." });
+  }
+
+  const toolCalls = rawToolCalls
+    .map((rule, index) => normalizeSimulationRule(rule, scenarioDir, `${path}.tool_calls[${index}]`, diagnostics))
+    .filter((rule): rule is EvalSimulationRule => rule !== undefined);
+
+  return {
+    ...(seedValue ? { seed: seedValue } : {}),
+    tool_calls: toolCalls
+  };
+}
+
+function normalizeScenarioCriteria(value: unknown, path: string, diagnostics: EvalDiagnostic[]): Record<string, Record<string, unknown>> {
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Eval scenario requires criteria object keyed by criterion id." });
+    return {};
+  }
+
+  const entries: Array<[string, Record<string, unknown>]> = [];
+  for (const [id, config] of Object.entries(value)) {
+    if (!isRecord(config)) {
+      diagnostics.push({ path: `${path}.${id}`, message: "Scenario criterion config must be an object." });
+      continue;
     }
-    seenGraderIds.add(grader.id);
-  });
+    entries.push([id, config]);
+  }
 
-  for (const grader of suite.graders ?? []) {
-    if (grader.kind === "ai_rubric") {
-      const rubricPath = resolveSuitePath(suiteDir, grader.rubric);
-      if (!await pathExists(rubricPath)) {
-        diagnostics.push({ path: `grader:${grader.id}.rubric`, message: `Rubric path does not exist: ${rubricPath}` });
+  return Object.fromEntries(entries);
+}
+
+function normalizeScenario(
+  value: unknown,
+  scenarioPath: string,
+  diagnostics: EvalDiagnostic[]
+): EvalScenario | undefined {
+  if (!isRecord(value)) {
+    diagnostics.push({ path: `scenario:${scenarioPath}`, message: "Eval scenario must be an object." });
+    return undefined;
+  }
+
+  if (value.fixture !== undefined) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.fixture`, message: "Legacy fixture is not supported; use environment." });
+  }
+
+  if (value.expected !== undefined) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.expected`, message: "Legacy expected is not supported; express expectations as criteria." });
+  }
+
+  if (value.grading !== undefined) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.grading`, message: "Legacy grading is not supported; use quality criteria." });
+  }
+
+  const scenarioDir = dirname(scenarioPath);
+  const id = readString(value.id);
+  const bucket = readString(value.bucket);
+  const difficulty = readString(value.difficulty);
+  const description = readString(value.description);
+  const environmentRecord = isRecord(value.environment) ? value.environment : undefined;
+  const workflowRecord = isRecord(value.workflow) ? value.workflow : undefined;
+  const repo = environmentRecord ? readString(environmentRecord.repo) : undefined;
+  const docs = environmentRecord ? readString(environmentRecord.docs) : undefined;
+  const tools = environmentRecord ? readString(environmentRecord.tools) : undefined;
+  const graphTemplate = workflowRecord ? readString(workflowRecord.graph_template) : undefined;
+  const harness = workflowRecord ? readString(workflowRecord.harness) : undefined;
+  const workspaceBackend = workflowRecord?.workspace_backend === "worktree" ? "worktree" : "inplace";
+  const launchProfile = workflowRecord ? readString(workflowRecord.launch_profile) : undefined;
+  const criteria = normalizeScenarioCriteria(value.criteria, `scenario:${scenarioPath}.criteria`, diagnostics);
+  const metadata = normalizeScenarioMetadata(value.metadata, scenarioDir, `scenario:${scenarioPath}.metadata`, diagnostics);
+
+  if (!id) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.id`, message: "Eval scenario requires non-empty id." });
+  }
+
+  if (!bucket) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.bucket`, message: "Eval scenario requires non-empty bucket." });
+  }
+
+  if (!difficulty) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.difficulty`, message: "Eval scenario requires non-empty difficulty." });
+  }
+
+  if (!description) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.description`, message: "Eval scenario requires non-empty description." });
+  }
+
+  if (!isRecord(value.environment)) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.environment`, message: "Eval scenario requires environment object." });
+  }
+
+  if (!repo) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.environment.repo`, message: "Eval scenario environment requires repo." });
+  }
+
+  if (!graphTemplate) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.workflow.graph_template`, message: "Eval scenario workflow requires graph_template." });
+  }
+
+  if (!harness || !(harnessNames as readonly string[]).includes(harness)) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.workflow.harness`, message: "Eval scenario workflow harness must be codex-cli or cursor-cli." });
+  }
+
+  if (!id || !bucket || !difficulty || !description || !repo || !graphTemplate || !harness) {
+    return undefined;
+  }
+
+  const repoPath = resolveScenarioPath(scenarioDir, repo);
+  const docsPath = docs ? resolveScenarioPath(scenarioDir, docs) : undefined;
+  const toolsPath = tools ? resolveScenarioPath(scenarioDir, tools) : undefined;
+  const graphTemplatePath = resolveScenarioPath(scenarioDir, graphTemplate);
+  const environment: EvalScenarioEnvironment = {
+    repo,
+    repo_path: repoPath,
+    init_git: readBoolean(environmentRecord?.init_git) ?? true
+  };
+  const simulation = normalizeSimulation(environmentRecord?.simulation, scenarioDir, `scenario:${scenarioPath}.environment.simulation`, diagnostics);
+
+  if (docs && docsPath) {
+    environment.docs = docs;
+    environment.docs_path = docsPath;
+  }
+
+  if (tools && toolsPath) {
+    environment.tools = tools;
+    environment.tools_path = toolsPath;
+  }
+
+  if (simulation) {
+    environment.simulation = simulation;
+  }
+
+  const workflow: EvalScenarioWorkflow = {
+    graph_template: graphTemplate,
+    graph_template_path: graphTemplatePath,
+    harness: harness as EvalScenarioWorkflow["harness"],
+    workspace_backend: workspaceBackend
+  };
+
+  if (launchProfile) {
+    workflow.launch_profile = launchProfile;
+  }
+
+  return {
+    id,
+    bucket,
+    difficulty,
+    description,
+    scenario_dir: scenarioDir,
+    graph_template_path: graphTemplatePath,
+    environment,
+    workflow,
+    criteria,
+    metadata
+  };
+}
+
+function emptySuite(suitePath: string, suiteDir: string): LoadedEvalSuite {
+  return {
+    suite: {
+      version: "1",
+      suite_id: "invalid",
+      objective: "invalid",
+      source_reference: evalSourceReference,
+      default_trials: 1,
+      scenarios: [],
+      variants: [],
+      criteria: [],
+      thresholds: {}
+    },
+    suite_path: suitePath,
+    suite_dir: suiteDir,
+    scenarios: [],
+    variants: [],
+    criteria: [],
+    diagnostics: []
+  };
+}
+
+async function readJson(path: string, diagnostics: EvalDiagnostic[], diagnosticPath: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as unknown;
+  } catch (error) {
+    diagnostics.push({
+      path: diagnosticPath,
+      message: `JSON file could not be loaded: ${error instanceof Error ? error.message : String(error)}`
+    });
+    return undefined;
+  }
+}
+
+async function validateLoadedPaths(loaded: LoadedEvalSuite): Promise<void> {
+  const diagnostics = loaded.diagnostics;
+  const seenScenarioIds = new Set<string>();
+  const seenVariantIds = new Set<string>();
+  const seenCriteriaIds = new Set<string>();
+  const criteriaIds = new Set(loaded.criteria.map((criterion) => criterion.id));
+
+  for (const criterion of loaded.criteria) {
+    if (seenCriteriaIds.has(criterion.id)) {
+      diagnostics.push({ path: `criterion:${criterion.id}`, message: `Duplicate criterion id "${criterion.id}".` });
+    }
+    seenCriteriaIds.add(criterion.id);
+
+    if (criterion.kind === "quality" && criterion.rubric_path && !await pathExists(criterion.rubric_path)) {
+      diagnostics.push({
+        path: `criterion:${criterion.id}.rubric`,
+        message: `Quality criterion rubric path does not exist: ${criterion.rubric_path}`
+      });
+    }
+  }
+
+  for (const scenario of loaded.scenarios) {
+    if (seenScenarioIds.has(scenario.id)) {
+      diagnostics.push({ path: `scenario:${scenario.id}`, message: `Duplicate scenario id "${scenario.id}".` });
+    }
+    seenScenarioIds.add(scenario.id);
+
+    if (!await pathExists(scenario.environment.repo_path)) {
+      diagnostics.push({
+        path: `scenario:${scenario.id}.environment.repo`,
+        message: `Environment repo path does not exist: ${scenario.environment.repo_path}`
+      });
+    }
+
+    if (scenario.environment.docs_path && !await pathExists(scenario.environment.docs_path)) {
+      diagnostics.push({
+        path: `scenario:${scenario.id}.environment.docs`,
+        message: `Environment docs path does not exist: ${scenario.environment.docs_path}`
+      });
+    }
+
+    if (scenario.environment.tools_path && !await pathExists(scenario.environment.tools_path)) {
+      diagnostics.push({
+        path: `scenario:${scenario.id}.environment.tools`,
+        message: `Environment tools path does not exist: ${scenario.environment.tools_path}`
+      });
+    }
+
+    for (const rule of scenario.environment.simulation?.tool_calls ?? []) {
+      if (rule.response_file_path && !await pathExists(rule.response_file_path)) {
+        diagnostics.push({
+          path: `scenario:${scenario.id}.environment.simulation.tool_calls.${rule.id}.response_file`,
+          message: `Simulation response file does not exist: ${rule.response_file_path}`
+        });
+      }
+    }
+
+    if (!await pathExists(scenario.workflow.graph_template_path)) {
+      diagnostics.push({
+        path: `scenario:${scenario.id}.workflow.graph_template`,
+        message: `Graph template does not exist: ${scenario.workflow.graph_template_path}`
+      });
+    }
+
+    if (scenario.metadata.realworld && !await pathExists(scenario.metadata.realworld.regression_patch_path)) {
+      diagnostics.push({
+        path: `scenario:${scenario.id}.metadata.realworld.regression_patch`,
+        message: `Real-world regression patch does not exist: ${scenario.metadata.realworld.regression_patch_path}`
+      });
+    }
+
+    for (const criterionId of Object.keys(scenario.criteria)) {
+      if (!criteriaIds.has(criterionId)) {
+        diagnostics.push({
+          path: `scenario:${scenario.id}.criteria.${criterionId}`,
+          message: `Scenario references unknown criterion "${criterionId}".`
+        });
       }
     }
   }
 
-  for (const variant of variants) {
-    if (!await pathExists(variant.graph_template_path)) {
-      if (!variant.optional) {
+  for (const variant of loaded.variants) {
+    if (seenVariantIds.has(variant.id)) {
+      diagnostics.push({ path: `variant:${variant.id}`, message: `Duplicate variant id "${variant.id}".` });
+    }
+    seenVariantIds.add(variant.id);
+
+    if (variant.graph_template) {
+      variant.graph_template_path = resolveSuitePath(loaded.suite_dir, variant.graph_template);
+      if (!await pathExists(variant.graph_template_path)) {
         diagnostics.push({
           path: `variant:${variant.id}.graph_template`,
-          message: `Graph template does not exist: ${variant.graph_template_path}`
+          message: `Variant graph template does not exist: ${variant.graph_template_path}`
         });
       }
-      continue;
     }
+  }
 
-    for (const evalCase of cases) {
+  for (const scenario of loaded.scenarios) {
+    for (const variant of loaded.variants) {
+      if (!await pathExists(variant.graph_template_path ?? scenario.workflow.graph_template_path)) {
+        continue;
+      }
       const rendered = await renderGraphTemplate({
-        suite_dir: suiteDir,
-        template_path: variant.graph_template_path,
-        case: evalCase
+        suite_dir: loaded.suite_dir,
+        template_path: variant.graph_template_path ?? scenario.workflow.graph_template_path,
+        scenario,
+        variant,
+        trial: { id: "trial-001", index: 1, root: "/tmp/agentflow-eval-trial" },
+        environment: {
+          repo: scenario.environment.repo_path,
+          ...(scenario.environment.docs_path ? { docs_url: "http://127.0.0.1:1" } : {}),
+          ...(scenario.environment.tools_path ? { tools: scenario.environment.tools_path } : {})
+        }
       });
 
       diagnostics.push(
         ...rendered.diagnostics.map((diagnostic) => ({
-          path: `case:${evalCase.id}.variant:${variant.id}.${diagnostic.path}`,
+          path: `scenario:${scenario.id}.variant:${variant.id}.${diagnostic.path}`,
           message: diagnostic.message
         }))
       );
@@ -504,55 +1008,45 @@ async function validateVariantTemplates(
 
 export async function loadEvalSuite(
   currentWorkingDirectory: string,
-  suitePath: string
+  suiteInput: string
 ): Promise<LoadedEvalSuite> {
-  const suite_path = resolve(currentWorkingDirectory, suitePath);
-  const suite_dir = dirname(suite_path);
-  const diagnostics: EvalDiagnostic[] = [];
-  let rawSuite: unknown;
+  const { suite_path, suite_dir } = await resolveSuiteInput(currentWorkingDirectory, suiteInput);
+  const loaded = emptySuite(suite_path, suite_dir);
+  const rawSuite = await readJson(suite_path, loaded.diagnostics, "$");
 
-  try {
-    rawSuite = JSON.parse(await readFile(suite_path, "utf8"));
-  } catch (error) {
-    return {
-      suite: {
-        version: "1",
-        suite_id: "invalid",
-        target: { graph_template: "" },
-        cases: ""
-      },
-      suite_path,
-      suite_dir,
-      cases: [],
-      diagnostics: [
-        {
-          path: "$",
-          message: `Eval suite could not be loaded: ${error instanceof Error ? error.message : String(error)}`
-        }
-      ]
-    };
+  if (rawSuite === undefined) {
+    return loaded;
   }
 
-  const suite = normalizeSuite(rawSuite, diagnostics);
-  const cases = suite ? await loadCases(resolveSuitePath(suite_dir, suite.cases), diagnostics) : [];
-
-  if (suite) {
-    await validateFixturePaths(suite_dir, cases, diagnostics);
-    await validateVariantTemplates(suite, suite_dir, cases, diagnostics);
+  const suite = normalizeSuite(rawSuite, suite_dir, loaded.diagnostics);
+  if (!suite) {
+    return loaded;
   }
 
-  return {
-    suite: suite ?? {
-      version: "1",
-      suite_id: "invalid",
-      target: { graph_template: "" },
-      cases: ""
-    },
-    suite_path,
-    suite_dir,
-    cases,
-    diagnostics
-  };
+  loaded.suite = suite;
+  loaded.criteria = suite.criteria;
+
+  for (const scenarioRef of suite.scenarios) {
+    const scenarioPath = resolveSuitePath(suite_dir, scenarioRef);
+    const rawScenario = await readJson(scenarioPath, loaded.diagnostics, `scenario:${scenarioRef}`);
+    const scenario = normalizeScenario(rawScenario, scenarioPath, loaded.diagnostics);
+    if (scenario) {
+      loaded.scenarios.push(scenario);
+    }
+  }
+
+  for (const variantRef of suite.variants) {
+    const variantPath = resolveSuitePath(suite_dir, variantRef);
+    const rawVariant = await readJson(variantPath, loaded.diagnostics, `variant:${variantRef}`);
+    const variant = normalizeVariant(rawVariant, variantPath, loaded.diagnostics);
+    if (variant) {
+      loaded.variants.push(variant);
+    }
+  }
+
+  await validateLoadedPaths(loaded);
+
+  return loaded;
 }
 
 function stringifyTemplateValue(value: unknown): string {
@@ -567,7 +1061,7 @@ function stringifyTemplateValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function readCasePathValue(value: unknown, segments: string[]): unknown {
+function readPathValue(value: unknown, segments: string[]): unknown {
   return segments.reduce<unknown>((current, segment) => {
     if (current === undefined || current === null) {
       return undefined;
@@ -588,7 +1082,10 @@ function readCasePathValue(value: unknown, segments: string[]): unknown {
 
 function resolveTemplatePlaceholder(options: {
   suite_dir: string;
-  case: EvalCase;
+  scenario: EvalScenario;
+  variant: EvalVariant;
+  trial: EvalTemplateTrialContext;
+  environment: EvalTemplateEnvironmentContext;
   placeholder: string;
 }): string | undefined {
   const normalized = options.placeholder.trim();
@@ -597,31 +1094,33 @@ function resolveTemplatePlaceholder(options: {
     return options.suite_dir;
   }
 
-  if (normalized === "case.fixtures.root") {
-    return resolve(options.suite_dir, "fixtures");
+  if (normalized.startsWith("scenario.")) {
+    const value = readPathValue(options.scenario, normalized.slice("scenario.".length).split("."));
+    return value === undefined ? undefined : stringifyTemplateValue(value);
   }
 
-  if (normalized.startsWith("case.repos.") && normalized.endsWith(".path")) {
-    const alias = normalized.slice("case.repos.".length, -".path".length);
-    const repo = options.case.repos?.[alias];
-    const repoPath = typeof repo === "string" ? repo : repo?.path;
-    return repoPath ? resolveSuitePath(options.suite_dir, repoPath) : undefined;
+  if (normalized.startsWith("variant.")) {
+    const value = readPathValue(options.variant, normalized.slice("variant.".length).split("."));
+    return value === undefined ? undefined : stringifyTemplateValue(value);
   }
 
-  if (normalized.startsWith("case.fixtures.")) {
-    const key = normalized.slice("case.fixtures.".length);
-    const fixtures = options.case.fixtures;
-    const value = Array.isArray(fixtures)
-      ? fixtures[Number(key)]
-      : fixtures && typeof fixtures === "object"
-        ? fixtures[key]
-        : undefined;
-
-    return typeof value === "string" ? resolveSuitePath(options.suite_dir, value) : undefined;
+  if (normalized.startsWith("trial.")) {
+    const value = readPathValue(options.trial, normalized.slice("trial.".length).split("."));
+    return value === undefined ? undefined : stringifyTemplateValue(value);
   }
 
-  if (normalized.startsWith("case.")) {
-    const value = readCasePathValue(options.case, normalized.slice("case.".length).split("."));
+  if (normalized.startsWith("environment.")) {
+    const value = readPathValue(options.environment, normalized.slice("environment.".length).split("."));
+    return value === undefined ? undefined : stringifyTemplateValue(value);
+  }
+
+  if (normalized.startsWith("workflow.")) {
+    const value = readPathValue(options.scenario.workflow, normalized.slice("workflow.".length).split("."));
+    return value === undefined ? undefined : stringifyTemplateValue(value);
+  }
+
+  if (normalized.startsWith("criteria.")) {
+    const value = readPathValue(options.scenario.criteria, normalized.slice("criteria.".length).split("."));
     return value === undefined ? undefined : stringifyTemplateValue(value);
   }
 
@@ -630,17 +1129,16 @@ function resolveTemplatePlaceholder(options: {
 
 function renderTemplateValue(value: unknown, options: {
   suite_dir: string;
-  case: EvalCase;
+  scenario: EvalScenario;
+  variant: EvalVariant;
+  trial: EvalTemplateTrialContext;
+  environment: EvalTemplateEnvironmentContext;
   diagnostics: EvalDiagnostic[];
   path: string;
 }): unknown {
   if (typeof value === "string") {
     return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/gu, (match, placeholder: string) => {
-      const resolved = resolveTemplatePlaceholder({
-        suite_dir: options.suite_dir,
-        case: options.case,
-        placeholder
-      });
+      const resolved = resolveTemplatePlaceholder({ ...options, placeholder });
 
       if (resolved === undefined) {
         options.diagnostics.push({
@@ -679,7 +1177,10 @@ function renderTemplateValue(value: unknown, options: {
 export async function renderGraphTemplate(options: {
   suite_dir: string;
   template_path: string;
-  case: EvalCase;
+  scenario: EvalScenario;
+  variant: EvalVariant;
+  trial: EvalTemplateTrialContext;
+  environment: EvalTemplateEnvironmentContext;
 }): Promise<{
   graph: unknown;
   diagnostics: EvalDiagnostic[];
@@ -703,11 +1204,75 @@ export async function renderGraphTemplate(options: {
 
   return {
     graph: renderTemplateValue(parsed, {
-      suite_dir: options.suite_dir,
-      case: options.case,
+      ...options,
       diagnostics,
       path: "$"
     }),
     diagnostics
+  };
+}
+
+export function parseJudgeResult(text: string): {
+  result?: EvalJudgePayload;
+  error?: string;
+} {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(text.trim());
+  } catch {
+    const objectMatch = text.match(/\{[\s\S]*\}/u);
+    if (!objectMatch) {
+      return { error: "Judge output was not valid JSON." };
+    }
+    try {
+      parsed = JSON.parse(objectMatch[0]);
+    } catch {
+      return { error: "Judge output was not valid JSON." };
+    }
+  }
+
+  if (!isRecord(parsed)) {
+    return { error: "Judge output must be a JSON object." };
+  }
+
+  if (typeof parsed.passed_quality_bar !== "boolean") {
+    return { error: "Judge output must include boolean passed_quality_bar." };
+  }
+
+  const score = readNumber(parsed.score);
+  if (score === undefined || score < 1 || score > 5) {
+    return { error: "Judge output score must be a number between 1 and 5." };
+  }
+
+  if (parsed.blockers !== undefined && !Array.isArray(parsed.blockers)) {
+    return { error: "Judge output blockers must be an array." };
+  }
+
+  const dimensionScores =
+    isRecord(parsed.dimension_scores)
+      ? Object.fromEntries(
+          Object.entries(parsed.dimension_scores).filter((entry): entry is [string, number] =>
+            typeof entry[1] === "number" && entry[1] >= 1 && entry[1] <= 5
+          )
+        )
+      : {};
+  const promptFeedback = isRecord(parsed.prompt_feedback) ? parsed.prompt_feedback : {};
+  const stringArray = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+  return {
+    result: {
+      passed_quality_bar: parsed.passed_quality_bar,
+      score,
+      dimension_scores: dimensionScores,
+      blockers: stringArray(parsed.blockers),
+      rationale: typeof parsed.rationale === "string" ? parsed.rationale : "",
+      prompt_feedback: {
+        helpful_sections: stringArray(promptFeedback.helpful_sections),
+        noisy_sections: stringArray(promptFeedback.noisy_sections),
+        missing_guidance: stringArray(promptFeedback.missing_guidance)
+      }
+    }
   };
 }

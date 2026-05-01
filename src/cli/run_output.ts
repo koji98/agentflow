@@ -45,7 +45,7 @@ function readOutcomeVerificationFromAttempt(attempt: RuntimeNodeAttempt): {
   findings: number;
   blockers: number;
 } | undefined {
-  const value = attempt.metadata.outcome_verification;
+  const value = attempt.metadata?.outcome_verification;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
@@ -64,7 +64,7 @@ function readOutcomeVerificationFromAttempt(attempt: RuntimeNodeAttempt): {
 }
 
 function readNodeWorkspaceDiffPath(attempt: RuntimeNodeAttempt): string | undefined {
-  const value = attempt.metadata.node_workspace_changes;
+  const value = attempt.metadata?.node_workspace_changes;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }

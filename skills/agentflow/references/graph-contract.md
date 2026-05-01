@@ -95,9 +95,7 @@ Container node kinds:
 Managed pattern node kinds:
 
 - `pattern_deep_research`
-- `pattern_spec_design`
-- `pattern_generate_evaluate_fix`
-- `pattern_review_change`
+- `pattern_deep_work`
 
 ## Context
 

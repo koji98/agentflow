@@ -4,7 +4,7 @@ import { managedPatternKinds } from "../../src/graph/schema.js";
 import { managedPatternDescriptors, managedPatternRegistry } from "../../src/managed/index.js";
 
 describe("managed pattern registry", () => {
-  it("defines the four canonical managed patterns", () => {
+  it("defines the canonical managed patterns", () => {
     expect(managedPatternDescriptors.map((descriptor) => descriptor.kind)).toEqual(managedPatternKinds);
   });
 
@@ -15,14 +15,12 @@ describe("managed pattern registry", () => {
 
     expect(statuses).toEqual({
       pattern_deep_research: "implemented",
-      pattern_spec_design: "implemented",
-      pattern_generate_evaluate_fix: "implemented",
-      pattern_review_change: "implemented"
+      pattern_deep_work: "implemented"
     });
 
     managedPatternDescriptors.forEach((descriptor) => {
       expect(descriptor.runtime_shape).toBe("compiled-subgraph");
-      expect(descriptor.phases.length).toBeGreaterThanOrEqual(4);
+      expect(descriptor.phases.length).toBeGreaterThanOrEqual(3);
       expect(descriptor.orchestration.summary.length).toBeGreaterThan(0);
     });
   });

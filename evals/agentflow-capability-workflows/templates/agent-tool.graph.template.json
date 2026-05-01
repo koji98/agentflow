@@ -1,0 +1,95 @@
+{
+  "version": "1",
+  "graph_id": "capability-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "{{scenario.description}}",
+    "acceptance_criteria": [
+      "The workflow satisfies the fixture repository validation.",
+      "The delivery package contains enough evidence for eval grading."
+    ],
+    "constraints": [
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use public network sources."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "workspace-write",
+      "timeout_sec": 900
+    }
+  },
+  "supervision": {
+    "max_total_interventions": 0,
+    "actions": {}
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "implement",
+        "repo": "main",
+        "goal": "Complete `AGENTFLOW_EVAL_TASK.md`. The local tool directory is on PATH; run `fixture-lookup --case tool-guided-discovery` to discover the required value, then run `npm test` and write `handoff.md`.",
+        "acceptance_criteria": [
+          "The local fixture tool is used for the unknown value.",
+          "`npm test` passes.",
+          "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Tool command:`, `Validation:`, and `Risks:` fields."
+        ],
+        "constraints": [
+          "Do not invent the flag value.",
+          "Do not add dependencies.",
+          "Use `fixture-lookup --case tool-guided-discovery` directly; do not bypass the PATH tool unless direct execution fails, and document any fallback in `Tool command:`."
+        ],
+        "context": [
+          {
+            "name": "task",
+            "from": "workspace_file",
+            "path": "AGENTFLOW_EVAL_TASK.md"
+          },
+          {
+            "name": "source",
+            "from": "workspace_glob",
+            "path": "src/**",
+            "max_files": 20
+          },
+          {
+            "name": "tests",
+            "from": "workspace_glob",
+            "path": "tests/**",
+            "max_files": 20
+          }
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Tool-use handoff with literal Scenario:, Changed files:, Tool command:, Validation:, and Risks: fields."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "verify",
+        "repo": "main",
+        "check_kind": "deterministic",
+        "command": "npm",
+        "args": [
+          "test"
+        ]
+      }
+    ]
+  }
+}
