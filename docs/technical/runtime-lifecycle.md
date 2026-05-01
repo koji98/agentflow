@@ -24,8 +24,8 @@ sequenceDiagram
   Runtime->>Runtime: initialize workspace backend
   Runtime->>Harness: execute reachable node attempt
   Harness-->>Runtime: result, stdout/stderr, final response
-  Runtime->>Supervisor: classify failures or missing artifacts
-  Supervisor-->>Runtime: accept, retry, repair, pause, or fail
+  Runtime->>Supervisor: observe checkpoint health
+  Supervisor-->>Runtime: continue, repair causal target, or request authority
   Runtime->>Delivery: write terminal delivery package
   Delivery-->>Human: reviewer guide, run map, ledgers
 ```
@@ -96,39 +96,34 @@ The attempt boundary matters because supervisor interventions attach to a specif
 
 ## Supervision
 
-The supervisor is engine-side control logic. It is not a separate always-running agent. It acts at scheduler boundaries after an attempt finishes or fails.
+The supervisor is engine-side control logic. It is not a separate always-running agent. It observes every executable checkpoint at scheduler boundaries and stays out of the way when the node is healthy. A failed or rejected checkpoint is treated as a symptom, not automatically as the root cause.
 
 ```mermaid
 flowchart TD
-  result["Attempt result"] --> classify["Classify failure or quality issue"]
-  classify --> budget{"Action allowed by policy and budget?"}
-  budget -- no --> fail["Fail run or accept with warnings"]
-  budget -- yes --> action{"Action"}
-  action --> retry["retry_with_guidance"]
-  action --> repair["repair_artifact"]
-  action --> rebuild["rebuild_context"]
-  action --> diagnostic["run_diagnostic"]
-  action --> semantic["semantic_evaluation"]
-  action --> pause["pause_for_authority"]
-  retry --> overlay["Write case file, evidence, recovery plan, runtime overlay, material delta, and envelope"]
-  rebuild --> overlay
-  diagnostic --> overlay
-  semantic --> overlay
-  overlay --> workspace["Apply workspace cleanup when requested"]
-  workspace --> schedule
-  overlay --> schedule["Emit retry_scheduled when a material delta exists"]
-  schedule --> rerun["Restart node attempt after delay"]
-  repair --> verify["Verify declared artifacts exist"]
-  pause --> persisted["Persist paused run state"]
+  checkpointResult["Checkpoint result"] --> healthy{"Healthy?"}
+  healthy -- yes --> continueGraph["Continue graph"]
+  healthy -- no --> caseFile["Write causal case file"]
+  caseFile --> cone["Build upstream causal cone"]
+  cone --> target["Rank recovery targets"]
+  target --> budget{"Recovery budget and authority available?"}
+  budget -- no --> authority["Request authority or stop on impossible invariant"]
+  budget -- yes --> repair["Repair nearest intent-aligned target"]
+  repair --> delta{"Material delta recorded?"}
+  delta -- no --> investigate["Widen causal search or change tactic"]
+  investigate --> cone
+  delta -- yes --> rerun["Rerun failed gate"]
+  rerun --> healthy
 ```
 
-Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, `interventions.jsonl`, and state. Intervention workers write their own prompt/result/log artifacts under the affected attempt.
+Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, `interventions.jsonl`, and state. Budget-spending recovery chains attach artifacts under the symptom attempt's `interventions/` directory. If the selected recovery target is upstream, the target writes normal attempt folders and the chain links the symptom, target, material delta, and rerun gate.
 
-For retry-oriented actions, the supervisor records a failure fingerprint, writes a case file, runs evidence gatherers, merges a recovery plan, writes `runtime-overlay.json`, records `material-delta.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the next attempt's prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
+For recovery-oriented actions, the supervisor records a failure fingerprint, writes `causal-case-file.{json,md}`, ranks targets in `causal-targets.json`, writes `recovery-chain.{json,md}`, merges evidence into `recovery-plan.{json,md}`, writes `runtime-overlay.json`, records `material-delta.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the selected target's next attempt prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
 
 Context materialization can fail before the harness runs. Those failures are classified as `context_contract_failure`, analyzed with the shared run-ready context analyzer, and retried with a compact `supervisor_context_repair` packet when the supervisor can safely repair the packaging without changing graph authority.
 
 Workspace repair uses the node-level baseline and after snapshots captured around every agent/exec attempt. If a failed attempt is classified as a forbidden or unrelated workspace edit, the overlay restores tracked files from the pre-attempt snapshot and removes untracked files introduced by that failed attempt before the retry is scheduled. Environment repair is intentionally narrower: it refreshes per-execution Agentflow tool wrappers and PATH/runtime metadata on the retry without mutating global machine state.
+
+Authority pauses are last resort. The runtime pauses only for credentials, explicit human checkpoint boundaries, product or intent ambiguity, security or compliance judgment, repo/sandbox/scope expansion, or graph contract amendment. Local context, artifact, workspace, validation strategy, and recoverable environment issues should attempt machine repair first.
 
 ## Resume
 

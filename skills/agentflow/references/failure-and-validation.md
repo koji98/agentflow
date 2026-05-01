@@ -66,7 +66,7 @@ When the verifier rejects an attempt, the engine reclassifies it as `outcome_ver
 
 ## Human Gates
 
-`checkpoint` is a planned human gate inside a repeat body. `pause_for_human` is a supervisor safety pause for runtime risk or failure conditions and resumes through structured human input.
+`checkpoint` is a planned human gate inside a repeat body. `pause_for_human` is a supervisor authority pause for credentials, scope expansion, product intent, security/compliance judgment, graph-contract changes, or another operator decision the runtime must not infer. It resumes through structured human input.
 
 ## Repeat
 

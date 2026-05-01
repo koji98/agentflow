@@ -184,7 +184,7 @@ Plugin tools should still match the node's job.
 - Adding AI checks after every agent node as a substitute for good acceptance criteria.
 - Wrapping mature local CLIs in custom helpers that remove useful flags, help text, or error messages.
 - Creating plugin tools before checking whether existing repo/device commands are enough.
-- Modeling supervisor safety pauses as planned workflow steps.
+- Modeling supervisor authority pauses as planned workflow steps.
 - Depending on generated internal ids from managed pattern expansion.
 
 ## Final Review

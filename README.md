@@ -8,13 +8,13 @@ Agentflow exists because long-running agent work needs more than an ad hoc promp
 
 ```mermaid
 flowchart LR
-  human["Human intent\nwhat should be done"] --> graph["Agentflow graph\ncontract and authority"]
-  graph --> harness["Agent harness\nCodex CLI or Cursor CLI"]
-  graph --> checks["Checks and criteria\nhard gates and rubrics"]
-  harness --> artifacts["Artifacts and logs\nwhat happened"]
-  checks --> supervisor["Supervisor\nobserve, repair, or request authority"]
-  artifacts --> supervisor
-  supervisor --> delivery["Delivery package\nreview-ready evidence"]
+  intentNode["Human intent: what should be done"] --> graphNode["Agentflow graph: contract and authority"]
+  graphNode --> harnessNode["Agent harness: Codex CLI or Cursor CLI"]
+  graphNode --> checksNode["Checks and criteria: hard gates and rubrics"]
+  harnessNode --> artifactNode["Artifacts and logs: what happened"]
+  checksNode --> supervisorNode["Supervisor: observe, repair, or request authority"]
+  artifactNode --> supervisorNode
+  supervisorNode --> deliveryNode["Delivery package: review-ready evidence"]
 ```
 
 ## What It Is
@@ -315,7 +315,7 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 
 Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `goal` and non-empty `acceptance_criteria`, with optional `constraints` normalized to `[]`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
 
-Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime safety stops chosen after failure or risk classification and resumed with `agentflow resume`.
+Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime pauses chosen only when recovery needs credentials, scope, product intent, security/compliance judgment, or graph-contract authority that the runtime must not infer.
 
 ## Runtime Surfaces
 

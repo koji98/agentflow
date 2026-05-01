@@ -57,7 +57,7 @@ Fields:
 - `max_total_interventions`: total machine-recovery budget for the run.
 - `profile`: optional profile name for supervisor evidence gathering, repair, and outcome verification.
 
-When `profile` is omitted, supervisor work inherits the failed node's effective profile. Use a read-only supervisor profile when you only want evidence gathering and verification isolated from worker settings; use a write-capable supervisor profile when artifact or workspace repair should be available. `pause_for_human` is a runtime safety decision, not an authored budget field, and remains distinct from authored `checkpoint` nodes.
+When `profile` is omitted, supervisor work inherits the failed node's effective profile. Use a read-only supervisor profile when you only want evidence gathering and verification isolated from worker settings; use a write-capable supervisor profile when artifact or workspace repair should be available. `pause_for_human` is a runtime authority decision, not an authored budget field, and remains distinct from authored `checkpoint` nodes.
 
 ## Nodes
 

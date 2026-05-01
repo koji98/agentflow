@@ -21,7 +21,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Do not over-prescribe implementation mechanics. Give agents clear intent, authority, context, artifacts, and validation; let them decide exact files and approach unless the user specified them.
 - In GitHub repos, consider rollout strategy before authoring: prefer small reviewable PRs, `establish_base -> parallel_prs`, or `cascading_prs` over one large PR unless the user asks otherwise.
 - A graph is not complete until validation passes: plugin resolution when needed, `validate`, `--review`, `--run-ready`, and `--show-compiled`.
-- Supervisor recovery is graph-causal: a failed node may be a symptom of an upstream node, artifact, context, workspace, validation strategy, or environment problem. Do not author supervisor safety pauses as planned workflow nodes.
+- Supervisor recovery is graph-causal: a failed node may be a symptom of an upstream node, artifact, context, workspace, validation strategy, or environment problem. Do not author supervisor authority pauses as planned workflow nodes.
 - `repos`, `profiles`, sandbox, and tools define authority. Constraints should name scope boundaries and high-impact limits.
 
 ## Route By Task
@@ -63,7 +63,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Use deterministic checks for hard facts. Reach for AI checks only when another node depends on the gate or when the deterministic command is genuinely unavailable; do not stack an AI `check` after every agent node to re-evaluate the same acceptance criteria.
 - Treat checks, outcome verification, supervisor `semantic_evaluation`, managed pattern evaluation, and `agentflow eval` as separate lanes. Use `agentflow-evals` for the offline eval lane.
 - Make high-impact limits explicit in `constraints` before granting credential-backed, external, or mutating tools.
-- Do not widen scope through supervisor behavior; use repeat-scoped checkpoints or graph edits for planned human decisions, and reserve `pause_for_human` for supervisor safety stops.
+- Do not widen scope through supervisor behavior; use repeat-scoped checkpoints or graph edits for planned human decisions, and reserve `pause_for_human` for authority boundaries the runtime must not infer.
 
 ## Runtime CLI Posture
 
