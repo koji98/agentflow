@@ -72,7 +72,7 @@ Important launch behavior:
 - Supervisor `pause_for_human` is an authority pause, not a graph node; local context, validation, artifact, workspace, and recoverable environment failures should attempt machine recovery before a pause is considered.
 - Terminal runs write the delivery package after run completion.
 
-For the implementation flow behind launch, node attempts, context materialization, generated runtime tooling, supervision, and delivery, see `technical-implementation/runtime-lifecycle.md`.
+For the implementation flow behind launch, node attempts, context materialization, generated runtime tooling, supervision, and delivery, see `../technical/runtime-lifecycle.md`.
 
 ## Progress Events
 
@@ -128,7 +128,7 @@ Runtime coordination files are under `<run-root>/runtime/`. They are useful when
 
 Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, handoff notes, or major decisions with `af log --type`. Decision logs use `decision`, `rationale`, and `evidence[]` so outcome verification can inspect why the node chose a scope-affecting path. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live intervention.
 
-When debugging what an agent actually received, use `technical-implementation/context-and-artifacts.md` and `technical-implementation/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --run-ready` also reports real context token analysis; use it before launch when a graph has broad globs, large docs, generated trees, or strict `input_rules.max_total_tokens`.
+When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --run-ready` also reports real context token analysis; use it before launch when a graph has broad globs, large docs, generated trees, or strict `input_rules.max_total_tokens`.
 
 ## Resume
 
@@ -167,7 +167,7 @@ Choose the smallest evaluation lane that matches the question:
 
 ## Run Eval Suites
 
-Use `docs/EVALS.md` as the canonical eval guide. The operational loop is:
+Use `evals.md` as the canonical eval guide. The operational loop is:
 
 ```bash
 agentflow eval validate evals/agentflow-workflow-quality

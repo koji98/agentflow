@@ -43,7 +43,7 @@ Each node attempt records execution-specific context, logs, result, and artifact
 - `tool-invocation-logs/`
 - `interventions/`
 
-For the implementation model behind these files, see `docs/technical-implementation/context-and-artifacts.md` and `docs/technical-implementation/runtime-tooling.md` in the repository.
+For the implementation model behind these files, see `docs/technical/context-and-artifacts.md` and `docs/technical/runtime-tooling.md` in the repository.
 
 ## Debug Order
 

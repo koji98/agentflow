@@ -46,6 +46,30 @@ Start with:
 
 For prompt iteration, inspect `scorecard.prompt_feedback`, quality rationales, and concrete failed assertions before changing prompts or context surfaces.
 
+## Iteration Loop
+
+Use evals as an engineering loop:
+
+1. Run a baseline on a small scenario set.
+2. Inspect report, failing scorecards, trace packets, prompt feedback, and run roots.
+3. Change one thing: graph shape, prompt pack, context materialization, tool exposure, supervisor behavior, or criteria.
+4. Rerun the same scenarios and trial count with the same fixtures.
+5. Compare baseline and candidate.
+6. Promote stable, important scenarios to a regression gate.
+
+Do not tune against only one lucky trial. If results vary, increase trials or narrow the scenario before drawing conclusions.
+
+## Prompt And Context Iteration
+
+When tuning prompts or context:
+
+- inspect what the node actually received;
+- identify missing signal and noisy sections;
+- remove context that does not affect decisions;
+- prefer concise artifacts over raw logs;
+- rerun the same scenario after each change;
+- keep a candidate only if hard blockers do not regress.
+
 ## Built-In Dogfood Suites
 
 The lightweight committed suite is `evals/agentflow-workflow-quality`.

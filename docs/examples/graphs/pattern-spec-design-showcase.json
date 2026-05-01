@@ -70,12 +70,12 @@
           {
             "name": "managed_patterns_doc",
             "from": "workspace_file",
-            "path": "docs/MANAGED_PATTERNS.md"
+            "path": "docs/product/managed-patterns.md"
           },
           {
             "name": "spec_design_doc",
             "from": "workspace_file",
-            "path": "docs/PATTERN_SPEC_DESIGN.md"
+            "path": "docs/product/patterns/spec-design.md"
           }
         ],
         "context_policy": {

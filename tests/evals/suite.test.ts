@@ -198,7 +198,7 @@ describe("eval suite v1 loading", () => {
     expect(graph.graph.steps[0]?.args.at(-1)).toBe("current");
   });
 
-  it("rejects legacy v2 fields, missing environment paths, duplicate ids, and bad placeholders", async () => {
+  it("rejects legacy eval fields, missing environment paths, duplicate ids, and bad placeholders", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-v1-invalid-"));
     const suiteDir = await writeMinimalV1Suite(tempRoot);
     await writeFile(

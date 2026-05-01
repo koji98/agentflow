@@ -2,6 +2,28 @@
 
 Eval suites are local file-backed benchmarks. They run normal Agentflow graphs and grade the resulting run artifacts.
 
+## Scenario Quality Bar
+
+Start with what the team needs to learn. A good scenario is:
+
+- realistic enough to exercise the workflow rather than just the schema;
+- local and reproducible on a fresh checkout;
+- hard enough to separate weak and strong variants;
+- solvable by a capable run;
+- explicit about required artifacts, forbidden edits, validation evidence, supervisor behavior, and expected pause/fail cases;
+- graded by deterministic facts first and quality criteria second.
+
+Avoid toy scenarios that always score 1.0, brittle scenarios that only one exact patch can pass, and tasks whose expected behavior is not visible in the trace packet or run artifacts.
+
+## Scenario Pattern Examples
+
+- Bug-fix workflow: local repo fixture, failing reproduction, implementation graph, focused regression command, forbidden broad edits.
+- PR review workflow: seeded diff or change package, review graph, required finding format, quality criteria for severity and evidence.
+- Plugin/tool workflow: local tool fixture or plugin, node-level tool access, trajectory criterion for help/use, output contract assertions.
+- Supervisor recovery workflow: intentionally missing docs/context/artifact/validation strategy, expected classification and recovery overlay.
+- Prompt/context noise eval: noisy repo fixture, broad possible context, quality criteria for context handling and noise efficiency.
+- Real-world issue workflow: pinned upstream SHA, local regression patch, focused test command, hidden oracle metadata for graders only.
+
 ## Layout
 
 ```text
@@ -159,6 +181,10 @@ Supported fields:
 
 Variant ids are hidden from quality criteria. Judge packets use anonymized labels such as `variant-01`.
 
-## Scenario Quality Bar
+## Anti-Patterns
 
-Good scenarios are local, reproducible, hard enough to reveal differences, unambiguous enough for deterministic grading, solvable by a reference implementation, and explicit about expected artifacts, forbidden edits, supervisor behavior, and trajectory requirements.
+- Scenarios that only check final status and never inspect artifacts or workspace effects.
+- Live public network dependencies for ordinary regression/capability runs.
+- Quality-only grading for hard facts that can be checked deterministically.
+- Exposing hidden oracle patches or upstream PR solutions in graph context.
+- Exact trajectory matching when ordered containment is enough.

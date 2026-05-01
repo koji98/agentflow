@@ -50,7 +50,7 @@
           {
             "name": "scope",
             "from": "workspace_file",
-            "path": "docs/SCOPE.md"
+            "path": "docs/product/scope.md"
           }
         ]
       },

@@ -67,12 +67,12 @@
           {
             "name": "managed_patterns_doc",
             "from": "workspace_file",
-            "path": "docs/MANAGED_PATTERNS.md"
+            "path": "docs/product/managed-patterns.md"
           },
           {
             "name": "review_change_doc",
             "from": "workspace_file",
-            "path": "docs/PATTERN_REVIEW_CHANGE.md"
+            "path": "docs/product/patterns/review-change.md"
           }
         ],
         "context_policy": {

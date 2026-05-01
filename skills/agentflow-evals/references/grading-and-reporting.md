@@ -116,6 +116,26 @@ Quality output must be strict JSON:
 
 Quality criteria must not excuse deterministic blockers. A candidate variant with more hard blockers cannot beat the baseline even if quality scores are higher.
 
+## Rubric Writing
+
+Write anchored rubrics so judges grade evidence, not vibes.
+
+- Score 1: unusable, violates graph/scenario contract, misses core evidence, or creates serious risk.
+- Score 2: partially relevant but important requirements, evidence, or artifacts are missing.
+- Score 3: usable with notable gaps, weak evidence, excess noise, or incomplete risk handling.
+- Score 4: correct and well-supported with minor issues.
+- Score 5: strong, concise, evidence-backed, low-noise, and directly aligned with scenario intent.
+
+Rubrics should tell the judge:
+
+- which trace/artifact fields matter;
+- what counts as a blocker;
+- what evidence must be cited in `rationale`;
+- which prompt/context sections were helpful, noisy, or missing;
+- that deterministic failures cannot be waived by quality scores.
+
+Prefer multiple focused quality criteria over one giant judge. For example, use separate criteria for `artifact_quality`, `context_handling`, `tool_discipline`, and `supervisor_recovery_quality` when those dimensions matter.
+
 ## Scorecards
 
 `scorecard.json` contains:

@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const iterations = Number.parseInt(process.argv.find((arg) => arg.startsWith("--iterations="))?.split("=")[1] ?? "10", 10);
 const outDir = resolve(rootDir, process.argv.find((arg) => arg.startsWith("--out="))?.split("=")[1] ?? "prompt-iteration-runs/latest");
-const reportPath = resolve(rootDir, process.argv.find((arg) => arg.startsWith("--report="))?.split("=")[1] ?? "docs/technical-implementation/prompt-iteration-report.md");
+const reportPath = resolve(rootDir, process.argv.find((arg) => arg.startsWith("--report="))?.split("=")[1] ?? "docs/technical/prompt-iteration-report.md");
 
 function digest(value) {
   return createHash("sha256").update(value).digest("hex");

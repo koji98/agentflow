@@ -9,6 +9,8 @@ const jsonMode = process.argv.includes("--json");
 
 const requiredReferences = [
   "graph-authoring.md",
+  "common-patterns.md",
+  "github-rollout.md",
   "managed-workflows.md",
   "run-debugging.md",
   "graph-contract.md",
@@ -22,6 +24,7 @@ const requiredAgentflowPluginReferences = [
 ];
 
 const requiredAgentflowEvalReferences = [
+  "eval-patterns.md",
   "suite-authoring.md",
   "grading-and-reporting.md",
   "operations-and-dogfood.md"

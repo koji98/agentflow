@@ -20,7 +20,7 @@ Agentflow also ships an offline eval surface for confidence in workflows. `agent
 - Container node kinds are `sequence`, `parallel`, and `repeat`.
 - Managed patterns are `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change`.
 - Team capabilities enter through plugin-bundled CLI tools with a clear description, optional non-secret config schema, and credential requirements when auth is needed.
-- Eval suites use version `"2"` and live outside the graph contract. See `EVALS.md`.
+- Eval suites use version `"1"` and live outside the graph contract. See `evals.md`.
 
 ## Graph Authoring Bar
 
@@ -51,7 +51,7 @@ Required behavior:
 - produce a delivery package for terminal runs
 - evaluate workflow quality offline through local suites, scenario environments, variants, repeated trials, criteria, trajectory checks, deterministic simulation, and benchmark reports
 
-Implementation details for these runtime paths live under `technical-implementation/`. Those docs explain how validation compiles graphs, how context packets and artifacts are materialized, how generated `af` and plugin tool wrappers enter the harness environment, and how credentials stay out of the agent context window.
+Implementation details for these runtime paths live under `../technical/`. Those docs explain how validation compiles graphs, how context packets and artifacts are materialized, how generated `af` and plugin tool wrappers enter the harness environment, and how credentials stay out of the agent context window.
 
 ## Documentation Bar
 

@@ -1,0 +1,30 @@
+# Agentflow Docs
+
+Agentflow docs are split by audience so readers do not have to infer whether a page is product guidance or implementation mechanics.
+
+## Product Docs
+
+Use `product/` when authoring, operating, or evaluating Agentflow workflows:
+
+1. `product/scope.md`: active product boundary and release bar.
+2. `product/operations.md`: validation, launch, resume, inspection, and delivery workflows.
+3. `product/evals.md`: eval suite authoring and operation.
+4. `product/plugins.md`: plugin workflow and tool contracts.
+5. `product/managed-patterns.md`: reusable managed workflow patterns.
+6. `product/patterns/`: pattern-specific authoring guides.
+
+## Technical Docs
+
+Use `technical/` when debugging runtime behavior or changing Agentflow internals:
+
+1. `technical/architecture.md`: implementation architecture and major subsystems.
+2. `technical/runtime-lifecycle.md`: launch-to-delivery execution flow.
+3. `technical/context-and-artifacts.md`: context materialization and artifact refs.
+4. `technical/runtime-tooling.md`: generated `af` and plugin tool wrappers.
+5. `technical/outcome-verification.md`: verifier behavior for agent attempts.
+6. `technical/node-workspace-snapshots.md`: per-attempt workspace baselines and diffs.
+7. `technical/prompt-iteration-report.md`: prompt/context tuning notes.
+
+## Examples
+
+Use `examples/` for runnable graph, eval, and plugin examples. Example files should point back to product docs for concepts and technical docs for implementation mechanics.

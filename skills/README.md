@@ -11,6 +11,8 @@ Included skills:
 The `agentflow` skill routes to compact references:
 
 - `references/graph-authoring.md`
+- `references/common-patterns.md`
+- `references/github-rollout.md`
 - `references/managed-workflows.md`
 - `references/run-debugging.md`
 - `references/graph-contract.md`
@@ -24,6 +26,7 @@ The `agentflow-plugins` skill owns:
 
 The `agentflow-evals` skill owns:
 
+- `references/eval-patterns.md`
 - `references/suite-authoring.md`
 - `references/grading-and-reporting.md`
 - `references/operations-and-dogfood.md`

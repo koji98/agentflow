@@ -55,7 +55,7 @@
           {
             "name": "managed_patterns_doc",
             "from": "workspace_file",
-            "path": "docs/MANAGED_PATTERNS.md"
+            "path": "docs/product/managed-patterns.md"
           }
         ],
         "context_policy": {

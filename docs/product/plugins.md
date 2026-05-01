@@ -258,7 +258,7 @@ Runtime behavior:
 - The harness prompt includes each tool's description, origin, credential scope names, and configured default keys, but never configured values.
 - Tools share the node sandbox and timeout.
 
-For the full implementation flow from compiled tool declaration to generated wrapper, launcher, credential resolution, harness prompt, and invocation ledger, see `technical-implementation/runtime-tooling.md`.
+For the full implementation flow from compiled tool declaration to generated wrapper, launcher, credential resolution, harness prompt, and invocation ledger, see `../technical/runtime-tooling.md`.
 
 ## Auth
 

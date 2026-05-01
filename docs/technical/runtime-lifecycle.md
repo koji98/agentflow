@@ -1,6 +1,6 @@
 # Runtime Lifecycle
 
-This document explains the implementation path from an authored graph to a terminal run. For operator commands, use `docs/OPERATIONS.md`; this page focuses on how those commands work internally.
+This document explains the implementation path from an authored graph to a terminal run. For operator commands, use `docs/product/operations.md`; this page focuses on how those commands work internally.
 
 ## High-Level Flow
 

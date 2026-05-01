@@ -49,7 +49,7 @@ Use for architecture and product design that should feed a later implementation 
 
 Implement an accountable slice, run independent evaluators, and iterate within a bounded repair loop.
 
-This pattern's `evaluation` block is authored workflow structure. It lowers into normal nodes and artifacts inside the compiled graph; it is not the same lane as a standalone graph `check`, a supervisor `semantic_evaluation` intervention, or an offline `agentflow eval` suite. Use `EVALS.md` for offline workflow benchmarks.
+This pattern's `evaluation` block is authored workflow structure. It lowers into normal nodes and artifacts inside the compiled graph; it is not the same lane as a standalone graph `check`, a supervisor `semantic_evaluation` intervention, or an offline `agentflow eval` suite. Use `evals.md` for offline workflow benchmarks.
 
 Primary artifacts:
 

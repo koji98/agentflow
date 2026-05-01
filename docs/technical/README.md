@@ -1,8 +1,8 @@
 # Technical Implementation
 
-These notes explain how Agentflow turns a human-authored graph into local supervised execution. They are intentionally more implementation-focused than `README.md`, `docs/SCOPE.md`, or `docs/OPERATIONS.md`, but they still describe stable concepts rather than every private function.
+These notes explain how Agentflow turns a human-authored graph into local supervised execution. They are intentionally more implementation-focused than `README.md`, `docs/product/scope.md`, or `docs/product/operations.md`, but they still describe stable concepts rather than every private function.
 
-Use these when you need to understand why a run behaves the way it does, how material reaches an agent, how plugin tools are exposed without leaking credentials, or how run artifacts become the delivery package. For offline workflow eval suite authoring and operation, use `../EVALS.md`.
+Use these when you need to understand why a run behaves the way it does, how material reaches an agent, how plugin tools are exposed without leaking credentials, or how run artifacts become the delivery package. For offline workflow eval suite authoring and operation, use `../product/evals.md`.
 
 ```mermaid
 flowchart LR

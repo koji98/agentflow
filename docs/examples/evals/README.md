@@ -1,6 +1,6 @@
 # Eval Examples
 
-Eval examples use suite schema version `"2"` and are separate from graph schema version `"1"`.
+Eval examples use suite schema version `"1"` and are separate from graph schema version `"1"`.
 
 Start with the tiny local suite:
 
@@ -27,4 +27,4 @@ agentflow eval validate evals/agentflow-capability-workflows
 agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1
 ```
 
-See `../../EVALS.md` for suite layout, scenario environments, variants, criteria, environment simulation, trajectory checks, trace packets, scorecards, and benchmark reports.
+See `../../product/evals.md` for suite layout, scenario environments, variants, criteria, environment simulation, trajectory checks, trace packets, scorecards, and benchmark reports.

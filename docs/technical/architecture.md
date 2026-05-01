@@ -9,9 +9,9 @@ Agentflow has four runtime layers:
 
 The authored graph remains the source of intent. The compiled graph is the executable contract. Runtime artifacts are the audit log. The delivery package is the human review surface.
 
-Agentflow also has an offline eval system in `src/evals/`. It is outside the graph contract: eval suites use version `"2"` files to run normal version `"1"` Agentflow graphs across scenarios, variants, and trials, then grade the resulting run artifacts.
+Agentflow also has an offline eval system in `src/evals/`. It is outside the graph contract: eval suites use version `"1"` files to run normal version `"1"` Agentflow graphs across scenarios, variants, and trials, then grade the resulting run artifacts.
 
-For a more detailed implementation walkthrough with diagrams, see `technical-implementation/runtime-lifecycle.md`, `technical-implementation/context-and-artifacts.md`, and `technical-implementation/runtime-tooling.md`.
+For a more detailed implementation walkthrough with diagrams, see `runtime-lifecycle.md`, `context-and-artifacts.md`, and `runtime-tooling.md`.
 
 ## Authored Graph
 
@@ -106,7 +106,7 @@ Reserved automatic artifacts:
 
 Downstream nodes should consume named artifacts, not rediscover scratch files.
 
-See `technical-implementation/context-and-artifacts.md` for the materialization lifecycle, token budget behavior, repeat selectors, and how artifact refs are derived from `ref`.
+See `context-and-artifacts.md` for the materialization lifecycle, token budget behavior, repeat selectors, and how artifact refs are derived from `ref`.
 
 ## Harness Contract
 
@@ -144,7 +144,7 @@ Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocat
 
 Agents do not rely on synchronous coordination with other graph nodes. Durable work moves through declared artifacts, worker notes are recorded with `af log`, and helper sub-node coordination stays under the parent node's runtime contract.
 
-See `technical-implementation/runtime-tooling.md` for the generated `af` wrapper, plugin launcher, credential isolation, harness environment, and tool invocation ledger flow.
+See `runtime-tooling.md` for the generated `af` wrapper, plugin launcher, credential isolation, harness environment, and tool invocation ledger flow.
 
 ## Supervision
 
@@ -241,7 +241,7 @@ Eval artifacts are rooted at `<eval-root>` and include `eval-run.json`, `evaluat
 
 Required deterministic criteria are authoritative for hard facts: final graph status, required artifacts, forbidden edits, delivery evidence, expected trajectory, and expected supervisor classifications/gatherers/actions. Quality criteria are for qualitative dimensions such as artifact quality, evidence use, context handling, supervisor recovery quality, tool discipline, noise efficiency, and delivery auditability. Variant ids are anonymized in quality packets.
 
-See `EVALS.md` for authoring guidance, CLI usage, artifact layout, and the built-in dogfood suites.
+See `../product/evals.md` for authoring guidance, CLI usage, artifact layout, and the built-in dogfood suites.
 
 ## Plugin Tools
 

@@ -67,12 +67,12 @@
           {
             "name": "managed_patterns_doc",
             "from": "workspace_file",
-            "path": "docs/MANAGED_PATTERNS.md"
+            "path": "docs/product/managed-patterns.md"
           },
           {
             "name": "generate_evaluate_fix_doc",
             "from": "workspace_file",
-            "path": "docs/PATTERN_GENERATE_EVALUATE_FIX.md"
+            "path": "docs/product/patterns/generate-evaluate-fix.md"
           }
         ],
         "context_policy": {

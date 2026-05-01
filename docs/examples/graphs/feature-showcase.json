@@ -68,7 +68,7 @@
           {
             "name": "docs",
             "from": "workspace_glob",
-            "path": "docs/*.md",
+            "path": "docs/product/*.md",
             "max_files": 4
           },
           {

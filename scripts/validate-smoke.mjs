@@ -19,16 +19,27 @@ const builtCliRunWorkspaceBackends = ["inplace", "worktree"];
 
 export const canonicalDocs = [
   "README.md",
-  "docs/SCOPE.md",
-  "docs/ARCHITECTURE.md",
-  "docs/OPERATIONS.md",
-  "docs/EVALS.md",
-  "docs/MANAGED_PATTERNS.md",
-  "docs/PLUGINS.md",
-  "docs/PATTERN_DEEP_RESEARCH.md",
-  "docs/PATTERN_SPEC_DESIGN.md",
-  "docs/PATTERN_GENERATE_EVALUATE_FIX.md",
-  "docs/PATTERN_REVIEW_CHANGE.md"
+  "docs/README.md",
+  "docs/product/README.md",
+  "docs/product/scope.md",
+  "docs/product/operations.md",
+  "docs/product/evals.md",
+  "docs/product/managed-patterns.md",
+  "docs/product/plugins.md",
+  "docs/product/patterns/README.md",
+  "docs/product/patterns/deep-research.md",
+  "docs/product/patterns/spec-design.md",
+  "docs/product/patterns/generate-evaluate-fix.md",
+  "docs/product/patterns/review-change.md",
+  "docs/technical/README.md",
+  "docs/technical/architecture.md",
+  "docs/technical/runtime-lifecycle.md",
+  "docs/technical/context-and-artifacts.md",
+  "docs/technical/runtime-tooling.md",
+  "docs/technical/outcome-verification.md",
+  "docs/technical/node-workspace-snapshots.md",
+  "docs/technical/prompt-iteration-report.md",
+  "docs/examples/README.md"
 ];
 
 export const commandChecks = [

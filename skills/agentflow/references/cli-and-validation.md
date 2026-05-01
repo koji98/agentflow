@@ -53,6 +53,20 @@ Plain `validate` is the minimum. For any graph that delegates meaningful work, r
 
 `--run-ready` tokenizes the current matched context with the runtime tokenizer. It reports sample glob matches, largest files, truncation risk, default ignored roots, explicit ignored-root opt-ins, and projected `max_total_tokens` failures before launch. Broad globs skip dependency and generated roots such as `.git`, `.agentflow`, `node_modules`, `.venv`, build output, coverage, `generated`, `gen`, and `__generated__` unless the authored context path explicitly starts inside that root.
 
+## Completion Gate
+
+Do not consider an authored graph complete until the relevant validation commands pass:
+
+```bash
+agentflow plugin resolve --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json
+agentflow validate --graph agentflow.graph.json --review
+agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json --show-compiled
+```
+
+Use `plugin resolve` only when the graph declares plugins. Use `--strict-review` instead of `--review` for release gates, reusable templates, and CI-owned graphs. Use `--diagram-output` or `--diagram-image-output` when reviewers need to understand managed pattern expansion, repeat loops, or parallel handoffs.
+
 ## Before Launch
 
 Confirm:
