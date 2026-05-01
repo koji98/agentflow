@@ -69,7 +69,7 @@ Important launch behavior:
 - Codex CLI and Cursor CLI receive the same Agentflow context, `af` runtime CLI, plugin tool, artifact, timeout, and sandbox contract.
 - `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.
 - `checkpoint` nodes are planned human gates inside repeat bodies; they prompt on a TTY when reached and feed pass, deny, or abort back into the graph.
-- Supervisor `pause_for_human` is a safety pause, not a graph node; it writes a paused run root that must be resumed with structured human input.
+- Supervisor `pause_for_human` is an authority pause, not a graph node; local context, validation, artifact, workspace, and recoverable environment failures should attempt machine recovery before a pause is considered.
 - Terminal runs write the delivery package after run completion.
 
 For the implementation flow behind launch, node attempts, context materialization, generated runtime tooling, supervision, and delivery, see `technical-implementation/runtime-lifecycle.md`.
@@ -128,7 +128,7 @@ Runtime coordination files are under `<run-root>/runtime/`. They are useful when
 
 Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, handoff notes, or major decisions with `af log --type`. Decision logs use `decision`, `rationale`, and `evidence[]` so outcome verification can inspect why the node chose a scope-affecting path. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live intervention.
 
-When debugging what an agent actually received, use `technical-implementation/context-and-artifacts.md` and `technical-implementation/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation.
+When debugging what an agent actually received, use `technical-implementation/context-and-artifacts.md` and `technical-implementation/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --run-ready` also reports real context token analysis; use it before launch when a graph has broad globs, large docs, generated trees, or strict `input_rules.max_total_tokens`.
 
 ## Resume
 
@@ -163,7 +163,7 @@ Choose the smallest evaluation lane that matches the question:
 - Let outcome verification grade passing `agent` attempts against authored acceptance criteria. It writes per-attempt verifier artifacts and routes rejected attempts through supervision.
 - Let supervisor `semantic_evaluation` spend intervention budget when a failed AI check or semantic uncertainty needs runtime recovery evidence.
 - Use managed pattern evaluation when the evaluation loop is part of a reusable authored workflow, such as `pattern_generate_evaluate_fix`.
-- Use `agentflow eval` for offline workflow suites that compare scenarios, variants, and repeated trials with deterministic graders and LLM judges. It follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and writes `.agentflow/evals` artifacts, including `eval-run.json`, `evaluation-ledger.json`, trial `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
+- Use `agentflow eval` for offline workflow suites that compare scenarios, variants, and repeated trials with required criteria, quality criteria, trajectory checks, and deterministic environment simulation. It follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), adopts useful ADK eval mechanics, and writes `.agentflow/evals` artifacts, including `eval-run.json`, `evaluation-ledger.json`, trial `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`; exit status follows infrastructure failures and `benchmark.threshold_passed`.
 
 ## Run Eval Suites
 
@@ -185,15 +185,15 @@ agentflow eval validate evals/agentflow-capability-workflows
 agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1 --eval-root .agentflow/evals/capability-workflows --concurrency 2
 ```
 
-Run `validate` before `run`; it catches missing scenario files, graph templates, variant files, graders, judges, and fixtures before any expensive harness work starts.
+Run `validate` before `run`; it catches missing scenario files, graph templates, variant files, criteria, rubrics, scripts, and environment fixtures before any expensive harness work starts.
 
 Review eval output in this order:
 
 1. `<eval-root>/report.md`
 2. `<eval-root>/benchmark.json`
 3. failing trial `scorecard.json`
-4. failing trial `deterministic-results.json`
-5. judge `ai-check-result.json` and `last_message.txt`
+4. failing trial `criteria-results.json`
+5. quality criterion `ai-check-result.json` and `judge-packet.json`
 6. trial `trace-packet.json`
 7. the underlying Agentflow run root named in `run-root.txt`
 
@@ -203,7 +203,7 @@ For real Codex-backed eval plumbing, run:
 node scripts/validate-real-evals.mjs --harness codex-cli
 ```
 
-The real validator skips only when `codex-cli` is unavailable. When the binary exists, incomplete artifacts, invalid deterministic scorecards, invalid judge output, or incorrect expected behavior fail validation.
+The real validator skips only when `codex-cli` is unavailable. When the binary exists, incomplete artifacts, invalid criteria scorecards, invalid quality output, or incorrect expected behavior fail validation.
 
 ## Delivery Review
 

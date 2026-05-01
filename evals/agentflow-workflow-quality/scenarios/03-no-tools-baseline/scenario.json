@@ -3,8 +3,86 @@
   "bucket": "valid-hard-execution",
   "difficulty": "medium",
   "description": "No-tools baseline should complete a local workflow with concise evidence.",
-  "fixture": { "repo": "../../shared/repo", "init_git": true },
-  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
-  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=no-tools-baseline"] }], "forbidden_edits": ["unrelated.txt"] },
-  "grading": { "dimensions": ["noise_efficiency", "artifact_quality"] }
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=no-tools-baseline"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "unrelated.txt"
+      ]
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "noise_efficiency",
+        "artifact_quality"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "noise_efficiency",
+        "artifact_quality"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "noise_efficiency",
+        "artifact_quality"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "noise_efficiency",
+        "artifact_quality"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "noise_efficiency",
+        "artifact_quality"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "noise_efficiency",
+        "artifact_quality"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "noise_efficiency",
+        "artifact_quality"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "noise_efficiency",
+        "artifact_quality"
+      ]
+    }
+  }
 }

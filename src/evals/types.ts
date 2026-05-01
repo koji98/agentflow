@@ -1,11 +1,21 @@
 import type { HarnessName, ReasoningEffort } from "../graph/schema.js";
 
-export const evalSuiteVersion = "2";
+export const evalSuiteVersion = "1";
 export const evalSourceReference =
-  "Anthropic: Demystifying evals for AI agents (https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)";
+  "Primary: Anthropic, Demystifying evals for AI agents (https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents). Adopted mechanics: ADK evaluation criteria, trajectory evaluation, and deterministic environment simulation (https://adk.dev/evaluate/).";
 
 export type EvalOutcomeStatus = "passed" | "failed" | "paused" | "canceled";
 export type EvalTrialStatus = "passed" | "failed" | "errored" | "skipped";
+export type EvalCriterionKind =
+  | "outcome"
+  | "artifact"
+  | "workspace"
+  | "supervisor"
+  | "trajectory"
+  | "quality"
+  | "delivery"
+  | "custom_script";
+export type EvalTrajectoryMatchMode = "exact_order" | "contains_ordered" | "contains_any_order" | "forbid";
 
 export interface EvalDiagnostic {
   path: string;
@@ -18,39 +28,69 @@ export interface EvalSuiteThresholds {
   min_average_score?: number;
 }
 
-export interface EvalScriptGrader {
+export interface EvalCriterion {
   id: string;
-  kind: "script";
-  command: string;
+  kind: EvalCriterionKind;
   required: boolean;
-  timeout_sec?: number;
-}
-
-export interface EvalJudge {
-  id: string;
-  rubric: string;
-  rubric_path: string;
-  required: boolean;
-  harness: HarnessName;
+  description?: string;
+  command?: string;
+  rubric?: string;
+  rubric_path?: string;
+  dimensions?: string[];
+  threshold?: number;
+  harness?: HarnessName;
   model?: string;
   reasoning_effort?: ReasoningEffort;
   timeout_sec?: number;
 }
 
 export interface EvalSuite {
-  version: "2";
+  version: "1";
   suite_id: string;
   objective: string;
   source_reference: string;
   default_trials: number;
   scenarios: string[];
   variants: string[];
-  graders: EvalScriptGrader[];
-  judges: EvalJudge[];
+  criteria: EvalCriterion[];
   thresholds: EvalSuiteThresholds;
 }
 
-export interface EvalScenarioFixture {
+export interface EvalSimulationMatch {
+  argv_exact?: string[];
+  argv_contains?: string[];
+  cwd_contains?: string;
+}
+
+export interface EvalSimulationResponse {
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number;
+}
+
+export interface EvalSimulationError {
+  stderr: string;
+  exit_code?: number;
+}
+
+export interface EvalSimulationRule {
+  id: string;
+  command: string;
+  match: EvalSimulationMatch;
+  response?: EvalSimulationResponse;
+  response_file?: string;
+  response_file_path?: string;
+  error?: EvalSimulationError;
+  latency_ms?: number;
+  probability?: number;
+}
+
+export interface EvalEnvironmentSimulation {
+  seed?: string;
+  tool_calls: EvalSimulationRule[];
+}
+
+export interface EvalScenarioEnvironment {
   repo: string;
   repo_path: string;
   init_git: boolean;
@@ -58,6 +98,7 @@ export interface EvalScenarioFixture {
   docs_path?: string;
   tools?: string;
   tools_path?: string;
+  simulation?: EvalEnvironmentSimulation;
 }
 
 export interface EvalScenarioWorkflow {
@@ -77,18 +118,6 @@ export interface EvalExpectedSupervisor {
   classifications?: string[];
   gatherers?: string[];
   apply_actions?: string[];
-}
-
-export interface EvalScenarioExpected {
-  final_outcome: EvalOutcomeStatus;
-  required_artifacts: EvalExpectedArtifact[];
-  forbidden_edits: string[];
-  supervisor: EvalExpectedSupervisor;
-  expected_pause?: boolean;
-}
-
-export interface EvalScenarioGrading {
-  dimensions: string[];
 }
 
 export interface EvalScenarioRealWorldMetadata {
@@ -113,6 +142,8 @@ export interface EvalScenarioMetadata {
   [key: string]: unknown;
 }
 
+export type EvalScenarioCriterionConfig = Record<string, unknown>;
+
 export interface EvalScenario {
   id: string;
   bucket: string;
@@ -120,10 +151,9 @@ export interface EvalScenario {
   description: string;
   scenario_dir: string;
   graph_template_path: string;
-  fixture: EvalScenarioFixture;
+  environment: EvalScenarioEnvironment;
   workflow: EvalScenarioWorkflow;
-  expected: EvalScenarioExpected;
-  grading: EvalScenarioGrading;
+  criteria: Record<string, EvalScenarioCriterionConfig>;
   metadata: EvalScenarioMetadata;
 }
 
@@ -143,8 +173,7 @@ export interface LoadedEvalSuite {
   suite_dir: string;
   scenarios: EvalScenario[];
   variants: EvalVariant[];
-  graders: EvalScriptGrader[];
-  judges: EvalJudge[];
+  criteria: EvalCriterion[];
   diagnostics: EvalDiagnostic[];
 }
 
@@ -154,10 +183,11 @@ export interface EvalTemplateTrialContext {
   root: string;
 }
 
-export interface EvalTemplateFixtureContext {
+export interface EvalTemplateEnvironmentContext {
   repo: string;
   docs_url?: string;
   tools?: string;
+  simulation_events_file?: string;
   eval_root?: string;
   trial_root?: string;
 }
@@ -168,29 +198,16 @@ export interface EvalAssertionResult {
   evidence?: string;
 }
 
-export interface EvalScriptGraderPayload {
+export interface EvalScriptCriterionPayload {
   passed: boolean;
   score?: number;
   summary?: string;
   assertions?: EvalAssertionResult[];
   metrics?: Record<string, unknown>;
+  blockers?: string[];
 }
 
-export interface EvalGraderResult extends EvalScriptGraderPayload {
-  id: string;
-  kind: "script";
-  required: boolean;
-  status: "passed" | "failed" | "errored" | "skipped";
-  output_dir: string;
-  error?: string;
-}
-
-export interface EvalJudgeResult {
-  id: string;
-  kind: "llm_judge";
-  required: boolean;
-  status: "passed" | "failed" | "errored" | "skipped";
-  output_dir: string;
+export interface EvalJudgePayload {
   passed_quality_bar: boolean;
   score: number;
   dimension_scores: Record<string, number>;
@@ -201,6 +218,26 @@ export interface EvalJudgeResult {
     noisy_sections: string[];
     missing_guidance: string[];
   };
+}
+
+export interface EvalCriterionResult {
+  id: string;
+  kind: EvalCriterionKind;
+  required: boolean;
+  status: "passed" | "failed" | "errored" | "skipped";
+  passed: boolean;
+  blockers: string[];
+  assertions: EvalAssertionResult[];
+  output_dir?: string;
+  score?: number;
+  dimension_scores?: Record<string, number>;
+  rationale?: string;
+  prompt_feedback?: {
+    helpful_sections: string[];
+    noisy_sections: string[];
+    missing_guidance: string[];
+  };
+  metrics?: Record<string, unknown>;
   error?: string;
 }
 
@@ -222,8 +259,25 @@ export interface EvalTraceAttempt {
   artifacts?: Record<string, string>;
 }
 
+export interface EvalTrajectoryEvent {
+  order: number;
+  kind: string;
+  source: string;
+  timestamp?: string;
+  type?: string;
+  node_id?: string;
+  node_label?: string;
+  status?: string;
+  action?: string;
+  command?: string;
+  artifact?: string;
+  rule_id?: string;
+  matched?: boolean;
+  [key: string]: unknown;
+}
+
 export interface EvalTracePacket {
-  schema_version: "2";
+  schema_version: "1";
   run_root: string;
   outcome: {
     status: string;
@@ -232,6 +286,8 @@ export interface EvalTracePacket {
   attempts: EvalTraceAttempt[];
   artifacts: EvalTraceArtifact[];
   events: Array<Record<string, unknown>>;
+  trajectory: EvalTrajectoryEvent[];
+  simulation_events: Array<Record<string, unknown>>;
   supervisor: {
     classifications: string[];
     gatherers: string[];
@@ -248,27 +304,21 @@ export interface EvalTracePacket {
     events: number;
     artifacts: number;
     recovery_cycles: number;
+    simulation_events: number;
+    trajectory_events: number;
     duration_ms?: number;
   };
 }
 
-export interface EvalDeterministicResult {
-  passed: boolean;
-  blockers: string[];
-  assertions: EvalAssertionResult[];
-}
-
 export interface EvalScorecard {
-  schema_version: "2";
+  schema_version: "1";
   suite_id: string;
   scenario_id: string;
   variant_id: string;
   trial_id: string;
   status: EvalTrialStatus;
   passed: boolean;
-  deterministic: EvalDeterministicResult;
-  graders: EvalGraderResult[];
-  judges: EvalJudgeResult[];
+  criteria_results: EvalCriterionResult[];
   scores: {
     average: number;
     dimensions: Record<string, number>;
@@ -305,6 +355,19 @@ export interface EvalTrialResult {
   scorecard?: EvalScorecard;
 }
 
+export interface EvalBenchmarkCriterion {
+  criterion_id: string;
+  kind: EvalCriterionKind;
+  required: boolean;
+  total_trials: number;
+  passed: number;
+  failed: number;
+  errored: number;
+  pass_rate: number;
+  blocker_count: number;
+  average_score: number;
+}
+
 export interface EvalBenchmarkVariant {
   variant_id: string;
   total_trials: number;
@@ -314,6 +377,7 @@ export interface EvalBenchmarkVariant {
   pass_rate: number;
   blocker_rate: number;
   average_score: number;
+  criteria: EvalBenchmarkCriterion[];
 }
 
 export interface EvalBenchmark {
@@ -330,10 +394,11 @@ export interface EvalBenchmark {
   pass_at_k: number;
   threshold_passed: boolean;
   variants: EvalBenchmarkVariant[];
+  criteria: EvalBenchmarkCriterion[];
 }
 
 export interface EvalRunLedger {
-  version: "2";
+  version: "1";
   suite_id: string;
   eval_root: string;
   suite_path: string;

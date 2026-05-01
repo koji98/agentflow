@@ -18,10 +18,19 @@ export interface RuntimeSupervisorRecoveryContext {
   case_file_path: string;
 }
 
+export interface RuntimeSupervisorContextRepairContext {
+  name: "supervisor_context_repair";
+  from: "runtime_supervisor_context_repair";
+  patch_id: string;
+  strategy: string;
+  reason: string;
+}
+
 export type ContextPacketSource =
   | ContextItem
   | RuntimeRepeatHistoryContext
-  | RuntimeSupervisorRecoveryContext;
+  | RuntimeSupervisorRecoveryContext
+  | RuntimeSupervisorContextRepairContext;
 
 export interface ContextPacketLiveWorkspaceBinding {
   kind: "live_workspace_input";

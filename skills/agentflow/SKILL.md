@@ -17,7 +17,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Need implementation mechanics: read `docs/technical-implementation/` in the repository.
 - Need failure semantics: read [references/failure-and-validation.md](references/failure-and-validation.md).
 - Need examples: read [references/examples.md](references/examples.md).
-- Need workflow eval suites, scenarios, graders, judges, scorecards, benchmarks, or prompt-pack comparisons: use `agentflow-evals`.
+- Need workflow eval suites, scenarios, criteria, environment simulation, trajectory checks, scorecards, benchmarks, or prompt-pack comparisons: use `agentflow-evals`.
 - Need reusable plugin workflows or tools: use `agentflow-plugins`.
 
 ## Default Workflow

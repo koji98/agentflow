@@ -68,6 +68,7 @@ import {
   diffNodeSnapshots,
   persistNodeBaselineSnapshot,
   persistNodeWorkspaceChanges,
+  restoreNodeWorkspaceChangesFromSnapshot,
   snapshotWorkspaceForNode
 } from "../workspace/node-snapshot.js";
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
@@ -813,6 +814,32 @@ async function sleepForRetryDelay(ms: number, signal: AbortSignal | undefined): 
   });
 }
 
+async function applyRuntimeOverlayBeforeRetry(options: {
+  recovery: Awaited<ReturnType<typeof runSupervisorRecoveryCycle>>;
+  attempt: RuntimeNodeAttempt;
+  workspacePath: string;
+}): Promise<boolean> {
+  const overlay = options.recovery.recovery_plan.runtime_overlay;
+  if (!overlay) {
+    return false;
+  }
+
+  if (overlay.apply_action === "repair_workspace") {
+    const patch = overlay.workspace_repair;
+    if (!patch) {
+      return false;
+    }
+    const result = await restoreNodeWorkspaceChangesFromSnapshot({
+      workspacePath: options.workspacePath,
+      attemptDir: options.attempt.execution_dir,
+      ...(patch.result_path ? { resultPath: patch.result_path } : {})
+    });
+    return result.status === "passed" || result.status === "partial";
+  }
+
+  return true;
+}
+
 async function handleFailedNodeWithSupervisor(options: {
   runOptions: RunCompiledGraphOptions;
   session: RuntimeSession;
@@ -956,6 +983,12 @@ async function handleFailedNodeWithSupervisor(options: {
         prior_interventions: await readSupervisorInterventions(options.writer.run_root).catch(() => []),
         policy: options.session.graph.supervision,
         workspace_path: options.session.manifest.repo_workspaces[options.node.repo]?.workspace_path ?? options.attempt.execution_dir,
+        repo_workspaces: Object.fromEntries(
+          Object.entries(options.session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
+            repoAlias,
+            binding.workspace_path
+          ])
+        ),
         ...(supervisorHarness ? { harness: supervisorHarness } : {}),
         ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
         ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
@@ -1152,6 +1185,12 @@ async function handleFailedNodeWithSupervisor(options: {
     prior_interventions: await readSupervisorInterventions(options.writer.run_root).catch(() => []),
     policy: options.session.graph.supervision,
     workspace_path: options.session.manifest.repo_workspaces[options.node.repo]?.workspace_path ?? options.attempt.execution_dir,
+    repo_workspaces: Object.fromEntries(
+      Object.entries(options.session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
+        repoAlias,
+        binding.workspace_path
+      ])
+    ),
     ...(supervisorHarness ? { harness: supervisorHarness } : {}),
     ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
     ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
@@ -1183,7 +1222,7 @@ async function handleFailedNodeWithSupervisor(options: {
     }
   );
 
-  if (recovery.recovery_plan.apply_action === "pause_for_human") {
+  if (recovery.recovery_plan.apply_action === "pause_for_authority") {
     options.session.supervisor.status = "paused";
     options.session.status = "paused";
     options.session.supervisor.pause = {
@@ -1209,7 +1248,26 @@ async function handleFailedNodeWithSupervisor(options: {
     return false;
   }
 
-  if (recovery.recovery_plan.apply_action !== "retry_node" || !recovery.recovery_envelope) {
+  const workspacePath =
+    options.session.manifest.repo_workspaces[options.node.repo]?.workspace_path ?? options.attempt.execution_dir;
+  const retryableOverlayAction = [
+    "repair_context",
+    "repair_validation_strategy",
+    "repair_workspace",
+    "repair_environment",
+    "retry_with_evidence"
+  ].includes(recovery.recovery_plan.apply_action);
+  const hasMaterialDelta = (recovery.recovery_plan.runtime_overlay?.material_delta.length ?? 0) > 0;
+  if (!retryableOverlayAction || !recovery.recovery_envelope || !hasMaterialDelta) {
+    options.session.supervisor.status = "exhausted";
+    return false;
+  }
+  const overlayApplied = await applyRuntimeOverlayBeforeRetry({
+    recovery,
+    attempt: options.attempt,
+    workspacePath
+  });
+  if (!overlayApplied) {
     options.session.supervisor.status = "exhausted";
     return false;
   }

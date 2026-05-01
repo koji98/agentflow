@@ -3,8 +3,90 @@
   "bucket": "valid-hard-execution",
   "difficulty": "hard",
   "description": "Outcome verifier should reject superficial success that misses semantic acceptance criteria.",
-  "fixture": { "repo": "../../shared/repo", "init_git": true },
-  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
-  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=semantic-acceptance-failure"] }], "forbidden_edits": ["shallow-pass.txt"], "supervisor": { "gatherers": ["semantic_rejudge"] } },
-  "grading": { "dimensions": ["supervisor_recovery_quality", "artifact_quality"] }
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=semantic-acceptance-failure"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "shallow-pass.txt"
+      ]
+    },
+    "supervisor": {
+      "gatherers": [
+        "semantic_rejudge"
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    }
+  }
 }

@@ -35,9 +35,9 @@ function renderEvalHelp(): string {
     "  compare <eval-root> --baseline <variant> --candidate <variant>",
     "",
     "Notes:",
-    "- Eval suites are local workflow benchmarks using version 2 eval.json files.",
+    "- Eval suites are local workflow benchmarks using version 1 eval.json files.",
     "- Eval trials run normal Agentflow graphs and grade complete workflow traces.",
-    "- The eval architecture follows Anthropic's Demystifying evals for AI agents article: tasks/scenarios, trials, graders, traces, outcomes, and aggregate reports."
+    "- The eval architecture follows Anthropic's Demystifying evals for AI agents article and adopts ADK-style criteria, trajectory evaluation, and deterministic environment simulation."
   ].join("\n");
 }
 
@@ -105,7 +105,7 @@ export const evalCommand = {
   ] as const,
   helpNotes: [
     "Eval suites are local file-backed workflow benchmarks.",
-    "Deterministic graders set hard blockers; LLM judges rate quality and prompt feedback.",
+    "Required criteria decide pass/fail; deterministic criteria set hard blockers and quality criteria rate qualitative behavior.",
     "Use eval for offline workflow grading; use graph check nodes for in-run sensors and supervisor semantic_evaluation for runtime interventions."
   ] as const,
   async run(
@@ -159,8 +159,8 @@ export const evalCommand = {
           scenario_count: loaded.scenarios.length,
           scenarios: loaded.scenarios.map((scenario) => scenario.id),
           variants: loaded.variants.map((variant) => variant.id),
-          grader_count: loaded.graders.length,
-          judge_count: loaded.judges.length,
+          criterion_count: loaded.criteria.length,
+          criteria: loaded.criteria.map((criterion) => ({ id: criterion.id, kind: criterion.kind, required: criterion.required })),
           diagnostics: loaded.diagnostics
         }
       };

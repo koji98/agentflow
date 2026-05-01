@@ -1,5 +1,5 @@
 {
-  "version": "2",
+  "version": "1",
   "suite_id": "agentflow-capability-workflows",
   "objective": "Evaluate Agentflow prompt, context, tool, workspace, artifact, delivery, and supervisor behavior on hard local workflow fixtures.",
   "default_trials": 1,
@@ -19,81 +19,164 @@
     "scenarios/13-worktree-change-capture/scenario.json",
     "scenarios/14-stale-docs-conflict/scenario.json",
     "scenarios/15-supervisor-retry-envelope/scenario.json",
-    "scenarios/16-terminal-repeated-failure/scenario.json"
+    "scenarios/16-terminal-repeated-failure/scenario.json",
+    "scenarios/17-context-overflow-repair/scenario.json",
+    "scenarios/18-noisy-generated-tree/scenario.json",
+    "scenarios/19-validation-timeout-strategy/scenario.json",
+    "scenarios/20-workspace-pollution-cleanup/scenario.json",
+    "scenarios/21-no-delta-recovery-stop/scenario.json"
   ],
   "variants": [
     "variants/current.json",
     "variants/terse.json"
   ],
-  "graders": [
-    {
-      "id": "capability-deterministic",
-      "kind": "script",
-      "command": "node graders/capability-deterministic.mjs",
-      "timeout_sec": 300
-    }
-  ],
-  "judges": [
-    {
-      "id": "contract-adherence",
-      "rubric": "judges/contract-adherence.md",
-      "model": "gpt-5.4-mini",
-      "reasoning_effort": "low",
-      "required": false
-    },
-    {
-      "id": "artifact-quality",
-      "rubric": "judges/artifact-quality.md",
-      "model": "gpt-5.4-mini",
-      "reasoning_effort": "low",
-      "required": false
-    },
-    {
-      "id": "evidence-use",
-      "rubric": "judges/evidence-use.md",
-      "model": "gpt-5.4-mini",
-      "reasoning_effort": "low",
-      "required": false
-    },
-    {
-      "id": "context-handling",
-      "rubric": "judges/context-handling.md",
-      "model": "gpt-5.4-mini",
-      "reasoning_effort": "low",
-      "required": false
-    },
-    {
-      "id": "tool-discipline",
-      "rubric": "judges/tool-discipline.md",
-      "model": "gpt-5.4-mini",
-      "reasoning_effort": "low",
-      "required": false
-    },
-    {
-      "id": "supervisor-recovery",
-      "rubric": "judges/supervisor-recovery.md",
-      "model": "gpt-5.4-mini",
-      "reasoning_effort": "low",
-      "required": false
-    },
-    {
-      "id": "noise-efficiency",
-      "rubric": "judges/noise-efficiency.md",
-      "model": "gpt-5.4-mini",
-      "reasoning_effort": "low",
-      "required": false
-    },
-    {
-      "id": "delivery-auditability",
-      "rubric": "judges/delivery-auditability.md",
-      "model": "gpt-5.4-mini",
-      "reasoning_effort": "low",
-      "required": false
-    }
-  ],
   "thresholds": {
     "pass_rate": 0.5,
     "max_blocker_rate": 1,
     "min_average_score": 2
-  }
+  },
+  "criteria": [
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true,
+      "description": "Final graph status matches the scenario expectation."
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true,
+      "description": "Declared artifacts exist and contain required evidence."
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace",
+      "required": true,
+      "description": "Forbidden workspace edits did not occur."
+    },
+    {
+      "id": "supervisor",
+      "kind": "supervisor",
+      "required": true,
+      "description": "Expected supervisor classifications, gatherers, and apply actions occurred."
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true,
+      "description": "Delivery manifest is present when the workflow completes."
+    },
+    {
+      "id": "capability-deterministic",
+      "kind": "custom_script",
+      "command": "node graders/capability-deterministic.mjs",
+      "timeout_sec": 300,
+      "required": true,
+      "description": "Suite-specific deterministic assertions."
+    },
+    {
+      "id": "contract-adherence",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/contract-adherence.md",
+      "dimensions": [
+        "contract_adherence"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "artifact-quality",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/artifact-quality.md",
+      "dimensions": [
+        "artifact_quality"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "evidence-use",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/evidence-use.md",
+      "dimensions": [
+        "evidence_use"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "context-handling",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/context-handling.md",
+      "dimensions": [
+        "context_handling"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "tool-discipline",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/tool-discipline.md",
+      "dimensions": [
+        "tool_discipline"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "supervisor-recovery",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/supervisor-recovery.md",
+      "dimensions": [
+        "supervisor_recovery"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "noise-efficiency",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/noise-efficiency.md",
+      "dimensions": [
+        "noise_efficiency"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    },
+    {
+      "id": "delivery-auditability",
+      "kind": "quality",
+      "required": false,
+      "rubric": "judges/delivery-auditability.md",
+      "dimensions": [
+        "delivery_auditability"
+      ],
+      "threshold": 4,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low"
+    }
+  ]
 }

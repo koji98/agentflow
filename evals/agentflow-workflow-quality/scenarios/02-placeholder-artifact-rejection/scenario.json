@@ -3,8 +3,87 @@
   "bucket": "valid-hard-execution",
   "difficulty": "hard",
   "description": "Workflow should reject placeholder handoffs and require substantive artifact content.",
-  "fixture": { "repo": "../../shared/repo", "init_git": true },
-  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
-  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=placeholder-artifact-rejection", "validation"] }], "forbidden_edits": ["TODO.md"] },
-  "grading": { "dimensions": ["artifact_quality", "graph_contract_adherence"] }
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=placeholder-artifact-rejection",
+            "validation"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "TODO.md"
+      ]
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "artifact_quality",
+        "graph_contract_adherence"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "artifact_quality",
+        "graph_contract_adherence"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "artifact_quality",
+        "graph_contract_adherence"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "artifact_quality",
+        "graph_contract_adherence"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "artifact_quality",
+        "graph_contract_adherence"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "artifact_quality",
+        "graph_contract_adherence"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "artifact_quality",
+        "graph_contract_adherence"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "artifact_quality",
+        "graph_contract_adherence"
+      ]
+    }
+  }
 }

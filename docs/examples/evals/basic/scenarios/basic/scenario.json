@@ -3,26 +3,35 @@
   "bucket": "smoke",
   "difficulty": "easy",
   "description": "Run a tiny local graph and leave durable artifacts for grading.",
-  "fixture": {
-    "repo": "repo",
-    "init_git": true
-  },
   "workflow": {
     "graph_template": "graph.template.json",
     "harness": "codex-cli",
     "workspace_backend": "inplace"
   },
-  "expected": {
-    "final_outcome": "passed",
-    "required_artifacts": [
-      {
-        "name": "handoff",
-        "contains": ["hello eval"]
-      }
-    ],
-    "forbidden_edits": []
+  "environment": {
+    "repo": "repo",
+    "init_git": true
   },
-  "grading": {
-    "dimensions": ["delivery_auditability"]
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "hello eval"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": []
+    },
+    "delivery": {
+      "required": true
+    },
+    "trace": {}
   }
 }

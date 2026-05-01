@@ -39,12 +39,12 @@ Start with:
 1. `<eval-root>/report.md`
 2. `<eval-root>/benchmark.json`
 3. failing trial `scorecard.json`
-4. failing trial `deterministic-results.json`
-5. judge `ai-check-result.json` and `last_message.txt`
+4. failing trial `criteria-results.json`
+5. quality criterion `ai-check-result.json` and `judge-packet.json`
 6. `trace-packet.json`
 7. the underlying run root named in `run-root.txt`
 
-For prompt iteration, inspect `scorecard.prompt_feedback`, judge rationales, and concrete failed assertions before changing prompts or context surfaces.
+For prompt iteration, inspect `scorecard.prompt_feedback`, quality rationales, and concrete failed assertions before changing prompts or context surfaces.
 
 ## Built-In Dogfood Suites
 
@@ -76,7 +76,7 @@ It is a capability eval. It is useful even when the pass rate is below 100%, bec
 
 The larger prompt/context iteration suite is `evals/agentflow-capability-workflows`.
 
-It generates ignored local repo fixtures under `eval-repos/agentflow-capability-workflows/` with `npm run setup:eval-repos`. Use it when you need harder end-to-end coverage across code repair, dependency docs, stale docs, noisy monorepos, local tools, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, and expected terminal failure.
+It generates ignored local repo fixtures under `eval-repos/agentflow-capability-workflows/` with `npm run setup:eval-repos`. Use it when you need harder end-to-end coverage across code repair, dependency docs, stale docs, noisy monorepos, local tools, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, expected terminal failure, context-overflow repair, and generated-tree noise control.
 
 The highest-signal issue suite is `evals/agentflow-realworld-issues`.
 
@@ -90,12 +90,12 @@ Run real Codex-backed validation when changing eval plumbing or prompt surfaces:
 node scripts/validate-real-evals.mjs --harness codex-cli
 ```
 
-The validator builds a temporary v2 suite with local fixtures and checks:
+The validator builds a temporary v1 suite with local environments and checks:
 
 - real node run
 - real eval trace packet
-- deterministic scorecard
-- at least one LLM judge result
+- deterministic criteria scorecard
+- at least one quality criterion result
 - report generation
 - inspect/compare output
 
@@ -111,9 +111,9 @@ Keep both when changing prompts or supervisor behavior: capability suites show w
 
 ## Troubleshooting
 
-- Validation fails before run: inspect path-specific diagnostics for missing suite, scenario, variant, judge, grader, fixture, or graph template files.
+- Validation fails before run: inspect path-specific diagnostics for missing suite, scenario, variant, criterion, rubric, script, environment fixture, simulation response file, or graph template files.
 - A scenario has 0% pass rate across many trials: check if the task is ambiguous, impossible, or graded for a fact not in the task.
-- Deterministic blockers fail but judges are positive: fix the workflow or grader first; hard blockers win.
-- Judges error: open `judge-results/<id>/ai-check-result.json`, `last_message.txt`, and `judge-packet.json`.
+- Deterministic blockers fail but quality scores are positive: fix the workflow or deterministic criterion first; hard blockers win.
+- Quality criteria error: open `judge-results/<id>/ai-check-result.json` and `judge-packet.json`.
 - Trial has no trace packet: inspect `rendered-graph.json`, `trial.json`, and launch errors; the graph may not have reached runtime.
-- External docs behavior is flaky: replace public network dependencies with local `docs/` fixtures and `{{fixture.docs_url}}`.
+- External docs behavior is flaky: replace public network dependencies with local `docs/` environments and `{{environment.docs_url}}`, or use deterministic `environment.simulation` tool calls.

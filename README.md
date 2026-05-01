@@ -32,7 +32,7 @@ The graph is not a free-form planner. It is an accountable execution contract. T
 - Humans evaluating Agentflow should read this README, then `docs/SCOPE.md` for the product boundary and `docs/ARCHITECTURE.md` for the runtime model.
 - Graph authors should use the minimal graph below, `docs/examples/graphs/`, and `docs/OPERATIONS.md` for validation and launch.
 - Plugin authors should use `docs/PLUGINS.md` for local or Git plugin packages, workflow exports, tool exports, and secure auth.
-- Workflow evaluators should use `docs/EVALS.md` for suite layout, scenarios, variants, graders, LLM judges, benchmark reports, and the built-in dogfood suites. Use `npm run setup:eval-repos` before running the generated local-repo capability suite, and `npm run setup:realworld-evals` before running the pinned GitHub issue suite.
+- Workflow evaluators should use `docs/EVALS.md` for suite layout, scenarios, variants, criteria, environment simulation, trajectory checks, benchmark reports, and the built-in dogfood suites. Use `npm run setup:eval-repos` before running the generated local-repo capability suite, and `npm run setup:realworld-evals` before running the pinned GitHub issue suite.
 - Implementers and debuggers who need the mechanics should use `docs/technical-implementation/` for runtime lifecycle, context/artifact materialization, and tool injection details.
 - Operators reviewing a terminal run should start with `delivery/manifest.json` and the human entrypoints it lists.
 - Agents authoring or debugging Agentflow should use the packaged `agentflow`, `agentflow-evals`, and `agentflow-plugins` skills under `skills/`.
@@ -215,11 +215,15 @@ The runtime records supervisor decisions in `supervisor-timeline.jsonl`, interve
 - `semantic_evaluation`
 - `fail`
 
-Each configured action uses `actions.<action>.max_uses`, with `max_total_interventions` enforcing the overall cap. The default supervisor action is observe; it intervenes only when graph success, node alignment, artifact integrity, or policy safety is at risk.
+Each configured action uses `actions.<action>.max_uses`, with `max_total_interventions` enforcing the overall cap. The configured action is the budget entry point; internally, the supervisor applies a runtime overlay such as context repair, evidence-backed retry, artifact repair, terminal fail, or authority pause. The default supervisor action is observe; it intervenes only when graph success, node alignment, artifact integrity, or policy safety is at risk.
 
 If a successful agent attempt misses a declared artifact, validation has already accepted the graph shape, so the runtime treats it as a repairable execution problem. When a harness is available, the supervisor runs an intent-aware repair intervention under the same node authority. When exactly one missing artifact is a human-readable text handoff and no harness is available, the supervisor can synthesize it from the captured `agent_response`; machine-readable artifacts and multi-artifact contracts are not synthesized from prose. Failed harness attempts keep their real failure output as the primary diagnostic; any files they wrote remain evidence for repair, not published declared handoffs.
 
-`retry_with_guidance` records a guidance brief and prompt revision, tracks repeated failure fingerprints, emits `supervisor.retry_scheduled`, then waits before re-queueing the node. The default delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override those values for local testing or operations.
+Context packaging failures are recovered deterministically when possible. `agentflow validate --run-ready` tokenizes real matched context, reports broad glob samples and largest files, honors default dependency/generated-tree ignores, and fails before launch when a node would exceed `max_total_tokens`. At runtime, the supervisor classifies these as `context_contract_failure`, writes context analysis and a context repair patch, then retries with a compact `supervisor_context_repair` packet instead of repeating the same oversized context.
+
+The same recovery loop handles other machine-fixable failures before it considers a pause. Validation timeouts receive focused validation guidance, forbidden failed-attempt workspace edits are restored from node snapshots before retry, and transient runtime wrapper/PATH failures retry with regenerated per-execution Agentflow tool wrappers. Human pause is reserved for authority, credentials, security/compliance, product intent, explicit checkpoints, or graph-contract changes.
+
+`retry_with_guidance` records a case file, evidence patches, a recovery plan, a material delta, and a recovery envelope, tracks repeated failure fingerprints, emits `supervisor.retry_scheduled`, then waits before re-queueing the node. The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts remain unchanged. The default delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override those values for local testing or operations.
 
 ## Evaluation Lanes
 
@@ -227,7 +231,7 @@ If a successful agent attempt misses a declared artifact, validation has already
 - Outcome verification is the always-on runtime contract for passing `agent` attempts. It audits the final response, declared artifacts, decision logs, and per-node workspace-change evidence before the attempt can remain passed.
 - Supervisor `semantic_evaluation` is an intervention. It spends supervisor budget after a runtime classification and records recovery evidence.
 - Managed pattern evaluation is authored workflow structure, such as the evaluator loop generated by `pattern_generate_evaluate_fix`.
-- `agentflow eval` is offline workflow evaluation for file-backed suites, scenarios, variants, repeated trials, deterministic graders, and LLM judges. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents), and it writes `.agentflow/evals` artifacts such as `eval-run.json`, `evaluation-ledger.json`, `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`. See `docs/EVALS.md` for the full suite schema and operating loop.
+- `agentflow eval` is offline workflow evaluation for file-backed suites, scenarios, variants, repeated trials, required criteria, quality criteria, trajectory checks, and deterministic environment simulation. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and adopts useful ADK eval mechanics, and it writes `.agentflow/evals` artifacts such as `eval-run.json`, `evaluation-ledger.json`, `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`. See `docs/EVALS.md` for the full suite schema and operating loop.
 
 ## Plugin Tools
 

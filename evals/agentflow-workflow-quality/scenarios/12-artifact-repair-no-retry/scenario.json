@@ -3,8 +3,90 @@
   "bucket": "valid-hard-execution",
   "difficulty": "hard",
   "description": "Supervisor should repair missing artifact directly when final response contains enough evidence.",
-  "fixture": { "repo": "../../shared/repo", "init_git": true },
-  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
-  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=artifact-repair-no-retry"] }], "forbidden_edits": ["unnecessary-retry.txt"], "supervisor": { "apply_actions": ["repair_artifact"] } },
-  "grading": { "dimensions": ["supervisor_recovery_quality", "artifact_quality"] }
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=artifact-repair-no-retry"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "unnecessary-retry.txt"
+      ]
+    },
+    "supervisor": {
+      "apply_actions": [
+        "repair_artifact"
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "supervisor_recovery_quality",
+        "artifact_quality"
+      ]
+    }
+  }
 }

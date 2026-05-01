@@ -5,18 +5,32 @@ import type { ArtifactDefinition, SupervisionPolicy } from "../graph/authored.js
 import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js";
 import type { SupervisorActionKind } from "../graph/schema.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
+import {
+  analyzeNodeContext,
+  createCompactContextIndex,
+  renderContextAnalysisMarkdown,
+  type ContextAnalysisReport,
+  type ContextAnalysisNode
+} from "../runtime/context/analyze.js";
+import { countContextTokens } from "../runtime/context/tokenizer.js";
 import type { RuntimeNodeExecutionResult } from "../runtime/core/engine.js";
 import type { HarnessAdapter } from "../runtime/harness/types.js";
 import { renderHarnessPrompt } from "../runtime/harness/types.js";
 import type { FailureClassification } from "./classifier.js";
 import type {
   SupervisorCaseFile,
+  SupervisorContextRepairPatch,
   SupervisorEvidenceGatherKind,
   SupervisorEvidenceGatherRequest,
   SupervisorEvidencePatch,
   SupervisorInterventionRecord,
+  SupervisorMaterialDelta,
   SupervisorRecoveryEnvelope,
-  SupervisorRecoveryPlan
+  SupervisorRecoveryPlan,
+  SupervisorRuntimeOverlay,
+  SupervisorValidationStrategyRepair,
+  SupervisorWorkspaceRepairPatch,
+  SupervisorEnvironmentRepair
 } from "./types.js";
 
 const evidenceConcurrencyCap = 4;
@@ -512,31 +526,248 @@ function selectApplyAction(options: {
   }
 
   if (!options.classification.retryable && options.classification.recommended_action === "pause_for_human") {
-    return "pause_for_human";
+    return "pause_for_authority";
   }
 
   if (options.patches.some((patch) => patch.scope_or_authority_changed)) {
-    return "pause_for_human";
+    return "pause_for_authority";
+  }
+
+  if (options.classification.class === "context_contract_failure") {
+    return "repair_context";
+  }
+
+  if (options.classification.class === "diagnostic_needed") {
+    return "repair_validation_strategy";
+  }
+
+  if (options.classification.evidence.workspace_repair_candidate === true) {
+    return "repair_workspace";
+  }
+
+  if (options.classification.evidence.environment_repair_candidate === true) {
+    return "repair_environment";
   }
 
   if (options.action === "repair_artifact" || options.classification.recommended_action === "repair_artifact") {
     return "repair_artifact";
   }
 
-  return "retry_node";
+  return "retry_with_evidence";
+}
+
+function retryableApplyAction(action: SupervisorRecoveryPlan["apply_action"]): boolean {
+  return [
+    "repair_context",
+    "repair_validation_strategy",
+    "repair_workspace",
+    "repair_environment",
+    "retry_with_evidence"
+  ].includes(action);
+}
+
+function buildContextRepairPatch(options: {
+  caseFile: SupervisorCaseFile;
+  analysis: ContextAnalysisNode;
+  analysisPath: string;
+}): SupervisorContextRepairPatch {
+  const text = createCompactContextIndex(options.analysis);
+  return {
+    patch_id: `${options.caseFile.case_id}__context_repair`,
+    strategy: "replace_authored_context",
+    reason: "Authored context exceeded the node token budget; supervisor replaced it with a compact index and omission provenance.",
+    materials: [
+      {
+        key: "supervisor_context_repair",
+        title: "Supervisor context repair package",
+        text,
+        tokens: countContextTokens(text)
+      }
+    ],
+    omitted: options.analysis.items.map((item) => ({
+      key: item.key,
+      reason: `Original ${item.kind} context "${item.name}" was not materialized directly after context repair. Use the compact index and live workspace paths when more detail is needed.`,
+      source_name: item.name,
+      ...(item.path ? { source_path: item.path } : {})
+    })),
+    analysis_path: options.analysisPath,
+    created_at: nowIso()
+  };
+}
+
+function readWorkspaceRepairPatch(options: {
+  caseFile: SupervisorCaseFile;
+  attempt: RuntimeNodeAttempt;
+  resultPath: string;
+}): SupervisorWorkspaceRepairPatch | undefined {
+  const metadata = isRecord(options.attempt.metadata) ? options.attempt.metadata : {};
+  const changes = isRecord(metadata.node_workspace_changes) ? metadata.node_workspace_changes : undefined;
+  const baselinePath = typeof changes?.baseline_path === "string" ? changes.baseline_path : undefined;
+  const changedFilesPath =
+    typeof changes?.changed_files_path === "string" ? changes.changed_files_path : undefined;
+  const changedFileCount =
+    typeof changes?.changed_file_count === "number" ? changes.changed_file_count : undefined;
+  const statusPath = typeof changes?.status_path === "string" ? changes.status_path : undefined;
+  const diffPatchPath = typeof changes?.diff_patch_path === "string" ? changes.diff_patch_path : undefined;
+
+  if (!baselinePath || !changedFilesPath || !changedFileCount || changedFileCount <= 0) {
+    return undefined;
+  }
+
+  return {
+    patch_id: `${options.caseFile.case_id}__workspace_repair`,
+    strategy: "restore_failed_attempt_changes",
+    reason: "The failed attempt changed workspace files outside the intended scope; restore that attempt-owned diff before retry.",
+    baseline_path: baselinePath,
+    changed_files_path: changedFilesPath,
+    ...(statusPath ? { status_path: statusPath } : {}),
+    ...(diffPatchPath ? { diff_patch_path: diffPatchPath } : {}),
+    changed_file_count: changedFileCount,
+    result_path: options.resultPath,
+    created_at: nowIso()
+  };
+}
+
+function buildRuntimeOverlay(options: {
+  overlayId: string;
+  applyAction: SupervisorRecoveryPlan["apply_action"];
+  classification: FailureClassification;
+  contextRepairPatch?: SupervisorContextRepairPatch;
+  workspaceRepairPatch?: SupervisorWorkspaceRepairPatch;
+  evidencePatches: SupervisorEvidencePatch[];
+}): SupervisorRuntimeOverlay | undefined {
+  const deltas: SupervisorMaterialDelta[] = [];
+  let validationStrategy: SupervisorValidationStrategyRepair | undefined;
+  let environmentRepair: SupervisorEnvironmentRepair | undefined;
+
+  if (options.contextRepairPatch) {
+    deltas.push({
+      kind: "context_changed",
+      summary: "Replaced authored context materialization with a compact supervisor context repair package."
+    });
+  }
+
+  if (options.evidencePatches.length > 0 && options.applyAction === "retry_with_evidence") {
+    deltas.push({
+      kind: "evidence_added",
+      summary: "Added supervisor evidence patches for the retry."
+    });
+  }
+
+  if (options.workspaceRepairPatch) {
+    deltas.push({
+      kind: "workspace_cleaned",
+      summary: `Restore ${options.workspaceRepairPatch.changed_file_count} file change(s) from the failed attempt before retry.`,
+      artifact_paths: {
+        baseline: options.workspaceRepairPatch.baseline_path,
+        changed_files: options.workspaceRepairPatch.changed_files_path,
+        ...(options.workspaceRepairPatch.diff_patch_path ? { diff: options.workspaceRepairPatch.diff_patch_path } : {}),
+        ...(options.workspaceRepairPatch.result_path ? { result: options.workspaceRepairPatch.result_path } : {})
+      }
+    });
+  }
+
+  if (options.applyAction === "repair_environment") {
+    environmentRepair = {
+      reason: options.classification.summary,
+      safe_repairs: [
+        "Regenerate per-execution Agentflow tool wrappers.",
+        "Refresh runtime PATH and Agentflow metadata for the next attempt.",
+        "Validate local runtime/tool availability through the normal executor setup path."
+      ],
+      retry_effect: "The next attempt receives freshly materialized wrappers and runtime metadata without changing graph authority."
+    };
+    deltas.push({
+      kind: "environment_repaired",
+      summary: "Refresh safe per-execution runtime wrappers and PATH metadata before retry."
+    });
+  }
+
+  if (options.applyAction === "repair_validation_strategy") {
+    validationStrategy = {
+      reason: options.classification.summary,
+      focus: [
+        "Use the narrowest validation command or diagnostic that proves the failed symptom.",
+        "Capture the exact command, exit code, and relevant stdout/stderr before final handoff.",
+        "If a broad validation command timed out or failed ambiguously, run a focused check first and then the broader command only when practical."
+      ],
+      avoid_repeating: [
+        "Do not rerun the same timeout-prone or ambiguous command as the only validation step.",
+        "Do not claim validation passed without command evidence."
+      ],
+      required_handoff_evidence: [
+        "focused validation command",
+        "result or exit code",
+        "remaining broad-suite risk, if any"
+      ]
+    };
+    deltas.push({
+      kind: "validation_strategy_changed",
+      summary: "Changed retry validation guidance to use focused diagnostics before broad validation."
+    });
+  }
+
+  if (!retryableApplyAction(options.applyAction) && options.applyAction !== "repair_artifact") {
+    return undefined;
+  }
+
+  return {
+    overlay_id: options.overlayId,
+    apply_action: options.applyAction,
+    material_delta: deltas,
+    ...(options.contextRepairPatch ? { context_repair: options.contextRepairPatch } : {}),
+    ...(validationStrategy ? { validation_strategy: validationStrategy } : {}),
+    ...(options.workspaceRepairPatch ? { workspace_repair: options.workspaceRepairPatch } : {}),
+    ...(environmentRepair ? { environment_repair: environmentRepair } : {}),
+    created_at: nowIso()
+  };
 }
 
 function buildRetryDirective(options: {
   classification: FailureClassification;
   caseFile: SupervisorCaseFile;
   patches: SupervisorEvidencePatch[];
+  runtimeOverlay?: SupervisorRuntimeOverlay;
 }): SupervisorRecoveryEnvelope["retry_directive"] {
   const retryGuidance = options.patches.flatMap((patch) => patch.retry_guidance);
+  const overlayGuidance = options.runtimeOverlay?.context_repair
+    ? [
+        "Use the supervisor context repair package as the active context index.",
+        "Open live workspace files listed in the repair package when additional detail is needed."
+      ]
+    : [];
+  const workspaceGuidance = options.runtimeOverlay?.workspace_repair
+    ? [
+        "Treat the retry as a clean attempt after supervisor workspace cleanup.",
+        "Stay inside the intended node scope and avoid recreating unrelated or forbidden edits."
+      ]
+    : [];
+  const environmentGuidance = options.runtimeOverlay?.environment_repair
+    ? [
+        "Use the refreshed Agentflow runtime wrappers and PATH metadata from this retry.",
+        "If a local tool is still unavailable, capture exact command evidence before final handoff."
+      ]
+    : [];
+  const validationGuidance = options.runtimeOverlay?.validation_strategy
+    ? [
+        ...options.runtimeOverlay.validation_strategy.focus,
+        ...options.runtimeOverlay.validation_strategy.avoid_repeating,
+        `Final handoff must include: ${options.runtimeOverlay.validation_strategy.required_handoff_evidence.join(", ")}.`
+      ]
+    : [];
   const evidenceToRead = [
     options.caseFile.prompt_path ?? "",
     ...options.patches.flatMap((patch) => Object.values(patch.artifact_paths).filter((path) => basename(path) === "evidence-patch.md"))
   ].filter(Boolean);
-  const dedupedGuidance = [...new Set(retryGuidance)].slice(0, 12);
+  const dedupedGuidance = [
+    ...new Set([
+      ...overlayGuidance,
+      ...workspaceGuidance,
+      ...environmentGuidance,
+      ...validationGuidance,
+      ...retryGuidance
+    ])
+  ].slice(0, 12);
 
   return {
     summary: options.classification.summary,
@@ -598,6 +829,7 @@ function buildRecoveryPlan(options: {
   classification: FailureClassification;
   caseFile: SupervisorCaseFile;
   patches: SupervisorEvidencePatch[];
+  runtimeOverlay?: SupervisorRuntimeOverlay;
 }): SupervisorRecoveryPlan {
   const applyAction = selectApplyAction({
     action: options.action,
@@ -607,11 +839,12 @@ function buildRecoveryPlan(options: {
   const conflicts = options.patches.flatMap((patch) => patch.conflicts);
   const mergedClaims = [...new Set(options.patches.flatMap((patch) => patch.claims))];
   const retryDirective =
-    applyAction === "retry_node"
+    retryableApplyAction(applyAction)
       ? buildRetryDirective({
           classification: options.classification,
           caseFile: options.caseFile,
-          patches: options.patches
+          patches: options.patches,
+          ...(options.runtimeOverlay ? { runtimeOverlay: options.runtimeOverlay } : {})
         })
       : undefined;
 
@@ -621,6 +854,7 @@ function buildRecoveryPlan(options: {
     classification: options.classification.class,
     apply_action: applyAction,
     ...(retryDirective ? { retry_directive: retryDirective } : {}),
+    ...(options.runtimeOverlay ? { runtime_overlay: options.runtimeOverlay } : {}),
     ...(applyAction === "repair_artifact"
       ? {
           repair_directive: {
@@ -629,7 +863,7 @@ function buildRecoveryPlan(options: {
           }
         }
       : {}),
-    ...(applyAction === "pause_for_human"
+    ...(applyAction === "pause_for_authority"
       ? {
           pause_request: {
             reason: options.classification.summary,
@@ -688,6 +922,7 @@ export async function runSupervisorRecoveryCycle(options: {
   prior_interventions: SupervisorInterventionRecord[];
   policy: SupervisionPolicy;
   workspace_path: string;
+  repo_workspaces?: Record<string, string>;
   harness?: HarnessAdapter;
   context_manifest_path?: string;
   signal?: AbortSignal;
@@ -703,6 +938,13 @@ export async function runSupervisorRecoveryCycle(options: {
   await mkdir(interventionDir, { recursive: true });
   const caseFileJsonPath = join(interventionDir, "case-file.json");
   const caseFileMarkdownPath = join(interventionDir, "case-file.md");
+  const contextAnalysisJsonPath = join(interventionDir, "context-analysis.json");
+  const contextAnalysisMarkdownPath = join(interventionDir, "context-analysis.md");
+  const contextRepairPatchPath = join(interventionDir, "context-repair-patch.json");
+  const workspaceRepairPatchPath = join(interventionDir, "workspace-repair-patch.json");
+  const workspaceRepairResultPath = join(interventionDir, "workspace-repair-result.json");
+  const runtimeOverlayPath = join(interventionDir, "runtime-overlay.json");
+  const materialDeltaPath = join(interventionDir, "material-delta.json");
   const recoveryPlanJsonPath = join(interventionDir, "recovery-plan.json");
   const recoveryPlanMarkdownPath = join(interventionDir, "recovery-plan.md");
   const recoveryEnvelopeJsonPath = join(interventionDir, "recovery-envelope.json");
@@ -749,6 +991,36 @@ export async function runSupervisorRecoveryCycle(options: {
   await writeFile(caseFileJsonPath, `${JSON.stringify(caseFile, null, 2)}\n`, "utf8");
   await writeFile(caseFileMarkdownPath, `${renderCaseFileMarkdown(caseFile)}\n`, "utf8");
 
+  const repoWorkspaces = options.repo_workspaces ?? {
+    [options.node.repo]: options.workspace_path
+  };
+  const contextAnalysis =
+    options.classification.class === "context_contract_failure"
+      ? await analyzeNodeContext({
+          node: options.node,
+          repo_workspaces: repoWorkspaces
+        })
+      : undefined;
+  if (contextAnalysis) {
+    const contextAnalysisReport: ContextAnalysisReport = {
+      status: contextAnalysis.would_exceed_total ? "blocked" : contextAnalysis.warnings.length > 0 ? "warnings" : "passed",
+      nodes: [contextAnalysis],
+      diagnostics: []
+    };
+    await writeFile(contextAnalysisJsonPath, `${JSON.stringify(contextAnalysis, null, 2)}\n`, "utf8");
+    await writeFile(contextAnalysisMarkdownPath, renderContextAnalysisMarkdown(contextAnalysisReport), "utf8");
+  }
+  const contextRepairPatch = contextAnalysis
+    ? buildContextRepairPatch({
+        caseFile,
+        analysis: contextAnalysis,
+        analysisPath: contextAnalysisJsonPath
+      })
+    : undefined;
+  if (contextRepairPatch) {
+    await writeFile(contextRepairPatchPath, `${JSON.stringify(contextRepairPatch, null, 2)}\n`, "utf8");
+  }
+
   const contextManifest = options.context_manifest_path
     ? await readFile(options.context_manifest_path, "utf8").catch(() => undefined)
     : undefined;
@@ -770,19 +1042,47 @@ export async function runSupervisorRecoveryCycle(options: {
       })
     )
   );
+  const plannedApplyAction = selectApplyAction({
+    action: options.action,
+    classification: options.classification,
+    patches: evidencePatches
+  });
+  const workspaceRepairPatch = plannedApplyAction === "repair_workspace"
+    ? readWorkspaceRepairPatch({
+        caseFile,
+        attempt: options.attempt,
+        resultPath: workspaceRepairResultPath
+      })
+    : undefined;
+  if (workspaceRepairPatch) {
+    await writeFile(workspaceRepairPatchPath, `${JSON.stringify(workspaceRepairPatch, null, 2)}\n`, "utf8");
+  }
+  const runtimeOverlay = buildRuntimeOverlay({
+    overlayId: `${options.intervention_id}__overlay`,
+    applyAction: plannedApplyAction,
+    classification: options.classification,
+    ...(contextRepairPatch ? { contextRepairPatch } : {}),
+    ...(workspaceRepairPatch ? { workspaceRepairPatch } : {}),
+    evidencePatches
+  });
+  if (runtimeOverlay) {
+    await writeFile(runtimeOverlayPath, `${JSON.stringify(runtimeOverlay, null, 2)}\n`, "utf8");
+    await writeFile(materialDeltaPath, `${JSON.stringify(runtimeOverlay.material_delta, null, 2)}\n`, "utf8");
+  }
 
   const recoveryPlan = buildRecoveryPlan({
     planId: `${options.intervention_id}__plan`,
     action: options.action,
     classification: options.classification,
     caseFile,
-    patches: evidencePatches
+    patches: evidencePatches,
+    ...(runtimeOverlay ? { runtimeOverlay } : {})
   });
   await writeFile(recoveryPlanJsonPath, `${JSON.stringify(recoveryPlan, null, 2)}\n`, "utf8");
   await writeFile(recoveryPlanMarkdownPath, `${renderRecoveryPlanMarkdown(recoveryPlan)}\n`, "utf8");
 
   const recoveryEnvelope =
-    recoveryPlan.apply_action === "retry_node" && recoveryPlan.retry_directive
+    retryableApplyAction(recoveryPlan.apply_action) && recoveryPlan.retry_directive
       ? {
           envelope_id: `${options.intervention_id}__envelope`,
           compiled_id: options.node.compiled_id,
@@ -795,6 +1095,7 @@ export async function runSupervisorRecoveryCycle(options: {
           failure_fingerprint: options.failure_fingerprint,
           repeated_fingerprint_count: options.repeated_fingerprint_count,
           retry_directive: recoveryPlan.retry_directive,
+          ...(recoveryPlan.runtime_overlay ? { runtime_overlay: recoveryPlan.runtime_overlay } : {}),
           created_at: nowIso()
         }
       : undefined;
@@ -808,6 +1109,25 @@ export async function runSupervisorRecoveryCycle(options: {
     intervention_dir: interventionDir,
     case_file_json: caseFileJsonPath,
     case_file_markdown: caseFileMarkdownPath,
+    ...(contextAnalysis
+      ? {
+          context_analysis_json: contextAnalysisJsonPath,
+          context_analysis_markdown: contextAnalysisMarkdownPath
+        }
+      : {}),
+    ...(contextRepairPatch ? { context_repair_patch_json: contextRepairPatchPath } : {}),
+    ...(workspaceRepairPatch
+      ? {
+          workspace_repair_patch_json: workspaceRepairPatchPath,
+          workspace_repair_result_json: workspaceRepairResultPath
+        }
+      : {}),
+    ...(runtimeOverlay
+      ? {
+          runtime_overlay_json: runtimeOverlayPath,
+          material_delta_json: materialDeltaPath
+        }
+      : {}),
     recovery_plan_json: recoveryPlanJsonPath,
     recovery_plan_markdown: recoveryPlanMarkdownPath,
     ...Object.fromEntries(

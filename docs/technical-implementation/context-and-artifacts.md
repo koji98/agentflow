@@ -78,6 +78,21 @@ flowchart TD
 
 The prompt does not inline every context file. It includes the manifest text and points to `packet.json` and `provenance.json`. This keeps prompt construction stable while still letting the agent inspect exact materialized paths.
 
+## Run-Ready Context Analysis
+
+`agentflow validate --run-ready` uses the same tokenizer and repo file discovery rules as runtime context materialization. It estimates every executable node's context packet before launch and includes `context_analysis` in the validation payload:
+
+- projected total tokens per node against `max_total_tokens`
+- projected and actual tokens per context item
+- sample glob matches and largest matched files
+- per-item truncation and non-tokenizable counts
+- default ignored roots and explicit ignored-root opt-ins
+- launch-blocking diagnostics when current context would exceed the node budget
+
+Plain `agentflow validate` keeps structural graph validation only. Run-ready validation fails before launch when the current workspace state would fail context materialization at runtime.
+
+Workspace globs skip common dependency and generated roots by default, including `.git`, `.agentflow`, `node_modules`, `.venv`, `venv`, `.tox`, cache directories, build output, coverage, `vendor`, `third_party`, `generated`, `gen`, `__generated__`, and Bazel output. Authors can intentionally opt into one of those roots by starting the authored context path inside that root, such as `.venv/*eval*.md`; broad globs like `**/*eval*` still skip those roots.
+
 ## Repeat Selectors
 
 Artifact refs can select attempts with:
@@ -87,6 +102,14 @@ Artifact refs can select attempts with:
 - `if_available: true`: omit rather than fail when the selected material does not exist.
 
 Inside repeat bodies, Agentflow can also add repeat history context for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually. Supervisor retry guidance can also appear as runtime-provided context after `retry_with_guidance`; it contains the guidance brief, prompt revision, failure fingerprint, and prior execution id for the retrying node.
+
+When a retry uses a supervisor runtime overlay, the overlay context is materialized before authored context:
+
+- `supervisor_recovery_envelope` summarizes the failure, case file, recovery plan, must-do guidance, and unchanged contract.
+- `supervisor_context_repair` appears when authored context could not fit. It replaces authored context for that retry with a compact context index, omitted-entry provenance, largest-file warnings, default ignored roots, and live paths the worker can inspect manually.
+- Workspace and environment repairs are recorded in `runtime-overlay.json` and `material-delta.json`. Workspace repair also writes `workspace-repair-patch.json` and `workspace-repair-result.json` so reviewers can see which failed-attempt edits were restored before retry.
+
+The overlay is not a graph contract change. It is an auditable runtime repair attached to the failed attempt's `interventions/<intervention-id>/` directory.
 
 ## Artifact Production
 

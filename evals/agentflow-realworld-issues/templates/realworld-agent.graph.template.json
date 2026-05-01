@@ -17,7 +17,7 @@
   },
   "repos": {
     "main": {
-      "path": "{{fixture.repo}}"
+      "path": "{{environment.repo}}"
     }
   },
   "defaults": {

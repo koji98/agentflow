@@ -122,7 +122,7 @@ async function writeRealEvalSuite(tempRoot) {
         acceptance_criteria: ["handoff artifact includes validation evidence"],
         constraints: ["Use only the local repo and local docs fixture."]
       },
-      repos: { main: { path: "{{fixture.repo}}" } },
+      repos: { main: { path: "{{environment.repo}}" } },
       defaults: { launch_profile: "default", workspace_backend: "inplace" },
       profiles: {
         default: {
@@ -139,7 +139,7 @@ async function writeRealEvalSuite(tempRoot) {
           type: "agent",
           id: "complete",
           repo: "main",
-          goal: `Write the handoff artifact at the declared path. The artifact must include the exact word "validation" and mention this local docs URL: {{fixture.docs_url}}`,
+          goal: `Write the handoff artifact at the declared path. The artifact must include the exact word "validation" and mention this local docs URL: {{environment.docs_url}}`,
           artifacts: {
             handoff: {
               from: "output_dir",
@@ -155,27 +155,35 @@ async function writeRealEvalSuite(tempRoot) {
       bucket: "valid-hard-execution",
       difficulty: "medium",
       description: `Real ${harness} eval scenario ${id}.`,
-      fixture: { repo: "repo", docs: "docs", init_git: true },
+      environment: { repo: "repo", docs: "docs", init_git: true },
       workflow: { graph_template: "graph.template.json", harness, workspace_backend: "inplace" },
-      expected: {
-        final_outcome: "passed",
-        required_artifacts: [{ name: "handoff" }],
-        forbidden_edits: ["forbidden.txt"]
-      },
-      grading: { dimensions: ["artifact_quality", "delivery_auditability"] }
+      criteria: {
+        outcome: { status: "passed" },
+        artifact: { required: [{ name: "handoff" }] },
+        workspace: { forbidden_edits: ["forbidden.txt"] },
+        delivery: { required: true },
+        packet: {},
+        quality: { dimensions: ["artifact_quality", "delivery_auditability"] }
+      }
     }, null, 2));
   }
 
   await writeFile(join(suiteDir, "eval.json"), JSON.stringify({
-    version: "2",
+    version: "1",
     suite_id: "real-evals-smoke",
     objective: `Validate real ${harness} workflow eval plumbing.`,
     default_trials: 1,
     scenarios: scenarioIds.map((id) => `scenarios/${id}/scenario.json`),
     variants: ["variants/current.json"],
-    graders: [{ id: "packet", kind: "script", command: "node graders/packet.mjs" }],
-    judges: [{
+    criteria: [
+      { id: "outcome", kind: "outcome", required: true },
+      { id: "artifact", kind: "artifact", required: true },
+      { id: "workspace", kind: "workspace", required: true },
+      { id: "delivery", kind: "delivery", required: true },
+      { id: "packet", kind: "custom_script", command: "node graders/packet.mjs", required: true },
+      {
       id: "quality",
+      kind: "quality",
       rubric: "judges/quality.md",
       harness,
       model: harness === "codex-cli"
@@ -183,7 +191,8 @@ async function writeRealEvalSuite(tempRoot) {
         : process.env.AGENTFLOW_CURSOR_MODEL ?? "auto",
       ...(harness === "codex-cli" ? { reasoning_effort: "low" } : {}),
       required: false
-    }],
+      }
+    ],
     thresholds: { pass_rate: 1, max_blocker_rate: 0, min_average_score: 1 }
   }, null, 2));
 
@@ -245,9 +254,9 @@ async function main() {
     const passed =
       ledger.benchmark.total_trials === 3 &&
       ledger.results.every((entry) => entry.trace_packet_file && entry.scorecard_file) &&
-      scorecards.every((scorecard) => scorecard.deterministic?.passed === true) &&
-      scorecards.every((scorecard) => Array.isArray(scorecard.judges) && scorecard.judges.length >= 1) &&
-      scorecards.every((scorecard) => scorecard.judges.every((judge) => judge.status !== "errored"));
+      scorecards.every((scorecard) => Array.isArray(scorecard.criteria_results)) &&
+      scorecards.every((scorecard) => scorecard.criteria_results.some((criterion) => criterion.id === "packet" && criterion.status === "passed")) &&
+      scorecards.every((scorecard) => scorecard.criteria_results.some((criterion) => criterion.id === "quality" && criterion.status !== "errored"));
 
     const payload = {
       status: passed ? "passed" : "failed",

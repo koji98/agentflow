@@ -60,6 +60,25 @@ function verifier(assertions) {
   ].join("\n");
 }
 
+function noisyMarkdownFiles(prefix, count, linesPerFile) {
+  return Object.fromEntries(
+    Array.from({ length: count }, (_, index) => {
+      const ordinal = String(index + 1).padStart(3, "0");
+      return [
+        `${prefix}/noise-${ordinal}.md`,
+        [
+          `# Generated/noisy context ${ordinal}`,
+          "",
+          ...Array.from({ length: linesPerFile }, (__, lineIndex) =>
+            `Line ${lineIndex + 1}: repeated low-value context used to stress Agentflow context materialization.`
+          ),
+          ""
+        ].join("\n")
+      ];
+    })
+  );
+}
+
 const repos = {
   "01-config-deep-merge": {
     "package.json": packageJson("config-deep-merge"),
@@ -342,6 +361,98 @@ const repos = {
     "package.json": packageJson("terminal-repeated-failure"),
     "AGENTFLOW_EVAL_TASK.md": "Terminal repeated failure fixture.\n",
     "scripts/always-fail.js": "console.error('intentional repeated failure for eval'); process.exit(1);\n"
+  },
+  "17-context-overflow-repair": {
+    "package.json": packageJson("context-overflow-repair"),
+    "AGENTFLOW_EVAL_TASK.md": task(
+      "Scenario: context-overflow-repair",
+      "Fix `src/router.js` so `normalizeRoute(value)` removes duplicate slashes, preserves a single leading slash, removes a trailing slash except for root, and preserves query strings. This scenario intentionally over-materializes markdown context on the first attempt; use the supervisor context repair packet and live workspace paths after retry."
+    ),
+    "src/router.js": [
+      "function normalizeRoute(value) {",
+      "  return String(value);",
+      "}",
+      "",
+      "module.exports = { normalizeRoute };",
+      ""
+    ].join("\n"),
+    "docs/router-notes.md": "The canonical route normalizer operates on the path portion before re-attaching the query string.\n",
+    "tests/verify.js": verifier([
+      "const { normalizeRoute } = require('../src/router');",
+      "assert.equal(normalizeRoute('//users///active/?page=1'), '/users/active?page=1');",
+      "assert.equal(normalizeRoute('/'), '/');",
+      "assert.equal(normalizeRoute('reports///'), '/reports');"
+    ]),
+    ...noisyMarkdownFiles("notes", 28, 18)
+  },
+  "18-noisy-generated-tree": {
+    "package.json": packageJson("noisy-generated-tree"),
+    "AGENTFLOW_EVAL_TASK.md": task(
+      "Scenario: noisy-generated-tree",
+      "Fix `src/status.js` so `statusFor({ paid, overdue })` returns `paid`, `overdue`, or `open` in that priority order. The repo includes a large generated tree that should not be part of normal context unless explicitly requested."
+    ),
+    "src/status.js": [
+      "function statusFor(invoice) {",
+      "  return invoice.overdue ? 'overdue' : 'open';",
+      "}",
+      "",
+      "module.exports = { statusFor };",
+      ""
+    ].join("\n"),
+    "tests/verify.js": verifier([
+      "const { statusFor } = require('../src/status');",
+      "assert.equal(statusFor({ paid: true, overdue: true }), 'paid');",
+      "assert.equal(statusFor({ paid: false, overdue: true }), 'overdue');",
+      "assert.equal(statusFor({ paid: false, overdue: false }), 'open');"
+    ]),
+    ...noisyMarkdownFiles("generated/api", 35, 20)
+  },
+  "19-validation-timeout-strategy": {
+    "package.json": packageJson("validation-timeout-strategy"),
+    "AGENTFLOW_EVAL_TASK.md": "Validation strategy repair fixture.\n",
+    "scripts/validation-gate.js": [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const envelope = process.env.AGENTFLOW_CONTEXT_SUPERVISOR_RECOVERY_ENVELOPE;",
+      "if (!envelope || !fs.existsSync(envelope)) {",
+      "  console.error('npm test timed out after 900s');",
+      "  process.exit(1);",
+      "}",
+      "const envelopeText = fs.readFileSync(envelope, 'utf8');",
+      "if (!/focused validation command|validation strategy/i.test(envelopeText)) {",
+      "  console.error('missing validation-strategy repair guidance');",
+      "  process.exit(1);",
+      "}",
+      "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.md'), 'Scenario: validation-timeout-strategy\\nValidation: focused validation command observed after timeout\\nChanged files: none\\nRisks: broad suite not rerun in fixture\\n');",
+      ""
+    ].join("\n")
+  },
+  "20-workspace-pollution-cleanup": {
+    "package.json": packageJson("workspace-pollution-cleanup"),
+    "AGENTFLOW_EVAL_TASK.md": "Workspace repair fixture.\n",
+    "scripts/workspace-gate.js": [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const workspace = process.env.AGENTFLOW_WORKSPACE;",
+      "const envelope = process.env.AGENTFLOW_CONTEXT_SUPERVISOR_RECOVERY_ENVELOPE;",
+      "const pollution = path.join(workspace, 'pollution.txt');",
+      "if (!envelope || !fs.existsSync(envelope)) {",
+      "  fs.writeFileSync(pollution, 'failed attempt should be cleaned before retry\\n');",
+      "  console.error('Forbidden edit: unexpected workspace change in pollution.txt');",
+      "  process.exit(1);",
+      "}",
+      "if (fs.existsSync(pollution)) {",
+      "  console.error('workspace repair did not clean pollution.txt');",
+      "  process.exit(1);",
+      "}",
+      "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.md'), 'Scenario: workspace-pollution-cleanup\\nValidation: pollution.txt absent after supervisor cleanup\\nChanged files: none\\nRisks: none\\n');",
+      ""
+    ].join("\n")
+  },
+  "21-no-delta-recovery-stop": {
+    "package.json": packageJson("no-delta-recovery-stop"),
+    "AGENTFLOW_EVAL_TASK.md": "No-delta recovery fixture.\n",
+    "scripts/no-delta.js": "console.error('Forbidden edit: unexpected workspace change, but no workspace diff exists'); process.exit(1);\n"
   }
 };
 
@@ -361,7 +472,12 @@ const scenarios = [
   ["13-worktree-change-capture", "agent-worktree", "workspace-backend", "medium", "Run an implementation scenario through the worktree backend."],
   ["14-stale-docs-conflict", "agent-docs", "context-conflict", "hard", "Resolve stale repo docs by preferring the current local HTTP docs fixture."],
   ["15-supervisor-retry-envelope", "exec-recovery", "supervisor-recovery", "medium", "Confirm a failed executable node receives a supervisor recovery envelope on retry."],
-  ["16-terminal-repeated-failure", "exec-terminal", "supervisor-boundary", "medium", "Confirm repeated unrecoverable failure records terminal supervisor evidence."]
+  ["16-terminal-repeated-failure", "exec-terminal", "supervisor-boundary", "medium", "Confirm repeated unrecoverable failure records terminal supervisor evidence."],
+  ["17-context-overflow-repair", "agent-context-overflow", "context-contract-recovery", "hard", "Confirm oversized authored context is repaired into a compact runtime overlay before retry."],
+  ["18-noisy-generated-tree", "agent-noisy-context", "context-noise-control", "hard", "Confirm broad context ignores generated dependency-style trees while preserving useful task context."],
+  ["19-validation-timeout-strategy", "exec-validation-strategy", "validation-repair", "hard", "Confirm timeout-like failures receive changed validation strategy before retry."],
+  ["20-workspace-pollution-cleanup", "exec-workspace-repair", "workspace-repair", "hard", "Confirm failed-attempt workspace pollution is cleaned before retry."],
+  ["21-no-delta-recovery-stop", "exec-no-delta", "supervisor-boundary", "hard", "Confirm recovery stops when no material delta can be produced."]
 ];
 
 const expectedChangedFiles = {
@@ -380,7 +496,12 @@ const expectedChangedFiles = {
   "13-worktree-change-capture": [],
   "14-stale-docs-conflict": ["src/mode.js"],
   "15-supervisor-retry-envelope": [],
-  "16-terminal-repeated-failure": []
+  "16-terminal-repeated-failure": [],
+  "17-context-overflow-repair": ["src/router.js"],
+  "18-noisy-generated-tree": ["src/status.js"],
+  "19-validation-timeout-strategy": [],
+  "20-workspace-pollution-cleanup": [],
+  "21-no-delta-recovery-stop": []
 };
 
 const templates = {
@@ -440,7 +561,7 @@ const templates = {
           type: "agent",
           id: "implement",
           repo: "main",
-          goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. The current docs fixture is {{fixture.docs_url}}. Use it when the task says local repo docs may be stale or missing. Run `npm test` and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+          goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. The current docs fixture is {{environment.docs_url}}. Use it when the task says local repo docs may be stale or missing. Run `npm test` and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
           acceptance_criteria: [
             "The implementation follows the current local HTTP docs fixture when it conflicts with repo docs.",
             "`npm test` passes.",
@@ -633,6 +754,165 @@ const templates = {
         { type: "exec", id: "always_fail", repo: "main", command: "node", args: ["scripts/always-fail.js"] }
       ]
     }
+  },
+  "exec-validation-strategy": {
+    supervision: {
+      max_total_interventions: 1,
+      actions: { run_diagnostic: { max_uses: 1 } }
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "exec",
+          id: "validation_gate",
+          repo: "main",
+          command: "node",
+          args: ["scripts/validation-gate.js"],
+          artifacts: {
+            handoff: {
+              from: "output_dir",
+              path: "handoff.md",
+              description: "Validation-strategy handoff written after supervisor retry."
+            }
+          }
+        }
+      ]
+    }
+  },
+  "exec-workspace-repair": {
+    supervision: {
+      max_total_interventions: 1,
+      actions: { run_diagnostic: { max_uses: 1 } }
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "exec",
+          id: "workspace_gate",
+          repo: "main",
+          command: "node",
+          args: ["scripts/workspace-gate.js"],
+          artifacts: {
+            handoff: {
+              from: "output_dir",
+              path: "handoff.md",
+              description: "Workspace-repair handoff written after supervisor cleanup."
+            }
+          }
+        }
+      ]
+    }
+  },
+  "exec-no-delta": {
+    supervision: {
+      max_total_interventions: 2,
+      actions: { run_diagnostic: { max_uses: 2 } }
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        { type: "exec", id: "no_delta", repo: "main", command: "node", args: ["scripts/no-delta.js"] }
+      ]
+    }
+  },
+  "agent-context-overflow": {
+    supervision: {
+      max_total_interventions: 1,
+      actions: { rebuild_context: { max_uses: 1 } }
+    },
+    profile: {
+      input_rules: {
+        max_total_tokens: 700,
+        max_tokens_per_item: 160
+      }
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "agent",
+          id: "implement",
+          repo: "main",
+          goal: "Fix `src/router.js` for the context-overflow-repair scenario: normalize duplicate slashes, preserve one leading slash, drop trailing slash except root, preserve query strings, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+          acceptance_criteria: [
+            "The first attempt may fail before harness execution because authored markdown context is too large.",
+            "The retry uses the supervisor context repair overlay without changing the task contract.",
+            "`npm test` passes.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, `Supervisor context:`, and `Risks:` fields."
+          ],
+          constraints: [
+            "Do not edit noise files under `notes/**`.",
+            "Do not add dependencies.",
+            "If a supervisor context repair packet is present, use it as the index and open live workspace paths only as needed."
+          ],
+          context: [
+            { name: "all_markdown", from: "workspace_glob", path: "**/*.md" },
+            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 }
+          ],
+          artifacts: {
+            handoff: {
+              from: "output_dir",
+              path: "handoff.md",
+              description: "Context-repair handoff with validation and supervisor context evidence."
+            }
+          }
+        },
+        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+      ]
+    }
+  },
+  "agent-noisy-context": {
+    supervision: { max_total_interventions: 0, actions: {} },
+    profile: {
+      input_rules: {
+        max_total_tokens: 1600,
+        max_tokens_per_item: 220
+      }
+    },
+    graph: {
+      type: "sequence",
+      id: "root",
+      steps: [
+        {
+          type: "agent",
+          id: "implement",
+          repo: "main",
+          goal: "Complete the noisy-generated-tree scenario in `AGENTFLOW_EVAL_TASK.md`. Use source and tests, ignore generated context noise unless explicitly needed, run `npm test`, and write `handoff.md`.",
+          acceptance_criteria: [
+            "Generated tree files are not treated as task authority.",
+            "`src/status.js` implements the expected priority order.",
+            "`npm test` passes.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+          ],
+          constraints: [
+            "Do not edit `generated/**`.",
+            "Do not add dependencies.",
+            "Prefer specific source and test files over broad generated context."
+          ],
+          context: [
+            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "broad_markdown", from: "workspace_glob", path: "**/*.md", max_files: 80 },
+            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 }
+          ],
+          artifacts: {
+            handoff: {
+              from: "output_dir",
+              path: "handoff.md",
+              description: "Noise-control handoff with validation evidence."
+            }
+          }
+        },
+        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+      ]
+    }
   }
 };
 
@@ -660,7 +940,7 @@ function graphDocument(templateName) {
       ]
     },
     repos: {
-      main: { path: "{{fixture.repo}}" }
+      main: { path: "{{environment.repo}}" }
     },
     defaults,
     profiles: {
@@ -669,7 +949,8 @@ function graphDocument(templateName) {
         model: "gpt-5.4-mini",
         reasoning_effort: "low",
         sandbox: "workspace-write",
-        timeout_sec: 900
+        timeout_sec: 900,
+        ...(template.profile?.input_rules ? { input_rules: template.profile.input_rules } : {})
       }
     },
     supervision: template.supervision,
@@ -678,26 +959,56 @@ function graphDocument(templateName) {
 }
 
 function scenarioJson([id, template, bucket, difficulty, description]) {
-  const expected = {
-    final_outcome: id === "16-terminal-repeated-failure" ? "failed" : "passed",
-    required_artifacts: id === "16-terminal-repeated-failure" ? [] : [
+  const expectsTerminalFailure = id === "16-terminal-repeated-failure" || id === "21-no-delta-recovery-stop";
+  const outcome = expectsTerminalFailure ? "failed" : "passed";
+  const requiredArtifacts = expectsTerminalFailure ? [] : [
       { name: "handoff", contains: ["Scenario:", "Validation:"] }
-    ],
-    forbidden_edits: [],
-    supervisor: {}
-  };
+    ];
+  const supervisor = {};
 
   if (id === "15-supervisor-retry-envelope") {
-    expected.supervisor = {
+    Object.assign(supervisor, {
       classifications: ["unknown"],
       apply_actions: ["retry_with_guidance"]
-    };
+    });
   }
 
   if (id === "16-terminal-repeated-failure") {
-    expected.supervisor = {
+    Object.assign(supervisor, {
       apply_actions: ["retry_with_guidance"]
-    };
+    });
+  }
+
+  if (id === "17-context-overflow-repair") {
+    Object.assign(supervisor, {
+      classifications: ["context_contract_failure"],
+      gatherers: ["local_context", "pattern_mining"],
+      apply_actions: ["repair_context"]
+    });
+  }
+
+  if (id === "19-validation-timeout-strategy") {
+    Object.assign(supervisor, {
+      classifications: ["diagnostic_needed"],
+      gatherers: ["diagnostic_probe"],
+      apply_actions: ["repair_validation_strategy"]
+    });
+  }
+
+  if (id === "20-workspace-pollution-cleanup") {
+    Object.assign(supervisor, {
+      classifications: ["wrong_local_pattern"],
+      gatherers: ["local_context", "investigate_failure"],
+      apply_actions: ["repair_workspace"]
+    });
+  }
+
+  if (id === "21-no-delta-recovery-stop") {
+    Object.assign(supervisor, {
+      classifications: ["wrong_local_pattern"],
+      gatherers: ["local_context", "investigate_failure"],
+      apply_actions: ["repair_workspace"]
+    });
   }
 
   return {
@@ -705,7 +1016,7 @@ function scenarioJson([id, template, bucket, difficulty, description]) {
     bucket,
     difficulty,
     description,
-    fixture: {
+    environment: {
       repo: `../../../../eval-repos/${suiteId}/${id}`,
       ...(template === "agent-docs" ? { docs: "../../docs/current-api" } : {}),
       ...(template === "agent-tool" ? { tools: `../../../../eval-repos/${suiteId}/tools` } : {}),
@@ -716,9 +1027,22 @@ function scenarioJson([id, template, bucket, difficulty, description]) {
       harness: "codex-cli",
       workspace_backend: template === "agent-worktree" ? "worktree" : "inplace"
     },
-    expected,
-    grading: {
-      dimensions: [
+    criteria: {
+      outcome: { status: outcome },
+      artifact: { required: requiredArtifacts },
+      workspace: { forbidden_edits: [] },
+      supervisor,
+      delivery: { required: outcome === "passed" },
+      "capability-deterministic": {},
+      "contract-adherence": {},
+      "artifact-quality": {},
+      "evidence-use": {},
+      "context-handling": {},
+      "tool-discipline": {},
+      "supervisor-recovery": {},
+      "noise-efficiency": {},
+      "delivery-auditability": {
+        dimensions: [
         "outcome_correctness",
         "graph_contract_adherence",
         "artifact_quality",
@@ -729,7 +1053,8 @@ function scenarioJson([id, template, bucket, difficulty, description]) {
         "retry_behavior",
         "noise_efficiency",
         "delivery_auditability"
-      ]
+        ]
+      }
     }
   };
 }
@@ -756,7 +1081,7 @@ function loadScenario(id) {
 }
 
 const scenario = loadScenario(scenarioId);
-const expectedStatus = scenario.expected.final_outcome ?? "passed";
+const expectedStatus = scenario.criteria?.outcome?.status ?? "passed";
 const artifacts = packet.artifacts ?? [];
 const handoff = artifacts.find((artifact) => artifact.name === "handoff");
 const handoffText = String(handoff?.content ?? "");
@@ -820,6 +1145,38 @@ if (scenarioId === "15-supervisor-retry-envelope") {
 if (scenarioId === "16-terminal-repeated-failure") {
   assert("terminal_failed", packet.outcome.status === "failed", "expected terminal failure");
   assert("failure_attempts", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
+}
+
+if (scenarioId === "17-context-overflow-repair") {
+  assert("context_repair_classified", packet.supervisor?.classifications?.includes("context_contract_failure"), "context_contract_failure classification");
+  assert("context_repair_applied", packet.supervisor?.apply_actions?.includes("repair_context"), "repair_context apply action");
+  assert("context_repair_attempts", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
+  assert("handoff_mentions_supervisor_context", /Supervisor context:|context repair|recovery envelope/i.test(handoffText), "handoff supervisor-context evidence");
+}
+
+if (scenarioId === "18-noisy-generated-tree") {
+  const changed = gitChangedFiles();
+  assert("generated_tree_untouched", !changed.some((file) => file.startsWith("generated/")), \`changed=\${changed.join(",") || "none"}\`);
+}
+
+if (scenarioId === "19-validation-timeout-strategy") {
+  assert("validation_strategy_classified", packet.supervisor?.classifications?.includes("diagnostic_needed"), "diagnostic_needed classification");
+  assert("validation_strategy_applied", packet.supervisor?.apply_actions?.includes("repair_validation_strategy"), "repair_validation_strategy apply action");
+  assert("validation_strategy_retry", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
+  assert("handoff_mentions_focused_validation", /focused validation command|timeout/i.test(handoffText), "handoff focused validation evidence");
+}
+
+if (scenarioId === "20-workspace-pollution-cleanup") {
+  assert("workspace_repair_classified", packet.supervisor?.classifications?.includes("wrong_local_pattern"), "wrong_local_pattern classification");
+  assert("workspace_repair_applied", packet.supervisor?.apply_actions?.includes("repair_workspace"), "repair_workspace apply action");
+  assert("workspace_repair_retry", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
+  assert("pollution_removed", !existsSync(join(repoRoot, "pollution.txt")), "pollution.txt absent");
+}
+
+if (scenarioId === "21-no-delta-recovery-stop") {
+  assert("no_delta_terminal_failed", packet.outcome.status === "failed", "expected terminal failure");
+  assert("no_delta_no_retry", (packet.metrics?.attempts ?? 0) === 1, "no retry without material delta");
+  assert("no_delta_repair_selected", packet.supervisor?.apply_actions?.includes("repair_workspace"), "repair_workspace selected");
 }
 
 const passed = assertions.every((entry) => entry.passed);
@@ -899,22 +1256,37 @@ async function writeSuite() {
   ].join("\n"));
 
   await write(resolve(suiteDir, "eval.json"), json({
-    version: "2",
+    version: "1",
     suite_id: suiteId,
     objective: "Evaluate Agentflow prompt, context, tool, workspace, artifact, delivery, and supervisor behavior on hard local workflow fixtures.",
     default_trials: 1,
     scenarios: scenarios.map(([id]) => `scenarios/${id}/scenario.json`),
     variants: ["variants/current.json", "variants/terse.json"],
-    graders: [
-      { id: "capability-deterministic", kind: "script", command: "node graders/capability-deterministic.mjs", timeout_sec: 300 }
+    criteria: [
+      { id: "outcome", kind: "outcome", required: true, description: "Final graph status matches the scenario expectation." },
+      { id: "artifact", kind: "artifact", required: true, description: "Declared artifacts exist and contain required evidence." },
+      { id: "workspace", kind: "workspace", required: true, description: "Forbidden workspace edits did not occur." },
+      { id: "supervisor", kind: "supervisor", required: true, description: "Expected supervisor behavior occurred." },
+      { id: "delivery", kind: "delivery", required: true, description: "Delivery manifest is present when required." },
+      {
+        id: "capability-deterministic",
+        kind: "custom_script",
+        command: "node graders/capability-deterministic.mjs",
+        timeout_sec: 300,
+        required: true
+      },
+      ...Object.keys(judgeFocus).map((id) => ({
+        id,
+        kind: "quality",
+        rubric: `judges/${id}.md`,
+        dimensions: [id.replace(/-/g, "_")],
+        threshold: 4,
+        harness: "codex-cli",
+        model: "gpt-5.4-mini",
+        reasoning_effort: "low",
+        required: false
+      }))
     ],
-    judges: Object.keys(judgeFocus).map((id) => ({
-      id,
-      rubric: `judges/${id}.md`,
-      model: "gpt-5.4-mini",
-      reasoning_effort: "low",
-      required: false
-    })),
     thresholds: { pass_rate: 0.5, max_blocker_rate: 1, min_average_score: 2 }
   }));
 

@@ -35,6 +35,11 @@ agentflow eval run evals/agentflow-capability-workflows --variant current --scen
 | `14-stale-docs-conflict` | `context-conflict` | Resolve stale repo docs by preferring the current local HTTP docs fixture. |
 | `15-supervisor-retry-envelope` | `supervisor-recovery` | Confirm a failed executable node receives a supervisor recovery envelope on retry. |
 | `16-terminal-repeated-failure` | `supervisor-boundary` | Confirm repeated unrecoverable failure records terminal supervisor evidence. |
+| `17-context-overflow-repair` | `context-contract-recovery` | Confirm oversized authored context is repaired into a compact runtime overlay before retry. |
+| `18-noisy-generated-tree` | `context-noise-control` | Confirm broad context ignores generated dependency-style trees while preserving useful task context. |
+| `19-validation-timeout-strategy` | `validation-repair` | Confirm timeout-like failures receive changed validation strategy before retry. |
+| `20-workspace-pollution-cleanup` | `workspace-repair` | Confirm failed-attempt workspace pollution is cleaned before retry. |
+| `21-no-delta-recovery-stop` | `supervisor-boundary` | Confirm recovery stops when no material delta can be produced. |
 
 The suite intentionally includes expected-pass workflows, a no-repo-edit audit, tool-required discovery, local HTTP docs, stale/noisy context, sequence handoff, worktree backend behavior, supervisor retry envelope behavior, and expected terminal failure.
 

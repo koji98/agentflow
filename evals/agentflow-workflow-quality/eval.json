@@ -1,5 +1,5 @@
 {
-  "version": "2",
+  "version": "1",
   "suite_id": "agentflow-workflow-quality",
   "objective": "Dogfood Agentflow evals against hard local workflow scenarios for prompts, supervisor recovery, artifacts, tools, and delivery auditability.",
   "default_trials": 1,
@@ -29,26 +29,130 @@
     "variants/current.json",
     "variants/terse.json"
   ],
-  "graders": [
-    {
-      "id": "workflow-deterministic",
-      "kind": "script",
-      "command": "node graders/workflow-deterministic.mjs"
-    }
-  ],
-  "judges": [
-    { "id": "contract-adherence", "rubric": "judges/contract-adherence.md" },
-    { "id": "artifact-quality", "rubric": "judges/artifact-quality.md" },
-    { "id": "evidence-use", "rubric": "judges/evidence-use.md" },
-    { "id": "supervisor-recovery", "rubric": "judges/supervisor-recovery.md" },
-    { "id": "context-handling", "rubric": "judges/context-handling.md" },
-    { "id": "tool-discipline", "rubric": "judges/tool-discipline.md" },
-    { "id": "noise-efficiency", "rubric": "judges/noise-efficiency.md" },
-    { "id": "delivery-auditability", "rubric": "judges/delivery-auditability.md" }
-  ],
   "thresholds": {
     "pass_rate": 0.5,
     "max_blocker_rate": 1,
     "min_average_score": 2
-  }
+  },
+  "criteria": [
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace",
+      "required": true
+    },
+    {
+      "id": "supervisor",
+      "kind": "supervisor",
+      "required": true
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true
+    },
+    {
+      "id": "workflow-deterministic",
+      "kind": "custom_script",
+      "command": "node graders/workflow-deterministic.mjs",
+      "required": true
+    },
+    {
+      "id": "contract-adherence",
+      "kind": "quality",
+      "rubric": "judges/contract-adherence.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "contract_adherence"
+      ]
+    },
+    {
+      "id": "artifact-quality",
+      "kind": "quality",
+      "rubric": "judges/artifact-quality.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "artifact_quality"
+      ]
+    },
+    {
+      "id": "evidence-use",
+      "kind": "quality",
+      "rubric": "judges/evidence-use.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "evidence_use"
+      ]
+    },
+    {
+      "id": "supervisor-recovery",
+      "kind": "quality",
+      "rubric": "judges/supervisor-recovery.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "supervisor_recovery"
+      ]
+    },
+    {
+      "id": "context-handling",
+      "kind": "quality",
+      "rubric": "judges/context-handling.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "context_handling"
+      ]
+    },
+    {
+      "id": "tool-discipline",
+      "kind": "quality",
+      "rubric": "judges/tool-discipline.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "tool_discipline"
+      ]
+    },
+    {
+      "id": "noise-efficiency",
+      "kind": "quality",
+      "rubric": "judges/noise-efficiency.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "noise_efficiency"
+      ]
+    },
+    {
+      "id": "delivery-auditability",
+      "kind": "quality",
+      "rubric": "judges/delivery-auditability.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "delivery_auditability"
+      ]
+    }
+  ]
 }

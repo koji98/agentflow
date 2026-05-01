@@ -109,19 +109,26 @@ flowchart TD
   action --> rebuild["rebuild_context"]
   action --> diagnostic["run_diagnostic"]
   action --> semantic["semantic_evaluation"]
-  action --> pause["pause_for_human"]
-  retry --> schedule["Write case file, evidence, recovery plan, envelope, and retry_scheduled event"]
+  action --> pause["pause_for_authority"]
+  retry --> overlay["Write case file, evidence, recovery plan, runtime overlay, material delta, and envelope"]
+  rebuild --> overlay
+  diagnostic --> overlay
+  semantic --> overlay
+  overlay --> workspace["Apply workspace cleanup when requested"]
+  workspace --> schedule
+  overlay --> schedule["Emit retry_scheduled when a material delta exists"]
   schedule --> rerun["Restart node attempt after delay"]
   repair --> verify["Verify declared artifacts exist"]
-  rebuild --> rerun
-  diagnostic --> classify
-  semantic --> classify
   pause --> persisted["Persist paused run state"]
 ```
 
 Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, `interventions.jsonl`, and state. Intervention workers write their own prompt/result/log artifacts under the affected attempt.
 
-For retry-oriented actions, the supervisor records a failure fingerprint, writes a case file, runs evidence gatherers, merges a recovery plan, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the next attempt's prompt and context. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
+For retry-oriented actions, the supervisor records a failure fingerprint, writes a case file, runs evidence gatherers, merges a recovery plan, writes `runtime-overlay.json`, records `material-delta.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the next attempt's prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
+
+Context materialization can fail before the harness runs. Those failures are classified as `context_contract_failure`, analyzed with the shared run-ready context analyzer, and retried with a compact `supervisor_context_repair` packet when the supervisor can safely repair the packaging without changing graph authority.
+
+Workspace repair uses the node-level baseline and after snapshots captured around every agent/exec attempt. If a failed attempt is classified as a forbidden or unrelated workspace edit, the overlay restores tracked files from the pre-attempt snapshot and removes untracked files introduced by that failed attempt before the retry is scheduled. Environment repair is intentionally narrower: it refreshes per-execution Agentflow tool wrappers and PATH/runtime metadata on the retry without mutating global machine state.
 
 ## Resume
 

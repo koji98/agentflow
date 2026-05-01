@@ -3,25 +3,37 @@ import { dirname, isAbsolute, resolve } from "node:path";
 
 import { harnessNames, reasoningEfforts } from "../graph/schema.js";
 import type {
+  EvalCriterion,
+  EvalCriterionKind,
   EvalDiagnostic,
-  EvalExpectedArtifact,
-  EvalJudge,
+  EvalEnvironmentSimulation,
+  EvalJudgePayload,
   EvalScenario,
-  EvalScenarioExpected,
-  EvalScenarioFixture,
-  EvalScenarioGrading,
+  EvalScenarioEnvironment,
   EvalScenarioMetadata,
   EvalScenarioRealWorldMetadata,
   EvalScenarioWorkflow,
-  EvalScriptGrader,
+  EvalSimulationMatch,
+  EvalSimulationRule,
   EvalSuite,
   EvalSuiteThresholds,
-  EvalTemplateFixtureContext,
+  EvalTemplateEnvironmentContext,
   EvalTemplateTrialContext,
   EvalVariant,
   LoadedEvalSuite
 } from "./types.js";
 import { evalSourceReference } from "./types.js";
+
+const criterionKinds = new Set<EvalCriterionKind>([
+  "outcome",
+  "artifact",
+  "workspace",
+  "supervisor",
+  "trajectory",
+  "quality",
+  "delivery",
+  "custom_script"
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -75,7 +87,7 @@ async function resolveSuiteInput(currentWorkingDirectory: string, suiteInput: st
       };
     }
   } catch {
-    // Let the read step produce the final diagnostic.
+    // Let readJson produce the final diagnostic.
   }
 
   return {
@@ -94,105 +106,196 @@ function normalizeThresholds(value: unknown, diagnostics: EvalDiagnostic[]): Eva
     return {};
   }
 
-  const pass_rate = readNumber(value.pass_rate);
-  const max_blocker_rate = readNumber(value.max_blocker_rate);
-  const min_average_score = readNumber(value.min_average_score);
   const thresholds: EvalSuiteThresholds = {};
+  const passRate = readNumber(value.pass_rate);
+  const maxBlockerRate = readNumber(value.max_blocker_rate);
+  const minAverageScore = readNumber(value.min_average_score);
 
-  if (value.pass_rate !== undefined && (pass_rate === undefined || pass_rate < 0 || pass_rate > 1)) {
+  if (value.pass_rate !== undefined && (passRate === undefined || passRate < 0 || passRate > 1)) {
     diagnostics.push({ path: "$.thresholds.pass_rate", message: "pass_rate threshold must be a number between 0 and 1." });
-  } else if (pass_rate !== undefined) {
-    thresholds.pass_rate = pass_rate;
+  } else if (passRate !== undefined) {
+    thresholds.pass_rate = passRate;
   }
 
-  if (
-    value.max_blocker_rate !== undefined &&
-    (max_blocker_rate === undefined || max_blocker_rate < 0 || max_blocker_rate > 1)
-  ) {
+  if (value.max_blocker_rate !== undefined && (maxBlockerRate === undefined || maxBlockerRate < 0 || maxBlockerRate > 1)) {
     diagnostics.push({
       path: "$.thresholds.max_blocker_rate",
       message: "max_blocker_rate threshold must be a number between 0 and 1."
     });
-  } else if (max_blocker_rate !== undefined) {
-    thresholds.max_blocker_rate = max_blocker_rate;
+  } else if (maxBlockerRate !== undefined) {
+    thresholds.max_blocker_rate = maxBlockerRate;
   }
 
-  if (
-    value.min_average_score !== undefined &&
-    (min_average_score === undefined || min_average_score < 1 || min_average_score > 5)
-  ) {
+  if (value.min_average_score !== undefined && (minAverageScore === undefined || minAverageScore < 1 || minAverageScore > 5)) {
     diagnostics.push({
       path: "$.thresholds.min_average_score",
       message: "min_average_score threshold must be a number between 1 and 5."
     });
-  } else if (min_average_score !== undefined) {
-    thresholds.min_average_score = min_average_score;
+  } else if (minAverageScore !== undefined) {
+    thresholds.min_average_score = minAverageScore;
   }
 
   return thresholds;
 }
 
-function normalizeScriptGrader(value: unknown, path: string, diagnostics: EvalDiagnostic[]): EvalScriptGrader | undefined {
+function normalizeCriterion(
+  value: unknown,
+  suiteDir: string,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalCriterion | undefined {
   if (!isRecord(value)) {
-    diagnostics.push({ path, message: "Eval grader must be an object." });
+    diagnostics.push({ path, message: "Eval criterion must be an object." });
     return undefined;
   }
 
   const id = readString(value.id);
   const kind = readString(value.kind);
-  const command = readString(value.command);
   const required = readBoolean(value.required);
-  const timeout_sec = readNumber(value.timeout_sec);
+  const description = readString(value.description);
+  const command = readString(value.command);
+  const rubric = readString(value.rubric);
+  const dimensions = readStringArray(value.dimensions);
+  const threshold = readNumber(value.threshold);
+  const harness = readString(value.harness) ?? "codex-cli";
+  const model = readString(value.model);
+  const reasoningEffort = value.reasoning_effort;
+  const timeoutSec = readNumber(value.timeout_sec);
 
   if (!id) {
-    diagnostics.push({ path: `${path}.id`, message: "Eval grader requires non-empty id." });
+    diagnostics.push({ path: `${path}.id`, message: "Eval criterion requires non-empty id." });
   }
 
-  if (kind !== "script") {
-    diagnostics.push({ path: `${path}.kind`, message: 'Eval grader kind must be "script".' });
+  if (!kind || !criterionKinds.has(kind as EvalCriterionKind)) {
+    diagnostics.push({
+      path: `${path}.kind`,
+      message: `Eval criterion kind must be one of ${[...criterionKinds].join(", ")}.`
+    });
   }
 
-  if (!command) {
-    diagnostics.push({ path: `${path}.command`, message: "Script grader requires non-empty command." });
+  if (kind === "custom_script" && !command) {
+    diagnostics.push({ path: `${path}.command`, message: "custom_script criteria require non-empty command." });
   }
 
-  if (!id || kind !== "script" || !command) {
+  if (kind === "quality") {
+    if (!rubric) {
+      diagnostics.push({ path: `${path}.rubric`, message: "quality criteria require non-empty rubric path." });
+    }
+
+    if (!(harnessNames as readonly string[]).includes(harness)) {
+      diagnostics.push({ path: `${path}.harness`, message: "quality criterion harness must be codex-cli or cursor-cli." });
+    }
+
+    if (reasoningEffort !== undefined && !(reasoningEfforts as readonly unknown[]).includes(reasoningEffort)) {
+      diagnostics.push({ path: `${path}.reasoning_effort`, message: "quality criterion has invalid reasoning_effort." });
+    }
+
+    if (harness === "cursor-cli" && reasoningEffort !== undefined) {
+      diagnostics.push({
+        path: `${path}.reasoning_effort`,
+        message: "Cursor quality criteria cannot set reasoning_effort; choose the appropriate Cursor model id instead."
+      });
+    }
+
+    if (threshold !== undefined && (threshold < 1 || threshold > 5)) {
+      diagnostics.push({ path: `${path}.threshold`, message: "quality criterion threshold must be between 1 and 5." });
+    }
+  }
+
+  if (!id || !kind || !criterionKinds.has(kind as EvalCriterionKind)) {
     return undefined;
   }
 
-  return {
+  if (kind === "custom_script" && !command) {
+    return undefined;
+  }
+
+  if (
+    kind === "quality" &&
+    (!rubric || !(harnessNames as readonly string[]).includes(harness) ||
+      (reasoningEffort !== undefined && !(reasoningEfforts as readonly unknown[]).includes(reasoningEffort)))
+  ) {
+    return undefined;
+  }
+
+  const criterion: EvalCriterion = {
     id,
-    kind,
-    command,
-    required: required ?? true,
-    ...(timeout_sec !== undefined ? { timeout_sec } : {})
+    kind: kind as EvalCriterionKind,
+    required: required ?? true
   };
+
+  if (description) {
+    criterion.description = description;
+  }
+
+  if (command) {
+    criterion.command = command;
+  }
+
+  if (rubric) {
+    criterion.rubric = rubric;
+    criterion.rubric_path = resolveSuitePath(suiteDir, rubric);
+  }
+
+  if (dimensions.length > 0) {
+    criterion.dimensions = dimensions;
+  }
+
+  if (threshold !== undefined) {
+    criterion.threshold = threshold;
+  }
+
+  if (kind === "quality") {
+    criterion.harness = harness as NonNullable<EvalCriterion["harness"]>;
+  }
+
+  if (model) {
+    criterion.model = model;
+  }
+
+  if (typeof reasoningEffort === "string" && (reasoningEfforts as readonly string[]).includes(reasoningEffort)) {
+    criterion.reasoning_effort = reasoningEffort as NonNullable<EvalCriterion["reasoning_effort"]>;
+  }
+
+  if (timeoutSec !== undefined) {
+    criterion.timeout_sec = timeoutSec;
+  }
+
+  return criterion;
 }
 
-function normalizeSuite(value: unknown, diagnostics: EvalDiagnostic[]): EvalSuite | undefined {
+function normalizeSuite(value: unknown, suiteDir: string, diagnostics: EvalDiagnostic[]): EvalSuite | undefined {
   if (!isRecord(value)) {
     diagnostics.push({ path: "$", message: "Eval suite must be a JSON object." });
     return undefined;
   }
 
   const version = value.version;
-  const suite_id = readString(value.suite_id);
+  const suiteId = readString(value.suite_id);
   const objective = readString(value.objective);
-  const default_trials = readNumber(value.default_trials);
+  const defaultTrials = readNumber(value.default_trials);
   const scenarios = Array.isArray(value.scenarios) ? value.scenarios.filter((item): item is string => typeof item === "string") : [];
   const variants = Array.isArray(value.variants) ? value.variants.filter((item): item is string => typeof item === "string") : [];
-  const graders = Array.isArray(value.graders)
-    ? value.graders
-        .map((grader, index) => normalizeScriptGrader(grader, `$.graders[${index}]`, diagnostics))
-        .filter((grader): grader is EvalScriptGrader => grader !== undefined)
+  const criteria = Array.isArray(value.criteria)
+    ? value.criteria
+        .map((criterion, index) => normalizeCriterion(criterion, suiteDir, `$.criteria[${index}]`, diagnostics))
+        .filter((criterion): criterion is EvalCriterion => criterion !== undefined)
     : [];
   const thresholds = normalizeThresholds(value.thresholds, diagnostics);
 
-  if (version !== "2") {
-    diagnostics.push({ path: "$.version", message: 'Eval suite version must be "2".' });
+  if (version !== "1") {
+    diagnostics.push({ path: "$.version", message: 'Eval suite version must be "1".' });
   }
 
-  if (!suite_id) {
+  if (value.graders !== undefined) {
+    diagnostics.push({ path: "$.graders", message: "Legacy top-level graders are not supported; use criteria with kind custom_script." });
+  }
+
+  if (value.judges !== undefined) {
+    diagnostics.push({ path: "$.judges", message: "Legacy top-level judges are not supported; use criteria with kind quality." });
+  }
+
+  if (!suiteId) {
     diagnostics.push({ path: "$.suite_id", message: "Eval suite requires non-empty suite_id." });
   }
 
@@ -200,7 +303,7 @@ function normalizeSuite(value: unknown, diagnostics: EvalDiagnostic[]): EvalSuit
     diagnostics.push({ path: "$.objective", message: "Eval suite requires non-empty objective." });
   }
 
-  if (default_trials === undefined || !Number.isInteger(default_trials) || default_trials < 1) {
+  if (defaultTrials === undefined || !Number.isInteger(defaultTrials) || defaultTrials < 1) {
     diagnostics.push({ path: "$.default_trials", message: "default_trials must be a positive integer." });
   }
 
@@ -212,30 +315,23 @@ function normalizeSuite(value: unknown, diagnostics: EvalDiagnostic[]): EvalSuit
     diagnostics.push({ path: "$.variants", message: "Eval suite requires at least one variant path." });
   }
 
-  if (value.judges !== undefined && !Array.isArray(value.judges)) {
-    diagnostics.push({ path: "$.judges", message: "Eval judges must be an array." });
+  if (!Array.isArray(value.criteria) || criteria.length === 0) {
+    diagnostics.push({ path: "$.criteria", message: "Eval suite requires at least one criterion." });
   }
 
-  if (value.graders !== undefined && !Array.isArray(value.graders)) {
-    diagnostics.push({ path: "$.graders", message: "Eval graders must be an array." });
-  }
-
-  if (version !== "2" || !suite_id || !objective) {
+  if (version !== "1" || !suiteId || !objective) {
     return undefined;
   }
 
   return {
     version,
-    suite_id,
+    suite_id: suiteId,
     objective,
     source_reference: evalSourceReference,
-    default_trials: default_trials !== undefined && Number.isInteger(default_trials) && default_trials > 0
-      ? default_trials
-      : 1,
+    default_trials: defaultTrials !== undefined && Number.isInteger(defaultTrials) && defaultTrials > 0 ? defaultTrials : 1,
     scenarios,
     variants,
-    graders,
-    judges: [],
+    criteria,
     thresholds
   };
 }
@@ -248,8 +344,8 @@ function normalizeVariant(value: unknown, variantPath: string, diagnostics: Eval
 
   const id = readString(value.id);
   const description = readString(value.description);
-  const graph_template = readString(value.graph_template);
-  const prompt_pack = readString(value.prompt_pack);
+  const graphTemplate = readString(value.graph_template);
+  const promptPack = readString(value.prompt_pack);
   const envValue = value.env;
   const env =
     isRecord(envValue)
@@ -276,63 +372,9 @@ function normalizeVariant(value: unknown, variantPath: string, diagnostics: Eval
     id,
     description,
     variant_path: variantPath,
-    ...(graph_template ? { graph_template } : {}),
-    ...(prompt_pack ? { prompt_pack } : {}),
+    ...(graphTemplate ? { graph_template: graphTemplate } : {}),
+    ...(promptPack ? { prompt_pack: promptPack } : {}),
     env
-  };
-}
-
-function normalizeExpectedArtifact(value: unknown): EvalExpectedArtifact | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const name = readString(value.name);
-  if (!name) {
-    return undefined;
-  }
-
-  const contains = Array.isArray(value.contains)
-    ? value.contains.filter((item): item is string => typeof item === "string")
-    : undefined;
-
-  return {
-    name,
-    ...(contains && contains.length > 0 ? { contains } : {})
-  };
-}
-
-function normalizeExpected(value: unknown): EvalScenarioExpected {
-  const record = isRecord(value) ? value : {};
-  const supervisor = isRecord(record.supervisor) ? record.supervisor : {};
-
-  return {
-    final_outcome:
-      record.final_outcome === "failed" ||
-      record.final_outcome === "paused" ||
-      record.final_outcome === "canceled"
-        ? record.final_outcome
-        : "passed",
-    required_artifacts: Array.isArray(record.required_artifacts)
-      ? record.required_artifacts
-          .map(normalizeExpectedArtifact)
-          .filter((artifact): artifact is EvalExpectedArtifact => artifact !== undefined)
-      : [],
-    forbidden_edits: Array.isArray(record.forbidden_edits)
-      ? record.forbidden_edits.filter((item): item is string => typeof item === "string")
-      : [],
-    supervisor: {
-      classifications: Array.isArray(supervisor.classifications)
-        ? supervisor.classifications.filter((item): item is string => typeof item === "string")
-        : [],
-      gatherers: Array.isArray(supervisor.gatherers)
-        ? supervisor.gatherers.filter((item): item is string => typeof item === "string")
-        : [],
-      apply_actions: Array.isArray(supervisor.apply_actions)
-        ? supervisor.apply_actions.filter((item): item is string => typeof item === "string")
-        : []
-    },
-    ...(typeof record.expected_pause === "boolean" ? { expected_pause: record.expected_pause } : {})
   };
 }
 
@@ -368,21 +410,21 @@ function normalizeRealWorldMetadata(
     return undefined;
   }
 
-  const source_repo = readString(value.source_repo);
+  const sourceRepo = readString(value.source_repo);
   const license = readString(value.license);
-  const base_sha = readString(value.base_sha);
-  const issue_url = readString(value.issue_url);
-  const pr_url = readString(value.pr_url);
-  const oracle_commit_sha = readString(value.oracle_commit_sha);
-  const package_manager = readString(value.package_manager);
-  const regression_patch = readString(value.regression_patch);
-  const setup_command = readString(value.setup_command);
-  const focused_test_command = readString(value.focused_test_command);
-  const allowed_changed_globs = readStringArray(value.allowed_changed_globs);
-  const forbidden_changed_globs = readStringArray(value.forbidden_changed_globs);
-  const hidden_oracle_changed_files = readStringArray(value.hidden_oracle_changed_files);
+  const baseSha = readString(value.base_sha);
+  const issueUrl = readString(value.issue_url);
+  const prUrl = readString(value.pr_url);
+  const oracleCommitSha = readString(value.oracle_commit_sha);
+  const packageManager = readString(value.package_manager);
+  const regressionPatch = readString(value.regression_patch);
+  const setupCommand = readString(value.setup_command);
+  const focusedTestCommand = readString(value.focused_test_command);
+  const allowedChangedGlobs = readStringArray(value.allowed_changed_globs);
+  const forbiddenChangedGlobs = readStringArray(value.forbidden_changed_globs);
+  const hiddenOracleChangedFiles = readStringArray(value.hidden_oracle_changed_files);
 
-  if (!source_repo) {
+  if (!sourceRepo) {
     diagnostics.push({ path: `${path}.source_repo`, message: "Real-world metadata requires source_repo." });
   }
 
@@ -390,42 +432,42 @@ function normalizeRealWorldMetadata(
     diagnostics.push({ path: `${path}.license`, message: 'Real-world metadata license must be "MIT".' });
   }
 
-  if (!isFullGitSha(base_sha)) {
+  if (!isFullGitSha(baseSha)) {
     diagnostics.push({ path: `${path}.base_sha`, message: "Real-world metadata base_sha must be a full 40-character git SHA." });
   }
 
-  if (!isValidUrl(issue_url)) {
+  if (!isValidUrl(issueUrl)) {
     diagnostics.push({ path: `${path}.issue_url`, message: "Real-world metadata issue_url must be a GitHub https URL." });
   }
 
-  if (!isValidUrl(pr_url)) {
+  if (!isValidUrl(prUrl)) {
     diagnostics.push({ path: `${path}.pr_url`, message: "Real-world metadata pr_url must be a GitHub https URL." });
   }
 
-  if (!isFullGitSha(oracle_commit_sha)) {
+  if (!isFullGitSha(oracleCommitSha)) {
     diagnostics.push({
       path: `${path}.oracle_commit_sha`,
       message: "Real-world metadata oracle_commit_sha must be a full 40-character git SHA."
     });
   }
 
-  if (!package_manager) {
+  if (!packageManager) {
     diagnostics.push({ path: `${path}.package_manager`, message: "Real-world metadata requires package_manager." });
   }
 
-  if (!regression_patch) {
+  if (!regressionPatch) {
     diagnostics.push({ path: `${path}.regression_patch`, message: "Real-world metadata requires regression_patch." });
   }
 
-  if (!setup_command) {
+  if (!setupCommand) {
     diagnostics.push({ path: `${path}.setup_command`, message: "Real-world metadata requires setup_command." });
   }
 
-  if (!focused_test_command) {
+  if (!focusedTestCommand) {
     diagnostics.push({ path: `${path}.focused_test_command`, message: "Real-world metadata requires focused_test_command." });
   }
 
-  if (allowed_changed_globs.length === 0) {
+  if (allowedChangedGlobs.length === 0) {
     diagnostics.push({
       path: `${path}.allowed_changed_globs`,
       message: "Real-world metadata requires at least one allowed_changed_glob."
@@ -433,36 +475,36 @@ function normalizeRealWorldMetadata(
   }
 
   if (
-    !source_repo ||
+    !sourceRepo ||
     license !== "MIT" ||
-    !isFullGitSha(base_sha) ||
-    !isValidUrl(issue_url) ||
-    !isValidUrl(pr_url) ||
-    !isFullGitSha(oracle_commit_sha) ||
-    !package_manager ||
-    !regression_patch ||
-    !setup_command ||
-    !focused_test_command ||
-    allowed_changed_globs.length === 0
+    !isFullGitSha(baseSha) ||
+    !isValidUrl(issueUrl) ||
+    !isValidUrl(prUrl) ||
+    !isFullGitSha(oracleCommitSha) ||
+    !packageManager ||
+    !regressionPatch ||
+    !setupCommand ||
+    !focusedTestCommand ||
+    allowedChangedGlobs.length === 0
   ) {
     return undefined;
   }
 
   return {
-    source_repo,
+    source_repo: sourceRepo,
     license,
-    base_sha: base_sha!,
-    issue_url: issue_url!,
-    pr_url: pr_url!,
-    oracle_commit_sha: oracle_commit_sha!,
-    package_manager,
-    regression_patch,
-    regression_patch_path: resolveScenarioPath(scenarioDir, regression_patch),
-    setup_command,
-    focused_test_command,
-    allowed_changed_globs,
-    forbidden_changed_globs,
-    hidden_oracle_changed_files
+    base_sha: baseSha!,
+    issue_url: issueUrl!,
+    pr_url: prUrl!,
+    oracle_commit_sha: oracleCommitSha!,
+    package_manager: packageManager,
+    regression_patch: regressionPatch,
+    regression_patch_path: resolveScenarioPath(scenarioDir, regressionPatch),
+    setup_command: setupCommand,
+    focused_test_command: focusedTestCommand,
+    allowed_changed_globs: allowedChangedGlobs,
+    forbidden_changed_globs: forbiddenChangedGlobs,
+    hidden_oracle_changed_files: hiddenOracleChangedFiles
   };
 }
 
@@ -492,10 +534,196 @@ function normalizeScenarioMetadata(
   return metadata;
 }
 
+function normalizeSimulationMatch(value: unknown, path: string, diagnostics: EvalDiagnostic[]): EvalSimulationMatch {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Simulation match must be an object." });
+    return {};
+  }
+
+  const argvExact = readStringArray(value.argv_exact);
+  const argvContains = readStringArray(value.argv_contains);
+  const cwdContains = readString(value.cwd_contains);
+  const match: EvalSimulationMatch = {};
+
+  if (value.argv_exact !== undefined && !Array.isArray(value.argv_exact)) {
+    diagnostics.push({ path: `${path}.argv_exact`, message: "argv_exact must be an array of strings." });
+  }
+
+  if (value.argv_contains !== undefined && !Array.isArray(value.argv_contains)) {
+    diagnostics.push({ path: `${path}.argv_contains`, message: "argv_contains must be an array of strings." });
+  }
+
+  if (argvExact.length > 0) {
+    match.argv_exact = argvExact;
+  }
+
+  if (argvContains.length > 0) {
+    match.argv_contains = argvContains;
+  }
+
+  if (cwdContains) {
+    match.cwd_contains = cwdContains;
+  }
+
+  return match;
+}
+
+function normalizeSimulationRule(
+  value: unknown,
+  scenarioDir: string,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalSimulationRule | undefined {
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Simulation tool call rule must be an object." });
+    return undefined;
+  }
+
+  const id = readString(value.id);
+  const command = readString(value.command);
+  const match = normalizeSimulationMatch(value.match, `${path}.match`, diagnostics);
+  const responseRecord = isRecord(value.response) ? value.response : undefined;
+  const errorRecord = isRecord(value.error) ? value.error : undefined;
+  const responseFile = readString(value.response_file);
+  const latencyMs = readNumber(value.latency_ms);
+  const probability = readNumber(value.probability);
+
+  if (!id) {
+    diagnostics.push({ path: `${path}.id`, message: "Simulation tool call rule requires non-empty id." });
+  }
+
+  if (!command) {
+    diagnostics.push({ path: `${path}.command`, message: "Simulation tool call rule requires non-empty command." });
+  } else if (command.includes("/") || command.includes("\\")) {
+    diagnostics.push({ path: `${path}.command`, message: "Simulation command must be a command name, not a path." });
+  }
+
+  if (value.response !== undefined && !responseRecord) {
+    diagnostics.push({ path: `${path}.response`, message: "Simulation response must be an object." });
+  }
+
+  if (value.error !== undefined && !errorRecord) {
+    diagnostics.push({ path: `${path}.error`, message: "Simulation error must be an object." });
+  }
+
+  if (!responseRecord && !errorRecord && !responseFile) {
+    diagnostics.push({ path, message: "Simulation rule requires response, response_file, or error." });
+  }
+
+  if (responseRecord && errorRecord) {
+    diagnostics.push({ path, message: "Simulation rule cannot define both response and error." });
+  }
+
+  if (latencyMs !== undefined && (latencyMs < 0 || !Number.isInteger(latencyMs))) {
+    diagnostics.push({ path: `${path}.latency_ms`, message: "Simulation latency_ms must be a non-negative integer." });
+  }
+
+  if (probability !== undefined && (probability < 0 || probability > 1)) {
+    diagnostics.push({ path: `${path}.probability`, message: "Simulation probability must be between 0 and 1." });
+  }
+
+  if (!id || !command || command.includes("/") || command.includes("\\") || (!responseRecord && !errorRecord && !responseFile) || (responseRecord && errorRecord)) {
+    return undefined;
+  }
+
+  const rule: EvalSimulationRule = {
+    id,
+    command,
+    match
+  };
+
+  if (responseRecord) {
+    rule.response = {
+      ...(typeof responseRecord.stdout === "string" ? { stdout: responseRecord.stdout } : {}),
+      ...(typeof responseRecord.stderr === "string" ? { stderr: responseRecord.stderr } : {}),
+      ...(typeof responseRecord.exit_code === "number" && Number.isInteger(responseRecord.exit_code)
+        ? { exit_code: responseRecord.exit_code }
+        : {})
+    };
+  }
+
+  if (responseFile) {
+    rule.response_file = responseFile;
+    rule.response_file_path = resolveScenarioPath(scenarioDir, responseFile);
+  }
+
+  if (errorRecord) {
+    rule.error = {
+      stderr: typeof errorRecord.stderr === "string" ? errorRecord.stderr : "simulated tool error",
+      ...(typeof errorRecord.exit_code === "number" && Number.isInteger(errorRecord.exit_code)
+        ? { exit_code: errorRecord.exit_code }
+        : {})
+    };
+  }
+
+  if (latencyMs !== undefined && Number.isInteger(latencyMs) && latencyMs >= 0) {
+    rule.latency_ms = latencyMs;
+  }
+
+  if (probability !== undefined && probability >= 0 && probability <= 1) {
+    rule.probability = probability;
+  }
+
+  return rule;
+}
+
+function normalizeSimulation(
+  value: unknown,
+  scenarioDir: string,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalEnvironmentSimulation | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Eval environment simulation must be an object." });
+    return undefined;
+  }
+
+  const seedValue = readString(value.seed) ?? (typeof value.seed === "number" ? String(value.seed) : undefined);
+  const rawToolCalls = Array.isArray(value.tool_calls) ? value.tool_calls : [];
+
+  if (!Array.isArray(value.tool_calls)) {
+    diagnostics.push({ path: `${path}.tool_calls`, message: "Environment simulation requires tool_calls array." });
+  }
+
+  const toolCalls = rawToolCalls
+    .map((rule, index) => normalizeSimulationRule(rule, scenarioDir, `${path}.tool_calls[${index}]`, diagnostics))
+    .filter((rule): rule is EvalSimulationRule => rule !== undefined);
+
+  return {
+    ...(seedValue ? { seed: seedValue } : {}),
+    tool_calls: toolCalls
+  };
+}
+
+function normalizeScenarioCriteria(value: unknown, path: string, diagnostics: EvalDiagnostic[]): Record<string, Record<string, unknown>> {
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "Eval scenario requires criteria object keyed by criterion id." });
+    return {};
+  }
+
+  const entries: Array<[string, Record<string, unknown>]> = [];
+  for (const [id, config] of Object.entries(value)) {
+    if (!isRecord(config)) {
+      diagnostics.push({ path: `${path}.${id}`, message: "Scenario criterion config must be an object." });
+      continue;
+    }
+    entries.push([id, config]);
+  }
+
+  return Object.fromEntries(entries);
+}
+
 function normalizeScenario(
   value: unknown,
   scenarioPath: string,
-  suiteDir: string,
   diagnostics: EvalDiagnostic[]
 ): EvalScenario | undefined {
   if (!isRecord(value)) {
@@ -503,21 +731,33 @@ function normalizeScenario(
     return undefined;
   }
 
+  if (value.fixture !== undefined) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.fixture`, message: "Legacy fixture is not supported; use environment." });
+  }
+
+  if (value.expected !== undefined) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.expected`, message: "Legacy expected is not supported; express expectations as criteria." });
+  }
+
+  if (value.grading !== undefined) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.grading`, message: "Legacy grading is not supported; use quality criteria." });
+  }
+
   const scenarioDir = dirname(scenarioPath);
   const id = readString(value.id);
   const bucket = readString(value.bucket);
   const difficulty = readString(value.difficulty);
   const description = readString(value.description);
-  const fixtureRecord = isRecord(value.fixture) ? value.fixture : undefined;
+  const environmentRecord = isRecord(value.environment) ? value.environment : undefined;
   const workflowRecord = isRecord(value.workflow) ? value.workflow : undefined;
-  const repo = fixtureRecord ? readString(fixtureRecord.repo) : undefined;
-  const docs = fixtureRecord ? readString(fixtureRecord.docs) : undefined;
-  const tools = fixtureRecord ? readString(fixtureRecord.tools) : undefined;
-  const graph_template = workflowRecord ? readString(workflowRecord.graph_template) : undefined;
+  const repo = environmentRecord ? readString(environmentRecord.repo) : undefined;
+  const docs = environmentRecord ? readString(environmentRecord.docs) : undefined;
+  const tools = environmentRecord ? readString(environmentRecord.tools) : undefined;
+  const graphTemplate = workflowRecord ? readString(workflowRecord.graph_template) : undefined;
   const harness = workflowRecord ? readString(workflowRecord.harness) : undefined;
-  const workspace_backend = workflowRecord?.workspace_backend === "worktree" ? "worktree" : "inplace";
-  const launch_profile = workflowRecord ? readString(workflowRecord.launch_profile) : undefined;
-  const gradingRecord = isRecord(value.grading) ? value.grading : {};
+  const workspaceBackend = workflowRecord?.workspace_backend === "worktree" ? "worktree" : "inplace";
+  const launchProfile = workflowRecord ? readString(workflowRecord.launch_profile) : undefined;
+  const criteria = normalizeScenarioCriteria(value.criteria, `scenario:${scenarioPath}.criteria`, diagnostics);
   const metadata = normalizeScenarioMetadata(value.metadata, scenarioDir, `scenario:${scenarioPath}.metadata`, diagnostics);
 
   if (!id) {
@@ -536,11 +776,15 @@ function normalizeScenario(
     diagnostics.push({ path: `scenario:${scenarioPath}.description`, message: "Eval scenario requires non-empty description." });
   }
 
-  if (!repo) {
-    diagnostics.push({ path: `scenario:${scenarioPath}.fixture.repo`, message: "Eval scenario fixture requires repo." });
+  if (!isRecord(value.environment)) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.environment`, message: "Eval scenario requires environment object." });
   }
 
-  if (!graph_template) {
+  if (!repo) {
+    diagnostics.push({ path: `scenario:${scenarioPath}.environment.repo`, message: "Eval scenario environment requires repo." });
+  }
+
+  if (!graphTemplate) {
     diagnostics.push({ path: `scenario:${scenarioPath}.workflow.graph_template`, message: "Eval scenario workflow requires graph_template." });
   }
 
@@ -548,43 +792,44 @@ function normalizeScenario(
     diagnostics.push({ path: `scenario:${scenarioPath}.workflow.harness`, message: "Eval scenario workflow harness must be codex-cli or cursor-cli." });
   }
 
-  if (!id || !bucket || !difficulty || !description || !repo || !graph_template || !harness) {
+  if (!id || !bucket || !difficulty || !description || !repo || !graphTemplate || !harness) {
     return undefined;
   }
 
   const repoPath = resolveScenarioPath(scenarioDir, repo);
   const docsPath = docs ? resolveScenarioPath(scenarioDir, docs) : undefined;
   const toolsPath = tools ? resolveScenarioPath(scenarioDir, tools) : undefined;
-  const graphTemplatePath = resolveScenarioPath(scenarioDir, graph_template);
-  const dimensions = Array.isArray(gradingRecord.dimensions)
-    ? gradingRecord.dimensions.filter((item): item is string => typeof item === "string")
-    : [];
-
-  const fixture: EvalScenarioFixture = {
+  const graphTemplatePath = resolveScenarioPath(scenarioDir, graphTemplate);
+  const environment: EvalScenarioEnvironment = {
     repo,
     repo_path: repoPath,
-    init_git: readBoolean(fixtureRecord?.init_git) ?? true
+    init_git: readBoolean(environmentRecord?.init_git) ?? true
   };
+  const simulation = normalizeSimulation(environmentRecord?.simulation, scenarioDir, `scenario:${scenarioPath}.environment.simulation`, diagnostics);
 
   if (docs && docsPath) {
-    fixture.docs = docs;
-    fixture.docs_path = docsPath;
+    environment.docs = docs;
+    environment.docs_path = docsPath;
   }
 
   if (tools && toolsPath) {
-    fixture.tools = tools;
-    fixture.tools_path = toolsPath;
+    environment.tools = tools;
+    environment.tools_path = toolsPath;
+  }
+
+  if (simulation) {
+    environment.simulation = simulation;
   }
 
   const workflow: EvalScenarioWorkflow = {
-    graph_template,
+    graph_template: graphTemplate,
     graph_template_path: graphTemplatePath,
     harness: harness as EvalScenarioWorkflow["harness"],
-    workspace_backend
+    workspace_backend: workspaceBackend
   };
 
-  if (launch_profile) {
-    workflow.launch_profile = launch_profile;
+  if (launchProfile) {
+    workflow.launch_profile = launchProfile;
   }
 
   return {
@@ -594,105 +839,31 @@ function normalizeScenario(
     description,
     scenario_dir: scenarioDir,
     graph_template_path: graphTemplatePath,
-    fixture,
+    environment,
     workflow,
-    expected: normalizeExpected(value.expected),
-    grading: {
-      dimensions
-    } satisfies EvalScenarioGrading,
+    criteria,
     metadata
   };
-}
-
-function normalizeJudge(
-  value: unknown,
-  suiteDir: string,
-  path: string,
-  diagnostics: EvalDiagnostic[]
-): EvalJudge | undefined {
-  if (!isRecord(value)) {
-    diagnostics.push({ path, message: "Eval judge must be an object." });
-    return undefined;
-  }
-
-  const id = readString(value.id);
-  const rubric = readString(value.rubric);
-  const harness = readString(value.harness) ?? "codex-cli";
-  const model = readString(value.model);
-  const reasoning_effort = value.reasoning_effort;
-  const required = readBoolean(value.required);
-  const timeout_sec = readNumber(value.timeout_sec);
-
-  if (!id) {
-    diagnostics.push({ path: `${path}.id`, message: "Eval judge requires non-empty id." });
-  }
-
-  if (!rubric) {
-    diagnostics.push({ path: `${path}.rubric`, message: "Eval judge requires non-empty rubric path." });
-  }
-
-  if (!(harnessNames as readonly string[]).includes(harness)) {
-    diagnostics.push({ path: `${path}.harness`, message: "Eval judge harness must be codex-cli or cursor-cli." });
-  }
-
-  if (reasoning_effort !== undefined && !(reasoningEfforts as readonly unknown[]).includes(reasoning_effort)) {
-    diagnostics.push({ path: `${path}.reasoning_effort`, message: "Eval judge has invalid reasoning_effort." });
-  }
-
-  if (harness === "cursor-cli" && reasoning_effort !== undefined) {
-    diagnostics.push({
-      path: `${path}.reasoning_effort`,
-      message: "Cursor eval judges cannot set reasoning_effort; choose the appropriate Cursor model id instead."
-    });
-  }
-
-  if (!id || !rubric || !(harnessNames as readonly string[]).includes(harness)) {
-    return undefined;
-  }
-
-  const judge: EvalJudge = {
-    id,
-    rubric,
-    rubric_path: resolveSuitePath(suiteDir, rubric),
-    required: required ?? true,
-    harness: harness as EvalJudge["harness"]
-  };
-
-  if (model) {
-    judge.model = model;
-  }
-
-  if (typeof reasoning_effort === "string" && (reasoningEfforts as readonly string[]).includes(reasoning_effort)) {
-    judge.reasoning_effort = reasoning_effort as NonNullable<EvalJudge["reasoning_effort"]>;
-  }
-
-  if (timeout_sec !== undefined) {
-    judge.timeout_sec = timeout_sec;
-  }
-
-  return judge;
 }
 
 function emptySuite(suitePath: string, suiteDir: string): LoadedEvalSuite {
   return {
     suite: {
-      version: "2",
+      version: "1",
       suite_id: "invalid",
       objective: "invalid",
       source_reference: evalSourceReference,
       default_trials: 1,
       scenarios: [],
       variants: [],
-      graders: [],
-      judges: [],
+      criteria: [],
       thresholds: {}
     },
     suite_path: suitePath,
     suite_dir: suiteDir,
     scenarios: [],
     variants: [],
-    graders: [],
-    judges: [],
+    criteria: [],
     diagnostics: []
   };
 }
@@ -713,8 +884,22 @@ async function validateLoadedPaths(loaded: LoadedEvalSuite): Promise<void> {
   const diagnostics = loaded.diagnostics;
   const seenScenarioIds = new Set<string>();
   const seenVariantIds = new Set<string>();
-  const seenGraderIds = new Set<string>();
-  const seenJudgeIds = new Set<string>();
+  const seenCriteriaIds = new Set<string>();
+  const criteriaIds = new Set(loaded.criteria.map((criterion) => criterion.id));
+
+  for (const criterion of loaded.criteria) {
+    if (seenCriteriaIds.has(criterion.id)) {
+      diagnostics.push({ path: `criterion:${criterion.id}`, message: `Duplicate criterion id "${criterion.id}".` });
+    }
+    seenCriteriaIds.add(criterion.id);
+
+    if (criterion.kind === "quality" && criterion.rubric_path && !await pathExists(criterion.rubric_path)) {
+      diagnostics.push({
+        path: `criterion:${criterion.id}.rubric`,
+        message: `Quality criterion rubric path does not exist: ${criterion.rubric_path}`
+      });
+    }
+  }
 
   for (const scenario of loaded.scenarios) {
     if (seenScenarioIds.has(scenario.id)) {
@@ -722,25 +907,34 @@ async function validateLoadedPaths(loaded: LoadedEvalSuite): Promise<void> {
     }
     seenScenarioIds.add(scenario.id);
 
-    if (!await pathExists(scenario.fixture.repo_path)) {
+    if (!await pathExists(scenario.environment.repo_path)) {
       diagnostics.push({
-        path: `scenario:${scenario.id}.fixture.repo`,
-        message: `Fixture repo path does not exist: ${scenario.fixture.repo_path}`
+        path: `scenario:${scenario.id}.environment.repo`,
+        message: `Environment repo path does not exist: ${scenario.environment.repo_path}`
       });
     }
 
-    if (scenario.fixture.docs_path && !await pathExists(scenario.fixture.docs_path)) {
+    if (scenario.environment.docs_path && !await pathExists(scenario.environment.docs_path)) {
       diagnostics.push({
-        path: `scenario:${scenario.id}.fixture.docs`,
-        message: `Fixture docs path does not exist: ${scenario.fixture.docs_path}`
+        path: `scenario:${scenario.id}.environment.docs`,
+        message: `Environment docs path does not exist: ${scenario.environment.docs_path}`
       });
     }
 
-    if (scenario.fixture.tools_path && !await pathExists(scenario.fixture.tools_path)) {
+    if (scenario.environment.tools_path && !await pathExists(scenario.environment.tools_path)) {
       diagnostics.push({
-        path: `scenario:${scenario.id}.fixture.tools`,
-        message: `Fixture tools path does not exist: ${scenario.fixture.tools_path}`
+        path: `scenario:${scenario.id}.environment.tools`,
+        message: `Environment tools path does not exist: ${scenario.environment.tools_path}`
       });
+    }
+
+    for (const rule of scenario.environment.simulation?.tool_calls ?? []) {
+      if (rule.response_file_path && !await pathExists(rule.response_file_path)) {
+        diagnostics.push({
+          path: `scenario:${scenario.id}.environment.simulation.tool_calls.${rule.id}.response_file`,
+          message: `Simulation response file does not exist: ${rule.response_file_path}`
+        });
+      }
     }
 
     if (!await pathExists(scenario.workflow.graph_template_path)) {
@@ -755,6 +949,15 @@ async function validateLoadedPaths(loaded: LoadedEvalSuite): Promise<void> {
         path: `scenario:${scenario.id}.metadata.realworld.regression_patch`,
         message: `Real-world regression patch does not exist: ${scenario.metadata.realworld.regression_patch_path}`
       });
+    }
+
+    for (const criterionId of Object.keys(scenario.criteria)) {
+      if (!criteriaIds.has(criterionId)) {
+        diagnostics.push({
+          path: `scenario:${scenario.id}.criteria.${criterionId}`,
+          message: `Scenario references unknown criterion "${criterionId}".`
+        });
+      }
     }
   }
 
@@ -775,24 +978,6 @@ async function validateLoadedPaths(loaded: LoadedEvalSuite): Promise<void> {
     }
   }
 
-  for (const grader of loaded.graders) {
-    if (seenGraderIds.has(grader.id)) {
-      diagnostics.push({ path: `grader:${grader.id}`, message: `Duplicate grader id "${grader.id}".` });
-    }
-    seenGraderIds.add(grader.id);
-  }
-
-  for (const judge of loaded.judges) {
-    if (seenJudgeIds.has(judge.id)) {
-      diagnostics.push({ path: `judge:${judge.id}`, message: `Duplicate judge id "${judge.id}".` });
-    }
-    seenJudgeIds.add(judge.id);
-
-    if (!await pathExists(judge.rubric_path)) {
-      diagnostics.push({ path: `judge:${judge.id}.rubric`, message: `Judge rubric path does not exist: ${judge.rubric_path}` });
-    }
-  }
-
   for (const scenario of loaded.scenarios) {
     for (const variant of loaded.variants) {
       if (!await pathExists(variant.graph_template_path ?? scenario.workflow.graph_template_path)) {
@@ -804,10 +989,10 @@ async function validateLoadedPaths(loaded: LoadedEvalSuite): Promise<void> {
         scenario,
         variant,
         trial: { id: "trial-001", index: 1, root: "/tmp/agentflow-eval-trial" },
-        fixture: {
-          repo: scenario.fixture.repo_path,
-          ...(scenario.fixture.docs_path ? { docs_url: "http://127.0.0.1:1" } : {}),
-          ...(scenario.fixture.tools_path ? { tools: scenario.fixture.tools_path } : {})
+        environment: {
+          repo: scenario.environment.repo_path,
+          ...(scenario.environment.docs_path ? { docs_url: "http://127.0.0.1:1" } : {}),
+          ...(scenario.environment.tools_path ? { tools: scenario.environment.tools_path } : {})
         }
       });
 
@@ -833,25 +1018,18 @@ export async function loadEvalSuite(
     return loaded;
   }
 
-  const suite = normalizeSuite(rawSuite, loaded.diagnostics);
+  const suite = normalizeSuite(rawSuite, suite_dir, loaded.diagnostics);
   if (!suite) {
     return loaded;
   }
 
   loaded.suite = suite;
-
-  const rawSuiteRecord = isRecord(rawSuite) ? rawSuite : {};
-  const judgeValues = Array.isArray(rawSuiteRecord.judges) ? rawSuiteRecord.judges : [];
-  loaded.judges = judgeValues
-    .map((judge, index) => normalizeJudge(judge, suite_dir, `$.judges[${index}]`, loaded.diagnostics))
-    .filter((judge): judge is EvalJudge => judge !== undefined);
-  loaded.suite.judges = loaded.judges;
-  loaded.graders = suite.graders;
+  loaded.criteria = suite.criteria;
 
   for (const scenarioRef of suite.scenarios) {
     const scenarioPath = resolveSuitePath(suite_dir, scenarioRef);
     const rawScenario = await readJson(scenarioPath, loaded.diagnostics, `scenario:${scenarioRef}`);
-    const scenario = normalizeScenario(rawScenario, scenarioPath, suite_dir, loaded.diagnostics);
+    const scenario = normalizeScenario(rawScenario, scenarioPath, loaded.diagnostics);
     if (scenario) {
       loaded.scenarios.push(scenario);
     }
@@ -907,7 +1085,7 @@ function resolveTemplatePlaceholder(options: {
   scenario: EvalScenario;
   variant: EvalVariant;
   trial: EvalTemplateTrialContext;
-  fixture: EvalTemplateFixtureContext;
+  environment: EvalTemplateEnvironmentContext;
   placeholder: string;
 }): string | undefined {
   const normalized = options.placeholder.trim();
@@ -931,8 +1109,8 @@ function resolveTemplatePlaceholder(options: {
     return value === undefined ? undefined : stringifyTemplateValue(value);
   }
 
-  if (normalized.startsWith("fixture.")) {
-    const value = readPathValue(options.fixture, normalized.slice("fixture.".length).split("."));
+  if (normalized.startsWith("environment.")) {
+    const value = readPathValue(options.environment, normalized.slice("environment.".length).split("."));
     return value === undefined ? undefined : stringifyTemplateValue(value);
   }
 
@@ -941,8 +1119,8 @@ function resolveTemplatePlaceholder(options: {
     return value === undefined ? undefined : stringifyTemplateValue(value);
   }
 
-  if (normalized.startsWith("expected.")) {
-    const value = readPathValue(options.scenario.expected, normalized.slice("expected.".length).split("."));
+  if (normalized.startsWith("criteria.")) {
+    const value = readPathValue(options.scenario.criteria, normalized.slice("criteria.".length).split("."));
     return value === undefined ? undefined : stringifyTemplateValue(value);
   }
 
@@ -954,7 +1132,7 @@ function renderTemplateValue(value: unknown, options: {
   scenario: EvalScenario;
   variant: EvalVariant;
   trial: EvalTemplateTrialContext;
-  fixture: EvalTemplateFixtureContext;
+  environment: EvalTemplateEnvironmentContext;
   diagnostics: EvalDiagnostic[];
   path: string;
 }): unknown {
@@ -1002,7 +1180,7 @@ export async function renderGraphTemplate(options: {
   scenario: EvalScenario;
   variant: EvalVariant;
   trial: EvalTemplateTrialContext;
-  fixture: EvalTemplateFixtureContext;
+  environment: EvalTemplateEnvironmentContext;
 }): Promise<{
   graph: unknown;
   diagnostics: EvalDiagnostic[];
@@ -1034,21 +1212,8 @@ export async function renderGraphTemplate(options: {
   };
 }
 
-export interface ParsedJudgeResult {
-  passed_quality_bar: boolean;
-  score: number;
-  dimension_scores: Record<string, number>;
-  blockers: string[];
-  rationale: string;
-  prompt_feedback: {
-    helpful_sections: string[];
-    noisy_sections: string[];
-    missing_guidance: string[];
-  };
-}
-
 export function parseJudgeResult(text: string): {
-  result?: ParsedJudgeResult;
+  result?: EvalJudgePayload;
   error?: string;
 } {
   let parsed: unknown;
@@ -1084,7 +1249,7 @@ export function parseJudgeResult(text: string): {
     return { error: "Judge output blockers must be an array." };
   }
 
-  const dimension_scores =
+  const dimensionScores =
     isRecord(parsed.dimension_scores)
       ? Object.fromEntries(
           Object.entries(parsed.dimension_scores).filter((entry): entry is [string, number] =>
@@ -1100,7 +1265,7 @@ export function parseJudgeResult(text: string): {
     result: {
       passed_quality_bar: parsed.passed_quality_bar,
       score,
-      dimension_scores,
+      dimension_scores: dimensionScores,
       blockers: stringArray(parsed.blockers),
       rationale: typeof parsed.rationale === "string" ? parsed.rationale : "",
       prompt_feedback: {

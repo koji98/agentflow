@@ -15,6 +15,7 @@ import {
   resolveExecutionArtifactsDirectory,
   resolveNodeExecutionDirectory
 } from "../../src/artifacts/paths.js";
+import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
 import { buildExecutionId } from "../../src/runtime/attempts.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
@@ -3539,6 +3540,100 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("repairs oversized runtime context before retrying the node", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-context-repair-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    const largeContext = `${Array.from({ length: 120 }, (_, index) => `context-token-${index}`).join(" ")}\n`;
+    await writeFile(join(repoDir, "first.md"), largeContext, "utf8");
+    await writeFile(join(repoDir, "second.md"), largeContext, "utf8");
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-context-repair",
+      supervision: {
+        actions: {
+          rebuild_context: { max_uses: 1 }
+        },
+        max_total_interventions: 1,
+        policy: {
+          pause_on_policy_risk: true,
+          pause_on_repeated_recovery: true,
+          drift_score_threshold: 0.8
+        }
+      },
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          input_rules: {
+            max_total_tokens: 200,
+            max_tokens_per_item: 100
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "recover_context",
+            goal: "Use the repaired context package and complete the node.",
+            acceptance_criteria: ["The retry receives a context repair overlay."],
+            context: [{ name: "markdown", from: "workspace_glob", path: "*.md" }]
+          }
+        ]
+      }
+    });
+
+    const invocations: Parameters<HarnessAdapter["run"]>[0][] = [];
+    const harness = createHarness("codex-cli", async (invocation) => {
+      invocations.push(invocation);
+      return {
+        status: "passed",
+        exitCode: 0,
+        transcript: { last_message: "completed with repaired context" }
+      };
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: { "codex-cli": harness }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(invocations).toHaveLength(1);
+    const prompt = renderHarnessPrompt(invocations[0]!);
+    expect(prompt).toContain("## Supervisor Recovery Envelope");
+    expect(prompt).toContain("context repair");
+
+    const attempts = await readRunExecutionAttempts(runRoot);
+    const failedAttempt = attempts.find((attempt) => attempt.status === "failed")!;
+    const interventionDir = join(failedAttempt.execution_dir, "interventions", `${failedAttempt.execution_id}__rebuild_context`);
+    expect(await pathExists(join(interventionDir, "context-analysis.json"))).toBe(true);
+    expect(await pathExists(join(interventionDir, "context-repair-patch.json"))).toBe(true);
+    expect(await pathExists(join(interventionDir, "runtime-overlay.json"))).toBe(true);
+    expect(await pathExists(join(interventionDir, "material-delta.json"))).toBe(true);
+
+    const passedAttempt = attempts.find((attempt) => attempt.status === "passed")!;
+    const retryManifest = await readFile(passedAttempt.context_manifest_path!, "utf8");
+    expect(retryManifest).toContain("supervisor_context_repair");
+    expect(retryManifest).toContain("Omitted entries may indicate");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("fails instead of pausing when human pause supervision is disabled", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-pause-disabled-"));
     const repoDir = join(tempRoot, "repo");
@@ -4102,7 +4197,7 @@ describe("runtime engine", () => {
       expect(run.outcome).toBe("passed");
       expect(await readFile(stdoutLogPath, "utf8")).toBe("partial output\nfinal output\n");
     } finally {
-      await rm(tempRoot, { recursive: true, force: true });
+      await rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
 

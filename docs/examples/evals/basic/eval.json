@@ -1,5 +1,5 @@
 {
-  "version": "2",
+  "version": "1",
   "suite_id": "basic-local-agentflow-eval",
   "objective": "Run a tiny local Agentflow workflow and grade its trace packet.",
   "default_trials": 1,
@@ -9,17 +9,37 @@
   "variants": [
     "variants/current.json"
   ],
-  "graders": [
-    {
-      "id": "trace",
-      "kind": "script",
-      "command": "node graders/trace.mjs"
-    }
-  ],
-  "judges": [],
   "thresholds": {
     "pass_rate": 1,
     "max_blocker_rate": 0,
     "min_average_score": 4
-  }
+  },
+  "criteria": [
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace",
+      "required": true
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true
+    },
+    {
+      "id": "trace",
+      "kind": "custom_script",
+      "command": "node graders/trace.mjs",
+      "required": true
+    }
+  ]
 }

@@ -27,4 +27,4 @@ agentflow eval validate evals/agentflow-capability-workflows
 agentflow eval run evals/agentflow-capability-workflows --variant current --scenario all --trials 1
 ```
 
-See `../../EVALS.md` for suite layout, scenario fixtures, variants, deterministic graders, LLM judges, trace packets, scorecards, and benchmark reports.
+See `../../EVALS.md` for suite layout, scenario environments, variants, criteria, environment simulation, trajectory checks, trace packets, scorecards, and benchmark reports.

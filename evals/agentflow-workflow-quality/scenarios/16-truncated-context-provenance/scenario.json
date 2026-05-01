@@ -3,8 +3,86 @@
   "bucket": "valid-noisy-evidence",
   "difficulty": "hard",
   "description": "Node should inspect provenance when a context snippet is truncated.",
-  "fixture": { "repo": "../../shared/repo", "init_git": true },
-  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
-  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=truncated-context-provenance"] }], "forbidden_edits": ["guessed-context.txt"] },
-  "grading": { "dimensions": ["context_handling", "evidence_use"] }
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=truncated-context-provenance"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "guessed-context.txt"
+      ]
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "context_handling",
+        "evidence_use"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "context_handling",
+        "evidence_use"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "context_handling",
+        "evidence_use"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "context_handling",
+        "evidence_use"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "context_handling",
+        "evidence_use"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "context_handling",
+        "evidence_use"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "context_handling",
+        "evidence_use"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "context_handling",
+        "evidence_use"
+      ]
+    }
+  }
 }

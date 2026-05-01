@@ -3,8 +3,87 @@
   "bucket": "valid-hard-execution",
   "difficulty": "hard",
   "description": "Tool-enabled workflow should discover the local fixture tool and use documented behavior.",
-  "fixture": { "repo": "../../shared/repo", "tools": "../../shared/tools", "init_git": true },
-  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
-  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=tool-discovery"] }], "forbidden_edits": ["invented-tool.log"] },
-  "grading": { "dimensions": ["tool_discipline", "evidence_use"] }
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true,
+    "tools": "../../shared/tools"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=tool-discovery"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "invented-tool.log"
+      ]
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "tool_discipline",
+        "evidence_use"
+      ]
+    }
+  }
 }

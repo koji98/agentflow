@@ -14,7 +14,7 @@
   },
   "repos": {
     "main": {
-      "path": "{{fixture.repo}}"
+      "path": "{{environment.repo}}"
     }
   },
   "defaults": {
@@ -42,7 +42,7 @@
         "type": "agent",
         "id": "implement",
         "repo": "main",
-        "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. The current docs fixture is {{fixture.docs_url}}. Use it when the task says local repo docs may be stale or missing. Run `npm test` and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+        "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. The current docs fixture is {{environment.docs_url}}. Use it when the task says local repo docs may be stale or missing. Run `npm test` and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
         "acceptance_criteria": [
           "The implementation follows the current local HTTP docs fixture when it conflicts with repo docs.",
           "`npm test` passes.",

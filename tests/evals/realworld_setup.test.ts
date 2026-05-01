@@ -77,7 +77,7 @@ describe("real-world eval materializer", () => {
       join(scenarioDir, "scenario.json"),
       `${JSON.stringify({
         id: "fake-case",
-        fixture: { repo: join(reposDir, "fake-case") },
+        environment: { repo: join(reposDir, "fake-case"), init_git: true },
         metadata: {
           realworld: {
             source_repo: "fake/realworld",
@@ -100,7 +100,7 @@ describe("real-world eval materializer", () => {
     await writeFile(
       join(suiteDir, "eval.json"),
       `${JSON.stringify({
-        version: "2",
+        version: "1",
         suite_id: "fake-realworld",
         scenarios: ["scenarios/fake-case/scenario.json"]
       }, null, 2)}\n`

@@ -1,6 +1,7 @@
 import type { SupervisorActionKind } from "../graph/schema.js";
 
 export type FailureClass =
+  | "context_contract_failure"
   | "missing_context"
   | "missing_dependency_docs"
   | "wrong_local_pattern"
@@ -92,9 +93,85 @@ export interface SupervisorEvidencePatch {
 
 export type SupervisorApplyAction =
   | "retry_node"
+  | "repair_context"
   | "repair_artifact"
-  | "pause_for_human"
+  | "repair_validation_strategy"
+  | "repair_workspace"
+  | "repair_environment"
+  | "retry_with_evidence"
+  | "pause_for_authority"
   | "fail_terminal";
+
+export interface SupervisorContextRepairMaterial {
+  key: string;
+  title: string;
+  text: string;
+  tokens: number;
+}
+
+export interface SupervisorContextRepairPatch {
+  patch_id: string;
+  strategy: "replace_authored_context";
+  reason: string;
+  materials: SupervisorContextRepairMaterial[];
+  omitted: Array<{
+    key: string;
+    reason: string;
+    source_name?: string;
+    source_path?: string;
+  }>;
+  analysis_path?: string;
+  created_at: string;
+}
+
+export interface SupervisorValidationStrategyRepair {
+  reason: string;
+  focus: string[];
+  avoid_repeating: string[];
+  required_handoff_evidence: string[];
+}
+
+export interface SupervisorWorkspaceRepairPatch {
+  patch_id: string;
+  strategy: "restore_failed_attempt_changes";
+  reason: string;
+  baseline_path: string;
+  changed_files_path: string;
+  status_path?: string;
+  diff_patch_path?: string;
+  changed_file_count: number;
+  result_path?: string;
+  created_at: string;
+}
+
+export interface SupervisorEnvironmentRepair {
+  reason: string;
+  safe_repairs: string[];
+  retry_effect: string;
+}
+
+export interface SupervisorMaterialDelta {
+  kind:
+    | "context_changed"
+    | "workspace_cleaned"
+    | "artifact_repaired"
+    | "validation_strategy_changed"
+    | "environment_repaired"
+    | "evidence_added";
+  summary: string;
+  artifact_paths?: Record<string, string>;
+}
+
+export interface SupervisorRuntimeOverlay {
+  overlay_id: string;
+  apply_action: SupervisorApplyAction;
+  material_delta: SupervisorMaterialDelta[];
+  context_repair?: SupervisorContextRepairPatch;
+  validation_strategy?: SupervisorValidationStrategyRepair;
+  workspace_repair?: SupervisorWorkspaceRepairPatch;
+  environment_repair?: SupervisorEnvironmentRepair;
+  created_at: string;
+}
 
 export interface SupervisorRecoveryPlan {
   plan_id: string;
@@ -102,6 +179,7 @@ export interface SupervisorRecoveryPlan {
   classification: FailureClass;
   apply_action: SupervisorApplyAction;
   retry_directive?: SupervisorRecoveryEnvelope["retry_directive"];
+  runtime_overlay?: SupervisorRuntimeOverlay;
   repair_directive?: {
     summary: string;
     evidence_to_read: string[];
@@ -148,6 +226,7 @@ export interface SupervisorRecoveryEnvelope {
       declared_artifacts: true;
     };
   };
+  runtime_overlay?: SupervisorRuntimeOverlay;
   created_at: string;
 }
 

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { loadEvalSuite, parseJudgeResult, renderGraphTemplate } from "../../src/evals/suite.js";
 
-async function writeMinimalV2Suite(root: string): Promise<string> {
+async function writeMinimalV1Suite(root: string): Promise<string> {
   const suiteDir = join(root, "suite");
   const scenarioDir = join(suiteDir, "scenarios", "artifact-discipline");
   const variantDir = join(suiteDir, "variants");
@@ -18,6 +18,7 @@ async function writeMinimalV2Suite(root: string): Promise<string> {
   await mkdir(judgesDir, { recursive: true });
   await mkdir(gradersDir, { recursive: true });
   await writeFile(join(scenarioDir, "repo", "README.md"), "fixture repo\n");
+  await writeFile(join(scenarioDir, "docs-response.txt"), "simulated docs\n");
   await writeFile(join(judgesDir, "artifact-quality.md"), "Rate artifact quality from 1 to 5.\n");
   await writeFile(
     join(gradersDir, "deterministic.mjs"),
@@ -44,7 +45,7 @@ async function writeMinimalV2Suite(root: string): Promise<string> {
       },
       repos: {
         main: {
-          path: "{{fixture.repo}}"
+          path: "{{environment.repo}}"
         }
       },
       defaults: {
@@ -78,41 +79,68 @@ async function writeMinimalV2Suite(root: string): Promise<string> {
       bucket: "valid-hard-execution",
       difficulty: "hard",
       description: "Node must publish a real handoff artifact.",
-      fixture: {
+      environment: {
         repo: "repo",
-        init_git: true
+        init_git: true,
+        simulation: {
+          seed: "stable",
+          tool_calls: [
+            {
+              id: "docs-503",
+              command: "docs-fetch",
+              match: { argv_contains: ["--url"] },
+              error: { stderr: "maintenance", exit_code: 503 },
+              latency_ms: 1,
+              probability: 1
+            },
+            {
+              id: "docs-ok",
+              command: "docs-ok",
+              match: { argv_exact: ["--url", "local"] },
+              response_file: "docs-response.txt"
+            }
+          ]
+        }
       },
       workflow: {
         graph_template: "graph.template.json",
         harness: "codex-cli",
         workspace_backend: "inplace"
       },
-      expected: {
-        final_outcome: "passed",
-        required_artifacts: [{ name: "handoff", contains: ["validation"] }],
-        forbidden_edits: ["forbidden.txt"],
-        supervisor: {
-          classifications: [],
-          gatherers: [],
-          apply_actions: []
-        }
-      },
-      grading: {
-        dimensions: ["artifact_quality", "graph_contract_adherence"]
+      criteria: {
+        outcome: { status: "passed" },
+        artifact: { required: [{ name: "handoff", contains: ["validation"] }] },
+        workspace: { forbidden_edits: ["forbidden.txt"] },
+        supervisor: {},
+        trajectory: {
+          match: "contains_ordered",
+          events: [{ kind: "node_attempt" }, { kind: "artifact_write", artifact: "handoff" }]
+        },
+        delivery: { required: true },
+        deterministic: {},
+        "artifact-quality": { dimensions: ["artifact_quality", "graph_contract_adherence"] }
       }
     }, null, 2)}\n`
   );
   await writeFile(
     join(suiteDir, "eval.json"),
     `${JSON.stringify({
-      version: "2",
+      version: "1",
       suite_id: "workflow-quality",
       objective: "Evaluate complete Agentflow workflow behavior.",
       default_trials: 2,
       scenarios: ["scenarios/artifact-discipline/scenario.json"],
       variants: ["variants/current.json"],
-      graders: [{ id: "deterministic", kind: "script", command: "node graders/deterministic.mjs" }],
-      judges: [{ id: "artifact-quality", rubric: "judges/artifact-quality.md" }],
+      criteria: [
+        { id: "outcome", kind: "outcome", required: true },
+        { id: "artifact", kind: "artifact", required: true },
+        { id: "workspace", kind: "workspace", required: true },
+        { id: "supervisor", kind: "supervisor", required: true },
+        { id: "trajectory", kind: "trajectory", required: true },
+        { id: "delivery", kind: "delivery", required: true },
+        { id: "deterministic", kind: "custom_script", command: "node graders/deterministic.mjs" },
+        { id: "artifact-quality", kind: "quality", rubric: "judges/artifact-quality.md", required: false }
+      ],
       thresholds: {
         pass_rate: 1,
         max_blocker_rate: 0,
@@ -124,10 +152,10 @@ async function writeMinimalV2Suite(root: string): Promise<string> {
   return suiteDir;
 }
 
-describe("eval suite v2 loading", () => {
-  it("loads scenario, variant, grader, judge, and renders graph placeholders", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-v2-suite-"));
-    const suiteDir = await writeMinimalV2Suite(tempRoot);
+describe("eval suite v1 loading", () => {
+  it("loads criteria, environment simulation, variant, and renders graph placeholders", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-v1-suite-"));
+    const suiteDir = await writeMinimalV1Suite(tempRoot);
 
     const loaded = await loadEvalSuite(tempRoot, suiteDir);
     const scenario = loaded.scenarios[0]!;
@@ -142,7 +170,7 @@ describe("eval suite v2 loading", () => {
         id: "trial-001",
         root: "/tmp/trial"
       },
-      fixture: {
+      environment: {
         repo: "/tmp/trial/repo"
       }
     });
@@ -155,11 +183,13 @@ describe("eval suite v2 loading", () => {
     };
 
     expect(loaded.diagnostics).toEqual([]);
-    expect(loaded.suite.version).toBe("2");
+    expect(loaded.suite.version).toBe("1");
     expect(loaded.suite.source_reference).toContain("Demystifying evals for AI agents");
+    expect(loaded.suite.source_reference).toContain("ADK");
     expect(loaded.scenarios.map((entry) => entry.id)).toEqual(["artifact-discipline"]);
     expect(loaded.variants.map((entry) => entry.id)).toEqual(["current"]);
-    expect(loaded.judges.map((entry) => entry.id)).toEqual(["artifact-quality"]);
+    expect(loaded.criteria.map((entry) => [entry.id, entry.kind])).toContainEqual(["artifact-quality", "quality"]);
+    expect(scenario.environment.simulation?.tool_calls.map((entry) => entry.id)).toEqual(["docs-503", "docs-ok"]);
     expect(rendered.diagnostics).toEqual([]);
     expect(graph.graph_id).toBe("eval-artifact-discipline-current-1");
     expect(graph.intent.goal).toBe("Node must publish a real handoff artifact.");
@@ -168,13 +198,13 @@ describe("eval suite v2 loading", () => {
     expect(graph.graph.steps[0]?.args.at(-1)).toBe("current");
   });
 
-  it("reports unsupported v1 suites, missing fixtures, duplicate ids, and bad placeholders", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-v2-invalid-"));
-    const suiteDir = await writeMinimalV2Suite(tempRoot);
+  it("rejects legacy v2 fields, missing environment paths, duplicate ids, and bad placeholders", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-v1-invalid-"));
+    const suiteDir = await writeMinimalV1Suite(tempRoot);
     await writeFile(
       join(suiteDir, "eval.json"),
       `${JSON.stringify({
-        version: "2",
+        version: "1",
         suite_id: "bad",
         objective: "bad",
         default_trials: 0,
@@ -183,7 +213,13 @@ describe("eval suite v2 loading", () => {
           "scenarios/artifact-discipline/scenario.json"
         ],
         variants: ["variants/current.json", "variants/current.json"],
-        judges: [{ id: "missing", rubric: "judges/missing.md" }],
+        criteria: [
+          { id: "outcome", kind: "outcome" },
+          { id: "outcome", kind: "outcome" },
+          { id: "missing-rubric", kind: "quality", rubric: "judges/missing.md" }
+        ],
+        graders: [{ id: "legacy", kind: "script", command: "true" }],
+        judges: [{ id: "legacy-judge", rubric: "judges/missing.md" }],
         thresholds: { pass_rate: 2 }
       }, null, 2)}\n`
     );
@@ -198,9 +234,19 @@ describe("eval suite v2 loading", () => {
         bucket: "valid-hard-execution",
         difficulty: "hard",
         description: "bad",
-        fixture: { repo: "missing-repo" },
+        fixture: { repo: "legacy-repo" },
+        expected: { final_outcome: "passed" },
+        grading: { dimensions: ["artifact_quality"] },
+        environment: {
+          repo: "missing-repo",
+          simulation: {
+            tool_calls: [
+              { id: "bad", command: "../bad", response: { stdout: "x" }, probability: 2 }
+            ]
+          }
+        },
         workflow: { graph_template: "graph.template.json", harness: "codex-cli" },
-        expected: { final_outcome: "passed" }
+        criteria: { outcome: {}, unknown: {} }
       }, null, 2)}\n`
     );
 
@@ -209,22 +255,31 @@ describe("eval suite v2 loading", () => {
 
     expect(messages).toContain("default_trials");
     expect(messages).toContain("pass_rate");
+    expect(messages).toContain("Legacy top-level graders");
+    expect(messages).toContain("Legacy top-level judges");
+    expect(messages).toContain("Legacy fixture is not supported");
+    expect(messages).toContain("Legacy expected is not supported");
+    expect(messages).toContain("Legacy grading is not supported");
     expect(messages).toContain("Duplicate scenario id");
     expect(messages).toContain("Duplicate variant id");
-    expect(messages).toContain("Fixture repo path does not exist");
-    expect(messages).toContain("Judge rubric path does not exist");
+    expect(messages).toContain("Duplicate criterion id");
+    expect(messages).toContain("Environment repo path does not exist");
+    expect(messages).toContain("Quality criterion rubric path does not exist");
+    expect(messages).toContain("Scenario references unknown criterion");
+    expect(messages).toContain("Simulation command must be a command name");
+    expect(messages).toContain("Simulation probability must be between 0 and 1");
     expect(messages).toContain("Unknown graph template placeholder");
 
-    await writeFile(join(suiteDir, "eval.json"), `${JSON.stringify({ version: "1" })}\n`);
+    await writeFile(join(suiteDir, "eval.json"), `${JSON.stringify({ version: "legacy" })}\n`);
     const unsupported = await loadEvalSuite(tempRoot, suiteDir);
     expect(unsupported.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
-      "Eval suite version must be \"2\""
+      "Eval suite version must be \"1\""
     );
   });
 
   it("validates and preserves real-world scenario metadata", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-realworld-metadata-"));
-    const suiteDir = await writeMinimalV2Suite(tempRoot);
+    const suiteDir = await writeMinimalV1Suite(tempRoot);
     const scenarioPath = join(suiteDir, "scenarios", "artifact-discipline", "scenario.json");
     await writeFile(join(suiteDir, "scenarios", "artifact-discipline", "regression.patch"), "diff --git a/a b/a\n");
     await writeFile(
@@ -234,7 +289,7 @@ describe("eval suite v2 loading", () => {
         bucket: "realworld-regression",
         difficulty: "hard",
         description: "Node must fix a pinned real-world issue.",
-        fixture: {
+        environment: {
           repo: "repo",
           init_git: true
         },
@@ -243,13 +298,15 @@ describe("eval suite v2 loading", () => {
           harness: "codex-cli",
           workspace_backend: "inplace"
         },
-        expected: {
-          final_outcome: "passed",
-          required_artifacts: [{ name: "handoff", contains: ["validation"] }],
-          forbidden_edits: []
-        },
-        grading: {
-          dimensions: ["evidence_use"]
+        criteria: {
+          outcome: { status: "passed" },
+          artifact: { required: [{ name: "handoff", contains: ["validation"] }] },
+          workspace: { forbidden_edits: [] },
+          supervisor: {},
+          trajectory: { match: "contains_any_order", events: [] },
+          delivery: { required: true },
+          deterministic: {},
+          "artifact-quality": { dimensions: ["evidence_use"] }
         },
         metadata: {
           realworld: {
@@ -286,9 +343,9 @@ describe("eval suite v2 loading", () => {
         bucket: "realworld-regression",
         difficulty: "hard",
         description: "bad metadata",
-        fixture: { repo: "repo" },
+        environment: { repo: "repo" },
         workflow: { graph_template: "graph.template.json", harness: "codex-cli" },
-        expected: { final_outcome: "passed" },
+        criteria: { outcome: {}, deterministic: {} },
         metadata: {
           realworld: {
             source_repo: "owner/project",
@@ -324,9 +381,9 @@ describe("eval suite v2 loading", () => {
         bucket: "realworld-regression",
         difficulty: "hard",
         description: "missing patch",
-        fixture: { repo: "repo" },
+        environment: { repo: "repo" },
         workflow: { graph_template: "graph.template.json", harness: "codex-cli" },
-        expected: { final_outcome: "passed" },
+        criteria: { outcome: {}, deterministic: {} },
         metadata: {
           realworld: {
             source_repo: "owner/project",

@@ -3,8 +3,86 @@
   "bucket": "valid-noisy-evidence",
   "difficulty": "hard",
   "description": "Node should prioritize relevant context when the manifest contains noisy distractors.",
-  "fixture": { "repo": "../../shared/repo", "init_git": true },
-  "workflow": { "graph_template": "../../shared/graph.exec.template.json", "harness": "codex-cli", "workspace_backend": "inplace" },
-  "expected": { "final_outcome": "passed", "required_artifacts": [{ "name": "handoff", "contains": ["scenario=noisy-context-manifest"] }], "forbidden_edits": ["distractor-output.txt"] },
-  "grading": { "dimensions": ["context_handling", "noise_efficiency"] }
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "scenario=noisy-context-manifest"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "distractor-output.txt"
+      ]
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "context_handling",
+        "noise_efficiency"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "context_handling",
+        "noise_efficiency"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "context_handling",
+        "noise_efficiency"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "context_handling",
+        "noise_efficiency"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "context_handling",
+        "noise_efficiency"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "context_handling",
+        "noise_efficiency"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "context_handling",
+        "noise_efficiency"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "context_handling",
+        "noise_efficiency"
+      ]
+    }
+  }
 }

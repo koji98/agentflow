@@ -93,6 +93,17 @@ function isContextFailureMessage(lowerMessage: string): boolean {
   ].some((fragment) => lowerMessage.includes(fragment));
 }
 
+function isContextContractFailureMessage(lowerMessage: string): boolean {
+  return (
+    lowerMessage.includes("would exceed max_total_tokens")
+    || lowerMessage.includes("max_total_tokens")
+    || lowerMessage.includes("context materialization")
+    || lowerMessage.includes("materializing context")
+    || lowerMessage.includes("non-tokenizable context")
+    || lowerMessage.includes("could not be materialized")
+  );
+}
+
 function gather(
   kind: SupervisorEvidenceGatherKind,
   reason: string,
@@ -268,6 +279,30 @@ export function classifyNodeFailure(input: {
   }
 
   if (
+    lowerMessage.includes("agentflow tool wrapper")
+    || lowerMessage.includes("tool wrapper")
+    || lowerMessage.includes("runtime path metadata")
+    || lowerMessage.includes("runtime metadata")
+    || lowerMessage.includes("path refresh")
+    || lowerMessage.includes("command not found")
+  ) {
+    return classifyResult({
+      class: "harness_unavailable",
+      summary: message || "Runtime tool or PATH setup appears unavailable.",
+      retryable: true,
+      recommended_action: "run_diagnostic",
+      gather_plan: gatherPlan([
+        gather("diagnostic_probe", "Inspect the local runtime/tool wrapper failure and refresh safe runtime metadata.", 1),
+        gather("local_context", "Collect the node tool contract and execution environment paths.", 2)
+      ]),
+      evidence: {
+        ...evidence,
+        environment_repair_candidate: true
+      }
+    });
+  }
+
+  if (
     lowerMessage.includes("harness")
     || lowerMessage.includes("binary")
     || lowerMessage.includes("required harness is unavailable")
@@ -283,6 +318,30 @@ export function classifyNodeFailure(input: {
       recommended_action: "pause_for_human",
       gather_plan: noGatherPlan(),
       evidence
+    });
+  }
+
+  if (
+    lowerMessage.includes("forbidden edit")
+    || lowerMessage.includes("forbidden file")
+    || lowerMessage.includes("unexpected file changed")
+    || lowerMessage.includes("unexpected workspace change")
+    || lowerMessage.includes("unrelated edit")
+    || lowerMessage.includes("workspace pollution")
+  ) {
+    return classifyResult({
+      class: "wrong_local_pattern",
+      summary: message || "The failed attempt made workspace changes outside the intended scope.",
+      retryable: true,
+      recommended_action: "run_diagnostic",
+      gather_plan: gatherPlan([
+        gather("local_context", "Inspect the failed attempt workspace diff and node scope.", 1),
+        gather("investigate_failure", "Determine which edits should be removed before retry.", 2)
+      ]),
+      evidence: {
+        ...evidence,
+        workspace_repair_candidate: true
+      }
     });
   }
 
@@ -338,6 +397,20 @@ export function classifyNodeFailure(input: {
       gather_plan: gatherPlan([
         gather("dependency_metadata", "Inspect local package metadata, versions, and dependency names.", 1),
         gather("external_context", "Gather read-only official docs, release notes, or public examples.", 2)
+      ]),
+      evidence
+    });
+  }
+
+  if (isContextContractFailureMessage(lowerMessage)) {
+    return classifyResult({
+      class: "context_contract_failure",
+      summary: message || "Execution context could not be packaged within the node context contract.",
+      retryable: true,
+      recommended_action: "rebuild_context",
+      gather_plan: gatherPlan([
+        gather("local_context", "Analyze the failed context package and build a bounded repair overlay.", 1),
+        gather("pattern_mining", "Identify relevant local files that should be sampled in the repaired context.", 2)
       ]),
       evidence
     });

@@ -12,6 +12,7 @@ import type {
   ContextPacketMaterializedItem,
   ContextPacketOmittedItem,
   ContextPacketSource,
+  RuntimeSupervisorContextRepairContext,
   ContextProvenance,
   WorkspaceFileContextProvenance,
   WorkspaceGlobContextProvenance
@@ -30,7 +31,10 @@ import {
   normalizeRelativePath,
   splitQualifiedPath
 } from "./common.js";
-import { listRepoFiles } from "./repo_files.js";
+import {
+  defaultContextIgnoredRoots,
+  listRepoFiles
+} from "./repo_files.js";
 import {
   contextTokenizerName,
   countContextTokens,
@@ -200,6 +204,14 @@ function describeContextItem(item: ContextItem, index: number): string {
   }
 
   return `${key} (workspace glob "${item.path}")`;
+}
+
+function explicitIgnoredRootOptIn(pattern: string): string | undefined {
+  const normalized = normalizeRelativePath(pattern).replace(/^\/+/u, "");
+  const [first] = normalized.split("/");
+  return first && defaultContextIgnoredRoots.includes(first as (typeof defaultContextIgnoredRoots)[number])
+    ? first
+    : undefined;
 }
 
 function createBudgetOverflowError(
@@ -408,6 +420,93 @@ async function materializeSupervisorRecoveryEnvelopeContext(
     materialized,
     "runtime supervisor recovery envelope"
   );
+}
+
+async function materializeSupervisorContextRepair(
+  options: ResolveContextOptions,
+  accumulator: MaterializationAccumulator,
+  maxTokensPerItem: number
+): Promise<boolean> {
+  const patch = options.recovery_envelope?.runtime_overlay?.context_repair;
+
+  if (!patch) {
+    return false;
+  }
+
+  for (const [index, material] of patch.materials.entries()) {
+    const remainingTokens = accumulator.max_total_tokens - accumulator.total_tokens;
+    const source: RuntimeSupervisorContextRepairContext = {
+      name: "supervisor_context_repair",
+      from: "runtime_supervisor_context_repair",
+      patch_id: patch.patch_id,
+      strategy: patch.strategy,
+      reason: patch.reason
+    };
+
+    if (remainingTokens <= 0) {
+      accumulator.omitted.push({
+        key: material.key,
+        source,
+        description: material.title,
+        reason: "Supervisor context repair material was omitted because prior runtime context consumed the available token budget.",
+        if_available: true
+      });
+      continue;
+    }
+
+    const prepared = prepareTextMaterialization(
+      material.text,
+      Math.min(maxTokensPerItem, remainingTokens)
+    );
+
+    await appendMaterializedItem(
+      accumulator,
+      {
+        key: material.key,
+        source,
+        description: material.title,
+        materialized_path: join(
+          options.execution_dir,
+          "context",
+          "materialized",
+          material.key,
+          `${index + 1}-context-repair.md`
+        ),
+        tokens: prepared.tokens,
+        truncated: prepared.truncated
+      },
+      prepared,
+      `supervisor context repair material "${material.key}"`
+    );
+  }
+
+  for (const [index, item] of (options.node.context ?? []).entries()) {
+    accumulator.omitted.push({
+      key: item.name || `context_${index + 1}`,
+      source: item,
+      reason: "Authored context item was replaced by a supervisor context repair overlay after the original package exceeded the runtime token budget.",
+      if_available: true
+    });
+  }
+
+  for (const omitted of patch.omitted) {
+    const source: RuntimeSupervisorContextRepairContext = {
+      name: "supervisor_context_repair",
+      from: "runtime_supervisor_context_repair",
+      patch_id: patch.patch_id,
+      strategy: patch.strategy,
+      reason: patch.reason
+    };
+    accumulator.omitted.push({
+      key: omitted.key,
+      source,
+      ...(omitted.source_name ? { description: omitted.source_name } : {}),
+      reason: omitted.reason,
+      if_available: true
+    });
+  }
+
+  return true;
 }
 
 interface SelectAttemptsContext {
@@ -630,7 +729,10 @@ async function materializeWorkspaceGlobContext(
 
   const normalizedPattern = normalizeRelativePath(repo_relative_path);
   const matcher = globPatternToRegExp(normalizedPattern);
-  const repoFiles = await listRepoFiles(repoRoot, cache.repo_files);
+  const ignoredRootOptIn = explicitIgnoredRootOptIn(normalizedPattern);
+  const repoFiles = await listRepoFiles(repoRoot, cache.repo_files, {
+    ...(ignoredRootOptIn ? { include_ignored_root: ignoredRootOptIn } : {})
+  });
   const matchedPaths = repoFiles
     .filter((filePath) => matcher.test(filePath))
     .slice(0, item.max_files ?? Number.MAX_SAFE_INTEGER);
@@ -914,16 +1016,24 @@ export async function resolveExecutionContext(
     options.node.effective_policy.input_rules.max_tokens_per_item
   );
 
-  for (const [index, item] of (options.node.context ?? []).entries()) {
-    await materializeContextItem(
-      item,
-      index,
-      options,
-      cache,
-      accumulator,
-      contextProvenance,
-      options.node.effective_policy.input_rules.max_tokens_per_item
-    );
+  const authoredContextReplaced = await materializeSupervisorContextRepair(
+    options,
+    accumulator,
+    options.node.effective_policy.input_rules.max_tokens_per_item
+  );
+
+  if (!authoredContextReplaced) {
+    for (const [index, item] of (options.node.context ?? []).entries()) {
+      await materializeContextItem(
+        item,
+        index,
+        options,
+        cache,
+        accumulator,
+        contextProvenance,
+        options.node.effective_policy.input_rules.max_tokens_per_item
+      );
+    }
   }
 
   await materializeRepeatHistoryContext(

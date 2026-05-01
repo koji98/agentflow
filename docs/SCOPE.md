@@ -9,7 +9,7 @@ The product surface is intentionally centered on four layers:
 3. Supervised execution: local execution through Codex CLI, Cursor CLI, deterministic checks, semantic checks, plugin-bundled tools, durable events, bounded action budgets, and visible interventions.
 4. Delivery package: review artifacts that summarize what happened, what changed, what evidence exists, where risk remains, what the supervisor did, and which files are human-facing versus resume/audit/debug state.
 
-Agentflow also ships an offline eval surface for confidence in workflows. `agentflow eval` is not a graph layer and does not alter the graph contract. It runs normal graphs from local v2 eval suites, records traces, applies deterministic graders and LLM judges, and writes benchmark artifacts for capability and regression evaluation.
+Agentflow also ships an offline eval surface for confidence in workflows. `agentflow eval` is not a graph layer and does not alter the graph contract. It runs normal graphs from local v1 eval suites, records traces and trajectories, applies required criteria and quality criteria, supports deterministic environment simulation, and writes benchmark artifacts for capability and regression evaluation.
 
 ## Canonical Surfaces
 
@@ -49,7 +49,7 @@ Required behavior:
 - preserve run state for inspection and resume
 - distinguish planned checkpoint gates from supervisor safety pauses in validation, operations, and delivery evidence
 - produce a delivery package for terminal runs
-- evaluate workflow quality offline through local suites, scenario fixtures, variants, repeated trials, deterministic graders, LLM judges, and benchmark reports
+- evaluate workflow quality offline through local suites, scenario environments, variants, repeated trials, criteria, trajectory checks, deterministic simulation, and benchmark reports
 
 Implementation details for these runtime paths live under `technical-implementation/`. Those docs explain how validation compiles graphs, how context packets and artifacts are materialized, how generated `af` and plugin tool wrappers enter the harness environment, and how credentials stay out of the agent context window.
 

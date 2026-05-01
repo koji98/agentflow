@@ -6,11 +6,12 @@ import {
   readExecutionManifest,
   readRunEvents,
   readRunExecutionAttempts,
+  readSupervisorInterventions,
   readRunRecord,
   readRunState
 } from "../artifacts/reader.js";
 import type { CompiledExecutableNode } from "../graph/compiled.js";
-import type { EvalTraceArtifact, EvalTraceAttempt, EvalTracePacket } from "./types.js";
+import type { EvalTraceArtifact, EvalTraceAttempt, EvalTracePacket, EvalTrajectoryEvent } from "./types.js";
 
 function jsonLine(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
@@ -21,6 +22,24 @@ async function readOptionalJson(path: string): Promise<unknown | undefined> {
     return JSON.parse(await readFile(path, "utf8")) as unknown;
   } catch {
     return undefined;
+  }
+}
+
+async function readJsonLines(path: string | undefined): Promise<Array<Record<string, unknown>>> {
+  if (!path) {
+    return [];
+  }
+
+  try {
+    const text = await readFile(path, "utf8");
+    return text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as unknown)
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)));
+  } catch {
+    return [];
   }
 }
 
@@ -49,6 +68,12 @@ function collectStringField(value: unknown, field: string, output: Set<string>):
   }
 
   Object.values(record).forEach((nested) => collectStringField(nested, field, output));
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 export async function writeEvalTrace(options: {
@@ -132,12 +157,15 @@ export async function writeEvalTrace(options: {
 
 export async function buildEvalTracePacket(options: {
   run_root: string;
+  simulation_events_file?: string;
 }): Promise<EvalTracePacket> {
-  const [run, state, events, attempts] = await Promise.all([
+  const [run, state, events, attempts, interventions, simulationEvents] = await Promise.all([
     readRunRecord(options.run_root),
     readRunState(options.run_root),
     readRunEvents(options.run_root),
-    readRunExecutionAttempts(options.run_root)
+    readRunExecutionAttempts(options.run_root),
+    readSupervisorInterventions(options.run_root),
+    readJsonLines(options.simulation_events_file)
   ]);
   const artifacts: EvalTraceArtifact[] = [];
 
@@ -166,12 +194,87 @@ export async function buildEvalTracePacket(options: {
   collectStringField(eventRecords, "gatherer", gatherers);
   collectStringField(eventRecords, "apply_action", applyActions);
   collectStringField(eventRecords, "action", applyActions);
+  collectStringField(interventions, "apply_action", applyActions);
+  collectStringField(
+    interventions.map((intervention) => readRecord(intervention.evidence.gather_plan)?.gathers),
+    "kind",
+    gatherers
+  );
 
   const manifestPath = join(options.run_root, "delivery", "manifest.json");
   const manifest = await readOptionalJson(manifestPath);
+  const trajectory: EvalTrajectoryEvent[] = [];
+  let order = 1;
+
+  for (const event of eventRecords) {
+    trajectory.push({
+      order,
+      kind: "run_event",
+      source: "agentflow",
+      ...(typeof event.timestamp === "string" ? { timestamp: event.timestamp } : {}),
+      ...(typeof event.type === "string" ? { type: event.type } : {}),
+      ...(typeof event.compiled_id === "string" ? { node_id: event.compiled_id } : {}),
+      ...(typeof event.node_label === "string" ? { node_label: event.node_label } : {}),
+      ...(typeof event.status === "string" ? { status: event.status } : {}),
+      ...(typeof event.action === "string" ? { action: event.action } : {}),
+      ...event
+    });
+    order += 1;
+  }
+
+  for (const attempt of attempts) {
+    trajectory.push({
+      order,
+      kind: "node_attempt",
+      source: "agentflow",
+      ...(attempt.compiled_id ? { node_id: attempt.compiled_id } : {}),
+      ...(attempt.authored_id ? { authored_id: attempt.authored_id } : {}),
+      ...(attempt.status ? { status: attempt.status } : {}),
+      ...(attempt.kind ? { node_kind: attempt.kind } : {}),
+      ...(attempt.outcome ? { outcome: attempt.outcome } : {}),
+      ...(attempt.execution_id ? { execution_id: attempt.execution_id } : {}),
+      ...(attempt.attempt_index !== undefined ? { attempt_index: attempt.attempt_index } : {})
+    });
+    order += 1;
+  }
+
+  for (const simulationEvent of simulationEvents) {
+    trajectory.push({
+      order,
+      kind: "simulation_tool_call",
+      source: "simulation",
+      ...(typeof simulationEvent.timestamp === "string" ? { timestamp: simulationEvent.timestamp } : {}),
+      ...(typeof simulationEvent.command === "string" ? { command: simulationEvent.command } : {}),
+      ...(typeof simulationEvent.rule_id === "string" ? { rule_id: simulationEvent.rule_id } : {}),
+      ...(typeof simulationEvent.matched === "boolean" ? { matched: simulationEvent.matched } : {}),
+      ...(typeof simulationEvent.exit_code === "number" ? { exit_code: simulationEvent.exit_code } : {}),
+      ...simulationEvent
+    });
+    order += 1;
+  }
+
+  for (const artifact of artifacts) {
+    trajectory.push({
+      order,
+      kind: "artifact_write",
+      source: "agentflow",
+      artifact: artifact.name,
+      path: artifact.path
+    });
+    order += 1;
+  }
+
+  if (manifest !== undefined) {
+    trajectory.push({
+      order,
+      kind: "delivery",
+      source: "agentflow",
+      path: manifestPath
+    });
+  }
 
   return {
-    schema_version: "2",
+    schema_version: "1",
     run_root: options.run_root,
     outcome: {
       status: state.status,
@@ -200,6 +303,8 @@ export async function buildEvalTracePacket(options: {
     }),
     artifacts,
     events: eventRecords,
+    trajectory,
+    simulation_events: simulationEvents,
     supervisor: {
       classifications: [...classifications],
       gatherers: [...gatherers],
@@ -217,7 +322,9 @@ export async function buildEvalTracePacket(options: {
       attempts: attempts.length,
       events: events.length,
       artifacts: artifacts.length,
-      recovery_cycles: interventionEvents.length
+      recovery_cycles: interventionEvents.length,
+      simulation_events: simulationEvents.length,
+      trajectory_events: trajectory.length
     }
   };
 }

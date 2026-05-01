@@ -50,7 +50,16 @@ const expectedChangedFiles = {
     "src/mode.js"
   ],
   "15-supervisor-retry-envelope": [],
-  "16-terminal-repeated-failure": []
+  "16-terminal-repeated-failure": [],
+  "17-context-overflow-repair": [
+    "src/router.js"
+  ],
+  "18-noisy-generated-tree": [
+    "src/status.js"
+  ],
+  "19-validation-timeout-strategy": [],
+  "20-workspace-pollution-cleanup": [],
+  "21-no-delta-recovery-stop": []
 };
 
 function loadScenario(id) {
@@ -62,7 +71,7 @@ function loadScenario(id) {
 }
 
 const scenario = loadScenario(scenarioId);
-const expectedStatus = scenario.expected.final_outcome ?? "passed";
+const expectedStatus = scenario.criteria?.outcome?.status ?? "passed";
 const artifacts = packet.artifacts ?? [];
 const handoff = artifacts.find((artifact) => artifact.name === "handoff");
 const handoffText = String(handoff?.content ?? "");
@@ -126,6 +135,38 @@ if (scenarioId === "15-supervisor-retry-envelope") {
 if (scenarioId === "16-terminal-repeated-failure") {
   assert("terminal_failed", packet.outcome.status === "failed", "expected terminal failure");
   assert("failure_attempts", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
+}
+
+if (scenarioId === "17-context-overflow-repair") {
+  assert("context_repair_classified", packet.supervisor?.classifications?.includes("context_contract_failure"), "context_contract_failure classification");
+  assert("context_repair_applied", packet.supervisor?.apply_actions?.includes("repair_context"), "repair_context apply action");
+  assert("context_repair_attempts", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
+  assert("handoff_mentions_supervisor_context", /Supervisor context:|context repair|recovery envelope/i.test(handoffText), "handoff supervisor-context evidence");
+}
+
+if (scenarioId === "18-noisy-generated-tree") {
+  const changed = gitChangedFiles();
+  assert("generated_tree_untouched", !changed.some((file) => file.startsWith("generated/")), `changed=${changed.join(",") || "none"}`);
+}
+
+if (scenarioId === "19-validation-timeout-strategy") {
+  assert("validation_strategy_classified", packet.supervisor?.classifications?.includes("diagnostic_needed"), "diagnostic_needed classification");
+  assert("validation_strategy_applied", packet.supervisor?.apply_actions?.includes("repair_validation_strategy"), "repair_validation_strategy apply action");
+  assert("validation_strategy_retry", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
+  assert("handoff_mentions_focused_validation", /focused validation command|timeout/i.test(handoffText), "handoff focused validation evidence");
+}
+
+if (scenarioId === "20-workspace-pollution-cleanup") {
+  assert("workspace_repair_classified", packet.supervisor?.classifications?.includes("wrong_local_pattern"), "wrong_local_pattern classification");
+  assert("workspace_repair_applied", packet.supervisor?.apply_actions?.includes("repair_workspace"), "repair_workspace apply action");
+  assert("workspace_repair_retry", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
+  assert("pollution_removed", !existsSync(join(repoRoot, "pollution.txt")), "pollution.txt absent");
+}
+
+if (scenarioId === "21-no-delta-recovery-stop") {
+  assert("no_delta_terminal_failed", packet.outcome.status === "failed", "expected terminal failure");
+  assert("no_delta_no_retry", (packet.metrics?.attempts ?? 0) === 1, "no retry without material delta");
+  assert("no_delta_repair_selected", packet.supervisor?.apply_actions?.includes("repair_workspace"), "repair_workspace selected");
 }
 
 const passed = assertions.every((entry) => entry.passed);

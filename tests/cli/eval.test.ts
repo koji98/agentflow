@@ -28,17 +28,14 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
   const repoDir = join(scenarioDir, "repo");
   const variantDir = join(suiteDir, "variants");
   const gradersDir = join(suiteDir, "graders");
-  const judgesDir = join(suiteDir, "judges");
   const evalRoot = join(tempRoot, "eval-output");
 
   await mkdir(repoDir, { recursive: true });
   await mkdir(variantDir, { recursive: true });
   await mkdir(gradersDir, { recursive: true });
-  await mkdir(judgesDir, { recursive: true });
   await initGitRepo(repoDir);
   await writeFile(join(repoDir, "package.json"), "{\"scripts\":{\"test\":\"node check.js\"}}\n");
   await writeFile(join(repoDir, "check.js"), "process.exit(0);\n");
-  await writeFile(join(judgesDir, "artifact-quality.md"), "Return strict JSON rating artifact quality.\n");
   await writeFile(
     join(variantDir, "current.json"),
     `${JSON.stringify({
@@ -64,13 +61,13 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
     [
       "import { readFileSync } from 'node:fs';",
       "const packet = JSON.parse(readFileSync(process.env.AGENTFLOW_EVAL_TRACE_PACKET_FILE, 'utf8'));",
-      "const passed = packet.outcome.status === 'passed' && packet.artifacts.some((artifact) => artifact.name === 'handoff');",
+      "const passed = packet.outcome.status === 'passed' && packet.artifacts.some((artifact) => artifact.name === 'handoff') && packet.simulation_events.some((event) => event.rule_id === 'remote-ok');",
       "console.log(JSON.stringify({",
       "  passed,",
       "  score: passed ? 5 : 1,",
-      "  summary: passed ? 'packet ok' : 'packet missing expected outcome or artifact',",
+      "  summary: passed ? 'packet ok' : 'packet missing expected outcome, artifact, or simulation event',",
       "  assertions: [{ id: 'packet', passed, evidence: process.env.AGENTFLOW_EVAL_TRACE_PACKET_FILE }],",
-      "  metrics: { attempts: packet.metrics.attempts }",
+      "  metrics: { attempts: packet.metrics.attempts, simulation_events: packet.metrics.simulation_events }",
       "}));"
     ].join("\n")
   );
@@ -78,14 +75,14 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
     join(scenarioDir, "graph.template.json"),
     `${JSON.stringify({
       version: "1",
-      graph_id: "eval-cli-v2-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+      graph_id: "eval-cli-v1-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
       intent: {
         goal: "Run the workflow eval case.",
         acceptance_criteria: ["The declared handoff artifact exists."]
       },
       repos: {
         main: {
-          path: "{{fixture.repo}}"
+          path: "{{environment.repo}}"
         }
       },
       defaults: {
@@ -101,6 +98,13 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
         type: "sequence",
         id: "root",
         steps: [
+          {
+            type: "exec",
+            id: "simulated_remote",
+            repo: "main",
+            command: "fixture-remote",
+            args: ["--url", "local"]
+          },
           {
             type: "exec",
             id: "write_handoff",
@@ -129,36 +133,59 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
       bucket: "valid-hard-execution",
       difficulty: "medium",
       description: "A deterministic workflow must write a declared handoff artifact.",
-      fixture: {
+      environment: {
         repo: "repo",
-        init_git: true
+        init_git: true,
+        simulation: {
+          seed: "eval-cli",
+          tool_calls: [
+            {
+              id: "remote-ok",
+              command: "fixture-remote",
+              match: { argv_exact: ["--url", "local"] },
+              response: { stdout: "remote ok\\n" }
+            }
+          ]
+        }
       },
       workflow: {
         graph_template: "graph.template.json",
         harness: "codex-cli",
         workspace_backend: "inplace"
       },
-      expected: {
-        final_outcome: "passed",
-        required_artifacts: [{ name: "handoff", contains: ["validation evidence"] }],
-        forbidden_edits: ["forbidden.txt"]
-      },
-      grading: {
-        dimensions: ["artifact_quality", "delivery_auditability"]
+      criteria: {
+        outcome: { status: "passed" },
+        artifact: { required: [{ name: "handoff", contains: ["validation evidence"] }] },
+        workspace: { forbidden_edits: ["forbidden.txt"] },
+        trajectory: {
+          match: "contains_ordered",
+          events: [
+            { kind: "simulation_tool_call", rule_id: "remote-ok", matched: true },
+            { kind: "artifact_write", artifact: "handoff" }
+          ]
+        },
+        delivery: { required: true },
+        packet: {}
       }
     }, null, 2)}\n`
   );
   await writeFile(
     join(suiteDir, "eval.json"),
     `${JSON.stringify({
-      version: "2",
+      version: "1",
       suite_id: "workflow-eval-cli",
-      objective: "Exercise the v2 workflow eval CLI.",
+      objective: "Exercise the v1 workflow eval CLI.",
       default_trials: 2,
       scenarios: ["scenarios/exec-artifact/scenario.json"],
       variants: ["variants/current.json", "variants/terse.json"],
-      graders: [{ id: "packet", kind: "script", command: "node graders/packet.mjs" }],
-      judges: [],
+      criteria: [
+        { id: "outcome", kind: "outcome", required: true },
+        { id: "artifact", kind: "artifact", required: true },
+        { id: "workspace", kind: "workspace", required: true },
+        { id: "trajectory", kind: "trajectory", required: true },
+        { id: "delivery", kind: "delivery", required: true },
+        { id: "packet", kind: "custom_script", command: "node graders/packet.mjs" }
+      ],
       thresholds: {
         pass_rate: 1,
         max_blocker_rate: 0,
@@ -170,9 +197,9 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
   return { suiteDir, evalRoot };
 }
 
-describe("eval CLI v2", () => {
+describe("eval CLI v1", () => {
   it("validates, runs trials, reports, inspects, and compares workflow evals", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-eval-v2-"));
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-eval-v1-"));
     const { suiteDir, evalRoot } = await writeWorkflowEvalFixture(tempRoot);
 
     const validateResult = await executeCli(["eval", "validate", suiteDir], tempRoot);
@@ -183,6 +210,7 @@ describe("eval CLI v2", () => {
     expect(validatePayload.status).toBe("passed");
     expect(validatePayload.scenario_count).toBe(1);
     expect(validatePayload.variants).toEqual(["current", "terse"]);
+    expect(validatePayload.criterion_count).toBe(6);
 
     const runResult = await executeCli(
       ["eval", "run", suiteDir, "--eval-root", evalRoot, "--variant", "all", "--trials", "2", "--concurrency", "2"],
@@ -207,7 +235,7 @@ describe("eval CLI v2", () => {
     ).trim();
     const currentTrace = JSON.parse(
       await readFile(join(evalRoot, "scenarios", "exec-artifact", "current", "trial-001", "trace-packet.json"), "utf8")
-    ) as { artifacts: Array<{ name: string; content?: string }> };
+    ) as { artifacts: Array<{ name: string; content?: string }>; trajectory: Array<{ kind: string; rule_id?: string }> };
     const terseTrace = JSON.parse(
       await readFile(join(evalRoot, "scenarios", "exec-artifact", "terse", "trial-001", "trace-packet.json"), "utf8")
     ) as { artifacts: Array<{ name: string; content?: string }> };
@@ -217,8 +245,9 @@ describe("eval CLI v2", () => {
     expect(runPayload.status).toBe("passed");
     expect(benchmark.total_trials).toBe(4);
     expect(benchmark.pass_rate).toBe(1);
+    expect(benchmark.criteria.some((criterion: { criterion_id: string }) => criterion.criterion_id === "trajectory")).toBe(true);
     expect(benchmark.average_score).toBeGreaterThanOrEqual(4);
-    expect(scorecard.deterministic.blockers).toEqual([]);
+    expect(scorecard.criteria_results.every((result: { status: string }) => result.status === "passed")).toBe(true);
     expect(scorecard.metrics.attempts).toBeGreaterThanOrEqual(1);
     expect(currentTrialOneRoot).toContain(
       join(evalRoot, "scenarios", "exec-artifact", "current", "trial-001", "runs")
@@ -237,6 +266,7 @@ describe("eval CLI v2", () => {
         artifact.name === "handoff" && artifact.content?.includes("validation evidence for current")
       )
     ).toBe(true);
+    expect(currentTrace.trajectory.some((event) => event.kind === "simulation_tool_call" && event.rule_id === "remote-ok")).toBe(true);
     expect(
       terseTrace.artifacts.some((artifact) =>
         artifact.name === "handoff" && artifact.content?.includes("validation evidence for terse")
@@ -250,6 +280,7 @@ describe("eval CLI v2", () => {
     const reportMarkdown = await executeCli(["eval", "report", evalRoot, "--format", "markdown"], tempRoot);
     expect(reportMarkdown.exitCode).toBe(0);
     expect(reportMarkdown.stdout).toContain("# Eval Suite workflow-eval-cli");
+    expect(reportMarkdown.stdout).toContain("## Criteria");
 
     const inspectResult = await executeCli(
       ["eval", "inspect", evalRoot, "--scenario", "exec-artifact", "--variant", "current", "--trial", "1"],
@@ -258,6 +289,7 @@ describe("eval CLI v2", () => {
     const inspectPayload = JSON.parse(inspectResult.stdout);
     expect(inspectResult.exitCode).toBe(0);
     expect(inspectPayload.scorecard.metrics.attempts).toBeGreaterThanOrEqual(1);
+    expect(inspectPayload.scorecard.criteria_results.map((result: { id: string }) => result.id)).toContain("packet");
 
     const compareResult = await executeCli(
       ["eval", "compare", evalRoot, "--baseline", "current", "--candidate", "terse"],
@@ -268,9 +300,10 @@ describe("eval CLI v2", () => {
     expect(comparePayload.baseline.variant_id).toBe("current");
     expect(comparePayload.candidate.variant_id).toBe("terse");
     expect(comparePayload.delta.pass_rate).toBe(0);
+    expect(comparePayload.criteria_delta.some((entry: { criterion_id: string }) => entry.criterion_id === "packet")).toBe(true);
   }, 120_000);
 
-  it("uses the new positional eval surface and rejects old --suite usage", async () => {
+  it("uses the positional eval surface and rejects old --suite usage", async () => {
     const result = await executeCli(["eval", "validate", "--suite", "suite.json"]);
 
     expect(result.exitCode).toBe(2);

@@ -82,6 +82,16 @@ const artifactContextReferenceFiles = new Set([
   "skills/agentflow/references/examples.md"
 ]);
 
+const graphContractReferenceFiles = new Set([
+  "skills/agentflow/SKILL.md",
+  "skills/agentflow/agents/openai.yaml",
+  "skills/agentflow-plugins/SKILL.md",
+  "skills/agentflow-plugins/agents/openai.yaml",
+  "skills/README.md",
+  ...requiredReferences.map((reference) => `skills/agentflow/references/${reference}`),
+  ...requiredAgentflowPluginReferences.map((reference) => `skills/agentflow-plugins/references/${reference}`)
+]);
+
 const staleArtifactContextPatterns = [
   {
     pattern: /"optional"\s*:\s*(true|false)/u,
@@ -251,9 +261,11 @@ async function validateSkills() {
     const lines = text.split("\n");
 
     for (const [lineIndex, line] of lines.entries()) {
-      for (const { pattern, reason } of staleSkillContractPatterns) {
-        if (pattern.test(line)) {
-          staleSkillContractMatches.push(`${file}:${lineIndex + 1}: ${reason}`);
+      if (graphContractReferenceFiles.has(file)) {
+        for (const { pattern, reason } of staleSkillContractPatterns) {
+          if (pattern.test(line)) {
+            staleSkillContractMatches.push(`${file}:${lineIndex + 1}: ${reason}`);
+          }
         }
       }
       if (artifactContextReferenceFiles.has(file)) {

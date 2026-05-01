@@ -3,41 +3,10 @@
   "bucket": "realworld-regression",
   "difficulty": "hard",
   "description": "Fix execa template parsing so escaped newlines keep the intended argument text.",
-  "fixture": {
-    "repo": "../../../../eval-repos/agentflow-realworld-issues/execa-escaped-newline-template",
-    "init_git": true
-  },
   "workflow": {
     "graph_template": "../../templates/realworld-agent.graph.template.json",
     "harness": "codex-cli",
     "workspace_backend": "inplace"
-  },
-  "expected": {
-    "final_outcome": "passed",
-    "required_artifacts": [
-      {
-        "name": "handoff",
-        "contains": [
-          "Validation:"
-        ]
-      }
-    ],
-    "forbidden_edits": [],
-    "supervisor": {
-      "classifications": [],
-      "gatherers": [],
-      "apply_actions": []
-    }
-  },
-  "grading": {
-    "dimensions": [
-      "outcome_correctness",
-      "graph_contract_adherence",
-      "evidence_use",
-      "context_handling",
-      "noise_efficiency",
-      "delivery_auditability"
-    ]
   },
   "metadata": {
     "realworld": {
@@ -64,6 +33,87 @@
       "hidden_oracle_changed_files": [
         "lib/methods/template.js",
         "test/methods/template.js"
+      ]
+    }
+  },
+  "environment": {
+    "repo": "../../../../eval-repos/agentflow-realworld-issues/execa-escaped-newline-template",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Validation:"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": []
+    },
+    "supervisor": {
+      "classifications": [],
+      "gatherers": [],
+      "apply_actions": []
+    },
+    "delivery": {
+      "required": true
+    },
+    "realworld-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "evidence_use",
+        "context_handling",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "evidence_use",
+        "context_handling",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "evidence_use",
+        "context_handling",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "evidence_use",
+        "context_handling",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "evidence_use",
+        "context_handling",
+        "noise_efficiency",
+        "delivery_auditability"
       ]
     }
   }

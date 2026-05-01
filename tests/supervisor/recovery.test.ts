@@ -120,8 +120,15 @@ describe("supervisor recovery cycle", () => {
       workspace_path: tempRoot
     });
 
-    expect(recovery.recovery_plan.apply_action).toBe("retry_node");
+    expect(recovery.recovery_plan.apply_action).toBe("retry_with_evidence");
     expect(recovery.evidence_patches.map((patch) => patch.kind)).toEqual(["dependency_metadata", "external_context"]);
+    expect(recovery.recovery_plan.runtime_overlay?.material_delta).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "evidence_added"
+        })
+      ])
+    );
     expect(recovery.recovery_envelope?.retry_directive.unchanged_contract).toEqual({
       goal: true,
       acceptance_criteria: true,
@@ -137,7 +144,7 @@ describe("supervisor recovery cycle", () => {
       runtimeAttempt.prompt_sha256!
     );
     await expect(readFile(recovery.intervention.artifact_paths.recovery_plan_markdown, "utf8")).resolves.toContain(
-      "Apply action: `retry_node`"
+      "Apply action: `retry_with_evidence`"
     );
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -197,9 +204,137 @@ describe("supervisor recovery cycle", () => {
       harness
     });
 
-    expect(recovery.recovery_plan.apply_action).toBe("pause_for_human");
+    expect(recovery.recovery_plan.apply_action).toBe("pause_for_authority");
     expect(recovery.recovery_plan.pause_request?.unblock_request).toContain("authority");
     expect(recovery.recovery_envelope).toBeUndefined();
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("writes a validation strategy overlay for diagnostic failures", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-validation-strategy-"));
+    const runtimeAttempt = attempt(tempRoot);
+    await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+    const classification = classifyNodeFailure({
+      node: node(),
+      attempt: runtimeAttempt,
+      result: {
+        status: "failed",
+        outcome: "failed",
+        result: { timed_out: true },
+        stderr: "npm test timed out after 900s"
+      },
+      policy
+    });
+
+    const recovery = await runSupervisorRecoveryCycle({
+      action: "run_diagnostic",
+      run_id: "run-1",
+      graph_intent: {
+        goal: "Graph goal.",
+        acceptance_criteria: ["Graph acceptance stays intact."],
+        constraints: []
+      },
+      node: node(),
+      attempt: runtimeAttempt,
+      result: {
+        status: "failed",
+        outcome: "failed",
+        result: { timed_out: true },
+        stderr: "npm test timed out after 900s"
+      },
+      decision_id: "decision-1",
+      intervention_id: "intervention-1",
+      classification,
+      failure_fingerprint: "fingerprint-1",
+      repeated_fingerprint_count: 1,
+      prior_interventions: [],
+      policy,
+      workspace_path: tempRoot
+    });
+
+    expect(recovery.recovery_plan.apply_action).toBe("repair_validation_strategy");
+    expect(recovery.recovery_plan.runtime_overlay?.validation_strategy?.focus.join("\n")).toContain("focused");
+    expect(recovery.recovery_plan.runtime_overlay?.material_delta).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "validation_strategy_changed"
+        })
+      ])
+    );
+    expect(recovery.recovery_envelope?.retry_directive.must_do.join("\n")).toContain("focused validation command");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("writes a workspace repair overlay when failed-attempt changes can be restored", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-workspace-repair-"));
+    const runtimeAttempt = attempt(tempRoot);
+    const workspaceChangesDir = join(tempRoot, "workspace-changes");
+    const baselinePath = join(workspaceChangesDir, "baseline.json");
+    const changedFilesPath = join(workspaceChangesDir, "changed-files.json");
+    await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+    runtimeAttempt.metadata = {
+      node_workspace_changes: {
+        baseline_path: baselinePath,
+        changed_files_path: changedFilesPath,
+        changed_file_count: 1,
+        diff_patch_path: join(workspaceChangesDir, "diff.patch"),
+        status_path: join(workspaceChangesDir, "status.txt")
+      }
+    };
+
+    const failedResult: RuntimeNodeExecutionResult = {
+      status: "failed",
+      outcome: "failed",
+      result: { exit_code: 1 },
+      stdout: "",
+      stderr: "Forbidden edit: unexpected workspace change in generated/noise.md"
+    };
+    const classification = classifyNodeFailure({
+      node: node(),
+      attempt: runtimeAttempt,
+      result: failedResult,
+      policy
+    });
+
+    const recovery = await runSupervisorRecoveryCycle({
+      action: "run_diagnostic",
+      run_id: "run-1",
+      graph_intent: {
+        goal: "Graph goal.",
+        acceptance_criteria: ["Graph acceptance stays intact."],
+        constraints: []
+      },
+      node: node(),
+      attempt: runtimeAttempt,
+      result: failedResult,
+      decision_id: "decision-1",
+      intervention_id: "intervention-1",
+      classification,
+      failure_fingerprint: "fingerprint-1",
+      repeated_fingerprint_count: 1,
+      prior_interventions: [],
+      policy,
+      workspace_path: tempRoot
+    });
+
+    expect(recovery.recovery_plan.apply_action).toBe("repair_workspace");
+    expect(recovery.recovery_plan.runtime_overlay?.workspace_repair).toEqual(
+      expect.objectContaining({
+        strategy: "restore_failed_attempt_changes",
+        baseline_path: baselinePath,
+        changed_files_path: changedFilesPath
+      })
+    );
+    expect(recovery.recovery_plan.runtime_overlay?.material_delta).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "workspace_cleaned"
+        })
+      ])
+    );
+    expect(recovery.recovery_envelope?.retry_directive.must_do.join("\n")).toContain("workspace cleanup");
 
     await rm(tempRoot, { recursive: true, force: true });
   });

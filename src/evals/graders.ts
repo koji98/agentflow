@@ -8,12 +8,11 @@ import { runLocalProcess } from "../runtime/checks/deterministic.js";
 import type { HarnessAdapter } from "../runtime/harness/types.js";
 import { parseJudgeResult } from "./suite.js";
 import type {
-  EvalGraderResult,
-  EvalJudge,
-  EvalJudgeResult,
+  EvalCriterion,
+  EvalCriterionResult,
+  EvalJudgePayload,
   EvalScenario,
-  EvalScriptGrader,
-  EvalScriptGraderPayload,
+  EvalScriptCriterionPayload,
   EvalTracePacket
 } from "./types.js";
 
@@ -47,7 +46,7 @@ function parseStructuredPayload(text: string): Record<string, unknown> | undefin
 }
 
 function normalizeScriptPayload(payload: unknown): {
-  payload?: EvalScriptGraderPayload;
+  payload?: EvalScriptCriterionPayload;
   error?: string;
 } {
   const record =
@@ -58,15 +57,19 @@ function normalizeScriptPayload(payload: unknown): {
         : undefined;
 
   if (!record) {
-    return { error: "Grader output was not valid structured JSON." };
+    return { error: "custom_script criterion output was not valid structured JSON." };
   }
 
   if (typeof record.passed !== "boolean") {
-    return { error: "Grader output must include boolean passed." };
+    return { error: "custom_script criterion output must include boolean passed." };
   }
 
   if (record.assertions !== undefined && !Array.isArray(record.assertions)) {
-    return { error: "Grader assertions must be an array when present." };
+    return { error: "custom_script criterion assertions must be an array when present." };
+  }
+
+  if (record.blockers !== undefined && !Array.isArray(record.blockers)) {
+    return { error: "custom_script criterion blockers must be an array when present." };
   }
 
   const assertions = Array.isArray(record.assertions)
@@ -83,6 +86,9 @@ function normalizeScriptPayload(payload: unknown): {
   const metrics = record.metrics && typeof record.metrics === "object" && !Array.isArray(record.metrics)
     ? record.metrics as Record<string, unknown>
     : undefined;
+  const blockers = Array.isArray(record.blockers)
+    ? record.blockers.filter((blocker): blocker is string => typeof blocker === "string")
+    : undefined;
 
   return {
     payload: {
@@ -90,64 +96,42 @@ function normalizeScriptPayload(payload: unknown): {
       ...(typeof record.score === "number" ? { score: record.score } : {}),
       ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
       ...(assertions ? { assertions } : {}),
-      ...(metrics ? { metrics } : {})
+      ...(metrics ? { metrics } : {}),
+      ...(blockers ? { blockers } : {})
     }
   };
 }
 
-function scriptErrorResult(options: {
-  grader: EvalScriptGrader;
+function criterionErrorResult(options: {
+  criterion: EvalCriterion;
   output_dir: string;
   error: string;
-}): EvalGraderResult {
+}): EvalCriterionResult {
   return {
-    id: options.grader.id,
-    kind: "script",
-    required: options.grader.required,
+    id: options.criterion.id,
+    kind: options.criterion.kind,
+    required: options.criterion.required,
     status: "errored",
     passed: false,
-    output_dir: options.output_dir,
-    summary: options.error,
-    error: options.error
-  };
-}
-
-function judgeErrorResult(options: {
-  judge: EvalJudge;
-  output_dir: string;
-  error: string;
-}): EvalJudgeResult {
-  return {
-    id: options.judge.id,
-    kind: "llm_judge",
-    required: options.judge.required,
-    status: "errored",
-    output_dir: options.output_dir,
-    passed_quality_bar: false,
-    score: 1,
-    dimension_scores: {},
     blockers: [options.error],
-    rationale: options.error,
-    prompt_feedback: {
-      helpful_sections: [],
-      noisy_sections: [],
-      missing_guidance: []
-    },
+    assertions: [{ id: "criterion_error", passed: false, evidence: options.error }],
+    output_dir: options.output_dir,
     error: options.error
   };
 }
 
-function createJudgeHarness(judge: EvalJudge): HarnessAdapter {
-  switch (judge.harness) {
-    case "codex-cli":
-      return createCodexCliHarness();
+function createJudgeHarness(criterion: EvalCriterion): HarnessAdapter {
+  switch (criterion.harness) {
     case "cursor-cli":
       return createCursorCliHarness();
+    case "codex-cli":
+    default:
+      return createCodexCliHarness();
   }
 }
 
-export async function runScriptGrader(options: {
-  grader: EvalScriptGrader;
+export async function runScriptCriterion(options: {
+  criterion: EvalCriterion;
   suite_dir: string;
   scenario: EvalScenario;
   variant_id: string;
@@ -158,24 +142,25 @@ export async function runScriptGrader(options: {
   scorecard_file: string;
   output_dir: string;
   signal?: AbortSignal;
-}): Promise<EvalGraderResult> {
+}): Promise<EvalCriterionResult> {
   await mkdir(options.output_dir, { recursive: true });
 
   const processResult = await runLocalProcess({
     command: "sh",
-    args: ["-lc", options.grader.command],
+    args: ["-lc", options.criterion.command ?? ""],
     cwd: options.suite_dir,
     env: {
       AGENTFLOW_EVAL_SCENARIO_ID: options.scenario.id,
       AGENTFLOW_EVAL_VARIANT: options.variant_id,
       AGENTFLOW_EVAL_TRIAL_ID: options.trial_id,
+      AGENTFLOW_EVAL_CRITERION_ID: options.criterion.id,
       AGENTFLOW_EVAL_RUN_ROOT: options.run_root,
       AGENTFLOW_EVAL_TRACE_FILE: options.trace_file,
       AGENTFLOW_EVAL_TRACE_PACKET_FILE: options.trace_packet_file,
       AGENTFLOW_EVAL_SCORECARD_FILE: options.scorecard_file,
       AGENTFLOW_EVAL_OUTPUT_DIR: options.output_dir
     },
-    timeout_sec: options.grader.timeout_sec ?? 300,
+    timeout_sec: options.criterion.timeout_sec ?? 300,
     signal: options.signal
   });
 
@@ -185,39 +170,46 @@ export async function runScriptGrader(options: {
   ]);
 
   if (processResult.exit_code !== 0 || processResult.timed_out || processResult.canceled) {
-    return scriptErrorResult({
-      grader: options.grader,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
       error: processResult.timed_out
-        ? "Script grader timed out."
+        ? "custom_script criterion timed out."
         : processResult.canceled
-          ? "Script grader canceled."
-          : processResult.stderr.trim() || `Script grader exited with code ${processResult.exit_code}.`
+          ? "custom_script criterion canceled."
+          : processResult.stderr.trim() || `custom_script criterion exited with code ${processResult.exit_code}.`
     });
   }
 
   const normalized = normalizeScriptPayload(processResult.stdout);
 
   if (!normalized.payload) {
-    return scriptErrorResult({
-      grader: options.grader,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
-      error: normalized.error ?? "Script grader produced invalid output."
+      error: normalized.error ?? "custom_script criterion produced invalid output."
     });
   }
 
+  const blockers = normalized.payload.blockers ?? (normalized.payload.passed ? [] : [normalized.payload.summary ?? "custom_script criterion failed."]);
+
   return {
-    id: options.grader.id,
-    kind: "script",
-    required: options.grader.required,
+    id: options.criterion.id,
+    kind: "custom_script",
+    required: options.criterion.required,
     status: normalized.payload.passed ? "passed" : "failed",
+    passed: normalized.payload.passed,
+    blockers,
+    assertions: normalized.payload.assertions ?? [],
     output_dir: options.output_dir,
-    ...normalized.payload
+    ...(typeof normalized.payload.score === "number" ? { score: normalized.payload.score } : {}),
+    ...(normalized.payload.summary ? { rationale: normalized.payload.summary } : {}),
+    ...(normalized.payload.metrics ? { metrics: normalized.payload.metrics } : {})
   };
 }
 
-export async function runEvalJudge(options: {
-  judge: EvalJudge;
+export async function runQualityCriterion(options: {
+  criterion: EvalCriterion;
   suite_dir: string;
   scenario: EvalScenario;
   anonymized_variant_label: string;
@@ -227,13 +219,13 @@ export async function runEvalJudge(options: {
   trace_packet_file: string;
   output_dir: string;
   signal?: AbortSignal;
-}): Promise<EvalJudgeResult> {
+}): Promise<EvalCriterionResult> {
   await mkdir(options.output_dir, { recursive: true });
 
-  const harness = createJudgeHarness(options.judge);
+  const harness = createJudgeHarness(options.criterion);
   if (!harness.capabilities.supports_ai_check) {
-    return judgeErrorResult({
-      judge: options.judge,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
       error: `${harness.kind} does not support AI rubric grading.`
     });
@@ -241,14 +233,22 @@ export async function runEvalJudge(options: {
 
   const readiness = await harness.checkReadiness?.();
   if (readiness && readiness.length > 0) {
-    return judgeErrorResult({
-      judge: options.judge,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
       error: readiness.join(" ")
     });
   }
 
-  const rubric = await readFile(options.judge.rubric_path, "utf8");
+  if (!options.criterion.rubric_path) {
+    return criterionErrorResult({
+      criterion: options.criterion,
+      output_dir: options.output_dir,
+      error: "quality criterion is missing rubric path."
+    });
+  }
+
+  const rubric = await readFile(options.criterion.rubric_path, "utf8");
   const contextDir = resolve(options.output_dir, "context");
   const contextPacketPath = resolve(contextDir, "packet.json");
   const contextManifestPath = resolve(contextDir, "manifest.md");
@@ -256,13 +256,19 @@ export async function runEvalJudge(options: {
   await mkdir(contextDir, { recursive: true });
 
   const judgePacket = {
+    criterion: {
+      id: options.criterion.id,
+      kind: options.criterion.kind,
+      required: options.criterion.required,
+      dimensions: options.criterion.dimensions ?? [],
+      threshold: options.criterion.threshold ?? 4
+    },
     scenario: {
       id: options.scenario.id,
       bucket: options.scenario.bucket,
       difficulty: options.scenario.difficulty,
       description: options.scenario.description,
-      expected: options.scenario.expected,
-      grading: options.scenario.grading
+      criteria: options.scenario.criteria
     },
     variant_label: options.anonymized_variant_label,
     trial_id: options.trial_id,
@@ -277,8 +283,9 @@ export async function runEvalJudge(options: {
     writeFile(
       contextManifestPath,
       [
-        "# Eval Judge Context",
+        "# Eval Quality Criterion Context",
         "",
+        `- Criterion: ${options.criterion.id}`,
         `- Scenario: ${options.scenario.id}`,
         `- Variant label: ${options.anonymized_variant_label}`,
         `- Trial: ${options.trial_id}`,
@@ -292,15 +299,16 @@ export async function runEvalJudge(options: {
   const aiResult = await runAiCheck({
     harness,
     run_id: `eval-${options.scenario.id}-${options.anonymized_variant_label}`,
-    execution_id: `judge-${options.judge.id}-${options.trial_id}`,
+    execution_id: `quality-${options.criterion.id}-${options.trial_id}`,
     repo_alias: "eval",
     repo_path: options.suite_dir,
-    model: options.judge.model,
-    ...(options.judge.reasoning_effort ? { reasoning_effort: options.judge.reasoning_effort } : {}),
+    model: options.criterion.model,
+    ...(options.criterion.reasoning_effort ? { reasoning_effort: options.criterion.reasoning_effort } : {}),
     skip_git_repo_check: true,
     node_goal: [
       "Grade this Agentflow workflow trial using only the referenced local files.",
       "Return strict JSON with passed_quality_bar, score, dimension_scores, blockers, rationale, and prompt_feedback.",
+      `Criterion: ${options.criterion.id}`,
       `Scenario: ${options.scenario.id}`,
       `Variant label: ${options.anonymized_variant_label}`,
       `Trial: ${options.trial_id}`
@@ -323,7 +331,7 @@ export async function runEvalJudge(options: {
     context_packet_path: contextPacketPath,
     context_manifest_path: contextManifestPath,
     output_dir: options.output_dir,
-    timeout_sec: options.judge.timeout_sec ?? 900,
+    timeout_sec: options.criterion.timeout_sec ?? 900,
     signal: options.signal
   });
 
@@ -336,19 +344,33 @@ export async function runEvalJudge(options: {
   );
 
   if (aiResult.harness_result.status !== "passed" || !parsed.result) {
-    return judgeErrorResult({
-      judge: options.judge,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
       error: aiResult.evaluation.summary ?? parsed.error ?? "AI rubric judge failed."
     });
   }
 
+  const payload: EvalJudgePayload = parsed.result;
+  const threshold = options.criterion.threshold ?? 4;
+  const passed = payload.passed_quality_bar && payload.score >= threshold && payload.blockers.length === 0;
+
   return {
-    id: options.judge.id,
-    kind: "llm_judge",
-    required: options.judge.required,
-    status: parsed.result.passed_quality_bar ? "passed" : "failed",
+    id: options.criterion.id,
+    kind: "quality",
+    required: options.criterion.required,
+    status: passed ? "passed" : "failed",
+    passed,
+    blockers: payload.blockers,
+    assertions: [{
+      id: "quality_threshold",
+      passed,
+      evidence: `score=${payload.score}; threshold=${threshold}; passed_quality_bar=${payload.passed_quality_bar}`
+    }],
     output_dir: options.output_dir,
-    ...parsed.result
+    score: payload.score,
+    dimension_scores: payload.dimension_scores,
+    rationale: payload.rationale,
+    prompt_feedback: payload.prompt_feedback
   };
 }

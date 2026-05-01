@@ -1,19 +1,20 @@
 # Grading And Reporting
 
-Agentflow evals grade complete workflow traces. Deterministic graders own hard blockers; LLM judges own qualitative dimensions and prompt feedback.
+Agentflow evals grade complete workflow traces. Required deterministic criteria own hard blockers; quality criteria own qualitative dimensions and prompt feedback.
 
 ## Trial Artifacts
 
 Each trial writes:
 
 - `rendered-graph.json`: graph after template substitution.
-- `trial.json`: scenario, variant, trial id, and fixture bindings.
+- `trial.json`: scenario, variant, trial id, and environment bindings.
 - `run-root.txt`: underlying Agentflow run root, when launch reached runtime.
+- `simulation-events.jsonl`: deterministic environment simulation calls, when configured.
 - `trace.jsonl`: normalized event trace.
-- `trace-packet.json`: compact grading packet.
-- `deterministic-results.json`: built-in hard-fact assertions and blockers.
-- `graders/<id>/stdout.txt` and `stderr.txt`: script grader IO.
-- `judge-results/<id>/judge-packet.json`: anonymized judge packet.
+- `trace-packet.json`: compact grading packet with `trajectory`.
+- `criteria-results.json`: every criterion result.
+- `criteria/<id>/stdout.txt` and `stderr.txt`: custom script criterion IO.
+- `judge-results/<id>/judge-packet.json`: anonymized quality criterion packet.
 - `judge-results/<id>/ai-check-result.json`: raw/parsed LLM judge harness result.
 - `scorecard.json`: final trial result.
 - `summary.md`: human-readable trial summary.
@@ -28,34 +29,40 @@ The trace packet summarizes:
 - attempts and statuses
 - declared artifacts and compact contents
 - runtime events
+- `trajectory` events for attempts, simulation calls, artifact writes, supervisor events, and delivery
+- simulation events
 - supervisor classifications, gatherers, apply actions, intervention count, and recovery count
 - delivery manifest summary
-- metrics such as attempts, artifacts, events, recovery cycles, and duration
+- metrics such as attempts, artifacts, events, recovery cycles, trajectory length, and duration
 
-Use trace packets for grader input. Use the full run root only when diagnosing a concrete failure.
+Use trace packets for criterion input. Use the full run root only when diagnosing a concrete failure.
 
-## Deterministic Grading
+## Built-In Deterministic Criteria
 
-Built-in deterministic assertions check:
+Built-in criteria check:
 
-- final graph status matches expected outcome
-- required artifacts exist and contain required substrings
-- forbidden edits are absent
-- delivery manifest exists
-- expected supervisor classifications, gatherers, and apply actions occurred
+- `outcome`: final graph status.
+- `artifact`: required artifacts and substrings.
+- `workspace`: forbidden paths.
+- `supervisor`: expected classifications, gatherers, and apply actions.
+- `trajectory`: ordered, unordered, exact, or forbidden trajectory events.
+- `delivery`: delivery manifest presence.
 
-Custom script graders run from the suite directory and receive:
+## Custom Script Criteria
+
+Custom script criteria run from the suite directory and receive:
 
 - `AGENTFLOW_EVAL_SCENARIO_ID`
 - `AGENTFLOW_EVAL_VARIANT`
 - `AGENTFLOW_EVAL_TRIAL_ID`
+- `AGENTFLOW_EVAL_CRITERION_ID`
 - `AGENTFLOW_EVAL_RUN_ROOT`
 - `AGENTFLOW_EVAL_TRACE_FILE`
 - `AGENTFLOW_EVAL_TRACE_PACKET_FILE`
 - `AGENTFLOW_EVAL_SCORECARD_FILE`
 - `AGENTFLOW_EVAL_OUTPUT_DIR`
 
-Script graders must print structured JSON:
+They must print structured JSON:
 
 ```json
 {
@@ -71,11 +78,11 @@ Script graders must print structured JSON:
 }
 ```
 
-Use deterministic graders for facts that can be checked objectively: file existence, content substrings, command results, forbidden edits, supervisor events, trace shape, tool invocation records, and delivery package evidence.
+Use custom scripts for facts that can be checked objectively but are too suite-specific for built-ins: changed-file scopes, focused commands, hidden oracle metadata, tool invocation records, delivery package details, and real-world regression commands.
 
-## LLM Judges
+## Quality Criteria
 
-Use focused judges. Common dimensions:
+Use focused quality criteria. Common dimensions:
 
 - `outcome_correctness`
 - `graph_contract_adherence`
@@ -88,7 +95,7 @@ Use focused judges. Common dimensions:
 - `noise_efficiency`
 - `delivery_auditability`
 
-Judge output must be strict JSON:
+Quality output must be strict JSON:
 
 ```json
 {
@@ -107,22 +114,20 @@ Judge output must be strict JSON:
 }
 ```
 
-LLM judges must not excuse deterministic blockers. A candidate variant with more hard blockers cannot beat the baseline even if judge scores are higher.
+Quality criteria must not excuse deterministic blockers. A candidate variant with more hard blockers cannot beat the baseline even if quality scores are higher.
 
 ## Scorecards
 
 `scorecard.json` contains:
 
-- deterministic result and blockers
-- script grader results
-- LLM judge results
+- `criteria_results`
 - average score
 - dimension scores
 - attempts, recovery cycles, duration, and blocker count
 - merged prompt feedback
 - final pass/fail/error status
 
-Trial pass requires no deterministic blockers, required graders passing, required judges passing, and no infrastructure error.
+Trial pass requires all required criteria to pass and no infrastructure error. Optional quality criteria can fail without failing the trial, but their scores and prompt feedback remain visible.
 
 ## Benchmark Comparison
 
@@ -137,6 +142,7 @@ Trial pass requires no deterministic blockers, required graders passing, require
 - pass@1
 - pass@k
 - per-variant summaries
+- per-criterion summaries
 - threshold result
 
 Use:
@@ -147,4 +153,4 @@ agentflow eval compare <eval-root> --baseline current --candidate candidate
 agentflow eval inspect <eval-root> --scenario <id> --variant <id> --trial 1
 ```
 
-Review deltas per scenario and dimension. Treat score improvements as meaningful only when deterministic blocker count does not regress.
+Review deltas by criterion and variant. Treat score improvements as meaningful only when hard blockers do not regress.

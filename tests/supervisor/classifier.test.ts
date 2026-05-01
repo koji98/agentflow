@@ -77,6 +77,29 @@ function classify(
 }
 
 describe("supervisor failure classifier", () => {
+  it("classifies context token budget failures as context contract failures", () => {
+    expect(
+      classify({
+        result: {
+          status: "failed",
+          outcome: "failed",
+          result: {
+            error:
+              'Materializing context_2 (workspace glob "**/*eval*") match ".venv/noisy-eval.py" would exceed max_total_tokens 100. Current tokens: 99. Next item tokens: 50.'
+          },
+          stderr:
+            'Materializing context_2 (workspace glob "**/*eval*") match ".venv/noisy-eval.py" would exceed max_total_tokens 100. Current tokens: 99. Next item tokens: 50.'
+        }
+      })
+    ).toEqual(
+      expect.objectContaining({
+        class: "context_contract_failure",
+        retryable: true,
+        recommended_action: "rebuild_context"
+      })
+    );
+  });
+
   it("classifies missing declared artifacts as artifact failures", () => {
     expect(classify({ error_message: "Required artifact contract is missing: summary at summary.md" })).toEqual(
       expect.objectContaining({
@@ -126,6 +149,32 @@ describe("supervisor failure classifier", () => {
         class: "harness_unavailable",
         retryable: false,
         recommended_action: "pause_for_human"
+      })
+    );
+  });
+
+  it("classifies workspace pollution as a workspace repair candidate", () => {
+    expect(classify({ error_message: "Forbidden edit: unexpected workspace change in docs/generated.md" })).toEqual(
+      expect.objectContaining({
+        class: "wrong_local_pattern",
+        retryable: true,
+        recommended_action: "run_diagnostic",
+        evidence: expect.objectContaining({
+          workspace_repair_candidate: true
+        })
+      })
+    );
+  });
+
+  it("classifies transient runtime wrapper failures as environment repair candidates", () => {
+    expect(classify({ error_message: "Agentflow tool wrapper failed: command not found" })).toEqual(
+      expect.objectContaining({
+        class: "harness_unavailable",
+        retryable: true,
+        recommended_action: "run_diagnostic",
+        evidence: expect.objectContaining({
+          environment_repair_candidate: true
+        })
       })
     );
   });

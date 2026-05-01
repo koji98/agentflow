@@ -162,11 +162,15 @@ Action kinds:
 - `semantic_evaluation`
 - `fail`
 
-The graph contract configures bounded intervention actions with `supervision.actions.<action>.max_uses`, plus `max_total_interventions` and `policy` settings such as `pause_on_policy_risk`, `pause_on_repeated_recovery`, and `drift_score_threshold`.
+The graph contract configures bounded intervention actions with `supervision.actions.<action>.max_uses`, plus `max_total_interventions` and `policy` settings such as `pause_on_policy_risk`, `pause_on_repeated_recovery`, and `drift_score_threshold`. These graph action names are budget entry points. Internal recovery can apply a more specific runtime overlay such as context repair, evidence-backed retry, validation-strategy repair, workspace repair, environment repair, artifact repair, terminal fail, or authority pause without adding graph fields.
 
 Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Bounded intervention workers attach artifacts under the target attempt's `interventions/` directory. Durable human pauses set run status to `paused` and include resume options plus the recovery plan that explains the precise unblock request.
 
-On a failed executable node attempt, retry-oriented actions enter the supervisor recovery loop. The runtime persists the exact rendered node prompt, builds an immutable case file, runs classifier-selected evidence gatherers with an internal concurrency cap, merges the evidence into one recovery plan, and applies exactly one action: retry the node, repair an artifact, pause for human authority, or fail terminally. Parallel evidence gathers are an internal detail; budget is spent once per recovery cycle on the selected graph action.
+On a failed executable node attempt, retry-oriented actions enter the supervisor recovery loop. The runtime persists the exact rendered node prompt, builds an immutable case file, runs classifier-selected evidence gatherers with an internal concurrency cap, merges the evidence into one recovery plan, and applies exactly one runtime overlay action. Retries are allowed only when the overlay records a material delta: context changed, evidence added, validation guidance changed, workspace repaired, environment repaired, or an artifact was repaired. Parallel evidence gathers are an internal detail; budget is spent once per recovery cycle on the selected graph action.
+
+Context contract failures are deterministic recovery cases. If authored context cannot be packaged because it exceeds `max_total_tokens`, explodes through broad globs, includes non-tokenizable material, or otherwise cannot fit the context contract, the supervisor writes `context-analysis.{json,md}`, writes `context-repair-patch.json`, and retries with a compact repair packet before the authored context. The repair packet contains a bounded file index, sample matches, largest files, default ignored roots, omitted-entry provenance, and live workspace paths for manual inspection. It does not change graph intent, node goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts.
+
+Workspace and environment repair are also runtime overlays, not graph contract features. Workspace repair consumes the node snapshot artifacts for the failed attempt and restores only that attempt's tracked/untracked diff before retry. Environment repair is limited to safe local substrate refresh, such as regenerating Agentflow tool wrappers and PATH/runtime metadata for the next attempt.
 
 Evidence gatherers can inspect local context, mine local patterns, read dependency metadata, gather read-only external context, run diagnostic probes, rejudge semantic failures, or investigate the failed attempt. External context is allowed by default for evidence gathering, but it cannot change graph intent, acceptance criteria, repo authority, sandbox authority, or declared artifacts.
 
@@ -182,7 +186,7 @@ Current artifact repair behavior:
 
 Failed harness attempts do not publish declared artifacts, even if they wrote files in the output directory before failing. Those files can be surfaced as prior-attempt evidence for later repair or retry prompts, but downstream refs and delivery handoffs only consume artifacts materialized from successful attempts or accepted repairs.
 
-`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same recovery loop. A retried node receives a `SupervisorRecoveryEnvelope` before the original authored task, and the same envelope is materialized into runtime context as `supervisor_recovery_envelope`. The envelope states that the original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
+`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same recovery loop. A retried node receives a `SupervisorRecoveryEnvelope` before the original authored task, and the same envelope is materialized into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af context show` also shows the `supervisor_context_repair` material and the authored entries omitted by the overlay. The envelope states that the original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
 
 Supervisor events:
 
@@ -199,7 +203,7 @@ Agentflow has two human-in-the-loop mechanisms, and they are intentionally diffe
 
 `checkpoint` is authored workflow structure. It is a planned human gate that reviews a declared artifact at a known point in the graph. In this release, checkpoints are valid only inside `repeat` bodies so a deny decision can feed the next iteration with operator feedback. A checkpoint used as the repeat `until` node behaves like the loop's human approval sensor: pass exits the loop, deny can drive another iteration, and abort cancels the run.
 
-`pause_for_human` is supervisor safety behavior. It is not an authored node. The supervisor chooses it when a failure or policy classification needs a human decision outside the planned graph path, such as a policy breach, repeated recovery, or scope drift. A pause writes durable run state, records `supervisor.paused`, sets the run status to `paused`, and waits for `agentflow resume --human-action ...`.
+`pause_for_human` is supervisor safety behavior. It is not an authored node, and internally it is treated as `pause_for_authority`. The supervisor chooses it only when recovery needs authority the runtime must not infer: missing credentials, explicit human checkpoint boundaries, product or intent ambiguity, security or compliance judgment, repo/sandbox/scope expansion, or graph contract amendment. Ordinary local context, validation, artifact, workspace, and recoverable environment failures should attempt machine repair first. A pause writes durable run state, records `supervisor.paused`, sets the run status to `paused`, and waits for `agentflow resume --human-action ...`.
 
 This mirrors the durable interrupt/resume shape used by production agent runtimes: the run state is persisted before asking a human, resources are released, and resume input is recorded as part of the audit trail. Agentflow implements that locally through run-root artifacts rather than a remote checkpoint database.
 
@@ -219,23 +223,23 @@ Evaluation has five lanes:
 - Outcome verification is runtime enforcement for passing `agent` attempts. It runs after declared artifacts materialize, writes `verify-outcome.json` and `verify-outcome.md`, and can turn a claimed pass into an `outcome_verification` failure routed through supervision.
 - Supervisor `semantic_evaluation` is an intervention. It is chosen by the supervisor after a failed AI check or semantic uncertainty, spends intervention budget, and writes supervisor evidence.
 - Managed pattern evaluation is authored workflow structure. For example, `pattern_generate_evaluate_fix.evaluation` expands into evaluator and repair-loop nodes as part of the compiled graph.
-- `agentflow eval` is offline workflow evaluation. It runs file-backed suites of scenarios, variants, and repeated trials against Agentflow workflows, grades hard facts with deterministic graders, rates qualitative behavior with LLM judges, and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents).
+- `agentflow eval` is offline workflow evaluation. It runs file-backed suites of scenarios, variants, and repeated trials against Agentflow workflows, grades hard facts with required criteria, rates qualitative behavior with quality criteria, and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and adopts ADK-style criteria, trajectory evaluation, and deterministic environment simulation.
 
 ## Offline Eval System
 
 `src/evals/` owns the workflow benchmark path:
 
-- `types.ts`: v2 suite, scenario, variant, trace packet, scorecard, and benchmark contracts.
+- `types.ts`: v1 suite, scenario, variant, criteria, environment, trace packet, scorecard, and benchmark contracts.
 - `suite.ts`: suite loading, path-specific validation diagnostics, graph-template rendering, and strict judge JSON parsing.
-- `runner.ts`: trial workspace setup, local docs/tool fixture wiring, normal `agentflow run` execution, trace packet writing, scorecard aggregation, reports, inspect, and compare.
+- `runner.ts`: trial environment setup, local docs/tool fixture wiring, deterministic simulation proxy wiring, normal `agentflow run` execution, trace packet writing, criteria evaluation, scorecard aggregation, reports, inspect, and compare.
 - `trace.ts`: normalized packet extraction from run roots.
-- `graders.ts`: script grader execution and LLM judge invocation through the same Codex/Cursor-compatible harness interface as AI checks.
+- `graders.ts`: custom script criterion execution and quality criterion invocation through the same Codex/Cursor-compatible harness interface as AI checks.
 
-Eval runner inputs are local files. A trial copies the scenario repo fixture, optionally initializes git, optionally starts a local docs fixture, optionally places copied tool fixtures on `PATH`, renders a graph template with scenario/variant/fixture placeholders, and runs the rendered graph through the normal runtime. When a run root exists, grading always proceeds even if the graph failed or paused so expected failure and expected pause cases can be scored.
+Eval runner inputs are local files. A trial copies the scenario repo environment, optionally initializes git, optionally starts a local docs environment, optionally places copied tool fixtures on `PATH`, optionally creates deterministic simulation proxy tools, renders a graph template with scenario/variant/environment placeholders, and runs the rendered graph through the normal runtime. When a run root exists, grading proceeds even if the graph failed or paused so expected failure and expected pause cases can be scored.
 
-Eval artifacts are rooted at `<eval-root>` and include `eval-run.json`, `evaluation-ledger.json`, `suite-snapshot.json`, `benchmark.json`, `report.md`, and per-trial directories containing `rendered-graph.json`, `trial.json`, `trace.jsonl`, `trace-packet.json`, `deterministic-results.json`, `judge-results/`, `scorecard.json`, and `summary.md`.
+Eval artifacts are rooted at `<eval-root>` and include `eval-run.json`, `evaluation-ledger.json`, `suite-snapshot.json`, `benchmark.json`, `report.md`, and per-trial directories containing `rendered-graph.json`, `trial.json`, `trace.jsonl`, `trace-packet.json`, `criteria-results.json`, `criteria/`, `judge-results/`, `scorecard.json`, and `summary.md`.
 
-Deterministic grading is authoritative for hard facts: final graph status, required artifacts, forbidden edits, delivery evidence, and expected supervisor classifications/gatherers/actions. LLM judges are for qualitative dimensions such as artifact quality, evidence use, context handling, supervisor recovery quality, tool discipline, noise efficiency, and delivery auditability. Variant ids are anonymized in judge packets.
+Required deterministic criteria are authoritative for hard facts: final graph status, required artifacts, forbidden edits, delivery evidence, expected trajectory, and expected supervisor classifications/gatherers/actions. Quality criteria are for qualitative dimensions such as artifact quality, evidence use, context handling, supervisor recovery quality, tool discipline, noise efficiency, and delivery auditability. Variant ids are anonymized in quality packets.
 
 See `EVALS.md` for authoring guidance, CLI usage, artifact layout, and the built-in dogfood suites.
 

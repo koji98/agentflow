@@ -198,7 +198,7 @@ async function materializeScenario({ scenario, suiteDir, reposDir, force, instal
     throw new Error(`Scenario ${scenario.id} is missing metadata.realworld.`);
   }
 
-  const destination = resolve(scenario.scenario_dir, scenario.fixture.repo);
+  const destination = resolve(scenario.scenario_dir, scenario.environment.repo);
   ensureInside(reposDir, destination, `Scenario ${scenario.id} fixture repo`);
 
   if (force) {

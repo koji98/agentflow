@@ -7,6 +7,7 @@ Agentflow treats failures as evidence for supervision and delivery. Do not hide 
 Supervisor classification includes:
 
 - `missing_context`
+- `context_contract_failure`
 - `missing_dependency_docs`
 - `wrong_local_pattern`
 - `diagnostic_needed`
@@ -21,7 +22,9 @@ Supervisor classification includes:
 
 Outcome verifier rejections come from the runtime outcome verifier (see "Outcome Verification" below). The classifier normally maps them to `semantic_misalignment`, or to `missing_dependency_docs` when the failure indicates missing package/API documentation. The verifier's findings flow into the supervisor recovery case file and next-attempt recovery envelope so the agent reacts to concrete evidence, not just a vague "it failed" signal.
 
-Harness failures preserve the harness's own diagnostic first. Structured `result.error` or metadata errors win, then stderr, then the captured final response/stdout. This keeps failures like Cursor authentication errors (`cursor agent login` or missing `CURSOR_API_KEY`) classified as `harness_unavailable` or policy pauses instead of being hidden behind missing declared artifacts.
+Context contract failures are deterministic packaging failures: token overflow, broad glob explosion, non-tokenizable required context, missing required material, or impossible context packet construction. They are recoverable when the supervisor can replace authored context with a compact runtime overlay that preserves graph intent and authority.
+
+Harness failures preserve the harness's own diagnostic first. Structured `result.error` or metadata errors win, then stderr, then the captured final response/stdout. This keeps failures like Cursor authentication errors (`cursor agent login` or missing `CURSOR_API_KEY`) classified as `harness_unavailable` or authority pauses instead of being hidden behind missing declared artifacts.
 
 ## Hard Failures
 
@@ -94,7 +97,13 @@ Failed executable attempts enter a recovery loop when budget and policy allow:
 3. Classify the failure and select evidence gatherers.
 4. Run evidence gatherers such as `local_context`, `pattern_mining`, `dependency_metadata`, `external_context`, `diagnostic_probe`, `semantic_rejudge`, and `investigate_failure`.
 5. Merge patches into one recovery plan.
-6. Apply one action: retry the node, repair an artifact, pause for human authority, or fail terminally.
+6. Apply one runtime overlay action: repair context, repair validation strategy, repair workspace, repair environment, retry with evidence, repair an artifact, pause for authority, or fail terminally.
+
+Retries must carry a material delta. The delta can be changed context, added evidence, changed validation guidance, workspace cleanup, environment repair, or repaired artifacts. If there is no new material delta, the supervisor should not spend budget repeating the same failed tactic.
+
+For `context_contract_failure`, the intervention writes `context-analysis.{json,md}`, `context-repair-patch.json`, `runtime-overlay.json`, `material-delta.json`, and a recovery envelope. The retry receives `supervisor_recovery_envelope` and `supervisor_context_repair` context before authored context. The repair packet is a compact index with omitted-entry provenance and live workspace paths; it does not change goals, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts.
+
+Workspace repair is machine-first. When the failure evidence shows forbidden or unrelated failed-attempt edits, the overlay uses node workspace snapshots to restore tracked files to the pre-attempt tree and remove untracked files created by that failed attempt before retrying. Environment repair is limited to safe per-execution substrate refresh: regenerated Agentflow tool wrappers, PATH/runtime metadata, and local availability checks. Neither repair expands graph scope or credentials.
 
 External context is allowed for read-only evidence gathering, but it cannot change graph intent, acceptance criteria, repo authority, sandbox authority, or declared artifacts.
 
