@@ -13,7 +13,8 @@ import {
   renderOutcomeVerificationPrompt,
   truncateForPrompt,
   type OutcomeVerificationPromptArtifactSnippet,
-  type OutcomeVerificationPromptDecisionLogEntry
+  type OutcomeVerificationPromptDecisionLogEntry,
+  type OutcomeVerificationPromptExecutionEvidence
 } from "./prompt.js";
 import type {
   OutcomeVerificationFinding,
@@ -22,6 +23,7 @@ import type {
 
 const verifierExecutionIdSuffix = "__verifier";
 const maxArtifactPromptBytes = 24 * 1024;
+const maxExecutionEvidencePromptBytes = 14 * 1024;
 const verifierMaxAttempts = 2;
 const verifierTimeoutSec = 600;
 const verifierRetryDelayMs = 250;
@@ -41,6 +43,7 @@ export interface RunOutcomeVerificationOptions {
   workspaceChangeArtifacts?: NodeWorkspaceChangeArtifacts;
   harness: HarnessAdapter;
   runId: string;
+  baseEnv?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   runtimeDir?: string;
   now?: () => number;
@@ -125,6 +128,102 @@ async function buildWorkspaceDiffSnippet(
     status_path: artifacts.status_path,
     changed_files_path: artifacts.changed_files_path,
     ...(captureError ? { capture_error: captureError } : {})
+  };
+}
+
+function tailText(value: string, maxBytes: number): { content: string; truncated: boolean } {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) {
+    return { content: value, truncated: false };
+  }
+
+  const marker = "\n... [earlier log output omitted] ...\n";
+  const buffer = Buffer.from(value, "utf8");
+  const markerBytes = Buffer.byteLength(marker, "utf8");
+  const sliced = buffer.subarray(Math.max(0, buffer.length - Math.max(0, maxBytes - markerBytes)));
+  return {
+    content: `${marker}${sliced.toString("utf8")}`,
+    truncated: true
+  };
+}
+
+function isTranscriptBoundary(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed === "thinking"
+    || trimmed === "codex"
+    || trimmed === "exec"
+    || trimmed === "apply_patch"
+    || trimmed === "file update:"
+    || trimmed.startsWith("apply_patch(");
+}
+
+function extractCommandTranscript(raw: string): string {
+  const lines = raw.split(/\r?\n/u);
+  const blocks: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index]?.trim() !== "exec") {
+      continue;
+    }
+
+    const block: string[] = [lines[index] ?? "exec"];
+    let outputLineCount = 0;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = lines[cursor] ?? "";
+      if (outputLineCount > 0 && isTranscriptBoundary(line)) {
+        break;
+      }
+
+      block.push(line);
+      outputLineCount += 1;
+      if (outputLineCount >= 22) {
+        block.push("... [command output truncated] ...");
+        break;
+      }
+    }
+
+    blocks.push(block.join("\n").trimEnd());
+  }
+
+  return blocks.slice(-10).join("\n\n");
+}
+
+async function buildExecutionEvidenceSnippet(attempt: RuntimeNodeAttempt): Promise<OutcomeVerificationPromptExecutionEvidence | undefined> {
+  if (!attempt.stdout_log_path && !attempt.stderr_log_path) {
+    return undefined;
+  }
+
+  const readErrors: string[] = [];
+  let stderr = "";
+  let stdout = "";
+
+  if (attempt.stderr_log_path) {
+    try {
+      stderr = await readFile(attempt.stderr_log_path, "utf8");
+    } catch (error) {
+      readErrors.push(`stderr: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (attempt.stdout_log_path) {
+    try {
+      stdout = await readFile(attempt.stdout_log_path, "utf8");
+    } catch (error) {
+      readErrors.push(`stdout: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const commandTranscript = stderr.length > 0 ? extractCommandTranscript(stderr) : "";
+  const fallbackTranscript = commandTranscript.length > 0
+    ? commandTranscript
+    : [stderr, stdout].filter((entry) => entry.trim().length > 0).join("\n\n");
+  const { content, truncated } = tailText(fallbackTranscript, maxExecutionEvidencePromptBytes);
+
+  return {
+    ...(attempt.stdout_log_path ? { stdout_path: attempt.stdout_log_path } : {}),
+    ...(attempt.stderr_log_path ? { stderr_path: attempt.stderr_log_path } : {}),
+    ...(content.trim().length > 0 ? { excerpt: content } : {}),
+    ...(truncated ? { truncated } : {}),
+    ...(readErrors.length > 0 ? { read_error: readErrors.join("; ") } : {})
   };
 }
 
@@ -270,6 +369,7 @@ function buildVerifierInvocation(options: {
   contextManifest: string;
   outputDir: string;
   runId: string;
+  baseEnv?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   runtimeDir?: string;
 }): AgentInvocation {
@@ -282,6 +382,7 @@ function buildVerifierInvocation(options: {
     sandbox: "read-only",
     skipGitRepoCheck: true,
     model: options.node.effective_policy.model,
+    ...(options.baseEnv ? { baseEnv: options.baseEnv } : {}),
     ...(options.node.effective_policy.reasoning_effort
       ? { reasoningEffort: options.node.effective_policy.reasoning_effort }
       : {}),
@@ -373,6 +474,20 @@ function collectTruncatedArtifactNames(snippets: OutcomeVerificationPromptArtifa
   return snippets.filter((snippet) => snippet.truncated === true).map((snippet) => snippet.name);
 }
 
+function buildForcedFailureFindings(agentResponseSnippet: OutcomeVerificationPromptArtifactSnippet): OutcomeVerificationFinding[] {
+  const response = agentResponseSnippet.content ?? "";
+  if (!response.includes("INTENTIONAL_FAILURE_DO_NOT_ACCEPT")) {
+    return [];
+  }
+
+  return [{
+    severity: "blocker",
+    category: "intentional_failure_marker",
+    evidence: `The final agent response contains INTENTIONAL_FAILURE_DO_NOT_ACCEPT, which marks the attempt as an intentional failed fallback rather than terminal completion. Response excerpt: ${response.slice(0, 500)}`,
+    recommendation: "Retry with supervisor recovery evidence and finish only when the authored acceptance criteria are satisfied."
+  }];
+}
+
 export async function runOutcomeVerification(
   options: RunOutcomeVerificationOptions
 ): Promise<OutcomeVerificationResult> {
@@ -397,6 +512,7 @@ export async function runOutcomeVerification(
   }
 
   const workspaceDiffSnippet = await buildWorkspaceDiffSnippet(options.workspaceChangeArtifacts);
+  const executionEvidence = await buildExecutionEvidenceSnippet(options.attempt);
   const decisionLogEntries = await readDecisionLogEntries({
     executionId: options.attempt.execution_id,
     ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {})
@@ -417,6 +533,7 @@ export async function runOutcomeVerification(
     agent_response_snippet: agentResponseSnippet,
     declared_artifact_snippets: declaredArtifactSnippets,
     decision_log_entries: decisionLogEntries,
+    ...(executionEvidence ? { execution_evidence: executionEvidence } : {}),
     workspace_diff_snippet: workspaceDiffSnippet,
     workspace_path: options.workspacePath,
     attempt: {
@@ -461,6 +578,7 @@ export async function runOutcomeVerification(
       contextManifest: options.contextManifest,
       outputDir: verifierOutputDir,
       runId: options.runId,
+      ...(options.baseEnv ? { baseEnv: options.baseEnv } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {})
     });
@@ -494,11 +612,16 @@ export async function runOutcomeVerification(
 
     if (parsed.ok) {
       const durationMs = nowMs(options.now) - startedAt;
+      const forcedFailureFindings = buildForcedFailureFindings(agentResponseSnippet);
+      const findings = [...forcedFailureFindings, ...parsed.data.findings];
+      const blockers = [...forcedFailureFindings, ...parsed.data.blockers];
       const result: OutcomeVerificationResult = {
-        passed: parsed.data.passed,
-        summary: parsed.data.summary,
-        findings: parsed.data.findings,
-        blockers: parsed.data.blockers,
+        passed: forcedFailureFindings.length > 0 ? false : parsed.data.passed,
+        summary: forcedFailureFindings.length > 0
+          ? "Outcome verifier returned passed=true, but the agent response contains an explicit intentional-failure marker."
+          : parsed.data.summary,
+        findings,
+        blockers,
         verifier_metadata: {
           ...metadataBase,
           duration_ms: durationMs,

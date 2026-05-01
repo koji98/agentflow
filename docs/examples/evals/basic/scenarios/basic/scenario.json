@@ -1,0 +1,37 @@
+{
+  "id": "case-001",
+  "bucket": "smoke",
+  "difficulty": "easy",
+  "description": "Run a tiny local graph and leave durable artifacts for grading.",
+  "workflow": {
+    "graph_template": "graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "hello eval"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": []
+    },
+    "delivery": {
+      "required": true
+    },
+    "trace": {}
+  }
+}

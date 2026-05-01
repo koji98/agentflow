@@ -1,0 +1,7 @@
+{
+  "id": "terse",
+  "description": "Experimental terse prompt pack used to test whether shorter prompts preserve behavior.",
+  "env": {
+    "AGENTFLOW_EVAL_PROMPT_PACK": "terse"
+  }
+}

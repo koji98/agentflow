@@ -20,6 +20,8 @@ export interface RuntimeNodeAttempt {
   stdout_log_path?: string;
   stderr_log_path?: string;
   result_path?: string;
+  prompt_path?: string;
+  prompt_sha256?: string;
   context_packet_path?: string;
   context_manifest_path?: string;
   context_provenance_path?: string;

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentflow Evals"
+  short_description: "Design and run workflow eval suites"
+  default_prompt: "Use $agentflow-evals for Agentflow eval suites, scenarios, variants, criteria, environment simulation, trajectory checks, trace packets, scorecards, benchmark reports, prompt-pack comparisons, workflow-quality evals, capability-workflow local repo evals, and pinned real-world GitHub issue evals."

@@ -59,46 +59,17 @@ import type {
 } from "./schema.js";
 import {
   buildPatternDeepResearch,
-  type PatternDeepResearchApprovalPolicy,
-  type PatternDeepResearchBrief,
-  type PatternDeepResearchContextPolicy,
-  type PatternDeepResearchDelivery,
-  type PatternDeepResearchStrategy
+  type PatternDeepResearchConfig
 } from "../managed/pattern_deep_research.js";
 import {
-  buildPatternSpecDesign,
-  type PatternSpecDesignApprovalPolicy,
-  type PatternSpecDesignBrief,
-  type PatternSpecDesignContextPolicy,
-  type PatternSpecDesignDelivery,
-  type PatternSpecDesignScope,
-  type PatternSpecDesignStrategy
-} from "../managed/pattern_spec_design.js";
-import {
-  buildPatternGenerateEvaluateFix,
-  type PatternGenerateEvaluateFixArtifactBundleSource,
-  type PatternGenerateEvaluateFixBrief,
-  type PatternGenerateEvaluateFixContextPolicy,
-  type PatternGenerateEvaluateFixEvaluation,
-  type PatternGenerateEvaluateFixManagedNodeSource,
-  type PatternGenerateEvaluateFixScope,
-  type PatternGenerateEvaluateFixSourceRef,
-  type PatternGenerateEvaluateFixStrategy,
-  type PatternGenerateEvaluateFixTaskSource
-} from "../managed/pattern_generate_evaluate_fix.js";
-import {
-  buildPatternReviewChange,
-  type PatternReviewChangeArtifactBundleSource,
-  type PatternReviewChangeBrief,
-  type PatternReviewChangeContextPolicy,
-  type PatternReviewChangeDelivery,
-  type PatternReviewChangeManagedNodeSource,
-  type PatternReviewChangeScope,
-  type PatternReviewChangeSource,
-  type PatternReviewChangeSourceRef,
-  type PatternReviewChangeStrategy
-} from "../managed/pattern_review_change.js";
-import type { ManagedPatternRuntime } from "../managed/foundation.js";
+  buildPatternDeepWork,
+  type PatternDeepWorkArtifactRubricCriterion,
+  type PatternDeepWorkCommandCriterion,
+  type PatternDeepWorkCompletionCriterion,
+  type PatternDeepWorkConfig,
+  type PatternDeepWorkRubricCriterion
+} from "../managed/pattern_deep_work.js";
+import { defaultManagedPublicArtifacts, type ManagedPatternAgentOptions, type ManagedPatternRuntime } from "../managed/foundation.js";
 
 export interface LoweredManagedNode {
   authored_id: string;
@@ -2030,204 +2001,79 @@ function normalizeManagedRuntime(
   };
 }
 
-function normalizePatternDeepResearchBrief(
-  value: unknown,
+function normalizeManagedAgentOptions(
+  record: Record<string, unknown>,
   path: string,
   diagnostics: GraphDiagnostic[]
-): PatternDeepResearchBrief | undefined {
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_deep_research.brief must be an object."
-    });
-    return undefined;
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["question", "objective", "audience", "scope_cues", "success_bar"], diagnostics);
-
-  const question = readRequiredString(record.question, `${path}.question`, diagnostics);
-  const objective = readRequiredString(record.objective, `${path}.objective`, diagnostics);
-  const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
-  const scope_cues = readStringArray(record.scope_cues, `${path}.scope_cues`, diagnostics);
-  const success_bar = readStringArray(record.success_bar, `${path}.success_bar`, diagnostics);
-
-  if (!question || !objective) {
-    return undefined;
-  }
-
-  return {
-    question,
-    objective,
-    ...(audience ? { audience } : {}),
-    ...(scope_cues && scope_cues.length > 0 ? { scope_cues } : {}),
-    ...(success_bar && success_bar.length > 0 ? { success_bar } : {})
-  };
-}
-
-function normalizePatternDeepResearchContextPolicy(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternDeepResearchContextPolicy {
-  if (value === undefined) {
-    return {
-      web: true,
-      files: true,
-      apps: false
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_deep_research.context_policy must be an object."
-    });
-    return {
-      web: true,
-      files: true,
-      apps: false
-    };
-  }
-
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["web", "files", "apps", "allow_domains", "deny_domains", "preferred_sources"],
+): ManagedPatternAgentOptions {
+  const model = readOptionalString(record.model, `${path}.model`, diagnostics);
+  const reasoning_effort = readEnumValue(
+    record.reasoning_effort,
+    `${path}.reasoning_effort`,
+    reasoningEfforts,
     diagnostics
   );
-
-  const web = readBoolean(record.web, `${path}.web`, diagnostics);
-  const files = readBoolean(record.files, `${path}.files`, diagnostics);
-  const apps = readBoolean(record.apps, `${path}.apps`, diagnostics);
-  const allow_domains = readStringArray(record.allow_domains, `${path}.allow_domains`, diagnostics);
-  const deny_domains = readStringArray(record.deny_domains, `${path}.deny_domains`, diagnostics);
-  const preferred_sources = readStringArray(record.preferred_sources, `${path}.preferred_sources`, diagnostics);
+  const sandbox = readEnumValue(record.sandbox, `${path}.sandbox`, sandboxModes, diagnostics);
+  const artifact_repair = normalizeArtifactRepairPolicy(
+    record.artifact_repair,
+    `${path}.artifact_repair`,
+    diagnostics
+  );
+  const tools = normalizeToolDeclarations(record.tools, `${path}.tools`, diagnostics);
 
   return {
-    ...(web !== undefined ? { web } : { web: true }),
-    ...(files !== undefined ? { files } : { files: true }),
-    ...(apps !== undefined ? { apps } : { apps: false }),
-    ...(allow_domains && allow_domains.length > 0 ? { allow_domains } : {}),
-    ...(deny_domains && deny_domains.length > 0 ? { deny_domains } : {}),
-    ...(preferred_sources && preferred_sources.length > 0 ? { preferred_sources } : {})
+    ...(model ? { model } : {}),
+    ...(reasoning_effort ? { reasoning_effort } : {}),
+    ...(sandbox ? { sandbox } : {}),
+    ...(artifact_repair ? { artifact_repair } : {}),
+    ...(tools && tools.length > 0 ? { tools } : {})
   };
 }
 
-function normalizePatternDeepResearchApprovalPolicy(
+function normalizePatternDeepResearchConfig(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): PatternDeepResearchApprovalPolicy {
-  if (value === undefined) {
-    return {
-      require_plan_approval: false
-    };
-  }
-
+): PatternDeepResearchConfig["research"] | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "pattern_deep_research.approval_policy must be an object."
+      message: "pattern_deep_research.research must be an object."
     });
-    return {
-      require_plan_approval: false
-    };
+    return undefined;
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["require_plan_approval"], diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["angles"], diagnostics);
+  const angles = readStringArray(record.angles, `${path}.angles`, diagnostics);
 
-  return {
-    require_plan_approval:
-      readBoolean(record.require_plan_approval, `${path}.require_plan_approval`, diagnostics) ?? false
-  };
-}
-
-function normalizePatternDeepResearchStrategy(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternDeepResearchStrategy {
-  if (value === undefined) {
-    return {
-      depth: "standard",
-      coverage_mode: "balanced",
-      followup_passes: 1,
-      final_critique: false
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
+  if (!angles || angles.length === 0) {
     diagnostics.push({
-      path,
-      message: "pattern_deep_research.strategy must be an object."
+      path: `${path}.angles`,
+      message: "pattern_deep_research.research.angles must include at least one angle."
     });
-    return {
-      depth: "standard",
-      coverage_mode: "balanced",
-      followup_passes: 1,
-      final_critique: false
-    };
+    return undefined;
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["depth", "coverage_mode", "followup_passes", "final_critique"], diagnostics);
-
-  return {
-    depth: readEnumValue(record.depth, `${path}.depth`, ["shallow", "standard", "deep"] as const, diagnostics) ?? "standard",
-    coverage_mode:
-      readEnumValue(
-        record.coverage_mode,
-        `${path}.coverage_mode`,
-        ["breadth", "balanced", "depth_first"] as const,
-        diagnostics
-      ) ?? "balanced",
-    followup_passes: readPositiveInteger(record.followup_passes, `${path}.followup_passes`, diagnostics, { minimum: 0 }) ?? 1,
-    final_critique: readBoolean(record.final_critique, `${path}.final_critique`, diagnostics) ?? false
-  };
-}
-
-function normalizePatternDeepResearchDelivery(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternDeepResearchDelivery {
-  if (value === undefined) {
-    return {
-      format: "report",
-      citation_style: "inline"
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
+  if (angles.length > 8) {
     diagnostics.push({
-      path,
-      message: "pattern_deep_research.delivery must be an object."
+      path: `${path}.angles`,
+      message: "pattern_deep_research.research.angles supports at most 8 angles."
     });
-    return {
-      format: "report",
-      citation_style: "inline"
-    };
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["format", "citation_style", "sections"], diagnostics);
-
-  const format = readOptionalString(record.format, `${path}.format`, diagnostics);
-  const citation_style = readOptionalString(record.citation_style, `${path}.citation_style`, diagnostics);
-  const sections = readStringArray(record.sections, `${path}.sections`, diagnostics);
+  angles.forEach((angle, index) => {
+    if (angle.trim().split(/\s+/u).length < 3) {
+      diagnostics.push({
+        path: `${path}.angles[${index}]`,
+        message: "Research angles should be sentence-style prompts, not one-word axes."
+      });
+    }
+  });
 
   return {
-    ...(format ? { format } : { format: "report" }),
-    ...(citation_style ? { citation_style } : { citation_style: "inline" }),
-    ...(sections && sections.length > 0 ? { sections } : {})
+    angles
   };
 }
 
@@ -2246,30 +2092,36 @@ function normalizePatternDeepResearchNode(
       "label",
       "repo",
       "profile",
+      "goal",
+      "acceptance_criteria",
+      "constraints",
       "context",
       "artifacts",
       "timeout_sec",
-      "brief",
-      "context_policy",
-      "approval_policy",
-      "strategy",
-      "delivery",
+      "model",
+      "reasoning_effort",
+      "sandbox",
+      "artifact_repair",
+      "tools",
+      "research",
       "runtime"
     ],
     diagnostics
   );
 
-  const base = normalizeExecutableBase(record, path, diagnostics, {
-    allow_artifacts: false
-  });
-  const brief = normalizePatternDeepResearchBrief(record.brief, `${path}.brief`, diagnostics);
-  const context_policy = normalizePatternDeepResearchContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
-  const approval_policy = normalizePatternDeepResearchApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
-  const strategy = normalizePatternDeepResearchStrategy(record.strategy, `${path}.strategy`, diagnostics);
-  const delivery = normalizePatternDeepResearchDelivery(record.delivery, `${path}.delivery`, diagnostics);
+  const base = normalizeExecutableBase(record, path, diagnostics);
+  const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
+  const research = normalizePatternDeepResearchConfig(record.research, `${path}.research`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (!base || !brief) {
+  if (base && !base.goal) {
+    diagnostics.push({
+      path: `${path}.goal`,
+      message: "Managed pattern nodes require goal."
+    });
+  }
+
+  if (!base || !base.goal || !research) {
     return undefined;
   }
 
@@ -2281,1066 +2133,211 @@ function normalizePatternDeepResearchNode(
 
   return buildPatternDeepResearch({
     ...base,
-    brief,
-    context_policy,
-    approval_policy,
-    strategy,
-    delivery,
+    ...agentOptions,
+    goal: base.goal,
+    research,
     runtime
   });
 }
 
-function normalizePatternSpecDesignScope(
+function normalizeCriterionId(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): PatternSpecDesignScope {
-  if (value === undefined) {
-    return {};
+): string | undefined {
+  const id = readRequiredString(value, path, diagnostics);
+
+  if (!id) {
+    return undefined;
   }
 
-  const record = asRecord(value);
-
-  if (!record) {
+  if (!/^[a-z][a-z0-9_]*$/u.test(id)) {
     diagnostics.push({
       path,
-      message: "pattern_spec_design.scope must be an object."
-    });
-    return {};
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["paths", "areas"], diagnostics);
-
-  const paths = readStringArray(record.paths, `${path}.paths`, diagnostics);
-  const areas = readStringArray(record.areas, `${path}.areas`, diagnostics);
-
-  return {
-    ...(paths && paths.length > 0 ? { paths } : {}),
-    ...(areas && areas.length > 0 ? { areas } : {})
-  };
-}
-
-function normalizePatternSpecDesignBrief(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternSpecDesignBrief | undefined {
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_spec_design.brief must be an object."
+      message: 'Completion criterion id must match /^[a-z][a-z0-9_]*$/.'
     });
     return undefined;
   }
 
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["problem", "goal", "audience", "constraints", "decision_drivers", "scope"],
-    diagnostics
-  );
-
-  const problem = readRequiredString(record.problem, `${path}.problem`, diagnostics);
-  const goal = readRequiredString(record.goal, `${path}.goal`, diagnostics);
-  const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
-  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
-  const decision_drivers = readStringArray(record.decision_drivers, `${path}.decision_drivers`, diagnostics);
-  const scope = normalizePatternSpecDesignScope(record.scope, `${path}.scope`, diagnostics);
-
-  if (!problem || !goal) {
-    return undefined;
-  }
-
-  return {
-    problem,
-    goal,
-    ...(audience ? { audience } : {}),
-    ...(constraints && constraints.length > 0 ? { constraints } : {}),
-    ...(decision_drivers && decision_drivers.length > 0 ? { decision_drivers } : {}),
-    ...(scope.paths || scope.areas ? { scope } : {})
-  };
+  return id;
 }
 
-function normalizePatternSpecDesignContextPolicy(
+function normalizeCompletionCriterion(
   value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternSpecDesignContextPolicy {
-  if (value === undefined) {
-    return {
-      repo_first: true,
-      allow_web_fallback: true
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_spec_design.context_policy must be an object."
-    });
-    return {
-      repo_first: true,
-      allow_web_fallback: true
-    };
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["repo_first", "allow_web_fallback", "web_triggers", "allow_domains"], diagnostics);
-
-  const repo_first = readBoolean(record.repo_first, `${path}.repo_first`, diagnostics);
-  const allow_web_fallback = readBoolean(record.allow_web_fallback, `${path}.allow_web_fallback`, diagnostics);
-  const web_triggers = readStringArray(record.web_triggers, `${path}.web_triggers`, diagnostics);
-  const allow_domains = readStringArray(record.allow_domains, `${path}.allow_domains`, diagnostics);
-
-  return {
-    repo_first: repo_first ?? true,
-    allow_web_fallback: allow_web_fallback ?? true,
-    ...(web_triggers && web_triggers.length > 0 ? { web_triggers } : {}),
-    ...(allow_domains && allow_domains.length > 0 ? { allow_domains } : {})
-  };
-}
-
-function normalizePatternSpecDesignApprovalPolicy(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternSpecDesignApprovalPolicy {
-  if (value === undefined) {
-    return {
-      require_direction_approval: false
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_spec_design.approval_policy must be an object."
-    });
-    return {
-      require_direction_approval: false
-    };
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["require_direction_approval"], diagnostics);
-
-  return {
-    require_direction_approval:
-      readBoolean(record.require_direction_approval, `${path}.require_direction_approval`, diagnostics) ?? false
-  };
-}
-
-function normalizePatternSpecDesignStrategy(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternSpecDesignStrategy {
-  if (value === undefined) {
-    return {
-      alternatives: 3,
-      critique_profiles: ["architecture", "implementation", "ux"],
-      max_revision_cycles: 2
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_spec_design.strategy must be an object."
-    });
-    return {
-      alternatives: 3,
-      critique_profiles: ["architecture", "implementation", "ux"],
-      max_revision_cycles: 2
-    };
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["alternatives", "critique_profiles", "max_revision_cycles"], diagnostics);
-
-  const alternatives = readPositiveInteger(record.alternatives, `${path}.alternatives`, diagnostics) ?? 3;
-  const critique_profiles = readStringArray(record.critique_profiles, `${path}.critique_profiles`, diagnostics);
-  const max_revision_cycles = readPositiveInteger(record.max_revision_cycles, `${path}.max_revision_cycles`, diagnostics) ?? 2;
-
-  return {
-    alternatives,
-    critique_profiles:
-      critique_profiles && critique_profiles.length > 0 ? critique_profiles : ["architecture", "implementation", "ux"],
-    max_revision_cycles
-  };
-}
-
-function normalizePatternSpecDesignDelivery(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternSpecDesignDelivery {
-  if (value === undefined) {
-    return {
-      format: "design_spec"
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_spec_design.delivery must be an object."
-    });
-    return {
-      format: "design_spec"
-    };
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["format", "sections"], diagnostics);
-
-  const format = readOptionalString(record.format, `${path}.format`, diagnostics);
-  const sections = readStringArray(record.sections, `${path}.sections`, diagnostics);
-
-  return {
-    ...(format ? { format } : { format: "design_spec" }),
-    ...(sections && sections.length > 0 ? { sections } : {})
-  };
-}
-
-function normalizePatternSpecDesignNode(
-  record: Record<string, unknown>,
   path: string,
   diagnostics: GraphDiagnostic[],
-  loweredManagedNodes: LoweredManagedNode[]
-): SequenceNode | undefined {
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    [
-      "type",
-      "id",
-      "label",
-      "repo",
-      "profile",
-      "context",
-      "artifacts",
-      "timeout_sec",
-      "brief",
-      "context_policy",
-      "approval_policy",
-      "strategy",
-      "delivery",
-      "runtime"
-    ],
-    diagnostics
+  publicArtifacts: Record<string, ArtifactDefinition>
+): PatternDeepWorkCompletionCriterion | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "completion criteria must be objects."
+    });
+    return undefined;
+  }
+
+  const kind = readEnumValue(
+    record.kind,
+    `${path}.kind`,
+    ["command", "rubric", "artifact_rubric"] as const,
+    diagnostics,
+    { required: true }
   );
-
-  const base = normalizeExecutableBase(record, path, diagnostics, {
-    allow_artifacts: false
+  const id = normalizeCriterionId(record.id, `${path}.id`, diagnostics);
+  const weight = readBoundedNumber(record.weight, `${path}.weight`, diagnostics, {
+    minimum: 0,
+    maximum: 1,
+    required: true
   });
-  const brief = normalizePatternSpecDesignBrief(record.brief, `${path}.brief`, diagnostics);
-  const context_policy = normalizePatternSpecDesignContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
-  const approval_policy = normalizePatternSpecDesignApprovalPolicy(record.approval_policy, `${path}.approval_policy`, diagnostics);
-  const strategy = normalizePatternSpecDesignStrategy(record.strategy, `${path}.strategy`, diagnostics);
-  const delivery = normalizePatternSpecDesignDelivery(record.delivery, `${path}.delivery`, diagnostics);
-  const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
+  const required = readBoolean(record.required, `${path}.required`, diagnostics);
 
-  if (!base || !brief) {
-    return undefined;
-  }
+  if (kind === "command") {
+    pushUnknownKeyDiagnostics(record, path, ["id", "kind", "command", "weight", "required"], diagnostics);
+    const command = readRequiredString(record.command, `${path}.command`, diagnostics);
 
-  loweredManagedNodes.push({
-    authored_id: base.id,
-    managed_kind: "pattern_spec_design",
-    lowered_to: "sequence"
-  });
-
-  return buildPatternSpecDesign({
-    ...base,
-    brief,
-    context_policy,
-    approval_policy,
-    strategy,
-    delivery,
-    runtime
-  });
-}
-
-function normalizePatternGenerateEvaluateFixScope(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternGenerateEvaluateFixScope {
-  if (value === undefined) {
-    return {};
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_generate_evaluate_fix.scope must be an object."
-    });
-    return {};
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["paths", "areas"], diagnostics);
-
-  const paths = readStringArray(record.paths, `${path}.paths`, diagnostics);
-  const areas = readStringArray(record.areas, `${path}.areas`, diagnostics);
-
-  return {
-    ...(paths && paths.length > 0 ? { paths } : {}),
-    ...(areas && areas.length > 0 ? { areas } : {})
-  };
-}
-
-function normalizePatternGenerateEvaluateFixBrief(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternGenerateEvaluateFixBrief {
-  if (value === undefined) {
-    return {};
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_generate_evaluate_fix.brief must be an object."
-    });
-    return {};
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["objective", "scope"], diagnostics);
-
-  const objective = readOptionalString(record.objective, `${path}.objective`, diagnostics);
-  const scope = normalizePatternGenerateEvaluateFixScope(record.scope, `${path}.scope`, diagnostics);
-
-  return {
-    ...(objective ? { objective } : {}),
-    ...(scope.paths || scope.areas ? { scope } : {})
-  };
-}
-
-function normalizePatternGenerateEvaluateFixSourceRef(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternGenerateEvaluateFixSourceRef | undefined {
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_generate_evaluate_fix task source reference must be an object."
-    });
-    return undefined;
-  }
-
-  const kind = readRequiredString(record.kind, `${path}.kind`, diagnostics);
-
-  if (!kind) {
-    return undefined;
-  }
-
-  if (kind === "file") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "path"], diagnostics);
-    const filePath = readRequiredString(record.path, `${path}.path`, diagnostics);
-
-    if (!filePath) {
+    if (!id || weight === undefined || !command) {
       return undefined;
     }
 
     return {
-      kind: "file",
-      path: filePath
-    };
+      id,
+      kind,
+      command,
+      weight,
+      ...(required !== undefined ? { required } : {})
+    } satisfies PatternDeepWorkCommandCriterion;
   }
 
-  if (kind === "artifact") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "node", "artifact"], diagnostics);
-    const node = readRequiredString(record.node, `${path}.node`, diagnostics);
+  if (kind === "rubric") {
+    pushUnknownKeyDiagnostics(record, path, ["id", "kind", "rubric", "weight", "required"], diagnostics);
+    const rubric = readRequiredString(record.rubric, `${path}.rubric`, diagnostics);
+
+    if (!id || weight === undefined || !rubric) {
+      return undefined;
+    }
+
+    return {
+      id,
+      kind,
+      rubric,
+      weight,
+      ...(required !== undefined ? { required } : {})
+    } satisfies PatternDeepWorkRubricCriterion;
+  }
+
+  if (kind === "artifact_rubric") {
+    pushUnknownKeyDiagnostics(record, path, ["id", "kind", "artifact", "rubric", "weight", "required"], diagnostics);
     const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
+    const rubric = readRequiredString(record.rubric, `${path}.rubric`, diagnostics);
 
-    if (!node || !artifact) {
-      return undefined;
-    }
-
-    return {
-      kind: "artifact",
-      node,
-      artifact
-    };
-  }
-
-  diagnostics.push({
-    path: `${path}.kind`,
-    message: 'pattern_generate_evaluate_fix task source reference kind must be "file" or "artifact".'
-  });
-  return undefined;
-}
-
-function normalizePatternGenerateEvaluateFixTaskSource(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternGenerateEvaluateFixTaskSource | undefined {
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_generate_evaluate_fix.task_source must be an object."
-    });
-    return undefined;
-  }
-
-  const kind = readRequiredString(record.kind, `${path}.kind`, diagnostics);
-
-  if (!kind) {
-    return undefined;
-  }
-
-  if (kind === "managed_node") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "node"], diagnostics);
-    const node = readRequiredString(record.node, `${path}.node`, diagnostics);
-
-    if (!node) {
-      return undefined;
-    }
-
-    return {
-      kind: "managed_node",
-      node
-    } satisfies PatternGenerateEvaluateFixManagedNodeSource;
-  }
-
-  if (kind === "artifact_bundle") {
-    pushUnknownKeyDiagnostics(
-      record,
-      path,
-      [
-        "kind",
-        "design_packet",
-        "design_spec",
-        "direction_proposal",
-        "tradeoff_matrix",
-        "decision_log",
-        "implementation_readiness",
-        "additional_context"
-      ],
-      diagnostics
-    );
-
-    const design_packet = normalizePatternGenerateEvaluateFixSourceRef(
-      record.design_packet,
-      `${path}.design_packet`,
-      diagnostics
-    );
-    const design_spec = record.design_spec
-      ? normalizePatternGenerateEvaluateFixSourceRef(record.design_spec, `${path}.design_spec`, diagnostics)
-      : undefined;
-    const direction_proposal = record.direction_proposal
-      ? normalizePatternGenerateEvaluateFixSourceRef(record.direction_proposal, `${path}.direction_proposal`, diagnostics)
-      : undefined;
-    const tradeoff_matrix = record.tradeoff_matrix
-      ? normalizePatternGenerateEvaluateFixSourceRef(record.tradeoff_matrix, `${path}.tradeoff_matrix`, diagnostics)
-      : undefined;
-    const decision_log = record.decision_log
-      ? normalizePatternGenerateEvaluateFixSourceRef(record.decision_log, `${path}.decision_log`, diagnostics)
-      : undefined;
-    const implementation_readiness = record.implementation_readiness
-      ? normalizePatternGenerateEvaluateFixSourceRef(
-          record.implementation_readiness,
-          `${path}.implementation_readiness`,
-          diagnostics
-        )
-      : undefined;
-    const additional_context = Array.isArray(record.additional_context)
-      ? record.additional_context
-          .map((item, index) =>
-            normalizePatternGenerateEvaluateFixSourceRef(item, `${path}.additional_context[${index}]`, diagnostics)
-          )
-          .filter((item): item is PatternGenerateEvaluateFixSourceRef => item !== undefined)
-      : record.additional_context === undefined
-        ? undefined
-        : (() => {
-            diagnostics.push({
-              path: `${path}.additional_context`,
-              message: "pattern_generate_evaluate_fix.task_source.additional_context must be an array."
-            });
-            return undefined;
-          })();
-
-    if (!design_packet) {
-      return undefined;
-    }
-
-    return {
-      kind: "artifact_bundle",
-      design_packet,
-      ...(design_spec ? { design_spec } : {}),
-      ...(direction_proposal ? { direction_proposal } : {}),
-      ...(tradeoff_matrix ? { tradeoff_matrix } : {}),
-      ...(decision_log ? { decision_log } : {}),
-      ...(implementation_readiness ? { implementation_readiness } : {}),
-      ...(additional_context && additional_context.length > 0 ? { additional_context } : {})
-    } satisfies PatternGenerateEvaluateFixArtifactBundleSource;
-  }
-
-  diagnostics.push({
-    path: `${path}.kind`,
-    message: 'pattern_generate_evaluate_fix.task_source.kind must be "managed_node" or "artifact_bundle".'
-  });
-  return undefined;
-}
-
-function normalizePatternGenerateEvaluateFixContextPolicy(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternGenerateEvaluateFixContextPolicy {
-  if (value === undefined) {
-    return {
-      allow_official_docs_fallback: true
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_generate_evaluate_fix.context_policy must be an object."
-    });
-    return {
-      allow_official_docs_fallback: true
-    };
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["allow_official_docs_fallback", "allow_domains"], diagnostics);
-
-  const allow_domains = readStringArray(record.allow_domains, `${path}.allow_domains`, diagnostics);
-
-  return {
-    allow_official_docs_fallback:
-      readBoolean(
-        record.allow_official_docs_fallback,
-        `${path}.allow_official_docs_fallback`,
-        diagnostics
-      ) ?? true,
-    ...(allow_domains && allow_domains.length > 0 ? { allow_domains } : {})
-  };
-}
-
-function normalizePatternGenerateEvaluateFixStrategy(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternGenerateEvaluateFixStrategy {
-  if (value === undefined) {
-    return {
-      max_fix_cycles: 2
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_generate_evaluate_fix.strategy must be an object."
-    });
-    return {
-      max_fix_cycles: 2
-    };
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["max_fix_cycles"], diagnostics);
-
-  return {
-    max_fix_cycles: readPositiveInteger(record.max_fix_cycles, `${path}.max_fix_cycles`, diagnostics) ?? 2
-  };
-}
-
-function normalizePatternGenerateEvaluateFixEvaluation(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternGenerateEvaluateFixEvaluation {
-  if (value === undefined) {
-    return {
-      commands: [],
-      required: true
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_generate_evaluate_fix.evaluation must be an object."
-    });
-    return {
-      commands: [],
-      required: true
-    };
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["commands", "required"], diagnostics);
-  const commands = readStringArray(record.commands, `${path}.commands`, diagnostics) ?? [];
-  const required = readBoolean(record.required, `${path}.required`, diagnostics) ?? true;
-
-  return {
-    commands,
-    required
-  };
-}
-
-function normalizePatternGenerateEvaluateFixNode(
-  record: Record<string, unknown>,
-  path: string,
-  diagnostics: GraphDiagnostic[],
-  loweredManagedNodes: LoweredManagedNode[]
-): SequenceNode | undefined {
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    [
-      "type",
-      "id",
-      "label",
-      "repo",
-      "profile",
-      "context",
-      "artifacts",
-      "timeout_sec",
-      "brief",
-      "task_source",
-      "context_policy",
-      "strategy",
-      "evaluation",
-      "runtime"
-    ],
-    diagnostics
-  );
-
-  const base = normalizeExecutableBase(record, path, diagnostics, {
-    allow_artifacts: false
-  });
-  const brief = normalizePatternGenerateEvaluateFixBrief(record.brief, `${path}.brief`, diagnostics);
-  const task_source = normalizePatternGenerateEvaluateFixTaskSource(
-    record.task_source,
-    `${path}.task_source`,
-    diagnostics
-  );
-  const context_policy = normalizePatternGenerateEvaluateFixContextPolicy(record.context_policy, `${path}.context_policy`, diagnostics);
-  const strategy = normalizePatternGenerateEvaluateFixStrategy(record.strategy, `${path}.strategy`, diagnostics);
-  const evaluation = normalizePatternGenerateEvaluateFixEvaluation(
-    record.evaluation,
-    `${path}.evaluation`,
-    diagnostics
-  );
-  const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
-
-  if (evaluation.commands.length === 0) {
-    diagnostics.push({
-      path: `${path}.evaluation.commands`,
-      message: "pattern_generate_evaluate_fix.evaluation.commands must include at least one command."
-    });
-  }
-
-  if (!base || !task_source) {
-    return undefined;
-  }
-
-  loweredManagedNodes.push({
-    authored_id: base.id,
-    managed_kind: "pattern_generate_evaluate_fix",
-    lowered_to: "sequence"
-  });
-
-  return buildPatternGenerateEvaluateFix({
-    ...base,
-    brief,
-    task_source,
-    context_policy,
-    strategy,
-    evaluation,
-    runtime
-  });
-}
-
-function normalizePatternReviewChangeScope(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternReviewChangeScope {
-  if (value === undefined) {
-    return {};
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_review_change.scope must be an object."
-    });
-    return {};
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["paths", "areas"], diagnostics);
-
-  const paths = readStringArray(record.paths, `${path}.paths`, diagnostics);
-  const areas = readStringArray(record.areas, `${path}.areas`, diagnostics);
-
-  return {
-    ...(paths && paths.length > 0 ? { paths } : {}),
-    ...(areas && areas.length > 0 ? { areas } : {})
-  };
-}
-
-function normalizePatternReviewChangeBrief(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternReviewChangeBrief {
-  if (value === undefined) {
-    return {};
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_review_change.brief must be an object."
-    });
-    return {};
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["review_goal", "focus", "audience", "scope"], diagnostics);
-
-  const review_goal = readOptionalString(record.review_goal, `${path}.review_goal`, diagnostics);
-  const focus = readStringArray(record.focus, `${path}.focus`, diagnostics);
-  const audience = readOptionalString(record.audience, `${path}.audience`, diagnostics);
-  const scope = normalizePatternReviewChangeScope(record.scope, `${path}.scope`, diagnostics);
-
-  return {
-    ...(review_goal ? { review_goal } : {}),
-    ...(focus && focus.length > 0 ? { focus } : {}),
-    ...(audience ? { audience } : {}),
-    ...(scope.paths || scope.areas ? { scope } : {})
-  };
-}
-
-function normalizePatternReviewChangeSourceRef(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternReviewChangeSourceRef | undefined {
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_review_change source reference must be an object."
-    });
-    return undefined;
-  }
-
-  const kind = readRequiredString(record.kind, `${path}.kind`, diagnostics);
-
-  if (!kind) {
-    return undefined;
-  }
-
-  if (kind === "file") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "path"], diagnostics);
-    const filePath = readRequiredString(record.path, `${path}.path`, diagnostics);
-
-    if (!filePath) {
-      return undefined;
-    }
-
-    return {
-      kind: "file",
-      path: filePath
-    };
-  }
-
-  if (kind === "artifact") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "node", "artifact"], diagnostics);
-    const node = readRequiredString(record.node, `${path}.node`, diagnostics);
-    const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
-
-    if (!node || !artifact) {
-      return undefined;
-    }
-
-    return {
-      kind: "artifact",
-      node,
-      artifact
-    };
-  }
-
-  diagnostics.push({
-    path: `${path}.kind`,
-    message: 'pattern_review_change source reference kind must be "file" or "artifact".'
-  });
-  return undefined;
-}
-
-function normalizePatternReviewChangeSource(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternReviewChangeSource | undefined {
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "pattern_review_change.review_source must be an object."
-    });
-    return undefined;
-  }
-
-  const kind = readRequiredString(record.kind, `${path}.kind`, diagnostics);
-
-  if (!kind) {
-    return undefined;
-  }
-
-  if (kind === "managed_node") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "node"], diagnostics);
-    const node = readRequiredString(record.node, `${path}.node`, diagnostics);
-
-    if (!node) {
-      return undefined;
-    }
-
-    return {
-      kind: "managed_node",
-      node
-    } satisfies PatternReviewChangeManagedNodeSource;
-  }
-
-  if (kind === "artifact_bundle") {
-    pushUnknownKeyDiagnostics(
-      record,
-      path,
-      ["kind", "diff", "summary", "evaluation_ledger", "files_touched", "additional_context"],
-      diagnostics
-    );
-
-    const diff = record.diff
-      ? normalizePatternReviewChangeSourceRef(record.diff, `${path}.diff`, diagnostics)
-      : undefined;
-    const summary = record.summary
-      ? normalizePatternReviewChangeSourceRef(record.summary, `${path}.summary`, diagnostics)
-      : undefined;
-    const evaluation_ledger = record.evaluation_ledger
-      ? normalizePatternReviewChangeSourceRef(record.evaluation_ledger, `${path}.evaluation_ledger`, diagnostics)
-      : undefined;
-    const files_touched = record.files_touched
-      ? normalizePatternReviewChangeSourceRef(record.files_touched, `${path}.files_touched`, diagnostics)
-      : undefined;
-    const additional_context = Array.isArray(record.additional_context)
-      ? record.additional_context
-          .map((item, index) =>
-            normalizePatternReviewChangeSourceRef(item, `${path}.additional_context[${index}]`, diagnostics)
-          )
-          .filter((item): item is PatternReviewChangeSourceRef => item !== undefined)
-      : record.additional_context === undefined
-        ? undefined
-        : (() => {
-            diagnostics.push({
-              path: `${path}.additional_context`,
-              message: "pattern_review_change.review_source.additional_context must be an array."
-            });
-            return undefined;
-          })();
-
-    if (!diff && !summary && (!additional_context || additional_context.length === 0)) {
+    if (artifact && !publicArtifacts[artifact]) {
       diagnostics.push({
-        path,
-        message:
-          "pattern_review_change.review_source artifact_bundle must include at least one of diff, summary, or additional_context."
+        path: `${path}.artifact`,
+        message: `artifact_rubric criterion references unknown public artifact "${artifact}".`
       });
+    }
+
+    if (!id || weight === undefined || !artifact || !rubric || !publicArtifacts[artifact]) {
       return undefined;
     }
 
     return {
-      kind: "artifact_bundle",
-      ...(diff ? { diff } : {}),
-      ...(summary ? { summary } : {}),
-      ...(evaluation_ledger ? { evaluation_ledger } : {}),
-      ...(files_touched ? { files_touched } : {}),
-      ...(additional_context && additional_context.length > 0 ? { additional_context } : {})
-    } satisfies PatternReviewChangeArtifactBundleSource;
+      id,
+      kind,
+      artifact,
+      rubric,
+      weight,
+      ...(required !== undefined ? { required } : {})
+    } satisfies PatternDeepWorkArtifactRubricCriterion;
   }
 
-  diagnostics.push({
-    path: `${path}.kind`,
-    message: 'pattern_review_change.review_source.kind must be "managed_node" or "artifact_bundle".'
-  });
   return undefined;
 }
 
-function normalizePatternReviewChangeContextPolicy(
+function normalizePatternDeepWorkCompletion(
   value: unknown,
   path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternReviewChangeContextPolicy {
-  if (value === undefined) {
-    return {
-      include_surrounding_code: true,
-      include_tests: true,
-      include_docs: false,
-      include_validation: true
-    };
-  }
-
+  diagnostics: GraphDiagnostic[],
+  publicArtifacts: Record<string, ArtifactDefinition>
+): PatternDeepWorkConfig["completion"] | undefined {
   const record = asRecord(value);
 
   if (!record) {
     diagnostics.push({
       path,
-      message: "pattern_review_change.context_policy must be an object."
+      message: "pattern_deep_work.completion must be an object."
     });
-    return {
-      include_surrounding_code: true,
-      include_tests: true,
-      include_docs: false,
-      include_validation: true
-    };
+    return undefined;
   }
 
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["include_surrounding_code", "include_tests", "include_docs", "include_validation"],
-    diagnostics
-  );
+  pushUnknownKeyDiagnostics(record, path, ["max_cycles", "pass_threshold", "criteria"], diagnostics);
 
-  return {
-    include_surrounding_code:
-      readBoolean(record.include_surrounding_code, `${path}.include_surrounding_code`, diagnostics) ?? true,
-    include_tests: readBoolean(record.include_tests, `${path}.include_tests`, diagnostics) ?? true,
-    include_docs: readBoolean(record.include_docs, `${path}.include_docs`, diagnostics) ?? false,
-    include_validation:
-      readBoolean(record.include_validation, `${path}.include_validation`, diagnostics) ?? true
-  };
-}
+  const max_cycles = readBoundedInteger(record.max_cycles, `${path}.max_cycles`, diagnostics, {
+    minimum: 1,
+    maximum: 5
+  }) ?? 3;
+  const pass_threshold = readBoundedNumber(record.pass_threshold, `${path}.pass_threshold`, diagnostics, {
+    minimum: 0,
+    maximum: 1
+  }) ?? 0.85;
 
-function normalizePatternReviewChangeStrategy(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternReviewChangeStrategy {
-  if (value === undefined) {
-    return {
-      reviewer_profiles: ["correctness", "testing", "maintainability"],
-      severity_policy: "balanced",
-      include_surrounding_context: false,
-      false_positive_challenge: true,
-      require_file_references: true
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
+  if (!Array.isArray(record.criteria)) {
     diagnostics.push({
-      path,
-      message: "pattern_review_change.strategy must be an object."
+      path: `${path}.criteria`,
+      message: "pattern_deep_work.completion.criteria must be an array."
     });
-    return {
-      reviewer_profiles: ["correctness", "testing", "maintainability"],
-      severity_policy: "balanced",
-      include_surrounding_context: false,
-      false_positive_challenge: true,
-      require_file_references: true
-    };
+    return undefined;
   }
 
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    [
-      "reviewer_profiles",
-      "severity_policy",
-      "include_surrounding_context",
-      "false_positive_challenge",
-      "require_file_references"
-    ],
-    diagnostics
-  );
-
-  const reviewer_profiles = readStringArray(record.reviewer_profiles, `${path}.reviewer_profiles`, diagnostics);
-  const severity_policy =
-    readEnumValue(record.severity_policy, `${path}.severity_policy`, ["balanced", "conservative", "strict"] as const, diagnostics) ??
-    "balanced";
-
-  return {
-    reviewer_profiles:
-      reviewer_profiles && reviewer_profiles.length > 0
-        ? reviewer_profiles
-        : ["correctness", "testing", "maintainability"],
-    severity_policy,
-    include_surrounding_context:
-      readBoolean(record.include_surrounding_context, `${path}.include_surrounding_context`, diagnostics) ?? false,
-    false_positive_challenge:
-      readBoolean(record.false_positive_challenge, `${path}.false_positive_challenge`, diagnostics) ?? true,
-    require_file_references:
-      readBoolean(record.require_file_references, `${path}.require_file_references`, diagnostics) ?? true
-  };
-}
-
-function normalizePatternReviewChangeDelivery(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): PatternReviewChangeDelivery {
-  if (value === undefined) {
-    return {
-      format: "review_summary"
-    };
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
+  if (record.criteria.length === 0) {
     diagnostics.push({
-      path,
-      message: "pattern_review_change.delivery must be an object."
+      path: `${path}.criteria`,
+      message: "pattern_deep_work.completion.criteria must include at least one criterion."
     });
-    return {
-      format: "review_summary"
-    };
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["format", "sections"], diagnostics);
-  const format = readOptionalString(record.format, `${path}.format`, diagnostics);
-  const sections = readStringArray(record.sections, `${path}.sections`, diagnostics);
+  const criteria = record.criteria
+    .map((criterion, index) => normalizeCompletionCriterion(
+      criterion,
+      `${path}.criteria[${index}]`,
+      diagnostics,
+      publicArtifacts
+    ))
+    .filter((criterion): criterion is PatternDeepWorkCompletionCriterion => criterion !== undefined);
+
+  const seenIds = new Set<string>();
+  criteria.forEach((criterion, index) => {
+    if (seenIds.has(criterion.id)) {
+      diagnostics.push({
+        path: `${path}.criteria[${index}].id`,
+        message: `Duplicate completion criterion id "${criterion.id}".`
+      });
+    }
+    seenIds.add(criterion.id);
+  });
+
+  const weightTotal = criteria.reduce((sum, criterion) => sum + criterion.weight, 0);
+  if (criteria.length > 0 && Math.abs(weightTotal - 1) > 0.001) {
+    diagnostics.push({
+      path: `${path}.criteria`,
+      message: `Completion criterion weights must sum to 1. Current total is ${Number(weightTotal.toFixed(4))}.`
+    });
+  }
+
+  if (criteria.length === 0) {
+    return undefined;
+  }
 
   return {
-    ...(format ? { format } : { format: "review_summary" }),
-    ...(sections && sections.length > 0 ? { sections } : {})
+    max_cycles,
+    pass_threshold,
+    criteria
   };
 }
 
-function normalizePatternReviewChangeNode(
+function normalizePatternDeepWorkNode(
   record: Record<string, unknown>,
   path: string,
   diagnostics: GraphDiagnostic[],
@@ -3355,54 +2352,59 @@ function normalizePatternReviewChangeNode(
       "label",
       "repo",
       "profile",
+      "goal",
+      "acceptance_criteria",
+      "constraints",
       "context",
       "artifacts",
       "timeout_sec",
-      "brief",
-      "review_source",
-      "context_policy",
-      "strategy",
-      "delivery",
+      "model",
+      "reasoning_effort",
+      "sandbox",
+      "artifact_repair",
+      "tools",
+      "completion",
       "runtime"
     ],
     diagnostics
   );
 
-  const base = normalizeExecutableBase(record, path, diagnostics, {
-    allow_artifacts: false
-  });
-  const brief = normalizePatternReviewChangeBrief(record.brief, `${path}.brief`, diagnostics);
-  const review_source = normalizePatternReviewChangeSource(
-    record.review_source,
-    `${path}.review_source`,
-    diagnostics
+  const base = normalizeExecutableBase(record, path, diagnostics);
+  const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
+  const publicArtifacts = {
+    ...defaultManagedPublicArtifacts(),
+    ...(base?.artifacts ?? {})
+  };
+  const completion = normalizePatternDeepWorkCompletion(
+    record.completion,
+    `${path}.completion`,
+    diagnostics,
+    publicArtifacts
   );
-  const context_policy = normalizePatternReviewChangeContextPolicy(
-    record.context_policy,
-    `${path}.context_policy`,
-    diagnostics
-  );
-  const strategy = normalizePatternReviewChangeStrategy(record.strategy, `${path}.strategy`, diagnostics);
-  const delivery = normalizePatternReviewChangeDelivery(record.delivery, `${path}.delivery`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
-  if (!base || !review_source) {
+  if (base && !base.goal) {
+    diagnostics.push({
+      path: `${path}.goal`,
+      message: "Managed pattern nodes require goal."
+    });
+  }
+
+  if (!base || !base.goal || !completion) {
     return undefined;
   }
 
   loweredManagedNodes.push({
     authored_id: base.id,
-    managed_kind: "pattern_review_change",
+    managed_kind: "pattern_deep_work",
     lowered_to: "sequence"
   });
 
-  return buildPatternReviewChange({
+  return buildPatternDeepWork({
     ...base,
-    brief,
-    review_source,
-    context_policy,
-    strategy,
-    delivery,
+    ...agentOptions,
+    goal: base.goal,
+    completion,
     runtime
   });
 }
@@ -3461,16 +2463,8 @@ export function normalizeGraphNode(
     return normalizePatternDeepResearchNode(record, path, diagnostics, loweredManagedNodes);
   }
 
-  if (type === "pattern_spec_design") {
-    return normalizePatternSpecDesignNode(record, path, diagnostics, loweredManagedNodes);
-  }
-
-  if (type === "pattern_generate_evaluate_fix") {
-    return normalizePatternGenerateEvaluateFixNode(record, path, diagnostics, loweredManagedNodes);
-  }
-
-  if (type === "pattern_review_change") {
-    return normalizePatternReviewChangeNode(record, path, diagnostics, loweredManagedNodes);
+  if (type === "pattern_deep_work") {
+    return normalizePatternDeepWorkNode(record, path, diagnostics, loweredManagedNodes);
   }
 
   diagnostics.push({

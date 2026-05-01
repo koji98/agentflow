@@ -43,7 +43,10 @@ export const runCommand = {
   async run(
     options: Record<string, string | boolean | string[] | undefined>,
     currentWorkingDirectory: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    _positionals: readonly string[] = [],
+    environment: NodeJS.ProcessEnv = process.env,
+    runtimeEnv: Record<string, string> = {}
   ) {
     const graphPath = typeof options.graph === "string" ? options.graph : undefined;
 
@@ -185,6 +188,7 @@ export const runCommand = {
     }
 
     const progress = createRuntimeProgressReporter(compilation.compiled_graph!);
+    const explicitRunsRoot = typeof options["runs-root"] === "string" ? options["runs-root"] : undefined;
     const run = await runCompiledGraph({
       on_event: (event) => {
         progress.onEvent(event);
@@ -194,7 +198,8 @@ export const runCommand = {
         graphDirectory: dirname(loaded.absolute_path),
         graphId: loaded.document.graph_id,
         ...(typeof options.label === "string" ? { runLabel: options.label } : {}),
-        environment: process.env
+        ...(explicitRunsRoot ? { runsRoot: explicitRunsRoot } : {}),
+        environment
       }),
       compiled_graph: compilation.compiled_graph!,
       repo_sources: repoResolution.repo_sources,
@@ -208,14 +213,17 @@ export const runCommand = {
       executors: {
         checkpoint: createInteractiveCheckpointExecutor()
       },
+      environment,
+      ...(Object.keys(runtimeEnv).length > 0 ? { runtime_env: runtimeEnv } : {}),
       ...(signal ? { signal } : {})
     });
     const artifactPaths = resolveRunArtifactPaths(run.run_root);
     const runsRoot = dirname(run.run_root);
     const runsRootDetails = createRunsRootDetails(
       currentWorkingDirectory,
-      process.env,
-      dirname(loaded.absolute_path)
+      environment,
+      dirname(loaded.absolute_path),
+      explicitRunsRoot
     );
     const terminalFields = createRunTerminalFields(run.state, run.attempts, run.events);
     const runMessage =

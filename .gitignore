@@ -6,3 +6,14 @@ coverage/
 web-app/dist/
 web-app/node_modules/
 .tmp
+
+# Generated local validation artifacts
+prompt-iteration-runs/
+eval-output/
+evals/**/eval-output/
+evals/**/.agentflow/
+eval-repos/
+
+# Host/editor/compiler local state
+.DS_Store
+*.tsbuildinfo

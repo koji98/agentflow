@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 import type {
   NodeWorkspaceChangeArtifacts,
   NodeWorkspaceChangedFile,
   NodeWorkspaceDiff,
+  NodeWorkspaceRestoreResult,
   NodeWorkspaceSnapshot
 } from "./types.js";
 
@@ -92,6 +93,15 @@ export async function snapshotWorkspaceForNode(workspacePath: string): Promise<N
 
 function pickRef(snapshot: NodeWorkspaceSnapshot): string {
   return snapshot.stash_sha.length > 0 ? snapshot.stash_sha : snapshot.head_sha;
+}
+
+function isSafeWorkspacePath(workspacePath: string, path: string): boolean {
+  if (path.length === 0 || path.startsWith("/") || path.includes("\0")) {
+    return false;
+  }
+  const absolute = resolve(workspacePath, path);
+  const root = resolve(workspacePath);
+  return absolute === root || absolute.startsWith(`${root}${sep}`);
 }
 
 async function gitDiffNoIndex(workspacePath: string, filePath: string): Promise<string> {
@@ -289,4 +299,98 @@ export async function persistNodeWorkspaceChanges(
     changed_file_count: diff.changed_files.length,
     status: captureError ? "degraded" : "captured"
   };
+}
+
+function parseJson<T>(text: string, fallback: T): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function restoreNodeWorkspaceChangesFromSnapshot(options: {
+  workspacePath: string;
+  attemptDir: string;
+  resultPath?: string;
+}): Promise<NodeWorkspaceRestoreResult> {
+  const paths = resolveNodeWorkspaceChangePaths(options.attemptDir);
+  const before = parseJson<NodeWorkspaceSnapshot>(
+    await readFile(paths.baseline_path, "utf8").catch(() => "{}"),
+    {
+      head_sha: "",
+      stash_sha: "",
+      untracked_files: [],
+      status_text: ""
+    }
+  );
+  const changedFiles = parseJson<NodeWorkspaceChangedFile[]>(
+    await readFile(paths.changed_files_path, "utf8").catch(() => "[]"),
+    []
+  );
+  const ref = pickRef(before);
+  const cleanedFiles: string[] = [];
+  const skippedFiles: NodeWorkspaceRestoreResult["skipped_files"] = [];
+  const errors: string[] = [];
+
+  for (const changed of changedFiles) {
+    if (!isSafeWorkspacePath(options.workspacePath, changed.path)) {
+      skippedFiles.push({
+        path: changed.path,
+        reason: "Path is outside the workspace or is not a safe relative path."
+      });
+      continue;
+    }
+
+    if (changed.change_kind === "untracked_added") {
+      try {
+        await rm(join(options.workspacePath, changed.path), { recursive: true, force: true });
+        cleanedFiles.push(changed.path);
+      } catch (error) {
+        errors.push(`${changed.path}: ${readErrorMessage(error)}`);
+      }
+      continue;
+    }
+
+    if (changed.change_kind === "untracked_deleted") {
+      skippedFiles.push({
+        path: changed.path,
+        reason: "The baseline snapshot records untracked file names but not their contents."
+      });
+      continue;
+    }
+
+    if (ref.length === 0) {
+      skippedFiles.push({
+        path: changed.path,
+        reason: "No baseline git ref was available for restoring tracked content."
+      });
+      continue;
+    }
+
+    const result = await tryGit(options.workspacePath, ["checkout", ref, "--", changed.path]);
+    if (result.code === 0) {
+      cleanedFiles.push(changed.path);
+    } else {
+      errors.push(`${changed.path}: ${result.stderr || result.stdout || `git checkout exited ${result.code}`}`);
+    }
+  }
+
+  const restoreResult: NodeWorkspaceRestoreResult = {
+    status: errors.length > 0
+      ? "failed"
+      : skippedFiles.length > 0
+        ? "partial"
+        : "passed",
+    strategy: "restore_failed_attempt_changes",
+    cleaned_files: [...new Set(cleanedFiles)].sort(),
+    skipped_files: skippedFiles,
+    errors
+  };
+
+  if (options.resultPath) {
+    await writeFile(options.resultPath, `${JSON.stringify(restoreResult, null, 2)}\n`, "utf8");
+  }
+
+  return restoreResult;
 }

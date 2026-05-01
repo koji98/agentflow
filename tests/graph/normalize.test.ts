@@ -363,17 +363,18 @@ describe("graph normalization", () => {
         id: "root",
         steps: [
           {
-            type: "pattern_generate_evaluate_fix",
+            type: "pattern_deep_work",
             id: "implement",
-            task_source: {
-              kind: "artifact_bundle",
-              design_packet: {
-                kind: "file",
-                path: "design-packet.json"
-              }
-            },
-            evaluation: {
-              commands: ["npm test"]
+            goal: "Implement the requested change.",
+            completion: {
+              criteria: [
+                {
+                  id: "focused_tests",
+                  kind: "command",
+                  command: "npm test",
+                  weight: 1
+                }
+              ]
             },
             inputs: [],
             context_from: [],
@@ -617,7 +618,7 @@ describe("graph normalization", () => {
         expect.objectContaining({
           path: "$.graph.steps[0].type",
           message:
-            "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_spec_design, pattern_generate_evaluate_fix, pattern_review_change."
+            "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_deep_work."
         })
       ])
     );

@@ -12,6 +12,7 @@ import type {
   ContextPacketMaterializedItem,
   ContextPacketOmittedItem,
   ContextPacketSource,
+  RuntimeSupervisorContextRepairContext,
   ContextProvenance,
   WorkspaceFileContextProvenance,
   WorkspaceGlobContextProvenance
@@ -30,7 +31,10 @@ import {
   normalizeRelativePath,
   splitQualifiedPath
 } from "./common.js";
-import { listRepoFiles } from "./repo_files.js";
+import {
+  defaultContextIgnoredRoots,
+  listRepoFiles
+} from "./repo_files.js";
 import {
   contextTokenizerName,
   countContextTokens,
@@ -38,7 +42,7 @@ import {
   encodeContextText
 } from "./tokenizer.js";
 import { buildRepeatHistory } from "./repeat_history.js";
-import type { SupervisorRetryGuidanceRecord } from "../../supervisor/types.js";
+import type { SupervisorRecoveryEnvelope } from "../../supervisor/types.js";
 
 interface PreparedMaterialization {
   text: string;
@@ -61,7 +65,7 @@ export interface ResolveContextOptions {
   workspace_path: string;
   repo_workspaces: Record<string, string>;
   attempts: AttemptRegistry;
-  retry_guidance?: SupervisorRetryGuidanceRecord;
+  recovery_envelope?: SupervisorRecoveryEnvelope;
 }
 
 const truncatedTextNotice =
@@ -202,6 +206,14 @@ function describeContextItem(item: ContextItem, index: number): string {
   return `${key} (workspace glob "${item.path}")`;
 }
 
+function explicitIgnoredRootOptIn(pattern: string): string | undefined {
+  const normalized = normalizeRelativePath(pattern).replace(/^\/+/u, "");
+  const [first] = normalized.split("/");
+  return first && defaultContextIgnoredRoots.includes(first as (typeof defaultContextIgnoredRoots)[number])
+    ? first
+    : undefined;
+}
+
 function createBudgetOverflowError(
   descriptor: string,
   currentTokens: number,
@@ -310,68 +322,67 @@ async function materializeRepeatHistoryContext(
   );
 }
 
-function renderSupervisorRetryGuidance(guidance: SupervisorRetryGuidanceRecord): string {
-  const revision = guidance.prompt_revision;
+function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope): string {
+  const directive = envelope.retry_directive;
   return [
-    "# Supervisor Retry Guidance",
+    "# Supervisor Recovery Envelope",
     "",
-    "This node is being retried after a supervisor intervention. Treat this guidance as the controlling retry task where it conflicts with incomplete, stale, or contradictory node wording, while preserving graph-level constraints and safety boundaries.",
+    "This node is being retried after a supervisor recovery cycle.",
+    "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
     "",
-    `- Prior execution: \`${guidance.prior_execution_id}\``,
-    `- Action: \`${guidance.action}\``,
-    `- Classification: \`${guidance.classification}\``,
-    `- Failure fingerprint: \`${guidance.failure_fingerprint}\``,
-    `- Repeated fingerprint count: \`${guidance.repeated_fingerprint_count}\``,
-    `- Retry guidance brief: \`${guidance.guidance_brief_path}\``,
-    `- Prompt revision artifact: \`${guidance.prompt_revision_path}\``,
+    `- Prior execution: \`${envelope.prior_execution_id}\``,
+    `- Classification: \`${envelope.classification}\``,
+    `- Repeated matching symptom count: \`${envelope.repeated_fingerprint_count}\``,
+    `- Case file: \`${envelope.case_file_path}\``,
+    `- Recovery plan: \`${envelope.recovery_plan_path}\``,
     "",
-    "## Revised Goal",
-    revision.revised_goal,
+    "## Recovery Summary",
+    directive.summary,
     "",
     "## Must Do",
-    ...revision.must_do.map((item) => `- ${item}`),
+    ...directive.must_do.map((item) => `- ${item}`),
     "",
     "## Must Not Do",
-    ...revision.must_not_do.map((item) => `- ${item}`),
-    "",
-    "## Artifact Requirements",
-    ...revision.artifact_requirements.map((item) => `- ${item}`),
-    "",
-    "## Resolved Conflicts",
-    ...revision.resolved_conflicts.map((item) => `- ${item}`),
+    ...directive.must_not_do.map((item) => `- ${item}`),
     "",
     "## Evidence To Read",
-    ...revision.evidence_to_read.map((item) => `- ${item}`),
+    ...directive.evidence_to_read.map((item) => `- ${item}`),
     "",
-    "## Intent Preservation",
-    revision.intent_preservation,
+    "## Validation Focus",
+    ...directive.validation_focus.map((item) => `- ${item}`),
     "",
-    "## Justification",
-    revision.justification
+    "## Contract Preservation",
+    "- Goal: unchanged.",
+    "- Acceptance criteria: unchanged.",
+    "- Constraints: unchanged.",
+    "- Repo authority: unchanged.",
+    "- Sandbox: unchanged.",
+    "- Declared artifacts: unchanged."
   ].join("\n");
 }
 
-async function materializeSupervisorRetryGuidanceContext(
+async function materializeSupervisorRecoveryEnvelopeContext(
   options: ResolveContextOptions,
   accumulator: MaterializationAccumulator,
   maxTokensPerItem: number
 ): Promise<void> {
-  const guidance = options.retry_guidance;
+  const envelope = options.recovery_envelope;
 
-  if (!guidance) {
+  if (!envelope) {
     return;
   }
 
   const source: ContextPacketSource = {
-    name: "supervisor_retry_guidance",
-    from: "runtime_supervisor_retry_guidance",
-    prior_execution_id: guidance.prior_execution_id,
-    action: guidance.action,
-    classification: guidance.classification,
-    failure_fingerprint: guidance.failure_fingerprint,
-    repeated_fingerprint_count: guidance.repeated_fingerprint_count
+    name: "supervisor_recovery_envelope",
+    from: "runtime_supervisor_recovery",
+    prior_execution_id: envelope.prior_execution_id,
+    classification: envelope.classification,
+    failure_fingerprint: envelope.failure_fingerprint,
+    repeated_fingerprint_count: envelope.repeated_fingerprint_count,
+    recovery_plan_path: envelope.recovery_plan_path,
+    case_file_path: envelope.case_file_path
   };
-  const description = "Supervisor-authored recovery guidance and prompt revision for this retry attempt.";
+  const description = "Supervisor recovery envelope, merged evidence, and retry directive for this retry attempt.";
   const remainingTokens = accumulator.max_total_tokens - accumulator.total_tokens;
 
   if (remainingTokens <= 0) {
@@ -379,14 +390,14 @@ async function materializeSupervisorRetryGuidanceContext(
       key: source.name,
       source,
       description,
-      reason: "Supervisor retry guidance was omitted because authored context consumed the available token budget.",
+      reason: "Supervisor recovery envelope was omitted because prior runtime context consumed the available token budget.",
       if_available: true
     });
     return;
   }
 
   const materialized = prepareTextMaterialization(
-    renderSupervisorRetryGuidance(guidance),
+    renderSupervisorRecoveryEnvelope(envelope),
     Math.min(maxTokensPerItem, remainingTokens)
   );
 
@@ -401,14 +412,101 @@ async function materializeSupervisorRetryGuidanceContext(
         "context",
         "materialized",
         source.name,
-        "retry-guidance.md"
+        "recovery-envelope.md"
       ),
       tokens: materialized.tokens,
       truncated: materialized.truncated
     },
     materialized,
-    "runtime supervisor retry guidance"
+    "runtime supervisor recovery envelope"
   );
+}
+
+async function materializeSupervisorContextRepair(
+  options: ResolveContextOptions,
+  accumulator: MaterializationAccumulator,
+  maxTokensPerItem: number
+): Promise<boolean> {
+  const patch = options.recovery_envelope?.runtime_overlay?.context_repair;
+
+  if (!patch) {
+    return false;
+  }
+
+  for (const [index, material] of patch.materials.entries()) {
+    const remainingTokens = accumulator.max_total_tokens - accumulator.total_tokens;
+    const source: RuntimeSupervisorContextRepairContext = {
+      name: "supervisor_context_repair",
+      from: "runtime_supervisor_context_repair",
+      patch_id: patch.patch_id,
+      strategy: patch.strategy,
+      reason: patch.reason
+    };
+
+    if (remainingTokens <= 0) {
+      accumulator.omitted.push({
+        key: material.key,
+        source,
+        description: material.title,
+        reason: "Supervisor context repair material was omitted because prior runtime context consumed the available token budget.",
+        if_available: true
+      });
+      continue;
+    }
+
+    const prepared = prepareTextMaterialization(
+      material.text,
+      Math.min(maxTokensPerItem, remainingTokens)
+    );
+
+    await appendMaterializedItem(
+      accumulator,
+      {
+        key: material.key,
+        source,
+        description: material.title,
+        materialized_path: join(
+          options.execution_dir,
+          "context",
+          "materialized",
+          material.key,
+          `${index + 1}-context-repair.md`
+        ),
+        tokens: prepared.tokens,
+        truncated: prepared.truncated
+      },
+      prepared,
+      `supervisor context repair material "${material.key}"`
+    );
+  }
+
+  for (const [index, item] of (options.node.context ?? []).entries()) {
+    accumulator.omitted.push({
+      key: item.name || `context_${index + 1}`,
+      source: item,
+      reason: "Authored context item was replaced by a supervisor context repair overlay after the original package exceeded the runtime token budget.",
+      if_available: true
+    });
+  }
+
+  for (const omitted of patch.omitted) {
+    const source: RuntimeSupervisorContextRepairContext = {
+      name: "supervisor_context_repair",
+      from: "runtime_supervisor_context_repair",
+      patch_id: patch.patch_id,
+      strategy: patch.strategy,
+      reason: patch.reason
+    };
+    accumulator.omitted.push({
+      key: omitted.key,
+      source,
+      ...(omitted.source_name ? { description: omitted.source_name } : {}),
+      reason: omitted.reason,
+      if_available: true
+    });
+  }
+
+  return true;
 }
 
 interface SelectAttemptsContext {
@@ -631,7 +729,10 @@ async function materializeWorkspaceGlobContext(
 
   const normalizedPattern = normalizeRelativePath(repo_relative_path);
   const matcher = globPatternToRegExp(normalizedPattern);
-  const repoFiles = await listRepoFiles(repoRoot, cache.repo_files);
+  const ignoredRootOptIn = explicitIgnoredRootOptIn(normalizedPattern);
+  const repoFiles = await listRepoFiles(repoRoot, cache.repo_files, {
+    ...(ignoredRootOptIn ? { include_ignored_root: ignoredRootOptIn } : {})
+  });
   const matchedPaths = repoFiles
     .filter((filePath) => matcher.test(filePath))
     .slice(0, item.max_files ?? Number.MAX_SAFE_INTEGER);
@@ -844,16 +945,13 @@ async function materializeArtifactContext(
 
 function renderContextManifest(packet: ContextPacket): string {
   const truncatedCount = packet.materials.filter((item) => item.truncated).length;
-  const liveWorkspaceItems = packet.materials.filter((item) => item.binding?.kind === "live_workspace_input");
   const lines = [
     "# Context Manifest",
     "",
-    "This is an index of materialized context for the current node. Read the listed files that are relevant to the task before acting.",
-    "",
+    "Material paths are relative to this manifest's directory.",
     `- Materialized items: \`${packet.totals.material_count}\``,
     `- Truncated items: \`${truncatedCount}\``,
     `- Omitted items: \`${packet.omitted.length}\``,
-    `- Live workspace inputs: \`${liveWorkspaceItems.length}\``,
     ""
   ];
 
@@ -863,10 +961,10 @@ function renderContextManifest(packet: ContextPacket): string {
     for (const item of packet.materials) {
       const bindingSuffix =
         item.binding?.kind === "live_workspace_input"
-          ? `, live workspace input requested "${item.binding.requested_path ?? "inline text"}", resolved "${item.binding.resolved_path}"`
+          ? `; source ${item.binding.requested_path ?? "inline text"}`
           : "";
       lines.push(
-        `- \`${item.key}\` -> \`${item.materialized_path}\` (${item.tokens} tokens${item.truncated ? ", truncated" : ""}${bindingSuffix})${item.description ? `: ${item.description}` : ""}`
+        `- \`${item.key}\` -> \`${formatManifestMaterializedPath(item.materialized_path)}\` (${item.tokens} tokens${item.truncated ? ", truncated" : ""}${bindingSuffix})${item.description ? `: ${item.description}` : ""}`
       );
     }
 
@@ -875,6 +973,8 @@ function renderContextManifest(packet: ContextPacket): string {
 
   if (packet.omitted.length > 0) {
     lines.push("## Omitted", "");
+    lines.push("Omitted entries may indicate optional missing context or token-budget pressure. Inspect provenance or report uncertainty when it matters.");
+    lines.push("");
 
     for (const item of packet.omitted) {
       lines.push(`- \`${item.key}\`: ${item.reason}${item.description ? ` Expected content: ${item.description}` : ""}`);
@@ -882,6 +982,14 @@ function renderContextManifest(packet: ContextPacket): string {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function formatManifestMaterializedPath(materializedPath: string): string {
+  const match = /[/\\]context[/\\]materialized[/\\](.+)$/u.exec(materializedPath);
+  if (!match?.[1]) {
+    return materializedPath;
+  }
+  return `materialized/${match[1].replace(/\\/gu, "/")}`;
 }
 
 export async function resolveExecutionContext(
@@ -902,23 +1010,31 @@ export async function resolveExecutionContext(
     max_total_tokens: options.node.effective_policy.input_rules.max_total_tokens
   };
 
-  for (const [index, item] of (options.node.context ?? []).entries()) {
-    await materializeContextItem(
-      item,
-      index,
-      options,
-      cache,
-      accumulator,
-      contextProvenance,
-      options.node.effective_policy.input_rules.max_tokens_per_item
-    );
-  }
-
-  await materializeSupervisorRetryGuidanceContext(
+  await materializeSupervisorRecoveryEnvelopeContext(
     options,
     accumulator,
     options.node.effective_policy.input_rules.max_tokens_per_item
   );
+
+  const authoredContextReplaced = await materializeSupervisorContextRepair(
+    options,
+    accumulator,
+    options.node.effective_policy.input_rules.max_tokens_per_item
+  );
+
+  if (!authoredContextReplaced) {
+    for (const [index, item] of (options.node.context ?? []).entries()) {
+      await materializeContextItem(
+        item,
+        index,
+        options,
+        cache,
+        accumulator,
+        contextProvenance,
+        options.node.effective_policy.input_rules.max_tokens_per_item
+      );
+    }
+  }
 
   await materializeRepeatHistoryContext(
     options,

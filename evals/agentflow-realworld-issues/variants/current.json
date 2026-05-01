@@ -1,0 +1,7 @@
+{
+  "id": "current",
+  "description": "Current Agentflow prompts and runtime behavior.",
+  "env": {
+    "AGENTFLOW_EVAL_PROMPT_PACK": "current"
+  }
+}

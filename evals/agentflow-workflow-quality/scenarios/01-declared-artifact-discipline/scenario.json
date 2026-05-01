@@ -1,0 +1,88 @@
+{
+  "id": "declared-artifact-discipline",
+  "bucket": "valid-hard-execution",
+  "difficulty": "hard",
+  "description": "Clear graph where the node must write the declared artifact, not rely on final text.",
+  "workflow": {
+    "graph_template": "../../shared/graph.exec.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "validation"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "forbidden.txt"
+      ]
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "workflow-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "artifact_quality",
+        "delivery_auditability"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "artifact_quality",
+        "delivery_auditability"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "artifact_quality",
+        "delivery_auditability"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "artifact_quality",
+        "delivery_auditability"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "artifact_quality",
+        "delivery_auditability"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "artifact_quality",
+        "delivery_auditability"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "artifact_quality",
+        "delivery_auditability"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "artifact_quality",
+        "delivery_auditability"
+      ]
+    }
+  }
+}

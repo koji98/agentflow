@@ -1,0 +1,158 @@
+{
+  "version": "1",
+  "suite_id": "agentflow-workflow-quality",
+  "objective": "Dogfood Agentflow evals against hard local workflow scenarios for prompts, supervisor recovery, artifacts, tools, and delivery auditability.",
+  "default_trials": 1,
+  "scenarios": [
+    "scenarios/01-declared-artifact-discipline/scenario.json",
+    "scenarios/02-placeholder-artifact-rejection/scenario.json",
+    "scenarios/03-no-tools-baseline/scenario.json",
+    "scenarios/04-tool-discovery/scenario.json",
+    "scenarios/05-tool-output-changes-direction/scenario.json",
+    "scenarios/06-helper-investigation/scenario.json",
+    "scenarios/07-missing-local-pattern/scenario.json",
+    "scenarios/08-ambiguous-diagnostic/scenario.json",
+    "scenarios/09-missing-dependency-docs/scenario.json",
+    "scenarios/10-version-specific-dependency/scenario.json",
+    "scenarios/11-semantic-acceptance-failure/scenario.json",
+    "scenarios/12-artifact-repair-no-retry/scenario.json",
+    "scenarios/13-repeated-fingerprint/scenario.json",
+    "scenarios/14-parallel-evidence-gather/scenario.json",
+    "scenarios/15-noisy-context-manifest/scenario.json",
+    "scenarios/16-truncated-context-provenance/scenario.json",
+    "scenarios/17-stale-local-docs/scenario.json",
+    "scenarios/18-machine-resolvable-conflict/scenario.json",
+    "scenarios/19-human-authority-conflict/scenario.json",
+    "scenarios/20-missing-authority-credential/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json",
+    "variants/terse.json"
+  ],
+  "thresholds": {
+    "pass_rate": 0.5,
+    "max_blocker_rate": 1,
+    "min_average_score": 2
+  },
+  "criteria": [
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace",
+      "required": true
+    },
+    {
+      "id": "supervisor",
+      "kind": "supervisor",
+      "required": true
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true
+    },
+    {
+      "id": "workflow-deterministic",
+      "kind": "custom_script",
+      "command": "node graders/workflow-deterministic.mjs",
+      "required": true
+    },
+    {
+      "id": "contract-adherence",
+      "kind": "quality",
+      "rubric": "judges/contract-adherence.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "contract_adherence"
+      ]
+    },
+    {
+      "id": "artifact-quality",
+      "kind": "quality",
+      "rubric": "judges/artifact-quality.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "artifact_quality"
+      ]
+    },
+    {
+      "id": "evidence-use",
+      "kind": "quality",
+      "rubric": "judges/evidence-use.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "evidence_use"
+      ]
+    },
+    {
+      "id": "supervisor-recovery",
+      "kind": "quality",
+      "rubric": "judges/supervisor-recovery.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "supervisor_recovery"
+      ]
+    },
+    {
+      "id": "context-handling",
+      "kind": "quality",
+      "rubric": "judges/context-handling.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "context_handling"
+      ]
+    },
+    {
+      "id": "tool-discipline",
+      "kind": "quality",
+      "rubric": "judges/tool-discipline.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "tool_discipline"
+      ]
+    },
+    {
+      "id": "noise-efficiency",
+      "kind": "quality",
+      "rubric": "judges/noise-efficiency.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "noise_efficiency"
+      ]
+    },
+    {
+      "id": "delivery-auditability",
+      "kind": "quality",
+      "rubric": "judges/delivery-auditability.md",
+      "required": false,
+      "harness": "codex-cli",
+      "threshold": 4,
+      "dimensions": [
+        "delivery_auditability"
+      ]
+    }
+  ]
+}

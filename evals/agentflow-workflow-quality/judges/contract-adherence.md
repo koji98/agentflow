@@ -1,0 +1,1 @@
+Rate whether the workflow preserved the authored graph and node contract. Score 5 only when the result clearly follows goal, acceptance criteria, constraints, sandbox, and declared artifacts. Return strict JSON with passed_quality_bar, score, dimension_scores, blockers, rationale, and prompt_feedback.

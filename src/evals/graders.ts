@@ -6,13 +6,14 @@ import { createCursorCliHarness } from "../runtime/harness/cursor_cli.js";
 import { runAiCheck } from "../runtime/checks/ai.js";
 import { runLocalProcess } from "../runtime/checks/deterministic.js";
 import type { HarnessAdapter } from "../runtime/harness/types.js";
+import { parseJudgeResult } from "./suite.js";
 import type {
-  EvalAiRubricGrader,
-  EvalCase,
-  EvalGrader,
-  EvalGraderNormalizedPayload,
-  EvalGraderResult,
-  EvalScriptGrader
+  EvalCriterion,
+  EvalCriterionResult,
+  EvalJudgePayload,
+  EvalScenario,
+  EvalScriptCriterionPayload,
+  EvalTracePacket
 } from "./types.js";
 
 function parseStructuredPayload(text: string): Record<string, unknown> | undefined {
@@ -28,27 +29,24 @@ function parseStructuredPayload(text: string): Record<string, unknown> | undefin
       ? parsed as Record<string, unknown>
       : undefined;
   } catch {
-    // Fall through to object extraction.
-  }
+    const firstObject = trimmed.match(/\{[\s\S]*\}/u);
+    if (!firstObject?.[0]) {
+      return undefined;
+    }
 
-  const firstObject = trimmed.match(/\{[\s\S]*\}/u);
-
-  if (!firstObject?.[0]) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(firstObject[0]) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : undefined;
-  } catch {
-    return undefined;
+    try {
+      const parsed = JSON.parse(firstObject[0]) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }
 
-function normalizePayload(payload: unknown): {
-  payload?: EvalGraderNormalizedPayload;
+function normalizeScriptPayload(payload: unknown): {
+  payload?: EvalScriptCriterionPayload;
   error?: string;
 } {
   const record =
@@ -59,15 +57,19 @@ function normalizePayload(payload: unknown): {
         : undefined;
 
   if (!record) {
-    return { error: "Grader output was not valid structured JSON." };
+    return { error: "custom_script criterion output was not valid structured JSON." };
   }
 
   if (typeof record.passed !== "boolean") {
-    return { error: "Grader output must include boolean passed." };
+    return { error: "custom_script criterion output must include boolean passed." };
   }
 
   if (record.assertions !== undefined && !Array.isArray(record.assertions)) {
-    return { error: "Grader assertions must be an array when present." };
+    return { error: "custom_script criterion assertions must be an array when present." };
+  }
+
+  if (record.blockers !== undefined && !Array.isArray(record.blockers)) {
+    return { error: "custom_script criterion blockers must be an array when present." };
   }
 
   const assertions = Array.isArray(record.assertions)
@@ -84,6 +86,9 @@ function normalizePayload(payload: unknown): {
   const metrics = record.metrics && typeof record.metrics === "object" && !Array.isArray(record.metrics)
     ? record.metrics as Record<string, unknown>
     : undefined;
+  const blockers = Array.isArray(record.blockers)
+    ? record.blockers.filter((blocker): blocker is string => typeof blocker === "string")
+    : undefined;
 
   return {
     payload: {
@@ -91,63 +96,71 @@ function normalizePayload(payload: unknown): {
       ...(typeof record.score === "number" ? { score: record.score } : {}),
       ...(typeof record.summary === "string" ? { summary: record.summary } : {}),
       ...(assertions ? { assertions } : {}),
-      ...(metrics ? { metrics } : {})
+      ...(metrics ? { metrics } : {}),
+      ...(blockers ? { blockers } : {})
     }
   };
 }
 
-function errorResult(options: {
-  grader: EvalGrader;
+function criterionErrorResult(options: {
+  criterion: EvalCriterion;
   output_dir: string;
   error: string;
-}): EvalGraderResult {
-  const required = options.grader.required !== false;
-
+}): EvalCriterionResult {
   return {
-    id: options.grader.id,
-    kind: options.grader.kind,
-    required,
+    id: options.criterion.id,
+    kind: options.criterion.kind,
+    required: options.criterion.required,
     status: "errored",
     passed: false,
+    blockers: [options.error],
+    assertions: [{ id: "criterion_error", passed: false, evidence: options.error }],
     output_dir: options.output_dir,
-    summary: options.error,
     error: options.error
   };
 }
 
-function createAiRubricHarness(grader: EvalAiRubricGrader): HarnessAdapter {
-  switch (grader.harness ?? "codex-cli") {
-    case "codex-cli":
-      return createCodexCliHarness();
+function createJudgeHarness(criterion: EvalCriterion): HarnessAdapter {
+  switch (criterion.harness) {
     case "cursor-cli":
       return createCursorCliHarness();
+    case "codex-cli":
+    default:
+      return createCodexCliHarness();
   }
 }
 
-async function runScriptGrader(options: {
-  grader: EvalScriptGrader;
+export async function runScriptCriterion(options: {
+  criterion: EvalCriterion;
   suite_dir: string;
-  case_file: string;
+  scenario: EvalScenario;
+  variant_id: string;
+  trial_id: string;
   run_root: string;
   trace_file: string;
-  variant_id: string;
+  trace_packet_file: string;
+  scorecard_file: string;
   output_dir: string;
   signal?: AbortSignal;
-}): Promise<EvalGraderResult> {
+}): Promise<EvalCriterionResult> {
   await mkdir(options.output_dir, { recursive: true });
 
   const processResult = await runLocalProcess({
     command: "sh",
-    args: ["-lc", options.grader.command],
+    args: ["-lc", options.criterion.command ?? ""],
     cwd: options.suite_dir,
     env: {
-      AGENTFLOW_EVAL_CASE_FILE: options.case_file,
+      AGENTFLOW_EVAL_SCENARIO_ID: options.scenario.id,
+      AGENTFLOW_EVAL_VARIANT: options.variant_id,
+      AGENTFLOW_EVAL_TRIAL_ID: options.trial_id,
+      AGENTFLOW_EVAL_CRITERION_ID: options.criterion.id,
       AGENTFLOW_EVAL_RUN_ROOT: options.run_root,
       AGENTFLOW_EVAL_TRACE_FILE: options.trace_file,
-      AGENTFLOW_EVAL_VARIANT: options.variant_id,
+      AGENTFLOW_EVAL_TRACE_PACKET_FILE: options.trace_packet_file,
+      AGENTFLOW_EVAL_SCORECARD_FILE: options.scorecard_file,
       AGENTFLOW_EVAL_OUTPUT_DIR: options.output_dir
     },
-    timeout_sec: options.grader.timeout_sec ?? 300,
+    timeout_sec: options.criterion.timeout_sec ?? 300,
     signal: options.signal
   });
 
@@ -157,101 +170,127 @@ async function runScriptGrader(options: {
   ]);
 
   if (processResult.exit_code !== 0 || processResult.timed_out || processResult.canceled) {
-    return errorResult({
-      grader: options.grader,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
       error: processResult.timed_out
-        ? "Script grader timed out."
+        ? "custom_script criterion timed out."
         : processResult.canceled
-          ? "Script grader canceled."
-          : processResult.stderr.trim() || `Script grader exited with code ${processResult.exit_code}.`
+          ? "custom_script criterion canceled."
+          : processResult.stderr.trim() || `custom_script criterion exited with code ${processResult.exit_code}.`
     });
   }
 
-  const normalized = normalizePayload(processResult.stdout);
+  const normalized = normalizeScriptPayload(processResult.stdout);
 
   if (!normalized.payload) {
-    return errorResult({
-      grader: options.grader,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
-      error: normalized.error ?? "Script grader produced invalid output."
+      error: normalized.error ?? "custom_script criterion produced invalid output."
     });
   }
 
+  const blockers = normalized.payload.blockers ?? (normalized.payload.passed ? [] : [normalized.payload.summary ?? "custom_script criterion failed."]);
+
   return {
-    id: options.grader.id,
-    kind: options.grader.kind,
-    required: options.grader.required !== false,
+    id: options.criterion.id,
+    kind: "custom_script",
+    required: options.criterion.required,
     status: normalized.payload.passed ? "passed" : "failed",
+    passed: normalized.payload.passed,
+    blockers,
+    assertions: normalized.payload.assertions ?? [],
     output_dir: options.output_dir,
-    ...normalized.payload
+    ...(typeof normalized.payload.score === "number" ? { score: normalized.payload.score } : {}),
+    ...(normalized.payload.summary ? { rationale: normalized.payload.summary } : {}),
+    ...(normalized.payload.metrics ? { metrics: normalized.payload.metrics } : {})
   };
 }
 
-async function runAiRubricGrader(options: {
-  grader: EvalAiRubricGrader;
+export async function runQualityCriterion(options: {
+  criterion: EvalCriterion;
   suite_dir: string;
-  case: EvalCase;
-  case_file: string;
+  scenario: EvalScenario;
+  anonymized_variant_label: string;
+  trial_id: string;
   run_root: string;
-  trace_file: string;
-  variant_id: string;
+  trace_packet: EvalTracePacket;
+  trace_packet_file: string;
   output_dir: string;
   signal?: AbortSignal;
-}): Promise<EvalGraderResult> {
+}): Promise<EvalCriterionResult> {
   await mkdir(options.output_dir, { recursive: true });
 
-  const harness = createAiRubricHarness(options.grader);
+  const harness = createJudgeHarness(options.criterion);
   if (!harness.capabilities.supports_ai_check) {
-    return errorResult({
-      grader: options.grader,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
       error: `${harness.kind} does not support AI rubric grading.`
     });
   }
-  const readiness = await harness.checkReadiness?.();
 
+  const readiness = await harness.checkReadiness?.();
   if (readiness && readiness.length > 0) {
-    return errorResult({
-      grader: options.grader,
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
       error: readiness.join(" ")
     });
   }
 
-  const rubricPath = resolve(options.suite_dir, options.grader.rubric);
-  const rubric = await readFile(rubricPath, "utf8");
+  if (!options.criterion.rubric_path) {
+    return criterionErrorResult({
+      criterion: options.criterion,
+      output_dir: options.output_dir,
+      error: "quality criterion is missing rubric path."
+    });
+  }
+
+  const rubric = await readFile(options.criterion.rubric_path, "utf8");
   const contextDir = resolve(options.output_dir, "context");
   const contextPacketPath = resolve(contextDir, "packet.json");
   const contextManifestPath = resolve(contextDir, "manifest.md");
+  const judgePacketPath = resolve(options.output_dir, "judge-packet.json");
   await mkdir(contextDir, { recursive: true });
 
+  const judgePacket = {
+    criterion: {
+      id: options.criterion.id,
+      kind: options.criterion.kind,
+      required: options.criterion.required,
+      dimensions: options.criterion.dimensions ?? [],
+      threshold: options.criterion.threshold ?? 4
+    },
+    scenario: {
+      id: options.scenario.id,
+      bucket: options.scenario.bucket,
+      difficulty: options.scenario.difficulty,
+      description: options.scenario.description,
+      criteria: options.scenario.criteria
+    },
+    variant_label: options.anonymized_variant_label,
+    trial_id: options.trial_id,
+    run_root: options.run_root,
+    trace_packet_file: options.trace_packet_file,
+    trace_packet: options.trace_packet
+  };
+
   await Promise.all([
-    writeFile(
-      contextPacketPath,
-      `${JSON.stringify(
-        {
-          case: options.case,
-          case_file: options.case_file,
-          run_root: options.run_root,
-          trace_file: options.trace_file,
-          variant_id: options.variant_id
-        },
-        null,
-        2
-      )}\n`,
-      "utf8"
-    ),
+    writeFile(judgePacketPath, `${JSON.stringify(judgePacket, null, 2)}\n`, "utf8"),
+    writeFile(contextPacketPath, `${JSON.stringify(judgePacket, null, 2)}\n`, "utf8"),
     writeFile(
       contextManifestPath,
       [
-        "# Eval Grader Context",
+        "# Eval Quality Criterion Context",
         "",
-        `- Case: ${options.case.id}`,
-        `- Variant: ${options.variant_id}`,
+        `- Criterion: ${options.criterion.id}`,
+        `- Scenario: ${options.scenario.id}`,
+        `- Variant label: ${options.anonymized_variant_label}`,
+        `- Trial: ${options.trial_id}`,
         `- Run root: ${options.run_root}`,
-        `- Trace file: ${options.trace_file}`,
-        `- Case file: ${options.case_file}`
+        `- Trace packet: ${options.trace_packet_file}`
       ].join("\n"),
       "utf8"
     )
@@ -259,96 +298,79 @@ async function runAiRubricGrader(options: {
 
   const aiResult = await runAiCheck({
     harness,
-    run_id: `eval-${options.case.id}-${options.variant_id}`,
-    execution_id: `grader-${options.grader.id}`,
+    run_id: `eval-${options.scenario.id}-${options.anonymized_variant_label}`,
+    execution_id: `quality-${options.criterion.id}-${options.trial_id}`,
     repo_alias: "eval",
     repo_path: options.suite_dir,
-    model: options.grader.model,
-    ...(options.grader.reasoning_effort ? { reasoning_effort: options.grader.reasoning_effort } : {}),
+    model: options.criterion.model,
+    ...(options.criterion.reasoning_effort ? { reasoning_effort: options.criterion.reasoning_effort } : {}),
     skip_git_repo_check: true,
     node_goal: [
-      "Grade this local Agentflow eval case using only the referenced local files.",
-      "Return normalized grader JSON with passed, score, summary, assertions, and metrics.",
-      `Case: ${options.case.id}`,
-      `Variant: ${options.variant_id}`,
-      `Run root: ${options.run_root}`,
-      `Trace file: ${options.trace_file}`
+      "Grade this Agentflow workflow trial using only the referenced local files.",
+      "Return strict JSON with passed_quality_bar, score, dimension_scores, blockers, rationale, and prompt_feedback.",
+      `Criterion: ${options.criterion.id}`,
+      `Scenario: ${options.scenario.id}`,
+      `Variant label: ${options.anonymized_variant_label}`,
+      `Trial: ${options.trial_id}`
     ].join("\n"),
     rubric,
+    output_schema: JSON.stringify({
+      passed_quality_bar: true,
+      score: 4,
+      dimension_scores: {
+        artifact_quality: 4
+      },
+      blockers: [],
+      rationale: "short evidence-backed explanation",
+      prompt_feedback: {
+        helpful_sections: [],
+        noisy_sections: [],
+        missing_guidance: []
+      }
+    }),
     context_packet_path: contextPacketPath,
     context_manifest_path: contextManifestPath,
     output_dir: options.output_dir,
-    timeout_sec: options.grader.timeout_sec ?? 900,
+    timeout_sec: options.criterion.timeout_sec ?? 900,
     signal: options.signal
   });
 
-  await writeFile(
-    resolve(options.output_dir, "ai-check-result.json"),
-    `${JSON.stringify(aiResult, null, 2)}\n`,
-    "utf8"
+  await writeFile(resolve(options.output_dir, "ai-check-result.json"), `${JSON.stringify(aiResult, null, 2)}\n`, "utf8");
+
+  const parsed = parseJudgeResult(
+    typeof aiResult.evaluation.raw === "string"
+      ? aiResult.evaluation.raw
+      : JSON.stringify(aiResult.evaluation.raw ?? aiResult.evaluation)
   );
 
-  const normalized = normalizePayload(aiResult.evaluation.raw ?? aiResult.evaluation);
-
-  if (aiResult.harness_result.status !== "passed" || !normalized.payload) {
-    return errorResult({
-      grader: options.grader,
+  if (aiResult.harness_result.status !== "passed" || !parsed.result) {
+    return criterionErrorResult({
+      criterion: options.criterion,
       output_dir: options.output_dir,
-      error: aiResult.evaluation.summary ?? normalized.error ?? "AI rubric grader failed."
+      error: aiResult.evaluation.summary ?? parsed.error ?? "AI rubric judge failed."
     });
   }
+
+  const payload: EvalJudgePayload = parsed.result;
+  const threshold = options.criterion.threshold ?? 4;
+  const passed = payload.passed_quality_bar && payload.score >= threshold && payload.blockers.length === 0;
 
   return {
-    id: options.grader.id,
-    kind: options.grader.kind,
-    required: options.grader.required !== false,
-    status: normalized.payload.passed ? "passed" : "failed",
+    id: options.criterion.id,
+    kind: "quality",
+    required: options.criterion.required,
+    status: passed ? "passed" : "failed",
+    passed,
+    blockers: payload.blockers,
+    assertions: [{
+      id: "quality_threshold",
+      passed,
+      evidence: `score=${payload.score}; threshold=${threshold}; passed_quality_bar=${payload.passed_quality_bar}`
+    }],
     output_dir: options.output_dir,
-    ...normalized.payload
+    score: payload.score,
+    dimension_scores: payload.dimension_scores,
+    rationale: payload.rationale,
+    prompt_feedback: payload.prompt_feedback
   };
-}
-
-export async function runEvalGrader(options: {
-  grader: EvalGrader;
-  suite_dir: string;
-  case: EvalCase;
-  case_file: string;
-  run_root: string;
-  trace_file: string;
-  variant_id: string;
-  output_dir: string;
-  signal?: AbortSignal;
-}): Promise<EvalGraderResult> {
-  try {
-    if (options.grader.kind === "script") {
-      return await runScriptGrader({
-        grader: options.grader,
-        suite_dir: options.suite_dir,
-        case_file: options.case_file,
-        run_root: options.run_root,
-        trace_file: options.trace_file,
-        variant_id: options.variant_id,
-        output_dir: options.output_dir,
-        ...(options.signal ? { signal: options.signal } : {})
-      });
-    }
-
-    return await runAiRubricGrader({
-      grader: options.grader,
-      suite_dir: options.suite_dir,
-      case: options.case,
-      case_file: options.case_file,
-      run_root: options.run_root,
-      trace_file: options.trace_file,
-      variant_id: options.variant_id,
-      output_dir: options.output_dir,
-      ...(options.signal ? { signal: options.signal } : {})
-    });
-  } catch (error) {
-    return errorResult({
-      grader: options.grader,
-      output_dir: options.output_dir,
-      error: error instanceof Error ? error.message : String(error)
-    });
-  }
 }

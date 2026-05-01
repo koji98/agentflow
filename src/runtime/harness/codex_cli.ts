@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
 import { createProcessTerminationController } from "../process_control.js";
@@ -94,6 +94,10 @@ export function createCodexCliHarness(
       await mkdir(invocation.outputDir, { recursive: true });
       const { args, last_message_path } = buildCodexArgs(invocation);
       const prompt = renderHarnessPrompt(invocation);
+      if (invocation.promptPath) {
+        await mkdir(dirname(invocation.promptPath), { recursive: true });
+        await writeFile(invocation.promptPath, `${prompt}\n`, "utf8");
+      }
       const spawnBroker = startSpawnBroker(invocation);
 
       return new Promise<HarnessResult>((resolve, reject) => {

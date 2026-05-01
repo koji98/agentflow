@@ -1,0 +1,74 @@
+diff --git a/AGENTFLOW_EVAL_TASK.md b/AGENTFLOW_EVAL_TASK.md
+new file mode 100644
+index 0000000000..c1a2fd3c29
+--- /dev/null
++++ b/AGENTFLOW_EVAL_TASK.md
+@@ -0,0 +1,36 @@
++# Scenario: date-fns-french-ordinal-architecture
++
++## Source Issue
++
++French long-month formatting currently emits an extra ordinal suffix:
++
++- Expected: `jeudi 29 août 2019`
++- Actual: `jeudi 29ème août 2019`
++
++The issue appears when formatting with `iiii do MMMM yyyy`.
++
++## Constraints
++
++- Fix production source, not the regression test.
++- Do not use the upstream PR patch, oracle commit, or live GitHub.
++- Do not edit package manifests, lockfiles, generated files, or this task file.
++- Do not edit `vitest.config.ts` or any other validation-only configuration.
++- Do not solve this as a final-output string replacement.
++- Prefer an extensible formatting/locale path that can support context-sensitive locale behavior.
++
++## Validation
++
++Run:
++
++```bash
++npx tsx src/format/agentflow-realworld-fr-ordinal/check.ts
++```
++
++## Agentflow Output Contract
++
++Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with:
++- `Scenario:` date-fns-french-ordinal-architecture
++- `Issue:` one-sentence summary
++- `Changed files:` exact files changed
++- `Validation:` exact command and result
++- `Risks:` remaining uncertainty or `none`
+diff --git a/src/format/agentflow-realworld-fr-ordinal/check.ts b/src/format/agentflow-realworld-fr-ordinal/check.ts
+new file mode 100644
+index 0000000000..24f09ac7ea
+--- /dev/null
++++ b/src/format/agentflow-realworld-fr-ordinal/check.ts
+@@ -0,0 +1,26 @@
++import { fr } from "../../locale/fr/index.js";
++import { format } from "../index.js";
++
++function assertEqual(actual: string, expected: string): void {
++  if (actual !== expected) {
++    throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
++  }
++}
++
++assertEqual(
++  format(new Date(2019, 7 /* Aug */, 1), "iiii do MMMM yyyy", {
++    locale: fr,
++  }),
++  "jeudi 1er août 2019",
++);
++
++assertEqual(
++  format(new Date(2019, 7 /* Aug */, 29), "iiii do MMMM yyyy", {
++    locale: fr,
++  }),
++  "jeudi 29 août 2019",
++);
++
++assertEqual(format(new Date(2019, 7 /* Aug */, 29), "do MMMM", { locale: fr }), "29 août");
++
++console.log("Agentflow French ordinal regression passed.");

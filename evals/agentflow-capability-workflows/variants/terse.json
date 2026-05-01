@@ -1,0 +1,7 @@
+{
+  "id": "terse",
+  "description": "Terse prompt-pack placeholder for prompt experiments.",
+  "env": {
+    "AGENTFLOW_EVAL_PROMPT_PACK": "terse"
+  }
+}

@@ -567,6 +567,19 @@ async function buildArtifactTaxonomy(options: {
       })
     )
   );
+  const interventionArtifactEntries = await Promise.all(
+    evidence.interventions.flatMap((intervention) =>
+      Object.entries(intervention.artifact_paths)
+        .filter(([key]) => key !== "intervention_dir")
+        .map(([key, path]) =>
+          artifactEntry({
+            path,
+            label: `${intervention.action} ${key}`,
+            purpose: `Supervisor intervention artifact for ${intervention.target_compiled_id ?? "unknown node"} (${intervention.intervention_id}).`
+          })
+        )
+    )
+  );
   const auditTrail = await Promise.all([
     artifactEntry({
       path: runPaths.events_file,
@@ -610,6 +623,7 @@ async function buildArtifactTaxonomy(options: {
     }),
     ...outcomeVerificationEntries,
     ...nodeWorkspaceChangeEntries,
+    ...interventionArtifactEntries,
     ...toolInvocationEntries
   ]);
   const debugPaths = [

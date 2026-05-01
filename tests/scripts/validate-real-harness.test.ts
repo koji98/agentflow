@@ -30,6 +30,7 @@ describe("validate:real-harness contract", () => {
         "run.completed event",
         "agent_response artifact"
       ],
+      scenarios: ["smoke", "supervisor-recovery"],
       supportedHarnesses: [
         {
           kind: "codex-cli",
@@ -61,8 +62,16 @@ describe("validate:real-harness contract", () => {
       "codex-cli",
       "cursor-cli"
     ]);
+    expect(scriptModule.parseRequestedHarnessKinds(["--scenario", "supervisor-recovery", "--harness", "codex-cli"], {})).toEqual(["codex-cli"]);
     expect(() => scriptModule.parseRequestedHarnessKinds(["--harness", "unknown-cli"], {})).toThrow(
       'Unsupported harness "unknown-cli". Use codex-cli, cursor-cli, or all.'
+    );
+    expect(scriptModule.parseRequestedScenario(["--scenario", "supervisor-recovery"], {})).toBe("supervisor-recovery");
+    expect(scriptModule.parseRequestedScenario([], {
+      AGENTFLOW_REAL_HARNESS_SCENARIO: "supervisor-recovery"
+    })).toBe("supervisor-recovery");
+    expect(() => scriptModule.parseRequestedScenario(["--scenario", "unknown"], {})).toThrow(
+      'Unsupported scenario "unknown". Use smoke or supervisor-recovery.'
     );
   });
 
@@ -79,6 +88,9 @@ describe("validate:real-harness contract", () => {
     expect(scriptModule.buildSmokeGraphDocument(codexSpec, {
       AGENTFLOW_CODEX_MODEL: "gpt-5.4-mini"
     }).profiles.default.model).toBe("gpt-5.4-mini");
+    expect(scriptModule.buildSupervisorRecoveryGraphDocument(codexSpec, "http://127.0.0.1:1234/fixturelib", {
+      AGENTFLOW_CODEX_MODEL: "gpt-5.4-mini"
+    }).graph.steps[0].goal).toContain("af supervision show");
   });
 
   it("detects explicit binary overrides and skips cleanly when no binaries are available", async () => {

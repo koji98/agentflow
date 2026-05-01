@@ -1,0 +1,151 @@
+{
+  "id": "22-managed-deep-research-repo",
+  "bucket": "managed-patterns",
+  "difficulty": "hard",
+  "description": "Use managed deep research on a real local repo fixture with seven balanced research angles.",
+  "workflow": {
+    "graph_template": "../../templates/managed-deep-research.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/22-managed-deep-research-repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Scenario:",
+            "Validation:"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": []
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "capability-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    }
+  }
+}

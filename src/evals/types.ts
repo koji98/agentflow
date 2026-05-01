@@ -1,82 +1,195 @@
 import type { HarnessName, ReasoningEffort } from "../graph/schema.js";
 
 export const evalSuiteVersion = "1";
+export const evalSourceReference =
+  "Primary: Anthropic, Demystifying evals for AI agents (https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents). Adopted mechanics: ADK evaluation criteria, trajectory evaluation, and deterministic environment simulation (https://adk.dev/evaluate/).";
+
+export type EvalOutcomeStatus = "passed" | "failed" | "paused" | "canceled";
+export type EvalTrialStatus = "passed" | "failed" | "errored" | "skipped";
+export type EvalCriterionKind =
+  | "outcome"
+  | "artifact"
+  | "workspace"
+  | "supervisor"
+  | "trajectory"
+  | "quality"
+  | "delivery"
+  | "custom_script";
+export type EvalTrajectoryMatchMode = "exact_order" | "contains_ordered" | "contains_any_order" | "forbid";
 
 export interface EvalDiagnostic {
   path: string;
   message: string;
 }
 
-export interface EvalSuiteTarget {
-  graph_template: string;
-}
-
-export interface EvalSuiteVariant {
-  graph_template?: string;
-  optional?: boolean;
-}
-
 export interface EvalSuiteThresholds {
   pass_rate?: number;
-  critical_failures?: number;
+  max_blocker_rate?: number;
+  min_average_score?: number;
 }
 
-export interface EvalScriptGrader {
+export interface EvalCriterion {
   id: string;
-  kind: "script";
-  command: string;
-  required?: boolean;
-  timeout_sec?: number;
-}
-
-export interface EvalAiRubricGrader {
-  id: string;
-  kind: "ai_rubric";
-  rubric: string;
-  required?: boolean;
+  kind: EvalCriterionKind;
+  required: boolean;
+  description?: string;
+  command?: string;
+  rubric?: string;
+  rubric_path?: string;
+  dimensions?: string[];
+  threshold?: number;
   harness?: HarnessName;
   model?: string;
   reasoning_effort?: ReasoningEffort;
   timeout_sec?: number;
 }
 
-export type EvalGrader = EvalScriptGrader | EvalAiRubricGrader;
-
 export interface EvalSuite {
   version: "1";
   suite_id: string;
-  target: EvalSuiteTarget;
-  cases: string;
-  variants?: Record<string, EvalSuiteVariant>;
-  graders?: EvalGrader[];
-  thresholds?: EvalSuiteThresholds;
+  objective: string;
+  source_reference: string;
+  default_trials: number;
+  scenarios: string[];
+  variants: string[];
+  criteria: EvalCriterion[];
+  thresholds: EvalSuiteThresholds;
 }
 
-export interface EvalCase {
+export interface EvalSimulationMatch {
+  argv_exact?: string[];
+  argv_contains?: string[];
+  cwd_contains?: string;
+}
+
+export interface EvalSimulationResponse {
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number;
+}
+
+export interface EvalSimulationError {
+  stderr: string;
+  exit_code?: number;
+}
+
+export interface EvalSimulationRule {
   id: string;
-  task: string;
-  fixtures?: string[] | Record<string, string>;
-  repos?: Record<string, string | { path: string }>;
-  expected?: unknown;
-  tags?: string[];
+  command: string;
+  match: EvalSimulationMatch;
+  response?: EvalSimulationResponse;
+  response_file?: string;
+  response_file_path?: string;
+  error?: EvalSimulationError;
+  latency_ms?: number;
+  probability?: number;
+}
+
+export interface EvalEnvironmentSimulation {
+  seed?: string;
+  tool_calls: EvalSimulationRule[];
+}
+
+export interface EvalScenarioEnvironment {
+  repo: string;
+  repo_path: string;
+  init_git: boolean;
+  docs?: string;
+  docs_path?: string;
+  tools?: string;
+  tools_path?: string;
+  simulation?: EvalEnvironmentSimulation;
+}
+
+export interface EvalScenarioWorkflow {
+  graph_template: string;
+  graph_template_path: string;
+  harness: HarnessName;
+  workspace_backend?: "inplace" | "worktree";
+  launch_profile?: string;
+}
+
+export interface EvalExpectedArtifact {
+  name: string;
+  contains?: string[];
+}
+
+export interface EvalExpectedSupervisor {
+  classifications?: string[];
+  gatherers?: string[];
+  apply_actions?: string[];
+}
+
+export interface EvalScenarioRealWorldMetadata {
+  source_repo: string;
+  license: "MIT";
+  base_sha: string;
+  issue_url: string;
+  pr_url: string;
+  oracle_commit_sha: string;
+  package_manager: string;
+  regression_patch: string;
+  regression_patch_path: string;
+  setup_command: string;
+  focused_test_command: string;
+  allowed_changed_globs: string[];
+  forbidden_changed_globs: string[];
+  hidden_oracle_changed_files: string[];
+}
+
+export interface EvalScenarioMetadata {
+  realworld?: EvalScenarioRealWorldMetadata;
   [key: string]: unknown;
+}
+
+export type EvalScenarioCriterionConfig = Record<string, unknown>;
+
+export interface EvalScenario {
+  id: string;
+  bucket: string;
+  difficulty: string;
+  description: string;
+  scenario_dir: string;
+  graph_template_path: string;
+  environment: EvalScenarioEnvironment;
+  workflow: EvalScenarioWorkflow;
+  criteria: Record<string, EvalScenarioCriterionConfig>;
+  metadata: EvalScenarioMetadata;
+}
+
+export interface EvalVariant {
+  id: string;
+  description: string;
+  variant_path: string;
+  graph_template?: string;
+  graph_template_path?: string;
+  env: Record<string, string>;
+  prompt_pack?: string;
 }
 
 export interface LoadedEvalSuite {
   suite: EvalSuite;
   suite_path: string;
   suite_dir: string;
-  cases: EvalCase[];
+  scenarios: EvalScenario[];
+  variants: EvalVariant[];
+  criteria: EvalCriterion[];
   diagnostics: EvalDiagnostic[];
 }
 
-export interface EvalVariantResolution {
+export interface EvalTemplateTrialContext {
   id: string;
-  graph_template: string;
-  graph_template_path: string;
-  optional: boolean;
-  skipped?: boolean;
-  skip_reason?: string;
+  index: number;
+  root: string;
+}
+
+export interface EvalTemplateEnvironmentContext {
+  repo: string;
+  docs_url?: string;
+  tools?: string;
+  simulation_events_file?: string;
+  eval_root?: string;
+  trial_root?: string;
 }
 
 export interface EvalAssertionResult {
@@ -85,47 +198,203 @@ export interface EvalAssertionResult {
   evidence?: string;
 }
 
-export interface EvalGraderNormalizedPayload {
+export interface EvalScriptCriterionPayload {
   passed: boolean;
   score?: number;
   summary?: string;
   assertions?: EvalAssertionResult[];
   metrics?: Record<string, unknown>;
+  blockers?: string[];
 }
 
-export interface EvalGraderResult extends EvalGraderNormalizedPayload {
+export interface EvalJudgePayload {
+  passed_quality_bar: boolean;
+  score: number;
+  dimension_scores: Record<string, number>;
+  blockers: string[];
+  rationale: string;
+  prompt_feedback: {
+    helpful_sections: string[];
+    noisy_sections: string[];
+    missing_guidance: string[];
+  };
+}
+
+export interface EvalCriterionResult {
   id: string;
-  kind: EvalGrader["kind"];
+  kind: EvalCriterionKind;
   required: boolean;
   status: "passed" | "failed" | "errored" | "skipped";
-  output_dir: string;
+  passed: boolean;
+  blockers: string[];
+  assertions: EvalAssertionResult[];
+  output_dir?: string;
+  score?: number;
+  dimension_scores?: Record<string, number>;
+  rationale?: string;
+  prompt_feedback?: {
+    helpful_sections: string[];
+    noisy_sections: string[];
+    missing_guidance: string[];
+  };
+  metrics?: Record<string, unknown>;
   error?: string;
 }
 
-export interface EvalCaseVariantResult {
-  case_id: string;
+export interface EvalTraceArtifact {
+  name: string;
+  path: string;
+  content?: string;
+}
+
+export interface EvalTraceAttempt {
+  execution_id?: string;
+  compiled_id?: string;
+  authored_id?: string;
+  kind?: string;
+  status?: string;
+  outcome?: string;
+  attempt_index?: number;
+  duration_ms?: number;
+  artifacts?: Record<string, string>;
+}
+
+export interface EvalTrajectoryEvent {
+  order: number;
+  kind: string;
+  source: string;
+  timestamp?: string;
+  type?: string;
+  node_id?: string;
+  node_label?: string;
+  status?: string;
+  action?: string;
+  command?: string;
+  artifact?: string;
+  rule_id?: string;
+  matched?: boolean;
+  [key: string]: unknown;
+}
+
+export interface EvalTracePacket {
+  schema_version: "1";
+  run_root: string;
+  outcome: {
+    status: string;
+    counts?: unknown;
+  };
+  attempts: EvalTraceAttempt[];
+  artifacts: EvalTraceArtifact[];
+  events: Array<Record<string, unknown>>;
+  trajectory: EvalTrajectoryEvent[];
+  simulation_events: Array<Record<string, unknown>>;
+  supervisor: {
+    classifications: string[];
+    gatherers: string[];
+    apply_actions: string[];
+    intervention_count: number;
+    recovery_count: number;
+  };
+  delivery: {
+    manifest_path?: string;
+    manifest?: unknown;
+  };
+  metrics: {
+    attempts: number;
+    events: number;
+    artifacts: number;
+    recovery_cycles: number;
+    simulation_events: number;
+    trajectory_events: number;
+    duration_ms?: number;
+  };
+}
+
+export interface EvalScorecard {
+  schema_version: "1";
+  suite_id: string;
+  scenario_id: string;
   variant_id: string;
-  status: "passed" | "failed" | "errored" | "skipped";
+  trial_id: string;
+  status: EvalTrialStatus;
   passed: boolean;
-  graph_status?: string;
-  rendered_graph_file?: string;
-  run_root?: string;
-  trace_file?: string;
-  grading_file: string;
-  summary_file: string;
-  graders: EvalGraderResult[];
+  criteria_results: EvalCriterionResult[];
+  scores: {
+    average: number;
+    dimensions: Record<string, number>;
+  };
+  metrics: {
+    attempts: number;
+    recovery_cycles: number;
+    duration_ms?: number;
+    blockers: number;
+  };
+  prompt_feedback: {
+    helpful_sections: string[];
+    noisy_sections: string[];
+    missing_guidance: string[];
+  };
   error?: string;
+}
+
+export interface EvalTrialResult {
+  scenario_id: string;
+  variant_id: string;
+  trial_id: string;
+  trial_index: number;
+  status: EvalTrialStatus;
+  passed: boolean;
+  rendered_graph_file: string;
+  trial_file: string;
+  trace_file?: string;
+  trace_packet_file?: string;
+  scorecard_file: string;
+  summary_file: string;
+  run_root?: string;
+  error?: string;
+  scorecard?: EvalScorecard;
+}
+
+export interface EvalBenchmarkCriterion {
+  criterion_id: string;
+  kind: EvalCriterionKind;
+  required: boolean;
+  total_trials: number;
+  passed: number;
+  failed: number;
+  errored: number;
+  pass_rate: number;
+  blocker_count: number;
+  average_score: number;
+}
+
+export interface EvalBenchmarkVariant {
+  variant_id: string;
+  total_trials: number;
+  passed: number;
+  failed: number;
+  errored: number;
+  pass_rate: number;
+  blocker_rate: number;
+  average_score: number;
+  criteria: EvalBenchmarkCriterion[];
 }
 
 export interface EvalBenchmark {
-  total: number;
+  total_trials: number;
   passed: number;
   failed: number;
   errored: number;
   skipped: number;
   pass_rate: number;
+  blocker_rate: number;
+  average_score: number;
+  score_variance: number;
+  pass_at_1: number;
+  pass_at_k: number;
   threshold_passed: boolean;
-  critical_failures: number;
+  variants: EvalBenchmarkVariant[];
+  criteria: EvalBenchmarkCriterion[];
 }
 
 export interface EvalRunLedger {
@@ -133,14 +402,16 @@ export interface EvalRunLedger {
   suite_id: string;
   eval_root: string;
   suite_path: string;
+  source_reference: string;
   started_at: string;
   ended_at: string;
   status: "passed" | "failed";
   filters: {
-    case_id?: string;
+    scenario_id?: string;
     variant_id?: string;
   };
+  trials_per_scenario: number;
   thresholds: EvalSuiteThresholds;
   benchmark: EvalBenchmark;
-  results: EvalCaseVariantResult[];
+  results: EvalTrialResult[];
 }

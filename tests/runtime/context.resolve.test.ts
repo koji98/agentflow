@@ -10,6 +10,7 @@ import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
 import { closeNodeAttempt, createAttemptRegistry, openNodeAttempt } from "../../src/runtime/attempts.js";
 import { resolveExecutionContext } from "../../src/runtime/context/resolve.js";
+import type { SupervisorRecoveryEnvelope } from "../../src/supervisor/types.js";
 
 const TEST_INTENT = {
   goal: "Resolve runtime context for an accountable Agentflow node.",
@@ -35,6 +36,106 @@ function compileGraph(document: Parameters<typeof normalizeAuthoredGraphDocument
 }
 
 describe("context resolution", () => {
+  it("materializes the supervisor recovery envelope ahead of authored context", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-recovery-"));
+    const repoDir = join(tempRoot, "repo");
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, "src.txt"), "source file\n", "utf8");
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "context-recovery-envelope",
+      repos: {
+        main: { path: "." }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "exec",
+            id: "consumer",
+            command: "placeholder",
+            context: [
+              {
+                name: "source_file",
+                from: "workspace_file",
+                path: "src.txt"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+    const recoveryEnvelope: SupervisorRecoveryEnvelope = {
+      envelope_id: "recovery-1",
+      compiled_id: consumerNode.compiled_id,
+      authored_id: consumerNode.authored_id,
+      prior_execution_id: "exec__consumer__attempt_1",
+      recovery_plan_path: join(tempRoot, "recovery-plan.json"),
+      case_file_path: join(tempRoot, "case-file.json"),
+      action: "retry_node",
+      classification: "missing_context",
+      failure_fingerprint: "fingerprint-1",
+      repeated_fingerprint_count: 1,
+      retry_directive: {
+        summary: "The retry needs recovered local context before the authored material.",
+        must_do: ["Read the rebuilt local context manifest first."],
+        must_not_do: ["Do not change the node contract."],
+        evidence_to_read: [join(tempRoot, "evidence-patch.md")],
+        validation_focus: ["Confirm the source file is used."],
+        unchanged_contract: {
+          goal: true,
+          acceptance_criteria: true,
+          constraints: true,
+          repo_authority: true,
+          sandbox: true,
+          declared_artifacts: true
+        }
+      },
+      created_at: "2026-04-24T00:00:02.000Z"
+    };
+
+    const resolved = await resolveExecutionContext({
+      compiled_graph: graph,
+      node: consumerNode,
+      execution_id: "exec__consumer__attempt_2",
+      execution_dir: join(tempRoot, "consumer"),
+      workspace_path: repoDir,
+      repo_workspaces: {
+        main: repoDir
+      },
+      attempts: createAttemptRegistry(),
+      recovery_envelope: recoveryEnvelope
+    });
+
+    expect(resolved.packet.materials.map((material) => material.key)).toEqual([
+      "supervisor_recovery_envelope",
+      "source_file"
+    ]);
+    expect(resolved.packet.materials[0]?.source).toEqual(
+      expect.objectContaining({
+        name: "supervisor_recovery_envelope",
+        from: "runtime_supervisor_recovery"
+      })
+    );
+    await expect(readFile(resolved.packet.materials[0]!.materialized_path, "utf8")).resolves.toContain(
+      "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged."
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("materializes workspace context and upstream artifacts into a context packet", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-"));
     const repoDir = join(tempRoot, "repo");
@@ -143,11 +244,10 @@ describe("context resolution", () => {
     expect(resolved.packet.tokenizer).toBe("o200k_base");
     expect(resolved.packet.omitted).toEqual([]);
     const manifest = await readFile(resolved.manifest_path, "utf8");
-    expect(manifest).toContain("This is an index of materialized context");
     expect(manifest).toContain("Materialized items");
     expect(manifest).toContain("Truncated items");
     expect(manifest).toContain("Omitted items");
-    expect(manifest).toContain('requested "src.txt"');
+    expect(manifest).toContain("source src.txt");
     expect(manifest).toContain("Structured verification result from the source node.");
     expect(manifest).not.toContain("Tokenizer");
     expect(manifest).not.toContain("Compiled node");

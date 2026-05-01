@@ -1,0 +1,150 @@
+{
+  "version": "1",
+  "graph_id": "pattern-deep-work-showcase",
+  "repos": {
+    "main": {
+      "path": "../../..",
+      "default_branch": "main"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "worktree"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "model": "gpt-5-codex",
+      "reasoning_effort": "medium",
+      "sandbox": "workspace-write",
+      "timeout_sec": 1200,
+      "input_rules": {
+        "max_total_tokens": 128000,
+        "max_tokens_per_item": 32000
+      }
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_deep_work",
+        "id": "managed_pattern_docs_update",
+        "repo": "main",
+        "profile": "default",
+        "goal": "Update managed-pattern documentation to explain deep research and deep work clearly.",
+        "acceptance_criteria": [
+          "Docs describe only the supported managed patterns.",
+          "The final summary documents validation evidence and residual risks."
+        ],
+        "constraints": [
+          "Do not change runtime source in this showcase.",
+          "Do not edit package manifests or lockfiles."
+        ],
+        "context": [
+          {
+            "name": "managed_patterns_doc",
+            "from": "workspace_file",
+            "path": "docs/product/managed-patterns.md"
+          },
+          {
+            "name": "skill_reference",
+            "from": "workspace_file",
+            "path": "skills/agentflow/references/managed-workflows.md"
+          }
+        ],
+        "artifacts": {
+          "validation_log": {
+            "from": "output_dir",
+            "path": "validation-log.md",
+            "description": "Validation evidence collected by the deep work pattern."
+          }
+        },
+        "completion": {
+          "max_cycles": 3,
+          "pass_threshold": 0.85,
+          "criteria": [
+            {
+              "id": "docs_validate",
+              "kind": "command",
+              "command": "npm run validate:skills",
+              "weight": 0.35,
+              "required": true
+            },
+            {
+              "id": "scope_rubric",
+              "kind": "rubric",
+              "rubric": "The workspace satisfies the managed-pattern documentation goal without reintroducing deleted old pattern names.",
+              "weight": 0.4
+            },
+            {
+              "id": "summary_quality",
+              "kind": "artifact_rubric",
+              "artifact": "summary",
+              "rubric": "The summary clearly explains changes, validation evidence, residual risks, and next actions.",
+              "weight": 0.25
+            }
+          ]
+        }
+      },
+      {
+        "type": "agent",
+        "id": "handoff",
+        "repo": "main",
+        "profile": "default",
+        "goal": "Summarize the deep work package for a human operator and mention the command to inspect the graph.",
+        "acceptance_criteria": [
+          "The handoff cites the managed deep work summary, packet, and validation log.",
+          "The handoff names validation evidence and residual risks."
+        ],
+        "context": [
+          {
+            "ref": "managed_pattern_docs_update.summary",
+            "name": "work_summary"
+          },
+          {
+            "ref": "managed_pattern_docs_update.packet",
+            "name": "work_packet"
+          },
+          {
+            "ref": "managed_pattern_docs_update.validation_log",
+            "name": "validation_log"
+          }
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Operator-facing summary of the managed deep work result."
+          }
+        }
+      }
+    ]
+  },
+  "intent": {
+    "goal": "Demonstrate a bounded managed deep work loop.",
+    "acceptance_criteria": [
+      "The example shows command, rubric, and artifact-rubric completion criteria."
+    ],
+    "constraints": [
+      "This is a showcase graph; inspect before launch."
+    ]
+  },
+  "supervision": {
+    "actions": {
+      "retry_with_guidance": { "max_uses": 2 },
+      "repair_artifact": { "max_uses": 2 },
+      "rebuild_context": { "max_uses": 1 },
+      "run_diagnostic": { "max_uses": 2 },
+      "pause_for_human": { "max_uses": 1 },
+      "semantic_evaluation": { "max_uses": 1 }
+    },
+    "max_total_interventions": 6,
+    "policy": {
+      "pause_on_policy_risk": true,
+      "pause_on_repeated_recovery": true,
+      "drift_score_threshold": 0.8
+    }
+  }
+}

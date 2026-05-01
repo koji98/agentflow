@@ -1,0 +1,51 @@
+{
+  "version": "1",
+  "graph_id": "dogfood-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "{{scenario.description}}",
+    "acceptance_criteria": [
+      "The workflow leaves durable evidence for eval grading.",
+      "The declared handoff artifact is reviewable."
+    ],
+    "constraints": [
+      "Use only local fixtures supplied by the eval scenario."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "inplace"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}"
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "exec",
+        "id": "write_handoff",
+        "repo": "main",
+        "command": "node",
+        "args": [
+          "-e",
+          "const fs=require('node:fs'); const path=require('node:path'); const out=process.env.AGENTFLOW_OUTPUT_DIR; fs.writeFileSync(path.join(out,'handoff.md'), `scenario={{scenario.id}}\\nvariant={{variant.id}}\\nvalidation=local deterministic smoke\\n`);"
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Eval handoff artifact."
+          }
+        }
+      }
+    ]
+  }
+}

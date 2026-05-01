@@ -7,6 +7,7 @@ import { defaultCredentialIndexPath } from "../../auth/store.js";
 import type { CredentialSpecMap } from "../../auth/types.js";
 import type { ArtifactDefinition } from "../../graph/authored.js";
 import type { CompiledAgentNode, ResolvedTool } from "../../graph/compiled.js";
+import type { SupervisorRecoveryEnvelope } from "../../supervisor/types.js";
 
 export interface AgentToolSetupResult {
   bin_dir: string;
@@ -34,6 +35,7 @@ interface PrepareAgentToolsOptions {
   timeout_sec?: number;
   context_packet_path?: string;
   context_manifest_path?: string;
+  supervisor_recovery_envelope?: SupervisorRecoveryEnvelope;
   credential_specs?: CredentialSpecMap;
   credential_index_path?: string;
   keychain_account?: string;
@@ -466,6 +468,7 @@ export async function prepareAgentTools(
     runtime_dir: runtimeDir,
     context_packet_path: options.context_packet_path ?? "",
     context_manifest_path: options.context_manifest_path ?? "",
+    ...(options.supervisor_recovery_envelope ? { supervisor_recovery_envelope: options.supervisor_recovery_envelope } : {}),
     tool_state_path,
     tool_bin_dir: bin_dir,
     tool_invocations_path,

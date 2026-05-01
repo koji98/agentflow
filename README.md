@@ -29,12 +29,13 @@ The graph is not a free-form planner. It is an accountable execution contract. T
 
 ## Where To Start
 
-- Humans evaluating Agentflow should read this README, then `docs/SCOPE.md` for the product boundary and `docs/ARCHITECTURE.md` for the runtime model.
-- Graph authors should use the minimal graph below, `docs/examples/graphs/`, and `docs/OPERATIONS.md` for validation and launch.
-- Plugin authors should use `docs/PLUGINS.md` for local or Git plugin packages, workflow exports, tool exports, and secure auth.
-- Implementers and debuggers who need the mechanics should use `docs/technical-implementation/` for runtime lifecycle, context/artifact materialization, and tool injection details.
+- Humans evaluating Agentflow should read this README, then `docs/README.md` for the documentation map, `docs/product/scope.md` for the product boundary, and `docs/technical/architecture.md` for the runtime model.
+- Graph authors should use the minimal graph below, `docs/examples/graphs/`, and `docs/product/operations.md` for validation and launch.
+- Plugin authors should use `docs/product/plugins.md` for local or Git plugin packages, workflow exports, tool exports, and secure auth.
+- Workflow evaluators should use `docs/product/evals.md` for suite layout, scenarios, variants, criteria, environment simulation, trajectory checks, benchmark reports, and the built-in dogfood suites. Use `npm run setup:eval-repos` before running the generated local-repo capability suite, and `npm run setup:realworld-evals` before running the pinned GitHub issue suite.
+- Implementers and debuggers who need the mechanics should use `docs/technical/` for runtime lifecycle, context/artifact materialization, and tool injection details.
 - Operators reviewing a terminal run should start with `delivery/manifest.json` and the human entrypoints it lists.
-- Agents authoring or debugging Agentflow should use the packaged `agentflow` and `agentflow-plugins` skills under `skills/`.
+- Agents authoring or debugging Agentflow should use the packaged `agentflow`, `agentflow-evals`, and `agentflow-plugins` skills under `skills/`.
 
 ## Install And Build
 
@@ -176,7 +177,7 @@ Top-level fields:
 - `prerequisites`: local launch checks for files, commands, env vars, and repos.
 - `graph`: `sequence`, `parallel`, `repeat`, executable nodes, or managed patterns.
 
-Executable nodes are `agent`, `exec`, `check`, and `checkpoint`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research`, `pattern_spec_design`, `pattern_generate_evaluate_fix`, and `pattern_review_change`.
+Executable nodes are `agent`, `exec`, `check`, and `checkpoint`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
 
 `checkpoint` is the planned human gate. In this release it belongs inside a `repeat` body so a human pass, deny, or abort decision can drive loop control and operator feedback. Supervisor `pause_for_human` is different: it is a safety pause chosen by runtime policy after a failure or risk classification, persisted in run state, and resumed with `agentflow resume --human-action ...`.
 
@@ -214,19 +215,23 @@ The runtime records supervisor decisions in `supervisor-timeline.jsonl`, interve
 - `semantic_evaluation`
 - `fail`
 
-Each configured action uses `actions.<action>.max_uses`, with `max_total_interventions` enforcing the overall cap. The default supervisor action is observe; it intervenes only when graph success, node alignment, artifact integrity, or policy safety is at risk.
+Each configured action uses `actions.<action>.max_uses`, with `max_total_interventions` enforcing the overall cap. The configured action is the budget entry point; internally, the supervisor applies a runtime overlay such as context repair, evidence-backed retry, artifact repair, terminal fail, or authority pause. The default supervisor action is observe; it intervenes only when graph success, node alignment, artifact integrity, or policy safety is at risk.
 
 If a successful agent attempt misses a declared artifact, validation has already accepted the graph shape, so the runtime treats it as a repairable execution problem. When a harness is available, the supervisor runs an intent-aware repair intervention under the same node authority. When exactly one missing artifact is a human-readable text handoff and no harness is available, the supervisor can synthesize it from the captured `agent_response`; machine-readable artifacts and multi-artifact contracts are not synthesized from prose. Failed harness attempts keep their real failure output as the primary diagnostic; any files they wrote remain evidence for repair, not published declared handoffs.
 
-`retry_with_guidance` records a guidance brief and prompt revision, tracks repeated failure fingerprints, emits `supervisor.retry_scheduled`, then waits before re-queueing the node. The default delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override those values for local testing or operations.
+Context packaging failures are recovered deterministically when possible. `agentflow validate --run-ready` tokenizes real matched context, reports broad glob samples and largest files, honors default dependency/generated-tree ignores, and fails before launch when a node would exceed `max_total_tokens`. At runtime, the supervisor classifies these as `context_contract_failure`, writes context analysis and a context repair patch, then retries with a compact `supervisor_context_repair` packet instead of repeating the same oversized context.
+
+The same recovery loop handles other machine-fixable failures before it considers a pause. Validation timeouts receive focused validation guidance, forbidden failed-attempt workspace edits are restored from node snapshots before retry, and transient runtime wrapper/PATH failures retry with regenerated per-execution Agentflow tool wrappers. Human pause is reserved for authority, credentials, security/compliance, product intent, explicit checkpoints, or graph-contract changes.
+
+`retry_with_guidance` records a case file, evidence patches, a recovery plan, a material delta, and a recovery envelope, tracks repeated failure fingerprints, emits `supervisor.retry_scheduled`, then waits before re-queueing the node. The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts remain unchanged. The default delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override those values for local testing or operations.
 
 ## Evaluation Lanes
 
 - Graph `check` nodes are in-run sensors. Deterministic checks verify hard facts; AI checks judge semantic criteria and return structured evidence.
 - Outcome verification is the always-on runtime contract for passing `agent` attempts. It audits the final response, declared artifacts, decision logs, and per-node workspace-change evidence before the attempt can remain passed.
 - Supervisor `semantic_evaluation` is an intervention. It spends supervisor budget after a runtime classification and records recovery evidence.
-- Managed pattern evaluation is authored workflow structure, such as the evaluator loop generated by `pattern_generate_evaluate_fix`.
-- `agentflow eval` is offline product/workflow evaluation for file-backed suites and variant comparison; it writes `.agentflow/evals` artifacts such as `evaluation-ledger.json`, `benchmark.json`, and `summary.md`.
+- Managed pattern evaluation is authored workflow structure. `pattern_deep_work` expands completion criteria into command checks, rubric checks, artifact-rubric checks, a deterministic scorecard gate, and a bounded repair loop.
+- `agentflow eval` is offline workflow evaluation for file-backed suites, scenarios, variants, repeated trials, required criteria, quality criteria, trajectory checks, and deterministic environment simulation. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and adopts useful ADK eval mechanics, and it writes `.agentflow/evals` artifacts such as `eval-run.json`, `evaluation-ledger.json`, `trace-packet.json`, `scorecard.json`, `benchmark.json`, and `report.md`. See `docs/product/evals.md` for the full suite schema and operating loop.
 
 ## Plugin Tools
 
@@ -234,7 +239,7 @@ Plugins expose team capabilities as ordinary CLI tools. Each tool declares an `e
 
 Agentflow resolves plugin tools, places generated launch wrappers on the node `PATH`, and renders the tool contract into the harness prompt without exposing configured values. Non-secret inline `tools[].config` values and secret credentials are resolved only inside the generated launcher when it starts the plugin tool subprocess. `tools[].config` is for graph-provided defaults, not the tool's CLI argument schema; exact CLI arguments belong in the tool executable's `--help`. `agentflow auth` stores secret fields in macOS Keychain and requires `--value-stdin` for secret values. Credential and tool-config values are not exported into the Codex CLI or Cursor CLI harness environment. Declaring a tool in the graph is the operator approval to expose it to eligible nodes. The tool name `af` is reserved for Agentflow's runtime CLI.
 
-For the implementation mechanics, see `docs/technical-implementation/runtime-tooling.md`.
+For the implementation mechanics, see `docs/technical/runtime-tooling.md`.
 
 ## Agent Runtime CLI
 
@@ -317,6 +322,7 @@ npm run validate:smoke
 - `src/plugins/`: Git or local plugin workflows, plugin tool exports, and credential metadata.
 - `src/artifacts/`: run-root paths, event projection, reconciliation, and readers.
 - `src/cli/`: CLI commands and progress rendering.
-- `docs/`: supervised v1 product and operator documentation.
-- `docs/technical-implementation/`: medium-level implementation docs for runtime lifecycle, context/artifact flow, and generated runtime tooling.
+- `docs/`: documentation map, product guidance, technical implementation notes, and runnable examples.
+- `docs/product/`: workflow authoring, operations, eval, plugin, and managed-pattern guidance.
+- `docs/technical/`: medium-level implementation docs for runtime lifecycle, context/artifact flow, and generated runtime tooling.
 - `skills/`: installable Agentflow skills aligned to the supervised v1 contract.

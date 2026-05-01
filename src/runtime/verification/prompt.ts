@@ -16,6 +16,14 @@ export interface OutcomeVerificationPromptDecisionLogEntry {
   log_id?: string;
 }
 
+export interface OutcomeVerificationPromptExecutionEvidence {
+  stdout_path?: string;
+  stderr_path?: string;
+  excerpt?: string;
+  truncated?: boolean;
+  read_error?: string;
+}
+
 export interface OutcomeVerificationPromptInput {
   graph_goal: string;
   graph_acceptance_criteria: string[];
@@ -28,6 +36,7 @@ export interface OutcomeVerificationPromptInput {
   agent_response_snippet: OutcomeVerificationPromptArtifactSnippet;
   declared_artifact_snippets: OutcomeVerificationPromptArtifactSnippet[];
   decision_log_entries: OutcomeVerificationPromptDecisionLogEntry[];
+  execution_evidence?: OutcomeVerificationPromptExecutionEvidence;
   workspace_diff_snippet?: {
     status: "captured" | "degraded" | "absent";
     changed_file_count: number;
@@ -157,6 +166,41 @@ function renderDecisionLog(entries: OutcomeVerificationPromptDecisionLogEntry[])
   return lines;
 }
 
+function renderExecutionEvidence(evidence: OutcomeVerificationPromptExecutionEvidence | undefined): string[] {
+  const lines = [
+    "## Captured Execution Evidence",
+    "Captured command transcript is deterministic evidence from the completed node attempt. Prefer it over rerunning commands from this read-only audit sandbox.",
+    "Rerun a command only when captured evidence is absent, contradictory, or too incomplete to judge. If a verifier-side rerun is blocked by sandbox or temp-file permissions, treat that as verifier-environment evidence, not as a node failure by itself."
+  ];
+
+  if (!evidence) {
+    lines.push("", "(no execution transcript captured)");
+    return lines;
+  }
+
+  if (evidence.stdout_path) {
+    lines.push(`- stdout log: ${evidence.stdout_path}`);
+  }
+  if (evidence.stderr_path) {
+    lines.push(`- stderr log: ${evidence.stderr_path}`);
+  }
+  if (evidence.read_error) {
+    lines.push(`- Read error: ${evidence.read_error}`);
+  }
+
+  if (!evidence.excerpt || evidence.excerpt.trim().length === 0) {
+    lines.push("", "(no compact command excerpt available)");
+    return lines;
+  }
+
+  lines.push("", "```", evidence.excerpt.trimEnd(), "```");
+  if (evidence.truncated) {
+    lines.push("This execution excerpt was truncated. Read the full log paths above before judging a point that depends on omitted command output.");
+  }
+
+  return lines;
+}
+
 export function truncateForPrompt(value: string, maxBytes: number): { content: string; truncated: boolean } {
   if (Buffer.byteLength(value, "utf8") <= maxBytes) {
     return { content: value, truncated: false };
@@ -179,12 +223,20 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "",
     "## Decision Rule",
     "- Pass when the declared artifacts, final response, decision log, and available deterministic evidence reasonably satisfy the authored acceptance criteria.",
+    "- Treat graph and node acceptance criteria as authoritative over any task text that describes an intentionally failing fallback, blocker report, or retry trigger.",
+    "- A final response explicitly marked as an intentional failure, retry request, missing-context fallback, or not-done state is blocker evidence unless the acceptance criteria explicitly say that terminal fallback is acceptable.",
+    "- A required declared artifact that is empty, placeholder-only, missing the requested content, or inconsistent with the final response is blocker evidence even when the final response claims success.",
+    "- The Declared Artifacts section below is authoritative for artifact presence. If a declared artifact snippet has a path, size/content, and no read error, treat that artifact as present; do not claim it is missing because a separate file search, transcript, or directory listing appears incomplete.",
+    "- Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section, has a read error, or the inlined content proves the artifact does not satisfy the authored artifact contract.",
+    "- If an artifact is truncated in this prompt, read the full artifact path before making a blocker judgment that depends on omitted content.",
     "- Set passed=false only when there is strong, concrete, actionable blocker evidence that the node violated the graph or node contract.",
     "- Ambiguous, incomplete, or lower-confidence evidence should become a non-blocker finding unless it directly contradicts a required contract point.",
     "- Prefer investigative recommendations over restating blockers. Tell the retrying agent what evidence to gather, what command/tool/doc to inspect, and what validation would prove recovery.",
     "- Distinguish an ambiguous configuration mismatch from an irreducible external blocker. For example, a first 404 or unavailable model id should usually recommend discovering available compatible ids, validating one in the target environment, updating the configuration/artifacts, and rerunning smoke checks. Reserve external-blocker language for missing credentials, forbidden approval, unavailable required inputs, or failures the node cannot investigate with its tools.",
     "- Workspace diff evidence is supporting audit evidence, not the default source of truth. Do not use it as the sole reason for passed=false unless it is the only authoritative evidence for the node's required change and shows a concrete violation.",
+    "- Captured execution evidence is the primary source for commands the agent actually ran. Do not turn a verifier-side command rerun failure into a blocker when the captured node transcript already shows the required command succeeded.",
     "- One blocker finding means passed=false; passed=true may still include low, medium, or high non-blocker findings.",
+    "- Cite exact artifact paths, decision log entries, commands, or response excerpts in evidence so the retrying agent can act without re-discovering the failure.",
     "",
     "## Graph Intent",
     `Goal: ${input.graph_goal.length > 0 ? input.graph_goal : "(no graph goal authored)"}`,
@@ -215,6 +267,8 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "Sandbox: read-only. You may read any file under the workspace, but never modify it.",
     "",
     ...renderWorkspaceDiff(input.workspace_diff_snippet),
+    "",
+    ...renderExecutionEvidence(input.execution_evidence),
     "",
     ...renderDecisionLog(input.decision_log_entries),
     "",

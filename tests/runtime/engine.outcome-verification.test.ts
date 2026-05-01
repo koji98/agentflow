@@ -310,6 +310,15 @@ describe("runtime engine outcome verification", () => {
             : passingVerification("Verifier accepts the corrected attempt.")
         );
       }
+      if (invocation.promptKind === "supervisor_evidence") {
+        return harnessOk(invocation, JSON.stringify({
+          claims: ["Verifier rejection is actionable without changing the graph contract."],
+          retry_guidance: ["Fix the incorrect output before the next handoff."],
+          conflicts: [],
+          confidence: "high",
+          scope_or_authority_changed: false
+        }));
+      }
       agentCalls += 1;
       await writeFile(
         join(invocation.outputDir, "agent-response.md"),
@@ -346,14 +355,15 @@ describe("runtime engine outcome verification", () => {
     ) as { passed: boolean };
     expect(failingPayload.passed).toBe(false);
 
-    const guidancePath = join(
+    const planPath = join(
       failingAttempt.execution_dir,
-      "supervisor",
-      "retry-guidance.md"
+      "interventions",
+      `${failingAttempt.execution_id}__semantic_evaluation`,
+      "recovery-plan.md"
     );
-    const guidanceText = await readFile(guidancePath, "utf8").catch(() => undefined);
-    if (guidanceText) {
-      expect(guidanceText).toContain("incorrect_output");
+    const planText = await readFile(planPath, "utf8").catch(() => undefined);
+    if (planText) {
+      expect(planText).toContain("Agent claimed success but the work is wrong.");
     }
 
     await rm(tempRoot, { recursive: true, force: true });

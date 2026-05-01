@@ -109,7 +109,7 @@ async function readJsonlRecords(path: string): Promise<Array<Record<string, unkn
 
 function readVerification(attempt: RuntimeNodeAttempt): VerificationRecordedPayload | undefined {
   return (
-    attempt.metadata.verification &&
+    attempt.metadata?.verification &&
     typeof attempt.metadata.verification === "object" &&
     attempt.metadata.verification !== null
       ? attempt.metadata.verification as VerificationRecordedPayload
@@ -118,7 +118,7 @@ function readVerification(attempt: RuntimeNodeAttempt): VerificationRecordedPayl
 }
 
 function readOutcomeVerification(attempt: RuntimeNodeAttempt): OutcomeVerificationResult | undefined {
-  const value = attempt.metadata.outcome_verification;
+  const value = attempt.metadata?.outcome_verification;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
@@ -130,7 +130,7 @@ function readOutcomeVerification(attempt: RuntimeNodeAttempt): OutcomeVerificati
 }
 
 function readNodeWorkspaceChanges(attempt: RuntimeNodeAttempt): NodeWorkspaceChangeArtifacts | undefined {
-  const value = attempt.metadata.node_workspace_changes;
+  const value = attempt.metadata?.node_workspace_changes;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }

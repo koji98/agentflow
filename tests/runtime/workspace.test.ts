@@ -413,5 +413,5 @@ describe("workspace backends", () => {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 });

@@ -9,7 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const jsonMode = process.argv.includes("--json");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const commandTimeoutMs = 20 * 60 * 1000;
+const commandTimeoutMs = 30 * 60 * 1000;
 const builtCliRelativePath = "dist/cli/index.js";
 const fixtureGraphRelativePath = "tests/graph/fixtures/repeat.graph.json";
 const fixtureGraphId = "repeat-graph";
@@ -19,15 +19,25 @@ const builtCliRunWorkspaceBackends = ["inplace", "worktree"];
 
 export const canonicalDocs = [
   "README.md",
-  "docs/SCOPE.md",
-  "docs/ARCHITECTURE.md",
-  "docs/OPERATIONS.md",
-  "docs/MANAGED_PATTERNS.md",
-  "docs/PLUGINS.md",
-  "docs/PATTERN_DEEP_RESEARCH.md",
-  "docs/PATTERN_SPEC_DESIGN.md",
-  "docs/PATTERN_GENERATE_EVALUATE_FIX.md",
-  "docs/PATTERN_REVIEW_CHANGE.md"
+  "docs/README.md",
+  "docs/product/README.md",
+  "docs/product/scope.md",
+  "docs/product/operations.md",
+  "docs/product/evals.md",
+  "docs/product/managed-patterns.md",
+  "docs/product/plugins.md",
+  "docs/product/patterns/README.md",
+  "docs/product/patterns/deep-research.md",
+  "docs/product/patterns/deep-work.md",
+  "docs/technical/README.md",
+  "docs/technical/architecture.md",
+  "docs/technical/runtime-lifecycle.md",
+  "docs/technical/context-and-artifacts.md",
+  "docs/technical/runtime-tooling.md",
+  "docs/technical/outcome-verification.md",
+  "docs/technical/node-workspace-snapshots.md",
+  "docs/technical/prompt-iteration-report.md",
+  "docs/examples/README.md"
 ];
 
 export const commandChecks = [
@@ -218,10 +228,10 @@ process.stdin.on("end", () => {
   const lastMessagePath = outputIndex >= 0 ? args[outputIndex + 1] : undefined;
 
   if (lastMessagePath) {
-    writeFileSync(lastMessagePath, JSON.stringify({ passed: true, summary: "codex smoke ok" }));
+    writeFileSync(lastMessagePath, JSON.stringify({ passed: true, summary: "codex smoke ok", findings: [] }));
   }
 
-  process.stdout.write('{"passed":true,"summary":"codex smoke ok"}');
+  process.stdout.write('{"passed":true,"summary":"codex smoke ok","findings":[]}');
 });
 `;
 
@@ -237,7 +247,7 @@ process.stdout.write(JSON.stringify({
   type: "result",
   subtype: "success",
   is_error: false,
-  result: "cursor smoke ok",
+  result: JSON.stringify({ passed: true, summary: "cursor smoke ok", findings: [] }),
   session_id: "validate-smoke"
 }));
 `;

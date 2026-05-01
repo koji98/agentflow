@@ -22,6 +22,8 @@
     "apply": "tsx src/cli/index.ts apply",
     "runs": "tsx src/cli/index.ts runs",
     "inspect": "tsx src/cli/index.ts inspect",
+    "setup:eval-repos": "node scripts/setup-eval-repos.mjs",
+    "setup:realworld-evals": "node scripts/setup-realworld-evals.mjs",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -31,7 +33,8 @@
     "validate:skills": "node scripts/validate-skills.mjs",
     "validate:smoke": "node scripts/validate-smoke.mjs",
     "validate:confidence": "node scripts/validate-confidence.mjs",
-    "validate:real-harness": "node scripts/validate-real-harness.mjs"
+    "validate:real-harness": "node scripts/validate-real-harness.mjs",
+    "validate:real-evals": "node scripts/validate-real-evals.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

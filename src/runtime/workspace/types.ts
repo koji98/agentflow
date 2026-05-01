@@ -49,3 +49,14 @@ export interface NodeWorkspaceChangeArtifacts {
   changed_file_count: number;
   status: "captured" | "degraded";
 }
+
+export interface NodeWorkspaceRestoreResult {
+  status: "passed" | "partial" | "failed";
+  strategy: "restore_failed_attempt_changes";
+  cleaned_files: string[];
+  skipped_files: Array<{
+    path: string;
+    reason: string;
+  }>;
+  errors: string[];
+}

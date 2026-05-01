@@ -11,6 +11,7 @@ import { resolveLaunchConfig } from "../../graph/profiles.js";
 import { reviewCompiledGraph } from "../../graph/review.js";
 import { workspaceBackends } from "../../graph/schema.js";
 import { loadAuthoredGraphDocument, summarizeAuthoredGraph } from "../../graph/validate.js";
+import { analyzeGraphContext } from "../../runtime/context/analyze.js";
 import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
 import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import { evaluateGraphReadiness } from "../../runtime/readiness.js";
@@ -430,6 +431,12 @@ export const validateCommand = {
           }
         : {})
     });
+    const contextAnalysis = runReady
+      ? await analyzeGraphContext({
+          graph: compilation.compiled_graph!,
+          repo_workspaces: repoResolution.repo_sources ?? {}
+        })
+      : undefined;
     const authoringReview = reviewCompiledGraph(loaded.document, compilation.compiled_graph!, {
       mode: strictReview ? "strict-review" : review ? "review" : "standard"
     });
@@ -490,14 +497,17 @@ export const validateCommand = {
         loaded.lowered_managed_nodes
       )
     };
+    const contextBlocked = contextAnalysis?.status === "blocked";
 
     return {
-      exitCode: readiness.status === "blocked" || strictReviewBlocked ? 1 : 0,
+      exitCode: readiness.status === "blocked" || strictReviewBlocked || contextBlocked ? 1 : 0,
       output: {
         command: "validate",
-        status: readiness.status === "blocked" || strictReviewBlocked ? "failed" : "passed",
+        status: readiness.status === "blocked" || strictReviewBlocked || contextBlocked ? "failed" : "passed",
         message:
-          readiness.status === "blocked"
+          contextBlocked
+            ? `Graph compiled, but context analysis found node context that would exceed token budgets for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
+            : readiness.status === "blocked"
             ? `Graph compiled, but readiness validation is blocked for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
             : strictReviewBlocked
               ? `Graph compiled, but strict authoring review found ${authoringReview.summary.serious_count} serious finding(s) for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
@@ -520,6 +530,7 @@ export const validateCommand = {
         },
         compiled_validation: compiledValidation,
         readiness,
+        ...(contextAnalysis ? { context_analysis: contextAnalysis } : {}),
         ...(mermaidDiagram && includeDiagram
           ? {
               diagram: {

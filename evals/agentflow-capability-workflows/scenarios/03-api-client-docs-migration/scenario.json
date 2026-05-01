@@ -1,0 +1,152 @@
+{
+  "id": "03-api-client-docs-migration",
+  "bucket": "missing-dependency-docs",
+  "difficulty": "hard",
+  "description": "Use local HTTP docs to migrate an API client to the v2 request contract.",
+  "workflow": {
+    "graph_template": "../../templates/agent-docs.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/03-api-client-docs-migration",
+    "init_git": true,
+    "docs": "../../docs/current-api"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Scenario:",
+            "Validation:"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": []
+    },
+    "supervisor": {},
+    "delivery": {
+      "required": true
+    },
+    "capability-deterministic": {},
+    "contract-adherence": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "artifact-quality": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "evidence-use": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "context-handling": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "tool-discipline": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "supervisor-recovery": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "noise-efficiency": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    },
+    "delivery-auditability": {
+      "dimensions": [
+        "outcome_correctness",
+        "graph_contract_adherence",
+        "artifact_quality",
+        "evidence_use",
+        "context_handling",
+        "tool_discipline",
+        "supervisor_recovery_quality",
+        "retry_behavior",
+        "noise_efficiency",
+        "delivery_auditability"
+      ]
+    }
+  }
+}
