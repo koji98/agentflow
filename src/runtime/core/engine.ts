@@ -22,7 +22,7 @@ import {
   readRunExecutionAttempts,
   readSupervisorInterventions
 } from "../../artifacts/reader.js";
-import { resolveExecutionArtifactsDirectory } from "../../artifacts/paths.js";
+import { resolveExecutionArtifactsDirectory, resolveInterventionDirectory } from "../../artifacts/paths.js";
 import { renderRunSummary } from "../delivery/summary.js";
 import { writeDeliveryPackage, type DeliveryPackageManifest } from "../delivery/package.js";
 import {
@@ -428,6 +428,52 @@ function latestOutcomeOverall(session: RuntimeSession, compiledId: string): Grap
   return listAttemptsForCompiledNode(session.attempts, compiledId).at(-1)?.outcome;
 }
 
+interface ManagedProgressInfo {
+  managed_kind: "pattern_deep_research" | "pattern_deep_work";
+  managed_authored_id: string;
+  phase: string;
+}
+
+function parseManagedAuthoredId(
+  authoredId: string,
+  loweredFrom?: CompiledExecutableNode["lowered_from"]
+): ManagedProgressInfo | undefined {
+  if (loweredFrom === "pattern_deep_research" || loweredFrom === "pattern_deep_work") {
+    return {
+      managed_kind: loweredFrom,
+      managed_authored_id: authoredId,
+      phase: "public_publisher"
+    };
+  }
+
+  for (const managedKind of ["pattern_deep_research", "pattern_deep_work"] as const) {
+    const marker = `__managed__${managedKind}__`;
+    const markerIndex = authoredId.indexOf(marker);
+
+    if (markerIndex !== -1) {
+      return {
+        managed_kind: managedKind,
+        managed_authored_id: authoredId.slice(0, markerIndex),
+        phase: authoredId.slice(markerIndex + marker.length)
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function managedStatusForNodeOutcome(info: ManagedProgressInfo, outcome: GraphOutcome): string {
+  if (outcome === "passed") {
+    return "healthy_progress";
+  }
+
+  if (info.managed_kind === "pattern_deep_work" && info.phase.includes("completion_gate")) {
+    return "ordinary_iteration_feedback";
+  }
+
+  return "recoverable_strategy_failure";
+}
+
 function getNodeIterationAttempts(
   session: RuntimeSession,
   compiledId: string,
@@ -630,6 +676,103 @@ async function emitEvent(
     }
   }
   return event;
+}
+
+async function emitManagedNodeProgress(options: {
+  session: RuntimeSession;
+  writer: ArtifactWriter;
+  runOwner: RunOwnerRecord;
+  events: RuntimeEventEnvelope[];
+  onEvent: RunCompiledGraphOptions["on_event"];
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  outcome: GraphOutcome;
+}): Promise<void> {
+  const managed = parseManagedAuthoredId(options.node.authored_id, options.node.lowered_from);
+
+  if (!managed) {
+    return;
+  }
+
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.onEvent,
+    "managed.progress",
+    {
+      ...managed,
+      status: managedStatusForNodeOutcome(managed, options.outcome),
+      node_authored_id: options.node.authored_id,
+      node_kind: options.node.kind,
+      outcome: options.outcome,
+      evidence_refs: [
+        ...(options.attempt.result_path ? [options.attempt.result_path] : []),
+        ...Object.values(options.attempt.artifacts)
+      ]
+    },
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.attempt.repeat_scope_id,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
+    }
+  );
+}
+
+async function emitManagedRepeatExhaustedProgress(options: {
+  session: RuntimeSession;
+  writer: ArtifactWriter;
+  runOwner: RunOwnerRecord;
+  events: RuntimeEventEnvelope[];
+  onEvent: RunCompiledGraphOptions["on_event"];
+  repeatScopeId: string;
+  repeatScopeAuthoredId: string;
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  outcome: GraphOutcome;
+}): Promise<boolean> {
+  const managed = parseManagedAuthoredId(options.repeatScopeAuthoredId);
+
+  if (!managed) {
+    return false;
+  }
+
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.onEvent,
+    "managed.progress",
+    {
+      ...managed,
+      phase: "repeat_exhausted",
+      status: "recoverable_strategy_failure",
+      node_authored_id: options.node.authored_id,
+      node_kind: options.node.kind,
+      outcome: options.outcome,
+      progress: {
+        latest_iteration_index: options.attempt.iteration_index,
+        max_attempts: options.session.repeat_scopes.get(options.repeatScopeId)?.max_attempts
+      },
+      evidence_refs: [
+        ...(options.attempt.result_path ? [options.attempt.result_path] : []),
+        ...Object.values(options.attempt.artifacts)
+      ]
+    },
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.repeatScopeId,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
+    }
+  );
+
+  return true;
 }
 
 function canSpendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): boolean {
@@ -2387,7 +2530,7 @@ async function synthesizeMissingArtifactsFromAgentResponse(options: {
     return undefined;
   }
 
-  const interventionDir = join(options.attempt.execution_dir, "interventions", options.interventionId);
+  const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, options.interventionId);
   const promptPath = join(interventionDir, "prompt.md");
   const stdoutPath = join(interventionDir, "stdout.log");
   const stderrPath = join(interventionDir, "stderr.log");
@@ -2584,7 +2727,7 @@ async function materializeDeclaredArtifactsWithRepair(options: {
       const missingBeforeRepair = missingArtifacts.map((artifact) => artifact.name);
       const decisionId = `${options.attempt.execution_id}__repair_artifact_decision_${repairAttempt}`;
       const interventionId = `${options.attempt.execution_id}__repair_artifact_${repairAttempt}`;
-      const interventionDir = join(options.attempt.execution_dir, "interventions", interventionId);
+      const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, interventionId);
       options.session.supervisor.status = "intervening";
       options.session.supervisor.intervention_count += 1;
       options.session.supervisor.last_decision_id = decisionId;
@@ -4277,6 +4420,16 @@ async function executeRunLoop(
       iteration_index: attempt.iteration_index,
       attempt_index: attempt.attempt_index
     });
+    await emitManagedNodeProgress({
+      session,
+      writer,
+      runOwner,
+      events,
+      onEvent: options.on_event,
+      node,
+      attempt,
+      outcome
+    });
 
     if (outcome === "passed") {
       const recoveryChain = session.supervisor.active_recovery_chains[node.compiled_id];
@@ -4374,6 +4527,49 @@ async function executeRunLoop(
             )
           );
           continue;
+        }
+
+        const managedExhausted = await emitManagedRepeatExhaustedProgress({
+          session,
+          writer,
+          runOwner,
+          events,
+          onEvent: options.on_event,
+          repeatScopeId,
+          repeatScopeAuthoredId: repeatScope.authored_id,
+          node,
+          attempt,
+          outcome
+        });
+
+        if (managedExhausted) {
+          const retried = await handleFailedNodeWithSupervisor({
+            runOptions: options,
+            session,
+            writer,
+            runOwner,
+            events,
+            readyQueue,
+            topology,
+            node,
+            attempt,
+            result,
+            readyNode: {
+              compiled_id: node.compiled_id,
+              deps_satisfied: computeReadyDeps(session, topology, node, attempt.iteration_index) ?? [],
+              repeat_scope_id: attempt.repeat_scope_id,
+              iteration_index: attempt.iteration_index
+            }
+          });
+
+          if (retried) {
+            continue;
+          }
+
+          if (session.status === "paused") {
+            cancelActiveExecutions(activeExecutions);
+            continue;
+          }
         }
 
         completeRepeatIteration(session, repeatScopeId, "failed");

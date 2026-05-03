@@ -249,6 +249,14 @@ export function resolveExecutionArtifactsDirectory(executionDir: string): string
   return join(executionDir, "artifacts");
 }
 
+export function resolveInterventionDirectoryName(interventionId: string): string {
+  return hashPathSegment(interventionId, "intervention");
+}
+
+export function resolveInterventionDirectory(executionDir: string, interventionId: string): string {
+  return join(executionDir, "interventions", resolveInterventionDirectoryName(interventionId));
+}
+
 export function resolveNodeArtifactDirectory(
   runRoot: string,
   compiledId: string,

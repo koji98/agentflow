@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { resolveExecutionArtifactsDirectory } from "../artifacts/paths.js";
+import { resolveExecutionArtifactsDirectory, resolveInterventionDirectory } from "../artifacts/paths.js";
 import type { CompiledAgentNode } from "../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { HarnessName } from "../graph/schema.js";
@@ -210,7 +210,7 @@ export async function runRepairArtifactIntervention(options: {
   const maxAttempts = options.max_attempts ?? repairAttempt;
   const decisionId = options.decision_id ?? `${options.attempt.execution_id}__repair_artifact_decision_${repairAttempt}`;
   const interventionId = options.intervention_id ?? createDefaultInterventionId(options.attempt, repairAttempt);
-  const interventionDir = join(options.attempt.execution_dir, "interventions", interventionId);
+  const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, interventionId);
   const startedAt = new Date().toISOString();
   const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
   const previousAttemptEvidencePaths = await collectPreviousAttemptEvidencePaths(

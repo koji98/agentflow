@@ -177,6 +177,21 @@ export function createRuntimeProgressReporter(
           return;
         }
 
+        case "managed.progress": {
+          const payload = event.payload as {
+            managed_kind?: string;
+            managed_authored_id?: string;
+            phase?: string;
+            status?: string;
+          };
+          if (payload.status !== "healthy_progress") {
+            writeLine(
+              `agentflow: managed ${payload.managed_kind ?? "pattern"} ${payload.managed_authored_id ?? "workflow"} ${payload.phase ?? "progress"} · ${payload.status ?? "unknown"}`
+            );
+          }
+          return;
+        }
+
         case "check.evaluated": {
           const payload = event.payload as { passed?: boolean; score?: number; summary?: string };
 

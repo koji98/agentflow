@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 describe("validate:smoke contract", () => {
-  it("pins canonical docs, deterministic npm checks, and built CLI smoke coverage", async () => {
+  it("pins canonical docs, lightweight npm checks, and built CLI smoke coverage", async () => {
     const scriptModule = await import("../../scripts/validate-smoke.mjs");
 
     expect(scriptModule.canonicalDocs).toEqual([
@@ -28,7 +28,6 @@ describe("validate:smoke contract", () => {
     ]);
     expect(scriptModule.commandChecks).toEqual([
       { name: "typecheck", script: "typecheck" },
-      { name: "tests", script: "test" },
       { name: "build", script: "build" },
       { name: "skill pack", script: "validate:skills" }
     ]);
@@ -41,6 +40,7 @@ describe("validate:smoke contract", () => {
       runWorkspaceBackends: ["inplace", "worktree"]
     });
     expect(scriptModule.smokeResidualRisks).toEqual([
+      "full unit and runtime test suites are not part of validate:smoke",
       "measured coverage floors are not part of validate:smoke",
       "manual run-artifact inspection is not part of validate:smoke",
       "real Codex or Cursor installs are not exercised by validate:smoke",

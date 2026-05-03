@@ -126,7 +126,7 @@ npm run build
 npm run validate:smoke
 ```
 
-`validate:smoke` verifies the built CLI against the repeat fixture across Codex CLI and Cursor CLI adapters with both `inplace` and `worktree` workspace backends.
+`validate:smoke` runs lightweight package checks and verifies the built CLI against the repeat fixture across Codex CLI and Cursor CLI adapters with both `inplace` and `worktree` workspace backends. It does not rerun the full `npm test` suite.
 
 ## First Run
 

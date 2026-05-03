@@ -7,6 +7,7 @@ export const runtimeEventTypes = [
   "node.ready",
   "repeat.iteration.started",
   "node.started",
+  "managed.progress",
   "supervisor.decision",
   "supervisor.intervention.started",
   "supervisor.intervention.completed",

@@ -188,8 +188,9 @@ Failed harness attempts do not publish declared artifacts, even if they wrote fi
 
 Supervisor helpers can use read-only diagnostics through `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, and `af diagnose validation`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. `af spawn --purpose investigation` creates read-only causal-analysis helpers; `af spawn --purpose repair` creates scoped repair helpers that can use only the selected target node's existing authority.
 
-Supervisor events:
+Managed monitoring and supervisor events:
 
+- `managed.progress`
 - `supervisor.decision`
 - `supervisor.intervention.started`
 - `supervisor.intervention.completed`

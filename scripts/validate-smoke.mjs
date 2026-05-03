@@ -42,7 +42,6 @@ export const canonicalDocs = [
 
 export const commandChecks = [
   { name: "typecheck", script: "typecheck" },
-  { name: "tests", script: "test" },
   { name: "build", script: "build" },
   { name: "skill pack", script: "validate:skills" }
 ];
@@ -57,6 +56,7 @@ export const builtCliSmokeContract = {
 };
 
 export const smokeResidualRisks = [
+  "full unit and runtime test suites are not part of validate:smoke",
   "measured coverage floors are not part of validate:smoke",
   "manual run-artifact inspection is not part of validate:smoke",
   "real Codex or Cursor installs are not exercised by validate:smoke",

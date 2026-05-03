@@ -457,6 +457,12 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: `${String(payload.kind ?? "node")} started in repo ${String(payload.repo_alias ?? "unknown")}.`
       };
+    case "managed.progress":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Managed ${String(payload.managed_kind ?? "pattern")} ${String(payload.phase ?? "progress")}: ${String(payload.status ?? "unknown")}.`
+      };
     case "supervisor.decision":
       return {
         ...(authored_id ? { authored_id } : {}),
@@ -658,6 +664,10 @@ function buildRunDiagnostic(
     case "node.blocked":
     case "node.canceled":
     case "supervisor.intervention.failed":
+    case "managed.progress":
+      if (event.type === "managed.progress" && payload.status === "healthy_progress") {
+        return undefined;
+      }
       return {
         seq: event.seq,
         ts: event.ts,

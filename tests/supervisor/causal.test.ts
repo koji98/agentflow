@@ -66,6 +66,37 @@ const validateNode: CompiledCheckNode = {
   args: ["test"]
 };
 
+const shipNode: CompiledAgentNode = {
+  compiled_id: "ship",
+  authored_id: "ship",
+  kind: "agent",
+  intent: {
+    goal: "Ship the UI artifacts.",
+    acceptance_criteria: ["The UI artifact validation passes with evidence."],
+    constraints: []
+  },
+  repo: "main",
+  deps: ["implement"],
+  scope_stack: ["root"],
+  effective_policy: policy,
+  context: [
+    {
+      name: "implementation summary",
+      ref: "implement.summary",
+      node: "implement",
+      artifact: "summary"
+    }
+  ],
+  declared_artifacts: {
+    handoff: {
+      from: "output_dir",
+      path: "handoff.md",
+      description: "Shipping handoff."
+    }
+  },
+  tools: []
+};
+
 const graph: CompiledGraph = {
   graph_id: "causal-test",
   intent: {
@@ -80,7 +111,7 @@ const graph: CompiledGraph = {
     workspace_backend: "inplace"
   },
   entry_node_ids: ["implement"],
-  nodes: [implementNode, validateNode],
+  nodes: [implementNode, validateNode, shipNode],
   edges: [
     {
       edge_id: "implement__validate",
@@ -88,12 +119,20 @@ const graph: CompiledGraph = {
       to: "validate",
       on: "passed",
       kind: "flow"
+    },
+    {
+      edge_id: "implement__ship",
+      from: "implement",
+      to: "ship",
+      on: "passed",
+      kind: "flow"
     }
   ],
   scopes: [],
   authored_to_compiled: {
     implement: ["implement"],
-    validate: ["validate"]
+    validate: ["validate"],
+    ship: ["ship"]
   },
   prerequisites: { checks: [] }
 };
@@ -105,6 +144,22 @@ const failedCheckAttempt: RuntimeNodeAttempt = {
   kind: "check",
   repo_alias: "main",
   execution_dir: "/tmp/validate",
+  attempt_index: 1,
+  status: "failed",
+  outcome: "failed",
+  started_at: "2026-05-01T00:00:00.000Z",
+  ended_at: "2026-05-01T00:00:01.000Z",
+  artifacts: {},
+  metadata: {}
+};
+
+const failedShipAttempt: RuntimeNodeAttempt = {
+  execution_id: "exec__ship__attempt_1",
+  compiled_id: "ship",
+  authored_id: "ship",
+  kind: "agent",
+  repo_alias: "main",
+  execution_dir: "/tmp/ship",
   attempt_index: 1,
   status: "failed",
   outcome: "failed",
@@ -126,6 +181,18 @@ const classification: FailureClassification = {
   evidence: {
     deterministic_check_failed: true
   }
+};
+
+const semanticClassification: FailureClassification = {
+  class: "semantic_misalignment",
+  summary: "Outcome verification rejected the shipping node because validation evidence was incomplete.",
+  retryable: true,
+  recommended_action: "semantic_evaluation",
+  gather_plan: {
+    max_parallel: 1,
+    gathers: []
+  },
+  evidence: {}
 };
 
 describe("supervisor causal context", () => {
@@ -183,5 +250,33 @@ describe("supervisor causal context", () => {
 
     expect(context.selected_target.requires_investigation).toBe(true);
     expect(context.selected_target.evidence.join(" ")).toContain("Repeated fingerprint");
+  });
+
+  it("keeps failed agent outcome verification on the symptom node unless upstream artifact evidence is implicated", () => {
+    const attempts = createAttemptRegistry();
+    attempts.by_compiled_id.set("ship", [failedShipAttempt]);
+    const topology = buildSchedulerTopology(graph);
+
+    const context = buildSupervisorCausalContext({
+      graph,
+      topology,
+      attempts,
+      nodeStatuses: new Map([
+        ["implement", "passed"],
+        ["ship", "failed"]
+      ]),
+      symptomNode: shipNode,
+      symptomAttempt: failedShipAttempt,
+      classification: semanticClassification,
+      repeatedFingerprintCount: 1
+    });
+
+    expect(context.selected_target).toEqual(
+      expect.objectContaining({
+        operation: "repair_current_node",
+        target_compiled_id: "ship",
+        symptom_compiled_id: "ship"
+      })
+    );
   });
 });

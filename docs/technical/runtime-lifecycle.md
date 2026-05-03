@@ -94,6 +94,8 @@ Each attempt is the unit of execution and audit. A typical agent attempt include
 
 The attempt boundary matters because supervisor interventions attach to a specific attempt, downstream refs select from attempts, and resume decides whether completed attempts remain compatible with the current compiled contract.
 
+Managed pattern internals also emit `managed.progress` events at meaningful boundaries such as internal node completion, ordinary deep-work completion feedback, and managed repeat exhaustion. Ordinary managed feedback stays inside the pattern while the pattern can still make progress. When a managed repeat exhausts its authored cycles, the runtime records the exhaustion as managed progress evidence and routes the failed boundary through the normal supervisor path. The supervisor may retry only when it can attach a material delta such as new evidence, repaired context, changed validation strategy, workspace cleanup, or safe environment repair.
+
 ## Supervision
 
 The supervisor is engine-side control logic. It is not a separate always-running agent. It observes every executable checkpoint at scheduler boundaries and stays out of the way when the node is healthy. A failed or rejected checkpoint is treated as a symptom, not automatically as the root cause.

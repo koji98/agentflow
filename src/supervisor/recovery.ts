@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import type { ArtifactDefinition } from "../graph/authored.js";
+import { resolveInterventionDirectory } from "../artifacts/paths.js";
 import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
@@ -754,16 +755,6 @@ function buildRuntimeOverlay(options: {
     });
   }
 
-  if (
-    options.causalContext
-    && options.causalContext.selected_target.target_compiled_id !== options.symptomCompiledId
-  ) {
-    deltas.push({
-      kind: "recovery_target_changed",
-      summary: `Recovery target changed from symptom node "${options.symptomCompiledId}" to causal target "${options.causalContext.selected_target.target_compiled_id}".`
-    });
-  }
-
   if (options.workspaceRepairPatch) {
     deltas.push({
       kind: "workspace_cleaned",
@@ -1094,7 +1085,7 @@ export async function runSupervisorRecoveryCycle(options: {
   recovery_envelope?: SupervisorRecoveryEnvelope;
 }> {
   const startedAt = nowIso();
-  const interventionDir = join(options.attempt.execution_dir, "interventions", options.intervention_id);
+  const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, options.intervention_id);
   await mkdir(interventionDir, { recursive: true });
   const caseFileJsonPath = join(interventionDir, "case-file.json");
   const caseFileMarkdownPath = join(interventionDir, "case-file.md");

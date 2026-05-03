@@ -84,7 +84,9 @@ Criteria weights must sum to `1`. Required criteria are hard blockers. Each cycl
 
 Managed patterns do not have a second supervisor. The normal runtime supervisor still handles internal node failures: context repair, harness failure, artifact repair, malformed grader output, environment issues, workspace cleanup, and recoverable validation strategy failures.
 
-For `pattern_deep_work`, a failed command criterion, low rubric score, or weak artifact is normal loop feedback and does not spend supervisor budget. Runtime failures still go to the normal supervisor: context repair, harness failure, artifact repair, malformed evaluator output, environment issues, workspace cleanup, and recoverable validation strategy failures. Max-cycle exhaustion fails the managed node with scorecard evidence unless the supervisor can produce a real material delta.
+Managed workflows emit `managed.progress` events at their internal boundaries so operators can see whether the pattern is moving, receiving ordinary feedback, or approaching a terminal boundary. These events are monitoring evidence; they do not create a second supervisor loop.
+
+For `pattern_deep_work`, a failed command criterion, low rubric score, or weak artifact is normal loop feedback and does not spend supervisor budget while the managed loop still has cycles available. Runtime failures still go to the normal supervisor: context repair, harness failure, artifact repair, malformed evaluator output, environment issues, workspace cleanup, and recoverable validation strategy failures. When the managed repeat exhausts its allowed cycles, Agentflow records a `managed.progress` exhaustion event and gives the normal supervisor one chance to recover if it can produce a real material delta. If there is no material delta, the managed node fails with scorecard evidence and downstream work remains blocked.
 
 ## Validation
 

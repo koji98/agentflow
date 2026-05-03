@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   createRunRootPath,
   resolveExecutionArtifactsDirectory,
+  resolveInterventionDirectory,
   resolveNodeExecutionDirectory,
   resolveRunsRoot,
   runsRootEnvironmentVariable
@@ -141,6 +142,32 @@ describe("runs root resolution", () => {
 
     expect(nodeSegment).toMatch(/^002-repair-[0-9a-f]{12}$/);
     expect(executionSegment).toMatch(/^i003-a002-exec-[0-9a-f]{16}$/);
+  });
+
+  it("bounds long intervention ids to filesystem-safe directories", () => {
+    const executionDir = "/tmp/agentflow/run/node/execution";
+    const interventionId =
+      "exec__root__research_artifacts_ui_plan__managed__pattern_deep_research__workflow__research_artifacts_ui_plan__managed__pattern_deep_research__angle_fanout__research_artifacts_ui_plan__managed__pattern_deep_research__angle_01__attempt_1__semantic_evaluation";
+    const interventionDir = resolveInterventionDirectory(
+      executionDir,
+      interventionId
+    );
+    const sameInterventionDir = resolveInterventionDirectory(
+      executionDir,
+      interventionId
+    );
+    const differentInterventionDir = resolveInterventionDirectory(
+      executionDir,
+      `${interventionId}__retry`
+    );
+
+    const segments = interventionDir.split("/").filter(Boolean);
+    const interventionSegment = segments.at(-1) ?? "";
+
+    expect(interventionDir).toBe(sameInterventionDir);
+    expect(interventionDir).not.toBe(differentInterventionDir);
+    expect(interventionSegment.length).toBeLessThanOrEqual(120);
+    expect(interventionSegment).toMatch(/^intervention-[0-9a-f]{16}$/);
   });
 
   it("resolves execution artifact directories as a stable execution subdirectory", () => {
