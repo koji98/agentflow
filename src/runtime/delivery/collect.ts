@@ -8,6 +8,8 @@ import type { RuntimeStateSnapshot, WorkspaceChangeArtifacts } from "../session.
 import type { SupervisorDecision, SupervisorInterventionRecord } from "../../supervisor/types.js";
 import type { OutcomeVerificationResult } from "../verification/types.js";
 import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
+import { readOperatorObservations } from "../observations/index.js";
+import type { OperatorObservation } from "../completion/index.js";
 
 export interface DeliveryEvidence {
   graph_id: string;
@@ -18,6 +20,7 @@ export interface DeliveryEvidence {
   events: RuntimeEventEnvelope[];
   supervisor_timeline: SupervisorDecision[];
   runtime_logs: Array<Record<string, unknown>>;
+  operator_observations: OperatorObservation[];
   interventions: SupervisorInterventionRecord[];
   failed_checks: Array<{
     authored_id: string;
@@ -226,6 +229,7 @@ export async function collectDeliveryEvidence(options: {
     )
   ).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
   const runtimeLogs = await readJsonlRecords(runPaths.runtime_log_file);
+  const operatorObservations = await readOperatorObservations(options.run_root);
   const supervisorTimeline = options.state.supervisor.timeline;
 
   const outcomeVerifications = options.attempts.flatMap((attempt) => {
@@ -275,6 +279,7 @@ export async function collectDeliveryEvidence(options: {
     events: options.events,
     supervisor_timeline: supervisorTimeline,
     runtime_logs: runtimeLogs,
+    operator_observations: operatorObservations,
     interventions: options.interventions,
     failed_checks: failedChecks,
     agent_responses: agentResponses,

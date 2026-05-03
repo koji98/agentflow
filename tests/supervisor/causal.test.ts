@@ -195,6 +195,24 @@ const semanticClassification: FailureClassification = {
   evidence: {}
 };
 
+const completionClassification: FailureClassification = {
+  class: "completion_contract_failure",
+  summary: "Missing expected artifact: handoff",
+  retryable: true,
+  recommended_action: "retry_with_guidance",
+  gather_plan: {
+    max_parallel: 1,
+    gathers: []
+  },
+  evidence: {
+    completion: {
+      completion_status: "incomplete",
+      blocking_reasons: ["Missing expected artifact: handoff"],
+      packet_path: "/tmp/ship/completion-packet.json"
+    }
+  }
+};
+
 describe("supervisor causal context", () => {
   it("treats a failed check as a symptom and targets the nearest upstream worker", () => {
     const attempts = createAttemptRegistry();
@@ -277,6 +295,42 @@ describe("supervisor causal context", () => {
         target_compiled_id: "ship",
         symptom_compiled_id: "ship"
       })
+    );
+  });
+
+  it("keeps failed agent completion checks on the symptom node instead of repairing upstream artifacts", () => {
+    const attempts = createAttemptRegistry();
+    attempts.by_compiled_id.set("ship", [failedShipAttempt]);
+    const topology = buildSchedulerTopology(graph);
+
+    const context = buildSupervisorCausalContext({
+      graph,
+      topology,
+      attempts,
+      nodeStatuses: new Map([
+        ["implement", "passed"],
+        ["ship", "failed"]
+      ]),
+      symptomNode: shipNode,
+      symptomAttempt: failedShipAttempt,
+      classification: completionClassification,
+      repeatedFingerprintCount: 1
+    });
+
+    expect(context.selected_target).toEqual(
+      expect.objectContaining({
+        operation: "repair_current_node",
+        target_compiled_id: "ship",
+        symptom_compiled_id: "ship"
+      })
+    );
+    expect(context.target_candidates).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          operation: "repair_artifact",
+          target_compiled_id: "implement"
+        })
+      ])
     );
   });
 });

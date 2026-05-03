@@ -11,6 +11,7 @@ export interface OutcomeVerificationPromptArtifactSnippet {
 export interface OutcomeVerificationPromptDecisionLogEntry {
   decision: string;
   rationale: string;
+  contract_implication?: string;
   evidence: string[];
   created_at?: string;
   log_id?: string;
@@ -22,6 +23,14 @@ export interface OutcomeVerificationPromptExecutionEvidence {
   excerpt?: string;
   truncated?: boolean;
   read_error?: string;
+}
+
+export interface OutcomeVerificationPromptCompletionPacket {
+  completion_status: "ready_for_verification" | "incomplete" | "blocked";
+  ready_for_verification: boolean;
+  blocking_reasons: string[];
+  missing_artifacts: string[];
+  packet_path: string;
 }
 
 export interface OutcomeVerificationPromptInput {
@@ -47,6 +56,7 @@ export interface OutcomeVerificationPromptInput {
     diff_truncated?: boolean;
     capture_error?: string;
   };
+  completion_packet?: OutcomeVerificationPromptCompletionPacket;
   workspace_path: string;
   attempt: {
     execution_id: string;
@@ -157,6 +167,9 @@ function renderDecisionLog(entries: OutcomeVerificationPromptDecisionLogEntry[])
       ].filter(Boolean).join(" | "));
     }
     lines.push(`Rationale: ${entry.rationale}`);
+    if (entry.contract_implication) {
+      lines.push(`Contract implication: ${entry.contract_implication}`);
+    }
     lines.push("Evidence:");
     for (const evidence of entry.evidence) {
       lines.push(`- ${evidence}`);
@@ -201,6 +214,40 @@ function renderExecutionEvidence(evidence: OutcomeVerificationPromptExecutionEvi
   return lines;
 }
 
+function renderCompletionPacket(packet: OutcomeVerificationPromptCompletionPacket | undefined): string[] {
+  const lines = [
+    "## Completion Packet",
+    "Runtime mechanical completion facts are primary structured evidence. Do not pass an incomplete packet; judge semantic correctness only when the packet is ready for verification.",
+  ];
+
+  if (!packet) {
+    lines.push("", "(no completion packet was provided)");
+    return lines;
+  }
+
+  lines.push(
+    `- Status: ${packet.completion_status}`,
+    `- Ready for verification: ${packet.ready_for_verification}`,
+    `- Packet: ${packet.packet_path}`
+  );
+
+  if (packet.missing_artifacts.length > 0) {
+    lines.push("- Missing artifacts:");
+    for (const artifact of packet.missing_artifacts) {
+      lines.push(`  - ${artifact}`);
+    }
+  }
+
+  if (packet.blocking_reasons.length > 0) {
+    lines.push("- Blocking reasons:");
+    for (const reason of packet.blocking_reasons) {
+      lines.push(`  - ${reason}`);
+    }
+  }
+
+  return lines;
+}
+
 export function truncateForPrompt(value: string, maxBytes: number): { content: string; truncated: boolean } {
   if (Buffer.byteLength(value, "utf8") <= maxBytes) {
     return { content: value, truncated: false };
@@ -222,6 +269,8 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "You must respond with a single fenced JSON object that follows the schema below. No prose outside the fence.",
     "",
     "## Decision Rule",
+    "- Treat the Completion Packet section as primary structured evidence for mechanical readiness.",
+    "- Do not pass when completion_status is incomplete. Treat blocked as a terminal attempt state only when the blocker is supported by evidence; blocked is not node success.",
     "- Pass when the declared artifacts, final response, decision log, and available deterministic evidence reasonably satisfy the authored acceptance criteria.",
     "- Treat graph and node acceptance criteria as authoritative over any task text that describes an intentionally failing fallback, blocker report, or retry trigger.",
     "- A final response explicitly marked as an intentional failure, retry request, missing-context fallback, or not-done state is blocker evidence unless the acceptance criteria explicitly say that terminal fallback is acceptable.",
@@ -261,6 +310,8 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "",
     "Constraints:",
     ...bullets(input.node_constraints, "No node-level constraints were authored."),
+    "",
+    ...renderCompletionPacket(input.completion_packet),
     "",
     "## Workspace",
     `Workspace path: ${input.workspace_path}`,

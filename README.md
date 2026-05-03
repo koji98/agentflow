@@ -330,8 +330,8 @@ Use `checkpoint` for authored human gates, usually inside a `repeat` body. Super
 
 | Surface | Who uses it | Purpose |
 | --- | --- | --- |
-| `agentflow` | Humans and automation outside a run. | Validate, run, resume, inspect, resolve plugins, auth, eval, and report. |
-| `af` | Agents inside a node attempt. | Inspect node contract, list granted tools, show context, write artifacts, log decisions, and spawn focused helpers. |
+| `agentflow` | Humans and automation outside a run. | Validate, run, resume, inspect, observe live runs, resolve plugins, auth, eval, and report. |
+| `af` | Agents inside a node attempt. | Inspect node contract, show context, write artifacts, log structured progress/findings/decisions, and check completion readiness. |
 | Run root | Operators and debuggers. | Durable state, events, attempts, context packets, logs, supervisor interventions, and delivery files. |
 | `delivery/` | Human reviewers. | High-signal terminal package with reviewer guide, implementation summary, evidence ledger, risks, and follow-ups. |
 

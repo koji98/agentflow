@@ -91,6 +91,7 @@ describe("graph CLI", () => {
     expect(result.stdout).toContain("run");
     expect(result.stdout).toContain("runs");
     expect(result.stdout).toContain("inspect");
+    expect(result.stdout).toContain("observe");
     expect(result.stdout).toContain("resume");
     expect(result.stdout).toContain("apply");
     expect(result.stdout).toContain("graph-help");

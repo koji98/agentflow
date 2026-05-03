@@ -129,7 +129,17 @@ process.stdin.on("end", () => {
 
   if (prompt.includes("Helper Task") || prompt.includes("Write helper report for golden spawn")) {
     writeFileSync(join(outputDir, "helper-report.md"), "helper ok\\n");
-    runAf(["log", "--type", "finding", "--summary", "Helper produced golden spawn report"]);
+    runAf([
+      "log",
+      "--type",
+      "finding",
+      "--finding-kind",
+      "observation",
+      "--summary",
+      "Helper produced golden spawn report",
+      "--evidence",
+      '{"kind":"artifact","ref":"helper-report.md","summary":"Helper report was written."}'
+    ]);
     finish("helper completed\\n");
     return;
   }
@@ -138,7 +148,15 @@ process.stdin.on("end", () => {
     writeFileSync(join(outputDir, "research-report.md"), "# Research Report\\n\\nGolden research package.\\n");
     writeFileSync(join(outputDir, "source-ledger.json"), JSON.stringify({ sources: ["README.md"] }, null, 2));
     writeFileSync(join(outputDir, "uncertainties.md"), "No open uncertainties.\\n");
-    runAf(["log", "--type", "finding", "--summary", "Research package published"]);
+    runAf([
+      "log",
+      "--type",
+      "progress",
+      "--summary",
+      "Research package published",
+      "--evidence",
+      '{"kind":"artifact","ref":"research-report.md","summary":"Research artifacts were written."}'
+    ]);
     finish("research package complete\\n");
     return;
   }
@@ -153,7 +171,15 @@ process.stdin.on("end", () => {
       process.exit(tool.status || 1);
     }
     writeFileSync(join(outputDir, "tool-report.md"), tool.stdout);
-    runAf(["log", "--type", "finding", "--summary", "Plugin tool output captured"]);
+    runAf([
+      "log",
+      "--type",
+      "progress",
+      "--summary",
+      "Plugin tool output captured",
+      "--evidence",
+      '{"kind":"tool_output","ref":"fixture-inspect","summary":"Plugin tool output was captured."}'
+    ]);
     finish("plugin tool complete\\n");
     return;
   }
@@ -161,6 +187,8 @@ process.stdin.on("end", () => {
   if (prompt.includes("Spawn Helper Golden")) {
     const spawned = runAf([
       "spawn",
+      "--purpose",
+      "verification",
       "--brief",
       "Write helper report for golden spawn.",
       "--artifact",
@@ -170,7 +198,15 @@ process.stdin.on("end", () => {
       "10"
     ]);
     writeFileSync(join(outputDir, "spawn-summary.md"), spawned);
-    runAf(["log", "--type", "handoff_note", "--summary", "Helper spawn completed"]);
+    runAf([
+      "log",
+      "--type",
+      "progress",
+      "--summary",
+      "Helper spawn completed",
+      "--evidence",
+      '{"kind":"runtime_event","ref":"af spawn","summary":"Helper spawn completed and returned a result."}'
+    ]);
     finish("spawn complete\\n");
     return;
   }
@@ -440,7 +476,7 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
     await expect(readFile(attempts[0]!.artifacts.tool_report!, "utf8")).resolves.toContain('"subject":"golden"');
   });
 
-  it("runs af spawn/wait inside an agent and preserves helper evidence", async () => {
+  it("runs af spawn --wait inside an agent and preserves helper evidence", async () => {
     const repoDir = join(tempRoot, "repo");
     const graphPath = join(tempRoot, "spawn.graph.json");
     await mkdir(repoDir, { recursive: true });

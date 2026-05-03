@@ -17,6 +17,7 @@ export type FailureClass =
   | "wrong_local_pattern"
   | "diagnostic_needed"
   | "artifact_contract_failure"
+  | "completion_contract_failure"
   | "semantic_misalignment"
   | "policy_or_scope_risk"
   | "harness_unavailable"

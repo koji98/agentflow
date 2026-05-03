@@ -226,7 +226,7 @@ Template variables:
 
 ## Trajectory Criteria
 
-Trace packets include `trajectory`, a chronological sequence of node attempts, runtime events, simulation calls, artifact writes, and delivery events. Trajectory criteria support:
+Trace packets include `trajectory`, a chronological sequence of node attempts, runtime events, completion packets, `af` runtime CLI calls, simulation calls, artifact writes, and delivery events. Trajectory criteria support:
 
 - `exact_order`: full trajectory must match the listed events.
 - `contains_ordered`: listed events must appear in order.
@@ -234,6 +234,15 @@ Trace packets include `trajectory`, a chronological sequence of node attempts, r
 - `forbid`: listed events must not appear.
 
 Exact matching is intentionally opt-in because full trajectories can change when runtime instrumentation improves.
+
+Completion-contract evals should prefer trajectory checks for runtime discipline:
+
+- require `{ "kind": "af_tool_call", "af_command": "complete check" }` when a scenario expects a normal agent to preview completion before finishing,
+- forbid debug/orchestration calls such as `{ "kind": "af_tool_call", "af_command": "diagnose failure" }` or `{ "kind": "af_tool_call", "af_command": "spawn" }` in normal-agent scenarios,
+- require `{ "kind": "completion_packet", "completion_status": "ready_for_verification" }` for clean passes,
+- require `{ "kind": "completion_packet", "completion_status": "incomplete" }` or `"blocked"` for negative scenarios such as missing artifacts, skipped validation, stale artifacts, live blocking observations, or sandbox blockers.
+
+Managed-pattern scenarios may assert `af spawn ... --wait` only when the graph grants orchestration authority and the helper artifact appears before the parent completion packet becomes ready.
 
 ## Custom Script Criteria
 

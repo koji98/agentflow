@@ -187,6 +187,86 @@ describe("runtime engine outcome verification", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
+  it("does not synthesize missing declared artifacts from the final response", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-no-synth-artifact-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "no-synth-artifact",
+      intent: {
+        goal: "Run without synthesizing missing artifacts.",
+        acceptance_criteria: ["Declared artifacts are real current-attempt outputs."]
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 2
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli" },
+        supervisor: { sandbox: "read-only" }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "implement",
+            intent: {
+              goal: "Write a declared handoff artifact.",
+              acceptance_criteria: ["The handoff artifact exists as a current-attempt artifact."],
+              constraints: []
+            },
+            artifacts: {
+              handoff: {
+                from: "output_dir",
+                path: "handoff.md",
+                description: "Current-attempt handoff."
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const harness = buildHarness(async (invocation) => {
+      if (invocation.promptKind === "outcome_verification") {
+        throw new Error("Outcome verifier should not run for mechanically incomplete completion.");
+      }
+      if (invocation.promptKind === "artifact_repair") {
+        throw new Error("Artifact repair harness should not be used for final-response synthesis.");
+      }
+      return harnessOk(invocation, "The handoff content is only in the final response.");
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: { "codex-cli": harness }
+    });
+
+    expect(run.outcome).not.toBe("passed");
+    const attempt = run.attempts[0]!;
+    const expectedArtifact = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "handoff.md");
+    await expect(readFile(expectedArtifact, "utf8")).rejects.toThrow();
+
+    const packet = JSON.parse(await readFile(join(attempt.execution_dir, "completion-packet.json"), "utf8")) as {
+      completion_status: string;
+      missing_artifacts: string[];
+    };
+    expect(packet.completion_status).toBe("incomplete");
+    expect(packet.missing_artifacts).toEqual(["handoff"]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("uses the dedicated supervisor profile for outcome verification when configured", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-verify-supervisor-profile-"));
     const repoDir = join(tempRoot, "repo");
@@ -336,9 +416,20 @@ describe("runtime engine outcome verification", () => {
           summary: "Use agentflow/p1-example as the PR branch",
           decision: "Use agentflow/p1-example as the PR branch",
           rationale: "The branch name matches the node contract and existing PR evidence.",
+          contract_implication: "The handoff must cite the branch, base, and checks evidence.",
           evidence: [
-            "gh pr view 123 --json baseRefName,headRefName,headRefOid matched main, agentflow/p1-example, abc123",
-            "babysit-pr passed for abc123"
+            {
+              kind: "command_output",
+              ref: "gh pr view 123 --json baseRefName,headRefName,headRefOid",
+              summary: "Matched main, agentflow/p1-example, abc123.",
+              status: "passed"
+            },
+            {
+              kind: "tool_output",
+              ref: "babysit-pr",
+              summary: "babysit-pr passed for abc123.",
+              status: "passed"
+            }
           ],
           created_at: "2026-04-28T12:00:00.000Z"
         })}\n`,
@@ -362,9 +453,13 @@ describe("runtime engine outcome verification", () => {
     });
 
     expect(run.outcome).toBe("passed");
+    expect(verifierPrompt).toContain("## Completion Packet");
+    expect(verifierPrompt).toContain("- Status: ready_for_verification");
+    expect(verifierPrompt).toContain("- Ready for verification: true");
     expect(verifierPrompt).toContain("## Decision Log");
     expect(verifierPrompt).toContain("Use agentflow/p1-example as the PR branch");
     expect(verifierPrompt).toContain("The branch name matches the node contract and existing PR evidence.");
+    expect(verifierPrompt).toContain("The handoff must cite the branch, base, and checks evidence.");
     expect(verifierPrompt).toContain("babysit-pr passed for abc123");
     expect(verifierPrompt).toContain("Workspace diffs are audit/provenance evidence.");
     expect(verifierPrompt).toContain("Diff excerpt: (not inlined by default");

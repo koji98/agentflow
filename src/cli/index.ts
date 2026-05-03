@@ -27,6 +27,7 @@ import { applyCommand } from "./commands/apply.js";
 import { authCommand } from "./commands/auth.js";
 import { evalCommand } from "./commands/eval.js";
 import { inspectCommand } from "./commands/inspect.js";
+import { observeCommand } from "./commands/observe.js";
 import { pluginCommand } from "./commands/plugin.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
@@ -57,7 +58,7 @@ interface GraphCliCommand {
   ) => Promise<GraphCliCommandResult>;
 }
 
-const repeatableOptionNames = new Set(["config"]);
+const repeatableOptionNames = new Set(["config", "evidence"]);
 
 const optionDescriptions: Record<string, string> = {
   graph: "--graph <path>               Authored graph document to validate or run.",
@@ -91,6 +92,21 @@ const optionDescriptions: Record<string, string> = {
   baseline: "--baseline <variant>        Baseline variant for eval compare.",
   candidate: "--candidate <variant>       Candidate variant for eval compare.",
   trial: "--trial <n>                 Trial number for eval inspect.",
+  run: "--run <run-root-or-id>        Run root path or discovered run id.",
+  kind: "--kind <kind>                Observation kind: observation, issue, risk, or blocker.",
+  summary: "--summary <text>           Required short observation or resolution summary.",
+  body: "--body <text>                Optional longer observation body.",
+  node: "--node <authored-id>         Optional authored node id to scope an observation.",
+  attempt: "--attempt <execution-id>   Optional execution id to scope an observation.",
+  evidence: "--evidence <json>          Structured evidence JSON object; repeatable.",
+  severity: "--severity <level>         Observation severity: info, warning, or error.",
+  author: "--author <name>             Observation author; defaults to AGENTFLOW_OBSERVER or USER.",
+  blocking: "--blocking                 Mark an observation as completion-blocking.",
+  "blocked-on": "--blocked-on <text>        Blocking condition or external dependency.",
+  "recoverable-by": "--recoverable-by <text>    Who or what can resolve the blocker.",
+  active: "--active                    Show only active observations.",
+  observation: "--observation <id>        Observation id to resolve.",
+  resolution: "--resolution <state>       Resolution state: resolved or superseded.",
   scope: "--scope <scope>              Credential scope for auth commands.",
   key: "--key <field>                 Credential field key for auth commands.",
   value: "--value <value>              Non-secret credential field value for auth set.",
@@ -249,6 +265,7 @@ const commandRegistry = {
   run: runCommand,
   runs: runsCommand,
   inspect: inspectCommand,
+  observe: observeCommand,
   resume: resumeCommand,
   apply: applyCommand,
   auth: authCommand,
@@ -438,11 +455,12 @@ function renderMainHelp(): string {
     "  3. run: execute the compiled graph and write durable artifacts under the run root",
     "  4. runs list: enumerate previous run roots for a graph",
     "  5. inspect: review a single recorded run root",
-    "  6. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work (use --latest with --graph to pick the most recent resumable run)",
-    "  7. apply: apply captured workspace changes from a run back to a git repo",
-    "  8. auth: configure plugin-tool credentials without exposing secret values to agent harnesses",
-    "  9. eval: validate or run local eval suites for Agentflow graphs",
-    "  10. plugin: resolve Git or local plugin packages for a graph",
+    "  6. observe: add live human observations to an active run without pausing it",
+    "  7. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work (use --latest with --graph to pick the most recent resumable run)",
+    "  8. apply: apply captured workspace changes from a run back to a git repo",
+    "  9. auth: configure plugin-tool credentials without exposing secret values to agent harnesses",
+    "  10. eval: validate or run local eval suites for Agentflow graphs",
+    "  11. plugin: resolve Git or local plugin packages for a graph",
     "",
     "Examples:",
     "  agentflow graph-help",
@@ -454,6 +472,7 @@ function renderMainHelp(): string {
     "  agentflow run --graph agentflow.graph.json",
     "  agentflow runs list --graph agentflow.graph.json",
     "  agentflow inspect .agentflow/runs/<run-id>",
+    "  agentflow observe add --run .agentflow/runs/<run-id> --kind observation --summary \"Backend worker is running\"",
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
     "  agentflow resume --graph agentflow.graph.json --latest",
     "  agentflow apply --run-root .agentflow/runs/<run-id>",
@@ -619,6 +638,7 @@ export async function executeCli(
     command.name !== "auth" &&
     command.name !== "plugin" &&
     command.name !== "runs" &&
+    command.name !== "observe" &&
     command.name !== "inspect"
   ) {
     return {

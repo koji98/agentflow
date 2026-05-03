@@ -266,11 +266,15 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
 function formatRuntimeCliContract(): string[] {
   return [
     "## Agentflow Runtime CLI",
-    "`af` is on PATH. Use `af --help` only when the options below are insufficient.",
-    "- `af status`: run metadata, sandbox, declared artifacts, and tools.",
-    "- `af context show`: redisplay the context manifest.",
+    "`af` is on PATH. Use the commands below as the runtime contract.",
+    "- `af status`: inspect current run, node, sandbox, declared artifacts, granted tools, supervisor recovery, and live human observations.",
+    "- `af context show`: inspect the runtime context packet and manifest before broad repo search.",
     "- `af artifact write <name> --file <path>` or `--content <text>`: publish declared artifacts.",
-    "- For major scope-affecting decisions, log `af log --type decision --decision <what> --rationale <why> --evidence <fact>`."
+    "- `af log --type progress --summary <text> --evidence <json>`: record verified progress only after checking the claim.",
+    "- `af log --type finding --finding-kind <observation|issue|risk|blocker> --summary <text> --evidence <json>`: record relevant facts as they arise.",
+    "- When blocked, use `af log --type finding --finding-kind blocker --blocking --blocked-on <what> --recoverable-by <who-or-what> --summary <text> --evidence <json>`.",
+    "- `af log --type decision --decision <what> --rationale <why> --contract-implication <effect> --evidence <json>`: record considered decisions with evidence.",
+    "- `af complete check`: run before final response; fix incomplete items or report a supported blocker."
   ];
 }
 
@@ -690,10 +694,11 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     ...formatContractPriority(hasSupervisorRecoveryEnvelope),
     "",
     "## Working Loop",
-    "Drive the node to completion within its boundary: inspect relevant context/repo state, make the smallest maintainable change, run named validation, fix failures, and rerun validation.",
+    "Drive the node to completion within its boundary: inspect runtime status and context, make the smallest maintainable change, run named validation, publish declared artifacts, and run `af complete check`.",
     "Investigate ambiguity instead of guessing. If the same tactic fails twice with the same symptom, change strategy or surface a concrete blocker.",
-    "When every acceptance criterion is satisfied and artifacts are verified, stop and respond immediately; do not continue investigating.",
-    "Stop early only when a concrete blocker prevents progress, and state the blocker with evidence.",
+    "Log meaningful progress after verification, findings as they arise, and decisions when they affect direction or contract interpretation.",
+    "When `af complete check` reports `ready_for_verification`, stop and respond immediately; do not continue investigating.",
+    "Stop early only when a concrete blocker prevents progress; log the blocker with structured evidence before the final response.",
     "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected.",
     "",
     ...supervisorRecoveryEnvelope,

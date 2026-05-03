@@ -36,6 +36,7 @@ function buildInput(overrides: Partial<OutcomeVerificationPromptInput> = {}): Ou
       {
         decision: "Use the existing widget module path",
         rationale: "The node contract asks for the focused widget module and no repo evidence points to a broader refactor.",
+        contract_implication: "The implementation remains limited to the widget module.",
         evidence: [
           "Context manifest listed widget.ts as the relevant source file.",
           "Repository inspection found no alternate widget package."
@@ -60,6 +61,13 @@ function buildInput(overrides: Partial<OutcomeVerificationPromptInput> = {}): Ou
       diff_truncated: false
     },
     workspace_path: "/repo",
+    completion_packet: {
+      completion_status: "ready_for_verification",
+      ready_for_verification: true,
+      blocking_reasons: [],
+      missing_artifacts: [],
+      packet_path: "/run/widget/completion-packet.json"
+    },
     attempt: {
       execution_id: "exec__implement_widget__attempt_1",
       attempt_index: 1
@@ -85,6 +93,7 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("Added widget module.");
     expect(prompt).toContain("Use the existing widget module path");
     expect(prompt).toContain("The node contract asks for the focused widget module");
+    expect(prompt).toContain("The implementation remains limited to the widget module.");
     expect(prompt).toContain("Context manifest listed widget.ts as the relevant source file.");
     expect(prompt).toContain("## Captured Execution Evidence");
     expect(prompt).toContain("/bin/zsh -lc 'npm test' succeeded in 1s");
@@ -100,6 +109,27 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("The Declared Artifacts section below is authoritative for artifact presence.");
     expect(prompt).toContain("treat that artifact as present; do not claim it is missing");
     expect(prompt).toContain("Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section");
+  });
+
+  it("renders completion packet facts before artifact snippets", () => {
+    const prompt = renderOutcomeVerificationPrompt(
+      buildInput({
+        completion_packet: {
+          completion_status: "incomplete",
+          ready_for_verification: false,
+          blocking_reasons: ["Missing expected artifact: patch_summary"],
+          missing_artifacts: ["patch_summary"],
+          packet_path: "/run/widget/completion-packet.json"
+        }
+      })
+    );
+
+    expect(prompt).toContain("## Completion Packet");
+    expect(prompt).toContain("- Status: incomplete");
+    expect(prompt).toContain("- Ready for verification: false");
+    expect(prompt).toContain("- Packet: /run/widget/completion-packet.json");
+    expect(prompt).toContain("- Missing expected artifact: patch_summary");
+    expect(prompt.indexOf("## Completion Packet")).toBeLessThan(prompt.indexOf("## Declared Artifacts"));
   });
 
   it("notes when an artifact was truncated", () => {

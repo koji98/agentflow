@@ -134,15 +134,19 @@ flowchart LR
 
 Common commands:
 
-- `af status`: inspect run, node, workspace, output directory, sandbox, declared artifacts, and granted tools.
+- `af status`: inspect run, node, workspace, output directory, sandbox, declared artifacts, granted tools summary, active supervisor recovery, and live human observations relevant to the current node.
 - `af context show`: print the materialized context manifest and packet path.
-- `af tools list`: show the granted plugin tools.
-- `af artifact list|write`: publish declared artifacts.
-- `af log --type ...`: append structured worker evidence to `runtime/log.jsonl`.
-- `af log --type decision --decision ... --rationale ... --evidence ...`: record major scope-affecting decisions with the rationale and supporting evidence strings that outcome verification can inspect.
-- `af spawn` and `af wait`: manage supervised helper sub-nodes with their own metadata and artifacts.
+- `af artifact write`: publish declared artifacts to their declared destinations.
+- `af complete check`: build the runtime completion packet and report whether the current attempt is `ready_for_verification`, `incomplete`, or `blocked`.
+- `af log --type progress --summary ... --evidence ...`: record verified progress only after checking the claim.
+- `af log --type finding --finding-kind <observation|issue|risk|blocker> --summary ... --evidence ...`: record relevant facts as they come up.
+- `af log --type decision --decision ... --rationale ... --contract-implication ... --evidence ...`: record considered decisions with evidence.
+
+`af --help` is intentionally narrow for normal agents. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` are explicit supervisor or managed-pattern tools, but they are not part of the ordinary worker completion loop. There is no standalone `af wait`; `af spawn --purpose <investigation|implementation|verification|repair> ... --wait` is the blocking orchestration form when orchestration authority is granted.
 
 The runtime CLI is file-backed. It coordinates through the run root and runtime directory, not through a live in-memory service exposed to the model.
+
+`af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include declared artifact state, placeholder/empty/stale artifact findings, validation evidence gaps, active blocking findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, and helper session evidence. Outcome verification only judges semantic correctness after this mechanical packet is ready, or after the packet reports a supported blocked state.
 
 ## Tool Invocation Evidence
 

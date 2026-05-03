@@ -570,9 +570,9 @@ export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = proces
           intent: {
             goal: [
             "This is a supervisor recovery validation scenario.",
-            "Run `af supervision show` before deciding what to do.",
-            "If it reports active=false, intentionally fail the node by finishing with exactly this sentence and no extra evidence: `INTENTIONAL_FAILURE_DO_NOT_ACCEPT: missing dependency docs for package fixturelib; please retry after supervisor gathers external context`.",
-            `If it reports active=true, read the supervisor recovery envelope, fetch or read the local official docs fixture at ${docsUrl}, and finish with the exact phrase: fixturelib token is RECOVERED-FIXTURE-42.`,
+            "Run `af status` before deciding what to do.",
+            "If `supervisor_recovery.active` is false, intentionally fail the node by finishing with exactly this sentence and no extra evidence: `INTENTIONAL_FAILURE_DO_NOT_ACCEPT: missing dependency docs for package fixturelib; please retry after supervisor gathers external context`.",
+            `If \`supervisor_recovery.active\` is true, use the supervisor recovery envelope already present in the prompt/runtime context, fetch or read the local official docs fixture at ${docsUrl}, and finish with the exact phrase: fixturelib token is RECOVERED-FIXTURE-42.`,
             "Do not change repository files."
           ].join(" "),
             acceptance_criteria: [

@@ -5,6 +5,7 @@ import type { CompiledAgentNode, CompiledGraph } from "../../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../../graph/profiles.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { AgentInvocation, HarnessAdapter } from "../harness/types.js";
+import type { CompletionPacket } from "../completion/index.js";
 import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
 import {
   parseOutcomeVerificationResponse,
@@ -14,6 +15,7 @@ import {
   renderOutcomeVerificationPrompt,
   truncateForPrompt,
   type OutcomeVerificationPromptArtifactSnippet,
+  type OutcomeVerificationPromptCompletionPacket,
   type OutcomeVerificationPromptDecisionLogEntry,
   type OutcomeVerificationPromptExecutionEvidence
 } from "./prompt.js";
@@ -41,6 +43,7 @@ export interface RunOutcomeVerificationOptions {
   contextManifest: string;
   agentResponseArtifactPath?: string;
   declaredArtifactPaths: Record<string, string>;
+  completionPacket?: CompletionPacket;
   workspaceChangeArtifacts?: NodeWorkspaceChangeArtifacts;
   harness: HarnessAdapter;
   supervisorPolicy?: EffectiveSupervisorPolicy;
@@ -233,11 +236,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readStringArray(value: unknown): string[] {
+function readEvidenceSummaries(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+    const kind = typeof entry.kind === "string" ? entry.kind : undefined;
+    const summary = typeof entry.summary === "string" && entry.summary.trim().length > 0 ? entry.summary : undefined;
+    if (!kind || !summary) {
+      return [];
+    }
+    const ref = typeof entry.ref === "string" && entry.ref.trim().length > 0 ? ` (${entry.ref})` : "";
+    const status = typeof entry.status === "string" && entry.status.trim().length > 0 ? ` [${entry.status}]` : "";
+    return [`${kind}${ref}${status}: ${summary}`];
+  });
 }
 
 async function readDecisionLogEntries(options: {
@@ -279,7 +294,7 @@ async function readDecisionLogEntries(options: {
     if (typeof parsed.decision !== "string" || typeof parsed.rationale !== "string") {
       continue;
     }
-    const evidence = readStringArray(parsed.evidence);
+    const evidence = readEvidenceSummaries(parsed.evidence);
     if (evidence.length === 0) {
       continue;
     }
@@ -287,6 +302,7 @@ async function readDecisionLogEntries(options: {
     entries.push({
       decision: parsed.decision,
       rationale: parsed.rationale,
+      ...(typeof parsed.contract_implication === "string" ? { contract_implication: parsed.contract_implication } : {}),
       evidence,
       ...(typeof parsed.created_at === "string" ? { created_at: parsed.created_at } : {}),
       ...(typeof parsed.log_id === "string" ? { log_id: parsed.log_id } : {})
@@ -478,6 +494,16 @@ function collectTruncatedArtifactNames(snippets: OutcomeVerificationPromptArtifa
   return snippets.filter((snippet) => snippet.truncated === true).map((snippet) => snippet.name);
 }
 
+function buildPromptCompletionPacket(packet: CompletionPacket): OutcomeVerificationPromptCompletionPacket {
+  return {
+    completion_status: packet.completion_status,
+    ready_for_verification: packet.ready_for_verification,
+    blocking_reasons: packet.blocking_reasons,
+    missing_artifacts: packet.missing_artifacts,
+    packet_path: packet.packet_path
+  };
+}
+
 function buildForcedFailureFindings(agentResponseSnippet: OutcomeVerificationPromptArtifactSnippet): OutcomeVerificationFinding[] {
   const response = agentResponseSnippet.content ?? "";
   if (!response.includes("INTENTIONAL_FAILURE_DO_NOT_ACCEPT")) {
@@ -538,6 +564,7 @@ export async function runOutcomeVerification(
     declared_artifact_snippets: declaredArtifactSnippets,
     decision_log_entries: decisionLogEntries,
     ...(executionEvidence ? { execution_evidence: executionEvidence } : {}),
+    ...(options.completionPacket ? { completion_packet: buildPromptCompletionPacket(options.completionPacket) } : {}),
     workspace_diff_snippet: workspaceDiffSnippet,
     workspace_path: options.workspacePath,
     attempt: {

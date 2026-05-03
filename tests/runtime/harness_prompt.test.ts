@@ -92,16 +92,23 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("## Working Loop");
     expect(prompt).toContain("Drive the node to completion within its boundary");
     expect(prompt).toContain(
-      "inspect relevant context/repo state, make the smallest maintainable change, run named validation"
+      "inspect runtime status and context, make the smallest maintainable change, run named validation"
     );
-    expect(prompt).toContain("For major scope-affecting decisions");
+    expect(prompt).toContain("af complete check");
+    expect(prompt).toContain("Log meaningful progress after verification");
+    expect(prompt).toContain("af log --type finding --finding-kind <observation|issue|risk|blocker>");
     expect(prompt).toContain("af log --type decision");
     expect(prompt).toContain("--rationale <why>");
+    expect(prompt).toContain("--contract-implication <effect>");
     expect(prompt).toContain("Investigate ambiguity instead of guessing");
     expect(prompt).toContain("Agentflow is the runner, not the work target.");
     expect(prompt).toContain("Do not open or follow global Agentflow skills");
     expect(prompt).toContain("stop and respond immediately");
-    expect(prompt).toContain("Use `af --help` only when the options below are insufficient.");
+    expect(prompt).not.toContain("Use `af --help` only when the options below are insufficient.");
+    expect(prompt).not.toContain("af artifact list");
+    expect(prompt).not.toContain("af diagnose");
+    expect(prompt).not.toContain("af learn");
+    expect(prompt).not.toContain("af spawn");
     expect(prompt).toContain("If the same tactic fails twice with the same symptom");
     expect(prompt).toContain(
       "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected."

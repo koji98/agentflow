@@ -11,7 +11,7 @@ Without an external grader, an agent that "claims" to satisfy the acceptance cri
 Outcome verification runs only for `agent` nodes that:
 
 - exited with `status === "passed"` and `outcome === "passed"`,
-- materialized every declared artifact, and
+- produced a completion packet with `completion_status: "ready_for_verification"`,
 - were not canceled mid-attempt.
 
 It is skipped for `check`, `checkpoint`, `pattern_*`, and `exec` nodes because those nodes have their own direct execution contract: command result, pass criteria, checkpoint decision, managed scorecard, artifacts, and workspace diff. Those executable nodes still require `intent.goal` and `intent.acceptance_criteria`; the supervisor uses that intent to diagnose causal failures and choose safe recovery targets.
@@ -23,6 +23,7 @@ The verifier receives:
 - Graph intent: goal, acceptance criteria, constraints.
 - Node intent: authored id, compiled id, execution id, attempt and iteration indices, goal, acceptance criteria, constraints.
 - Workspace path and a per-node workspace-change summary with paths to full audit artifacts (see `node-workspace-snapshots.md`).
+- Completion packet facts: status, blocking reasons, missing artifacts, and packet path.
 - Decision log entries recorded by the node with `af log --type decision`, each containing a decision, rationale, and evidence list.
 - The agent's captured response (`agent-response.md`) as an inline snippet.
 - Each declared artifact's content as an inline snippet, with size truncation guards and explicit `(truncated)` markers.
@@ -33,13 +34,14 @@ Per-artifact prompt contents are truncated above a fixed byte budget. Truncation
 
 The verifier leans passing unless it has strong, concrete, actionable blocker evidence. Ambiguous, incomplete, or lower-confidence evidence should usually become a non-blocker finding rather than a retry.
 
-Primary supervision evidence is:
+Primary verification evidence is:
 
-1. Declared artifacts.
-2. Decision log entries.
-3. The final response.
-4. Deterministic command/tool evidence cited by those records.
-5. Workspace-change artifacts as audit/provenance evidence.
+1. Completion packet facts.
+2. Declared artifacts.
+3. Decision log entries.
+4. The final response.
+5. Deterministic command/tool evidence cited by those records.
+6. Workspace-change artifacts as audit/provenance evidence.
 
 Workspace diffs are useful for debugging and manual review, but they are not the default source of truth for intent. They should not be the sole reason for `passed=false` unless they are the only authoritative evidence for the node's required change and show a concrete contract violation.
 
@@ -95,9 +97,9 @@ The attempt's metadata records the verifier result as `outcome_verification` so 
 
 ## Engine Wiring
 
-After an `agent` attempt's harness exits clean and declared artifacts are materialized, the engine calls `runOutcomeVerification` and emits an `outcome.verified` event with `passed`, `findings_count`, `blockers_count`, `verifier_harness`, `parse_status`, `duration_ms`, and the on-disk `verify_outcome_path`.
+After an `agent` attempt's harness exits clean, the engine builds and persists `completion-packet.json`. If the packet is `incomplete` or `blocked`, the engine records the packet on attempt metadata and routes the attempt through supervisor recovery without invoking the semantic verifier. If the packet is `ready_for_verification`, the engine calls `runOutcomeVerification` and emits an `outcome.verified` event with `passed`, `findings_count`, `blockers_count`, `verifier_harness`, `parse_status`, `duration_ms`, and the on-disk `verify_outcome_path`.
 
-If the verifier rejects, the engine sets `result.outcome = "failed"`, attaches the verifier payload to `result.result.outcome_verification`, and falls through to the supervisor recovery path. The classifier treats ordinary verifier rejections as `semantic_misalignment`; if the verdict points to missing package/API documentation, it uses `missing_dependency_docs`. The recovery loop writes a case file, gathers semantic/local/external evidence as needed, merges a recovery plan, and injects a `SupervisorRecoveryEnvelope` into the next attempt while preserving the original node contract.
+If completion is incomplete, the classifier treats it as `completion_contract_failure` and retries the responsible node with concrete missing evidence. If completion is blocked, the classifier treats it as an operator pause unless recovery evidence proves a runtime repair can safely proceed. If the verifier rejects a mechanically ready packet, the engine sets `result.outcome = "failed"`, attaches the verifier payload to `result.result.outcome_verification`, and falls through to the supervisor recovery path. The classifier treats ordinary verifier rejections as `semantic_misalignment`; if the verdict points to missing package/API documentation, it uses `missing_dependency_docs`. The recovery loop writes a case file, gathers semantic/local/external evidence as needed, merges a recovery plan, and injects a `SupervisorRecoveryEnvelope` into the next attempt while preserving the original node contract.
 
 If the relevant supervisor action budget is exhausted, the run fails with the recovery classification and the failed verifier verdict in the delivery package.
 

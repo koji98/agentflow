@@ -9,6 +9,7 @@ import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { RuntimeEventEnvelope } from "../events.js";
 import type { RuntimeStateSnapshot, WorkspaceChangeArtifacts } from "../session.js";
 import { collectDeliveryEvidence, type DeliveryEvidence } from "./collect.js";
+import { operatorObservationsPath } from "../observations/index.js";
 
 const sectionFiles: Record<DeliverySection, string> = {
   task_brief: "task-brief.md",
@@ -53,6 +54,7 @@ export interface DeliveryPackageManifest {
     intervention_trace: string;
     supervisor_timeline: string;
     runtime_log: string;
+    operator_observations: string;
   };
   internal_artifacts: {
     run_record: string;
@@ -61,6 +63,7 @@ export interface DeliveryPackageManifest {
     interventions: string;
     supervisor_timeline: string;
     runtime_log: string;
+    operator_observations: string;
     node_attempts: string;
     workspace_changes: string;
   };
@@ -80,6 +83,7 @@ export interface DeliveryPackageManifest {
     tool_invocation_records: number;
     workspace_change_artifacts: number;
     node_workspace_change_artifacts: number;
+    operator_observations: number;
     verifications_passed: number;
     verifications_failed: number;
   };
@@ -224,6 +228,7 @@ function renderImplementationSummary(evidence: DeliveryEvidence): string {
     `- Declared artifacts captured: \`${evidence.declared_artifacts.length}\``,
     `- Tool invocation records: \`${evidence.tool_invocations.reduce((sum, entry) => sum + entry.records.length, 0)}\``,
     `- Outcome verifications: passed=\`${verificationsPassed}\` failed=\`${verificationsFailed}\``,
+    `- Human observations: active=\`${evidence.operator_observations.filter((entry) => entry.status === "active").length}\` total=\`${evidence.operator_observations.length}\``,
     "",
     "## Agent Responses",
     "",
@@ -303,6 +308,14 @@ function renderDecisionLog(evidence: DeliveryEvidence): string {
     lines.push("");
   }
 
+  if (evidence.operator_observations.length > 0) {
+    lines.push("## Human Observations", "");
+    for (const observation of evidence.operator_observations) {
+      lines.push(`- \`${observation.status}\` \`${observation.kind}\` by \`${observation.author}\`: ${observation.summary}`);
+    }
+    lines.push("");
+  }
+
   if (evidence.interventions.length > 0) {
     lines.push("## Supervisor Interventions", "");
     for (const intervention of evidence.interventions) {
@@ -325,7 +338,7 @@ function renderReviewerGuide(manifest: DeliveryPackageManifest, evidence: Delive
     `2. Read \`${manifest.human_entrypoints.implementation_summary}\` and the declared artifacts it references.`,
     `3. Check \`${manifest.human_entrypoints.risk_notes}\` and \`${manifest.human_entrypoints.follow_up_items}\`.`,
     `4. Use \`${manifest.run_map}\` if you need to understand the run directory layout.`,
-    `5. Use evidence files for audit details: \`${manifest.evidence_files.grouped_change_map}\`, \`${manifest.evidence_files.evaluation_ledger}\`, \`${manifest.evidence_files.supervisor_timeline}\`, \`${manifest.evidence_files.runtime_log}\`, and \`${manifest.evidence_files.intervention_trace}\`.`,
+    `5. Use evidence files for audit details: \`${manifest.evidence_files.grouped_change_map}\`, \`${manifest.evidence_files.evaluation_ledger}\`, \`${manifest.evidence_files.supervisor_timeline}\`, \`${manifest.evidence_files.runtime_log}\`, \`${manifest.evidence_files.operator_observations}\`, and \`${manifest.evidence_files.intervention_trace}\`.`,
     "",
     "## What To Ignore Unless Debugging",
     "",
@@ -340,6 +353,7 @@ function renderReviewerGuide(manifest: DeliveryPackageManifest, evidence: Delive
     `- Events: \`${manifest.internal_artifacts.events}\``,
     `- Supervisor timeline: \`${manifest.internal_artifacts.supervisor_timeline}\``,
     `- Runtime log: \`${manifest.internal_artifacts.runtime_log}\``,
+    `- Human observations: \`${manifest.internal_artifacts.operator_observations}\``,
     `- Interventions ledger: \`${manifest.internal_artifacts.interventions}\``,
     `- Node attempts: \`${manifest.internal_artifacts.node_attempts}\``,
     "",
@@ -401,6 +415,7 @@ function renderRiskNotes(evidence: DeliveryEvidence): string {
     "",
     `- Failed checks: \`${evidence.failed_checks.length}\``,
     `- Supervisor interventions: \`${evidence.interventions.length}\``,
+    `- Human observations: active=\`${evidence.operator_observations.filter((entry) => entry.status === "active").length}\` total=\`${evidence.operator_observations.length}\``,
     `- Changed files: \`${evidence.workspace_changes.reduce((sum, artifact) => sum + artifact.changed_files.length, 0)}\``,
     ""
   ];
@@ -409,6 +424,14 @@ function renderRiskNotes(evidence: DeliveryEvidence): string {
     lines.push("## Failed Checks", "");
     for (const check of evidence.failed_checks) {
       lines.push(`- \`${check.authored_id}\`: ${check.summary}`);
+    }
+    lines.push("");
+  }
+
+  if (evidence.operator_observations.length > 0) {
+    lines.push("## Human Observations", "");
+    for (const observation of evidence.operator_observations) {
+      lines.push(`- \`${observation.status}\` \`${observation.kind}\`: ${observation.summary}`);
     }
     lines.push("");
   }
@@ -423,10 +446,13 @@ function renderRiskNotes(evidence: DeliveryEvidence): string {
 
 function renderFollowUpItems(evidence: DeliveryEvidence): string {
   const failedChecks = evidence.failed_checks.map((check) => `Resolve failed check \`${check.authored_id}\`: ${check.summary}`);
+  const activeBlockingObservations = evidence.operator_observations
+    .filter((observation) => observation.status === "active" && (observation.kind === "blocker" || observation.blocking === true))
+    .map((observation) => `Resolve human blocker \`${observation.observation_id}\`: ${observation.summary}`);
   const nonPassingAttempts = evidence.attempts
     .filter((attempt) => attempt.status !== "passed")
     .map((attempt) => `Inspect \`${attempt.authored_id}\` execution \`${attempt.execution_id}\` with status \`${attempt.status}\`.`);
-  const items = [...failedChecks, ...nonPassingAttempts];
+  const items = [...failedChecks, ...activeBlockingObservations, ...nonPassingAttempts];
 
   return [
     "# Follow Up Items",
@@ -597,6 +623,11 @@ async function buildArtifactTaxonomy(options: {
       purpose: "Structured `af log` evidence recorded by workers during node execution."
     }),
     artifactEntry({
+      path: operatorObservationsPath(runRoot),
+      label: "Human observation ledger",
+      purpose: "Append-only live human observation records that can influence completion without pausing the run."
+    }),
+    artifactEntry({
       path: runPaths.interventions_file,
       label: "Supervisor intervention ledger",
       purpose: "Append-only supervisor intervention records."
@@ -719,6 +750,15 @@ async function buildArtifactTaxonomy(options: {
     }));
   }
 
+  if ((await readTrimmed(operatorObservationsPath(runRoot))) === undefined) {
+    emptyOrNoop.push(await artifactEntry({
+      path: operatorObservationsPath(runRoot),
+      label: "Human observation ledger",
+      purpose: "No live human observations were recorded.",
+      reason: "missing_ledger"
+    }));
+  }
+
   const compileDiagnostics = await readTrimmed(runPaths.compile_diagnostics_file);
   if (compileDiagnostics === "[]" || compileDiagnostics === "") {
     emptyOrNoop.push(await artifactEntry({
@@ -784,6 +824,7 @@ async function buildManifest(evidence: DeliveryEvidence, runRoot: string, delive
   ) as Record<DeliverySection, string>;
   const runPaths = resolveRunArtifactPaths(runRoot);
   const runMapPath = join(deliveryDir, "run-map.md");
+  const observationsPath = operatorObservationsPath(runRoot);
   const artifactTaxonomy = await buildArtifactTaxonomy({
     evidence,
     runRoot,
@@ -812,7 +853,8 @@ async function buildManifest(evidence: DeliveryEvidence, runRoot: string, delive
       evaluation_ledger: sections.evaluation_ledger,
       intervention_trace: sections.intervention_trace,
       supervisor_timeline: runPaths.supervisor_timeline_file,
-      runtime_log: runPaths.runtime_log_file
+      runtime_log: runPaths.runtime_log_file,
+      operator_observations: observationsPath
     },
     internal_artifacts: {
       run_record: runPaths.run_file,
@@ -820,6 +862,7 @@ async function buildManifest(evidence: DeliveryEvidence, runRoot: string, delive
       events: runPaths.events_file,
       supervisor_timeline: runPaths.supervisor_timeline_file,
       runtime_log: runPaths.runtime_log_file,
+      operator_observations: observationsPath,
       interventions: runPaths.interventions_file,
       node_attempts: runPaths.nodes_dir,
       workspace_changes: runPaths.workspace_changes_dir
@@ -833,6 +876,7 @@ async function buildManifest(evidence: DeliveryEvidence, runRoot: string, delive
       tool_invocation_records: evidence.tool_invocations.reduce((sum, entry) => sum + entry.records.length, 0),
       workspace_change_artifacts: evidence.workspace_changes.length,
       node_workspace_change_artifacts: evidence.node_workspace_changes.length,
+      operator_observations: evidence.operator_observations.length,
       verifications_passed: evidence.outcome_verifications.filter((entry) => entry.passed).length,
       verifications_failed: evidence.outcome_verifications.filter((entry) => !entry.passed).length
     },
@@ -912,7 +956,8 @@ export async function writeDeliveryPackage(options: {
         attempt_index: entry.attempt_index,
         ...(entry.iteration_index !== undefined ? { iteration_index: entry.iteration_index } : {}),
         artifacts: entry.artifacts
-      }))
+      })),
+      operator_observations: evidence.operator_observations
     }),
     writeText(manifest.sections.reviewer_guide, renderReviewerGuide(manifest, evidence)),
     writeText(manifest.sections.risk_notes, renderRiskNotes(evidence)),
@@ -922,6 +967,7 @@ export async function writeDeliveryPackage(options: {
       run_id: evidence.run_id,
       supervisor_timeline: evidence.supervisor_timeline,
       runtime_logs: evidence.runtime_logs,
+      operator_observations: evidence.operator_observations,
       interventions: evidence.interventions,
       final_assessments: Object.fromEntries(
         evidence.attempts.map((attempt) => [

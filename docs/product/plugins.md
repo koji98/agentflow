@@ -255,7 +255,7 @@ Consumer graph:
 Runtime behavior:
 
 - Agentflow generates per-execution tool launchers under the node runtime directory.
-- The launcher directory is prepended to `PATH` and also contains Agentflow's reserved `af` runtime CLI wrapper.
+- The launcher directory is prepended to `PATH` and also contains Agentflow's reserved `af` runtime CLI wrapper. `af` is the completion/runtime contract for the node, not a plugin extension point.
 - Agents receive short tool summaries in the prompt and should run `<tool> --help` for authoritative arguments, defaults, output shape, exit codes, examples, and safety notes.
 - Tool `--help` must be fast, read-only, credential-free, side-effect-free, and exit `0`.
 - Tool help output must include purpose, `Usage:`, arguments/options, defaults, configured defaults with secret-looking values redacted, `Output:`, `Exit codes:`, and `Examples:`.

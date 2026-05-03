@@ -54,7 +54,7 @@ The pattern lowers into:
 5. A deterministic scorecard gate.
 6. A final public artifact publisher from the latest passing cycle.
 
-The normal supervisor still handles internal runtime failures. Criterion misses are loop feedback and do not spend supervisor budget.
+The normal supervisor still handles internal runtime failures. Criterion misses are loop feedback and do not spend supervisor budget while cycles remain. If the repeat exhausts, Agentflow persists the latest completion scorecard into the attempt completion packet, emits supervisor-visible managed completion evidence, and lets the supervisor drive a causal recovery only when it can make a real material delta.
 
 The completion criteria panel is not the first validation attempt. The generate-and-validate agent should already have tried to validate the candidate and fix clear validation failures before yielding to the criteria panel.
 

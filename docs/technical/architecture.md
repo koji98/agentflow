@@ -138,17 +138,17 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 
 `af` commands are file-backed against the run root:
 
-- `af status`, `af tools list`, and `af context show` read the node contract.
-- `af artifact write|list` publish and inspect declared artifacts.
-- `af log --type <progress|finding|blocker|risk|question|handoff_note|decision>` appends structured worker evidence to `runtime/log.jsonl`; decision entries carry `decision`, `rationale`, and `evidence[]`.
-- `af spawn` creates a helper sub-node with its own runtime metadata, selected plugin tools, output directory, logs, and artifact contract.
-- `af wait` waits for helper completion.
+- `af status` and `af context show` orient the node against the current runtime contract.
+- `af artifact write` publishes declared artifacts.
+- `af complete check` builds the mechanical completion packet for the current attempt.
+- `af log --type <progress|finding|decision>` appends structured worker evidence to `runtime/log.jsonl`. Findings use `--finding-kind <observation|issue|risk|blocker>`. Decisions carry `decision`, `rationale`, `contract_implication`, and structured `evidence[]`.
+- `af spawn --purpose <investigation|implementation|verification|repair>` creates a helper sub-node with its own runtime metadata, selected plugin tools, output directory, logs, artifact contract, and optional `--wait` behavior.
 
-`af --help` and `af <command> --help` are the authoritative in-node runtime API reference. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.
+The default `af --help` surface is intentionally small because it is part of agent correctness. It shows the normal completion loop commands and omits debug/orchestration commands such as `diagnose`, `learn`, `tools list`, and `spawn`. `af <command> --help` remains the authoritative in-node runtime API reference for commands the runtime exposes to the current authority. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.
 
 Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocations.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and stdout/stderr sidecar paths when output is captured.
 
-Agents do not rely on synchronous coordination with other graph nodes. Durable work moves through declared artifacts, worker notes are recorded with `af log`, and helper sub-node coordination stays under the parent node's runtime contract.
+Agents do not rely on synchronous coordination with other graph nodes. Durable work moves through declared artifacts, worker notes are recorded with `af log`, helper sub-node coordination stays under the parent node's runtime contract, and completion state moves through `completion-packet.json` rather than final-response claims.
 
 See `runtime-tooling.md` for the generated `af` wrapper, plugin launcher, credential isolation, harness environment, and tool invocation ledger flow.
 
@@ -186,7 +186,7 @@ Failed harness attempts do not publish declared artifacts, even if they wrote fi
 
 `retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same causal recovery loop. A retried or repaired target receives a `SupervisorRecoveryEnvelope` before the original authored task, and the same envelope is materialized into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af context show` also shows the `supervisor_context_repair` material and the authored entries omitted by the overlay. The envelope names the symptom node, the selected recovery target, the material delta, and states that graph intent, node intent, repo authority, sandbox, and declared artifacts are unchanged. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
 
-Supervisor helpers can use read-only diagnostics through `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, and `af diagnose validation`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. `af spawn --purpose investigation` creates read-only causal-analysis helpers; `af spawn --purpose repair` creates scoped repair helpers that can use only the selected target node's existing authority.
+Supervisor helpers can use read-only diagnostics through `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, and `af diagnose validation`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. `af spawn --purpose investigation` creates read-only causal-analysis helpers; `af spawn --purpose implementation`, `--purpose verification`, and `--purpose repair` create bounded helper sessions for managed or supervisor-authorized work. There is no standalone `af wait`; use `af spawn ... --wait` when the parent needs a terminal helper result before continuing.
 
 Managed monitoring and supervisor events:
 

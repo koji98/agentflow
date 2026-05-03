@@ -75,6 +75,13 @@ import {
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
 import { runOutcomeVerification } from "../verification/verifier.js";
 import type { OutcomeVerificationResult } from "../verification/types.js";
+import {
+  buildCompletionPacket,
+  persistCompletionPacket,
+  type CompletionManagedSummary,
+  type CompletionPacket
+} from "../completion/index.js";
+import { readOperatorObservations } from "../observations/index.js";
 import { runRepairArtifactIntervention } from "../../supervisor/actions.js";
 import { buildSupervisorCausalContext } from "../../supervisor/causal.js";
 import { classifyNodeFailure, type FailureClassification } from "../../supervisor/classifier.js";
@@ -740,6 +747,20 @@ async function emitManagedRepeatExhaustedProgress(options: {
     return false;
   }
 
+  const completionPacketPath =
+    isRecord(options.attempt.metadata?.completion) &&
+    typeof options.attempt.metadata.completion.packet_path === "string"
+      ? options.attempt.metadata.completion.packet_path
+      : undefined;
+  let completionPacket: CompletionPacket | undefined;
+  if (completionPacketPath) {
+    try {
+      completionPacket = JSON.parse(await readFile(completionPacketPath, "utf8")) as CompletionPacket;
+    } catch {
+      completionPacket = undefined;
+    }
+  }
+
   await emitEvent(
     options.session,
     options.writer,
@@ -758,7 +779,16 @@ async function emitManagedRepeatExhaustedProgress(options: {
         latest_iteration_index: options.attempt.iteration_index,
         max_attempts: options.session.repeat_scopes.get(options.repeatScopeId)?.max_attempts
       },
+      ...(completionPacket
+        ? {
+            completion_status: completionPacket.completion_status,
+            blocking_reasons: completionPacket.blocking_reasons,
+            managed_summary: completionPacket.managed,
+            completion_packet_path: completionPacket.packet_path
+          }
+        : {}),
       evidence_refs: [
+        ...(completionPacketPath ? [completionPacketPath] : []),
         ...(options.attempt.result_path ? [options.attempt.result_path] : []),
         ...Object.values(options.attempt.artifacts)
       ]
@@ -773,6 +803,158 @@ async function emitManagedRepeatExhaustedProgress(options: {
   );
 
   return true;
+}
+
+interface ManagedCriterionSnapshot {
+  id: string;
+  required: boolean;
+  passed: boolean;
+  score: number;
+  summary?: string;
+  evidence_path?: string;
+}
+
+interface ManagedScorecardSnapshot {
+  passed: boolean;
+  total_score: number;
+  criteria: ManagedCriterionSnapshot[];
+  path: string;
+}
+
+function normalizeManagedCriterion(value: unknown): ManagedCriterionSnapshot | undefined {
+  if (!isRecord(value) || typeof value.id !== "string") {
+    return undefined;
+  }
+  const rawScore = typeof value.score === "number" ? value.score : value.passed === true ? 1 : 0;
+  return {
+    id: value.id,
+    required: value.required === true,
+    passed: value.passed === true,
+    score: Math.max(0, Math.min(1, rawScore)),
+    ...(typeof value.summary === "string" ? { summary: value.summary } : {}),
+    ...(typeof value.evidence_path === "string" ? { evidence_path: value.evidence_path } : {})
+  };
+}
+
+async function readManagedScorecard(path: string | undefined): Promise<ManagedScorecardSnapshot | undefined> {
+  if (!path) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    if (!isRecord(parsed) || !Array.isArray(parsed.criteria)) {
+      return undefined;
+    }
+    return {
+      passed: parsed.passed === true,
+      total_score: typeof parsed.total_score === "number" ? parsed.total_score : 0,
+      criteria: parsed.criteria.flatMap((criterion) => {
+        const normalized = normalizeManagedCriterion(criterion);
+        return normalized ? [normalized] : [];
+      }),
+      path
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function buildManagedCompletionSummary(options: {
+  session: RuntimeSession;
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  artifacts: Record<string, string>;
+}): Promise<CompletionManagedSummary | undefined> {
+  const managed = parseManagedAuthoredId(options.node.authored_id, options.node.lowered_from);
+  if (!managed || managed.managed_kind !== "pattern_deep_work") {
+    return undefined;
+  }
+  if (!managed.phase.includes("completion_gate")) {
+    return undefined;
+  }
+
+  const currentScorecard = await readManagedScorecard(options.artifacts.completion_scorecard);
+  const cycleLimit = options.attempt.repeat_scope_id
+    ? options.session.repeat_scopes.get(options.attempt.repeat_scope_id)?.max_attempts
+    : undefined;
+  if (!currentScorecard) {
+    return {
+      active: true,
+      managed_kind: managed.managed_kind,
+      ...(options.attempt.iteration_index !== undefined ? { cycle: options.attempt.iteration_index } : {}),
+      ...(cycleLimit !== undefined ? { cycle_limit: cycleLimit } : {}),
+      ready_for_publish: false,
+      blocking_criteria: managed.phase.includes("completion_gate") ? ["completion_scorecard_missing"] : [],
+      material_delta: [],
+      evidence_refs: []
+    };
+  }
+
+  const priorScorecards = (
+    await Promise.all(
+      listAttemptsForCompiledNode(options.session.attempts, options.node.compiled_id)
+        .filter((attempt) => attempt.execution_id !== options.attempt.execution_id)
+        .map((attempt) => readManagedScorecard(attempt.artifacts.completion_scorecard))
+    )
+  ).filter((scorecard): scorecard is ManagedScorecardSnapshot => Boolean(scorecard));
+  const priorCriteriaById = new Map<string, ManagedCriterionSnapshot[]>();
+  for (const scorecard of priorScorecards) {
+    for (const criterion of scorecard.criteria) {
+      const list = priorCriteriaById.get(criterion.id) ?? [];
+      list.push(criterion);
+      priorCriteriaById.set(criterion.id, list);
+    }
+  }
+
+  const failingRequired = currentScorecard.criteria
+    .filter((criterion) => criterion.required && !criterion.passed)
+    .map((criterion) => criterion.id);
+  const regressions = currentScorecard.criteria.flatMap((criterion) => {
+    if (!criterion.required || criterion.passed) {
+      return [];
+    }
+    const priorPassed = (priorCriteriaById.get(criterion.id) ?? []).find((prior) => prior.passed);
+    return priorPassed
+      ? [{
+          criterion: criterion.id,
+          from: "passed",
+          to: "failed",
+          ...(options.attempt.iteration_index !== undefined ? { cycle: options.attempt.iteration_index } : {})
+        }]
+      : [];
+  });
+  const previousScorecard = priorScorecards.at(-1);
+  const materialDelta = previousScorecard
+    ? [
+        `Completion score changed from ${previousScorecard.total_score} to ${currentScorecard.total_score}.`,
+        ...currentScorecard.criteria.flatMap((criterion) => {
+          const previous = previousScorecard.criteria.find((entry) => entry.id === criterion.id);
+          return previous && (previous.passed !== criterion.passed || previous.score !== criterion.score)
+            ? [`Criterion ${criterion.id} changed from ${previous.passed ? "passed" : "failed"}:${previous.score} to ${criterion.passed ? "passed" : "failed"}:${criterion.score}.`]
+            : [];
+        })
+      ]
+    : [`Initial managed scorecard recorded with score ${currentScorecard.total_score}.`];
+  const blockingCriteria = [...new Set([
+    ...failingRequired,
+    ...regressions.map((regression) => regression.criterion)
+  ])];
+
+  return {
+    active: true,
+    managed_kind: managed.managed_kind,
+    ...(options.attempt.iteration_index !== undefined ? { cycle: options.attempt.iteration_index } : {}),
+    ...(cycleLimit !== undefined ? { cycle_limit: cycleLimit } : {}),
+    failing_required_criteria: failingRequired,
+    regressions,
+    blocking_criteria: blockingCriteria,
+    ready_for_publish: currentScorecard.passed && blockingCriteria.length === 0,
+    material_delta: materialDelta,
+    evidence_refs: [
+      currentScorecard.path,
+      ...currentScorecard.criteria.flatMap((criterion) => criterion.evidence_path ? [criterion.evidence_path] : [])
+    ]
+  };
 }
 
 function canSpendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): boolean {
@@ -2484,144 +2666,6 @@ async function materializePresentDeclaredArtifacts(options: {
   return artifacts;
 }
 
-function isHumanTextArtifact(artifact: MissingDeclaredArtifact): boolean {
-  if (artifact.from !== "output_dir") {
-    return false;
-  }
-
-  const lowerPath = artifact.path.toLowerCase();
-  return lowerPath.endsWith(".md") || lowerPath.endsWith(".markdown") || lowerPath.endsWith(".txt");
-}
-
-async function synthesizeMissingArtifactsFromAgentResponse(options: {
-  node: CompiledAgentNode;
-  attempt: RuntimeNodeAttempt;
-  missingArtifacts: MissingDeclaredArtifact[];
-  automaticArtifacts: Record<string, string>;
-  decisionId: string;
-  interventionId: string;
-  repairAttempt: number;
-  maxAttempts: number;
-}): Promise<SupervisorInterventionRecord | undefined> {
-  if (
-    options.missingArtifacts.length !== 1 ||
-    !options.missingArtifacts.every(isHumanTextArtifact)
-  ) {
-    return undefined;
-  }
-
-  const agentResponsePath = options.automaticArtifacts.agent_response;
-  if (!agentResponsePath) {
-    return undefined;
-  }
-
-  let agentResponse: string;
-  try {
-    agentResponse = await readFile(agentResponsePath, "utf8");
-  } catch {
-    return undefined;
-  }
-
-  const trimmedResponse = agentResponse.trim();
-  if (
-    trimmedResponse.length === 0 ||
-    trimmedResponse === missingAgentResponseMessage
-  ) {
-    return undefined;
-  }
-
-  const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, options.interventionId);
-  const promptPath = join(interventionDir, "prompt.md");
-  const stdoutPath = join(interventionDir, "stdout.log");
-  const stderrPath = join(interventionDir, "stderr.log");
-  const resultPath = join(interventionDir, "result.json");
-  const startedAt = new Date().toISOString();
-
-  await mkdir(interventionDir, { recursive: true });
-
-  await Promise.all(options.missingArtifacts.map(async (artifact) => {
-    await mkdir(dirname(artifact.expected_path), { recursive: true });
-    await writeFile(
-      artifact.expected_path,
-      [
-        "# Recovered Agentflow Artifact",
-        "",
-        "Agentflow synthesized this human-readable handoff from the node's captured final response because the declared artifact was missing after the node completed.",
-        "",
-        "## Declared Artifact",
-        "",
-        `- Name: \`${artifact.name}\``,
-        `- Path: \`${artifact.path}\``,
-        `- Expected content: ${artifact.description}`,
-        "",
-        "## Recovered Content",
-        "",
-        trimmedResponse
-      ].join("\n"),
-      "utf8"
-    );
-  }));
-
-  await Promise.all([
-    writeFile(
-      promptPath,
-      [
-        "## Agentflow Artifact Repair",
-        "",
-        "The supervisor recovered missing human-readable artifacts from the captured agent response.",
-        "No external harness was invoked because every missing artifact was a text handoff and the node had already completed successfully.",
-        "",
-        "## Node Task",
-        "",
-        options.node.intent.goal,
-        "",
-        "## Recovered Artifacts",
-        formatMissingArtifactList(options.missingArtifacts)
-      ].join("\n"),
-      "utf8"
-    ),
-    writeFile(stdoutPath, "Synthesized missing text artifacts from agent_response.\n", "utf8"),
-    writeFile(stderrPath, "", "utf8"),
-    writeFile(
-      resultPath,
-      `${JSON.stringify({
-        status: "passed",
-        repair_strategy: "synthesize_from_agent_response",
-        missing_artifacts_after: []
-      }, null, 2)}\n`,
-      "utf8"
-    )
-  ]);
-
-  return {
-    intervention_id: options.interventionId,
-    decision_id: options.decisionId,
-    action: "repair_artifact",
-    status: "passed",
-    target_compiled_id: options.node.compiled_id,
-    target_execution_id: options.attempt.execution_id,
-    started_at: startedAt,
-    ended_at: new Date().toISOString(),
-    reason: "Recovered missing human-readable declared artifacts from the node's captured final response.",
-    evidence: {
-      repair_attempt: options.repairAttempt,
-      max_attempts: options.maxAttempts,
-      repair_strategy: "synthesize_from_agent_response",
-      source_artifact: "agent_response",
-      source_path: agentResponsePath,
-      missing_artifacts_before: options.missingArtifacts.map((artifact) => artifact.name),
-      missing_artifacts_after: []
-    },
-    artifact_paths: {
-      intervention_dir: interventionDir,
-      prompt: promptPath,
-      stdout: stdoutPath,
-      stderr: stderrPath,
-      result: resultPath
-    }
-  };
-}
-
 async function hasUsableCapturedAgentResponse(
   automaticArtifacts: Record<string, string>
 ): Promise<boolean> {
@@ -2637,18 +2681,6 @@ async function hasUsableCapturedAgentResponse(
   } catch {
     return false;
   }
-}
-
-function formatMissingArtifactList(missingArtifacts: MissingDeclaredArtifact[]): string {
-  return missingArtifacts
-    .map((artifact) => [
-      `- \`${artifact.name}\``,
-      `  - from: \`${artifact.from}\``,
-      `  - declared path: \`${artifact.path}\``,
-      `  - expected absolute path: \`${artifact.expected_path}\``,
-      `  - expected content: ${artifact.description}`
-    ].join("\n"))
-    .join("\n");
 }
 
 async function materializeDeclaredArtifactsWithRepair(options: {
@@ -2809,20 +2841,7 @@ async function materializeDeclaredArtifactsWithRepair(options: {
       );
 
       const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.harnesses);
-      const harnessAvailable = Boolean(supervisorHarness.harnessName && supervisorHarness.harness);
-      const synthesizedIntervention = harnessAvailable
-        ? undefined
-        : await synthesizeMissingArtifactsFromAgentResponse({
-            node: options.node,
-            attempt: options.attempt,
-            missingArtifacts,
-            automaticArtifacts: options.automaticArtifacts,
-            decisionId,
-            interventionId,
-            repairAttempt,
-            maxAttempts
-          });
-      const intervention = synthesizedIntervention ?? await runRepairArtifactIntervention({
+      const intervention = await runRepairArtifactIntervention({
         node: options.node,
         attempt: options.attempt,
         missing_artifacts: missingArtifacts,
@@ -3000,6 +3019,48 @@ async function ensureCheckpointPassFeedbackArtifact(
       "utf8"
     );
   }
+}
+
+async function buildAndPersistAttemptCompletionPacket(options: {
+  runRoot: string;
+  session: RuntimeSession;
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  workspacePath: string;
+  artifacts: Record<string, string>;
+  stdoutLogPath?: string;
+  stderrLogPath?: string;
+  resultPath?: string;
+  supervisorRecoveryEnvelope?: SupervisorRecoveryEnvelope;
+}): Promise<CompletionPacket> {
+  const packetAttempt: RuntimeNodeAttempt = {
+    ...options.attempt,
+    artifacts: options.artifacts,
+    ...(options.stdoutLogPath ? { stdout_log_path: options.stdoutLogPath } : {}),
+    ...(options.stderrLogPath ? { stderr_log_path: options.stderrLogPath } : {}),
+    ...(options.resultPath ? { result_path: options.resultPath } : {})
+  };
+  const priorAttempts = listAttemptsForCompiledNode(options.session.attempts, options.node.compiled_id)
+    .filter((attempt) => attempt.execution_id !== options.attempt.execution_id);
+  const managed = await buildManagedCompletionSummary({
+    session: options.session,
+    node: options.node,
+    attempt: packetAttempt,
+    artifacts: options.artifacts
+  });
+  const packet = await buildCompletionPacket({
+    runRoot: options.runRoot,
+    node: options.node,
+    attempt: packetAttempt,
+    priorAttempts,
+    workspacePath: options.workspacePath,
+    sandbox: options.node.effective_policy.sandbox ?? "workspace-write",
+    observations: await readOperatorObservations(options.runRoot),
+    ...(managed ? { managed } : {}),
+    ...(options.supervisorRecoveryEnvelope ? { supervisorRecoveryEnvelope: options.supervisorRecoveryEnvelope } : {})
+  });
+  await persistCompletionPacket(packet);
+  return packet;
 }
 
 async function executeNode(
@@ -3295,6 +3356,41 @@ async function executeNode(
       delete result.outcome;
     }
 
+    const completionPacket = await buildAndPersistAttemptCompletionPacket({
+      runRoot: options.run_root,
+      session,
+      node,
+      attempt,
+      workspacePath: workspace.workspace_path,
+      artifacts,
+      stdoutLogPath: executionPaths.stdout_log_path,
+      stderrLogPath: executionPaths.stderr_log_path,
+      resultPath: executionPaths.result_path,
+      ...(activeRecoveryEnvelope ? { supervisorRecoveryEnvelope: activeRecoveryEnvelope } : {})
+    });
+
+    if (
+      node.kind === "agent"
+      && result.status === "passed"
+      && result.outcome === "passed"
+      && completionPacket.completion_status !== "ready_for_verification"
+    ) {
+      const previousResult = isRecord(result.result) ? result.result : {};
+      result = {
+        ...result,
+        status: "failed",
+        outcome: "failed",
+        result: {
+          ...previousResult,
+          completion: {
+            completion_status: completionPacket.completion_status,
+            blocking_reasons: completionPacket.blocking_reasons,
+            packet_path: completionPacket.packet_path
+          }
+        }
+      };
+    }
+
     let outcomeVerification: OutcomeVerificationResult | undefined;
     if (
       node.kind === "agent"
@@ -3353,6 +3449,7 @@ async function executeNode(
           contextManifest: contextManifestText,
           ...(artifacts.agent_response ? { agentResponseArtifactPath: artifacts.agent_response } : {}),
           declaredArtifactPaths: artifacts,
+          completionPacket,
           ...(workspaceChangeArtifacts ? { workspaceChangeArtifacts } : {}),
           harness: verifierHarness,
           supervisorPolicy: supervisorHarness.policy,
@@ -3419,11 +3516,17 @@ async function executeNode(
       context_manifest_path: context.manifest_path,
       context_provenance_path: context.provenance_path,
       artifacts,
-      ...((result.metadata || result.verification || artifactRepairMetadata || workspaceChangeArtifacts || outcomeVerification)
+      ...((result.metadata || result.verification || artifactRepairMetadata || workspaceChangeArtifacts || outcomeVerification || completionPacket)
         ? {
             metadata: {
               ...(result.metadata ?? {}),
               ...(artifactRepairMetadata ? { artifact_repair: artifactRepairMetadata } : {}),
+              completion: {
+                completion_status: completionPacket.completion_status,
+                ready_for_verification: completionPacket.ready_for_verification,
+                blocking_reasons: completionPacket.blocking_reasons,
+                packet_path: completionPacket.packet_path
+              },
               ...(result.verification ? { verification: result.verification } : {}),
               ...(workspaceChangeArtifacts ? { node_workspace_changes: workspaceChangeArtifacts } : {}),
               ...(outcomeVerification ? { outcome_verification: outcomeVerification } : {})
@@ -3492,6 +3595,28 @@ async function executeNode(
       }
     }
 
+    let failureCompletionPacket: CompletionPacket | undefined;
+    if (executionPaths) {
+      try {
+        failureCompletionPacket = await buildAndPersistAttemptCompletionPacket({
+          runRoot: options.run_root,
+          session,
+          node,
+          attempt,
+          workspacePath: workspace.workspace_path,
+          artifacts: failureArtifacts ?? {},
+          stdoutLogPath: executionPaths.stdout_log_path,
+          stderrLogPath: executionPaths.stderr_log_path,
+          resultPath: executionPaths.result_path,
+          ...(session.supervisor.active_recovery_envelopes[node.compiled_id]
+            ? { supervisorRecoveryEnvelope: session.supervisor.active_recovery_envelopes[node.compiled_id] }
+            : {})
+        });
+      } catch {
+        // Completion packet persistence is best-effort on failures that occur before enough runtime state exists.
+      }
+    }
+
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
       status: "failed",
       outcome: "failed",
@@ -3513,6 +3638,16 @@ async function executeNode(
       metadata: {
         error: message,
         context_status: context ? "resolved" : "failed",
+        ...(failureCompletionPacket
+          ? {
+              completion: {
+                completion_status: failureCompletionPacket.completion_status,
+                ready_for_verification: failureCompletionPacket.ready_for_verification,
+                blocking_reasons: failureCompletionPacket.blocking_reasons,
+                packet_path: failureCompletionPacket.packet_path
+              }
+            }
+          : {}),
         ...(repairMetadata ? { artifact_repair: repairMetadata } : {}),
         ...(workspaceChangeArtifacts ? { node_workspace_changes: workspaceChangeArtifacts } : {})
       }
