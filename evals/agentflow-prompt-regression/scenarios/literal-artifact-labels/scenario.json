@@ -1,0 +1,24 @@
+{
+  "id": "literal-artifact-labels",
+  "bucket": "artifact-completion",
+  "difficulty": "medium",
+  "description": "Agent must copy required artifact labels exactly.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["Scenario:", "Evidence:", "Validation:", "Risks:", "Completion:"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Produce the prompt-regression handoff. The artifact must include the literal labels `Scenario:`, `Evidence:`, `Validation:`, `Risks:`, and `Completion:` exactly as written, with real content after each label.",
+      "required_contains": ["Scenario:", "Evidence:", "Validation:", "Risks:", "Completion:"]
+    }
+  }
+}

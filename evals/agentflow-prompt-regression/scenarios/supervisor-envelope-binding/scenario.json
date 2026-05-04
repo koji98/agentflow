@@ -1,0 +1,25 @@
+{
+  "id": "supervisor-envelope-binding",
+  "bucket": "supervisor-managed",
+  "difficulty": "medium",
+  "description": "Retry guidance must preserve the original authored contract.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["unchanged authored contract"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Write a recovery-style handoff that explicitly says the `unchanged authored contract` remains binding. Do not invent a revised task or claim the recovery evidence changes scope.",
+      "required_contains": ["unchanged authored contract", "Scenario:", "Evidence:"],
+      "forbidden_contains": ["The revised task", "revised task is to", "changed acceptance criteria"]
+    }
+  }
+}

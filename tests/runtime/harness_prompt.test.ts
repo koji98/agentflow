@@ -25,6 +25,38 @@ function baseInvocation(overrides: Partial<AgentInvocation> = {}): AgentInvocati
 }
 
 describe("harness prompt rendering", () => {
+  it("renders the standard worker prompt in the contract-first section order", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      graphGoal: "Ship the wider feature safely.",
+      artifacts: {
+        handoff: {
+          from: "output_dir",
+          path: "handoff.md",
+          description: "Markdown handoff."
+        }
+      }
+    }));
+    const sections = [
+      "## Role",
+      "## Contract Priority",
+      "## Working Loop",
+      "## Node Task",
+      "## Graph Context",
+      "## Workspace",
+      "## Context",
+      "## Agentflow Runtime CLI",
+      "## Artifact Contract",
+      "## Final Handoff"
+    ];
+
+    for (const section of sections) {
+      expect(prompt).toContain(section);
+    }
+    for (let index = 0; index < sections.length - 1; index += 1) {
+      expect(prompt.indexOf(sections[index]!)).toBeLessThan(prompt.indexOf(sections[index + 1]!));
+    }
+  });
+
   it("makes the node task primary and graph context secondary", () => {
     const prompt = renderHarnessPrompt(baseInvocation({
       graphGoal: "Ship the wider feature safely.",
@@ -82,7 +114,19 @@ describe("harness prompt rendering", () => {
 
     expect(prompt).toContain("copy those strings exactly into the artifact body");
     expect(prompt).toContain("`Scenario:` is not satisfied by `# Scenario` or a paraphrase");
+    expect(prompt).toContain("Forbidden or excluded content overrides exact-phrase copying");
+    expect(prompt).toContain("including in a negated sentence saying you excluded it");
+    expect(prompt).toContain("Do not restate excluded content to explain that it was ignored");
+    expect(prompt).toContain("Risks:` sections should contain only live risks for the requested deliverable");
+    expect(prompt).toContain("Do not copy stale prior-artifact payloads, any value or content described as stale/noise");
+    expect(prompt).toContain("Summarize why they are non-authoritative without preserving exact marker values");
+    expect(prompt).toContain("For multi-line Markdown, write a file and publish it with `af artifact write <name> --file <path>`");
     expect(prompt).toContain("do not encode newlines as literal `\\n`");
+    expect(prompt).toContain("If a declared artifact path ends in `.json`, write valid JSON that parses cleanly");
+    expect(prompt).toContain("Do not write prospective completion-state claims into artifacts");
+    expect(prompt).toContain("artifacts must stay true after the final completion check runs");
+    expect(prompt).toContain("If you mention validation, include the exact command/tool name and observed result");
+    expect(prompt).toContain("ready once validation is recorded");
     expect(prompt).toContain("contains no placeholder text, blank evidence slots, or unresolved template values.");
   });
 
@@ -92,17 +136,27 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("## Working Loop");
     expect(prompt).toContain("Drive the node to completion within its boundary");
     expect(prompt).toContain(
-      "inspect runtime status and context, make the smallest maintainable change, run named validation"
+      "run exact `af` commands named by the node task first"
     );
+    expect(prompt).toContain("When the node task says to use `af context show`, run `af context show` before `af status`");
+    expect(prompt).toContain("When the node task names an exact command, run that command exactly");
     expect(prompt).toContain("af complete check");
     expect(prompt).toContain("Log meaningful progress after verification");
+    expect(prompt).toContain("Omit ignored context/noise rather than memorializing it in the artifact");
+    expect(prompt).toContain("Do not log a blocking finding for an issue you can resolve inside this node");
+    expect(prompt).toContain("treat that output as repair feedback");
+    expect(prompt).toContain("blocking findings remain active completion blockers");
     expect(prompt).toContain("af log --type finding --finding-kind <observation|issue|risk|blocker>");
+    expect(prompt).toContain("Every `af log --evidence` JSON value must include `kind` and `summary`");
+    expect(prompt).toContain("`kind` must be one of `command_output`, `artifact`, `workspace_diff`, `context`, `runtime_event`, `external_state`, `human_input`, or `tool_output`");
+    expect(prompt).toContain("For self-resolvable issues, use `finding-kind issue` or `risk`");
     expect(prompt).toContain("af log --type decision");
     expect(prompt).toContain("--rationale <why>");
     expect(prompt).toContain("--contract-implication <effect>");
     expect(prompt).toContain("Investigate ambiguity instead of guessing");
     expect(prompt).toContain("Agentflow is the runner, not the work target.");
-    expect(prompt).toContain("Do not open or follow global Agentflow skills");
+    expect(prompt).toContain("Do not consult ambient Agentflow playbooks");
+    expect(prompt).toContain("If the node task names `af context show`, run that exact command before optional runtime status checks");
     expect(prompt).toContain("stop and respond immediately");
     expect(prompt).not.toContain("Use `af --help` only when the options below are insufficient.");
     expect(prompt).not.toContain("af artifact list");

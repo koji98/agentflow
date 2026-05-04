@@ -9,7 +9,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Use the local pinned fixture repo as authority.",
+      "Do not treat sources outside the local pinned fixture repo as authority.",
       "Do not use public network sources during the node run.",
       "Do not inspect upstream PR patches or oracle commits.",
       "Do not edit regression tests, package manifests, lockfiles, or generated files."
@@ -76,9 +76,9 @@
             "Do not edit `AGENTFLOW_EVAL_TASK.md` or files matching `agentflow-realworld-*`.",
             "Do not edit test-runner configuration, package manifests, lockfiles, regression tests, generated files, or validation cache/output files unless the issue itself requires that production change.",
             "Do not add dependencies.",
-            "If validation needs cache or output redirection, use command-line flags or temporary paths outside the repo; do not persist validation-only configuration in the workspace.",
-            "Use repository search to find the relevant implementation and nearby tests; do not read broad source directories when the task can be narrowed first.",
-            "Prefer repository-local patterns and focused tests over broad rewrites."
+            "Do not persist validation-only cache or output redirection configuration in the workspace; use command-line flags or temporary paths outside the repo.",
+            "Do not read broad source directories when repository search can first narrow relevant implementation and nearby tests.",
+            "Do not choose broad rewrites over repository-local patterns and focused tests."
           ]
         }
       },

@@ -1,0 +1,42 @@
+{
+  "id": "tool-overlap-selection",
+  "bucket": "tool-discipline",
+  "difficulty": "hard",
+  "description": "Agent must choose the distinct requested tool when tool names overlap.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true,
+    "simulation": {
+      "tool_calls": [
+        {
+          "id": "lookup-overlap-ok",
+          "command": "fixture-lookup",
+          "match": { "argv_exact": ["--case", "overlap"] },
+          "response": { "stdout": "selected=lookup-overlap-ok\n" }
+        },
+        {
+          "id": "search-overlap-wrong",
+          "command": "fixture-search",
+          "match": { "argv_contains": ["overlap"] },
+          "response": { "stdout": "selected=wrong-tool\n" }
+        }
+      ]
+    }
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["lookup-overlap-ok"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Two local tools sound similar. Use only `fixture-lookup --case overlap`, not `fixture-search`, then write the selected value in the handoff.",
+      "required_contains": ["lookup-overlap-ok", "Scenario:"],
+      "required_simulation": [{ "command": "fixture-lookup", "rule_id": "lookup-overlap-ok" }],
+      "forbidden_simulation": [{ "command": "fixture-search", "rule_id": "search-overlap-wrong" }]
+    }
+  }
+}

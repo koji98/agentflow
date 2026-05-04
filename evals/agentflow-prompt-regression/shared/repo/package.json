@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "test": "node scripts/fail-then-pass.mjs"
+  },
+  "dependencies": {}
+}

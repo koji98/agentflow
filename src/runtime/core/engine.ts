@@ -2368,6 +2368,9 @@ async function defaultCheckExecutor(
     repo_path: context.workspace_path,
     model: context.node.effective_policy.model,
     base_env: context.environment,
+    ...(context.node.effective_policy.harness_config
+      ? { harness_config: context.node.effective_policy.harness_config }
+      : {}),
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
@@ -2569,6 +2572,9 @@ async function defaultAgentExecutor(
     runtimeDir,
     sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
     ...(context.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
+    ...(context.node.effective_policy.harness_config
+      ? { harnessConfig: context.node.effective_policy.harness_config }
+      : {}),
     model: context.node.effective_policy.model,
     baseEnv: context.environment,
     ...(context.node.effective_policy.reasoning_effort

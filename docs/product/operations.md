@@ -64,6 +64,7 @@ Important launch behavior:
 - `workspace_backend: "worktree"` creates isolated git worktrees and cleans them up at terminal state.
 - `workspace_backend: "inplace"` runs directly against the configured repo path.
 - Codex CLI and Cursor CLI receive the same Agentflow context, `af` runtime CLI, plugin tool, artifact, timeout, and sandbox contract.
+- Harness-native config is isolated by default. Declare Codex MCP/plugins or Cursor config/permissions in `profiles.*.harness_config` when they are part of the intended run; use `isolation: "inherit_user"` only when accepting non-reproducible local harness behavior.
 - `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.
 - `checkpoint` nodes are planned human gates inside repeat bodies; they prompt on a TTY when reached and feed pass, deny, or abort back into the graph.
 - Supervisor `pause_for_human` is an authority pause, not a graph node; local context, validation, artifact, workspace, and recoverable environment failures should attempt machine recovery before a pause is considered.

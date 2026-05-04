@@ -8,7 +8,7 @@
       "The declared handoff artifact is reviewable."
     ],
     "constraints": [
-      "Use only local fixtures supplied by the eval scenario."
+      "Do not use sources outside the local fixtures supplied by the eval scenario."
     ]
   },
   "repos": {

@@ -32,6 +32,7 @@ export interface CompletionEvidence {
   ref?: string;
   summary: string;
   status?: "passed" | "failed" | "blocked" | "unknown";
+  data?: Record<string, unknown>;
 }
 
 export interface RuntimeLogEntry {
@@ -87,14 +88,14 @@ export interface CompletionDeclaredArtifact {
   path: string;
   expected_path: string;
   description: string;
-  status: "present" | "missing" | "empty" | "placeholder" | "blocked";
+  status: "present" | "missing" | "empty" | "placeholder" | "invalid_json" | "forbidden_content" | "missing_required_content" | "blocked";
   current_attempt: boolean;
   size_bytes?: number;
 }
 
 export interface CompletionArtifactFinding {
   artifact: string;
-  kind: "missing" | "empty" | "placeholder" | "stale_prior_attempt" | "blocked";
+  kind: "missing" | "empty" | "placeholder" | "invalid_json" | "forbidden_content" | "missing_required_content" | "stale_prior_attempt" | "blocked";
   summary: string;
   evidence_ref?: string;
 }

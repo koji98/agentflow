@@ -68,7 +68,7 @@ If `public_artifact` is omitted, the angle remains private evidence only. The pu
       "The packet preserves evidence, uncertainty, and next actions."
     ],
     "constraints": [
-      "Repository conventions remain primary authority."
+      "Do not treat sources outside repository conventions as primary authority."
     ]
   },
   "context": [

@@ -30,6 +30,17 @@ export interface OutcomeVerificationPromptCompletionPacket {
   ready_for_verification: boolean;
   blocking_reasons: string[];
   missing_artifacts: string[];
+  declared_artifacts?: Array<{
+    name: string;
+    status: string;
+    current_attempt: boolean;
+    size_bytes?: number;
+  }>;
+  artifact_findings?: Array<{
+    artifact: string;
+    kind: string;
+    summary: string;
+  }>;
   packet_path: string;
 }
 
@@ -238,6 +249,20 @@ function renderCompletionPacket(packet: OutcomeVerificationPromptCompletionPacke
     }
   }
 
+  if (packet.declared_artifacts && packet.declared_artifacts.length > 0) {
+    lines.push("- Declared artifact status:");
+    for (const artifact of packet.declared_artifacts) {
+      lines.push(`  - ${artifact.name}: ${artifact.status}; current_attempt=${artifact.current_attempt}${artifact.size_bytes !== undefined ? `; size=${artifact.size_bytes}` : ""}`);
+    }
+  }
+
+  if (packet.artifact_findings && packet.artifact_findings.length > 0) {
+    lines.push("- Artifact findings:");
+    for (const finding of packet.artifact_findings) {
+      lines.push(`  - ${finding.artifact}:${finding.kind}: ${finding.summary}`);
+    }
+  }
+
   if (packet.blocking_reasons.length > 0) {
     lines.push("- Blocking reasons:");
     for (const reason of packet.blocking_reasons) {
@@ -277,6 +302,7 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "- A required declared artifact that is empty, placeholder-only, missing the requested content, or inconsistent with the final response is blocker evidence even when the final response claims success.",
     "- The Declared Artifacts section below is authoritative for artifact presence. If a declared artifact snippet has a path, size/content, and no read error, treat that artifact as present; do not claim it is missing because a separate file search, transcript, or directory listing appears incomplete.",
     "- Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section, has a read error, or the inlined content proves the artifact does not satisfy the authored artifact contract.",
+    "- For exact labels or literal phrase requirements, defer to the Completion Packet artifact findings when the packet is ready for verification. Do not invent a missing-literal blocker when the packet reports the artifact present with no placeholder, forbidden-content, or missing-required-content finding and the inlined artifact text contains the literal.",
     "- If an artifact is truncated in this prompt, read the full artifact path before making a blocker judgment that depends on omitted content.",
     "- Set passed=false only when there is strong, concrete, actionable blocker evidence that the node violated the graph or node contract.",
     "- Ambiguous, incomplete, or lower-confidence evidence should become a non-blocker finding unless it directly contradicts a required contract point.",

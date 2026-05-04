@@ -1,0 +1,34 @@
+{
+  "id": "managed-loop-exhaustion",
+  "bucket": "supervisor-managed",
+  "difficulty": "hard",
+  "description": "Managed loop exhaustion should leave repairable evidence instead of silent terminal drift.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["repairable evidence"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Write a managed-loop-exhaustion evidence handoff. It must contain `repairable evidence`, the exact phrase `failed criterion shape`, and the exact phrase `next forward action` rather than silently terminating.",
+      "required_contains": [
+        "repairable evidence",
+        {
+          "any": [
+            { "text": "failed criterion", "case_sensitive": false },
+            { "text": "failure shape", "case_sensitive": false }
+          ]
+        },
+        { "text": "next forward action", "case_sensitive": false },
+        "Scenario:"
+      ]
+    }
+  }
+}

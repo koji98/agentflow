@@ -27,6 +27,16 @@ interface ArtifactInspection {
   findings: CompletionArtifactFinding[];
 }
 
+interface ForbiddenArtifactContent {
+  term: string;
+  source: string;
+}
+
+interface RequiredArtifactContent {
+  term: string;
+  source: string;
+}
+
 interface HelperSessionSnapshot {
   agent_id: string;
   parent_agent_id: string;
@@ -84,7 +94,11 @@ const placeholderPatterns = [
   /\bTODO\b/iu,
   /\bTBD\b/iu,
   /lorem ipsum/iu,
-  /placeholder/iu,
+  /\bplaceholder\s+(?:text|content|value|section|here)\b/iu,
+  /\[\s*placeholder[^\]]*\]/iu,
+  /\b(?:run|execute|validation|command)\s*:?[\s`]*\\\s+(?:from|in|with|as)\b/iu,
+  /\bready\b[^\n.]{0,80}\bonce\b[^\n.]{0,80}\b(?:validation|check|recorded)\b/iu,
+  /\b(?:remains|still needs|yet)\s+to\s+be\s+(?:run|recorded|verified|completed)\b/iu,
   /fill this in/iu,
   /to be filled/iu,
   /not implemented/iu,
@@ -96,6 +110,58 @@ function containsPlaceholder(content: string): boolean {
   return placeholderPatterns.some((pattern) => pattern.test(content));
 }
 
+const forbiddenSentencePattern = /\b((?:do not|don't|must not|should not|never)[^.!?\n]*(?:contain|include|use|summarize|cite|rely on|copy|mention|write)[^.!?\n]*)/giu;
+const forbiddenRequirementSignalPattern = /\b(?:do not|don't|must not|should not|never)\b/iu;
+const backtickedTermPattern = /`([^`\n]+)`/gu;
+const requiredArtifactTermContextPattern = /\b(?:includes?|including|contains?|copy|say|with|literal labels?|exact phrases?|discovered risk that|risk that|finding that)\b/iu;
+const forbiddenBeforeTermPattern = /\b(?:do not|don't|must not|should not|never)\b[^`\n]*$/iu;
+
+function extractForbiddenArtifactContent(texts: string[]): ForbiddenArtifactContent[] {
+  const terms = new Map<string, ForbiddenArtifactContent>();
+  for (const text of texts) {
+    for (const sentence of text.matchAll(forbiddenSentencePattern)) {
+      const source = sentence[1]?.trim();
+      if (!source) {
+        continue;
+      }
+      for (const match of source.matchAll(backtickedTermPattern)) {
+        const term = match[1]?.trim();
+        if (!term || terms.has(term)) {
+          continue;
+        }
+        terms.set(term, { term, source });
+      }
+    }
+  }
+  return [...terms.values()];
+}
+
+function extractRequiredArtifactContent(texts: string[]): RequiredArtifactContent[] {
+  const terms = new Map<string, RequiredArtifactContent>();
+  for (const text of texts) {
+    for (const match of text.matchAll(backtickedTermPattern)) {
+      const term = match[1]?.trim();
+      if (!term || terms.has(term) || match.index === undefined) {
+        continue;
+      }
+      const before = text.slice(Math.max(0, match.index - 140), match.index);
+      const after = text.slice(match.index + match[0].length, Math.min(text.length, match.index + match[0].length + 140));
+      if (forbiddenBeforeTermPattern.test(before)) {
+        continue;
+      }
+      const source = `${before}${match[0]}${after}`.trim();
+      if (!requiredArtifactTermContextPattern.test(before) && !requiredArtifactTermContextPattern.test(after)) {
+        continue;
+      }
+      if (forbiddenRequirementSignalPattern.test(after) && !requiredArtifactTermContextPattern.test(before)) {
+        continue;
+      }
+      terms.set(term, { term, source });
+    }
+  }
+  return [...terms.values()];
+}
+
 async function inspectArtifact(options: {
   name: string;
   definition: ArtifactDefinition;
@@ -103,6 +169,9 @@ async function inspectArtifact(options: {
   currentAttemptPath: string | undefined;
   priorAttempts: RuntimeNodeAttempt[];
   sandbox: BuildCompletionPacketOptions["sandbox"];
+  forbiddenContent: ForbiddenArtifactContent[];
+  requiredContent: RequiredArtifactContent[];
+  declaredArtifactIdentifiers: string[];
 }): Promise<ArtifactInspection> {
   const findings: CompletionArtifactFinding[] = [];
   const currentAttempt = options.currentAttemptPath === options.expectedPath || await fileExists(options.expectedPath);
@@ -240,6 +309,91 @@ async function inspectArtifact(options: {
     };
   }
 
+  if (options.definition.path.toLocaleLowerCase().endsWith(".json")) {
+    try {
+      JSON.parse(content);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      findings.push({
+        artifact: options.name,
+        kind: "invalid_json",
+        summary: `Declared JSON artifact "${options.name}" does not parse: ${message}`,
+        evidence_ref: options.expectedPath
+      });
+      return {
+        artifact: {
+          name: options.name,
+          required: true,
+          from: options.definition.from,
+          path: options.definition.path,
+          expected_path: options.expectedPath,
+          description: options.definition.description,
+          status: "invalid_json",
+          current_attempt: true,
+          size_bytes: sizeBytes
+        },
+        findings
+      };
+    }
+  }
+
+  const forbidden = options.forbiddenContent.find((rule) => content.includes(rule.term));
+  if (forbidden) {
+    findings.push({
+      artifact: options.name,
+      kind: "forbidden_content",
+      summary: `Declared artifact "${options.name}" contains contract-forbidden content: ${forbidden.term}.`,
+      evidence_ref: options.expectedPath
+    });
+    return {
+      artifact: {
+        name: options.name,
+        required: true,
+        from: options.definition.from,
+        path: options.definition.path,
+        expected_path: options.expectedPath,
+        description: options.definition.description,
+        status: "forbidden_content",
+        current_attempt: true,
+        size_bytes: sizeBytes
+      },
+      findings
+    };
+  }
+
+  const missingRequired = options.requiredContent.find((rule) => {
+    if (
+      rule.term === options.name ||
+      rule.term === options.definition.path ||
+      options.declaredArtifactIdentifiers.includes(rule.term)
+    ) {
+      return false;
+    }
+    return !content.includes(rule.term);
+  });
+  if (missingRequired) {
+    findings.push({
+      artifact: options.name,
+      kind: "missing_required_content",
+      summary: `Declared artifact "${options.name}" is missing required exact content: ${missingRequired.term}.`,
+      evidence_ref: options.expectedPath
+    });
+    return {
+      artifact: {
+        name: options.name,
+        required: true,
+        from: options.definition.from,
+        path: options.definition.path,
+        expected_path: options.expectedPath,
+        description: options.definition.description,
+        status: "missing_required_content",
+        current_attempt: true,
+        size_bytes: sizeBytes
+      },
+      findings
+    };
+  }
+
   return {
     artifact: {
       name: options.name,
@@ -290,11 +444,13 @@ function normalizeEvidence(value: unknown): RuntimeLogEntry["evidence"] | undefi
     }
     const ref = hasOwnString(entry, "ref");
     const status = hasOwnString(entry, "status");
+    const data = isRecord(entry.data) ? entry.data : undefined;
     return [{
       kind: kind as (typeof evidenceKinds)[number],
       ...(ref ? { ref } : {}),
       summary,
-      ...(status ? { status: status as "passed" | "failed" | "blocked" | "unknown" } : {})
+      ...(status ? { status: status as "passed" | "failed" | "blocked" | "unknown" } : {}),
+      ...(data ? { data } : {})
     }];
   });
 
@@ -481,7 +637,7 @@ function extractLiteralCommands(criteria: string[]): string[] {
     const backtickMatches = criterion.match(/`([^`]+)`/gu) ?? [];
     for (const wrapped of backtickMatches) {
       const value = wrapped.slice(1, -1).trim();
-      if (backtickedCommandPattern.test(value)) {
+      if (backtickedCommandPattern.test(value) || isGenericBacktickedCommand(value)) {
         commands.add(value);
       }
     }
@@ -494,6 +650,25 @@ function extractLiteralCommands(criteria: string[]): string[] {
   }
 
   return [...commands];
+}
+
+function isGenericBacktickedCommand(value: string): boolean {
+  const parts = value.trim().split(/\s+/u);
+  if (parts.length < 2) {
+    return false;
+  }
+
+  const executable = parts[0] ?? "";
+  if (!/[./-]/u.test(executable)) {
+    return false;
+  }
+
+  return parts.slice(1).some((part) =>
+    part.startsWith("-") ||
+    part.includes("=") ||
+    part.includes("/") ||
+    part.includes(".")
+  );
 }
 
 async function readAttemptTranscript(attempt: RuntimeNodeAttempt): Promise<string> {
@@ -511,12 +686,35 @@ async function readAttemptTranscript(attempt: RuntimeNodeAttempt): Promise<strin
   return chunks.join("\n");
 }
 
+type RuntimeEvidence = NonNullable<RuntimeLogEntry["evidence"]>[number];
+
+function evidenceDataStrings(value: unknown): string[] {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(evidenceDataStrings);
+  }
+  if (isRecord(value)) {
+    return Object.values(value).flatMap(evidenceDataStrings);
+  }
+  return [];
+}
+
+function commandEvidenceText(evidence: RuntimeEvidence): string[] {
+  return [
+    evidence.ref,
+    evidence.summary,
+    ...evidenceDataStrings(evidence.data)
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
 function logContainsCommandEvidence(logs: RuntimeLogEntry[], command: string): RuntimeLogEntry | undefined {
   return logs.find((log) => {
     const evidence = log.evidence ?? [];
     return evidence.some((item) =>
-      item.kind === "command_output" &&
-      (item.ref === command || item.summary.includes(command))
+      (item.kind === "command_output" || item.kind === "tool_output") &&
+      commandEvidenceText(item).some((value) => value.includes(command))
     );
   });
 }
@@ -689,6 +887,22 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
   const declaredArtifacts: CompletionDeclaredArtifact[] = [];
   const artifactFindings: CompletionArtifactFinding[] = [];
   const priorAttempts = options.priorAttempts ?? [];
+  const forbiddenContent = extractForbiddenArtifactContent([
+    options.node.intent.goal,
+    ...options.node.intent.acceptance_criteria,
+    ...options.node.intent.constraints,
+    ...Object.values(options.node.declared_artifacts).map((artifact) => artifact.description)
+  ]);
+  const requiredContent = extractRequiredArtifactContent([
+    options.node.intent.goal,
+    ...options.node.intent.acceptance_criteria,
+    ...options.node.intent.constraints,
+    ...Object.values(options.node.declared_artifacts).map((artifact) => artifact.description)
+  ]);
+  const declaredArtifactIdentifiers = Object.entries(options.node.declared_artifacts).flatMap(([name, definition]) => [
+    name,
+    definition.path
+  ]);
   for (const [name, definition] of Object.entries(options.node.declared_artifacts)) {
     const expectedPath = expectedArtifactPath({
       definition,
@@ -703,7 +917,10 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
       expectedPath,
       currentAttemptPath: options.attempt.artifacts[name],
       priorAttempts,
-      sandbox: options.sandbox
+      sandbox: options.sandbox,
+      forbiddenContent,
+      requiredContent,
+      declaredArtifactIdentifiers
     });
     declaredArtifacts.push(inspected.artifact);
     artifactFindings.push(...inspected.findings);
@@ -715,7 +932,11 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
     (log.finding_kind === "blocker" || log.blocking === true)
   );
   const validationEvidence = await buildValidationEvidence({
-    acceptanceCriteria: options.node.intent.acceptance_criteria,
+    acceptanceCriteria: [
+      options.node.intent.goal,
+      ...options.node.intent.acceptance_criteria,
+      ...options.node.intent.constraints
+    ],
     attempt: options.attempt,
     logs
   });

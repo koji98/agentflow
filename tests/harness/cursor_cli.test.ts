@@ -353,7 +353,8 @@ describe("cursor cli harness", () => {
         expect.arrayContaining([
           `Read(${repoDir}/**)`,
           `Read(${join(executionDir, "context", "packet.json")})`,
-          `Read(${join(executionDir, "context", "manifest.md")})`
+          `Read(${join(executionDir, "context", "manifest.md")})`,
+          `Read(${executionDir}/**)`
         ])
       );
       expect(cursorConfig.permissions.deny).toEqual(
@@ -522,6 +523,204 @@ describe("cursor cli harness", () => {
       );
       expect(cursorConfig.permissions.deny).toEqual([]);
     } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("merges declared cursor config and permissions into isolated generated config", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-declared-config-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCursorBinary(tempRoot);
+    const harness = createCursorCliHarness({
+      binary: mock.binary_path
+    });
+
+    try {
+      const result = await harness.run({
+        runId: "run-declared",
+        executionId: "exec-declared",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        nodeGoal: "Use declared Cursor config.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "isolated",
+          cursor: {
+            config: {
+              editor: {
+                vimMode: true
+              },
+              telemetry: {
+                enabled: false
+              }
+            },
+            permissions: {
+              allow: ["Shell(npm test)"],
+              deny: ["WebFetch(*)"]
+            }
+          }
+        }
+      });
+
+      expect(result.status).toBe("passed");
+      const cursorConfig = JSON.parse(
+        await readFile(join(executionDir, ".cursor-config", "cli.json"), "utf8")
+      ) as {
+        editor: { vimMode: boolean };
+        telemetry: { enabled: boolean };
+        permissions: { allow: string[]; deny: string[] };
+      };
+
+      expect(cursorConfig.editor.vimMode).toBe(true);
+      expect(cursorConfig.telemetry.enabled).toBe(false);
+      expect(cursorConfig.permissions.allow).toEqual(
+        expect.arrayContaining([
+          `Read(${repoDir}/**)`,
+          `Write(${repoDir}/**)`,
+          "Shell(npm test)"
+        ])
+      );
+      expect(cursorConfig.permissions.deny).toEqual(["WebFetch(*)"]);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("inherits user cursor config only when the profile explicitly opts in", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-inherit-user-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    const userCursorConfigDir = join(tempRoot, "user-cursor-config");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCursorBinary(tempRoot);
+    const harness = createCursorCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
+    process.env.MOCK_ENV_PATH = mock.env_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-inherit",
+        executionId: "exec-inherit",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        baseEnv: {
+          ...process.env,
+          CURSOR_CONFIG_DIR: userCursorConfigDir
+        },
+        nodeGoal: "Use local Cursor configuration.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "inherit_user"
+        }
+      });
+
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+
+      expect(result.status).toBe("passed");
+      expect(env.CURSOR_CONFIG_DIR).toBe(userCursorConfigDir);
+      expect(result.metadata).not.toHaveProperty("cursor_config_dir");
+    } finally {
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("forces isolated cursor config for trust-check prompts even when the profile inherits user config", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-trust-check-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    const userCursorConfigDir = join(tempRoot, "user-cursor-config");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCursorBinary(tempRoot);
+    const harness = createCursorCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
+    process.env.MOCK_ENV_PATH = mock.env_path;
+
+    try {
+      const result = await harness.run({
+        promptKind: "ai_check",
+        runId: "run-trust",
+        executionId: "exec-trust",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "read-only",
+        model: "gpt-5-cursor",
+        baseEnv: {
+          ...process.env,
+          CURSOR_CONFIG_DIR: userCursorConfigDir
+        },
+        nodeGoal: "Judge the result.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "inherit_user",
+          cursor: {
+            permissions: {
+              allow: ["Shell(npm test)"]
+            }
+          }
+        }
+      });
+
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+      const cursorConfig = JSON.parse(
+        await readFile(join(executionDir, ".cursor-config", "cli.json"), "utf8")
+      ) as { permissions: { allow: string[]; deny: string[] } };
+
+      expect(result.status).toBe("passed");
+      expect(env.CURSOR_CONFIG_DIR).toBe(join(executionDir, ".cursor-config"));
+      expect(env.CURSOR_CONFIG_DIR).not.toBe(userCursorConfigDir);
+      expect(cursorConfig.permissions.allow).not.toContain("Shell(npm test)");
+      expect(cursorConfig.permissions.deny).toEqual(
+        expect.arrayContaining(["Write(*)", "Shell(*)", "WebFetch(*)", "Mcp(*:*)"])
+      );
+    } finally {
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
+      }
+
       await rm(tempRoot, { recursive: true, force: true });
     }
   });

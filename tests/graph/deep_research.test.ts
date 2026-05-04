@@ -118,6 +118,8 @@ describe("deep research managed pattern", () => {
       "market_scan__managed__pattern_deep_research__angle_02",
       "market_scan__managed__pattern_deep_research__angle_03"
     ]);
+    expect(JSON.stringify(fanout.steps[0])).toContain("research angle worker");
+    expect(JSON.stringify(fanout.steps[0])).not.toContain("expert");
     expect(finalNode).toEqual(
       expect.objectContaining({
         id: "market_scan",
@@ -129,6 +131,8 @@ describe("deep research managed pattern", () => {
         })
       })
     );
+    expect(JSON.stringify(finalNode)).toContain("final research publisher");
+    expect(JSON.stringify(finalNode)).not.toContain("expert");
   });
 
   it("adds balanced synthesis layers when more than three angle reports need synthesis", () => {
@@ -177,6 +181,8 @@ describe("deep research managed pattern", () => {
       "market_scan__managed__pattern_deep_research__synthesis_01_02",
       "market_scan__managed__pattern_deep_research__synthesis_01_03"
     ]);
+    expect(JSON.stringify(synthesisLayer.steps[0])).toContain("research synthesis worker");
+    expect(JSON.stringify(synthesisLayer.steps[0])).not.toContain("expert");
     expect(synthesisLayer.steps.map((step) => ("context" in step ? step.context?.length : 0))).toEqual([
       4,
       4,

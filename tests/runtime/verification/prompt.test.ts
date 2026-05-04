@@ -109,6 +109,7 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("The Declared Artifacts section below is authoritative for artifact presence.");
     expect(prompt).toContain("treat that artifact as present; do not claim it is missing");
     expect(prompt).toContain("Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section");
+    expect(prompt).toContain("defer to the Completion Packet artifact findings");
   });
 
   it("renders completion packet facts before artifact snippets", () => {
@@ -119,6 +120,16 @@ describe("renderOutcomeVerificationPrompt", () => {
           ready_for_verification: false,
           blocking_reasons: ["Missing expected artifact: patch_summary"],
           missing_artifacts: ["patch_summary"],
+          declared_artifacts: [{
+            name: "patch_summary",
+            status: "missing",
+            current_attempt: false
+          }],
+          artifact_findings: [{
+            artifact: "patch_summary",
+            kind: "missing",
+            summary: "Missing expected artifact: patch_summary"
+          }],
           packet_path: "/run/widget/completion-packet.json"
         }
       })
@@ -129,6 +140,8 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("- Ready for verification: false");
     expect(prompt).toContain("- Packet: /run/widget/completion-packet.json");
     expect(prompt).toContain("- Missing expected artifact: patch_summary");
+    expect(prompt).toContain("- patch_summary: missing; current_attempt=false");
+    expect(prompt).toContain("- patch_summary:missing: Missing expected artifact: patch_summary");
     expect(prompt.indexOf("## Completion Packet")).toBeLessThan(prompt.indexOf("## Declared Artifacts"));
   });
 

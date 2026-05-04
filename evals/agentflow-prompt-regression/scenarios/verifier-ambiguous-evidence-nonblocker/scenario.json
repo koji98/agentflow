@@ -1,0 +1,25 @@
+{
+  "id": "verifier-ambiguous-evidence-nonblocker",
+  "bucket": "verifier-behavior",
+  "difficulty": "medium",
+  "description": "Ambiguous lower-confidence evidence should be non-blocking unless it contradicts the contract.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["non-blocker ambiguity"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "There is harmless ambiguous evidence in stale docs. Write the handoff with `non-blocker ambiguity` and explain why it does not contradict the authored contract.",
+      "required_contains": ["non-blocker ambiguity", { "any": ["contradict", "conflict"] }, "Scenario:"],
+      "forbid_blocking_logs": true
+    }
+  }
+}

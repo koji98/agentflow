@@ -150,6 +150,516 @@ describe("completion packet", () => {
     ]);
   });
 
+  it("accepts artifact text that states placeholder checks passed", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: completed",
+        "Evidence: local checks passed.",
+        "Validation: focused validation passed.",
+        "Risks: none identified.",
+        "Completion: No placeholders or unresolved template values remain in this file."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode(),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.artifact_findings).toEqual([]);
+    expect(packet.declared_artifacts).toEqual([
+      expect.objectContaining({
+        name: "implementation_summary",
+        status: "present"
+      })
+    ]);
+  });
+
+  it("rejects declared JSON artifacts that do not parse", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "draft-packet.json");
+    await writeFile(
+      artifactPath,
+      [
+        "{",
+        '  "scenario": "managed-cycle-feedback",',
+        '  "completion": "Draft generated"',
+        '  "notes_artifact": "work-notes.md"',
+        "}"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        declared_artifacts: {
+          draft_packet: {
+            from: "output_dir",
+            path: "draft-packet.json",
+            description: "Draft content packet."
+          }
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { draft_packet: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("incomplete");
+    expect(packet.artifact_findings).toEqual([
+      expect.objectContaining({
+        artifact: "draft_packet",
+        kind: "invalid_json",
+        summary: expect.stringContaining("does not parse")
+      })
+    ]);
+    expect(packet.declared_artifacts[0]).toEqual(expect.objectContaining({
+      status: "invalid_json"
+    }));
+  });
+
+  it("rejects declared artifacts that include contract-forbidden exact content", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: customer profile summary.",
+        "Evidence: canonical facts only.",
+        "Validation: focused validation passed.",
+        "Risks: legacy-agentflow-detour was ignored.",
+        "Completion: handoff written."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: "Write the summary. Do not include `legacy-agentflow-detour`.",
+          acceptance_criteria: ["The handoff omits excluded material."],
+          constraints: []
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("incomplete");
+    expect(packet.artifact_findings).toEqual([
+      expect.objectContaining({
+        artifact: "implementation_summary",
+        kind: "forbidden_content",
+        summary: expect.stringContaining("legacy-agentflow-detour")
+      })
+    ]);
+    expect(packet.declared_artifacts[0]).toEqual(expect.objectContaining({
+      status: "forbidden_content"
+    }));
+  });
+
+  it("rejects declared artifacts missing required exact content", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: verifier guidance.",
+        "Evidence: concrete path recorded.",
+        "Validation: next validation step recorded.",
+        "Risks: none identified.",
+        "Completion: handoff written with an actionable retry path."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: "Write a handoff that includes `actionable finding`, a concrete evidence path, and a next validation step.",
+          acceptance_criteria: ["The handoff is published."],
+          constraints: []
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("incomplete");
+    expect(packet.artifact_findings).toEqual([
+      expect.objectContaining({
+        artifact: "implementation_summary",
+        kind: "missing_required_content",
+        summary: expect.stringContaining("actionable finding")
+      })
+    ]);
+    expect(packet.declared_artifacts[0]).toEqual(expect.objectContaining({
+      status: "missing_required_content"
+    }));
+  });
+
+  it("requires exact artifact content with punctuation without requiring the artifact path literal", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "handoff.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: source edit skipped.",
+        "Evidence: No source edit required.",
+        "Validation: focused validation passed.",
+        "Risks: none identified.",
+        "Completion: handoff written."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        declared_artifacts: {
+          handoff: {
+            from: "output_dir",
+            path: "handoff.md",
+            description: "Publish `handoff.md` with `Evidence: no source edit required`."
+          }
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { handoff: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("incomplete");
+    expect(packet.artifact_findings).toEqual([
+      expect.objectContaining({
+        artifact: "handoff",
+        kind: "missing_required_content",
+        summary: expect.stringContaining("Evidence: no source edit required")
+      })
+    ]);
+  });
+
+  it("requires dotted materialized path literals from discovered-risk requirements", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: stale context conflict.",
+        "Evidence: context/materialized/stale_agentflow_noise/STALE_AGENTFLOW_SKILL.md is stale.",
+        "Validation: focused validation passed.",
+        "Risks: stale context was ignored.",
+        "Completion: handoff written."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: "Record the discovered risk that `docs/STALE_AGENTFLOW_SKILL.md` is stale and publish the handoff.",
+          acceptance_criteria: ["The handoff is published."],
+          constraints: []
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("incomplete");
+    expect(packet.artifact_findings).toEqual([
+      expect.objectContaining({
+        artifact: "implementation_summary",
+        kind: "missing_required_content",
+        summary: expect.stringContaining("docs/STALE_AGENTFLOW_SKILL.md")
+      })
+    ]);
+  });
+
+  it("does not require operational command literals from managed criteria text in artifacts", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "cycle-plan.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Objective",
+        "Plan another cycle.",
+        "",
+        "Validation plan",
+        "Run the managed completion criteria after execution."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: [
+            "Prepare the next managed work cycle.",
+            "Completion Model:",
+            "- always_fail (required, weight 1): command `exit 1`"
+          ].join("\n"),
+          acceptance_criteria: ["The plan addresses failed managed criteria."],
+          constraints: []
+        },
+        declared_artifacts: {
+          cycle_plan: {
+            from: "output_dir",
+            path: "cycle-plan.md",
+            description: "Focused plan for the next deep work cycle."
+          }
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { cycle_plan: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("ready_for_verification");
+    expect(packet.artifact_findings).toEqual([]);
+  });
+
+  it("does not require declared artifact filenames to appear in every artifact body", async () => {
+    const artifactRoot = resolveExecutionArtifactsDirectory(executionDir);
+    const notesPath = join(artifactRoot, "work-notes.md");
+    const summaryPath = join(artifactRoot, "draft-summary.md");
+    const packetPath = join(artifactRoot, "draft-packet.json");
+    await writeFile(notesPath, "Changed nothing useful.\n", "utf8");
+    await writeFile(summaryPath, "Draft summary.\n", "utf8");
+    await writeFile(packetPath, "{\"status\":\"draft\"}\n", "utf8");
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: "Write `work-notes.md`, `draft-summary.md`, and `draft-packet.json` for this managed cycle.",
+          acceptance_criteria: ["The draft artifacts are published."],
+          constraints: []
+        },
+        declared_artifacts: {
+          work_notes: {
+            from: "output_dir",
+            path: "work-notes.md",
+            description: "Notes from the current deep work cycle."
+          },
+          draft_summary: {
+            from: "output_dir",
+            path: "draft-summary.md",
+            description: "Draft content for public artifact summary."
+          },
+          draft_packet: {
+            from: "output_dir",
+            path: "draft-packet.json",
+            description: "Draft content for public artifact packet."
+          }
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: {
+          work_notes: notesPath,
+          draft_summary: summaryPath,
+          draft_packet: packetPath
+        }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("ready_for_verification");
+    expect(packet.artifact_findings).toEqual([]);
+  });
+
+  it("does not treat required exact content as forbidden when the same sentence has a separate exclusion", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: current-attempt",
+        "Evidence: fresh handoff.",
+        "Validation: focused validation passed.",
+        "Risks: none identified.",
+        "Completion: handoff written."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: "The current declared artifact must say `current-attempt` and must not contain `STALE_PRIOR_ARTIFACT`.",
+          acceptance_criteria: ["The handoff satisfies both literal requirements."],
+          constraints: []
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.artifact_findings).toEqual([]);
+    expect(packet.declared_artifacts[0]).toEqual(expect.objectContaining({
+      status: "present"
+    }));
+  });
+
+  it("rejects dangling validation commands and prospective completion text", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: malformed handoff",
+        "Evidence: context was inspected.",
+        "Validation: Run \\ from the repository workspace.",
+        "Risks: none recorded.",
+        "Completion: ready once validation is recorded."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode(),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("incomplete");
+    expect(packet.artifact_findings).toEqual([
+      expect.objectContaining({
+        artifact: "implementation_summary",
+        kind: "placeholder"
+      })
+    ]);
+  });
+
+  it("requires evidence for exact commands named in the node goal", async () => {
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: command evidence",
+        "Evidence: artifact written.",
+        "Validation: not recorded.",
+        "Risks: none identified.",
+        "Completion: handoff written."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: "Run `prompt-validate --case progress` and publish the handoff.",
+          acceptance_criteria: ["The handoff is published."],
+          constraints: []
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("incomplete");
+    expect(packet.validation_evidence).toEqual([
+      expect.objectContaining({
+        requirement: "prompt-validate --case progress",
+        status: "missing_evidence"
+      })
+    ]);
+  });
+
+  it("recognizes exact command validation evidence logged as structured data", async () => {
+    await mkdir(join(runRoot, "runtime"), { recursive: true });
+    await writeFile(
+      join(runRoot, "runtime", "log.jsonl"),
+      `${JSON.stringify({
+        log_id: "log-command",
+        execution_id: "exec__ship__attempt_1",
+        type: "progress",
+        summary: "Recorded fixture lookup validation.",
+        evidence: [{
+          kind: "command_output",
+          summary: "Executed the required fixture lookup.",
+          data: {
+            command: "fixture-lookup --case overlap",
+            output: "selected=lookup-overlap-ok"
+          }
+        }],
+        created_at: "2026-05-03T12:01:00.000Z"
+      })}\n`,
+      "utf8"
+    );
+    const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: command evidence",
+        "Evidence: fixture lookup succeeded.",
+        "Validation: fixture lookup output recorded.",
+        "Risks: none identified.",
+        "Completion: handoff written."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const packet = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: "Run `fixture-lookup --case overlap` and publish the handoff.",
+          acceptance_criteria: ["The handoff is published."],
+          constraints: []
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+
+    expect(packet.completion_status).toBe("ready_for_verification");
+    expect(packet.validation_evidence).toEqual([
+      expect.objectContaining({
+        requirement: "fixture-lookup --case overlap",
+        status: "present",
+        source: "runtime_log",
+        evidence_ref: "log-command"
+      })
+    ]);
+  });
+
   it("distinguishes current-attempt artifacts from stale prior-attempt artifacts", async () => {
     const priorArtifactPath = join(tempRoot, "prior", "implementation-summary.md");
     await mkdir(join(tempRoot, "prior"), { recursive: true });
@@ -226,6 +736,36 @@ describe("completion packet", () => {
         status: "missing_evidence"
       })
     ]);
+
+    await writeFile(
+      artifactPath,
+      [
+        "Scenario: verifier ambiguity.",
+        "Evidence: stale docs are non-authoritative.",
+        "Validation: no command required.",
+        "Risks: none identified.",
+        "Completion: non-blocker ambiguity does not contradict the authored contract."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const phrasePacket = await buildCompletionPacket({
+      runRoot,
+      node: makeNode({
+        intent: {
+          goal: "Write the handoff with `non-blocker ambiguity` and explain why it does not contradict the authored contract.",
+          acceptance_criteria: ["The handoff is published."],
+          constraints: []
+        }
+      }),
+      attempt: makeAttempt(executionDir, {
+        artifacts: { implementation_summary: artifactPath }
+      }),
+      workspacePath: workspace,
+      sandbox: "workspace-write"
+    });
+    expect(phrasePacket.completion_status).toBe("ready_for_verification");
+    expect(phrasePacket.validation_evidence).toEqual([]);
   });
 
   it("treats active blocking findings as blocked completion evidence", async () => {

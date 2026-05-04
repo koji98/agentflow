@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 
+import type { EffectiveHarnessConfig } from "../../graph/profiles.js";
 import type { ReasoningEffort } from "../../graph/schema.js";
 import type { HarnessAdapter, HarnessResult } from "../harness/types.js";
 
@@ -19,6 +20,7 @@ export interface RunAiCheckInvocation {
   repo_path: string;
   model: string | undefined;
   reasoning_effort?: ReasoningEffort;
+  harness_config?: EffectiveHarnessConfig;
   base_env?: NodeJS.ProcessEnv;
   skip_git_repo_check?: boolean;
   rubric: string | undefined;
@@ -213,6 +215,7 @@ export async function runAiCheck(
       repoPath: invocation.repo_path,
       sandbox: "read-only",
       ...(invocation.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
+      ...(invocation.harness_config ? { harnessConfig: invocation.harness_config } : {}),
       model: invocation.model,
       ...(invocation.reasoning_effort ? { reasoningEffort: invocation.reasoning_effort } : {}),
       ...(invocation.base_env ? { baseEnv: invocation.base_env } : {}),

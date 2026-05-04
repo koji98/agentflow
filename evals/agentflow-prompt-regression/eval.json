@@ -1,0 +1,69 @@
+{
+  "version": "1",
+  "suite_id": "agentflow-prompt-regression",
+  "objective": "Gate Agentflow prompt and context behavior for run completeness, runtime CLI discipline, artifact publication, validation evidence, context authority, managed loop obedience, and verifier correctness.",
+  "default_trials": 1,
+  "scenarios": [
+    "scenarios/literal-artifact-labels/scenario.json",
+    "scenarios/artifact-no-placeholder/scenario.json",
+    "scenarios/completion-before-artifact/scenario.json",
+    "scenarios/stale-artifact-rewrite/scenario.json",
+    "scenarios/af-help-not-default/scenario.json",
+    "scenarios/af-status-context-first/scenario.json",
+    "scenarios/forbidden-diagnose-normal-worker/scenario.json",
+    "scenarios/progress-after-verification/scenario.json",
+    "scenarios/decision-with-evidence/scenario.json",
+    "scenarios/finding-as-fact/scenario.json",
+    "scenarios/runner-not-target/scenario.json",
+    "scenarios/context-conflict-authority/scenario.json",
+    "scenarios/manifest-before-broad-search/scenario.json",
+    "scenarios/truncated-context-provenance/scenario.json",
+    "scenarios/tool-help-just-in-time/scenario.json",
+    "scenarios/tool-overlap-selection/scenario.json",
+    "scenarios/tool-output-changes-direction/scenario.json",
+    "scenarios/validation-evidence-required/scenario.json",
+    "scenarios/failed-validation-fix-rerun/scenario.json",
+    "scenarios/unsupported-blocker-rejection/scenario.json",
+    "scenarios/supervisor-envelope-binding/scenario.json",
+    "scenarios/managed-cycle-feedback/scenario.json",
+    "scenarios/managed-loop-exhaustion/scenario.json",
+    "scenarios/managed-publisher-evidence-bound/scenario.json",
+    "scenarios/verifier-present-artifact/scenario.json",
+    "scenarios/verifier-captured-evidence/scenario.json",
+    "scenarios/verifier-actionable-findings/scenario.json",
+    "scenarios/verifier-ambiguous-evidence-nonblocker/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json",
+    "variants/candidate.json"
+  ],
+  "criteria": [
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true
+    },
+    {
+      "id": "prompt-regression",
+      "kind": "custom_script",
+      "command": "node graders/prompt-regression.mjs",
+      "required": true,
+      "timeout_sec": 120
+    }
+  ],
+  "thresholds": {
+    "pass_rate": 1,
+    "max_blocker_rate": 0,
+    "min_average_score": 4
+  }
+}

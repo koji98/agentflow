@@ -24,6 +24,10 @@ import type {
   GraphDefaults,
   GraphIntent,
   GraphProfile,
+  HarnessConfig,
+  CodexHarnessConfig,
+  CursorHarnessConfig,
+  CursorHarnessPermissions,
   InputRules,
   ParallelNode,
   PluginToolReference,
@@ -107,6 +111,8 @@ export const defaultSupervisionPolicy: SupervisionPolicy = {
   profile: "supervisor",
   max_total_interventions: 3
 };
+
+const harnessIsolationModes = ["isolated", "inherit_user"] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -345,6 +351,29 @@ function readStringRecord(
   });
 
   return result;
+}
+
+function readUnknownRecord(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  label: string
+): Record<string, unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: `${label} must be an object.`
+    });
+    return undefined;
+  }
+
+  return { ...record };
 }
 
 function readEnumValue<T extends readonly string[]>(
@@ -622,6 +651,144 @@ function normalizeArtifactRepairPolicy(
   };
 }
 
+function normalizeCodexHarnessConfig(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): CodexHarnessConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "codex harness config must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["config", "mcp_servers", "plugins", "notify"], diagnostics);
+
+  const config = readUnknownRecord(record.config, `${path}.config`, diagnostics, "codex.config");
+  const mcp_servers = readUnknownRecord(record.mcp_servers, `${path}.mcp_servers`, diagnostics, "codex.mcp_servers");
+  const plugins = readUnknownRecord(record.plugins, `${path}.plugins`, diagnostics, "codex.plugins");
+  const notify =
+    record.notify === undefined
+      ? undefined
+      : Array.isArray(record.notify)
+        ? [...record.notify]
+        : undefined;
+
+  if (record.notify !== undefined && !Array.isArray(record.notify)) {
+    diagnostics.push({
+      path: `${path}.notify`,
+      message: "codex.notify must be an array."
+    });
+  }
+
+  return {
+    ...(config ? { config } : {}),
+    ...(mcp_servers ? { mcp_servers } : {}),
+    ...(plugins ? { plugins } : {}),
+    ...(notify !== undefined ? { notify } : {})
+  };
+}
+
+function normalizeCursorHarnessPermissions(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): CursorHarnessPermissions | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "cursor.permissions must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["allow", "deny"], diagnostics);
+
+  const allow = readStringArray(record.allow, `${path}.allow`, diagnostics);
+  const deny = readStringArray(record.deny, `${path}.deny`, diagnostics);
+
+  return {
+    ...(allow !== undefined ? { allow } : {}),
+    ...(deny !== undefined ? { deny } : {})
+  };
+}
+
+function normalizeCursorHarnessConfig(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): CursorHarnessConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "cursor harness config must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["config", "permissions"], diagnostics);
+
+  const config = readUnknownRecord(record.config, `${path}.config`, diagnostics, "cursor.config");
+  const permissions = normalizeCursorHarnessPermissions(record.permissions, `${path}.permissions`, diagnostics);
+
+  return {
+    ...(config ? { config } : {}),
+    ...(permissions ? { permissions } : {})
+  };
+}
+
+function normalizeHarnessConfig(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): HarnessConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "harness_config must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["isolation", "codex", "cursor"], diagnostics);
+
+  const isolation = readEnumValue(record.isolation, `${path}.isolation`, harnessIsolationModes, diagnostics);
+  const codex = normalizeCodexHarnessConfig(record.codex, `${path}.codex`, diagnostics);
+  const cursor = normalizeCursorHarnessConfig(record.cursor, `${path}.cursor`, diagnostics);
+
+  return {
+    ...(isolation ? { isolation } : {}),
+    ...(codex ? { codex } : {}),
+    ...(cursor ? { cursor } : {})
+  };
+}
+
 function normalizeGraphProfile(
   value: unknown,
   path: string,
@@ -651,7 +818,8 @@ function normalizeGraphProfile(
       "input_rules",
       "deterministic_check_defaults",
       "ai_check_defaults",
-      "artifact_repair"
+      "artifact_repair",
+      "harness_config"
     ],
     diagnostics
   );
@@ -688,6 +856,11 @@ function normalizeGraphProfile(
     `${path}.artifact_repair`,
     diagnostics
   );
+  const harness_config = normalizeHarnessConfig(
+    record.harness_config,
+    `${path}.harness_config`,
+    diagnostics
+  );
 
   return {
     ...(harness ? { harness } : {}),
@@ -700,7 +873,8 @@ function normalizeGraphProfile(
     ...(input_rules ? { input_rules } : {}),
     ...(deterministic_check_defaults ? { deterministic_check_defaults } : {}),
     ...(ai_check_defaults ? { ai_check_defaults } : {}),
-    ...(artifact_repair ? { artifact_repair } : {})
+    ...(artifact_repair ? { artifact_repair } : {}),
+    ...(harness_config ? { harness_config } : {})
   };
 }
 

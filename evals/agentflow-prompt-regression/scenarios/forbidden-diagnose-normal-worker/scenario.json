@@ -1,0 +1,25 @@
+{
+  "id": "forbidden-diagnose-normal-worker",
+  "bucket": "runtime-cli-discipline",
+  "difficulty": "medium",
+  "description": "Normal worker must not use recovery-only af commands.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["Scenario:"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Write the `normal-worker` handoff. There is no supervisor recovery envelope and no helper authority.",
+      "required_contains": [{ "any": ["normal-worker", "normal worker"] }, "Scenario:", "Completion:"],
+      "forbidden_af": ["diagnose", "learn", "spawn", "--help"]
+    }
+  }
+}

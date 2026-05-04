@@ -268,7 +268,7 @@ async function assertDeliveryAndInspect(runRoot: string, expectedStatus = "passe
   return { manifest, inspectPayload };
 }
 
-describe("golden end-to-end graph runs", () => {
+describe("golden end-to-end graph runs", { timeout: 90_000 }, () => {
   let tempRoot: string;
   let previousCodexBin: string | undefined;
 

@@ -96,7 +96,7 @@ function formatAngleLabel(angle: PatternDeepResearchAngle): string {
 
 function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepResearchAngle, index: number): string {
   return renderPrompt([
-    body("You are an expert deep researcher investigating one assigned angle for a larger managed research workflow. Your private report will be synthesized later, so gather strong useful evidence and preserve uncertainty clearly."),
+    body("You are a research angle worker investigating one assigned angle for a larger managed research workflow. Your private report will be synthesized later, so gather useful evidence and preserve uncertainty clearly."),
     section("Final Managed Workflow Contract", [
       "This is a private helper node inside a managed workflow. The final managed node owns the public artifact shape and final acceptance criteria below.",
       "Use this contract to understand what your evidence must support, but do not format this private angle report as the final public artifact unless the private output contract below says so.",
@@ -144,7 +144,7 @@ function buildSynthesisPrompt(
   group: number
 ): string {
   return renderPrompt([
-    body(`You are an expert research lead synthesizing ${inputCount} research packets into one higher-signal research packet.`),
+    body(`You are a research synthesis worker combining ${inputCount} research packets into one higher-signal research packet.`),
     section("Final Managed Workflow Contract", [
       "This is a private synthesis step inside a larger managed research workflow. The final public result will be published later.",
       "Use the final contract to preserve relevant evidence, but do not format this private synthesis as the final public artifact unless the private output contract below says so.",
@@ -174,7 +174,7 @@ function buildFinalPrompt(
 ): string {
   const publicAxisArtifacts = config.research.angles.filter((angle) => angle.public_artifact);
   return renderPrompt([
-    body(`You are the final research lead publishing the managed deep research result from ${inputCount} research packet${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
+    body(`You are the final research publisher for a managed deep research result from ${inputCount} research packet${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
     section("Managed Workflow Contract", [
       "This final publisher owns the managed workflow's public artifact contract. Internal helper reports are only evidence.",
       `Goal: ${config.intent.goal}`,

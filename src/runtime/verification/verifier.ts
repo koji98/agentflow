@@ -401,6 +401,9 @@ function buildVerifierInvocation(options: {
     repoPath: options.workspacePath,
     sandbox: "read-only",
     skipGitRepoCheck: true,
+    ...(policy?.harness_config ?? options.node.effective_policy.harness_config
+      ? { harnessConfig: policy?.harness_config ?? options.node.effective_policy.harness_config }
+      : {}),
     model: policy?.model ?? options.node.effective_policy.model,
     ...(options.baseEnv ? { baseEnv: options.baseEnv } : {}),
     ...(policy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort
@@ -500,6 +503,17 @@ function buildPromptCompletionPacket(packet: CompletionPacket): OutcomeVerificat
     ready_for_verification: packet.ready_for_verification,
     blocking_reasons: packet.blocking_reasons,
     missing_artifacts: packet.missing_artifacts,
+    declared_artifacts: packet.declared_artifacts.map((artifact) => ({
+      name: artifact.name,
+      status: artifact.status,
+      current_attempt: artifact.current_attempt,
+      ...(artifact.size_bytes !== undefined ? { size_bytes: artifact.size_bytes } : {})
+    })),
+    artifact_findings: packet.artifact_findings.map((finding) => ({
+      artifact: finding.artifact,
+      kind: finding.kind,
+      summary: finding.summary
+    })),
     packet_path: packet.packet_path
   };
 }

@@ -443,6 +443,7 @@ async function writeEvidencePatch(options: {
   harness?: HarnessAdapter;
   model?: string;
   reasoning_effort?: EffectiveSupervisorPolicy["reasoning_effort"];
+  harness_config?: EffectiveSupervisorPolicy["harness_config"];
   timeout_sec?: number;
   runId: string;
   workspacePath: string;
@@ -521,6 +522,7 @@ async function writeEvidencePatch(options: {
         sandbox: "read-only",
         model: options.model,
         ...(options.reasoning_effort ? { reasoningEffort: options.reasoning_effort } : {}),
+        ...(options.harness_config ? { harnessConfig: options.harness_config } : {}),
         contextPacketPath: options.caseFileJsonPath,
         contextManifestPath: options.contextManifestPath ?? options.caseFileJsonPath,
         contextManifest: options.contextManifest ?? `Case file: ${options.caseFileJsonPath}`,
@@ -1215,6 +1217,7 @@ export async function runSupervisorRecoveryCycle(options: {
         ...(options.supervisor_policy?.reasoning_effort
           ? { reasoning_effort: options.supervisor_policy.reasoning_effort }
           : {}),
+        ...(options.supervisor_policy?.harness_config ? { harness_config: options.supervisor_policy.harness_config } : {}),
         ...(options.supervisor_policy?.timeout_sec ? { timeout_sec: options.supervisor_policy.timeout_sec } : {}),
         runId: options.run_id,
         workspacePath: options.workspace_path,

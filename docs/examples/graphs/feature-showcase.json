@@ -220,7 +220,7 @@
                   "The walkthrough draft stays read-only and uses prior artifacts as context."
                 ],
                 "constraints": [
-                  "Keep it read-only and do not modify files."
+            "Do not modify files; keep the survey read-only."
                 ]
               }
             },
@@ -335,7 +335,7 @@
       "Artifacts explain survey, verification, and review outcomes."
     ],
     "constraints": [
-      "Stay within the Agentflow repository."
+      "Do not inspect or modify files outside the Agentflow repository."
     ]
   },
   "supervision": {

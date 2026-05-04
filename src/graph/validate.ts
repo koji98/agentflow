@@ -13,17 +13,20 @@ import type {
   ExecutableGraphNode,
   GraphPrerequisiteCheck,
   ResolvedArtifactContextRef,
-  ToolDeclaration
+  ToolDeclaration,
+  GraphProfile,
+  HarnessConfig
 } from "./authored.js";
 import { normalizeAuthoredGraphDocument } from "./normalize.js";
 import type { LoweredManagedNode } from "./normalize.js";
-import { resolveLaunchConfig, resolveNodePolicy } from "./profiles.js";
+import { resolveLaunchConfig, resolveNodePolicy, resolveSupervisorPolicy } from "./profiles.js";
 import {
   reservedArtifactNames,
   reservedToolNames,
   toolNamePattern
 } from "./schema.js";
 import type { GraphDiagnostic } from "./schema.js";
+import type { HarnessName } from "./schema.js";
 import { expandPluginWorkflows, type PluginToolExport, type ResolvedPlugin } from "../plugins/workflows.js";
 import {
   interpolateGraphConfig,
@@ -246,6 +249,61 @@ function validateEnvFiles(
       });
     }
   });
+}
+
+function pushUniqueDiagnostic(
+  diagnostics: ValidationDiagnostic[],
+  seen: Set<string>,
+  diagnostic: ValidationDiagnostic
+): void {
+  const key = `${diagnostic.path}\n${diagnostic.message}`;
+  if (seen.has(key)) {
+    return;
+  }
+
+  seen.add(key);
+  diagnostics.push(diagnostic);
+}
+
+function validateHarnessConfigForHarness(
+  profileName: string,
+  profile: GraphProfile | undefined,
+  harness: HarnessName | undefined,
+  path: string,
+  diagnostics: ValidationDiagnostic[],
+  seen: Set<string>
+): void {
+  const harnessConfig: HarnessConfig | undefined = profile?.harness_config;
+  if (!harnessConfig || !harness) {
+    return;
+  }
+
+  if (harness === "codex-cli" && harnessConfig.cursor) {
+    pushUniqueDiagnostic(diagnostics, seen, {
+      path: `${path}.cursor`,
+      message: `Profile "${profileName}" resolves to harness "codex-cli" and cannot declare cursor harness config.`
+    });
+  }
+
+  if (harness === "cursor-cli" && harnessConfig.codex) {
+    pushUniqueDiagnostic(diagnostics, seen, {
+      path: `${path}.codex`,
+      message: `Profile "${profileName}" resolves to harness "cursor-cli" and cannot declare codex harness config.`
+    });
+  }
+
+  if (
+    harness === "cursor-cli" &&
+    harnessConfig.isolation === "inherit_user" &&
+    (harnessConfig.cursor?.config || harnessConfig.cursor?.permissions)
+  ) {
+    pushUniqueDiagnostic(diagnostics, seen, {
+      path,
+      message:
+        `Profile "${profileName}" uses cursor-cli with isolation "inherit_user"; ` +
+        "declared cursor.config and cursor.permissions require isolated generated config."
+    });
+  }
 }
 
 function validateArtifactReference(
@@ -482,6 +540,7 @@ async function validateNormalizedDocument(
   const pluginsByAlias = new Map<string, ResolvedPlugin>(
     (options.resolved_plugins ?? []).map((plugin) => [plugin.alias, plugin])
   );
+  const harnessConfigDiagnostics = new Set<string>();
 
   const graphToolValidation = validateToolDeclarations(
     document.tools ?? [],
@@ -496,6 +555,15 @@ async function validateNormalizedDocument(
 
   Object.entries(document.profiles ?? {}).forEach(([profileName, profile]) => {
     validateEnvFiles(profile.env_files, `$.profiles.${profileName}.env_files`, diagnostics);
+    validateHarnessConfigForHarness(
+      profileName,
+      profile,
+      profile.harness,
+      `$.profiles.${profileName}.harness_config`,
+      diagnostics,
+      harnessConfigDiagnostics
+    );
+
     if (profile.harness === "cursor-cli" && profile.reasoning_effort !== undefined) {
       diagnostics.push({
         path: `$.profiles.${profileName}.reasoning_effort`,
@@ -525,12 +593,36 @@ async function validateNormalizedDocument(
   }
 
   const launch = resolveLaunchConfig(document);
+  const supervisorResolution = resolveSupervisorPolicy(document, launch);
+  if (supervisorResolution.supervisor_profile && !supervisorResolution.supervisor_profile.harness) {
+    validateHarnessConfigForHarness(
+      supervisorResolution.profile_name ?? document.supervision.profile,
+      supervisorResolution.supervisor_profile,
+      supervisorResolution.policy?.harness,
+      `$.profiles.${supervisorResolution.profile_name ?? document.supervision.profile}.harness_config`,
+      diagnostics,
+      harnessConfigDiagnostics
+    );
+  }
 
   visitNodes(document.graph, (node, metadata) => {
     if (node.type === "agent" || (node.type === "check" && node.check_kind === "ai")) {
       const resolution = resolveNodePolicy(document, launch, node);
       for (const diagnostic of resolution.diagnostics) {
         diagnostics.push(diagnostic);
+      }
+
+      const effectiveProfileName = node.profile ?? launch.launch_profile;
+      const effectiveProfile = node.profile ? resolution.node_profile : resolution.launch_profile;
+      if (effectiveProfile && !effectiveProfile.harness) {
+        validateHarnessConfigForHarness(
+          effectiveProfileName,
+          effectiveProfile,
+          resolution.policy.harness,
+          `$.profiles.${effectiveProfileName}.harness_config`,
+          diagnostics,
+          harnessConfigDiagnostics
+        );
       }
 
       if (resolution.policy?.harness === "cursor-cli" && node.reasoning_effort !== undefined) {

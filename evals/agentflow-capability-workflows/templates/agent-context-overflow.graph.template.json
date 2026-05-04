@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -87,7 +87,7 @@
           "constraints": [
             "Do not edit noise files under `notes/**`.",
             "Do not add dependencies.",
-            "If a supervisor context repair packet is present, use it as the index and open live workspace paths only as needed."
+            "Do not ignore a supervisor context repair packet; use it as the index and open live workspace paths only as needed."
           ]
         }
       },

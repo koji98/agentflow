@@ -71,6 +71,9 @@ describe("graph profile resolution", () => {
         profile_name: "default",
         workspace_backend: "inplace",
         harness: "codex-cli",
+        harness_config: {
+          isolation: "isolated"
+        },
         reasoning_effort: builtInCodexReasoningEffort,
         timeout_sec: builtInTimeoutSeconds,
         input_rules: builtInInputRules,
@@ -78,6 +81,135 @@ describe("graph profile resolution", () => {
         sandbox: "workspace-write"
       })
     );
+  });
+
+  it("resolves profile harness config with launch inheritance and node overlay", () => {
+    const document = createDocument(
+      {
+        default: {
+          harness: "codex-cli",
+          harness_config: {
+            isolation: "isolated",
+            codex: {
+              config: {
+                approval_policy: "never",
+                model_provider: "openai"
+              },
+              mcp_servers: {
+                docs: {
+                  command: "docs-server"
+                }
+              },
+              plugins: {
+                figma: {
+                  enabled: false
+                }
+              },
+              notify: ["terminal-notifier"]
+            }
+          }
+        },
+        worker: {
+          harness: "codex-cli",
+          harness_config: {
+            isolation: "inherit_user",
+            codex: {
+              config: {
+                approval_policy: "on-request"
+              },
+              mcp_servers: {
+                repo: {
+                  command: "repo-server"
+                }
+              },
+              notify: []
+            }
+          }
+        },
+        cursor_worker: {
+          harness: "cursor-cli",
+          harness_config: {
+            cursor: {
+              config: {
+                editor: {
+                  vimMode: true
+                }
+              },
+              permissions: {
+                allow: ["Shell(npm test)"],
+                deny: ["WebFetch(*)"]
+              }
+            }
+          }
+        }
+      },
+      {
+        launch_profile: "default"
+      }
+    );
+
+    const launch = resolveLaunchConfig(document);
+    const codexResolution = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "implement",
+      profile: "worker",
+      intent: {
+        goal: "Implement the change.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
+    } satisfies AgentNode);
+    const cursorResolution = resolveNodePolicy(document, launch, {
+      type: "agent",
+      id: "cursor_implement",
+      profile: "cursor_worker",
+      intent: {
+        goal: "Implement the change.",
+        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+        constraints: []
+      },
+    } satisfies AgentNode);
+
+    expect(codexResolution.diagnostics).toEqual([]);
+    expect(codexResolution.policy.harness_config).toEqual({
+      isolation: "inherit_user",
+      codex: {
+        config: {
+          approval_policy: "on-request",
+          model_provider: "openai"
+        },
+        mcp_servers: {
+          docs: {
+            command: "docs-server"
+          },
+          repo: {
+            command: "repo-server"
+          }
+        },
+        plugins: {
+          figma: {
+            enabled: false
+          }
+        },
+        notify: []
+      }
+    });
+
+    expect(cursorResolution.diagnostics).toEqual([]);
+    expect(cursorResolution.policy.harness_config).toEqual({
+      isolation: "isolated",
+      cursor: {
+        config: {
+          editor: {
+            vimMode: true
+          }
+        },
+        permissions: {
+          allow: ["Shell(npm test)"],
+          deny: ["WebFetch(*)"]
+        }
+      }
+    });
   });
 
   it("keeps invalid launch overrides explicit without coercing workspace backend", () => {
@@ -410,6 +542,9 @@ describe("graph profile resolution", () => {
     expect(resolution.policy).toEqual({
       profile_name: "supervisor",
       harness: "codex-cli",
+      harness_config: {
+        isolation: "isolated"
+      },
       model: "gpt-5.2",
       reasoning_effort: "high",
       sandbox: "read-only",

@@ -1,0 +1,31 @@
+{
+  "id": "managed-publisher-evidence-bound",
+  "bucket": "supervisor-managed",
+  "difficulty": "hard",
+  "description": "Managed publisher must not claim beyond passing scorecard evidence.",
+  "workflow": {
+    "graph_template": "../../templates/managed-deep-work.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "summary", "contains": ["scorecard"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "artifact": "summary",
+      "task": "Produce managed publisher output for `managed-publisher-evidence-bound`. The public summary must cite `scorecard evidence` and must not claim unverified success beyond that evidence.",
+      "required_contains": [
+        "managed-publisher",
+        { "any": ["scorecard evidence", "completion scorecard", "scorecard and validation evidence"] },
+        "Scenario:",
+        "Validation:"
+      ],
+      "forbidden_contains": ["unverified success"]
+    }
+  }
+}

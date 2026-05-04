@@ -1,0 +1,29 @@
+{
+  "id": "manifest-before-broad-search",
+  "bucket": "context-authority",
+  "difficulty": "medium",
+  "description": "Agent should use materialized context before broad repository search.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["manifest-first"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Use `af context show` before broad repo search. Write a handoff that includes the exact literal token `manifest-first` in the artifact body and names the context fixture evidence.",
+      "required_contains": [
+        "manifest-first",
+        { "text": "context fixture", "case_sensitive": false },
+        "Scenario:"
+      ],
+      "required_af": ["context show", "complete check"]
+    }
+  }
+}

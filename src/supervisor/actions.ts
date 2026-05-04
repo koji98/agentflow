@@ -150,6 +150,9 @@ function buildRepairInvocation(options: {
     repoPath: options.workspace_path,
     sandbox,
     ...(supervisorPolicy?.skip_git_repo_check ?? options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
+    ...(supervisorPolicy?.harness_config ?? options.node.effective_policy.harness_config
+      ? { harnessConfig: supervisorPolicy?.harness_config ?? options.node.effective_policy.harness_config }
+      : {}),
     model: supervisorPolicy?.model ?? options.node.effective_policy.model,
     ...(supervisorPolicy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort
       ? { reasoningEffort: supervisorPolicy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort }

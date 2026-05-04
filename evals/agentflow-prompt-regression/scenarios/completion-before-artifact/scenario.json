@@ -1,0 +1,24 @@
+{
+  "id": "completion-before-artifact",
+  "bucket": "artifact-completion",
+  "difficulty": "medium",
+  "description": "Agent must publish the declared artifact even when no source edit is needed.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["no source edit required"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "The repository already satisfies the code requirement. Do not stop at a final response. Publish `handoff.md` with `Scenario: completion-before-artifact`, `Evidence: no source edit required`, validation reasoning, risks, and completion status.",
+      "required_contains": ["Scenario:", "completion-before-artifact", "Evidence:", "no source edit required", "Completion:"]
+    }
+  }
+}

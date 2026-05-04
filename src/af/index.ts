@@ -1207,7 +1207,8 @@ function parseEvidenceEntry(raw: string): CompletionEvidence {
     summary,
     ...(status === "passed" || status === "failed" || status === "blocked" || status === "unknown"
       ? { status }
-      : {})
+      : {}),
+    ...(isRecord(parsed.data) ? { data: parsed.data } : {})
   };
 }
 
@@ -1257,6 +1258,13 @@ function createRuntimeLogEntry(
   const blockedOn = optionString(options, "blocked-on");
   const recoverableBy = optionString(options, "recoverable-by");
   const contractImplication = optionString(options, "contract-implication");
+  if (
+    type === "finding" &&
+    blocking &&
+    /\b(?:af\s+complete\s+check|complete\s+check|completion\s+check)\b/iu.test(`${summary}\n${blockedOn ?? ""}`)
+  ) {
+    throw new Error("Do not log af complete check feedback as a blocking finding. Repair the reported issue and rerun af complete check; if a real external blocker remains, log that external blocker directly.");
+  }
   return {
     log_id: `log_${randomUUID()}`,
     run_id: metadata.run_id,

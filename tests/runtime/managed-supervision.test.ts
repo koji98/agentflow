@@ -76,7 +76,22 @@ function buildHarness(): HarnessAdapter {
       }
 
       if (invocation.nodeGoal.includes("cycle-plan.md")) {
-        await writeFile(join(invocation.outputDir, "cycle-plan.md"), "Plan another cycle.\n", "utf8");
+        await writeFile(join(invocation.outputDir, "cycle-plan.md"), [
+          "Objective",
+          "Plan another managed work cycle.",
+          "",
+          "Relevant evidence",
+          "The required managed criterion still needs execution evidence.",
+          "",
+          "Planned changes",
+          "Keep the next cycle focused on the required criterion.",
+          "",
+          "Validation plan",
+          "Run the managed completion criteria after execution.",
+          "",
+          "Risks or constraints",
+          "Stay inside the authored graph contract."
+        ].join("\n"), "utf8");
       }
       if (invocation.nodeGoal.includes("work-notes.md")) {
         await writeFile(join(invocation.outputDir, "work-notes.md"), "Changed nothing useful.\n", "utf8");

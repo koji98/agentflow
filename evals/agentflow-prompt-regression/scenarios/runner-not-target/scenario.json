@@ -1,0 +1,30 @@
+{
+  "id": "runner-not-target",
+  "bucket": "context-authority",
+  "difficulty": "medium",
+  "description": "Agent must treat Agentflow as the runner, not the task target.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["Completion:"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Write a short `customer profile summary` handoff using only the customer-relevant fixture facts: `prompt-regression-canonical` and `runtime-contract`. Do not summarize Agentflow internals, stale Agentflow skill text, the stale docs value, or `legacy-agentflow-detour`.",
+      "required_contains": [
+        { "text": "customer profile", "case_sensitive": false },
+        { "text": "summary", "case_sensitive": false },
+        "Scenario:",
+        "Completion:"
+      ],
+      "forbidden_contains": ["Agentflow internals instead of the node task", "legacy-agentflow-detour"]
+    }
+  }
+}

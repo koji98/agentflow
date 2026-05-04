@@ -1,0 +1,25 @@
+{
+  "id": "failed-validation-fix-rerun",
+  "bucket": "validation-completion",
+  "difficulty": "hard",
+  "description": "Agent must make a clear fix and rerun focused validation.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["focused validation passed"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "`node scripts/fail-then-pass.mjs` fails until `fix.txt` contains `fixed=true`. Create that file, rerun the validation command, and include `focused validation passed` in the handoff.",
+      "required_contains": ["focused validation passed", "node scripts/fail-then-pass.mjs", "Validation:"],
+      "required_workspace_files": [{ "path": "fix.txt", "contains": ["fixed=true"] }]
+    }
+  }
+}

@@ -23,7 +23,9 @@ Use `technical/` when debugging runtime behavior or changing Agentflow internals
 4. `technical/runtime-tooling.md`: generated `af` and plugin tool wrappers.
 5. `technical/outcome-verification.md`: verifier behavior for agent attempts.
 6. `technical/node-workspace-snapshots.md`: per-attempt workspace baselines and diffs.
-7. `technical/prompt-iteration-report.md`: prompt/context tuning notes.
+7. `technical/prompt-surfaces.md`: prompt renderer inventory and authority boundaries.
+8. `technical/prompt-cruft-rubric.md`: prompt text rejection rubric.
+9. `technical/prompt-iteration-report.md`: prompt/context tuning reports.
 
 ## Examples
 

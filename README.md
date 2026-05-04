@@ -163,8 +163,8 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
   "intent": {
     "goal": "Implement a focused change and leave it ready for review.",
     "constraints": [
-      "Keep the graph outcome-oriented.",
-      "Avoid unrelated refactors."
+      "Do not turn the graph into an implementation playbook.",
+      "Do not include unrelated refactors."
     ],
     "acceptance_criteria": [
       "The change is implemented.",
@@ -223,7 +223,7 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
             "The handoff names changed files, validation, and residual risks."
           ],
           "constraints": [
-            "Write a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md."
+            "Do not finish without writing a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md."
           ]
         },
         "context": [
@@ -264,7 +264,7 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
 }
 ```
 
-Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, tool contract, artifact contract, output directory, and timeout budget. `model: "auto"` means Agentflow does not pass an explicit model flag to the selected harness.
+Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, tool contract, artifact contract, output directory, and timeout budget. Harness-native config is isolated by default and may be declared in `profiles.*.harness_config`; inheriting local Codex or Cursor config requires an explicit `isolation: "inherit_user"` opt-in. `model: "auto"` means Agentflow does not pass an explicit model flag to the selected harness.
 
 ## CLI Commands
 
@@ -315,7 +315,7 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | `intent` | Top-level goal, constraints, and acceptance criteria. |
 | `repos` | Local repository aliases. Defaults to `main` at `.` when omitted. |
 | `defaults` | Launch profile and workspace backend defaults. |
-| `profiles` | Harness, model, sandbox, env, timeout, tool policy, and budget settings. |
+| `profiles` | Harness, model, sandbox, env, timeout, harness-native config isolation, tool policy, and budget settings. |
 | `supervision` | Required supervisor profile plus total recovery budget. |
 | `plugins` and `tools` | Plugin-bundled CLI capabilities exposed to eligible nodes. |
 | `prerequisites` | Local launch checks for files, commands, env vars, and repos. |

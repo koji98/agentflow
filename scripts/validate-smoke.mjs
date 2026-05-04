@@ -36,7 +36,11 @@ export const canonicalDocs = [
   "docs/technical/runtime-tooling.md",
   "docs/technical/outcome-verification.md",
   "docs/technical/node-workspace-snapshots.md",
+  "docs/technical/prompt-surfaces.md",
+  "docs/technical/prompt-cruft-rubric.md",
+  "docs/technical/prompt-iteration-template.md",
   "docs/technical/prompt-iteration-report.md",
+  "docs/technical/prompt-iteration-2026-04-29.md",
   "docs/examples/README.md"
 ];
 

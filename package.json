@@ -32,6 +32,7 @@
     "build": "tsc -p tsconfig.json",
     "validate:skills": "node scripts/validate-skills.mjs",
     "validate:smoke": "node scripts/validate-smoke.mjs",
+    "validate:prompts": "vitest run tests/runtime/harness_prompt.test.ts tests/runtime/verification/prompt.test.ts tests/graph/deep_work.test.ts tests/graph/deep_research.test.ts tests/evals/suite.test.ts && tsx src/cli/index.ts eval run evals/agentflow-prompt-regression --variant current --trials 1 --concurrency 1",
     "validate:confidence": "node scripts/validate-confidence.mjs",
     "validate:real-harness": "node scripts/validate-real-harness.mjs",
     "validate:real-evals": "node scripts/validate-real-evals.mjs"

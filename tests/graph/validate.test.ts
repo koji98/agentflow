@@ -388,6 +388,90 @@ describe("graph validation", () => {
     );
   });
 
+  it("rejects harness-specific config that does not match the effective harness", async () => {
+    const diagnostics = await validateGraph({
+      version: "1",
+      graph_id: "wrong-harness-config",
+      intent: TEST_INTENT,
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          harness_config: {
+            cursor: {
+              config: {
+                editor: {
+                  vimMode: true
+                }
+              }
+            }
+          }
+        },
+        cursor_worker: {
+          harness: "cursor-cli",
+          harness_config: {
+            codex: {
+              mcp_servers: {
+                docs: {
+                  command: "docs-server"
+                }
+              }
+            }
+          }
+        },
+        inherited_codex: {
+          harness_config: {
+            cursor: {
+              permissions: {
+                allow: ["Shell(npm test)"]
+              }
+            }
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "agent",
+            id: "cursor_agent",
+            profile: "cursor_worker"
+          },
+          {
+            type: "agent",
+            id: "inherited_agent",
+            profile: "inherited_codex"
+          }
+        ]
+      }
+    });
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.profiles.default.harness_config.cursor",
+          message: 'Profile "default" resolves to harness "codex-cli" and cannot declare cursor harness config.'
+        },
+        {
+          path: "$.profiles.cursor_worker.harness_config.codex",
+          message: 'Profile "cursor_worker" resolves to harness "cursor-cli" and cannot declare codex harness config.'
+        },
+        {
+          path: "$.profiles.inherited_codex.harness_config.cursor",
+          message: 'Profile "inherited_codex" resolves to harness "codex-cli" and cannot declare cursor harness config.'
+        }
+      ])
+    );
+  });
+
   it("rejects input paths and cwd values that escape the repo or workspace root", async () => {
     const diagnostics = await validateGraph({
       version: "1",

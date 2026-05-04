@@ -105,6 +105,163 @@ describe("graph normalization", () => {
     );
   });
 
+  it("normalizes profile-level harness config for declared harness capabilities", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "harness-config",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          harness_config: {
+            isolation: "isolated",
+            codex: {
+              config: {
+                approval_policy: "never"
+              },
+              mcp_servers: {
+                docs: {
+                  command: "docs-server",
+                  args: ["serve"]
+                }
+              },
+              plugins: {
+                figma: {
+                  enabled: true
+                }
+              },
+              notify: []
+            }
+          }
+        },
+        supervisor: {
+          harness: "cursor-cli",
+          sandbox: "read-only",
+          harness_config: {
+            cursor: {
+              config: {
+                editor: {
+                  vimMode: true
+                }
+              },
+              permissions: {
+                allow: ["Shell(npm test)"],
+                deny: ["WebFetch(*)"]
+              }
+            }
+          }
+        }
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 3
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: []
+      }
+    });
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.document?.profiles?.default?.harness_config).toEqual({
+      isolation: "isolated",
+      codex: {
+        config: {
+          approval_policy: "never"
+        },
+        mcp_servers: {
+          docs: {
+            command: "docs-server",
+            args: ["serve"]
+          }
+        },
+        plugins: {
+          figma: {
+            enabled: true
+          }
+        },
+        notify: []
+      }
+    });
+    expect(normalized.document?.profiles?.supervisor?.harness_config).toEqual({
+      cursor: {
+        config: {
+          editor: {
+            vimMode: true
+          }
+        },
+        permissions: {
+          allow: ["Shell(npm test)"],
+          deny: ["WebFetch(*)"]
+        }
+      }
+    });
+  });
+
+  it("rejects unknown harness config fields", () => {
+    const normalized = normalizeAuthoredGraphDocument({
+      version: "1",
+      graph_id: "bad-harness-config",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli",
+          harness_config: {
+            mode: "legacy",
+            codex: {
+              config: {},
+              mcp: {}
+            },
+            cursor: {
+              config: {},
+              tool_permissions: {},
+              permissions: {
+                allow: [],
+                maybe: []
+              }
+            }
+          }
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: []
+      }
+    });
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          path: "$.profiles.default.harness_config.mode",
+          message: 'Unknown field "mode" is not part of the graph contract.'
+        },
+        {
+          path: "$.profiles.default.harness_config.codex.mcp",
+          message: 'Unknown field "mcp" is not part of the graph contract.'
+        },
+        {
+          path: "$.profiles.default.harness_config.cursor.tool_permissions",
+          message: 'Unknown field "tool_permissions" is not part of the graph contract.'
+        },
+        {
+          path: "$.profiles.default.harness_config.cursor.permissions.maybe",
+          message: 'Unknown field "maybe" is not part of the graph contract.'
+        }
+      ])
+    );
+  });
+
   it("rejects legacy supervision action and policy fields", () => {
     const normalized = normalizeAuthoredGraphDocument({
       version: "1",

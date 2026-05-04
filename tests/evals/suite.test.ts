@@ -153,6 +153,29 @@ async function writeMinimalV1Suite(root: string): Promise<string> {
 }
 
 describe("eval suite v1 loading", () => {
+  it("loads the checked-in prompt regression suite as a strict release gate", async () => {
+    const loaded = await loadEvalSuite(process.cwd(), "evals/agentflow-prompt-regression");
+
+    expect(loaded.diagnostics).toEqual([]);
+    expect(loaded.suite.suite_id).toBe("agentflow-prompt-regression");
+    expect(loaded.suite.thresholds).toEqual({
+      pass_rate: 1,
+      max_blocker_rate: 0,
+      min_average_score: 4
+    });
+    expect(loaded.variants.map((variant) => [variant.id, variant.prompt_pack])).toEqual([
+      ["current", "current"],
+      ["candidate", "candidate"]
+    ]);
+    expect(loaded.scenarios).toHaveLength(28);
+    expect(loaded.criteria.map((criterion) => [criterion.id, criterion.kind])).toEqual([
+      ["outcome", "outcome"],
+      ["artifact", "artifact"],
+      ["delivery", "delivery"],
+      ["prompt-regression", "custom_script"]
+    ]);
+  });
+
   it("loads criteria, environment simulation, variant, and renders graph placeholders", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-eval-v1-suite-"));
     const suiteDir = await writeMinimalV1Suite(tempRoot);

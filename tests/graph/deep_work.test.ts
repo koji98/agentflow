@@ -151,6 +151,8 @@ describe("pattern deep work", () => {
     const generateValidateNode = loop.body.steps[1];
     const criteriaPanel = loop.body.steps[2];
     const gateNode = loop.body.steps[3];
+    const planPrompt = JSON.stringify(planNode);
+    const generateValidatePrompt = JSON.stringify(generateValidateNode);
 
     expect(planNode).toEqual(
       expect.objectContaining({
@@ -161,6 +163,12 @@ describe("pattern deep work", () => {
         })
       })
     );
+    expect(planPrompt).toContain("implementation planner");
+    expect(planPrompt).toContain("You do not edit files in this phase.");
+    expect(planPrompt).toContain("treat that as expected first-cycle state");
+    expect(planPrompt).toContain("do not consult ambient Codex or Agentflow playbooks");
+    expect(planPrompt).toContain("Do not wait for, search globally for, or report a blocker solely because first-cycle private materials are missing.");
+    expect(planPrompt).not.toContain("senior");
     expect(generateValidateNode).toEqual(
       expect.objectContaining({
         type: "agent",
@@ -172,6 +180,8 @@ describe("pattern deep work", () => {
         })
       })
     );
+    expect(generateValidatePrompt).toContain("implementation agent responsible for completing and validating this work cycle");
+    expect(generateValidatePrompt).not.toContain("meticulous");
 
     if (!criteriaPanel || criteriaPanel.type !== "parallel") {
       throw new Error("Expected completion criteria to run in parallel.");
@@ -194,6 +204,8 @@ describe("pattern deep work", () => {
         id: "implement_checkout__managed__pattern_deep_work__criterion_02_acceptance_rubric"
       })
     );
+    expect(JSON.stringify(criteriaPanel.steps[1])).toContain("evaluator for completion criterion `acceptance_rubric`");
+    expect(JSON.stringify(criteriaPanel.steps[1])).not.toContain("fair");
     expect(criteriaPanel.steps[2]).toEqual(
       expect.objectContaining({
         type: "check",
@@ -232,6 +244,9 @@ describe("pattern deep work", () => {
           ])
         })
       })
+    );
+    expect(JSON.stringify(finalNode)).toContain(
+      "publishing the final public artifacts from the latest passing managed work cycle"
     );
   });
 

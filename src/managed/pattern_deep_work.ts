@@ -108,7 +108,7 @@ function buildPlanPrompt(
   cycleCount: number
 ): string {
   return renderPrompt([
-    body("You are a senior implementation planner preparing the next cycle of a managed work loop. You do not edit files in this phase. Your job is to understand the contract, feedback, and repository state well enough to give the execution agent the smallest credible plan."),
+    body("You are an implementation planner preparing the next cycle of a managed work loop. You do not edit files in this phase. Your job is to understand the contract, feedback, and repository state well enough to give the execution agent the smallest credible plan."),
     section("Managed Workflow Contract", [
       "This managed workflow node has one public contract: the goal, acceptance criteria, constraints, and declared public artifacts below. Internal plans, notes, scorecards, and drafts are private working material.",
       `Goal: ${config.intent.goal}`,
@@ -121,7 +121,10 @@ function buildPlanPrompt(
       ...formatCriteria(config.completion.criteria)
     ]),
     section("Planning Task", [
+      "This prompt and materialized context are sufficient for the planning phase.",
       "Read the task context, any prior failed scorecard, criterion verification records, command output excerpts, and current workspace state available to you.",
+      "If prior scorecards, work notes, criterion records, or repeat history are omitted because no prior cycle exists, treat that as expected first-cycle state.",
+      "Do not wait for, search globally for, or report a blocker solely because first-cycle private materials are missing.",
       "Identify the concrete gap between the current state and the managed workflow contract.",
       "Define the smallest credible next plan that can satisfy failed criteria without widening scope.",
       "Name likely files or areas to inspect or change, but do not over-prescribe exact code unless the evidence requires it.",
@@ -140,7 +143,7 @@ function buildGenerateValidatePrompt(
   publicArtifacts: Record<string, ArtifactDefinition>
 ): string {
   return renderPrompt([
-    body("You are a meticulous implementation agent responsible for completing and validating this work cycle. Do not stop at a plausible change. Work until you are confident the candidate satisfies the goal, acceptance criteria, and constraints, or until you have concrete evidence of what remains."),
+    body("You are an implementation agent responsible for completing and validating this work cycle. Do not stop at a plausible change. Work until you have verified the candidate satisfies the goal, acceptance criteria, and constraints, or until you have concrete evidence of what remains."),
     section("Managed Workflow Contract", [
       "This is one cycle inside a managed work loop. If the completion criteria do not pass, another cycle may use your notes and feedback to continue. Write concrete validation evidence and residual risks so the next cycle can improve rather than restart.",
       `Goal: ${config.intent.goal}`,
@@ -174,7 +177,7 @@ function buildRubricGoal(criterion: PatternDeepWorkRubricCriterion): string {
     : `draft public artifact \`${criterion.target.slice("artifact:".length)}\` and its supporting evidence`;
 
   return renderPrompt([
-    body(`You are a fair, evidence-based evaluator for completion criterion \`${criterion.id}\`.`),
+    body(`You are an evidence-based evaluator for completion criterion \`${criterion.id}\`.`),
     section("Criterion", [
       `Rubric: ${criterion.rubric}`,
       `Target: ${criterion.target}`,

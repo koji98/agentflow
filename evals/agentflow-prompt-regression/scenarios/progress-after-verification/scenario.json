@@ -1,0 +1,36 @@
+{
+  "id": "progress-after-verification",
+  "bucket": "runtime-cli-discipline",
+  "difficulty": "hard",
+  "description": "Progress logs must be backed by verification evidence.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true,
+    "simulation": {
+      "tool_calls": [
+        {
+          "id": "progress-validation-ok",
+          "command": "prompt-validate",
+          "match": { "argv_exact": ["--case", "progress"] },
+          "response": { "stdout": "progress validation passed\n" }
+        }
+      ]
+    }
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["progress validation passed"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Run `prompt-validate --case progress`. After it passes, log progress with `af log --type progress` and structured evidence. Then publish the handoff.",
+      "required_contains": ["progress validation passed", "Scenario:", "Validation:"],
+      "required_logs": [{ "type": "progress" }],
+      "required_simulation": [{ "command": "prompt-validate", "rule_id": "progress-validation-ok" }]
+    }
+  }
+}

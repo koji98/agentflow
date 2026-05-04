@@ -40,7 +40,8 @@ process.stdin.on("end", () => {
       AGENTFLOW_WORKSPACE: process.env.AGENTFLOW_WORKSPACE,
       AGENTFLOW_OUTPUT_DIR: process.env.AGENTFLOW_OUTPUT_DIR,
       AGENTFLOW_CONTEXT_PACKET: process.env.AGENTFLOW_CONTEXT_PACKET,
-      AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST
+      AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST,
+      CODEX_HOME: process.env.CODEX_HOME
     }, null, 2));
   }
 
@@ -261,7 +262,7 @@ describe("codex cli harness", () => {
           "--sandbox",
           "workspace-write",
           "--add-dir",
-          outputDir,
+          executionDir,
           "--output-last-message",
           join(outputDir, "last_message.txt"),
           "--skip-git-repo-check",
@@ -272,6 +273,9 @@ describe("codex cli harness", () => {
           "-"
         ])
       );
+      expect(argv).not.toContain("mcp_servers={}");
+      expect(argv).not.toContain("plugins={}");
+      expect(argv).not.toContain("notify=[]");
       expect(prompt).toContain("## Role");
       expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
       expect(prompt).toContain("You are executing one node in a wider Agentflow graph.");
@@ -302,7 +306,8 @@ describe("codex cli harness", () => {
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,
         AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
-        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md")
+        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md"),
+        CODEX_HOME: expect.stringContaining("agentflow-codex-home-")
       });
       expect(result.outputJson).toEqual({
         passed: true,
@@ -326,6 +331,241 @@ describe("codex cli harness", () => {
         delete process.env.MOCK_STDIN_PATH;
       } else {
         process.env.MOCK_STDIN_PATH = previousStdinPath;
+      }
+
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("passes declared codex harness config without stripping MCP, plugins, or notify", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-declared-config-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCodexBinary(tempRoot);
+    const harness = createCodexCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
+    process.env.MOCK_ARGV_PATH = mock.argv_path;
+    process.env.MOCK_ENV_PATH = mock.env_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-declared",
+        executionId: "exec-declared",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-codex",
+        nodeGoal: "Use declared harness-native tools.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "isolated",
+          codex: {
+            config: {
+              approval_policy: "never",
+              model_provider: "openai"
+            },
+            mcp_servers: {
+              docs: {
+                command: "docs-server",
+                args: ["serve"]
+              }
+            },
+            plugins: {
+              figma: {
+                enabled: true
+              }
+            },
+            notify: ["terminal-notifier"]
+          }
+        }
+      });
+
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+
+      expect(result.status).toBe("passed");
+      expect(argv).toEqual(
+        expect.arrayContaining([
+          "-c",
+          'approval_policy="never"',
+          "-c",
+          'model_provider="openai"',
+          "-c",
+          'mcp_servers={ docs = { args = ["serve"], command = "docs-server" } }',
+          "-c",
+          "plugins={ figma = { enabled = true } }",
+          "-c",
+          'notify=["terminal-notifier"]'
+        ])
+      );
+      expect(env.CODEX_HOME).toContain("agentflow-codex-home-");
+    } finally {
+      if (previousArgvPath === undefined) {
+        delete process.env.MOCK_ARGV_PATH;
+      } else {
+        process.env.MOCK_ARGV_PATH = previousArgvPath;
+      }
+
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("inherits user codex config only when the profile explicitly opts in", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-inherit-user-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    const userCodexHome = join(tempRoot, "user-codex-home");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCodexBinary(tempRoot);
+    const harness = createCodexCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
+    process.env.MOCK_ARGV_PATH = mock.argv_path;
+    process.env.MOCK_ENV_PATH = mock.env_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-inherit",
+        executionId: "exec-inherit",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-codex",
+        baseEnv: {
+          ...process.env,
+          CODEX_HOME: userCodexHome
+        },
+        nodeGoal: "Use the local Codex configuration.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "inherit_user"
+        }
+      });
+
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+
+      expect(result.status).toBe("passed");
+      expect(env.CODEX_HOME).toBe(userCodexHome);
+      expect(argv).not.toContain("mcp_servers={}");
+      expect(argv).not.toContain("plugins={}");
+      expect(argv).not.toContain("notify=[]");
+    } finally {
+      if (previousArgvPath === undefined) {
+        delete process.env.MOCK_ARGV_PATH;
+      } else {
+        process.env.MOCK_ARGV_PATH = previousArgvPath;
+      }
+
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("forces isolated codex config for trust-check prompts even when the profile inherits user config", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-trust-check-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    const userCodexHome = join(tempRoot, "user-codex-home");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCodexBinary(tempRoot);
+    const harness = createCodexCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
+    process.env.MOCK_ARGV_PATH = mock.argv_path;
+    process.env.MOCK_ENV_PATH = mock.env_path;
+
+    try {
+      const result = await harness.run({
+        promptKind: "ai_check",
+        runId: "run-trust",
+        executionId: "exec-trust",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "read-only",
+        model: "gpt-5-codex",
+        baseEnv: {
+          ...process.env,
+          CODEX_HOME: userCodexHome
+        },
+        nodeGoal: "Verify the outcome.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "inherit_user",
+          codex: {
+            mcp_servers: {
+              docs: {
+                command: "docs-server"
+              }
+            }
+          }
+        }
+      });
+
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+
+      expect(result.status).toBe("passed");
+      expect(env.CODEX_HOME).toContain("agentflow-codex-home-");
+      expect(env.CODEX_HOME).not.toBe(userCodexHome);
+      expect(argv).not.toContain("mcp_servers={ docs = { command = \"docs-server\" } }");
+    } finally {
+      if (previousArgvPath === undefined) {
+        delete process.env.MOCK_ARGV_PATH;
+      } else {
+        process.env.MOCK_ARGV_PATH = previousArgvPath;
       }
 
       if (previousEnvPath === undefined) {

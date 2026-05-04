@@ -40,8 +40,8 @@ Common top-level fields:
 {
   "goal": "Ship checkout timeout handling.",
   "constraints": [
-    "Keep the public API stable.",
-    "Avoid unrelated refactors."
+    "Do not change the public API.",
+    "Do not make unrelated refactors."
   ],
   "acceptance_criteria": [
     "Timeouts return a typed error.",
@@ -52,7 +52,7 @@ Common top-level fields:
 
 The normalizer rejects unknown graph fields and invalid enum values. Missing `intent.goal` is a hard schema error.
 
-Repository and profile authority stay explicit outside `intent`. Top-level `repos` bind aliases to local checkouts, top-level `profiles` define harness authority, and executable nodes choose `repo` and `profile`. Scope boundaries and out-of-scope notes are authored in graph-level or node-level `intent.constraints`.
+Repository and profile authority stay explicit outside `intent`. Top-level `repos` bind aliases to local checkouts, top-level `profiles` define harness authority, and executable nodes choose `repo` and `profile`. Scope boundaries and out-of-scope notes are authored in graph-level or node-level `intent.constraints`. Constraint strings should be prohibition-style boundaries that start with `Do not`; put positive success requirements in `acceptance_criteria`.
 
 ## Compilation
 

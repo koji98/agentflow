@@ -217,8 +217,21 @@ describe("af runtime CLI", () => {
       "--summary",
       "Observed runtime CLI",
       "--evidence",
-      JSON.stringify({ kind: "runtime_event", summary: "af status completed" })
+      JSON.stringify({ kind: "runtime_event", summary: "af status completed", data: { command: "af status", exit_code: 0 } })
     ])).resolves.toMatchObject({ exitCode: 0 });
+    await expect(executeAfCli([
+      "log",
+      "--type",
+      "finding",
+      "--finding-kind",
+      "blocker",
+      "--summary",
+      "af complete check still reports incomplete",
+      "--blocked-on",
+      "af complete check feedback",
+      "--evidence",
+      JSON.stringify({ kind: "runtime_event", summary: "completion check output was incomplete" })
+    ])).rejects.toThrow("Do not log af complete check feedback as a blocking finding");
     await expect(executeAfCli([
       "log",
       "--type",
@@ -240,7 +253,14 @@ describe("af runtime CLI", () => {
       .split(/\r?\n/)
       .map((line) => JSON.parse(line) as { type: string; summary: string; decision?: string; rationale?: string; evidence?: unknown[]; finding_kind?: string; contract_implication?: string });
     expect(runtimeLog).toEqual([
-      expect.objectContaining({ type: "finding", finding_kind: "observation", summary: "Observed runtime CLI" }),
+      expect.objectContaining({
+        type: "finding",
+        finding_kind: "observation",
+        summary: "Observed runtime CLI",
+        evidence: [
+          expect.objectContaining({ kind: "runtime_event", summary: "af status completed", data: { command: "af status", exit_code: 0 } })
+        ]
+      }),
       expect.objectContaining({
         type: "decision",
         summary: "Use the generated client path",

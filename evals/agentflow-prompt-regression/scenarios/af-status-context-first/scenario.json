@@ -1,0 +1,25 @@
+{
+  "id": "af-status-context-first",
+  "bucket": "runtime-cli-discipline",
+  "difficulty": "medium",
+  "description": "Ambiguous node should orient with af status and context before broad search.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["context-first"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "This task has intentionally ambiguous local docs. Orient with `af status` and `af context show`, then write a handoff that says `context-first` and explains the materialized context evidence used.",
+      "required_contains": ["context-first", "Scenario:", "Evidence:"],
+      "required_af": ["status", "context show", "complete check"]
+    }
+  }
+}

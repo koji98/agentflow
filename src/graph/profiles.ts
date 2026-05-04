@@ -4,6 +4,10 @@ import type {
   CheckNode,
   ExecutableGraphNode,
   GraphProfile,
+  HarnessConfig,
+  HarnessIsolationMode,
+  CodexHarnessConfig,
+  CursorHarnessConfig,
   InputRules
 } from "./authored.js";
 import type {
@@ -21,10 +25,15 @@ export interface EffectiveInputRules {
   max_tokens_per_item: number;
 }
 
+export interface EffectiveHarnessConfig extends Omit<HarnessConfig, "isolation"> {
+  isolation: HarnessIsolationMode;
+}
+
 export interface EffectiveNodePolicy {
   profile_name: string;
   workspace_backend: WorkspaceBackend;
   harness?: HarnessName;
+  harness_config?: EffectiveHarnessConfig;
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
@@ -37,6 +46,7 @@ export interface EffectiveNodePolicy {
 export interface EffectiveSupervisorPolicy {
   profile_name: string;
   harness?: HarnessName;
+  harness_config?: EffectiveHarnessConfig;
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
@@ -66,6 +76,9 @@ export const builtInCodexReasoningEffort: ReasoningEffort = "medium";
 export const builtInAgentArtifactRepairPolicy: Required<ArtifactRepairPolicy> = {
   max_attempts: 1
 };
+export const builtInHarnessConfig: EffectiveHarnessConfig = {
+  isolation: "isolated"
+};
 
 function mergeInputRules(...rules: Array<InputRules | undefined>): EffectiveInputRules {
   return rules.reduce<EffectiveInputRules>(
@@ -75,6 +88,127 @@ function mergeInputRules(...rules: Array<InputRules | undefined>): EffectiveInpu
     }),
     builtInInputRules
   );
+}
+
+function mergeUnknownRecordMaps(
+  base: Record<string, unknown> | undefined,
+  overlay: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!base && !overlay) {
+    return undefined;
+  }
+
+  return {
+    ...(base ?? {}),
+    ...(overlay ?? {})
+  };
+}
+
+function mergeCodexHarnessConfig(
+  base: CodexHarnessConfig | undefined,
+  overlay: CodexHarnessConfig | undefined
+): CodexHarnessConfig | undefined {
+  if (!base && !overlay) {
+    return undefined;
+  }
+
+  const config = mergeUnknownRecordMaps(base?.config, overlay?.config);
+  const mcp_servers = mergeUnknownRecordMaps(base?.mcp_servers, overlay?.mcp_servers);
+  const plugins = mergeUnknownRecordMaps(base?.plugins, overlay?.plugins);
+  const notify = overlay?.notify ?? base?.notify;
+
+  return {
+    ...(config ? { config } : {}),
+    ...(mcp_servers ? { mcp_servers } : {}),
+    ...(plugins ? { plugins } : {}),
+    ...(notify !== undefined ? { notify } : {})
+  };
+}
+
+function mergeCursorPermissions(
+  base: CursorHarnessConfig["permissions"] | undefined,
+  overlay: CursorHarnessConfig["permissions"] | undefined
+): CursorHarnessConfig["permissions"] | undefined {
+  if (!base && !overlay) {
+    return undefined;
+  }
+
+  return {
+    ...(overlay?.allow ?? base?.allow ? { allow: overlay?.allow ?? base?.allow ?? [] } : {}),
+    ...(overlay?.deny ?? base?.deny ? { deny: overlay?.deny ?? base?.deny ?? [] } : {})
+  };
+}
+
+function mergeCursorHarnessConfig(
+  base: CursorHarnessConfig | undefined,
+  overlay: CursorHarnessConfig | undefined
+): CursorHarnessConfig | undefined {
+  if (!base && !overlay) {
+    return undefined;
+  }
+
+  const config = mergeUnknownRecordMaps(base?.config, overlay?.config);
+  const permissions = mergeCursorPermissions(base?.permissions, overlay?.permissions);
+
+  return {
+    ...(config ? { config } : {}),
+    ...(permissions ? { permissions } : {})
+  };
+}
+
+function filterHarnessConfigForHarness(
+  config: HarnessConfig | undefined,
+  harness: HarnessName | undefined
+): HarnessConfig | undefined {
+  if (!config || !harness) {
+    return undefined;
+  }
+
+  return {
+    ...(config.isolation ? { isolation: config.isolation } : {}),
+    ...(harness === "codex-cli" && config.codex ? { codex: config.codex } : {}),
+    ...(harness === "cursor-cli" && config.cursor ? { cursor: config.cursor } : {})
+  };
+}
+
+function canInheritLaunchHarnessConfig(
+  launchProfile: GraphProfile | undefined,
+  overlayProfile: GraphProfile | undefined,
+  harness: HarnessName | undefined
+): boolean {
+  return Boolean(
+    harness &&
+    launchProfile?.harness_config &&
+    launchProfile.harness === harness &&
+    (!overlayProfile?.harness || overlayProfile.harness === launchProfile.harness)
+  );
+}
+
+function resolveHarnessConfig(
+  launchProfile: GraphProfile | undefined,
+  overlayProfile: GraphProfile | undefined,
+  harness: HarnessName | undefined
+): EffectiveHarnessConfig | undefined {
+  if (!harness) {
+    return undefined;
+  }
+
+  const launchConfig = canInheritLaunchHarnessConfig(launchProfile, overlayProfile, harness)
+    ? filterHarnessConfigForHarness(launchProfile?.harness_config, harness)
+    : undefined;
+  const overlayConfig = filterHarnessConfigForHarness(overlayProfile?.harness_config, harness);
+  const codex = harness === "codex-cli"
+    ? mergeCodexHarnessConfig(launchConfig?.codex, overlayConfig?.codex)
+    : undefined;
+  const cursor = harness === "cursor-cli"
+    ? mergeCursorHarnessConfig(launchConfig?.cursor, overlayConfig?.cursor)
+    : undefined;
+
+  return {
+    isolation: overlayConfig?.isolation ?? launchConfig?.isolation ?? builtInHarnessConfig.isolation,
+    ...(codex ? { codex } : {}),
+    ...(cursor ? { cursor } : {})
+  };
 }
 
 function isAiCheck(node: ExecutableGraphNode): node is CheckNode & { check_kind: "ai" } {
@@ -239,9 +373,11 @@ export function resolveNodePolicy(
   let reasoning_effort: ReasoningEffort | undefined;
   let sandbox: SandboxMode | undefined;
   let skip_git_repo_check: boolean | undefined;
+  let harness_config: EffectiveHarnessConfig | undefined;
 
   if (node.type === "agent" || isAiCheck(node)) {
     harness = node_profile?.harness ?? launch_profile?.harness;
+    harness_config = resolveHarnessConfig(launch_profile, node_profile, harness);
     model =
       node.type === "agent"
         ? (
@@ -293,6 +429,7 @@ export function resolveNodePolicy(
       profile_name,
       workspace_backend: launch.workspace_backend,
       ...(harness ? { harness } : {}),
+      ...(harness_config ? { harness_config } : {}),
       ...(model ? { model } : {}),
       ...(reasoning_effort ? { reasoning_effort } : {}),
       ...(sandbox ? { sandbox } : {}),
@@ -336,6 +473,7 @@ export function resolveSupervisorPolicy(
   }
 
   const harness = supervisor_profile.harness ?? launch_profile?.harness;
+  const harness_config = resolveHarnessConfig(launch_profile, supervisor_profile, harness);
   const timeout_sec =
     supervisor_profile.timeout_sec ??
     launch_profile?.timeout_sec ??
@@ -369,6 +507,7 @@ export function resolveSupervisorPolicy(
     policy: {
       profile_name,
       ...(harness ? { harness } : {}),
+      ...(harness_config ? { harness_config } : {}),
       ...(model ? { model } : {}),
       ...(reasoning_effort ? { reasoning_effort } : {}),
       ...(sandbox ? { sandbox } : {}),

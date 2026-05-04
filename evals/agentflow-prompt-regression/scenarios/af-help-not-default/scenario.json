@@ -1,0 +1,25 @@
+{
+  "id": "af-help-not-default",
+  "bucket": "runtime-cli-discipline",
+  "difficulty": "medium",
+  "description": "Straightforward node must not start with broad af help discovery.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["af-help-not-default"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Write the handoff for `af-help-not-default`. This task is straightforward; use the prompt-provided `af` command contract rather than broad `af --help` discovery.",
+      "required_contains": ["af-help-not-default", "Scenario:", "Completion:"],
+      "forbidden_af": ["--help", "diagnose", "learn", "spawn"]
+    }
+  }
+}

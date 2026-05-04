@@ -1,0 +1,25 @@
+{
+  "id": "managed-cycle-feedback",
+  "bucket": "supervisor-managed",
+  "difficulty": "hard",
+  "description": "Managed deep work should preserve cycle feedback for the next plan.",
+  "workflow": {
+    "graph_template": "../../templates/managed-deep-work.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "summary", "contains": ["Scenario:", "Evidence:", "Validation:"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "artifact": "summary",
+      "task": "Produce managed cycle evidence for `managed-cycle-feedback`. The public summary must include Scenario:, Evidence:, Validation:, Risks:, and Completion: fields and must explain how cycle feedback was used.",
+      "required_contains": ["managed-cycle-feedback", "Scenario:", "Evidence:", "Validation:"]
+    }
+  }
+}
