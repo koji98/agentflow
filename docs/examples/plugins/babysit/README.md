@@ -30,5 +30,5 @@ Run from the repository root:
 
 ```bash
 agentflow plugin resolve --graph docs/examples/graphs/ship-feature.graph.json
-agentflow validate --graph docs/examples/graphs/ship-feature.graph.json --run-ready
+agentflow validate --graph docs/examples/graphs/ship-feature.graph.json
 ```

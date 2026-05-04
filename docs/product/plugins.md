@@ -298,7 +298,7 @@ Use:
 
 ```bash
 agentflow plugin resolve --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json
 agentflow validate --graph agentflow.graph.json --show-compiled
 ```
 
@@ -307,5 +307,5 @@ Inspect:
 - lockfile commit pins
 - resolved workflow public artifacts
 - generated managed expansion
-- plugin tool `--help` readiness under `--run-ready`
+- plugin tool `--help` readiness
 - credential references and config policy diagnostics

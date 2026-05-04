@@ -35,7 +35,7 @@ describe("validate:smoke contract", () => {
       builtCliRelativePath: "dist/cli/index.js",
       fixtureGraphRelativePath: "tests/graph/fixtures/repeat.graph.json",
       fixtureGraphId: "repeat-graph",
-      fixtureCommands: ["validate", "validate --show-compiled", "validate --review", "validate --diagram"],
+      fixtureCommands: ["validate", "validate --show-compiled", "validate --output-dir", "validate --diagram-output"],
       runHarnessAdapters: ["codex-cli", "cursor-cli"],
       runWorkspaceBackends: ["inplace", "worktree"]
     });

@@ -89,6 +89,39 @@ describe("managed pattern normalization edges", () => {
     );
   });
 
+  it("validates deep research public axis artifact references", () => {
+    const normalized = normalizeAuthoredGraphDocument(
+      buildEnvelope({
+        type: "pattern_deep_research",
+        id: "market_scan",
+        intent: {
+          goal: "Research a managed pattern change.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        },
+        research: {
+          angles: [
+            {
+              id: "architecture",
+              prompt: "Assess whether the implementation follows the local architecture.",
+              public_artifact: "missing_axis"
+            }
+          ]
+        }
+      })
+    );
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].research.angles[0].public_artifact",
+          message: 'research angle public_artifact references unknown public artifact "missing_axis".'
+        })
+      ])
+    );
+  });
+
   it("validates deep work completion criteria and public artifact references", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({
@@ -111,8 +144,8 @@ describe("managed pattern normalization edges", () => {
             },
             {
               id: "handoff_quality",
-              kind: "artifact_rubric",
-              artifact: "missing",
+              kind: "rubric",
+              target: "artifact:missing",
               rubric: "The artifact explains the result.",
               weight: 0.2
             }
@@ -125,8 +158,8 @@ describe("managed pattern normalization edges", () => {
     expect(normalized.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "$.graph.steps[0].completion.criteria[1].artifact",
-          message: 'artifact_rubric criterion references unknown public artifact "missing".'
+          path: "$.graph.steps[0].completion.criteria[1].target",
+          message: 'rubric criterion target references unknown public artifact "missing".'
         }),
         expect.objectContaining({
           path: "$.graph.steps[0].completion.criteria",
@@ -136,7 +169,48 @@ describe("managed pattern normalization edges", () => {
     );
   });
 
-  it("accepts default public artifacts for deep work artifact rubrics", () => {
+  it("accepts default public artifacts for targeted deep work rubrics", () => {
+    const normalized = normalizeAuthoredGraphDocument(
+      buildEnvelope({
+        type: "pattern_deep_work",
+        id: "implement",
+        intent: {
+          goal: "Implement a change.",
+          acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
+          constraints: []
+        },
+        completion: {
+          criteria: [
+            {
+              id: "focused_tests",
+              kind: "command",
+              command: "npm test",
+              weight: 0.5,
+              required: true
+            },
+            {
+              id: "summary_quality",
+              kind: "rubric",
+              target: "artifact:summary",
+              rubric: "The summary explains validation evidence.",
+              weight: 0.5
+            }
+          ]
+        }
+      })
+    );
+
+    expect(normalized.diagnostics).toEqual([]);
+    expect(normalized.lowered_managed_nodes).toEqual([
+      {
+        authored_id: "implement",
+        managed_kind: "pattern_deep_work",
+        lowered_to: "sequence"
+      }
+    ]);
+  });
+
+  it("rejects removed deep work artifact_rubric criteria", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({
         type: "pattern_deep_work",
@@ -167,13 +241,14 @@ describe("managed pattern normalization edges", () => {
       })
     );
 
-    expect(normalized.diagnostics).toEqual([]);
-    expect(normalized.lowered_managed_nodes).toEqual([
-      {
-        authored_id: "implement",
-        managed_kind: "pattern_deep_work",
-        lowered_to: "sequence"
-      }
-    ]);
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].completion.criteria[1].kind",
+          message: "Expected one of: command, rubric."
+        })
+      ])
+    );
   });
 });

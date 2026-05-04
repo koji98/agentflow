@@ -184,6 +184,60 @@ describe("deep research managed pattern", () => {
     ]);
   });
 
+  it("keeps deep research collapsed by default and publishes only selected public axes", () => {
+    const normalized = normalizeAuthoredGraphDocument(
+      buildDocument({
+        research: {
+          angles: [
+            {
+              id: "architecture",
+              prompt: "Investigate whether the implementation follows established Agentflow architecture.",
+              public_artifact: "architecture_findings"
+            },
+            {
+              id: "risk",
+              prompt: "Identify correctness, maintainability, and rollout risks in the managed pattern design."
+            }
+          ]
+        },
+        artifacts: {
+          architecture_findings: {
+            from: "output_dir",
+            path: "architecture-findings.md",
+            description: "Public architecture-axis research findings."
+          }
+        }
+      })
+    );
+
+    expect(normalized.diagnostics).toEqual([]);
+
+    const root = normalized.document?.graph;
+    if (!root || root.type !== "sequence") {
+      throw new Error("Expected normalized graph root to be a sequence.");
+    }
+
+    const workflow = root.steps[0];
+    if (!workflow || workflow.type !== "sequence") {
+      throw new Error("Expected pattern_deep_research to lower into a sequence workflow.");
+    }
+
+    const finalNode = workflow.steps.at(-1);
+    expect(finalNode).toEqual(
+      expect.objectContaining({
+        id: "market_scan",
+        type: "agent",
+        artifacts: expect.objectContaining({
+          summary: expect.objectContaining({ path: "summary.md" }),
+          packet: expect.objectContaining({ path: "packet.json" }),
+          architecture_findings: expect.objectContaining({ path: "architecture-findings.md" })
+        })
+      })
+    );
+    expect(JSON.stringify(finalNode)).toContain("architecture_findings");
+    expect(JSON.stringify(finalNode)).toContain("risk");
+  });
+
   it("compiles pattern_deep_research so downstream nodes depend on the final public artifacts", () => {
     const normalized = normalizeAuthoredGraphDocument({
       ...buildDocument(),

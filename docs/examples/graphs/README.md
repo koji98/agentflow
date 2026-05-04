@@ -31,7 +31,7 @@ agentflow validate --graph docs/examples/graphs/feature-showcase.json
 agentflow validate --graph docs/examples/graphs/feature-showcase.json --show-compiled
 ```
 
-The `ship-feature.graph.json` example uses the local babysit plugin and a secret GitHub credential. Configure it before `--run-ready` or launch:
+The `ship-feature.graph.json` example uses the local babysit plugin and a secret GitHub credential. Configure it before validation or launch:
 
 ```bash
 printf %s "$GITHUB_TOKEN" | agentflow auth set --scope github --key token --secret --value-stdin

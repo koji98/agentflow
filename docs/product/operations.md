@@ -18,23 +18,20 @@ Agents can run `af --help` and `af <command> --help` inside a node for the autho
 
 ```bash
 agentflow validate --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json --review
-agentflow validate --graph agentflow.graph.json --strict-review
-agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json --strict
 agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest
 agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest
 ```
 
-Use the validation modes for different questions:
+Default `validate` is the launch preflight. It checks authored graph normalization, launch profile/workspace resolution, compilation, full authoring review, local repo/command/harness readiness, plugin tool help, credential references, and real context token analysis without launching a run or mutating workspace files.
 
-- plain `validate`: is the authored and compiled graph contract valid, and are there standard authoring warnings?
-- `--review`: what deeper node-by-node authoring guidance should the operator consider before launch?
-- `--strict-review`: should serious authoring review findings fail validation?
-- `--run-ready`: are local repos, commands, env vars, plugin credentials, plugin tool `--help` contracts, plugins, and harness binaries ready on this machine?
+- `--strict`: fail validation when serious authoring review findings are present.
 - `--show-compiled`: does the compiled primitive graph match the operator's intent?
-- `--diagram` or `--diagram-output`: what Mermaid diagram represents the resolved compiled graph, scopes, artifacts, checks, supervision, and delivery surface?
+- `--output-dir`: write a validation package with compiled graph, Mermaid, review, readiness, and context files.
+- `--diagram-output`: write a Mermaid diagram for the resolved compiled graph, scopes, artifacts, checks, supervision, and delivery surface.
 - `--diagram-image-output`: can Mermaid CLI render that compiled diagram as an image for review? This uses `npx -y @mermaid-js/mermaid-cli` by default; use `--diagram-image-package` for a specific package spec, or `--diagram-image-renderer mmdc` for an installed local binary.
 
 Always inspect `intent`, `supervision`, resolved profiles, managed expansions, plugin tools, and artifact handoffs before launching serious work.
@@ -139,7 +136,7 @@ agentflow observe resolve --run <run-root> --observation <id> --resolution "Work
 
 `af status` and `af complete check` surface active observations relevant to the current node. Observations are evidence, not graph edits; they do not change acceptance criteria, repo authority, sandbox, or declared artifacts.
 
-When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --run-ready` also reports real context token analysis; use it before launch when a graph has broad globs, large docs, generated trees, or strict `input_rules.max_total_tokens`.
+When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --graph <path>` reports real context token analysis before launch when a graph has broad globs, large docs, generated trees, or strict `input_rules.max_total_tokens`.
 
 ## Resume
 

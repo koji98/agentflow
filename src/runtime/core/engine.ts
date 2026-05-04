@@ -805,6 +805,125 @@ async function emitManagedRepeatExhaustedProgress(options: {
   return true;
 }
 
+async function readCompletionPacketFromAttempt(attempt: RuntimeNodeAttempt): Promise<CompletionPacket | undefined> {
+  const completionPacketPath =
+    isRecord(attempt.metadata?.completion) &&
+    typeof attempt.metadata.completion.packet_path === "string"
+      ? attempt.metadata.completion.packet_path
+      : undefined;
+
+  if (!completionPacketPath) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(await readFile(completionPacketPath, "utf8")) as CompletionPacket;
+  } catch {
+    return undefined;
+  }
+}
+
+function managedBlockingCriteria(summary: CompletionManagedSummary | undefined): string[] {
+  if (!summary?.active) {
+    return [];
+  }
+
+  return [...new Set([
+    ...(summary.failing_required_criteria ?? []),
+    ...(summary.blocking_criteria ?? [])
+  ])].sort();
+}
+
+function sameStringList(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+async function emitManagedRepeatStalledProgress(options: {
+  session: RuntimeSession;
+  writer: ArtifactWriter;
+  runOwner: RunOwnerRecord;
+  events: RuntimeEventEnvelope[];
+  onEvent: RunCompiledGraphOptions["on_event"];
+  repeatScopeId: string;
+  repeatScopeAuthoredId: string;
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  outcome: GraphOutcome;
+}): Promise<boolean> {
+  const managed = parseManagedAuthoredId(options.repeatScopeAuthoredId);
+  if (!managed || managed.managed_kind !== "pattern_deep_work") {
+    return false;
+  }
+
+  const currentPacket = await readCompletionPacketFromAttempt(options.attempt);
+  if (!currentPacket?.managed.active || currentPacket.managed.ready_for_publish !== false) {
+    return false;
+  }
+
+  const currentBlockers = managedBlockingCriteria(currentPacket.managed);
+  if (currentBlockers.length === 0 || (currentPacket.managed.material_delta?.length ?? 0) > 0) {
+    return false;
+  }
+
+  const priorPackets = (
+    await Promise.all(
+      listAttemptsForCompiledNode(options.session.attempts, options.node.compiled_id)
+        .filter((attempt) =>
+          attempt.execution_id !== options.attempt.execution_id &&
+          attempt.repeat_scope_id === options.repeatScopeId
+        )
+        .map(readCompletionPacketFromAttempt)
+    )
+  ).filter((packet): packet is CompletionPacket => Boolean(packet));
+  const previousPacket = priorPackets.at(-1);
+  const previousBlockers = managedBlockingCriteria(previousPacket?.managed);
+  if (!previousPacket?.managed.active || !sameStringList(currentBlockers, previousBlockers)) {
+    return false;
+  }
+
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.onEvent,
+    "managed.progress",
+    {
+      ...managed,
+      phase: "stalled_without_delta",
+      status: "stalled_without_delta",
+      node_authored_id: options.node.authored_id,
+      node_kind: options.node.kind,
+      outcome: options.outcome,
+      blocking_criteria: currentBlockers,
+      completion_status: currentPacket.completion_status,
+      blocking_reasons: currentPacket.blocking_reasons,
+      managed_summary: currentPacket.managed,
+      completion_packet_path: currentPacket.packet_path,
+      progress: {
+        latest_iteration_index: options.attempt.iteration_index,
+        previous_iteration_index: previousPacket.managed.cycle,
+        max_attempts: options.session.repeat_scopes.get(options.repeatScopeId)?.max_attempts
+      },
+      evidence_refs: [
+        currentPacket.packet_path,
+        previousPacket.packet_path,
+        ...(options.attempt.result_path ? [options.attempt.result_path] : []),
+        ...Object.values(options.attempt.artifacts)
+      ]
+    },
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.repeatScopeId,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
+    }
+  );
+
+  return true;
+}
+
 interface ManagedCriterionSnapshot {
   id: string;
   required: boolean;
@@ -926,7 +1045,9 @@ async function buildManagedCompletionSummary(options: {
   const previousScorecard = priorScorecards.at(-1);
   const materialDelta = previousScorecard
     ? [
-        `Completion score changed from ${previousScorecard.total_score} to ${currentScorecard.total_score}.`,
+        ...(previousScorecard.total_score !== currentScorecard.total_score
+          ? [`Completion score changed from ${previousScorecard.total_score} to ${currentScorecard.total_score}.`]
+          : []),
         ...currentScorecard.criteria.flatMap((criterion) => {
           const previous = previousScorecard.criteria.find((entry) => entry.id === criterion.id);
           return previous && (previous.passed !== criterion.passed || previous.score !== criterion.score)
@@ -934,7 +1055,7 @@ async function buildManagedCompletionSummary(options: {
             : [];
         })
       ]
-    : [`Initial managed scorecard recorded with score ${currentScorecard.total_score}.`];
+    : [];
   const blockingCriteria = [...new Set([
     ...failingRequired,
     ...regressions.map((regression) => regression.criterion)
@@ -4629,6 +4750,55 @@ async function executeRunLoop(
         const attemptsRemaining = repeatScope.latest_iteration_index < repeatScope.max_attempts;
 
         if (attemptsRemaining) {
+          const managedStalled = await emitManagedRepeatStalledProgress({
+            session,
+            writer,
+            runOwner,
+            events,
+            onEvent: options.on_event,
+            repeatScopeId,
+            repeatScopeAuthoredId: repeatScope.authored_id,
+            node,
+            attempt,
+            outcome
+          });
+
+          if (managedStalled) {
+            const retried = await handleFailedNodeWithSupervisor({
+              runOptions: options,
+              session,
+              writer,
+              runOwner,
+              events,
+              readyQueue,
+              topology,
+              node,
+              attempt,
+              result,
+              readyNode: {
+                compiled_id: node.compiled_id,
+                deps_satisfied: computeReadyDeps(session, topology, node, attempt.iteration_index) ?? [],
+                repeat_scope_id: attempt.repeat_scope_id,
+                iteration_index: attempt.iteration_index
+              }
+            });
+
+            if (retried) {
+              continue;
+            }
+
+            if (session.status === "paused") {
+              cancelActiveExecutions(activeExecutions);
+              continue;
+            }
+
+            completeRepeatIteration(session, repeatScopeId, "failed");
+            session.status = "failed";
+            await markPendingNodesBlocked(session, writer, runOwner, events, options.on_event, node);
+            cancelActiveExecutions(activeExecutions);
+            continue;
+          }
+
           const updatedScope = openRepeatIteration(session, repeatScopeId);
           await emitEvent(session, writer, runOwner, events, options.on_event, "repeat.iteration.started", {
             max_attempts: updatedScope.max_attempts

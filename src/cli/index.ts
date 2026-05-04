@@ -63,14 +63,12 @@ const repeatableOptionNames = new Set(["config", "evidence"]);
 const optionDescriptions: Record<string, string> = {
   graph: "--graph <path>               Authored graph document to validate or run.",
   label: "--label <label>              Optional label appended to the generated run or eval artifact root.",
-  "run-ready": "--run-ready                  Also check local runtime dependencies during validate.",
   "run-root": "--run-root <path>            Existing run root to resume.",
   "runs-root": "--runs-root <path>           Absolute runs root directory to enumerate.",
   latest: "--latest                     Resume the most recent resumable run discovered for the supplied --graph.",
+  strict: "--strict                     Fail validate when serious authoring review findings are present.",
   "show-compiled": "--show-compiled              Include the compiled graph payload in the validate output.",
-  review: "--review                     Include deeper authoring review findings in validate output.",
-  "strict-review": "--strict-review              Fail validate when serious authoring review findings are present.",
-  diagram: "--diagram                    Include Mermaid for the compiled graph in validate output.",
+  "output-dir": "--output-dir <path>          Write a validation package with compiled graph, review, readiness, and context files.",
   "diagram-output": "--diagram-output <path>      Write Mermaid for the compiled graph to a file.",
   "diagram-image-output": "--diagram-image-output <path> Render Mermaid for the compiled graph to an image file.",
   "diagram-image-renderer": "--diagram-image-renderer <npx|mmdc> Choose the Mermaid image renderer.",
@@ -88,7 +86,7 @@ const optionDescriptions: Record<string, string> = {
   trials: "--trials <n>                Trial count per selected scenario and variant.",
   "eval-root": "--eval-root <path>           Eval artifact root to write or inspect.",
   concurrency: "--concurrency <n>           Number of eval trials to run concurrently.",
-  format: "--format <json|markdown>      Eval report output format.",
+  format: "--format <format>           Output format for commands that support formatted output.",
   baseline: "--baseline <variant>        Baseline variant for eval compare.",
   candidate: "--candidate <variant>       Candidate variant for eval compare.",
   trial: "--trial <n>                 Trial number for eval inspect.",
@@ -206,7 +204,7 @@ function renderGraphHelp(): string {
     "",
     "Key rules:",
     "- The runtime executes compiled graphs only.",
-    "- validate reports authored validation, compiled validation, and declared readiness; add --run-ready for local machine dependency checks.",
+    "- validate runs authored validation, compilation, full authoring review, local readiness checks, plugin tool help, credential diagnostics, and context analysis by default.",
     "- sequence, parallel, and repeat are authoring containers, not executable runtime nodes.",
     "- pattern_deep_research and pattern_deep_work are implemented as managed patterns that lower into generated primitive subgraphs.",
     "- plugin workflow nodes use type = plugin, uses = plugin_alias/workflow_id, and config = workflow-specific settings; run agentflow plugin resolve --graph first.",
@@ -236,13 +234,12 @@ function renderGraphHelp(): string {
     "",
     "Recommended local workflow:",
     "1. agentflow validate --graph agentflow.graph.json",
-    "2. agentflow validate --graph agentflow.graph.json --review for substantive graphs, or --strict-review for release gates",
-    "3. agentflow validate --graph agentflow.graph.json --run-ready when local launch readiness matters",
-    "4. agentflow validate --graph agentflow.graph.json --show-compiled, --diagram-output graph.mmd, or --diagram-image-output graph.svg to inspect the compiled graph (image export uses npx by default)",
-    "5. agentflow eval validate evals/<suite-id> when workflow evaluation suites exist",
-    "6. agentflow run --graph agentflow.graph.json",
-    "7. agentflow runs list --graph agentflow.graph.json to discover prior run roots",
-    "8. agentflow inspect <run-root> for failure stderr tails and summaries"
+    "2. agentflow validate --graph agentflow.graph.json --strict for release gates",
+    "3. agentflow validate --graph agentflow.graph.json --show-compiled, --output-dir .agentflow/validation/latest, --diagram-output graph.mmd, or --diagram-image-output graph.svg to inspect/export the compiled graph (image export uses npx by default)",
+    "4. agentflow eval validate evals/<suite-id> when workflow evaluation suites exist",
+    "5. agentflow run --graph agentflow.graph.json",
+    "6. agentflow runs list --graph agentflow.graph.json to discover prior run roots",
+    "7. agentflow inspect <run-root> for failure stderr tails and summaries"
   ].join("\n");
 }
 
@@ -360,47 +357,40 @@ function renderInteractiveValidateResult(output: Record<string, unknown>): strin
   const edgeCount = compiledSummary && typeof compiledSummary.edge_count === "number"
     ? compiledSummary.edge_count
     : undefined;
-  const readiness = isRecord(output.readiness) ? output.readiness : undefined;
+  const checksRecord = isRecord(output.checks) ? output.checks : undefined;
+  const readiness = checksRecord && isRecord(checksRecord.readiness) ? checksRecord.readiness : undefined;
   const readinessStatus = readiness && typeof readiness.status === "string" ? readiness.status : undefined;
   const blockedCount = readiness && typeof readiness.blocked_count === "number" ? readiness.blocked_count : 0;
   const warningCount = readiness && typeof readiness.warning_count === "number" ? readiness.warning_count : 0;
   const passedCount = readiness && typeof readiness.passed_count === "number" ? readiness.passed_count : 0;
-  const authoringReview = isRecord(output.authoring_review) ? output.authoring_review : undefined;
+  const context = checksRecord && isRecord(checksRecord.context) ? checksRecord.context : undefined;
+  const contextStatus = context && typeof context.status === "string" ? context.status : undefined;
+  const authoringReview = checksRecord && isRecord(checksRecord.authoring_review) ? checksRecord.authoring_review : undefined;
   const reviewSummary = authoringReview && isRecord(authoringReview.summary) ? authoringReview.summary : undefined;
   const reviewStatus = authoringReview && typeof authoringReview.status === "string" ? authoringReview.status : undefined;
   const reviewMode = authoringReview && typeof authoringReview.mode === "string" ? authoringReview.mode : undefined;
   const seriousReviewCount = reviewSummary && typeof reviewSummary.serious_count === "number" ? reviewSummary.serious_count : 0;
   const warningReviewCount = reviewSummary && typeof reviewSummary.warning_count === "number" ? reviewSummary.warning_count : 0;
-  const checks = readiness && Array.isArray(readiness.checks) ? readiness.checks : [];
-  const readinessMode = output.readiness_mode === "run-ready" ? "run-ready" : "declared";
-  const problemChecks = checks
-    .filter((check): check is Record<string, unknown> =>
-      isRecord(check) && (check.status === "blocked" || check.status === "warning")
-    )
+  const findings = isRecord(output.findings) ? output.findings : undefined;
+  const blockers = findings && Array.isArray(findings.blockers) ? findings.blockers : [];
+  const warnings = findings && Array.isArray(findings.warnings) ? findings.warnings : [];
+  const problemFindings = [...blockers, ...warnings]
+    .filter((finding): finding is Record<string, unknown> => isRecord(finding))
     .slice(0, 6)
-    .map((check) => `- ${String(check.status)} ${String(check.kind ?? "check")} ${String(check.target ?? "")}: ${String(check.message ?? "")}`);
-  const reviewFindings = authoringReview && Array.isArray(authoringReview.findings)
-    ? authoringReview.findings
-        .filter((finding): finding is Record<string, unknown> =>
-          isRecord(finding) && (finding.severity === "serious" || finding.severity === "warning")
-        )
-        .slice(0, 6)
-        .map((finding) =>
-          `- ${String(finding.severity)} ${String(finding.category ?? "review")}${finding.node_id ? ` ${String(finding.node_id)}` : ""}: ${String(finding.message ?? "")}`
-        )
-    : [];
+    .map((finding) =>
+      `- ${String(finding.severity ?? "warning")} ${String(finding.source ?? "validate")} ${String(finding.target ?? finding.node_id ?? finding.path ?? "")}: ${String(finding.message ?? "")}`
+    );
 
   const headline =
     status === "passed"
-      ? readinessMode === "run-ready"
-        ? "Graph validated and run-ready."
-        : "Graph validated."
+      ? "Graph validated and run-ready."
       : "Graph validation failed.";
   const readinessLine = readinessStatus
-    ? `Readiness: ${readinessStatus} (${passedCount} passed, ${warningCount} warnings, ${blockedCount} blocked; mode: ${readinessMode})`
+    ? `Readiness: ${readinessStatus} (${passedCount} passed, ${warningCount} warnings, ${blockedCount} blocked)`
     : undefined;
+  const contextLine = contextStatus ? `Context: ${contextStatus}` : undefined;
   const reviewLine = reviewStatus
-    ? `Authoring review: ${reviewStatus} (${seriousReviewCount} serious, ${warningReviewCount} warnings; mode: ${reviewMode ?? "standard"})`
+    ? `Authoring review: ${reviewStatus} (${seriousReviewCount} serious, ${warningReviewCount} warnings; mode: ${reviewMode ?? "review"})`
     : undefined;
   const nextSteps = isRecord(output.next_steps) ? output.next_steps : undefined;
   const runStep = nextSteps && typeof nextSteps.run === "string" ? nextSteps.run : undefined;
@@ -416,11 +406,9 @@ function renderInteractiveValidateResult(output: Record<string, unknown>): strin
       ? [`Compiled: ${nodeCount ?? "?"} nodes · ${edgeCount ?? "?"} edges`]
       : []),
     ...(readinessLine ? [readinessLine] : []),
+    ...(contextLine ? [contextLine] : []),
     ...(reviewLine ? [reviewLine] : []),
-    ...(readinessMode !== "run-ready" && status === "passed"
-      ? ["Run-ready checks: not requested; add --run-ready to check git, commands, and harness binaries."]
-      : []),
-    ...(problemChecks.length > 0 || reviewFindings.length > 0 ? ["Issues:", ...problemChecks, ...reviewFindings] : []),
+    ...(problemFindings.length > 0 ? ["Issues:", ...problemFindings] : []),
     ...(runStep && status === "passed" ? [`Run: ${runStep}`] : [])
   ].join("\n");
 }
@@ -451,7 +439,7 @@ function renderMainHelp(): string {
     "",
     "Local workflow:",
     "  1. graph-help: review the authored graph contract and minimal example",
-    "  2. validate: check authored, compiled, authoring review, diagram, and optional run-ready phases without running the graph",
+    "  2. validate: check authored, compiled, full review, local readiness, and context phases without running the graph",
     "  3. run: execute the compiled graph and write durable artifacts under the run root",
     "  4. runs list: enumerate previous run roots for a graph",
     "  5. inspect: review a single recorded run root",
@@ -465,9 +453,9 @@ function renderMainHelp(): string {
     "Examples:",
     "  agentflow graph-help",
     "  agentflow validate --graph agentflow.graph.json",
-    "  agentflow validate --graph agentflow.graph.json --run-ready",
     "  agentflow validate --graph agentflow.graph.json --show-compiled",
-    "  agentflow validate --graph agentflow.graph.json --review",
+    "  agentflow validate --graph agentflow.graph.json --strict",
+    "  agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest",
     "  agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd",
     "  agentflow run --graph agentflow.graph.json",
     "  agentflow runs list --graph agentflow.graph.json",

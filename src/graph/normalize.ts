@@ -63,13 +63,17 @@ import {
 } from "../managed/pattern_deep_research.js";
 import {
   buildPatternDeepWork,
-  type PatternDeepWorkArtifactRubricCriterion,
   type PatternDeepWorkCommandCriterion,
   type PatternDeepWorkCompletionCriterion,
   type PatternDeepWorkConfig,
   type PatternDeepWorkRubricCriterion
 } from "../managed/pattern_deep_work.js";
-import { defaultManagedPublicArtifacts, type ManagedPatternAgentOptions, type ManagedPatternRuntime } from "../managed/foundation.js";
+import {
+  defaultManagedPublicArtifacts,
+  mergeManagedPublicArtifacts,
+  type ManagedPatternAgentOptions,
+  type ManagedPatternRuntime
+} from "../managed/foundation.js";
 
 export interface LoweredManagedNode {
   authored_id: string;
@@ -1945,7 +1949,8 @@ function normalizeManagedAgentOptions(
 function normalizePatternDeepResearchConfig(
   value: unknown,
   path: string,
-  diagnostics: GraphDiagnostic[]
+  diagnostics: GraphDiagnostic[],
+  publicArtifacts: Record<string, ArtifactDefinition>
 ): PatternDeepResearchConfig["research"] | undefined {
   const record = asRecord(value);
 
@@ -1958,9 +1963,9 @@ function normalizePatternDeepResearchConfig(
   }
 
   pushUnknownKeyDiagnostics(record, path, ["angles"], diagnostics);
-  const angles = readStringArray(record.angles, `${path}.angles`, diagnostics);
+  const angleValues = Array.isArray(record.angles) ? record.angles : undefined;
 
-  if (!angles || angles.length === 0) {
+  if (!angleValues || angleValues.length === 0) {
     diagnostics.push({
       path: `${path}.angles`,
       message: "pattern_deep_research.research.angles must include at least one angle."
@@ -1968,20 +1973,94 @@ function normalizePatternDeepResearchConfig(
     return undefined;
   }
 
-  if (angles.length > 8) {
+  if (angleValues.length > 8) {
     diagnostics.push({
       path: `${path}.angles`,
       message: "pattern_deep_research.research.angles supports at most 8 angles."
     });
   }
 
-  angles.forEach((angle, index) => {
-    if (angle.trim().split(/\s+/u).length < 3) {
+  const angles = angleValues.flatMap((angle, index) => {
+    const anglePath = `${path}.angles[${index}]`;
+
+    if (typeof angle === "string") {
+      const trimmed = angle.trim();
+      if (!trimmed) {
+        diagnostics.push({
+          path: anglePath,
+          message: "Expected a non-empty string."
+        });
+        return [];
+      }
+      if (trimmed.split(/\s+/u).length < 3) {
+        diagnostics.push({
+          path: anglePath,
+          message: "Research angles should be sentence-style prompts, not one-word axes."
+        });
+      }
+      return [{
+        id: `angle_${String(index + 1).padStart(2, "0")}`,
+        prompt: trimmed
+      }];
+    }
+
+    const angleRecord = asRecord(angle);
+    if (!angleRecord) {
       diagnostics.push({
-        path: `${path}.angles[${index}]`,
+        path: anglePath,
+        message: "research angles must be strings or objects."
+      });
+      return [];
+    }
+
+    pushUnknownKeyDiagnostics(angleRecord, anglePath, ["id", "prompt", "public_artifact"], diagnostics);
+    const id = normalizeManagedLocalId(
+      angleRecord.id,
+      `${anglePath}.id`,
+      "Research angle id",
+      diagnostics
+    );
+    const prompt = readRequiredString(angleRecord.prompt, `${anglePath}.prompt`, diagnostics);
+    const public_artifact = readOptionalString(
+      angleRecord.public_artifact,
+      `${anglePath}.public_artifact`,
+      diagnostics
+    );
+
+    if (prompt && prompt.trim().split(/\s+/u).length < 3) {
+      diagnostics.push({
+        path: `${anglePath}.prompt`,
         message: "Research angles should be sentence-style prompts, not one-word axes."
       });
     }
+
+    if (public_artifact && !publicArtifacts[public_artifact]) {
+      diagnostics.push({
+        path: `${anglePath}.public_artifact`,
+        message: `research angle public_artifact references unknown public artifact "${public_artifact}".`
+      });
+    }
+
+    if (!id || !prompt || (public_artifact && !publicArtifacts[public_artifact])) {
+      return [];
+    }
+
+    return [{
+      id,
+      prompt,
+      ...(public_artifact ? { public_artifact } : {})
+    }];
+  });
+
+  const seenIds = new Set<string>();
+  angles.forEach((angle, index) => {
+    if (seenIds.has(angle.id)) {
+      diagnostics.push({
+        path: `${path}.angles[${index}].id`,
+        message: `Duplicate research angle id "${angle.id}".`
+      });
+    }
+    seenIds.add(angle.id);
   });
 
   return {
@@ -2021,7 +2100,12 @@ function normalizePatternDeepResearchNode(
 
   const base = normalizeExecutableBase(record, path, diagnostics);
   const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
-  const research = normalizePatternDeepResearchConfig(record.research, `${path}.research`, diagnostics);
+  const research = normalizePatternDeepResearchConfig(
+    record.research,
+    `${path}.research`,
+    diagnostics,
+    mergeManagedPublicArtifacts(base?.artifacts)
+  );
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
   if (!base || !research) {
@@ -2042,9 +2126,10 @@ function normalizePatternDeepResearchNode(
   });
 }
 
-function normalizeCriterionId(
+function normalizeManagedLocalId(
   value: unknown,
   path: string,
+  label: string,
   diagnostics: GraphDiagnostic[]
 ): string | undefined {
   const id = readRequiredString(value, path, diagnostics);
@@ -2056,12 +2141,20 @@ function normalizeCriterionId(
   if (!/^[a-z][a-z0-9_]*$/u.test(id)) {
     diagnostics.push({
       path,
-      message: 'Completion criterion id must match /^[a-z][a-z0-9_]*$/.'
+      message: `${label} must match /^[a-z][a-z0-9_]*$/.`
     });
     return undefined;
   }
 
   return id;
+}
+
+function normalizeCriterionId(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): string | undefined {
+  return normalizeManagedLocalId(value, path, "Completion criterion id", diagnostics);
 }
 
 function normalizeCompletionCriterion(
@@ -2083,7 +2176,7 @@ function normalizeCompletionCriterion(
   const kind = readEnumValue(
     record.kind,
     `${path}.kind`,
-    ["command", "rubric", "artifact_rubric"] as const,
+    ["command", "rubric"] as const,
     diagnostics,
     { required: true }
   );
@@ -2113,49 +2206,69 @@ function normalizeCompletionCriterion(
   }
 
   if (kind === "rubric") {
-    pushUnknownKeyDiagnostics(record, path, ["id", "kind", "rubric", "weight", "required"], diagnostics);
+    pushUnknownKeyDiagnostics(record, path, ["id", "kind", "target", "rubric", "weight", "required"], diagnostics);
+    const target = normalizeRubricTarget(record.target, `${path}.target`, diagnostics, publicArtifacts);
     const rubric = readRequiredString(record.rubric, `${path}.rubric`, diagnostics);
 
-    if (!id || weight === undefined || !rubric) {
+    if (!id || weight === undefined || !target || !rubric) {
       return undefined;
     }
 
     return {
       id,
       kind,
+      target,
       rubric,
       weight,
       ...(required !== undefined ? { required } : {})
     } satisfies PatternDeepWorkRubricCriterion;
   }
 
-  if (kind === "artifact_rubric") {
-    pushUnknownKeyDiagnostics(record, path, ["id", "kind", "artifact", "rubric", "weight", "required"], diagnostics);
-    const artifact = readRequiredString(record.artifact, `${path}.artifact`, diagnostics);
-    const rubric = readRequiredString(record.rubric, `${path}.rubric`, diagnostics);
+  return undefined;
+}
 
-    if (artifact && !publicArtifacts[artifact]) {
-      diagnostics.push({
-        path: `${path}.artifact`,
-        message: `artifact_rubric criterion references unknown public artifact "${artifact}".`
-      });
-    }
-
-    if (!id || weight === undefined || !artifact || !rubric || !publicArtifacts[artifact]) {
-      return undefined;
-    }
-
-    return {
-      id,
-      kind,
-      artifact,
-      rubric,
-      weight,
-      ...(required !== undefined ? { required } : {})
-    } satisfies PatternDeepWorkArtifactRubricCriterion;
+function normalizeRubricTarget(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  publicArtifacts: Record<string, ArtifactDefinition>
+): PatternDeepWorkRubricCriterion["target"] | undefined {
+  const target = readRequiredString(value, path, diagnostics);
+  if (!target) {
+    return undefined;
   }
 
-  return undefined;
+  if (target === "workspace") {
+    return target;
+  }
+
+  const artifactPrefix = "artifact:";
+  if (!target.startsWith(artifactPrefix)) {
+    diagnostics.push({
+      path,
+      message: 'rubric target must be "workspace" or "artifact:<name>".'
+    });
+    return undefined;
+  }
+
+  const artifact = target.slice(artifactPrefix.length);
+  if (!artifact) {
+    diagnostics.push({
+      path,
+      message: 'rubric target must be "workspace" or "artifact:<name>".'
+    });
+    return undefined;
+  }
+
+  if (!publicArtifacts[artifact]) {
+    diagnostics.push({
+      path,
+      message: `rubric criterion target references unknown public artifact "${artifact}".`
+    });
+    return undefined;
+  }
+
+  return target as PatternDeepWorkRubricCriterion["target"];
 }
 
 function normalizePatternDeepWorkCompletion(

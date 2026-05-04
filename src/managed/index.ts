@@ -19,10 +19,10 @@ export type {
   ManagedPatternRegistry
 } from "./types.js";
 export type {
+  PatternDeepResearchAngle,
   PatternDeepResearchConfig
 } from "./pattern_deep_research.js";
 export type {
-  PatternDeepWorkArtifactRubricCriterion,
   PatternDeepWorkCommandCriterion,
   PatternDeepWorkCompletionCriterion,
   PatternDeepWorkConfig,

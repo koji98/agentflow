@@ -46,7 +46,7 @@ export const managedPatternDescriptors = [
     phases: [
       { id: "plan", label: "Plan Cycle", summary: "Plan the smallest credible next move from context, scorecards, and prior feedback without editing.", mode: "single-agent" },
       { id: "generate_validate", label: "Generate And Validate", summary: "Do or revise the work, run focused validation when feasible, and draft public artifacts.", mode: "single-agent" },
-      { id: "criteria", label: "Completion Criteria", summary: "Run command, rubric, and artifact-rubric checks in parallel.", mode: "parallel-agents" },
+      { id: "criteria", label: "Completion Criteria", summary: "Run command criteria and targeted rubric checks in parallel.", mode: "parallel-agents" },
       { id: "gate", label: "Completion Gate", summary: "Aggregate a deterministic weighted scorecard and loop on misses.", mode: "repair-loop" },
       { id: "publish", label: "Publish Work", summary: "Write final declared artifacts from the latest passing cycle.", mode: "single-agent" }
     ]

@@ -224,7 +224,7 @@ Evaluation has five lanes:
 - Graph `check` nodes are in-run sensors. They are authored into the graph and can gate flow, repeat loops, or evidence collection.
 - Outcome verification is runtime enforcement for passing `agent` attempts. It runs after declared artifacts materialize, writes `verify-outcome.json` and `verify-outcome.md`, and can turn a claimed pass into an `outcome_verification` failure routed through supervision.
 - Supervisor `semantic_evaluation` is an intervention. It is chosen by the supervisor after a failed AI check or semantic uncertainty, spends intervention budget, and writes supervisor evidence.
-- Managed pattern evaluation is authored workflow structure. `pattern_deep_work.completion` expands into criterion checks, a deterministic scorecard gate, and a bounded repair loop as part of the compiled graph.
+- Managed pattern evaluation is authored workflow structure. `pattern_deep_work.completion` expands into command criteria, targeted rubric criteria, a deterministic scorecard gate, and a bounded repair loop as part of the compiled graph.
 - `agentflow eval` is offline workflow evaluation. It runs file-backed suites of scenarios, variants, and repeated trials against Agentflow workflows, grades hard facts with required criteria, rates qualitative behavior with quality criteria, and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and adopts ADK-style criteria, trajectory evaluation, and deterministic environment simulation.
 
 ## Offline Eval System
@@ -262,7 +262,7 @@ Policy rules:
 - credential values and non-secret inline `tools[].config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
 - plugin manifests do not declare default CLI arguments; exact tool CLI arguments belong in the tool's `--help` and are passed by the agent when invoking the callable tool
 - `config_schema` only validates graph-provided default config values
-- executable `--help` is required for every plugin tool, must run without credentials or side effects, and is checked by `agentflow validate --graph ... --run-ready`
+- executable `--help` is required for every plugin tool, must run without credentials or side effects, and is checked by `agentflow validate --graph ...`
 
 ## Delivery Package
 

@@ -134,7 +134,7 @@ npm run validate:smoke
 2. Validate the graph before launching:
 
    ```bash
-   agentflow validate --graph agentflow.graph.json --run-ready
+   agentflow validate --graph agentflow.graph.json
    ```
 
 3. Inspect the compiled shape when the graph changes:
@@ -272,11 +272,10 @@ Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a differe
 | --- | --- |
 | See graph syntax help | `agentflow graph-help` |
 | Resolve plugin packages and lock tools | `agentflow plugin resolve --graph agentflow.graph.json` |
-| Validate the graph | `agentflow validate --graph agentflow.graph.json` |
-| Run authoring review | `agentflow validate --graph agentflow.graph.json --review` |
-| Fail on serious review findings | `agentflow validate --graph agentflow.graph.json --strict-review` |
-| Check local launch readiness and context token budgets | `agentflow validate --graph agentflow.graph.json --run-ready` |
+| Validate launch readiness | `agentflow validate --graph agentflow.graph.json` |
+| Fail on serious authoring findings | `agentflow validate --graph agentflow.graph.json --strict` |
 | Inspect compiled runtime contract | `agentflow validate --graph agentflow.graph.json --show-compiled` |
+| Write validation package | `agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest` |
 | Write Mermaid diagram | `agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd` |
 | Render graph image | `agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg` |
 | Launch a run | `agentflow run --graph agentflow.graph.json` |

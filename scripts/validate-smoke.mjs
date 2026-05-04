@@ -13,7 +13,7 @@ const commandTimeoutMs = 30 * 60 * 1000;
 const builtCliRelativePath = "dist/cli/index.js";
 const fixtureGraphRelativePath = "tests/graph/fixtures/repeat.graph.json";
 const fixtureGraphId = "repeat-graph";
-const builtCliFixtureCommands = ["validate", "validate --show-compiled", "validate --review", "validate --diagram"];
+const builtCliFixtureCommands = ["validate", "validate --show-compiled", "validate --output-dir", "validate --diagram-output"];
 const builtCliRunHarnessAdapters = ["codex-cli", "cursor-cli"];
 const builtCliRunWorkspaceBackends = ["inplace", "worktree"];
 
@@ -395,11 +395,17 @@ async function checkBuiltCliSmoke() {
   const builtCliPath = resolve(rootDir, builtCliRelativePath);
   const fixtureGraphPath = resolve(rootDir, fixtureGraphRelativePath);
   const smokeFailures = [];
+  const validateTempRoot = await mkdtemp(join(tmpdir(), "agentflow-validate-smoke-cli-"));
+  const validateEnv = {
+    AGENTFLOW_CODEX_CLI_BIN: await createMockCodexBinary(validateTempRoot),
+    AGENTFLOW_CURSOR_CLI_BIN: await createMockCursorBinary(validateTempRoot)
+  };
 
   const validateResult = runCommand(
     process.execPath,
     [builtCliPath, "validate", "--graph", fixtureGraphRelativePath],
-    "built CLI validate"
+    "built CLI validate",
+    { env: validateEnv }
   );
 
   if (!validateResult.passed) {
@@ -436,7 +442,8 @@ async function checkBuiltCliSmoke() {
   const showCompiledResult = runCommand(
     process.execPath,
     [builtCliPath, "validate", "--graph", fixtureGraphRelativePath, "--show-compiled"],
-    "built CLI validate --show-compiled"
+    "built CLI validate --show-compiled",
+    { env: validateEnv }
   );
 
   if (!showCompiledResult.passed) {
@@ -477,41 +484,51 @@ async function checkBuiltCliSmoke() {
     }
   }
 
-  const reviewResult = runCommand(
+  const outputDir = join(validateTempRoot, "validation-package");
+  const outputDirResult = runCommand(
     process.execPath,
-    [builtCliPath, "validate", "--graph", fixtureGraphRelativePath, "--review"],
-    "built CLI validate --review"
+    [builtCliPath, "validate", "--graph", fixtureGraphRelativePath, "--output-dir", outputDir],
+    "built CLI validate --output-dir",
+    { env: validateEnv }
   );
 
-  if (!reviewResult.passed) {
-    smokeFailures.push(reviewResult.reason);
+  if (!outputDirResult.passed) {
+    smokeFailures.push(outputDirResult.reason);
   } else {
     try {
       const payload = expectRecord(
-        parseJsonOutput("built CLI validate --review", reviewResult.stdout),
-        "validate --review payload"
+        parseJsonOutput("built CLI validate --output-dir", outputDirResult.stdout),
+        "validate --output-dir payload"
       );
-      const authoringReview = expectRecord(
-        payload.authoring_review,
-        "validate --review payload.authoring_review"
-      );
+      const exports = expectRecord(payload.exports, "validate --output-dir payload.exports");
 
-      if (authoringReview.mode !== "review") {
-        throw new Error("validate --review payload.authoring_review.mode must equal \"review\".");
+      if (exports.output_dir !== outputDir) {
+        throw new Error(`validate --output-dir payload.exports.output_dir must equal ${outputDir}.`);
       }
 
-      if (!Array.isArray(authoringReview.findings)) {
-        throw new Error("validate --review payload.authoring_review.findings must be an array.");
+      const files = exports.files;
+      if (!Array.isArray(files) || !files.includes(join(outputDir, "compiled-graph.mmd"))) {
+        throw new Error("validate --output-dir payload.exports.files must include compiled-graph.mmd.");
+      }
+
+      if (!(await pathExists(join(outputDir, "authoring-review.json")))) {
+        throw new Error("validate --output-dir must write authoring-review.json.");
+      }
+
+      if (!(await pathExists(join(outputDir, "context-analysis.json")))) {
+        throw new Error("validate --output-dir must write context-analysis.json.");
       }
     } catch (error) {
       smokeFailures.push(error instanceof Error ? error.message : String(error));
     }
   }
 
+  const diagramPath = join(validateTempRoot, "compiled-graph.mmd");
   const diagramResult = runCommand(
     process.execPath,
-    [builtCliPath, "validate", "--graph", fixtureGraphRelativePath, "--diagram"],
-    "built CLI validate --diagram"
+    [builtCliPath, "validate", "--graph", fixtureGraphRelativePath, "--diagram-output", diagramPath],
+    "built CLI validate --diagram-output",
+    { env: validateEnv }
   );
 
   if (!diagramResult.passed) {
@@ -519,17 +536,17 @@ async function checkBuiltCliSmoke() {
   } else {
     try {
       const payload = expectRecord(
-        parseJsonOutput("built CLI validate --diagram", diagramResult.stdout),
-        "validate --diagram payload"
+        parseJsonOutput("built CLI validate --diagram-output", diagramResult.stdout),
+        "validate --diagram-output payload"
       );
-      const diagram = expectRecord(payload.diagram, "validate --diagram payload.diagram");
+      const exports = expectRecord(payload.exports, "validate --diagram-output payload.exports");
 
-      if (diagram.format !== "mermaid") {
-        throw new Error("validate --diagram payload.diagram.format must equal \"mermaid\".");
+      if (exports.diagram_output_path !== diagramPath) {
+        throw new Error(`validate --diagram-output payload.exports.diagram_output_path must equal ${diagramPath}.`);
       }
 
-      if (!expectString(diagram.graph, "validate --diagram payload.diagram.graph").includes("flowchart TD")) {
-        throw new Error("validate --diagram payload.diagram.graph must include Mermaid flowchart syntax.");
+      if (!expectString(await readFile(diagramPath, "utf8"), "validate --diagram-output file").includes("flowchart TD")) {
+        throw new Error("validate --diagram-output file must include Mermaid flowchart syntax.");
       }
     } catch (error) {
       smokeFailures.push(error instanceof Error ? error.message : String(error));
@@ -681,6 +698,8 @@ async function checkBuiltCliSmoke() {
     }
   }
 
+  await rm(validateTempRoot, { recursive: true, force: true });
+
   if (smokeFailures.length > 0) {
     return {
       name: "built CLI smoke",
@@ -692,8 +711,8 @@ async function checkBuiltCliSmoke() {
         commands_run: [
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --show-compiled`,
-          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --review`,
-          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --diagram`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --output-dir <validation package>`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --diagram-output <compiled graph Mermaid>`,
           ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
             builtCliRunWorkspaceBackends.map((workspaceBackend) =>
               `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`
@@ -716,8 +735,8 @@ async function checkBuiltCliSmoke() {
         commands_run: [
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath}`,
           `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --show-compiled`,
-          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --review`,
-          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --diagram`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --output-dir <validation package>`,
+          `node ${builtCliRelativePath} validate --graph ${fixtureGraphRelativePath} --diagram-output <compiled graph Mermaid>`,
           ...builtCliRunHarnessAdapters.flatMap((harnessKind) =>
             builtCliRunWorkspaceBackends.map((workspaceBackend) =>
               `node ${builtCliRelativePath} run --graph <temporary ${harnessKind} ${workspaceBackend} smoke fixture>`

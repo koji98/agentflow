@@ -31,6 +31,8 @@ Default public artifacts:
 
 Authors can add or override artifacts with the normal `artifacts` field. Downstream nodes should reference the authored pattern id, for example `storage_research.summary`, not generated internal angle ids.
 
+Deep research collapses public output by default into `summary` and `packet`. Angle and synthesis artifacts remain private evidence unless an angle explicitly selects a public artifact.
+
 ## Runtime Shape
 
 The pattern lowers into:
@@ -42,6 +44,14 @@ The pattern lowers into:
 Each synthesis node consumes at most three research packets. Groups are split as evenly as possible, so seven angles become synthesis groups of `2`, `2`, and `3`, not `3`, `3`, and `1`. Synthesis preserves major findings, collapses duplicate claims, keeps provenance, and carries conflicts or uncertainty forward.
 
 Angle and synthesis artifacts are private evidence packets. They support the final contract but do not need to match final public handoff formatting. The final publisher resolves contradictions, cites evidence, captures uncertainty, honors authored artifact descriptions and required field labels, and writes the declared public artifacts. Downstream nodes should not need to inspect private angle or synthesis artifacts.
+
+Angles can be authored as strings or objects. Object angles support:
+
+- `id`: stable axis id matching `/^[a-z][a-z0-9_]*$/`
+- `prompt`: sentence-style research prompt
+- `public_artifact`: optional authored public artifact to publish for that axis
+
+If `public_artifact` is omitted, the angle remains private evidence only. The public `packet` includes an angle index with evidence refs and private artifact paths for selective inspection.
 
 ## Example
 
@@ -72,7 +82,11 @@ Angle and synthesis artifacts are private evidence packets. They support the fin
   "research": {
     "angles": [
       "Investigate how current runtime artifacts support resume and auditability.",
-      "Compare storage alternatives against local-first operation and repository simplicity.",
+      {
+        "id": "storage_options",
+        "prompt": "Compare storage alternatives against local-first operation and repository simplicity.",
+        "public_artifact": "decision_matrix"
+      },
       "Identify migration, validation, and supervisor recovery risks for the recommended direction."
     ]
   },

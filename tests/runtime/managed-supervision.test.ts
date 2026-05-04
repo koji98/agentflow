@@ -93,6 +93,93 @@ function buildHarness(): HarnessAdapter {
 }
 
 describe("managed supervision monitoring", () => {
+  it("escalates repeated no-delta deep-work stalls before exhausting all cycles", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-managed-stall-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "managed-stall",
+      intent: {
+        goal: "Exercise managed stall detection.",
+        acceptance_criteria: ["Repeated no-delta managed failures are supervisor-visible before cycle exhaustion."]
+      },
+      supervision: {
+        profile: "supervisor",
+        max_total_interventions: 0
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli", sandbox: "workspace-write" },
+        supervisor: { harness: "codex-cli", sandbox: "read-only" }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_deep_work",
+            id: "ship_work",
+            repo: "main",
+            profile: "default",
+            intent: {
+              goal: "Do managed work.",
+              acceptance_criteria: ["The required managed criterion passes."],
+              constraints: []
+            },
+            completion: {
+              max_cycles: 3,
+              pass_threshold: 1,
+              criteria: [
+                {
+                  id: "always_fail",
+                  kind: "command",
+                  command: "exit 1",
+                  weight: 1,
+                  required: true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    });
+
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: { "codex-cli": buildHarness() }
+    });
+
+    expect(run.outcome).toBe("failed");
+    const gateAttempts = run.attempts.filter((attempt) => attempt.authored_id.includes("completion_gate"));
+    expect(gateAttempts).toHaveLength(2);
+
+    const stalled = run.events.find((event) =>
+      event.type === "managed.progress" &&
+      typeof event.payload === "object" &&
+      event.payload !== null &&
+      (event.payload as { phase?: string }).phase === "stalled_without_delta"
+    );
+    expect(stalled?.payload).toEqual(expect.objectContaining({
+      status: "stalled_without_delta",
+      blocking_criteria: ["always_fail"]
+    }));
+    expect(run.events.some((event) =>
+      event.type === "managed.progress" &&
+      typeof event.payload === "object" &&
+      event.payload !== null &&
+      (event.payload as { phase?: string }).phase === "repeat_exhausted"
+    )).toBe(false);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("emits managed completion evidence and invokes supervisor when a deep-work loop exhausts", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-managed-supervision-"));
     const repoDir = join(tempRoot, "repo");

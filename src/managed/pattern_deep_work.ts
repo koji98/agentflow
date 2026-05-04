@@ -29,8 +29,7 @@ import {
 
 export type PatternDeepWorkCompletionCriterion =
   | PatternDeepWorkCommandCriterion
-  | PatternDeepWorkRubricCriterion
-  | PatternDeepWorkArtifactRubricCriterion;
+  | PatternDeepWorkRubricCriterion;
 
 export interface PatternDeepWorkCriterionBase {
   id: string;
@@ -45,12 +44,7 @@ export interface PatternDeepWorkCommandCriterion extends PatternDeepWorkCriterio
 
 export interface PatternDeepWorkRubricCriterion extends PatternDeepWorkCriterionBase {
   kind: "rubric";
-  rubric: string;
-}
-
-export interface PatternDeepWorkArtifactRubricCriterion extends PatternDeepWorkCriterionBase {
-  kind: "artifact_rubric";
-  artifact: string;
+  target: "workspace" | `artifact:${string}`;
   rubric: string;
 }
 
@@ -105,10 +99,7 @@ function formatCriteria(criteria: PatternDeepWorkCompletionCriterion[]): string[
     if (criterion.kind === "command") {
       return `- ${criterion.id} (${required}, weight ${criterion.weight}): command \`${criterion.command}\``;
     }
-    if (criterion.kind === "artifact_rubric") {
-      return `- ${criterion.id} (${required}, weight ${criterion.weight}): grade artifact \`${criterion.artifact}\` with rubric "${criterion.rubric}"`;
-    }
-    return `- ${criterion.id} (${required}, weight ${criterion.weight}): ${criterion.rubric}`;
+    return `- ${criterion.id} (${required}, weight ${criterion.weight}, target ${criterion.target}): ${criterion.rubric}`;
   });
 }
 
@@ -178,41 +169,23 @@ function buildGenerateValidatePrompt(
 }
 
 function buildRubricGoal(criterion: PatternDeepWorkRubricCriterion): string {
+  const targetDescription = criterion.target === "workspace"
+    ? "the current workspace candidate, work notes, validation evidence, and draft artifacts"
+    : `draft public artifact \`${criterion.target.slice("artifact:".length)}\` and its supporting evidence`;
+
   return renderPrompt([
     body(`You are a fair, evidence-based evaluator for completion criterion \`${criterion.id}\`.`),
     section("Criterion", [
       `Rubric: ${criterion.rubric}`,
+      `Target: ${criterion.target}`,
       `Weight: ${criterion.weight}`,
       `Required blocker: ${criterion.required === true ? "yes" : "no"}`
     ]),
     section("Evaluation Guidance", [
-      "Grade only the evidence in context.",
+      `Grade only ${targetDescription}.`,
       "Give full credit when the evidence satisfies the criterion.",
       "Do not invent issues, penalize harmless style differences, or require work outside the managed workflow contract.",
       "Do withhold credit for missing evidence, violated constraints, failed validation, or unsupported claims.",
-      "Use score 0.85 or higher when the criterion is clearly satisfied; set `passed` true when the criterion is adequately satisfied."
-    ]),
-    section("Required JSON Output", [
-      "Return valid JSON only:",
-      '{"passed":true,"score":1,"summary":"short evidence-backed rationale","issues":[]}',
-      "Score must be a number from 0 to 1."
-    ])
-  ]);
-}
-
-function buildArtifactRubricGoal(criterion: PatternDeepWorkArtifactRubricCriterion): string {
-  return renderPrompt([
-    body(`You are a fair, evidence-based evaluator for draft public artifact \`${criterion.artifact}\` and completion criterion \`${criterion.id}\`.`),
-    section("Criterion", [
-      `Rubric: ${criterion.rubric}`,
-      `Weight: ${criterion.weight}`,
-      `Required blocker: ${criterion.required === true ? "yes" : "no"}`
-    ]),
-    section("Evaluation Guidance", [
-      "Grade only the artifact draft and supporting evidence in context.",
-      "Give full credit when the artifact satisfies the criterion.",
-      "Do not invent issues, penalize harmless style differences, or require content outside the managed workflow contract.",
-      "Do withhold credit for missing evidence, violated constraints, failed validation, unsupported claims, or an artifact that would not help downstream work.",
       "Use score 0.85 or higher when the criterion is clearly satisfied; set `passed` true when the criterion is adequately satisfied."
     ]),
     section("Required JSON Output", [
@@ -393,18 +366,22 @@ function buildCriterionContext(
     artifactContext("work_notes", generateValidateId, "work_notes")
   ];
 
-  if (criterion.kind !== "artifact_rubric") {
+  if (criterion.kind === "rubric" && criterion.target.startsWith("artifact:")) {
     return [
       ...common,
-      ...Object.keys(publicArtifacts).map((name) =>
-        artifactContext(draftArtifactName(name), generateValidateId, draftArtifactName(name))
+      artifactContext(
+        draftArtifactName(criterion.target.slice("artifact:".length)),
+        generateValidateId,
+        draftArtifactName(criterion.target.slice("artifact:".length))
       )
     ];
   }
 
   return [
     ...common,
-    artifactContext(draftArtifactName(criterion.artifact), generateValidateId, draftArtifactName(criterion.artifact))
+    ...Object.keys(publicArtifacts).map((name) =>
+      artifactContext(draftArtifactName(name), generateValidateId, draftArtifactName(name))
+    )
   ];
 }
 
@@ -450,9 +427,7 @@ function buildCriterionNode(
     context: buildCriterionContext(generateValidateId, publicArtifacts, criterion),
     rubric: criterion.rubric,
     intent: {
-      goal: criterion.kind === "artifact_rubric"
-        ? buildArtifactRubricGoal(criterion)
-        : buildRubricGoal(criterion),
+      goal: buildRubricGoal(criterion),
       acceptance_criteria: [
         "The evaluator returns valid JSON with passed, score, summary, and issues fields.",
         "The evaluator grades only evidence in context and does not require work outside the managed workflow contract."
@@ -681,7 +656,11 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
         artifacts: publicArtifacts,
         intent: {
           goal: buildFinalPublishPrompt(config, publicArtifacts),
-          acceptance_criteria: config.intent.acceptance_criteria,
+          acceptance_criteria: [
+            ...config.intent.acceptance_criteria,
+            "The public artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success.",
+            "The packet preserves completion score, criterion results, validation evidence, residual risks, and next actions."
+          ],
           constraints: config.intent.constraints
         }
       }

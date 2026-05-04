@@ -29,8 +29,7 @@ Common fields:
 Supported criteria:
 
 - `command`: deterministic shell command. Passes with score `1` when the command passes and score `0` when it fails.
-- `rubric`: AI score from `0` to `1` against the workspace, goal, acceptance criteria, constraints, and draft artifacts.
-- `artifact_rubric`: AI score from `0` to `1` for one declared public artifact draft.
+- `rubric`: AI score from `0` to `1` against a declared target. Use `target: "workspace"` for the current candidate as a whole, or `target: "artifact:<name>"` for one draft public artifact.
 
 Criteria weights must sum to `1`. Required criteria are hard blockers. Passing requires no required blockers and `total_score >= pass_threshold`.
 
@@ -41,7 +40,7 @@ Default public artifacts:
 - `summary`: final human-readable handoff.
 - `packet`: final machine-readable scorecard, criterion results, validation evidence, residual risks, and next actions.
 
-Authors can add or override artifacts with the normal `artifacts` field. Artifact-rubric criteria can grade default artifacts or authored artifacts.
+Authors can add or override artifacts with the normal `artifacts` field. Targeted rubric criteria can grade default artifacts or authored artifacts.
 
 ## Runtime Shape
 
@@ -99,13 +98,14 @@ The completion criteria panel is not the first validation attempt. The generate-
       {
         "id": "acceptance_rubric",
         "kind": "rubric",
+        "target": "workspace",
         "rubric": "The workspace satisfies the goal and acceptance criteria without violating constraints.",
         "weight": 0.4
       },
       {
         "id": "handoff_quality",
-        "kind": "artifact_rubric",
-        "artifact": "summary",
+        "kind": "rubric",
+        "target": "artifact:summary",
         "rubric": "The summary clearly describes changes, validation evidence, and residual risks.",
         "weight": 0.2
       }

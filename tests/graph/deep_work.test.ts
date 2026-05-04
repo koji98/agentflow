@@ -44,13 +44,14 @@ function buildPatternStep(stepOverrides = {}) {
         {
           id: "acceptance_rubric",
           kind: "rubric",
+          target: "workspace",
           rubric: "The workspace satisfies the goal and acceptance criteria without violating constraints.",
           weight: 0.4
         },
         {
           id: "handoff_quality",
-          kind: "artifact_rubric",
-          artifact: "summary",
+          kind: "rubric",
+          target: "artifact:summary",
           rubric: "The summary clearly describes changes, validation evidence, and residual risks.",
           weight: 0.2
         }
@@ -193,6 +194,18 @@ describe("pattern deep work", () => {
         id: "implement_checkout__managed__pattern_deep_work__criterion_02_acceptance_rubric"
       })
     );
+    expect(criteriaPanel.steps[2]).toEqual(
+      expect.objectContaining({
+        type: "check",
+        check_kind: "ai",
+        on_failure: "continue",
+        id: "implement_checkout__managed__pattern_deep_work__criterion_03_handoff_quality",
+        context: [
+          expect.objectContaining({ name: "work_notes" }),
+          expect.objectContaining({ name: "draft_summary" })
+        ]
+      })
+    );
     expect(gateNode).toEqual(
       expect.objectContaining({
         type: "check",
@@ -212,6 +225,11 @@ describe("pattern deep work", () => {
           summary: expect.objectContaining({ path: "summary.md" }),
           packet: expect.objectContaining({ path: "packet.json" }),
           validation_log: expect.objectContaining({ path: "validation-log.md" })
+        }),
+        intent: expect.objectContaining({
+          acceptance_criteria: expect.arrayContaining([
+            "The public artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success."
+          ])
         })
       })
     );

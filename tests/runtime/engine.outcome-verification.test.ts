@@ -681,7 +681,7 @@ describe("runtime engine outcome verification", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("does not run outcome verification for exec, check, checkpoint, or pattern nodes", async () => {
+  it("does not run outcome verification for exec and check nodes", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-verify-skip-"));
     const repoDir = join(tempRoot, "repo");
     const runRoot = join(tempRoot, "run");
@@ -714,7 +714,28 @@ describe("runtime engine outcome verification", () => {
     const run = await runCompiledGraph({
       run_root: runRoot,
       compiled_graph: graph,
-      repo_sources: { main: repoDir }
+      repo_sources: { main: repoDir },
+      executors: {
+        exec: async () => ({
+          status: "passed",
+          outcome: "passed",
+          result: {},
+          stdout: "",
+          stderr: ""
+        }),
+        check: async () => ({
+          status: "passed",
+          outcome: "passed",
+          result: {},
+          stdout: "",
+          stderr: "",
+          check: {
+            check_kind: "deterministic",
+            passed: true,
+            summary: "Check passed."
+          }
+        })
+      }
     });
 
     expect(run.outcome).toBe("passed");
