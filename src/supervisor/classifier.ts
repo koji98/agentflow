@@ -366,6 +366,8 @@ export function classifyNodeFailure(input: {
     || lowerMessage.includes("authentication required")
     || lowerMessage.includes("cursor agent login")
     || lowerMessage.includes("cursor_api_key")
+    || lowerMessage.includes("sandbox mode is enabled but not available")
+    || lowerMessage.includes("sandbox is unavailable")
   ) {
     return classifyResult({
       class: "harness_unavailable",

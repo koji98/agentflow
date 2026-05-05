@@ -191,6 +191,34 @@ describe("supervisor failure classifier", () => {
     );
   });
 
+  it("classifies Cursor sandbox availability failures as harness failures before completion repair", () => {
+    expect(classify({
+      result: {
+        status: "failed",
+        outcome: "failed",
+        result: {
+          exit_code: 1,
+          metadata: {
+            error:
+              "Cursor CLI structured output failed: stdout was not a JSON object.\nCursor CLI stderr:\nError: Sandbox mode is enabled but not available on this system. Sandbox is unavailable."
+          },
+          completion: {
+            completion_status: "incomplete",
+            blocking_reasons: ["Missing expected artifact: mcp_glean_handoff"],
+            packet_path: "/tmp/execution/completion-packet.json"
+          }
+        }
+      }
+    })).toEqual(
+      expect.objectContaining({
+        class: "harness_unavailable",
+        retryable: false,
+        recommended_action: "pause_for_human",
+        summary: expect.stringContaining("Sandbox mode is enabled")
+      })
+    );
+  });
+
   it("classifies workspace pollution as a workspace repair candidate", () => {
     expect(classify({ error_message: "Forbidden edit: unexpected workspace change in docs/generated.md" })).toEqual(
       expect.objectContaining({

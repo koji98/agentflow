@@ -45,6 +45,7 @@ import {
   checkKinds,
   contextSourceKinds,
   contextSelectors,
+  cursorSandboxModes,
   failureBehaviors,
   graphVersion,
   harnessNames,
@@ -746,14 +747,27 @@ function normalizeCursorHarnessConfig(
     return undefined;
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["config", "permissions"], diagnostics);
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    ["config", "permissions", "sandbox_mode", "required_mcps", "approve_mcps", "trust_workspace"],
+    diagnostics
+  );
 
   const config = readUnknownRecord(record.config, `${path}.config`, diagnostics, "cursor.config");
   const permissions = normalizeCursorHarnessPermissions(record.permissions, `${path}.permissions`, diagnostics);
+  const sandbox_mode = readEnumValue(record.sandbox_mode, `${path}.sandbox_mode`, cursorSandboxModes, diagnostics);
+  const required_mcps = readStringArray(record.required_mcps, `${path}.required_mcps`, diagnostics);
+  const approve_mcps = readBoolean(record.approve_mcps, `${path}.approve_mcps`, diagnostics);
+  const trust_workspace = readBoolean(record.trust_workspace, `${path}.trust_workspace`, diagnostics);
 
   return {
     ...(config ? { config } : {}),
-    ...(permissions ? { permissions } : {})
+    ...(permissions ? { permissions } : {}),
+    ...(sandbox_mode ? { sandbox_mode } : {}),
+    ...(required_mcps !== undefined ? { required_mcps } : {}),
+    ...(approve_mcps !== undefined ? { approve_mcps } : {}),
+    ...(trust_workspace !== undefined ? { trust_workspace } : {})
   };
 }
 

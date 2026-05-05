@@ -143,7 +143,12 @@ function mapCursorSandbox(
   return sandbox === "danger-full-access" ? "disabled" : "enabled";
 }
 
-function buildCursorArgs(invocation: AgentInvocation, prompt: string): string[] {
+function buildCursorArgs(
+  invocation: AgentInvocation,
+  harnessConfig: NonNullable<AgentInvocation["harnessConfig"]>,
+  prompt: string
+): string[] {
+  const cursorHarness = harnessConfig.cursor;
   const args = [
     "-p",
     "--output-format",
@@ -151,7 +156,7 @@ function buildCursorArgs(invocation: AgentInvocation, prompt: string): string[] 
     "--workspace",
     invocation.repoPath,
     "--sandbox",
-    mapCursorSandbox(invocation.sandbox)
+    cursorHarness?.sandbox_mode ?? mapCursorSandbox(invocation.sandbox)
   ];
 
   if (invocation.sandbox !== "read-only") {
@@ -160,6 +165,14 @@ function buildCursorArgs(invocation: AgentInvocation, prompt: string): string[] 
 
   if (invocation.model && invocation.model !== "auto") {
     args.push("--model", invocation.model);
+  }
+
+  if (cursorHarness?.approve_mcps === true) {
+    args.push("--approve-mcps");
+  }
+
+  if (cursorHarness?.trust_workspace === true) {
+    args.push("--trust");
   }
 
   args.push(prompt);
@@ -260,11 +273,11 @@ export function createCursorCliHarness(
         await mkdir(dirname(invocation.promptPath), { recursive: true });
         await writeFile(invocation.promptPath, `${prompt}\n`, "utf8");
       }
-      const args = buildCursorArgs(invocation, prompt);
-      const metadataArgs = redactPromptArg(args);
       const cursorConfig = harnessConfig.isolation === "isolated"
         ? await createCursorConfig(invocation, harnessConfig)
         : undefined;
+      const args = buildCursorArgs(invocation, harnessConfig, prompt);
+      const metadataArgs = redactPromptArg(args);
       const spawnBroker = startSpawnBroker(invocation);
 
       return new Promise<HarnessResult>((resolve, reject) => {
@@ -334,6 +347,11 @@ export function createCursorCliHarness(
             !termination.state.canceled && !termination.state.timed_out
               ? cursorOutput.error
               : undefined;
+          const stderrTail = stderr.trim().split(/\r?\n/u).slice(-20).join("\n");
+          const structuredOutputMessage =
+            structuredOutputError && stderrTail
+              ? `${structuredOutputError}\nCursor CLI stderr:\n${stderrTail}`
+              : structuredOutputError;
           resolve({
             status:
               termination.state.canceled
@@ -355,7 +373,7 @@ export function createCursorCliHarness(
                 : {}),
               timed_out: termination.state.timed_out,
               force_killed: termination.state.force_killed,
-              ...(structuredOutputError ? { error: createCursorOutputFailure(structuredOutputError).message } : {})
+              ...(structuredOutputMessage ? { error: createCursorOutputFailure(structuredOutputMessage).message } : {})
             },
             ...(cursorOutput.last_message
               ? {
