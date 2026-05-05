@@ -26,6 +26,9 @@ flowchart LR
 3. `runtime-tooling.md`: how `af` and plugin tools are injected into an agent's `PATH`, how tool help/config/credentials are resolved, and what the harness actually sees.
 4. `node-workspace-snapshots.md`: how the engine captures a per-attempt git baseline, after-state, and diff for `agent` and `exec` nodes.
 5. `outcome-verification.md`: how every passing `agent` attempt is graded by a fresh-context verifier, what the verifier prompt and output schema look like, and how rejection routes through the supervisor.
+6. `prompt-surfaces.md`: canonical prompt renderer inventory, section model, authority boundaries, and prompt coverage.
+7. `prompt-cruft-rubric.md`: rejection rubric for prompt text that does not map to a real contract or eval.
+8. `prompt-iteration-report.md`: index of dated prompt iteration reports and the report template.
 
 ## Medium-Level Model
 

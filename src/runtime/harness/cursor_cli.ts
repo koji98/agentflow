@@ -10,6 +10,7 @@ import {
   collectMissingHarnessBinaryDiagnostics,
   normalizeHarnessLaunchError,
   renderHarnessPrompt,
+  deriveHarnessExecutionRoot,
   resolveCliBinary,
   type AgentInvocation,
   type HarnessAdapter,
@@ -33,6 +34,49 @@ function parseJsonRecord(value: string | undefined): Record<string, unknown> | u
   } catch {
     return undefined;
   }
+}
+
+function isTrustCheckPrompt(invocation: AgentInvocation): boolean {
+  return (
+    invocation.promptKind === "ai_check" ||
+    invocation.promptKind === "outcome_verification" ||
+    invocation.promptKind === "supervisor_evidence"
+  );
+}
+
+function resolveHarnessConfig(invocation: AgentInvocation): NonNullable<AgentInvocation["harnessConfig"]> {
+  if (isTrustCheckPrompt(invocation)) {
+    return {
+      isolation: "isolated"
+    };
+  }
+
+  return invocation.harnessConfig ?? {
+    isolation: "isolated"
+  };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mergeConfigRecords(
+  base: Record<string, unknown>,
+  overlay: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  if (!overlay) {
+    return base;
+  }
+
+  const merged: Record<string, unknown> = { ...base };
+  Object.entries(overlay).forEach(([key, value]) => {
+    const baseValue = merged[key];
+    merged[key] =
+      isPlainRecord(baseValue) && isPlainRecord(value)
+        ? mergeConfigRecords(baseValue, value)
+        : value;
+  });
+  return merged;
 }
 
 function createCursorOutputFailure(message: string): Error {
@@ -130,17 +174,21 @@ function cursorPermissionEntry(kind: "Read" | "Write", path: string): string {
   return `${kind}(${path})`;
 }
 
-async function createCursorConfig(invocation: AgentInvocation): Promise<{
+async function createCursorConfig(
+  invocation: AgentInvocation,
+  harnessConfig: NonNullable<AgentInvocation["harnessConfig"]>
+): Promise<{
   config_dir: string;
   cli_config_path: string;
 }> {
+  const executionRoot = deriveHarnessExecutionRoot(invocation.outputDir);
   const config_dir = join(invocation.outputDir, ".cursor-config");
   const cli_config_path = join(config_dir, "cli.json");
   const allow = [
     cursorPermissionEntry("Read", `${invocation.repoPath}/**`),
     cursorPermissionEntry("Read", invocation.contextPacketPath),
     cursorPermissionEntry("Read", invocation.contextManifestPath),
-    cursorPermissionEntry("Read", `${invocation.outputDir}/**`),
+    cursorPermissionEntry("Read", `${executionRoot}/**`),
     ...(invocation.runtimeDir ? [cursorPermissionEntry("Read", `${invocation.runtimeDir}/**`)] : [])
   ];
   const deny =
@@ -158,21 +206,28 @@ async function createCursorConfig(invocation: AgentInvocation): Promise<{
     ? []
     : [
         cursorPermissionEntry("Write", `${invocation.repoPath}/**`),
-        cursorPermissionEntry("Write", `${invocation.outputDir}/**`),
+        cursorPermissionEntry("Write", `${executionRoot}/**`),
         ...(invocation.runtimeDir ? [cursorPermissionEntry("Write", `${invocation.runtimeDir}/**`)] : [])
       ];
+  const declaredPermissions = harnessConfig.cursor?.permissions;
+  const config = mergeConfigRecords(
+    {
+      version: 1,
+      editor: {
+        vimMode: false
+      }
+    },
+    harnessConfig.cursor?.config
+  );
 
   await mkdir(config_dir, { recursive: true });
   await writeFile(
     cli_config_path,
     `${JSON.stringify({
-      version: 1,
-      editor: {
-        vimMode: false
-      },
+      ...config,
       permissions: {
-        allow: [...allow, ...writeAllow],
-        deny
+        allow: [...allow, ...writeAllow, ...(declaredPermissions?.allow ?? [])],
+        deny: [...deny, ...(declaredPermissions?.deny ?? [])]
       }
     }, null, 2)}\n`,
     "utf8"
@@ -199,6 +254,7 @@ export function createCursorCliHarness(
     },
     async run(invocation: AgentInvocation): Promise<HarnessResult> {
       await mkdir(invocation.outputDir, { recursive: true });
+      const harnessConfig = resolveHarnessConfig(invocation);
       const prompt = renderHarnessPrompt(invocation);
       if (invocation.promptPath) {
         await mkdir(dirname(invocation.promptPath), { recursive: true });
@@ -206,7 +262,9 @@ export function createCursorCliHarness(
       }
       const args = buildCursorArgs(invocation, prompt);
       const metadataArgs = redactPromptArg(args);
-      const cursorConfig = await createCursorConfig(invocation);
+      const cursorConfig = harnessConfig.isolation === "isolated"
+        ? await createCursorConfig(invocation, harnessConfig)
+        : undefined;
       const spawnBroker = startSpawnBroker(invocation);
 
       return new Promise<HarnessResult>((resolve, reject) => {
@@ -214,7 +272,7 @@ export function createCursorCliHarness(
           cwd: invocation.repoPath,
           env: {
             ...buildHarnessSpawnEnv(invocation),
-            CURSOR_CONFIG_DIR: cursorConfig.config_dir
+            ...(cursorConfig ? { CURSOR_CONFIG_DIR: cursorConfig.config_dir } : {})
           },
           stdio: ["ignore", "pipe", "pipe"]
         });
@@ -289,8 +347,12 @@ export function createCursorCliHarness(
             metadata: {
               binary,
               args: metadataArgs,
-              cursor_config_dir: cursorConfig.config_dir,
-              cursor_cli_config_path: cursorConfig.cli_config_path,
+              ...(cursorConfig
+                ? {
+                    cursor_config_dir: cursorConfig.config_dir,
+                    cursor_cli_config_path: cursorConfig.cli_config_path
+                  }
+                : {}),
               timed_out: termination.state.timed_out,
               force_killed: termination.state.force_killed,
               ...(structuredOutputError ? { error: createCursorOutputFailure(structuredOutputError).message } : {})

@@ -1,0 +1,29 @@
+{
+  "id": "verifier-actionable-findings",
+  "bucket": "verifier-behavior",
+  "difficulty": "hard",
+  "description": "Verifier blocker guidance should be concrete and evidence-backed.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["actionable finding"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Write a handoff that includes `actionable finding`, a concrete evidence path, and a next validation step. This guards verifier prompts that need concrete retry guidance.",
+      "required_contains": [
+        "actionable finding",
+        { "any": ["next validation step", "Validation:"] },
+        "Evidence:",
+        "Scenario:"
+      ]
+    }
+  }
+}

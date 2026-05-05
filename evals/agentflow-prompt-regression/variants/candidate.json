@@ -1,0 +1,8 @@
+{
+  "id": "candidate",
+  "description": "Candidate prompt contract under test. This is an eval label, not a runtime compatibility mode.",
+  "prompt_pack": "candidate",
+  "env": {
+    "AGENTFLOW_EVAL_LABEL": "prompt-candidate"
+  }
+}

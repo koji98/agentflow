@@ -153,6 +153,12 @@ interface OutcomeVerificationPayloadShape {
   verifier_metadata?: unknown;
 }
 
+interface CompletionFailurePayloadShape {
+  completion_status: "incomplete" | "blocked";
+  blocking_reasons?: unknown;
+  packet_path?: unknown;
+}
+
 function readOutcomeVerificationPayload(
   result: RuntimeNodeExecutionResult | undefined
 ): OutcomeVerificationPayloadShape | undefined {
@@ -164,6 +170,36 @@ function readOutcomeVerificationPayload(
     return undefined;
   }
   return payload as unknown as OutcomeVerificationPayloadShape;
+}
+
+function readCompletionFailurePayload(input: {
+  attempt: RuntimeNodeAttempt;
+  result?: RuntimeNodeExecutionResult;
+}): CompletionFailurePayloadShape | undefined {
+  const payload = isRecord(input.result?.result) && isRecord(input.result.result.completion)
+    ? input.result.result.completion
+    : isRecord(input.attempt.metadata?.completion)
+      ? input.attempt.metadata.completion
+      : undefined;
+
+  if (!payload) {
+    return undefined;
+  }
+
+  if (payload.completion_status !== "incomplete" && payload.completion_status !== "blocked") {
+    return undefined;
+  }
+
+  return payload as unknown as CompletionFailurePayloadShape;
+}
+
+function completionReasons(payload: CompletionFailurePayloadShape): string[] {
+  if (!Array.isArray(payload.blocking_reasons)) {
+    return [];
+  }
+  return payload.blocking_reasons.filter((reason): reason is string =>
+    typeof reason === "string" && reason.trim().length > 0
+  );
 }
 
 function containsDependencyDocsGap(value: unknown): boolean {
@@ -189,6 +225,28 @@ export function classifyNodeFailure(input: {
     execution_id: input.attempt.execution_id,
     ...(message ? { message } : {})
   };
+  const completionPayload = readCompletionFailurePayload(input);
+
+  if (completionPayload?.completion_status === "blocked") {
+    const reasons = completionReasons(completionPayload);
+    return classifyResult({
+      class: "operator_pause",
+      summary: reasons[0] ?? "Completion packet reports a supported blocker.",
+      retryable: false,
+      recommended_action: "pause_for_human",
+      gather_plan: noGatherPlan(),
+      evidence: {
+        ...evidence,
+        completion: {
+          completion_status: completionPayload.completion_status,
+          blocking_reasons: reasons,
+          ...(typeof completionPayload.packet_path === "string"
+            ? { packet_path: completionPayload.packet_path }
+            : {})
+        }
+      }
+    });
+  }
 
   if (
     lowerMessage.includes("non-recoverable") ||
@@ -359,6 +417,30 @@ export function classifyNodeFailure(input: {
         ...evidence,
         repeated_fingerprint_count: input.repeated_fingerprint_count,
         causal_search_required: true
+      }
+    });
+  }
+
+  if (completionPayload?.completion_status === "incomplete") {
+    const reasons = completionReasons(completionPayload);
+    return classifyResult({
+      class: "completion_contract_failure",
+      summary: reasons[0] ?? "Completion packet is incomplete.",
+      retryable: true,
+      recommended_action: "retry_with_guidance",
+      gather_plan: gatherPlan([
+        gather("local_context", "Inspect the completion packet, node contract, current-attempt artifacts, and runtime logs.", 1),
+        gather("investigate_failure", "Identify the concrete missing artifact, placeholder artifact, validation gap, or unresolved blocker.", 2)
+      ]),
+      evidence: {
+        ...evidence,
+        completion: {
+          completion_status: completionPayload.completion_status,
+          blocking_reasons: reasons,
+          ...(typeof completionPayload.packet_path === "string"
+            ? { packet_path: completionPayload.packet_path }
+            : {})
+        }
       }
     });
   }

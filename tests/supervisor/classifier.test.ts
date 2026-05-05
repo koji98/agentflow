@@ -110,6 +110,58 @@ describe("supervisor failure classifier", () => {
     );
   });
 
+  it("classifies incomplete completion packets as current-node retry failures", () => {
+    expect(classify({
+      result: {
+        status: "failed",
+        outcome: "failed",
+        result: {
+          completion: {
+            completion_status: "incomplete",
+            blocking_reasons: ["Missing expected artifact: handoff"],
+            packet_path: "/tmp/execution/completion-packet.json"
+          }
+        }
+      }
+    })).toEqual(
+      expect.objectContaining({
+        class: "completion_contract_failure",
+        retryable: true,
+        recommended_action: "retry_with_guidance",
+        summary: "Missing expected artifact: handoff",
+        evidence: expect.objectContaining({
+          completion: expect.objectContaining({
+            completion_status: "incomplete",
+            packet_path: "/tmp/execution/completion-packet.json"
+          })
+        })
+      })
+    );
+  });
+
+  it("classifies blocked completion packets as human-authority pauses", () => {
+    expect(classify({
+      result: {
+        status: "failed",
+        outcome: "failed",
+        result: {
+          completion: {
+            completion_status: "blocked",
+            blocking_reasons: ["Export proof requires operator-managed backend worker."],
+            packet_path: "/tmp/execution/completion-packet.json"
+          }
+        }
+      }
+    })).toEqual(
+      expect.objectContaining({
+        class: "operator_pause",
+        retryable: false,
+        recommended_action: "pause_for_human",
+        summary: "Export proof requires operator-managed backend worker."
+      })
+    );
+  });
+
   it("classifies harness no-op artifact misses as harness failures", () => {
     expect(classify({
       error_message: "Agent harness produced no final response while required declared artifacts are missing: implementation_summary at agent-implementation-summary.md. This is a harness/no-op failure, not an artifact repair candidate."

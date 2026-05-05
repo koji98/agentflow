@@ -4,7 +4,7 @@ Author graphs as supervised execution contracts. A good graph states what the te
 
 ## Authoring Checklist
 
-- Add `intent.goal`, `intent.acceptance_criteria`, and `intent.constraints`.
+- Add `intent.goal`, `intent.acceptance_criteria`, and `intent.constraints`; constraints should be `Do not ...` boundaries.
 - Add `repos`, `profiles`, and `defaults.launch_profile` explicitly.
 - Use `defaults.workspace_backend: "worktree"` for code-writing work unless the operator intentionally wants in-place execution.
 - In GitHub repos, choose a rollout strategy before node layout. Prefer small PRs, `establish_base -> parallel_prs`, or `cascading_prs` over one large PR. See `github-rollout.md`.
@@ -12,7 +12,7 @@ Author graphs as supervised execution contracts. A good graph states what the te
 - Give every executable node (`agent`, `exec`, `check`, `checkpoint`) a meaningful `intent.goal`, non-empty `intent.acceptance_criteria`, and relevant `intent.constraints`. Deterministic nodes need intent too so the supervisor can diagnose whether a failure is local or upstream.
 - Use deterministic `check` nodes for hard facts that should gate control flow or delivery evidence.
 - Set `supervision.profile` to a real profile and `supervision.max_total_interventions` to match task risk. The supervisor profile is required so recovery and verification have explicit harness/model settings even when the failed checkpoint is deterministic.
-- A graph is not complete until required validation passes. Resolve plugins when needed, run `validate`, then run `--review`, `--run-ready`, and `--show-compiled`.
+- A graph is not complete until required validation passes. Resolve plugins when needed, then run `agentflow validate --graph <path>` and inspect with `--show-compiled` or `--output-dir` only when needed.
 
 ## Agent Mental Model
 
@@ -77,6 +77,8 @@ Acceptance criteria are runtime-enforced for passing `agent` attempts. Write cri
 - Weak: "Do a good job."
 - Weak: "Iterate until done."
 
+Use `constraints` for prohibition-style boundaries that start with `Do not`. Put positive success requirements in `acceptance_criteria`, not constraints.
+
 Do not repeat boilerplate iteration guidance in `constraints`. The runtime injects a working loop into standard agent prompts, and outcome verification rejects early-bailing.
 
 ## Context And Prompt Quality
@@ -89,7 +91,7 @@ Context is prompt design. Include enough signal for the node to act, but avoid m
 - Avoid `**/*` and broad terms that can include dependencies, generated output, `.agentflow`, build artifacts, vendored code, or test fixtures unrelated to the task.
 - Put version-specific docs, issue text, reproduction notes, and prior decisions into named context entries.
 - Pass compact synthesis artifacts downstream instead of large raw research packets unless exact excerpts are needed.
-- Run `agentflow validate --graph <path> --run-ready` to see real token cost, glob samples, largest files, ignored roots, and projected context failures.
+- Run `agentflow validate --graph <path>` to see real token cost, glob samples, largest files, ignored roots, and projected context failures.
 
 Use artifacts for durable handoffs that later nodes or reviewers need:
 
@@ -103,7 +105,9 @@ Use artifacts for durable handoffs that later nodes or reviewers need:
       "The changed files are summarized.",
       "Validation and residual risks are named."
     ],
-    "constraints": []
+    "constraints": [
+      "Do not modify files outside src/runtime without explicit evidence that the task requires it."
+    ]
   },
   "context": [
     {

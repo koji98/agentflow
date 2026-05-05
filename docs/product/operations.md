@@ -18,23 +18,20 @@ Agents can run `af --help` and `af <command> --help` inside a node for the autho
 
 ```bash
 agentflow validate --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json --review
-agentflow validate --graph agentflow.graph.json --strict-review
-agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json --strict
 agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest
 agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest
 ```
 
-Use the validation modes for different questions:
+Default `validate` is the launch preflight. It checks authored graph normalization, launch profile/workspace resolution, compilation, full authoring review, local repo/command/harness readiness, plugin tool help, credential references, and real context token analysis without launching a run or mutating workspace files.
 
-- plain `validate`: is the authored and compiled graph contract valid, and are there standard authoring warnings?
-- `--review`: what deeper node-by-node authoring guidance should the operator consider before launch?
-- `--strict-review`: should serious authoring review findings fail validation?
-- `--run-ready`: are local repos, commands, env vars, plugin credentials, plugin tool `--help` contracts, plugins, and harness binaries ready on this machine?
+- `--strict`: fail validation when serious authoring review findings are present.
 - `--show-compiled`: does the compiled primitive graph match the operator's intent?
-- `--diagram` or `--diagram-output`: what Mermaid diagram represents the resolved compiled graph, scopes, artifacts, checks, supervision, and delivery surface?
+- `--output-dir`: write a validation package with compiled graph, Mermaid, review, readiness, and context files.
+- `--diagram-output`: write a Mermaid diagram for the resolved compiled graph, scopes, artifacts, checks, supervision, and delivery surface.
 - `--diagram-image-output`: can Mermaid CLI render that compiled diagram as an image for review? This uses `npx -y @mermaid-js/mermaid-cli` by default; use `--diagram-image-package` for a specific package spec, or `--diagram-image-renderer mmdc` for an installed local binary.
 
 Always inspect `intent`, `supervision`, resolved profiles, managed expansions, plugin tools, and artifact handoffs before launching serious work.
@@ -67,6 +64,7 @@ Important launch behavior:
 - `workspace_backend: "worktree"` creates isolated git worktrees and cleans them up at terminal state.
 - `workspace_backend: "inplace"` runs directly against the configured repo path.
 - Codex CLI and Cursor CLI receive the same Agentflow context, `af` runtime CLI, plugin tool, artifact, timeout, and sandbox contract.
+- Harness-native config is isolated by default. Declare Codex MCP/plugins or Cursor config/permissions in `profiles.*.harness_config` when they are part of the intended run; use `isolation: "inherit_user"` only when accepting non-reproducible local harness behavior.
 - `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.
 - `checkpoint` nodes are planned human gates inside repeat bodies; they prompt on a TTY when reached and feed pass, deny, or abort back into the graph.
 - Supervisor `pause_for_human` is an authority pause, not a graph node; local context, validation, artifact, workspace, and recoverable environment failures should attempt machine recovery before a pause is considered.
@@ -124,11 +122,22 @@ Runtime coordination files are under `<run-root>/runtime/`. They are useful when
 
 - `log.jsonl`: structured worker evidence recorded with `af log --type`.
 - `helpers/<helper-id>/session.json`: helper lifecycle, logs, output directory, and artifact paths.
+- `observations.jsonl`: live human observations added without pausing the run.
 - `human-resume-input.jsonl`: structured human input used when resuming paused runs.
 
-Agents should publish durable results with `af artifact write` and record progress, findings, blockers, risks, questions, handoff notes, or major decisions with `af log --type`. Decision logs use `decision`, `rationale`, and `evidence[]` so outcome verification can inspect why the node chose a scope-affecting path. A completed agent is not an online collaborator; inspect its artifacts and supervisor timeline rather than expecting live intervention.
+Agents should publish durable results with `af artifact write`, check mechanical readiness with `af complete check`, and record evidence with the three log types: `progress`, `finding`, and `decision`. Findings carry `finding_kind: observation|issue|risk|blocker`; blocking findings also include `blocked_on`, `recoverable_by` when known, and structured evidence. Decision logs use `decision`, `rationale`, `contract_implication`, and `evidence[]` so outcome verification and supervisor recovery can inspect why the node chose a scope-affecting path. A completed agent is not an online collaborator; inspect its artifacts, completion packet, observations, and supervisor timeline rather than expecting live intervention.
 
-When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --run-ready` also reports real context token analysis; use it before launch when a graph has broad globs, large docs, generated trees, or strict `input_rules.max_total_tokens`.
+Operators can add non-pausing live feedback with:
+
+```bash
+agentflow observe add --run <run-root> --kind observation --summary "Reviewer note"
+agentflow observe add --run <run-root> --kind blocker --summary "Backend worker unavailable" --blocking --blocked-on backend-worker
+agentflow observe resolve --run <run-root> --observation <id> --resolution "Worker restored"
+```
+
+`af status` and `af complete check` surface active observations relevant to the current node. Observations are evidence, not graph edits; they do not change acceptance criteria, repo authority, sandbox, or declared artifacts.
+
+When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --graph <path>` reports real context token analysis before launch when a graph has broad globs, large docs, generated trees, or strict `input_rules.max_total_tokens`.
 
 ## Resume
 
@@ -239,4 +248,4 @@ npm run build
 npm run validate:smoke
 ```
 
-`validate:smoke` runs the package-level checks and exercises the built CLI against the repeat fixture across Codex CLI, Cursor CLI, `inplace`, and `worktree` combinations.
+`validate:smoke` runs lightweight package checks and exercises the built CLI against the repeat fixture across Codex CLI, Cursor CLI, `inplace`, and `worktree` combinations. It does not rerun the full `npm test` suite.

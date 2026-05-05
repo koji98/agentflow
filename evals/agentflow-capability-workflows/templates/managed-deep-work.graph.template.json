@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -91,13 +91,14 @@
             {
               "id": "acceptance_rubric",
               "kind": "rubric",
+              "target": "workspace",
               "rubric": "The workspace satisfies the repository task, preserves the exported API, and stays within the stated constraints.",
               "weight": 0.25
             },
             {
               "id": "handoff_quality",
-              "kind": "artifact_rubric",
-              "artifact": "handoff",
+              "kind": "rubric",
+              "target": "artifact:handoff",
               "rubric": "The handoff clearly documents scenario id, changed files, validation evidence, and residual risks without placeholder text.",
               "weight": 0.2
             }
@@ -113,7 +114,7 @@
           "constraints": [
             "Do not edit files outside `src/tax.js` unless validation proves it is necessary.",
             "Do not add dependencies or generated files.",
-            "Use local repo files and tests as primary authority."
+            "Do not treat sources outside local repo files and tests as primary authority."
           ]
         }
       },

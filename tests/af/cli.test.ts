@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { executeAfCli, runAfCli } from "../../src/af/index.js";
 import type { ArtifactDefinition } from "../../src/graph/authored.js";
+import {
+  appendOperatorObservation,
+  createOperatorObservation
+} from "../../src/runtime/observations/index.js";
 
 interface TestRuntimePaths {
   root: string;
@@ -113,6 +117,13 @@ describe("af runtime CLI", () => {
     expect(topLevel.stdout).toContain("Usage:");
     expect(topLevel.stdout).toContain("af <command> [subcommand] --help");
     expect(topLevel.stdout).toContain("Exit codes:");
+    expect(topLevel.stdout).toContain("af complete check");
+    expect(topLevel.stdout).not.toContain("af artifact list");
+    expect(topLevel.stdout).not.toContain("af tools list");
+    expect(topLevel.stdout).not.toContain("af diagnose");
+    expect(topLevel.stdout).not.toContain("af learn");
+    expect(topLevel.stdout).not.toContain("af spawn");
+    expect(topLevel.stdout).not.toContain("af wait");
 
     const artifactWrite = await executeAfCli(["artifact", "write", "--help"]);
     expect(artifactWrite.exitCode).toBe(0);
@@ -126,65 +137,101 @@ describe("af runtime CLI", () => {
     expect(contextShow.stdout).toContain("context_packet_path");
     expect(contextShow.stdout).toContain("Read-only inspection");
 
-    const supervisionShow = await executeAfCli(["supervision", "show", "--help"]);
-    expect(supervisionShow.exitCode).toBe(0);
-    expect(supervisionShow.stdout).toContain("active supervisor recovery envelope");
+    const completeCheck = await executeAfCli(["complete", "check", "--help"]);
+    expect(completeCheck.exitCode).toBe(0);
+    expect(completeCheck.stdout).toContain("af complete check");
   });
 
-  it("exposes status, artifact, log, and helper commands through runtime metadata", async () => {
+  it("exposes status, completion, artifact, and structured log commands through runtime metadata", async () => {
     const runtime = await createRuntime(tempRoot);
     process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
 
-    const status = outputOf<{ agent: { agent_id: string }; run: { run_id: string } }>(
+    const status = outputOf<{ agent: { agent_id: string }; run: { run_id: string }; supervisor_recovery: { active: boolean } }>(
       await executeAfCli(["status"])
     );
     expect(status.agent.agent_id).toBe("agent-main");
     expect(status.run.run_id).toBe("run-test");
+    expect(status.supervisor_recovery.active).toBe(false);
 
-    const metadataJson = JSON.parse(await readFile(runtime.metadata, "utf8")) as Record<string, unknown>;
-    await writeFile(runtime.metadata, `${JSON.stringify({
-      ...metadataJson,
-      supervisor_recovery_envelope: {
-        envelope_id: "recovery-1",
-        compiled_id: "main",
-        authored_id: "main",
-        prior_execution_id: "exec-1",
-        recovery_plan_path: join(runtime.root, "recovery-plan.json"),
-        case_file_path: join(runtime.root, "case-file.json"),
-        action: "retry_node",
-        classification: "missing_context",
-        failure_fingerprint: "fingerprint-1",
-        repeated_fingerprint_count: 1,
-        retry_directive: {
-          summary: "Recover with rebuilt context.",
-          must_do: ["Read the recovery evidence."],
-          must_not_do: ["Do not change the graph contract."],
-          evidence_to_read: [join(runtime.root, "evidence-patch.md")],
-          validation_focus: ["Run validation."],
-          unchanged_contract: {
-            goal: true,
-            acceptance_criteria: true,
-            constraints: true,
-            repo_authority: true,
-            sandbox: true,
-            declared_artifacts: true
-          }
-        },
-        created_at: "2026-04-24T00:00:00.000Z"
-      }
-    }, null, 2)}\n`, "utf8");
-    const supervision = outputOf<{ active: boolean; recovery_envelope: { classification: string } }>(
-      await executeAfCli(["supervision", "show"])
-    );
-    expect(supervision.active).toBe(true);
-    expect(supervision.recovery_envelope.classification).toBe("missing_context");
+    const incomplete = await executeAfCli(["complete", "check"]);
+    expect(incomplete.exitCode).toBe(1);
+    expect(incomplete.output).toEqual(expect.objectContaining({
+      command: "af complete check",
+      completion_status: "incomplete",
+      missing_artifacts: ["handoff"]
+    }));
 
     await expect(executeAfCli(["artifact", "write", "handoff", "--content", "ready\n"]))
       .resolves.toMatchObject({ exitCode: 0 });
     await expect(readFile(join(runtime.output, "handoff.md"), "utf8")).resolves.toBe("ready\n");
 
-    await expect(executeAfCli(["log", "--type", "finding", "--summary", "Observed runtime CLI"]))
-      .resolves.toMatchObject({ exitCode: 0 });
+    const complete = await executeAfCli(["complete", "check"]);
+    expect(complete.exitCode).toBe(0);
+    expect(complete.output).toEqual(expect.objectContaining({
+      completion_status: "ready_for_verification",
+      ready_for_verification: true
+    }));
+
+    await appendOperatorObservation(runtime.root, createOperatorObservation({
+      runId: "run-test",
+      author: "human",
+      kind: "blocker",
+      severity: "error",
+      summary: "Routed export worker is unavailable",
+      node: "main",
+      blocking: true,
+      blockedOn: "operator_managed_backend_worker",
+      recoverableBy: "operator",
+      evidence: [{
+        kind: "external_state",
+        summary: "Worker process is stopped.",
+        status: "blocked"
+      }]
+    }));
+
+    const statusWithObservation = outputOf<{
+      operator_observations: { active: number; blocking: number };
+    }>(await executeAfCli(["status"]));
+    expect(statusWithObservation.operator_observations).toEqual(expect.objectContaining({
+      active: 1,
+      blocking: 1
+    }));
+
+    const blockedComplete = await executeAfCli(["complete", "check"]);
+    expect(blockedComplete.exitCode).toBe(1);
+    expect(blockedComplete.output).toEqual(expect.objectContaining({
+      completion_status: "blocked",
+      operator_observations: expect.objectContaining({
+        active: 1,
+        blocking: 1
+      }),
+      blocking_reasons: expect.arrayContaining(["Routed export worker is unavailable"])
+    }));
+
+    await expect(executeAfCli([
+      "log",
+      "--type",
+      "finding",
+      "--finding-kind",
+      "observation",
+      "--summary",
+      "Observed runtime CLI",
+      "--evidence",
+      JSON.stringify({ kind: "runtime_event", summary: "af status completed", data: { command: "af status", exit_code: 0 } })
+    ])).resolves.toMatchObject({ exitCode: 0 });
+    await expect(executeAfCli([
+      "log",
+      "--type",
+      "finding",
+      "--finding-kind",
+      "blocker",
+      "--summary",
+      "af complete check still reports incomplete",
+      "--blocked-on",
+      "af complete check feedback",
+      "--evidence",
+      JSON.stringify({ kind: "runtime_event", summary: "completion check output was incomplete" })
+    ])).rejects.toThrow("Do not log af complete check feedback as a blocking finding");
     await expect(executeAfCli([
       "log",
       "--type",
@@ -194,36 +241,62 @@ describe("af runtime CLI", () => {
       "--rationale",
       "It matches the node contract and existing source layout.",
       "--evidence",
-      "repo inspection found src/client.ts",
+      JSON.stringify({ kind: "context", ref: "src/client.ts", summary: "repo inspection found src/client.ts" }),
       "--evidence",
-      "context manifest cited the generated client"
+      JSON.stringify({ kind: "context", ref: runtime.contextManifest, summary: "context manifest cited the generated client" }),
+      "--contract-implication",
+      "Artifact handoff can cite the generated client path."
     ]))
       .resolves.toMatchObject({ exitCode: 0 });
     const runtimeLog = (await readFile(join(runtime.root, "runtime", "log.jsonl"), "utf8"))
       .trim()
       .split(/\r?\n/)
-      .map((line) => JSON.parse(line) as { type: string; summary: string; decision?: string; rationale?: string; evidence?: string[] });
+      .map((line) => JSON.parse(line) as { type: string; summary: string; decision?: string; rationale?: string; evidence?: unknown[]; finding_kind?: string; contract_implication?: string });
     expect(runtimeLog).toEqual([
-      expect.objectContaining({ type: "finding", summary: "Observed runtime CLI" }),
+      expect.objectContaining({
+        type: "finding",
+        finding_kind: "observation",
+        summary: "Observed runtime CLI",
+        evidence: [
+          expect.objectContaining({ kind: "runtime_event", summary: "af status completed", data: { command: "af status", exit_code: 0 } })
+        ]
+      }),
       expect.objectContaining({
         type: "decision",
         summary: "Use the generated client path",
         decision: "Use the generated client path",
         rationale: "It matches the node contract and existing source layout.",
+        contract_implication: "Artifact handoff can cite the generated client path.",
         evidence: [
-          "repo inspection found src/client.ts",
-          "context manifest cited the generated client"
+          expect.objectContaining({ kind: "context", summary: "repo inspection found src/client.ts" }),
+          expect.objectContaining({ kind: "context", summary: "context manifest cited the generated client" })
         ]
       })
     ]);
 
     await expect(executeAfCli([
+      "log",
+      "--type",
+      "blocker",
+      "--summary",
+      "Old blocker type"
+    ])).rejects.toThrow("af log --type must be one of: progress, finding, decision");
+
+    await expect(executeAfCli([
       "spawn",
+      "--purpose",
+      "repair",
       "--brief",
       "Try an ungranted tool.",
       "--tools",
       "not-granted"
     ])).rejects.toThrow("not granted");
+
+    await expect(executeAfCli([
+      "spawn",
+      "--brief",
+      "Missing explicit purpose."
+    ])).rejects.toThrow("af spawn requires --purpose.");
   });
 
   it("exposes supervisor learn and diagnose helpers", async () => {
@@ -379,6 +452,8 @@ describe("af runtime CLI", () => {
     const spawned = outputOf<{ status: string; agent: { status: string }; artifact: string }>(
       await executeAfCli([
         "spawn",
+        "--purpose",
+        "implementation",
         "--brief",
         "Write the helper validation report.",
         "--artifact",
@@ -393,26 +468,25 @@ describe("af runtime CLI", () => {
     await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");
   });
 
-  it("reports a missing helper session as a wait failure", async () => {
+  it("does not expose a standalone af wait command", async () => {
     const runtime = await createRuntime(tempRoot);
     process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
 
-    const result = await executeAfCli([
-      "wait",
-      "--agent",
-      "helper_missing",
-      "--timeout-sec",
-      "0"
-    ]);
+    const result = await executeAfCli(["wait", "--agent", "helper_missing"]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toContain("Unknown af command: wait");
 
-    expect(result.exitCode).toBe(1);
-    expect(result.output).toEqual(
-      expect.objectContaining({
-        command: "af wait",
-        status: "failed",
-        message: "Timed out waiting for helper_missing."
-      })
-    );
+    const artifactList = await executeAfCli(["artifact", "list"]);
+    expect(artifactList.exitCode).toBe(2);
+    expect(artifactList.stdout).toContain("Unknown af command: artifact list");
+
+    const toolsList = await executeAfCli(["tools", "list"]);
+    expect(toolsList.exitCode).toBe(2);
+    expect(toolsList.stdout).toContain("Unknown af command: tools list");
+
+    const supervisionShow = await executeAfCli(["supervision", "show"]);
+    expect(supervisionShow.exitCode).toBe(2);
+    expect(supervisionShow.stdout).toContain("Unknown af command: supervision show");
   });
 
   it("fails af spawn --wait when the helper exits without its required artifact", async () => {
@@ -428,6 +502,8 @@ describe("af runtime CLI", () => {
 
     const result = await executeAfCli([
       "spawn",
+      "--purpose",
+      "verification",
       "--brief",
       "Exit without writing the required helper artifact.",
       "--artifact",
@@ -440,7 +516,7 @@ describe("af runtime CLI", () => {
     expect(result.exitCode).toBe(1);
     expect(result.output).toEqual(
       expect.objectContaining({
-        command: "af wait",
+        command: "af spawn",
         status: "failed",
         agent: expect.objectContaining({
           status: "failed",

@@ -1,0 +1,35 @@
+{
+  "id": "verifier-captured-evidence",
+  "bucket": "verifier-behavior",
+  "difficulty": "medium",
+  "description": "Verifier should prefer captured node evidence over verifier-side rerun failures.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true,
+    "simulation": {
+      "tool_calls": [
+        {
+          "id": "captured-evidence-ok",
+          "command": "prompt-validate",
+          "match": { "argv_exact": ["--case", "captured"] },
+          "response": { "stdout": "captured node evidence passed\n" }
+        }
+      ]
+    }
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["captured node evidence passed"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Run `prompt-validate --case captured`, include `captured node evidence passed` in the handoff, and do not ask the verifier to rerun it.",
+      "required_contains": ["captured node evidence passed", "Validation:"],
+      "required_simulation": [{ "command": "prompt-validate", "rule_id": "captured-evidence-ok" }]
+    }
+  }
+}

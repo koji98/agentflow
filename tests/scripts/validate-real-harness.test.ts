@@ -90,7 +90,7 @@ describe("validate:real-harness contract", () => {
     }).profiles.default.model).toBe("gpt-5.4-mini");
     expect(scriptModule.buildSupervisorRecoveryGraphDocument(codexSpec, "http://127.0.0.1:1234/fixturelib", {
       AGENTFLOW_CODEX_MODEL: "gpt-5.4-mini"
-    }).graph.steps[0].intent.goal).toContain("af supervision show");
+    }).graph.steps[0].intent.goal).toContain("af status");
   });
 
   it("detects explicit binary overrides and skips cleanly when no binaries are available", async () => {

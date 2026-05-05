@@ -226,7 +226,7 @@ Template variables:
 
 ## Trajectory Criteria
 
-Trace packets include `trajectory`, a chronological sequence of node attempts, runtime events, simulation calls, artifact writes, and delivery events. Trajectory criteria support:
+Trace packets include `trajectory`, a chronological sequence of node attempts, runtime events, completion packets, `af` runtime CLI calls, simulation calls, artifact writes, and delivery events. Trajectory criteria support:
 
 - `exact_order`: full trajectory must match the listed events.
 - `contains_ordered`: listed events must appear in order.
@@ -234,6 +234,15 @@ Trace packets include `trajectory`, a chronological sequence of node attempts, r
 - `forbid`: listed events must not appear.
 
 Exact matching is intentionally opt-in because full trajectories can change when runtime instrumentation improves.
+
+Completion-contract evals should prefer trajectory checks for runtime discipline:
+
+- require `{ "kind": "af_tool_call", "af_command": "complete check" }` when a scenario expects a normal agent to preview completion before finishing,
+- forbid debug/orchestration calls such as `{ "kind": "af_tool_call", "af_command": "diagnose failure" }` or `{ "kind": "af_tool_call", "af_command": "spawn" }` in normal-agent scenarios,
+- require `{ "kind": "completion_packet", "completion_status": "ready_for_verification" }` for clean passes,
+- require `{ "kind": "completion_packet", "completion_status": "incomplete" }` or `"blocked"` for negative scenarios such as missing artifacts, skipped validation, stale artifacts, live blocking observations, or sandbox blockers.
+
+Managed-pattern scenarios may assert `af spawn ... --wait` only when the graph grants orchestration authority and the helper artifact appears before the parent completion packet becomes ready.
 
 ## Custom Script Criteria
 
@@ -292,6 +301,8 @@ They must print JSON:
 
 Variant ids are anonymized in quality packets. Required deterministic criteria remain authoritative: a candidate cannot win by having better quality scores while adding hard blockers.
 
+Prompt packs are eval labels, not runtime compatibility modes. Agentflow keeps one active prompt contract; eval variants can label `current` and `candidate` prompt experiments so reports and prompt diff artifacts are auditable.
+
 ## CLI
 
 ```bash
@@ -300,7 +311,10 @@ agentflow eval run evals/agentflow-workflow-quality --variant current --scenario
 agentflow eval report .agentflow/evals/workflow-quality --format markdown
 agentflow eval inspect .agentflow/evals/workflow-quality --scenario missing-dependency-docs --variant current --trial 1
 agentflow eval compare .agentflow/evals/workflow-quality --baseline current --candidate terse
+npm run validate:prompts
 ```
+
+`eval compare` reports both strict improvement and no-regression fields. Prompt promotion should require `candidate_meets_or_exceeds_baseline: true` and should reject any high-severity scenario regression even when aggregate score is flat.
 
 Run behavior:
 
@@ -322,6 +336,8 @@ Run behavior:
   evaluation-ledger.json
   suite-snapshot.json
   benchmark.json
+  prompt-pack-diff.json
+  prompt-pack-diff.md
   report.md
   scenarios/<scenario>/<variant>/trial-001/
     rendered-graph.json
@@ -347,6 +363,7 @@ Review `report.md` first, then failing `scorecard.json`, `criteria-results.json`
 
 ## Built-In Suites
 
+- `evals/agentflow-prompt-regression`: strict release gate for solved prompt behavior; use `npm run validate:prompts` before shipping prompt changes. Prompt-regression gates use default isolated harness config; profiles with `harness_config.isolation: "inherit_user"` are intentionally non-reproducible and do not belong in this release gate.
 - `evals/agentflow-workflow-quality`: lightweight dogfood capability suite.
 - `evals/agentflow-capability-workflows`: harder local-repo prompt/context suite generated with `npm run setup:eval-repos`.
 - `evals/agentflow-realworld-issues`: pinned MIT real-world issue suite generated with `npm run setup:realworld-evals`.

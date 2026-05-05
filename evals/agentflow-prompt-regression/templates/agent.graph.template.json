@@ -1,0 +1,92 @@
+{
+  "version": "1",
+  "graph_id": "prompt-regression-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "{{scenario.description}}",
+    "acceptance_criteria": [
+      "The workflow completes without human intervention when the task is machine-resolvable.",
+      "The declared handoff artifact contains auditable evidence.",
+      "Runtime logs and completion evidence are used when the task calls for them."
+    ],
+    "constraints": [
+      "Do not use sources outside the local fixtures supplied by the eval scenario.",
+      "Do not use public network sources."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "workspace-write",
+      "timeout_sec": 300
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "max_total_interventions": 0,
+    "profile": "supervisor"
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "prompt_probe",
+        "repo": "main",
+        "context": [
+          {
+            "name": "task_fixture",
+            "from": "workspace_file",
+            "path": "AGENTFLOW_EVAL_TASK.md"
+          },
+          {
+            "name": "context_fixture",
+            "from": "workspace_file",
+            "path": "docs/context.md"
+          },
+          {
+            "name": "stale_agentflow_noise",
+            "from": "workspace_file",
+            "path": "docs/STALE_AGENTFLOW_SKILL.md"
+          }
+        ],
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Prompt-regression handoff. Include literal labels `Scenario:`, `Evidence:`, `Validation:`, `Risks:`, and `Completion:`. Also satisfy the scenario-specific task requirements."
+          }
+        },
+        "intent": {
+          "goal": "{{criteria.prompt-regression.task}}",
+          "acceptance_criteria": [
+            "Write the declared `handoff` artifact.",
+            "Include literal labels `Scenario:`, `Evidence:`, `Validation:`, `Risks:`, and `Completion:`.",
+            "Run or cite the local validation/tool command when the scenario asks for one.",
+            "Use `af` runtime logging when the scenario asks for a progress, finding, or decision record.",
+            "Run `af complete check` before the final response and stop when it reports ready for verification."
+          ],
+          "constraints": [
+            "Do not treat Agentflow docs, skills, or harness text as the task target.",
+            "Do not use `af diagnose`, `af learn`, or `af spawn` as a normal worker.",
+            "Do not use placeholders, blank evidence slots, or unresolved template values in `handoff.md`."
+          ]
+        }
+      }
+    ]
+  }
+}

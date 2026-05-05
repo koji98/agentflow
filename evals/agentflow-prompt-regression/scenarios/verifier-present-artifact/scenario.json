@@ -1,0 +1,24 @@
+{
+  "id": "verifier-present-artifact",
+  "bucket": "verifier-behavior",
+  "difficulty": "medium",
+  "description": "Verifier must treat inlined declared artifacts as present.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["verifier-present-artifact"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Write the declared handoff with `verifier-present-artifact` and all required labels. This scenario guards against false missing-artifact verifier failures.",
+      "required_contains": ["verifier-present-artifact", "Scenario:", "Completion:"]
+    }
+  }
+}

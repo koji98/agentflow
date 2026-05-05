@@ -44,13 +44,14 @@ function buildPatternStep(stepOverrides = {}) {
         {
           id: "acceptance_rubric",
           kind: "rubric",
+          target: "workspace",
           rubric: "The workspace satisfies the goal and acceptance criteria without violating constraints.",
           weight: 0.4
         },
         {
           id: "handoff_quality",
-          kind: "artifact_rubric",
-          artifact: "summary",
+          kind: "rubric",
+          target: "artifact:summary",
           rubric: "The summary clearly describes changes, validation evidence, and residual risks.",
           weight: 0.2
         }
@@ -150,6 +151,8 @@ describe("pattern deep work", () => {
     const generateValidateNode = loop.body.steps[1];
     const criteriaPanel = loop.body.steps[2];
     const gateNode = loop.body.steps[3];
+    const planPrompt = JSON.stringify(planNode);
+    const generateValidatePrompt = JSON.stringify(generateValidateNode);
 
     expect(planNode).toEqual(
       expect.objectContaining({
@@ -160,6 +163,12 @@ describe("pattern deep work", () => {
         })
       })
     );
+    expect(planPrompt).toContain("implementation planner");
+    expect(planPrompt).toContain("You do not edit files in this phase.");
+    expect(planPrompt).toContain("treat that as expected first-cycle state");
+    expect(planPrompt).toContain("do not consult ambient Codex or Agentflow playbooks");
+    expect(planPrompt).toContain("Do not wait for, search globally for, or report a blocker solely because first-cycle private materials are missing.");
+    expect(planPrompt).not.toContain("senior");
     expect(generateValidateNode).toEqual(
       expect.objectContaining({
         type: "agent",
@@ -171,6 +180,8 @@ describe("pattern deep work", () => {
         })
       })
     );
+    expect(generateValidatePrompt).toContain("implementation agent responsible for completing and validating this work cycle");
+    expect(generateValidatePrompt).not.toContain("meticulous");
 
     if (!criteriaPanel || criteriaPanel.type !== "parallel") {
       throw new Error("Expected completion criteria to run in parallel.");
@@ -193,6 +204,20 @@ describe("pattern deep work", () => {
         id: "implement_checkout__managed__pattern_deep_work__criterion_02_acceptance_rubric"
       })
     );
+    expect(JSON.stringify(criteriaPanel.steps[1])).toContain("evaluator for completion criterion `acceptance_rubric`");
+    expect(JSON.stringify(criteriaPanel.steps[1])).not.toContain("fair");
+    expect(criteriaPanel.steps[2]).toEqual(
+      expect.objectContaining({
+        type: "check",
+        check_kind: "ai",
+        on_failure: "continue",
+        id: "implement_checkout__managed__pattern_deep_work__criterion_03_handoff_quality",
+        context: [
+          expect.objectContaining({ name: "work_notes" }),
+          expect.objectContaining({ name: "draft_summary" })
+        ]
+      })
+    );
     expect(gateNode).toEqual(
       expect.objectContaining({
         type: "check",
@@ -212,8 +237,16 @@ describe("pattern deep work", () => {
           summary: expect.objectContaining({ path: "summary.md" }),
           packet: expect.objectContaining({ path: "packet.json" }),
           validation_log: expect.objectContaining({ path: "validation-log.md" })
+        }),
+        intent: expect.objectContaining({
+          acceptance_criteria: expect.arrayContaining([
+            "The public artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success."
+          ])
         })
       })
+    );
+    expect(JSON.stringify(finalNode)).toContain(
+      "publishing the final public artifacts from the latest passing managed work cycle"
     );
   });
 

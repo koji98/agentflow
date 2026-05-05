@@ -45,6 +45,43 @@ The harness environment includes:
 
 It explicitly does not include `AGENTFLOW_CREDENTIAL_*` values or raw `AGENTFLOW_TOOL_<NAME>_<KEY>` config values.
 
+## Harness Config Isolation
+
+Harness-native config is profile authority. Ambient Codex or Cursor user config is not used by default, and node definitions do not carry their own `harness_config`.
+
+Profiles may declare:
+
+```json
+{
+  "harness_config": {
+    "isolation": "isolated",
+    "codex": {
+      "config": {},
+      "mcp_servers": {},
+      "plugins": {},
+      "notify": []
+    },
+    "cursor": {
+      "config": {},
+      "permissions": {
+        "allow": [],
+        "deny": []
+      }
+    }
+  }
+}
+```
+
+`isolation` defaults to `isolated`. Launch profile config is inherited only when the effective harness matches; node and supervisor profiles then overlay it. Object maps merge by key, arrays replace, and the more specific profile wins. Validation fails unknown `harness_config` keys and harness-specific config under the wrong effective harness.
+
+In Codex isolated mode, Agentflow creates a temporary `CODEX_HOME`, links auth when available, and passes only declared `codex.config`, `codex.mcp_servers`, `codex.plugins`, and `codex.notify` values. If no MCP servers or plugins are declared, isolated Codex runs have none by default.
+
+In Cursor isolated mode, Agentflow creates a generated `CURSOR_CONFIG_DIR`, writes the Agentflow workspace and sandbox permissions, then merges declared `cursor.config` and `cursor.permissions`. Cursor `inherit_user` cannot combine with declared `cursor.config` or `cursor.permissions` because Agentflow would have no generated config file to merge into.
+
+`isolation: "inherit_user"` is an explicit reproducibility tradeoff. Codex runs keep the user's `CODEX_HOME`; Cursor runs keep the user's `CURSOR_CONFIG_DIR` and ambient CLI config. Agentflow still supplies required workspace, sandbox, output, context, runtime CLI, and plugin-tool environment. Use this only when the local harness-native setup is part of the intended run, and exclude those profiles from prompt-regression release gates.
+
+Verifier, AI-check, and supervisor-evidence invocations always force isolated no-external-tool harness config, even if their profile asks to inherit user config. Those prompts are runtime trust checks, not worker capability nodes.
+
 ## Generated Tool Directory
 
 For each agent execution, Agentflow creates:
@@ -134,15 +171,19 @@ flowchart LR
 
 Common commands:
 
-- `af status`: inspect run, node, workspace, output directory, sandbox, declared artifacts, and granted tools.
+- `af status`: inspect run, node, workspace, output directory, sandbox, declared artifacts, granted tools summary, active supervisor recovery, and live human observations relevant to the current node.
 - `af context show`: print the materialized context manifest and packet path.
-- `af tools list`: show the granted plugin tools.
-- `af artifact list|write`: publish declared artifacts.
-- `af log --type ...`: append structured worker evidence to `runtime/log.jsonl`.
-- `af log --type decision --decision ... --rationale ... --evidence ...`: record major scope-affecting decisions with the rationale and supporting evidence strings that outcome verification can inspect.
-- `af spawn` and `af wait`: manage supervised helper sub-nodes with their own metadata and artifacts.
+- `af artifact write`: publish declared artifacts to their declared destinations.
+- `af complete check`: build the runtime completion packet and report whether the current attempt is `ready_for_verification`, `incomplete`, or `blocked`.
+- `af log --type progress --summary ... --evidence ...`: record verified progress only after checking the claim.
+- `af log --type finding --finding-kind <observation|issue|risk|blocker> --summary ... --evidence ...`: record relevant facts as they come up.
+- `af log --type decision --decision ... --rationale ... --contract-implication ... --evidence ...`: record considered decisions with evidence.
+
+`af --help` is intentionally narrow for normal agents. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` are explicit supervisor or managed-pattern tools, but they are not part of the ordinary worker completion loop. There is no standalone `af wait`; `af spawn --purpose <investigation|implementation|verification|repair> ... --wait` is the blocking orchestration form when orchestration authority is granted.
 
 The runtime CLI is file-backed. It coordinates through the run root and runtime directory, not through a live in-memory service exposed to the model.
+
+`af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include declared artifact state, placeholder/empty/stale artifact findings, validation evidence gaps, active blocking findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, and helper session evidence. Outcome verification only judges semantic correctness after this mechanical packet is ready, or after the packet reports a supported blocked state.
 
 ## Tool Invocation Evidence
 

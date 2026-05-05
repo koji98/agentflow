@@ -27,10 +27,10 @@ function compileReviewGraph(value: unknown) {
 }
 
 describe("compiled graph authoring review", () => {
-  it("includes graph intent findings in the standard review", () => {
+  it("includes graph intent findings in the default full review", () => {
     const { document, graph } = compileReviewGraph({
       version: "1",
-      graph_id: "review-standard-intent",
+      graph_id: "review-default-intent",
       intent: {
         goal: "Ship"
       },
@@ -85,7 +85,7 @@ describe("compiled graph authoring review", () => {
     );
   });
 
-  it("keeps deeper node-purpose guidance behind explicit review modes", () => {
+  it("includes deeper node-purpose guidance in the default review", () => {
     const { document, graph } = compileReviewGraph({
       version: "1",
       graph_id: "review-deep-node-guidance",
@@ -139,18 +139,10 @@ describe("compiled graph authoring review", () => {
       }
     });
 
-    const standard = reviewCompiledGraph(document, graph);
-    const full = reviewCompiledGraph(document, graph, { mode: "review" });
+    const review = reviewCompiledGraph(document, graph);
 
-    expect(standard.findings).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          category: "context",
-          path: "$.graph.steps[0].context[0].max_files"
-        })
-      ])
-    );
-    expect(full.findings).toEqual(
+    expect(review.mode).toBe("review");
+    expect(review.findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           category: "context",

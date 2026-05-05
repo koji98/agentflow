@@ -11,6 +11,7 @@ export interface OutcomeVerificationPromptArtifactSnippet {
 export interface OutcomeVerificationPromptDecisionLogEntry {
   decision: string;
   rationale: string;
+  contract_implication?: string;
   evidence: string[];
   created_at?: string;
   log_id?: string;
@@ -22,6 +23,25 @@ export interface OutcomeVerificationPromptExecutionEvidence {
   excerpt?: string;
   truncated?: boolean;
   read_error?: string;
+}
+
+export interface OutcomeVerificationPromptCompletionPacket {
+  completion_status: "ready_for_verification" | "incomplete" | "blocked";
+  ready_for_verification: boolean;
+  blocking_reasons: string[];
+  missing_artifacts: string[];
+  declared_artifacts?: Array<{
+    name: string;
+    status: string;
+    current_attempt: boolean;
+    size_bytes?: number;
+  }>;
+  artifact_findings?: Array<{
+    artifact: string;
+    kind: string;
+    summary: string;
+  }>;
+  packet_path: string;
 }
 
 export interface OutcomeVerificationPromptInput {
@@ -47,6 +67,7 @@ export interface OutcomeVerificationPromptInput {
     diff_truncated?: boolean;
     capture_error?: string;
   };
+  completion_packet?: OutcomeVerificationPromptCompletionPacket;
   workspace_path: string;
   attempt: {
     execution_id: string;
@@ -157,6 +178,9 @@ function renderDecisionLog(entries: OutcomeVerificationPromptDecisionLogEntry[])
       ].filter(Boolean).join(" | "));
     }
     lines.push(`Rationale: ${entry.rationale}`);
+    if (entry.contract_implication) {
+      lines.push(`Contract implication: ${entry.contract_implication}`);
+    }
     lines.push("Evidence:");
     for (const evidence of entry.evidence) {
       lines.push(`- ${evidence}`);
@@ -201,6 +225,54 @@ function renderExecutionEvidence(evidence: OutcomeVerificationPromptExecutionEvi
   return lines;
 }
 
+function renderCompletionPacket(packet: OutcomeVerificationPromptCompletionPacket | undefined): string[] {
+  const lines = [
+    "## Completion Packet",
+    "Runtime mechanical completion facts are primary structured evidence. Do not pass an incomplete packet; judge semantic correctness only when the packet is ready for verification.",
+  ];
+
+  if (!packet) {
+    lines.push("", "(no completion packet was provided)");
+    return lines;
+  }
+
+  lines.push(
+    `- Status: ${packet.completion_status}`,
+    `- Ready for verification: ${packet.ready_for_verification}`,
+    `- Packet: ${packet.packet_path}`
+  );
+
+  if (packet.missing_artifacts.length > 0) {
+    lines.push("- Missing artifacts:");
+    for (const artifact of packet.missing_artifacts) {
+      lines.push(`  - ${artifact}`);
+    }
+  }
+
+  if (packet.declared_artifacts && packet.declared_artifacts.length > 0) {
+    lines.push("- Declared artifact status:");
+    for (const artifact of packet.declared_artifacts) {
+      lines.push(`  - ${artifact.name}: ${artifact.status}; current_attempt=${artifact.current_attempt}${artifact.size_bytes !== undefined ? `; size=${artifact.size_bytes}` : ""}`);
+    }
+  }
+
+  if (packet.artifact_findings && packet.artifact_findings.length > 0) {
+    lines.push("- Artifact findings:");
+    for (const finding of packet.artifact_findings) {
+      lines.push(`  - ${finding.artifact}:${finding.kind}: ${finding.summary}`);
+    }
+  }
+
+  if (packet.blocking_reasons.length > 0) {
+    lines.push("- Blocking reasons:");
+    for (const reason of packet.blocking_reasons) {
+      lines.push(`  - ${reason}`);
+    }
+  }
+
+  return lines;
+}
+
 export function truncateForPrompt(value: string, maxBytes: number): { content: string; truncated: boolean } {
   if (Buffer.byteLength(value, "utf8") <= maxBytes) {
     return { content: value, truncated: false };
@@ -222,12 +294,15 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "You must respond with a single fenced JSON object that follows the schema below. No prose outside the fence.",
     "",
     "## Decision Rule",
+    "- Treat the Completion Packet section as primary structured evidence for mechanical readiness.",
+    "- Do not pass when completion_status is incomplete. Treat blocked as a terminal attempt state only when the blocker is supported by evidence; blocked is not node success.",
     "- Pass when the declared artifacts, final response, decision log, and available deterministic evidence reasonably satisfy the authored acceptance criteria.",
     "- Treat graph and node acceptance criteria as authoritative over any task text that describes an intentionally failing fallback, blocker report, or retry trigger.",
     "- A final response explicitly marked as an intentional failure, retry request, missing-context fallback, or not-done state is blocker evidence unless the acceptance criteria explicitly say that terminal fallback is acceptable.",
     "- A required declared artifact that is empty, placeholder-only, missing the requested content, or inconsistent with the final response is blocker evidence even when the final response claims success.",
     "- The Declared Artifacts section below is authoritative for artifact presence. If a declared artifact snippet has a path, size/content, and no read error, treat that artifact as present; do not claim it is missing because a separate file search, transcript, or directory listing appears incomplete.",
     "- Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section, has a read error, or the inlined content proves the artifact does not satisfy the authored artifact contract.",
+    "- For exact labels or literal phrase requirements, defer to the Completion Packet artifact findings when the packet is ready for verification. Do not invent a missing-literal blocker when the packet reports the artifact present with no placeholder, forbidden-content, or missing-required-content finding and the inlined artifact text contains the literal.",
     "- If an artifact is truncated in this prompt, read the full artifact path before making a blocker judgment that depends on omitted content.",
     "- Set passed=false only when there is strong, concrete, actionable blocker evidence that the node violated the graph or node contract.",
     "- Ambiguous, incomplete, or lower-confidence evidence should become a non-blocker finding unless it directly contradicts a required contract point.",
@@ -261,6 +336,8 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "",
     "Constraints:",
     ...bullets(input.node_constraints, "No node-level constraints were authored."),
+    "",
+    ...renderCompletionPacket(input.completion_packet),
     "",
     "## Workspace",
     `Workspace path: ${input.workspace_path}`,

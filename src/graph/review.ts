@@ -12,7 +12,7 @@ import type {
 } from "./compiled.js";
 import { reservedArtifactNames } from "./schema.js";
 
-export type GraphReviewMode = "standard" | "review" | "strict-review";
+export type GraphReviewMode = "review" | "strict";
 export type GraphReviewSeverity = "info" | "warning" | "serious";
 
 export interface GraphReviewFinding {
@@ -538,17 +538,16 @@ export function reviewCompiledGraph(
   graph: CompiledGraph,
   options: { mode?: GraphReviewMode } = {}
 ): GraphReviewReport {
-  const mode = options.mode ?? "standard";
-  const fullReview = mode === "review" || mode === "strict-review";
+  const mode = options.mode ?? "review";
   const findings: GraphReviewFinding[] = [];
   const authoredMetadata = collectAuthoredMetadata(document.graph);
 
   reviewIntent(document, findings);
 
   graph.nodes.forEach((node) => {
-    reviewExecutableNode(document, node, authoredMetadata, findings, { fullReview });
+    reviewExecutableNode(document, node, authoredMetadata, findings, { fullReview: true });
   });
-  reviewVerification(document, graph, findings, { fullReview });
+  reviewVerification(document, graph, findings, { fullReview: true });
   reviewRepeatAndParallel(graph, authoredMetadata, findings);
   reviewSupervision(graph, findings);
 

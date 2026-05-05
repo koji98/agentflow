@@ -78,9 +78,9 @@ flowchart TD
 
 The prompt does not inline every context file. It includes the manifest text and points to `packet.json` and `provenance.json`. This keeps prompt construction stable while still letting the agent inspect exact materialized paths.
 
-## Run-Ready Context Analysis
+## Validate Context Analysis
 
-`agentflow validate --run-ready` uses the same tokenizer and repo file discovery rules as runtime context materialization. It estimates every executable node's context packet before launch and includes `context_analysis` in the validation payload:
+`agentflow validate --graph <path>` uses the same tokenizer and repo file discovery rules as runtime context materialization. It estimates every executable node's context packet before launch and includes the report under `checks.context` in the validation payload:
 
 - projected total tokens per node against `max_total_tokens`
 - projected and actual tokens per context item
@@ -89,7 +89,7 @@ The prompt does not inline every context file. It includes the manifest text and
 - default ignored roots and explicit ignored-root opt-ins
 - launch-blocking diagnostics when current context would exceed the node budget
 
-Plain `agentflow validate` keeps structural graph validation only. Run-ready validation fails before launch when the current workspace state would fail context materialization at runtime.
+Validation fails before launch when the current workspace state would fail context materialization at runtime.
 
 Workspace globs skip common dependency and generated roots by default, including `.git`, `.agentflow`, `node_modules`, `.venv`, `venv`, `.tox`, cache directories, build output, coverage, `vendor`, `third_party`, `generated`, `gen`, `__generated__`, and Bazel output. Authors can intentionally opt into one of those roots by starting the authored context path inside that root, such as `.venv/*eval*.md`; broad globs like `**/*eval*` still skip those roots.
 

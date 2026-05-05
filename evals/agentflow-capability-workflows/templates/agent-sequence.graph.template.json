@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -112,7 +112,7 @@
           ],
           "constraints": [
             "Do not change files outside `src/rounding.js` unless validation proves it is necessary.",
-            "Use the research artifact as evidence, not as authority to widen the node scope.",
+            "Do not use the research artifact as authority to widen node scope; use it only as evidence.",
             "Do not leave blank fields, placeholder text, or unresolved template values in the handoff artifact."
           ]
         }

@@ -29,7 +29,7 @@ Common:
 {
   "goal": "Ship checkout timeout handling.",
   "constraints": [
-    "Keep public APIs stable.",
+    "Do not change public APIs.",
     "Do not modify payment provider configuration."
   ],
   "acceptance_criteria": [
@@ -39,7 +39,7 @@ Common:
 }
 ```
 
-Top-level `intent.goal` is required. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; scope boundaries and high-impact limits belong in graph-level or node-level `intent.constraints`.
+Top-level `intent.goal` is required. Use top-level `repos` for local checkout bindings and top-level `profiles` for harness authority; scope boundaries and high-impact limits belong in graph-level or node-level `intent.constraints`. Constraint strings should start with `Do not`; positive outcomes belong in `acceptance_criteria`.
 
 Executable nodes can also carry intent:
 
@@ -136,6 +136,7 @@ Common profile fields:
 - `timeout_sec`
 - `input_rules`
 - `env_files`
+- `harness_config`
 - `artifact_repair`
 - `deterministic_check_defaults`
 - `ai_check_defaults`
@@ -145,6 +146,8 @@ Set `model` to a concrete harness-supported model only when the team needs that 
 Sandboxes: `read-only`, `workspace-write`, `danger-full-access`.
 
 Agents that declare artifacts need a write-capable sandbox.
+
+`harness_config.isolation` defaults to `isolated`, so ambient Codex/Cursor user config is ignored unless the profile explicitly opts into `inherit_user`. Declare harness-native Codex MCP/plugins/config or Cursor config/permissions under the matching `harness_config.codex` or `harness_config.cursor` key. Do not put harness-specific config under a profile for the other harness.
 
 ## Plugin Tools
 

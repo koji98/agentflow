@@ -57,7 +57,7 @@ The standard agent prompt already includes a `## Working Loop` section that tell
 
 Every `agent` node attempt that exits cleanly with all declared artifacts is sent to a fresh-context outcome verifier before it is allowed to remain `passed`. The verifier:
 
-- Uses the same harness and same model as the executor, but in a fresh session with a `read-only` sandbox and no plugin tools.
+- Uses the same harness family and model as the executor, but in a fresh isolated session with a `read-only` sandbox and no plugin tools, MCP servers, or inherited harness-native config.
 - Receives the graph and node intent (goal, acceptance criteria, constraints), the agent's captured response, the declared artifact contents, and the attempt's workspace diff.
 - Must respond with a single fenced JSON block matching the documented schema. Malformed responses are retried with a bounded budget; persistent malformed output is treated as a `verifier_unparseable` blocker and fails the attempt closed.
 - Produces `verify-outcome.json` (machine) and `verify-outcome.md` (human) under the attempt directory, plus an `outcome.verified` runtime event.

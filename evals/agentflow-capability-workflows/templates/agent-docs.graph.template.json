@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -91,7 +91,7 @@
             "Do not widen the task beyond the fixture repo.",
             "Do not add dependencies.",
             "Do not edit `docs/**`; stale repo docs are conflict evidence only, not part of the requested change.",
-            "Read the docs fixture URL directly when possible; if the URL is unavailable, record the exact probe and fallback evidence in `Docs evidence:`."
+            "Do not skip the docs fixture URL when it is available; if unavailable, record the exact probe and fallback evidence in `Docs evidence:`."
           ]
         }
       },

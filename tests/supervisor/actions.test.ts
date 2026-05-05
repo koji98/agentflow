@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
+import { resolveExecutionArtifactsDirectory, resolveInterventionDirectory } from "../../src/artifacts/paths.js";
 import type { CompiledAgentNode } from "../../src/graph/compiled.js";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { runRepairArtifactIntervention } from "../../src/supervisor/actions.js";
@@ -120,10 +120,11 @@ describe("supervisor actions", () => {
         target_execution_id: "exec-1"
       })
     );
-    expect(record.artifact_paths.intervention_dir).toBe(join(executionDir, "interventions", "intervention-1"));
-    await expect(readFile(join(executionDir, "interventions", "intervention-1", "prompt.md"), "utf8"))
+    const interventionDir = resolveInterventionDirectory(executionDir, "intervention-1");
+    expect(record.artifact_paths.intervention_dir).toBe(interventionDir);
+    await expect(readFile(join(interventionDir, "prompt.md"), "utf8"))
       .resolves.toContain("## Repair Task");
-    await expect(readFile(join(executionDir, "interventions", "intervention-1", "result.json"), "utf8"))
+    await expect(readFile(join(interventionDir, "result.json"), "utf8"))
       .resolves.toContain('"missing_artifacts_after": []');
     await expect(readFile(join(artifactsRoot, "handoff.md"), "utf8")).resolves.toBe("repaired\n");
   });

@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { resolveExecutionArtifactsDirectory } from "../artifacts/paths.js";
+import { resolveExecutionArtifactsDirectory, resolveInterventionDirectory } from "../artifacts/paths.js";
 import type { CompiledAgentNode } from "../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { HarnessName } from "../graph/schema.js";
@@ -150,6 +150,9 @@ function buildRepairInvocation(options: {
     repoPath: options.workspace_path,
     sandbox,
     ...(supervisorPolicy?.skip_git_repo_check ?? options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
+    ...(supervisorPolicy?.harness_config ?? options.node.effective_policy.harness_config
+      ? { harnessConfig: supervisorPolicy?.harness_config ?? options.node.effective_policy.harness_config }
+      : {}),
     model: supervisorPolicy?.model ?? options.node.effective_policy.model,
     ...(supervisorPolicy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort
       ? { reasoningEffort: supervisorPolicy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort }
@@ -210,7 +213,7 @@ export async function runRepairArtifactIntervention(options: {
   const maxAttempts = options.max_attempts ?? repairAttempt;
   const decisionId = options.decision_id ?? `${options.attempt.execution_id}__repair_artifact_decision_${repairAttempt}`;
   const interventionId = options.intervention_id ?? createDefaultInterventionId(options.attempt, repairAttempt);
-  const interventionDir = join(options.attempt.execution_dir, "interventions", interventionId);
+  const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, interventionId);
   const startedAt = new Date().toISOString();
   const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
   const previousAttemptEvidencePaths = await collectPreviousAttemptEvidencePaths(

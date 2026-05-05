@@ -71,7 +71,7 @@
           ],
           "constraints": [
             "Do not change files during this research showcase.",
-            "Repository docs and source are primary authority."
+            "Do not treat non-repository material as primary authority."
           ]
         }
       },
@@ -133,7 +133,7 @@
       "The package preserves findings, uncertainty, and a recommendation."
     ],
     "constraints": [
-      "Use repository docs and source as primary evidence."
+      "Do not rely on evidence outside repository docs and source."
     ]
   },
   "supervision": {

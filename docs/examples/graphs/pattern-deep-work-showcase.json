@@ -70,13 +70,14 @@
             {
               "id": "scope_rubric",
               "kind": "rubric",
+              "target": "workspace",
               "rubric": "The workspace satisfies the managed-pattern documentation goal without reintroducing deleted old pattern names.",
               "weight": 0.4
             },
             {
               "id": "summary_quality",
-              "kind": "artifact_rubric",
-              "artifact": "summary",
+              "kind": "rubric",
+              "target": "artifact:summary",
               "rubric": "The summary clearly explains changes, validation evidence, residual risks, and next actions.",
               "weight": 0.25
             }
@@ -134,10 +135,10 @@
   "intent": {
     "goal": "Demonstrate a bounded managed deep work loop.",
     "acceptance_criteria": [
-      "The example shows command, rubric, and artifact-rubric completion criteria."
+      "The example shows command criteria and targeted rubric criteria."
     ],
     "constraints": [
-      "This is a showcase graph; inspect before launch."
+      "Do not launch this showcase graph without inspecting it first."
     ]
   },
   "supervision": {

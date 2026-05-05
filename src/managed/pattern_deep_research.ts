@@ -20,9 +20,15 @@ import {
 
 export interface PatternDeepResearchConfig extends BaseExecutableNode, ManagedPatternAgentOptions {
   research: {
-    angles: string[];
+    angles: PatternDeepResearchAngle[];
   };
   runtime?: ManagedPatternRuntime;
+}
+
+export interface PatternDeepResearchAngle {
+  id: string;
+  prompt: string;
+  public_artifact?: string;
 }
 
 function workflowNodeId(rootId: string, suffix: string): string {
@@ -82,9 +88,15 @@ function balancedGroups<T>(items: T[], maxGroupSize = 3): T[][] {
   return groups;
 }
 
-function buildAnglePrompt(config: PatternDeepResearchConfig, angle: string, index: number): string {
+function formatAngleLabel(angle: PatternDeepResearchAngle): string {
+  return angle.public_artifact
+    ? `${angle.id}: ${angle.prompt} (public artifact: ${angle.public_artifact})`
+    : `${angle.id}: ${angle.prompt}`;
+}
+
+function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepResearchAngle, index: number): string {
   return renderPrompt([
-    body("You are an expert deep researcher investigating one assigned angle for a larger managed research workflow. Your private report will be synthesized later, so gather strong useful evidence and preserve uncertainty clearly."),
+    body("You are a research angle worker investigating one assigned angle for a larger managed research workflow. Your private report will be synthesized later, so gather useful evidence and preserve uncertainty clearly."),
     section("Final Managed Workflow Contract", [
       "This is a private helper node inside a managed workflow. The final managed node owns the public artifact shape and final acceptance criteria below.",
       "Use this contract to understand what your evidence must support, but do not format this private angle report as the final public artifact unless the private output contract below says so.",
@@ -93,9 +105,18 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: string, inde
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Assigned Angle", [
-      angle,
+      `Angle id: ${angle.id}`,
+      angle.prompt,
       "Stay focused on this angle. Do not duplicate the other angle workers unless overlap is needed to explain a conflict."
     ]),
+    ...(angle.public_artifact
+      ? [
+          section("Selected Public Axis", [
+            `The final publisher will write public artifact \`${angle.public_artifact}\` for this axis if the evidence supports it.`,
+            "Your angle packet should preserve the strongest claims, evidence refs, conflicts, uncertainty, and confidence for that public artifact."
+          ])
+        ]
+      : []),
     section("Research Method", [
       "Use local repository files, provided context, available local CLIs, docs, or web research, whichever best serves this angle.",
       "Prefer authoritative local/source evidence when the question is repo-specific.",
@@ -123,7 +144,7 @@ function buildSynthesisPrompt(
   group: number
 ): string {
   return renderPrompt([
-    body(`You are an expert research lead synthesizing ${inputCount} research packets into one higher-signal research packet.`),
+    body(`You are a research synthesis worker combining ${inputCount} research packets into one higher-signal research packet.`),
     section("Final Managed Workflow Contract", [
       "This is a private synthesis step inside a larger managed research workflow. The final public result will be published later.",
       "Use the final contract to preserve relevant evidence, but do not format this private synthesis as the final public artifact unless the private output contract below says so.",
@@ -151,25 +172,33 @@ function buildFinalPrompt(
   publicArtifacts: Record<string, ArtifactDefinition>,
   inputCount: number
 ): string {
+  const publicAxisArtifacts = config.research.angles.filter((angle) => angle.public_artifact);
   return renderPrompt([
-    body(`You are the final research lead publishing the managed deep research result from ${inputCount} research packet${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
+    body(`You are the final research publisher for a managed deep research result from ${inputCount} research packet${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
     section("Managed Workflow Contract", [
       "This final publisher owns the managed workflow's public artifact contract. Internal helper reports are only evidence.",
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
-    section("Research Angles", config.research.angles.map((angle) => `- ${angle}`)),
+    section("Research Angles", config.research.angles.map((angle) => `- ${formatAngleLabel(angle)}`)),
     section("Current Context", [
       "Use the research reports and packets in context as authority.",
       "Resolve disagreements explicitly. Preserve uncertainty and cite the evidence behind important claims.",
       "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
     ]),
+    ...(publicAxisArtifacts.length > 0
+      ? [
+          section("Selected Public Axis Artifacts", publicAxisArtifacts.map((angle) =>
+            `- ${angle.public_artifact}: publish the final evidence-backed findings for angle \`${angle.id}\`.`
+          ))
+        ]
+      : []),
     section("Public Artifact Contract", [
       "Write exactly the declared public artifacts.",
       ...formatArtifactContract(publicArtifacts),
       "Honor each artifact description literally, including any required field labels or handoff sections.",
-      "The `packet` artifact must include answer, findings, evidence, sources, uncertainties, confidence, and recommended next actions."
+      "The `packet` artifact must include answer, findings, evidence, sources, uncertainties, confidence, recommended next actions, and an angle index with each angle id, public artifact when selected, source refs, confidence, conflicts, and private evidence paths."
     ]),
     section("Quality Bar", [
       "The final package should be useful for a downstream design, implementation, review, or decision node without making the reader inspect private internal artifacts.",

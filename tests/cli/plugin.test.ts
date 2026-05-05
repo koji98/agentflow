@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -207,6 +207,7 @@ async function createRootResourcePlugin(root: string): Promise<string> {
   await writeFile(join(pluginDir, "workflows", "rooted", "context", "workflow.md"), "Workflow-local guidance.\n");
   await writeFile(join(pluginDir, "shared", "root.md"), "Plugin-root guidance.\n");
   await writeFile(join(pluginDir, "tools", "root-check.sh"), "#!/usr/bin/env bash\necho rooted\n");
+  await chmod(join(pluginDir, "tools", "root-check.sh"), 0o755);
   await writeFile(
     join(pluginDir, "workflows", "rooted", "workflow.graph.json"),
     JSON.stringify(
@@ -441,7 +442,7 @@ describe("plugin workflows", () => {
     await writeFile(join(pluginDir, "workflows", "simple", "context", "guidance.md"), "Changed guidance.\n");
     const stale = await executeCli(["validate", "--graph", graphPath], tempRoot);
     expect(stale.exitCode).toBe(1);
-    expect(JSON.parse(stale.stdout).diagnostics).toEqual(
+    expect(JSON.parse(stale.stdout).checks.authored.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           message: expect.stringContaining("digest changed")
@@ -720,7 +721,7 @@ describe("plugin workflows", () => {
 
     const unresolved = await executeCli(["validate", "--graph", graphPath], tempRoot);
     expect(unresolved.exitCode).toBe(1);
-    expect(JSON.parse(unresolved.stdout).diagnostics).toEqual(
+    expect(JSON.parse(unresolved.stdout).checks.authored.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           message: expect.stringContaining("agentflow plugin resolve --graph")

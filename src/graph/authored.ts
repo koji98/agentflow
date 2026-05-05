@@ -46,6 +46,31 @@ export interface ArtifactRepairPolicy {
   max_attempts?: number;
 }
 
+export type HarnessIsolationMode = "isolated" | "inherit_user";
+
+export interface CodexHarnessConfig {
+  config?: Record<string, unknown>;
+  mcp_servers?: Record<string, unknown>;
+  plugins?: Record<string, unknown>;
+  notify?: unknown[];
+}
+
+export interface CursorHarnessPermissions {
+  allow?: string[];
+  deny?: string[];
+}
+
+export interface CursorHarnessConfig {
+  config?: Record<string, unknown>;
+  permissions?: CursorHarnessPermissions;
+}
+
+export interface HarnessConfig {
+  isolation?: HarnessIsolationMode;
+  codex?: CodexHarnessConfig;
+  cursor?: CursorHarnessConfig;
+}
+
 export interface PluginToolReference {
   from_plugin: string;
   tool: string;
@@ -67,6 +92,7 @@ export interface GraphProfile {
   deterministic_check_defaults?: DeterministicCheckDefaults;
   ai_check_defaults?: AiCheckDefaults;
   artifact_repair?: ArtifactRepairPolicy;
+  harness_config?: HarnessConfig;
 }
 
 export interface GraphDefaults {

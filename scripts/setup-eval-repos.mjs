@@ -912,13 +912,14 @@ const templates = {
               {
                 id: "acceptance_rubric",
                 kind: "rubric",
+                target: "workspace",
                 rubric: "The workspace satisfies the repository task, preserves the exported API, and stays within the stated constraints.",
                 weight: 0.25
               },
               {
                 id: "handoff_quality",
-                kind: "artifact_rubric",
-                artifact: "handoff",
+                kind: "rubric",
+                target: "artifact:handoff",
                 rubric: "The handoff clearly documents scenario id, changed files, validation evidence, and residual risks without placeholder text.",
                 weight: 0.2
               }

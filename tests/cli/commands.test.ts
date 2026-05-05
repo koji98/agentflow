@@ -62,6 +62,52 @@ async function initGitRepo(repoDir: string): Promise<void> {
   await execFileAsync("git", ["commit", "-m", "init"], { cwd: repoDir });
 }
 
+async function withMockValidateHarnesses<T>(run: () => Promise<T>): Promise<T> {
+  const previousCodex = process.env.AGENTFLOW_CODEX_CLI_BIN;
+  const previousCursor = process.env.AGENTFLOW_CURSOR_CLI_BIN;
+  process.env.AGENTFLOW_CODEX_CLI_BIN = process.execPath;
+  process.env.AGENTFLOW_CURSOR_CLI_BIN = process.execPath;
+
+  try {
+    return await run();
+  } finally {
+    if (previousCodex === undefined) {
+      delete process.env.AGENTFLOW_CODEX_CLI_BIN;
+    } else {
+      process.env.AGENTFLOW_CODEX_CLI_BIN = previousCodex;
+    }
+
+    if (previousCursor === undefined) {
+      delete process.env.AGENTFLOW_CURSOR_CLI_BIN;
+    } else {
+      process.env.AGENTFLOW_CURSOR_CLI_BIN = previousCursor;
+    }
+  }
+}
+
+async function withFastSupervisorRetries<T>(run: () => Promise<T>): Promise<T> {
+  const previousBaseDelay = process.env.AGENTFLOW_RETRY_BASE_DELAY_MS;
+  const previousMaxDelay = process.env.AGENTFLOW_RETRY_MAX_DELAY_MS;
+  process.env.AGENTFLOW_RETRY_BASE_DELAY_MS = "0";
+  process.env.AGENTFLOW_RETRY_MAX_DELAY_MS = "0";
+
+  try {
+    return await run();
+  } finally {
+    if (previousBaseDelay === undefined) {
+      delete process.env.AGENTFLOW_RETRY_BASE_DELAY_MS;
+    } else {
+      process.env.AGENTFLOW_RETRY_BASE_DELAY_MS = previousBaseDelay;
+    }
+
+    if (previousMaxDelay === undefined) {
+      delete process.env.AGENTFLOW_RETRY_MAX_DELAY_MS;
+    } else {
+      process.env.AGENTFLOW_RETRY_MAX_DELAY_MS = previousMaxDelay;
+    }
+  }
+}
+
 async function waitForPath(path: string, timeoutMs = 15000): Promise<void> {
   const startedAt = Date.now();
 
@@ -91,6 +137,7 @@ describe("graph CLI", () => {
     expect(result.stdout).toContain("run");
     expect(result.stdout).toContain("runs");
     expect(result.stdout).toContain("inspect");
+    expect(result.stdout).toContain("observe");
     expect(result.stdout).toContain("resume");
     expect(result.stdout).toContain("apply");
     expect(result.stdout).toContain("graph-help");
@@ -105,7 +152,9 @@ describe("graph CLI", () => {
     const graphPath = fileURLToPath(
       new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
     );
-    const result = await executeCli(["validate", "--graph", graphPath, "--show-compiled"]);
+    const result = await withMockValidateHarnesses(() =>
+      executeCli(["validate", "--graph", graphPath, "--show-compiled"])
+    );
     const payload = JSON.parse(result.stdout);
 
     expect(result.exitCode).toBe(0);
@@ -129,7 +178,9 @@ describe("graph CLI", () => {
     const graphPath = fileURLToPath(
       new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
     );
-    const result = await executeCli(["validate", "--graph", graphPath]);
+    const result = await withMockValidateHarnesses(() =>
+      executeCli(["validate", "--graph", graphPath])
+    );
     const payload = JSON.parse(result.stdout);
 
     expect(result.exitCode).toBe(0);
@@ -141,21 +192,25 @@ describe("graph CLI", () => {
     expect(payload.launch.launch_profile).toBe("default");
     expect(payload.compiled_summary.node_count).toBe(7);
     expect(payload.compiled_summary.scope_count).toBeGreaterThan(0);
-    expect(payload.authored_validation.status).toBe("passed");
-    expect(payload.compiled_validation.status).toBe("passed");
-    expect(payload.compiled_validation.compiled_summary.node_count).toBe(7);
-    expect(payload.compiled_validation.managed_expansion).toEqual([]);
-    expect(payload.readiness_mode).toBe("declared");
-    expect(payload.readiness.status).toBe("ready");
-    expect(payload.authoring_review.mode).toBe("standard");
-    expect(payload.authoring_review.summary.reviewed_node_count).toBe(7);
+    expect(payload.validation_level).toBe("run-ready");
+    expect(payload.checks.authored.status).toBe("passed");
+    expect(payload.checks.compiled.status).toBe("passed");
+    expect(payload.checks.compiled.compiled_summary.node_count).toBe(7);
+    expect(payload.checks.compiled.managed_expansion).toEqual([]);
+    expect(payload.checks.readiness.status).toBe("ready");
+    expect(payload.checks.context.status).toMatch(/passed|warnings/);
+    expect(payload.checks.authoring_review.mode).toBe("review");
+    expect(payload.checks.authoring_review.summary.reviewed_node_count).toBe(7);
+    expect(payload.findings.blockers).toEqual([]);
+    expect(payload.findings.warnings).toBeInstanceOf(Array);
     expect(payload.next_steps.run).toContain("agentflow run --graph");
     expect(payload.next_steps.graph_help).toBe("agentflow graph-help");
   });
 
-  it("reports authoring review warnings by default and fails only under strict review", async () => {
+  it("reports full authoring review findings by default and fails only under strict validate", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-authoring-review-"));
     const graphPath = join(tempRoot, "agentflow.graph.json");
+    await initGitRepo(tempRoot);
     await writeFile(
       graphPath,
       `${JSON.stringify(
@@ -203,18 +258,20 @@ describe("graph CLI", () => {
       )}\n`
     );
 
-    const normalResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
+    const normalResult = await withMockValidateHarnesses(() =>
+      executeCli(["validate", "--graph", graphPath], tempRoot)
+    );
     const normalPayload = JSON.parse(normalResult.stdout);
-    const reviewResult = await executeCli(["validate", "--graph", graphPath, "--review"], tempRoot);
-    const reviewPayload = JSON.parse(reviewResult.stdout);
-    const strictResult = await executeCli(["validate", "--graph", graphPath, "--strict-review"], tempRoot);
+    const strictResult = await withMockValidateHarnesses(() =>
+      executeCli(["validate", "--graph", graphPath, "--strict"], tempRoot)
+    );
     const strictPayload = JSON.parse(strictResult.stdout);
 
     expect(normalResult.exitCode).toBe(0);
     expect(normalPayload.status).toBe("passed");
-    expect(normalPayload.authoring_review.mode).toBe("standard");
-    expect(normalPayload.authoring_review.status).toBe("serious_findings");
-    expect(normalPayload.authoring_review.findings).toEqual(
+    expect(normalPayload.checks.authoring_review.mode).toBe("review");
+    expect(normalPayload.checks.authoring_review.status).toBe("serious_findings");
+    expect(normalPayload.checks.authoring_review.findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           severity: "serious",
@@ -227,10 +284,7 @@ describe("graph CLI", () => {
         })
       ])
     );
-
-    expect(reviewResult.exitCode).toBe(0);
-    expect(reviewPayload.authoring_review.mode).toBe("review");
-    expect(reviewPayload.authoring_review.findings).toEqual(
+    expect(normalPayload.checks.authoring_review.findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           category: "intent",
@@ -242,8 +296,8 @@ describe("graph CLI", () => {
     expect(strictResult.exitCode).toBe(1);
     expect(strictPayload.status).toBe("failed");
     expect(strictPayload.message).toContain("strict authoring review");
-    expect(strictPayload.authoring_review.mode).toBe("strict-review");
-    expect(strictPayload.readiness.status).toBe("ready");
+    expect(strictPayload.checks.authoring_review.mode).toBe("strict");
+    expect(strictPayload.checks.readiness.status).toBe("ready");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -254,6 +308,7 @@ describe("graph CLI", () => {
       new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
     );
     const diagramPath = join(tempRoot, "graph.mmd");
+    const outputDir = join(tempRoot, "validation-package");
     const npxImagePath = join(tempRoot, "graph-npx.svg");
     const mmdcImagePath = join(tempRoot, "graph-mmdc.svg");
     const fakeNpxPath = join(tempRoot, "npx");
@@ -297,66 +352,90 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     delete process.env.AGENTFLOW_MERMAID_NPX_PACKAGE;
 
     try {
-      const inlineResult = await executeCli(["validate", "--graph", graphPath, "--diagram"], tempRoot);
-      const inlinePayload = JSON.parse(inlineResult.stdout);
-      const writtenResult = await executeCli(
-        ["validate", "--graph", graphPath, "--diagram-output", diagramPath],
-        tempRoot
+      const writtenResult = await withMockValidateHarnesses(() =>
+        executeCli(
+          ["validate", "--graph", graphPath, "--diagram-output", diagramPath],
+          tempRoot
+        )
       );
       const writtenPayload = JSON.parse(writtenResult.stdout);
-      const npxImageResult = await executeCli(
-        [
-          "validate",
-          "--graph",
-          graphPath,
-          "--diagram-image-output",
-          npxImagePath,
-          "--diagram-image-package",
-          "fixture-mermaid-cli@1.0.0"
-        ],
-        tempRoot
+      const packageResult = await withMockValidateHarnesses(() =>
+        executeCli(
+          ["validate", "--graph", graphPath, "--output-dir", outputDir],
+          tempRoot
+        )
+      );
+      const packagePayload = JSON.parse(packageResult.stdout);
+      const npxImageResult = await withMockValidateHarnesses(() =>
+        executeCli(
+          [
+            "validate",
+            "--graph",
+            graphPath,
+            "--diagram-image-output",
+            npxImagePath,
+            "--diagram-image-package",
+            "fixture-mermaid-cli@1.0.0"
+          ],
+          tempRoot
+        )
       );
       const npxImagePayload = JSON.parse(npxImageResult.stdout);
-      const mmdcImageResult = await executeCli(
-        [
-          "validate",
-          "--graph",
-          graphPath,
-          "--diagram-image-output",
-          mmdcImagePath,
-          "--diagram-image-renderer",
-          "mmdc"
-        ],
-        tempRoot
+      const mmdcImageResult = await withMockValidateHarnesses(() =>
+        executeCli(
+          [
+            "validate",
+            "--graph",
+            graphPath,
+            "--diagram-image-output",
+            mmdcImagePath,
+            "--diagram-image-renderer",
+            "mmdc"
+          ],
+          tempRoot
+        )
       );
       const mmdcImagePayload = JSON.parse(mmdcImageResult.stdout);
       const writtenDiagram = await readFile(diagramPath, "utf8");
+      const packageManifest = JSON.parse(await readFile(join(outputDir, "manifest.json"), "utf8"));
+      const packageCompiledGraph = JSON.parse(await readFile(join(outputDir, "compiled-graph.json"), "utf8"));
+      const packageMermaid = await readFile(join(outputDir, "compiled-graph.mmd"), "utf8");
       const renderedNpxImage = await readFile(npxImagePath, "utf8");
       const renderedMmdcImage = await readFile(mmdcImagePath, "utf8");
 
-      expect(inlineResult.exitCode).toBe(0);
-      expect(inlinePayload.diagram.format).toBe("mermaid");
-      expect(inlinePayload.diagram.graph).toContain("flowchart TD");
-      expect(inlinePayload.diagram.graph).toContain("agent: understand");
-      expect(inlinePayload.diagram.graph).toContain("delivery package");
-
       expect(writtenResult.exitCode).toBe(0);
-      expect(writtenPayload.diagram_output_path).toBe(diagramPath);
+      expect(writtenPayload.exports.diagram_output_path).toBe(diagramPath);
       expect(writtenPayload).not.toHaveProperty("diagram");
       expect(writtenDiagram).toContain("flowchart TD");
       expect(writtenDiagram).toContain("repeat: repair_loop");
 
+      expect(packageResult.exitCode).toBe(0);
+      expect(packagePayload.exports.output_dir).toBe(outputDir);
+      expect(packagePayload.exports.files).toEqual(
+        expect.arrayContaining([
+          join(outputDir, "manifest.json"),
+          join(outputDir, "compiled-graph.json"),
+          join(outputDir, "compiled-graph.mmd"),
+          join(outputDir, "authoring-review.json"),
+          join(outputDir, "readiness.json"),
+          join(outputDir, "context-analysis.json")
+        ])
+      );
+      expect(packageManifest.command).toBe("validate");
+      expect(packageCompiledGraph.graph_id).toBe("repeat-graph");
+      expect(packageMermaid).toContain("flowchart TD");
+
       expect(npxImageResult.exitCode).toBe(0);
-      expect(npxImagePayload.diagram_image_output_path).toBe(npxImagePath);
-      expect(npxImagePayload.diagram_image_renderer.renderer).toBe("npx");
-      expect(npxImagePayload.diagram_image_renderer.npx_package).toBe("fixture-mermaid-cli@1.0.0");
+      expect(npxImagePayload.exports.diagram_image_output_path).toBe(npxImagePath);
+      expect(npxImagePayload.exports.diagram_image_renderer.renderer).toBe("npx");
+      expect(npxImagePayload.exports.diagram_image_renderer.npx_package).toBe("fixture-mermaid-cli@1.0.0");
       expect(renderedNpxImage).toContain("rendered by npx fixture-mermaid-cli@1.0.0");
       expect(renderedNpxImage).toContain("flowchart TD");
 
       expect(mmdcImageResult.exitCode).toBe(0);
-      expect(mmdcImagePayload.diagram_image_output_path).toBe(mmdcImagePath);
-      expect(mmdcImagePayload.diagram_image_renderer.renderer).toBe("mmdc");
-      expect(mmdcImagePayload.diagram_image_renderer.cli_binary).toBe(fakeMmdcPath);
+      expect(mmdcImagePayload.exports.diagram_image_output_path).toBe(mmdcImagePath);
+      expect(mmdcImagePayload.exports.diagram_image_renderer.renderer).toBe("mmdc");
+      expect(mmdcImagePayload.exports.diagram_image_renderer.cli_binary).toBe(fakeMmdcPath);
       expect(renderedMmdcImage).toContain("rendered svg");
       expect(renderedMmdcImage).toContain("flowchart TD");
     } finally {
@@ -392,12 +471,15 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     const graphPath = fileURLToPath(
       new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
     );
-    const result = await executeCli(["validate", "--graph", graphPath]);
+    const result = await withMockValidateHarnesses(() =>
+      executeCli(["validate", "--graph", graphPath])
+    );
     const rendered = renderCliStdout(result, { isTty: true });
 
     expect(result.exitCode).toBe(0);
-    expect(rendered).toContain("Graph validated.");
-    expect(rendered).toContain("Run-ready checks: not requested");
+    expect(rendered).toContain("Graph validated and run-ready.");
+    expect(rendered).toContain("Context:");
+    expect(rendered).not.toContain("Run-ready checks: not requested");
     expect(rendered).not.toContain("{");
   });
 
@@ -487,8 +569,8 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
 
     expect(warningResult.exitCode).toBe(0);
     expect(warningPayload.status).toBe("passed");
-    expect(warningPayload.readiness.status).toBe("warnings");
-    expect(warningPayload.readiness.checks).toEqual(
+    expect(warningPayload.checks.readiness.status).toBe("warnings");
+    expect(warningPayload.checks.readiness.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "env",
@@ -500,9 +582,9 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
 
     expect(blockedResult.exitCode).toBe(1);
     expect(blockedPayload.status).toBe("failed");
-    expect(blockedPayload.compiled_validation.status).toBe("passed");
-    expect(blockedPayload.readiness.status).toBe("blocked");
-    expect(blockedPayload.readiness.checks).toEqual(
+    expect(blockedPayload.checks.compiled.status).toBe("passed");
+    expect(blockedPayload.checks.readiness.status).toBe("blocked");
+    expect(blockedPayload.checks.readiness.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "command",
@@ -515,7 +597,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("checks local runtime dependencies when validate is run-ready", async () => {
+  it("checks local runtime dependencies during default validate", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-"));
     const repoDir = join(tempRoot, "repo");
     const graphPath = join(tempRoot, "agentflow.graph.json");
@@ -563,13 +645,13 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     };
 
     await writeGraph(process.execPath);
-    const readyResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+    const readyResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
     const readyPayload = JSON.parse(readyResult.stdout);
 
     expect(readyResult.exitCode).toBe(0);
-    expect(readyPayload.readiness_mode).toBe("run-ready");
-    expect(readyPayload.readiness.status).toBe("ready");
-    expect(readyPayload.readiness.checks).toEqual(
+    expect(readyPayload.validation_level).toBe("run-ready");
+    expect(readyPayload.checks.readiness.status).toBe("ready");
+    expect(readyPayload.checks.readiness.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "command",
@@ -585,13 +667,13 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     );
 
     await writeGraph("definitely-missing-node-command");
-    const blockedResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+    const blockedResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
     const blockedPayload = JSON.parse(blockedResult.stdout);
 
     expect(blockedResult.exitCode).toBe(1);
-    expect(blockedPayload.readiness_mode).toBe("run-ready");
-    expect(blockedPayload.readiness.status).toBe("blocked");
-    expect(blockedPayload.readiness.checks).toEqual(
+    expect(blockedPayload.validation_level).toBe("run-ready");
+    expect(blockedPayload.checks.readiness.status).toBe("blocked");
+    expect(blockedPayload.checks.readiness.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "command",
@@ -605,7 +687,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("checks required harness binaries only during run-ready validate", async () => {
+  it("checks required harness binaries during default validate", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-harness-"));
     const repoDir = join(tempRoot, "repo");
     const graphPath = join(tempRoot, "agentflow.graph.json");
@@ -658,15 +740,11 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     process.env.AGENTFLOW_CODEX_CLI_BIN = missingCodex;
 
     try {
-      const normalResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
-      const normalPayload = JSON.parse(normalResult.stdout);
-      const runReadyResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
-      const runReadyPayload = JSON.parse(runReadyResult.stdout);
+      const result = await executeCli(["validate", "--graph", graphPath], tempRoot);
+      const payload = JSON.parse(result.stdout);
 
-      expect(normalResult.exitCode).toBe(0);
-      expect(normalPayload.readiness_mode).toBe("declared");
-      expect(runReadyResult.exitCode).toBe(1);
-      expect(runReadyPayload.readiness.checks).toEqual(
+      expect(result.exitCode).toBe(1);
+      expect(payload.checks.readiness.checks).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             kind: "harness",
@@ -687,7 +765,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     }
   });
 
-  it("blocks run-ready validation when node context would exceed token budget", async () => {
+  it("blocks default validate when node context would exceed token budget", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-context-"));
     const repoDir = join(tempRoot, "repo");
     await mkdir(repoDir, { recursive: true });
@@ -739,13 +817,13 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       "utf8"
     );
 
-    const result = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+    const result = await executeCli(["validate", "--graph", graphPath], tempRoot);
     const payload = JSON.parse(result.stdout);
 
     expect(result.exitCode).toBe(1);
     expect(payload.status).toBe("failed");
-    expect(payload.context_analysis.status).toBe("blocked");
-    expect(payload.context_analysis.nodes[0].would_exceed_total).toBe(true);
+    expect(payload.checks.context.status).toBe("blocked");
+    expect(payload.checks.context.nodes[0].would_exceed_total).toBe(true);
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -857,7 +935,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("executes plugin tool --help only during run-ready validation", async () => {
+  it("executes plugin tool --help during default validate", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-plugin-help-"));
     const repoDir = join(tempRoot, "repo");
     const pluginDir = join(tempRoot, "fixture-plugin");
@@ -904,7 +982,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
           graph_id: "plugin-help-validation",
           intent: {
             goal: "Validate plugin help readiness.",
-            acceptance_criteria: ["Plugin tool help is enforced only in run-ready validation."]
+            acceptance_criteria: ["Plugin tool help is enforced during validation."]
           },
           plugins: {
             fixture: {
@@ -959,13 +1037,10 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       const resolveResult = await executeCli(["plugin", "resolve", "--graph", graphPath], tempRoot);
       expect(resolveResult.exitCode).toBe(0);
 
-      const normalResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
-      expect(normalResult.exitCode).toBe(0);
-
-      const blockedResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+      const blockedResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
       const blockedPayload = JSON.parse(blockedResult.stdout);
       expect(blockedResult.exitCode).toBe(1);
-      expect(blockedPayload.readiness.checks).toEqual(
+      expect(blockedPayload.checks.readiness.checks).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             kind: "tool",
@@ -1006,10 +1081,10 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       ].join("\n"));
       const resolveUpdated = await executeCli(["plugin", "resolve", "--graph", graphPath], tempRoot);
       expect(resolveUpdated.exitCode).toBe(0);
-      const readyResult = await executeCli(["validate", "--graph", graphPath, "--run-ready"], tempRoot);
+      const readyResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
       const readyPayload = JSON.parse(readyResult.stdout);
       expect(readyResult.exitCode).toBe(0);
-      expect(readyPayload.readiness.checks).toEqual(
+      expect(readyPayload.checks.readiness.checks).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             kind: "tool",
@@ -1310,7 +1385,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
       )}\n`
     );
 
-    const result = await executeCli(["run", "--graph", graphPath], tempRoot);
+    const result = await withFastSupervisorRetries(() => executeCli(["run", "--graph", graphPath], tempRoot));
     const payload = JSON.parse(result.stdout);
 
     expect(result.exitCode).toBe(1);
@@ -2511,7 +2586,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(invalidValidate.exitCode).toBe(1);
     expect(invalidValidatePayload.command).toBe("validate");
     expect(invalidValidatePayload.message).toContain("Graph could not be loaded or normalized from --graph");
-    expect(invalidValidatePayload.diagnostics).toEqual(
+    expect(invalidValidatePayload.checks.authored.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.defaults.launch_profile",
@@ -2537,7 +2612,7 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(graphHelp.stdout).toContain("evaluation lanes are distinct");
     expect(graphHelp.stdout).toContain("latest_passed, latest_failed, previous");
     expect(graphHelp.stdout).toContain("Recommended local workflow:");
-    expect(graphHelp.stdout).toContain("--strict-review for release gates");
+    expect(graphHelp.stdout).toContain("--strict for release gates");
     expect(graphHelp.stdout).toContain("--diagram-output graph.mmd");
     expect(graphHelp.stdout).toContain("--diagram-image-output graph.svg");
     expect(graphHelp.stdout).toContain("Repo paths in $.repos.*.path resolve relative to the graph file directory.");
@@ -2548,6 +2623,25 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
 
     expect(result.exitCode).toBe(2);
     expect(result.stdout).toContain("Unknown command: control");
+  });
+
+  it("rejects removed validate mode flags", async () => {
+    const graphPath = fileURLToPath(
+      new URL("../graph/fixtures/repeat.graph.json", import.meta.url)
+    );
+    const runReady = await executeCli(["validate", "--graph", graphPath, "--run-ready"]);
+    const review = await executeCli(["validate", "--graph", graphPath, "--review"]);
+    const strictReview = await executeCli(["validate", "--graph", graphPath, "--strict-review"]);
+    const diagram = await executeCli(["validate", "--graph", graphPath, "--diagram"]);
+
+    expect(runReady.exitCode).toBe(2);
+    expect(runReady.stdout).toContain("Unexpected option(s): --run-ready");
+    expect(review.exitCode).toBe(2);
+    expect(review.stdout).toContain("Unexpected option(s): --review");
+    expect(strictReview.exitCode).toBe(2);
+    expect(strictReview.stdout).toContain("Unexpected option(s): --strict-review");
+    expect(diagram.exitCode).toBe(2);
+    expect(diagram.stdout).toContain("Unexpected option(s): --diagram");
   });
 
   it("renders command help and rejects unexpected positionals or options", async () => {
@@ -2591,14 +2685,17 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     expect(mainHelp.stdout).not.toContain("control");
 
     expect(validateHelp.exitCode).toBe(0);
-    expect(validateHelp.stdout).toContain("validate: Validate and compile an authored graph without launching a run.");
+    expect(validateHelp.stdout).toContain("validate: Validate launch readiness for an authored graph without launching a run.");
     expect(validateHelp.stdout).toContain("--show-compiled");
-    expect(validateHelp.stdout).toContain("--review");
-    expect(validateHelp.stdout).toContain("--strict-review");
+    expect(validateHelp.stdout).toContain("--strict");
+    expect(validateHelp.stdout).toContain("--output-dir");
     expect(validateHelp.stdout).toContain("--diagram-output");
     expect(validateHelp.stdout).toContain("--diagram-image-output");
     expect(validateHelp.stdout).toContain("--diagram-image-renderer");
     expect(validateHelp.stdout).toContain("--diagram-image-package");
+    expect(validateHelp.stdout).not.toContain("--run-ready");
+    expect(validateHelp.stdout).not.toContain("--review");
+    expect(validateHelp.stdout).not.toContain("--strict-review");
 
     expect(runsHelp.exitCode).toBe(0);
     expect(runsHelp.stdout).toContain("runs: Inspect previously recorded run roots");

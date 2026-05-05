@@ -126,7 +126,7 @@ npm run build
 npm run validate:smoke
 ```
 
-`validate:smoke` verifies the built CLI against the repeat fixture across Codex CLI and Cursor CLI adapters with both `inplace` and `worktree` workspace backends.
+`validate:smoke` runs lightweight package checks and verifies the built CLI against the repeat fixture across Codex CLI and Cursor CLI adapters with both `inplace` and `worktree` workspace backends. It does not rerun the full `npm test` suite.
 
 ## First Run
 
@@ -134,7 +134,7 @@ npm run validate:smoke
 2. Validate the graph before launching:
 
    ```bash
-   agentflow validate --graph agentflow.graph.json --run-ready
+   agentflow validate --graph agentflow.graph.json
    ```
 
 3. Inspect the compiled shape when the graph changes:
@@ -163,8 +163,8 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
   "intent": {
     "goal": "Implement a focused change and leave it ready for review.",
     "constraints": [
-      "Keep the graph outcome-oriented.",
-      "Avoid unrelated refactors."
+      "Do not turn the graph into an implementation playbook.",
+      "Do not include unrelated refactors."
     ],
     "acceptance_criteria": [
       "The change is implemented.",
@@ -223,7 +223,7 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
             "The handoff names changed files, validation, and residual risks."
           ],
           "constraints": [
-            "Write a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md."
+            "Do not finish without writing a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md."
           ]
         },
         "context": [
@@ -264,7 +264,7 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
 }
 ```
 
-Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, tool contract, artifact contract, output directory, and timeout budget. `model: "auto"` means Agentflow does not pass an explicit model flag to the selected harness.
+Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, tool contract, artifact contract, output directory, and timeout budget. Harness-native config is isolated by default and may be declared in `profiles.*.harness_config`; inheriting local Codex or Cursor config requires an explicit `isolation: "inherit_user"` opt-in. `model: "auto"` means Agentflow does not pass an explicit model flag to the selected harness.
 
 ## CLI Commands
 
@@ -272,11 +272,10 @@ Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a differe
 | --- | --- |
 | See graph syntax help | `agentflow graph-help` |
 | Resolve plugin packages and lock tools | `agentflow plugin resolve --graph agentflow.graph.json` |
-| Validate the graph | `agentflow validate --graph agentflow.graph.json` |
-| Run authoring review | `agentflow validate --graph agentflow.graph.json --review` |
-| Fail on serious review findings | `agentflow validate --graph agentflow.graph.json --strict-review` |
-| Check local launch readiness and context token budgets | `agentflow validate --graph agentflow.graph.json --run-ready` |
+| Validate launch readiness | `agentflow validate --graph agentflow.graph.json` |
+| Fail on serious authoring findings | `agentflow validate --graph agentflow.graph.json --strict` |
 | Inspect compiled runtime contract | `agentflow validate --graph agentflow.graph.json --show-compiled` |
+| Write validation package | `agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest` |
 | Write Mermaid diagram | `agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd` |
 | Render graph image | `agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg` |
 | Launch a run | `agentflow run --graph agentflow.graph.json` |
@@ -316,13 +315,13 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | `intent` | Top-level goal, constraints, and acceptance criteria. |
 | `repos` | Local repository aliases. Defaults to `main` at `.` when omitted. |
 | `defaults` | Launch profile and workspace backend defaults. |
-| `profiles` | Harness, model, sandbox, env, timeout, tool policy, and budget settings. |
+| `profiles` | Harness, model, sandbox, env, timeout, harness-native config isolation, tool policy, and budget settings. |
 | `supervision` | Required supervisor profile plus total recovery budget. |
 | `plugins` and `tools` | Plugin-bundled CLI capabilities exposed to eligible nodes. |
 | `prerequisites` | Local launch checks for files, commands, env vars, and repos. |
 | `graph` | The execution shape: containers, executable nodes, or managed patterns. |
 
-Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
+Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Constraint strings should start with `Do not`; positive requirements belong in acceptance criteria. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
 
 Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime pauses chosen only when recovery needs credentials, scope, product intent, security/compliance judgment, or graph-contract authority that the runtime must not infer.
 
@@ -330,8 +329,8 @@ Use `checkpoint` for authored human gates, usually inside a `repeat` body. Super
 
 | Surface | Who uses it | Purpose |
 | --- | --- | --- |
-| `agentflow` | Humans and automation outside a run. | Validate, run, resume, inspect, resolve plugins, auth, eval, and report. |
-| `af` | Agents inside a node attempt. | Inspect node contract, list granted tools, show context, write artifacts, log decisions, and spawn focused helpers. |
+| `agentflow` | Humans and automation outside a run. | Validate, run, resume, inspect, observe live runs, resolve plugins, auth, eval, and report. |
+| `af` | Agents inside a node attempt. | Inspect node contract, show context, write artifacts, log structured progress/findings/decisions, and check completion readiness. |
 | Run root | Operators and debuggers. | Durable state, events, attempts, context packets, logs, supervisor interventions, and delivery files. |
 | `delivery/` | Human reviewers. | High-signal terminal package with reviewer guide, implementation summary, evidence ledger, risks, and follow-ups. |
 

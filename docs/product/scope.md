@@ -33,7 +33,7 @@ A good node owns a meaningful outcome:
 - implement an accountable slice and publish change evidence
 - review a change package and publish calibrated findings
 
-The graph must preserve human control through clear `constraints`, planned repeat-scoped `checkpoint` gates when human input is required, supervisor `pause_for_human` authority pauses for runtime boundaries the system must not infer, and explicit approval before exposing plugin tools to agents.
+The graph must preserve human control through clear `constraints`, planned repeat-scoped `checkpoint` gates when human input is required, supervisor `pause_for_human` authority pauses for runtime boundaries the system must not infer, and explicit approval before exposing plugin tools to agents. Constraints should be prohibition-style boundaries that start with `Do not`; positive success requirements belong in acceptance criteria.
 
 ## Runtime Bar
 

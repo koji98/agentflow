@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { access, chmod, cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { runCommand } from "../cli/commands/run.js";
@@ -73,6 +74,10 @@ export function createEvalRootPath(options: {
 
 function writeJson(path: string, value: unknown): Promise<void> {
   return writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function hashText(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -291,7 +296,7 @@ async function createSimulationProxies(options: {
   }
 
   const binPath = join(options.trial_root, "simulation-bin");
-  const eventsFile = join(options.trial_root, "simulation-events.jsonl");
+  const eventsFile = join(options.trial_root, "workspace", "repo", ".agentflow-simulation-events.jsonl");
   await mkdir(binPath, { recursive: true });
   await writeFile(eventsFile, "", "utf8");
 
@@ -304,8 +309,9 @@ async function createSimulationProxies(options: {
 
   for (const [command, rules] of rulesByCommand) {
     const scriptPath = join(binPath, command);
+    const cjsPath = `${scriptPath}.cjs`;
     await writeFile(
-      scriptPath,
+      cjsPath,
       renderSimulationProxyScript({
         command,
         rules,
@@ -314,7 +320,9 @@ async function createSimulationProxies(options: {
       }),
       "utf8"
     );
+    await writeFile(scriptPath, `#!/bin/sh\nexec "${process.execPath}" "$0.cjs" "$@"\n`, "utf8");
     await chmod(scriptPath, 0o755);
+    await chmod(cjsPath, 0o755);
   }
 
   return {
@@ -1257,6 +1265,153 @@ function computeBenchmark(
   };
 }
 
+interface PromptSnapshot {
+  relative_path: string;
+  bytes: number;
+  lines: number;
+  sha256: string;
+}
+
+interface PromptDiffEntry {
+  scenario_id: string;
+  trial_id: string;
+  baseline_variant: string;
+  candidate_variant: string;
+  prompt_path: string;
+  baseline_sha256?: string;
+  candidate_sha256?: string;
+  baseline_bytes?: number;
+  candidate_bytes?: number;
+  byte_delta: number;
+  changed: boolean;
+  status: "changed" | "unchanged" | "missing_baseline" | "missing_candidate";
+}
+
+async function collectPromptSnapshots(runRoot: string | undefined): Promise<PromptSnapshot[]> {
+  if (!runRoot || !await pathExists(runRoot)) {
+    return [];
+  }
+
+  const root = runRoot;
+  const snapshots: PromptSnapshot[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true });
+    await Promise.all(entries.map(async (entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(path);
+        return;
+      }
+      if (!entry.isFile() || entry.name !== "prompt.md") {
+        return;
+      }
+
+      const content = await readFile(path, "utf8");
+      snapshots.push({
+        relative_path: relative(root, path),
+        bytes: Buffer.byteLength(content, "utf8"),
+        lines: content.split(/\r?\n/u).length,
+        sha256: hashText(content)
+      });
+    }));
+  }
+
+  await walk(runRoot);
+  return snapshots.sort((left, right) => left.relative_path.localeCompare(right.relative_path));
+}
+
+async function buildPromptDiffEntries(results: EvalTrialResult[], variants: EvalVariant[]): Promise<PromptDiffEntry[]> {
+  if (variants.length < 2) {
+    return [];
+  }
+
+  const baseline = variants[0]!;
+  const candidates = variants.slice(1);
+  const byKey = new Map(results.map((result) => [
+    `${result.scenario_id}::${result.trial_id}::${result.variant_id}`,
+    result
+  ]));
+  const entries: PromptDiffEntry[] = [];
+
+  for (const candidate of candidates) {
+    const candidateResults = results.filter((result) => result.variant_id === candidate.id);
+    for (const candidateResult of candidateResults) {
+      const baselineResult = byKey.get(`${candidateResult.scenario_id}::${candidateResult.trial_id}::${baseline.id}`);
+      if (!baselineResult) {
+        continue;
+      }
+
+      const [baselineSnapshots, candidateSnapshots] = await Promise.all([
+        collectPromptSnapshots(baselineResult.run_root),
+        collectPromptSnapshots(candidateResult.run_root)
+      ]);
+      const baselineByPath = new Map(baselineSnapshots.map((snapshot) => [snapshot.relative_path, snapshot]));
+      const candidateByPath = new Map(candidateSnapshots.map((snapshot) => [snapshot.relative_path, snapshot]));
+      const paths = [...new Set([...baselineByPath.keys(), ...candidateByPath.keys()])].sort();
+
+      for (const promptPath of paths) {
+        const baselineSnapshot = baselineByPath.get(promptPath);
+        const candidateSnapshot = candidateByPath.get(promptPath);
+        const changed = baselineSnapshot?.sha256 !== candidateSnapshot?.sha256;
+        const status =
+          !baselineSnapshot
+            ? "missing_baseline"
+            : !candidateSnapshot
+              ? "missing_candidate"
+              : changed
+                ? "changed"
+                : "unchanged";
+
+        entries.push({
+          scenario_id: candidateResult.scenario_id,
+          trial_id: candidateResult.trial_id,
+          baseline_variant: baseline.id,
+          candidate_variant: candidate.id,
+          prompt_path: promptPath,
+          ...(baselineSnapshot ? { baseline_sha256: baselineSnapshot.sha256, baseline_bytes: baselineSnapshot.bytes } : {}),
+          ...(candidateSnapshot ? { candidate_sha256: candidateSnapshot.sha256, candidate_bytes: candidateSnapshot.bytes } : {}),
+          byte_delta: (candidateSnapshot?.bytes ?? 0) - (baselineSnapshot?.bytes ?? 0),
+          changed,
+          status
+        });
+      }
+    }
+  }
+
+  return entries;
+}
+
+function renderPromptDiffReport(options: {
+  variants: EvalVariant[];
+  entries: PromptDiffEntry[];
+}): string {
+  const variantLines = options.variants.map((variant) =>
+    `- ${variant.id}${variant.prompt_pack ? ` (prompt_pack=${variant.prompt_pack})` : ""}: ${variant.description}`
+  );
+  const changedEntries = options.entries.filter((entry) => entry.changed);
+
+  return [
+    "# Prompt Pack Diff",
+    "",
+    "Prompt packs are eval labels only. Agentflow runtime keeps one active prompt contract.",
+    "",
+    "## Variants",
+    ...variantLines,
+    "",
+    "## Summary",
+    `- Prompt files compared: ${options.entries.length}`,
+    `- Changed prompt files: ${changedEntries.length}`,
+    "",
+    "## Files",
+    ...(options.entries.length > 0
+      ? options.entries.map((entry) =>
+          `- ${entry.scenario_id} / ${entry.trial_id} / ${entry.baseline_variant}->${entry.candidate_variant} / ${entry.prompt_path}: ${entry.status}, byte_delta=${entry.byte_delta}`
+        )
+      : ["- No rendered prompt files were available for comparison."])
+  ].join("\n");
+}
+
 export async function runEvalSuite(options: {
   currentWorkingDirectory: string;
   loaded: LoadedEvalSuite;
@@ -1338,6 +1493,7 @@ export async function runEvalSuite(options: {
 
   const orderedResults = results.filter((result): result is EvalTrialResult => Boolean(result));
   const benchmark = computeBenchmark(orderedResults, variants, options.loaded.criteria, options.loaded.suite.thresholds);
+  const promptDiffEntries = await buildPromptDiffEntries(orderedResults, variants);
   const endedAt = new Date().toISOString();
   const ledger: EvalRunLedger = {
     version: "1",
@@ -1369,6 +1525,18 @@ export async function runEvalSuite(options: {
     }),
     writeJson(join(options.eval_root, "evaluation-ledger.json"), ledger),
     writeJson(join(options.eval_root, "benchmark.json"), benchmark),
+    writeJson(join(options.eval_root, "prompt-pack-diff.json"), {
+      variants: variants.map((variant) => ({
+        id: variant.id,
+        description: variant.description,
+        ...(variant.prompt_pack ? { prompt_pack: variant.prompt_pack } : {})
+      })),
+      entries: promptDiffEntries
+    }),
+    writeFile(join(options.eval_root, "prompt-pack-diff.md"), renderPromptDiffReport({
+      variants,
+      entries: promptDiffEntries
+    }), "utf8"),
     writeFile(join(options.eval_root, "report.md"), renderEvalReport(ledger), "utf8")
   ]);
 
@@ -1392,6 +1560,7 @@ export function renderEvalReport(ledger: EvalRunLedger): string {
     `- Pass rate: ${ledger.benchmark.pass_rate.toFixed(3)}`,
     `- Blocker rate: ${ledger.benchmark.blocker_rate.toFixed(3)}`,
     `- Average score: ${ledger.benchmark.average_score.toFixed(3)}`,
+    `- Prompt pack diff: ${join(ledger.eval_root, "prompt-pack-diff.md")}`,
     "",
     "## Criteria",
     ...ledger.benchmark.criteria.map((criterion) =>
@@ -1470,6 +1639,8 @@ export function compareEvalVariants(options: {
     blocker_count: number;
     average_score: number;
   }>;
+  candidate_regresses_baseline: boolean;
+  candidate_meets_or_exceeds_baseline: boolean;
   candidate_beats_baseline: boolean;
 } {
   const baseline = aggregateVariant(options.ledger, options.baseline);
@@ -1492,12 +1663,18 @@ export function compareEvalVariants(options: {
       average_score: Number(((next?.average_score ?? 0) - (base?.average_score ?? 0)).toFixed(4))
     };
   });
+  const candidateRegressesBaseline =
+    candidate.blocker_rate > baseline.blocker_rate ||
+    candidate.pass_rate < baseline.pass_rate ||
+    candidate.average_score < baseline.average_score;
 
   return {
     baseline,
     candidate,
     delta,
     criteria_delta: criteriaDelta,
+    candidate_regresses_baseline: candidateRegressesBaseline,
+    candidate_meets_or_exceeds_baseline: !candidateRegressesBaseline,
     candidate_beats_baseline:
       candidate.blocker_rate <= baseline.blocker_rate &&
       candidate.pass_rate >= baseline.pass_rate &&

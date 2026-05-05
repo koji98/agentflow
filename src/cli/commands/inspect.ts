@@ -10,6 +10,7 @@ import {
   readTextFileIfPresent,
   type RunRecord
 } from "../../artifacts/reader.js";
+import { operatorObservationsPath, readOperatorObservations } from "../../runtime/observations/index.js";
 import type { RuntimeNodeAttempt } from "../../runtime/attempts.js";
 import { createRunTerminalFields } from "../run_output.js";
 import { renderCommandUsageError } from "../command_support.js";
@@ -206,10 +207,11 @@ export const inspectCommand = {
       readRunEvents(runRoot).catch(() => [])
     ]);
     const deliveryManifestPath = `${artifactPaths.delivery_dir}/manifest.json`;
-    const [deliveryTaxonomySummary, supervisorTimelineCount, runtimeLogCount] = await Promise.all([
+    const [deliveryTaxonomySummary, supervisorTimelineCount, runtimeLogCount, operatorObservations] = await Promise.all([
       readDeliveryTaxonomySummary(deliveryManifestPath),
       countJsonlRecords(artifactPaths.supervisor_timeline_file),
-      countJsonlRecords(artifactPaths.runtime_log_file)
+      countJsonlRecords(artifactPaths.runtime_log_file),
+      readOperatorObservations(runRoot)
     ]);
 
     const failedNodeStderrTails = await summarizeFailedNodes(attempts);
@@ -239,6 +241,12 @@ export const inspectCommand = {
               supervisor_pause: state.supervisor.pause,
               supervisor_timeline_count: supervisorTimelineCount,
               runtime_log_count: runtimeLogCount,
+              operator_observation_count: operatorObservations.length,
+              active_operator_observation_count: operatorObservations.filter((entry) => entry.status === "active").length,
+              blocking_operator_observation_count: operatorObservations.filter((entry) =>
+                entry.status === "active" && (entry.kind === "blocker" || entry.blocking === true)
+              ).length,
+              operator_observations: operatorObservations,
               intervention_count: state.supervisor.intervention_count,
               supervisor_budget_remaining: state.supervisor.budget_remaining,
               delivery_package: deliveryManifestPath,
@@ -266,6 +274,7 @@ export const inspectCommand = {
           events_file: artifactPaths.events_file,
           supervisor_timeline_file: artifactPaths.supervisor_timeline_file,
           runtime_log_file: artifactPaths.runtime_log_file,
+          operator_observations_file: operatorObservationsPath(runRoot),
           interventions_file: artifactPaths.interventions_file,
           summary_file: artifactPaths.summary_file,
           delivery_dir: artifactPaths.delivery_dir,

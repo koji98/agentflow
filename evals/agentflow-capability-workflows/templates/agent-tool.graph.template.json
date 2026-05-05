@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -82,7 +82,7 @@
           "constraints": [
             "Do not invent the flag value.",
             "Do not add dependencies.",
-            "Use `fixture-lookup --case tool-guided-discovery` directly; do not bypass the PATH tool unless direct execution fails, and document any fallback in `Tool command:`."
+            "Do not bypass `fixture-lookup --case tool-guided-discovery` on PATH unless direct execution fails; document fallback in `Tool command:`."
           ]
         }
       },

@@ -271,6 +271,8 @@ describe("eval CLI v1", () => {
     expect(benchmark.pass_rate).toBe(1);
     expect(benchmark.criteria.some((criterion: { criterion_id: string }) => criterion.criterion_id === "trajectory")).toBe(true);
     expect(benchmark.average_score).toBeGreaterThanOrEqual(4);
+    expect(await readFile(join(evalRoot, "prompt-pack-diff.md"), "utf8")).toContain("# Prompt Pack Diff");
+    expect(JSON.parse(await readFile(join(evalRoot, "prompt-pack-diff.json"), "utf8")).variants).toHaveLength(2);
     expect(scorecard.criteria_results.every((result: { status: string }) => result.status === "passed")).toBe(true);
     expect(scorecard.metrics.attempts).toBeGreaterThanOrEqual(1);
     expect(currentTrialOneRoot).toContain(
@@ -305,6 +307,7 @@ describe("eval CLI v1", () => {
     expect(reportMarkdown.exitCode).toBe(0);
     expect(reportMarkdown.stdout).toContain("# Eval Suite workflow-eval-cli");
     expect(reportMarkdown.stdout).toContain("## Criteria");
+    expect(reportMarkdown.stdout).toContain("Prompt pack diff:");
 
     const inspectResult = await executeCli(
       ["eval", "inspect", evalRoot, "--scenario", "exec-artifact", "--variant", "current", "--trial", "1"],
@@ -324,6 +327,8 @@ describe("eval CLI v1", () => {
     expect(comparePayload.baseline.variant_id).toBe("current");
     expect(comparePayload.candidate.variant_id).toBe("terse");
     expect(comparePayload.delta.pass_rate).toBe(0);
+    expect(comparePayload.candidate_regresses_baseline).toBe(false);
+    expect(comparePayload.candidate_meets_or_exceeds_baseline).toBe(true);
     expect(comparePayload.criteria_delta.some((entry: { criterion_id: string }) => entry.criterion_id === "packet")).toBe(true);
   }, 120_000);
 

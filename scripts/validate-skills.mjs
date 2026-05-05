@@ -150,10 +150,10 @@ async function validateSkills() {
 
   record(
     "packaged skills",
-    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-evals", "agentflow-plugins"]),
-    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-evals", "agentflow-plugins"])
-      ? "skills/agentflow, skills/agentflow-evals, and skills/agentflow-plugins are packaged."
-      : `Expected skills/agentflow, skills/agentflow-evals, and skills/agentflow-plugins, found: ${skillDirs.join(", ") || "none"}`
+    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-evals", "agentflow-grill-me", "agentflow-plugins"]),
+    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-evals", "agentflow-grill-me", "agentflow-plugins"])
+      ? "skills/agentflow, skills/agentflow-evals, skills/agentflow-grill-me, and skills/agentflow-plugins are packaged."
+      : `Expected skills/agentflow, skills/agentflow-evals, skills/agentflow-grill-me, and skills/agentflow-plugins, found: ${skillDirs.join(", ") || "none"}`
   );
 
   const requiredFiles = [
@@ -161,6 +161,8 @@ async function validateSkills() {
     "skills/agentflow/agents/openai.yaml",
     "skills/agentflow-evals/SKILL.md",
     "skills/agentflow-evals/agents/openai.yaml",
+    "skills/agentflow-grill-me/SKILL.md",
+    "skills/agentflow-grill-me/agents/openai.yaml",
     "skills/agentflow-plugins/SKILL.md",
     "skills/agentflow-plugins/agents/openai.yaml",
     "skills/README.md",
@@ -227,6 +229,8 @@ async function validateSkills() {
     "skills/agentflow/agents/openai.yaml",
     "skills/agentflow-evals/SKILL.md",
     "skills/agentflow-evals/agents/openai.yaml",
+    "skills/agentflow-grill-me/SKILL.md",
+    "skills/agentflow-grill-me/agents/openai.yaml",
     "skills/agentflow-plugins/SKILL.md",
     "skills/agentflow-plugins/agents/openai.yaml",
     "skills/README.md",

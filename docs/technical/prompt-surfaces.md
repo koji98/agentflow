@@ -1,0 +1,52 @@
+# Prompt Surfaces
+
+Agentflow prompts are compiled runtime contracts. Treat them like code: each surface has an authority boundary, structured inputs, output expectations, tests, and eval coverage. Do not add alternate prompt shapes, prompt aliases, legacy prompt packs, or compatibility shims.
+
+## Section Model
+
+Prompt sections should appear in this order when applicable:
+
+1. `Role`
+2. `Contract Priority`
+3. `Task`
+4. `Workspace` or `Workspace And Authority`
+5. `Context`
+6. `Tools`
+7. `Artifacts And Logs`
+8. `Completion`
+9. `Output`
+
+Role text is useful only when it changes authority, scope, output contract, or evaluation responsibility. Avoid generic persona adjectives unless a prompt-regression eval proves the wording is load-bearing.
+
+## Inventory
+
+| Surface | Renderer | Prompt kind | Authority boundary | Contract inputs | Output contract | Coverage |
+| --- | --- | --- | --- | --- | --- | --- |
+| Standard agent node | `src/runtime/harness/types.ts` | `agent` | Executes one node, not the graph; node task controls graph context. | graph intent, node intent, sandbox, context manifest, tools, declared artifacts, recovery envelope | final response plus declared artifacts after `af complete check` | `tests/runtime/harness_prompt.test.ts`, `evals/agentflow-prompt-regression` |
+| Artifact repair | `src/runtime/harness/types.ts` | `artifact_repair` | Repair missing declared artifacts only; no unrelated work. | original task, missing artifact list, prior response/logs, context manifest | missing artifacts at exact paths | `tests/runtime/harness_prompt.test.ts` |
+| AI check | `src/runtime/harness/types.ts` | `ai_check` | Read-only check node; no workspace mutation. | check intent, graph context, context manifest, output schema | JSON only | `tests/runtime/harness_prompt.test.ts`, runtime check tests |
+| Supervisor evidence gatherer | `src/runtime/harness/types.ts` | `supervisor_evidence` | Read-only evidence for a failed attempt; cannot rewrite graph intent. | case file, gather kind, evidence output path, instructions | JSON evidence patch | supervisor recovery tests |
+| Supervisor recovery envelope | `src/runtime/harness/types.ts` | agent block | Additive retry evidence; original node contract remains binding. | recovery plan, case file, retry directive, unchanged-contract flags | changed tactics inside unchanged task | `tests/runtime/harness_prompt.test.ts`, supervisor tests |
+| Outcome verifier | `src/runtime/verification/prompt.ts` | verifier | Fresh read-only audit after mechanical completion. | graph/node intent, completion packet, artifacts, decision logs, command evidence, diff metadata | one fenced JSON verdict | `tests/runtime/verification/prompt.test.ts`, verifier eval scenarios |
+| Runtime CLI block | `src/runtime/harness/types.ts` | prompt block | Normal worker correctness loop only. | granted runtime metadata and current command contract | correct `af` usage, structured logs, completion packet | harness prompt tests, prompt-regression trajectory checks |
+| Plugin tool block | `src/runtime/harness/types.ts` | prompt block | Select granted plugin CLIs only when useful. | resolved plugin tools, descriptions, credentials/config names | tool calls with `--help` just in time | tool tests, prompt-regression tool discipline |
+| Context block | `src/runtime/harness/types.ts` | prompt block | Manifest-first evidence, not authority over node contract. | packet path, manifest path, provenance path, manifest excerpt | targeted context reads and documented uncertainty | harness prompt tests, context evals |
+| Deep work planner | `src/managed/pattern_deep_work.ts` | managed agent | Plan next cycle only; no edits. | workflow contract, criteria, prior scorecard/work notes | `cycle-plan.md` | `tests/graph/deep_work.test.ts` |
+| Deep work generator/validator | `src/managed/pattern_deep_work.ts` | managed agent | Execute one managed cycle and publish private drafts. | cycle plan, failed scorecard, criteria, public artifact draft contract | `work-notes.md` plus draft artifacts | `tests/graph/deep_work.test.ts`, managed evals |
+| Deep work criterion evaluator | `src/managed/pattern_deep_work.ts` | AI check rubric | Grade only current evidence for one criterion. | rubric criterion, draft artifacts/work notes | JSON `{passed, score, summary, issues}` | `tests/graph/deep_work.test.ts` |
+| Deep work publisher | `src/managed/pattern_deep_work.ts` | managed agent | Publish public artifacts only from latest passing scorecard. | scorecard, work notes, draft artifacts | declared public artifacts | `tests/graph/deep_work.test.ts` |
+| Deep research angle worker | `src/managed/pattern_deep_research.ts` | managed agent | Private research for one assigned angle. | final contract, assigned angle, context | `angle-report.md`, `packet.json` | `tests/graph/deep_research.test.ts` |
+| Deep research synthesis worker | `src/managed/pattern_deep_research.ts` | managed agent | Collapse packets without losing unique findings or provenance. | input packets/reports | synthesis report and packet | `tests/graph/deep_research.test.ts` |
+| Deep research publisher | `src/managed/pattern_deep_research.ts` | managed agent | Owns final public artifact contract; private reports are evidence. | final contract, selected axes, synthesis packets | declared public artifacts | `tests/graph/deep_research.test.ts` |
+
+## Known Failure Modes
+
+- Agent treats Agentflow docs, skills, or harness text as the work target.
+- Agent publishes only a final response and misses declared artifacts.
+- Agent writes placeholder or stale artifacts.
+- Agent claims validation without command/tool evidence.
+- Agent logs progress before verifying the claim.
+- Agent uses recovery commands as a normal worker.
+- Agent follows stale context over authored contract or provenance.
+- Verifier marks an inlined artifact missing because a side-channel search is incomplete.
+- Managed publisher claims beyond passing scorecard evidence.

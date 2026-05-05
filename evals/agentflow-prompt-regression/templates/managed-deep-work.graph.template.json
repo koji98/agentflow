@@ -1,0 +1,81 @@
+{
+  "version": "1",
+  "graph_id": "prompt-regression-managed-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "{{scenario.description}}",
+    "acceptance_criteria": [
+      "The managed workflow preserves cycle evidence and publishes public artifacts only from supported evidence."
+    ],
+    "constraints": [
+      "Do not use sources outside the local fixtures supplied by the eval scenario."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "workspace-write",
+      "timeout_sec": 600
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "max_total_interventions": 0,
+    "profile": "supervisor"
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_deep_work",
+        "id": "managed_probe",
+        "repo": "main",
+        "intent": {
+          "goal": "{{criteria.prompt-regression.task}}",
+          "acceptance_criteria": [
+            "The latest cycle records validation evidence.",
+            "The final public artifact does not claim beyond passing scorecard evidence."
+          ],
+          "constraints": [
+            "Do not change graph contract or fabricate validation."
+          ]
+        },
+        "completion": {
+          "max_cycles": 2,
+          "pass_threshold": 0.8,
+          "criteria": [
+            {
+              "id": "notes_have_evidence",
+              "kind": "rubric",
+              "target": "artifact:summary",
+              "rubric": "The draft summary contains concrete cycle evidence, validation status, and residual risk.",
+              "weight": 1,
+              "required": true
+            }
+          ]
+        },
+        "artifacts": {
+          "summary": {
+            "from": "output_dir",
+            "path": "summary.md",
+            "description": "Managed prompt-regression summary with literal Scenario:, Evidence:, Validation:, Risks:, and Completion: fields."
+          }
+        }
+      }
+    ]
+  }
+}

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import type { ArtifactDefinition } from "../graph/authored.js";
+import { resolveInterventionDirectory } from "../artifacts/paths.js";
 import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
@@ -442,6 +443,7 @@ async function writeEvidencePatch(options: {
   harness?: HarnessAdapter;
   model?: string;
   reasoning_effort?: EffectiveSupervisorPolicy["reasoning_effort"];
+  harness_config?: EffectiveSupervisorPolicy["harness_config"];
   timeout_sec?: number;
   runId: string;
   workspacePath: string;
@@ -520,6 +522,7 @@ async function writeEvidencePatch(options: {
         sandbox: "read-only",
         model: options.model,
         ...(options.reasoning_effort ? { reasoningEffort: options.reasoning_effort } : {}),
+        ...(options.harness_config ? { harnessConfig: options.harness_config } : {}),
         contextPacketPath: options.caseFileJsonPath,
         contextManifestPath: options.contextManifestPath ?? options.caseFileJsonPath,
         contextManifest: options.contextManifest ?? `Case file: ${options.caseFileJsonPath}`,
@@ -751,16 +754,6 @@ function buildRuntimeOverlay(options: {
     deltas.push({
       kind: "evidence_added",
       summary: "Added supervisor evidence from a successful gather for the retry."
-    });
-  }
-
-  if (
-    options.causalContext
-    && options.causalContext.selected_target.target_compiled_id !== options.symptomCompiledId
-  ) {
-    deltas.push({
-      kind: "recovery_target_changed",
-      summary: `Recovery target changed from symptom node "${options.symptomCompiledId}" to causal target "${options.causalContext.selected_target.target_compiled_id}".`
     });
   }
 
@@ -1094,7 +1087,7 @@ export async function runSupervisorRecoveryCycle(options: {
   recovery_envelope?: SupervisorRecoveryEnvelope;
 }> {
   const startedAt = nowIso();
-  const interventionDir = join(options.attempt.execution_dir, "interventions", options.intervention_id);
+  const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, options.intervention_id);
   await mkdir(interventionDir, { recursive: true });
   const caseFileJsonPath = join(interventionDir, "case-file.json");
   const caseFileMarkdownPath = join(interventionDir, "case-file.md");
@@ -1224,6 +1217,7 @@ export async function runSupervisorRecoveryCycle(options: {
         ...(options.supervisor_policy?.reasoning_effort
           ? { reasoning_effort: options.supervisor_policy.reasoning_effort }
           : {}),
+        ...(options.supervisor_policy?.harness_config ? { harness_config: options.supervisor_policy.harness_config } : {}),
         ...(options.supervisor_policy?.timeout_sec ? { timeout_sec: options.supervisor_policy.timeout_sec } : {}),
         runId: options.run_id,
         workspacePath: options.workspace_path,

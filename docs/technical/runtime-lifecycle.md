@@ -39,11 +39,11 @@ Validation follows the same front half as a run, but stops before execution:
 3. Expand managed patterns and plugin workflow nodes into authored primitive graph nodes.
 4. Resolve launch settings from `defaults` and `profiles`.
 5. Compile the graph into primitive runtime nodes, edges, scopes, resolved tools, credential specs, and artifact references.
-6. Run graph validation and authoring review diagnostics.
-7. Optionally run local readiness checks with `--run-ready`.
-8. Optionally emit compiled JSON, Mermaid text, or a rendered Mermaid image.
+6. Run full authoring review diagnostics.
+7. Run local readiness checks for repos, commands, harnesses, plugin tool help, credentials, and context token budgets.
+8. Optionally emit compiled JSON, a validation package, Mermaid text, or a rendered Mermaid image.
 
-`validate --show-compiled` is the most direct way to inspect the contract the runtime will execute. `validate --diagram` and `--diagram-output` are for reviewing graph shape, dependencies, scopes, and artifact handoffs visually.
+`validate --show-compiled` is the most direct way to inspect the contract the runtime will execute. `validate --output-dir` writes a reusable validation package. `validate --diagram-output` is for reviewing graph shape, dependencies, scopes, and artifact handoffs visually.
 
 ## Compile
 
@@ -93,6 +93,8 @@ Each attempt is the unit of execution and audit. A typical agent attempt include
 - `verify-outcome.json` and `verify-outcome.md` for passing agent attempts after declared artifacts materialize
 
 The attempt boundary matters because supervisor interventions attach to a specific attempt, downstream refs select from attempts, and resume decides whether completed attempts remain compatible with the current compiled contract.
+
+Managed pattern internals also emit `managed.progress` events at meaningful boundaries such as internal node completion, ordinary deep-work completion feedback, repeated no-delta stalls, and managed repeat exhaustion. Ordinary managed feedback stays inside the pattern while the pattern can still make progress. When deep work repeats the same blocker without material delta, or when a managed repeat exhausts its authored cycles, the runtime records managed progress evidence and routes the failed boundary through the normal supervisor path. The supervisor may retry only when it can attach a material delta such as new evidence, repaired context, changed validation strategy, workspace cleanup, or safe environment repair.
 
 ## Supervision
 

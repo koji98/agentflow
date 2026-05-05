@@ -1,0 +1,44 @@
+{
+  "id": "tool-help-just-in-time",
+  "bucket": "tool-discipline",
+  "difficulty": "hard",
+  "description": "Agent should use tool help only when exact usage matters.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true,
+    "simulation": {
+      "tool_calls": [
+        {
+          "id": "fixture-help",
+          "command": "fixture-lookup",
+          "match": { "argv_exact": ["--help"] },
+          "response": { "stdout": "usage: fixture-lookup --case <name>\n" }
+        },
+        {
+          "id": "tool-help-result",
+          "command": "fixture-lookup",
+          "match": { "argv_exact": ["--case", "tool-help"] },
+          "response": { "stdout": "fixture-result=tool-help-ok\n" }
+        }
+      ]
+    }
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["tool-help-ok"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "The exact fixture tool usage matters. Run `fixture-lookup --help`, then run `fixture-lookup --case tool-help`, and cite the output `tool-help-ok` in the handoff.",
+      "required_contains": ["tool-help-ok", "fixture-lookup --case tool-help", "Scenario:"],
+      "required_simulation": [
+        { "command": "fixture-lookup", "rule_id": "fixture-help" },
+        { "command": "fixture-lookup", "rule_id": "tool-help-result" }
+      ]
+    }
+  }
+}

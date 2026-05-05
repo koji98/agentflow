@@ -209,6 +209,18 @@ function classifyCurrentNodeOperation(classification: FailureClassification): Su
   return "repair_current_node";
 }
 
+function shouldConsiderArtifactProducer(options: {
+  symptomNode: CompiledExecutableNode;
+  classification: FailureClassification;
+}): boolean {
+  if (options.symptomNode.kind === "check") {
+    return true;
+  }
+
+  return options.classification.class === "artifact_contract_failure"
+    && options.symptomNode.kind !== "agent";
+}
+
 export function buildSupervisorCausalContext(options: {
   graph: CompiledGraph;
   topology: SchedulerTopology;
@@ -245,11 +257,16 @@ export function buildSupervisorCausalContext(options: {
     requiresInvestigation: options.repeatedFingerprintCount >= 2
   }));
 
-  const artifactProducer = artifactProducerFromContext({
-    symptom: options.symptomNode,
-    graph: options.graph,
-    topology: options.topology
-  });
+  const artifactProducer = shouldConsiderArtifactProducer({
+    symptomNode: options.symptomNode,
+    classification: options.classification
+  })
+    ? artifactProducerFromContext({
+        symptom: options.symptomNode,
+        graph: options.graph,
+        topology: options.topology
+      })
+    : undefined;
   if (artifactProducer) {
     candidates.push(makeTarget({
       operation: "repair_artifact",

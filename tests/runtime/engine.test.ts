@@ -13,6 +13,7 @@ import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import {
   resolveExecutionArtifactsDirectory,
+  resolveInterventionDirectory,
   resolveNodeExecutionDirectory
 } from "../../src/artifacts/paths.js";
 import { readRunExecutionAttempts, readSupervisorInterventions } from "../../src/artifacts/reader.js";
@@ -964,13 +965,7 @@ describe("runtime engine", () => {
               acceptance_criteria: ["The handoff explains validation."],
               constraints: []
             },
-            artifacts: {
-              handoff: {
-                from: "output_dir",
-                path: "handoff.md",
-                description: "Reviewer handoff."
-              }
-            }
+            artifacts: {}
           }
         ]
       }
@@ -979,7 +974,6 @@ describe("runtime engine", () => {
     const invocations: Parameters<HarnessAdapter["run"]>[0][] = [];
     const harness = createHarness("codex-cli", async (invocation) => {
       invocations.push(invocation);
-      await writeFile(join(invocation.outputDir, "handoff.md"), "handoff\n");
       return {
         status: "passed",
         exitCode: 0,
@@ -1574,8 +1568,14 @@ describe("runtime engine", () => {
     expect(run.events.filter((event) => event.type === "supervisor.intervention.started")).toHaveLength(2);
     expect(run.events.filter((event) => event.type === "supervisor.intervention.failed")).toHaveLength(1);
     expect(run.events.filter((event) => event.type === "supervisor.intervention.completed")).toHaveLength(1);
-    expect(await pathExists(join(attempt.execution_dir, "interventions", `${attempt.execution_id}__repair_artifact_1`, "prompt.md"))).toBe(true);
-    expect(await pathExists(join(attempt.execution_dir, "interventions", `${attempt.execution_id}__repair_artifact_2`, "result.json"))).toBe(true);
+    expect(await pathExists(join(
+      resolveInterventionDirectory(attempt.execution_dir, `${attempt.execution_id}__repair_artifact_1`),
+      "prompt.md"
+    ))).toBe(true);
+    expect(await pathExists(join(
+      resolveInterventionDirectory(attempt.execution_dir, `${attempt.execution_id}__repair_artifact_2`),
+      "result.json"
+    ))).toBe(true);
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -1960,7 +1960,7 @@ describe("runtime engine", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("self-heals missing Markdown handoff artifacts from the completed agent response", async () => {
+  it("does not synthesize missing Markdown handoff artifacts from the completed agent response", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-agent-response-artifact-recovery-"));
     const repoDir = join(tempRoot, "repo");
     const runRoot = join(tempRoot, "run");
@@ -2034,32 +2034,30 @@ describe("runtime engine", () => {
     });
 
     const attempt = run.attempts[0]!;
-    const handoff = await readFile(attempt.artifacts.handoff!, "utf8");
 
-    expect(run.outcome).toBe("passed");
-    expect(attempt.status).toBe("passed");
-    expect(handoff).toContain("Recovered Agentflow Artifact");
-    expect(handoff).toContain("Implemented checkout timeout handling.");
-    expect(handoff).toContain("Validation: npm test -- checkout");
-    expect(attempt.metadata.artifact_repair).toEqual({
-      status: "passed",
-      max_attempts: 1,
-      attempt_count: 1,
-      missing_artifacts: []
-    });
+    expect(run.outcome).toBe("failed");
+    expect(attempt.status).toBe("failed");
+    expect(attempt.artifacts.handoff).toBeUndefined();
+    expect(attempt.metadata.completion).toEqual(expect.objectContaining({
+      completion_status: "incomplete",
+      blocking_reasons: expect.arrayContaining([
+        expect.stringContaining("Missing expected artifact: handoff")
+      ])
+    }));
     expect(run.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: "supervisor.intervention.completed",
+          type: "supervisor.decision",
           compiled_id: "root__write_handoff",
           payload: expect.objectContaining({
-            repaired_artifacts: ["handoff"]
+            classification: "completion_contract_failure",
+            action: "retry_with_guidance"
           })
         })
       ])
     );
     await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain(
-      '"repair_strategy":"synthesize_from_agent_response"'
+      '"action":"retry_with_guidance"'
     );
 
     await rm(tempRoot, { recursive: true, force: true });
@@ -3383,7 +3381,7 @@ describe("runtime engine", () => {
           type: "supervisor.decision",
           compiled_id: "root__writer",
           payload: expect.objectContaining({
-            classification: "unknown",
+            classification: "completion_contract_failure",
             action: "retry_with_guidance",
             target_execution_id: attempts[0]!.execution_id
           })
@@ -3791,7 +3789,10 @@ describe("runtime engine", () => {
 
     const attempts = await readRunExecutionAttempts(runRoot);
     const failedAttempt = attempts.find((attempt) => attempt.status === "failed")!;
-    const interventionDir = join(failedAttempt.execution_dir, "interventions", `${failedAttempt.execution_id}__rebuild_context`);
+    const interventionDir = resolveInterventionDirectory(
+      failedAttempt.execution_dir,
+      `${failedAttempt.execution_id}__rebuild_context`
+    );
     expect(await pathExists(join(interventionDir, "context-analysis.json"))).toBe(true);
     expect(await pathExists(join(interventionDir, "context-repair-patch.json"))).toBe(true);
     expect(await pathExists(join(interventionDir, "runtime-overlay.json"))).toBe(true);

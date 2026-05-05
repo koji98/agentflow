@@ -12,7 +12,7 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Graphs are execution contracts: intent, authority, context, artifacts, validation, supervision, and delivery.
 - Every executable node (`agent`, `exec`, `check`, `checkpoint`) needs an `intent` block with a meaningful `goal` and non-empty `acceptance_criteria`; `intent.constraints` default to `[]`.
 - `intent.acceptance_criteria` are runtime-enforced by outcome verification for passing `agent` attempts and used by the supervisor to interpret deterministic nodes.
-- Context is prompt design. Prefer exact, high-signal material over broad dumps; validate real token cost with `--run-ready`.
+- Context is prompt design. Prefer exact, high-signal material over broad dumps; validate real token cost with `agentflow validate --graph <path>`.
 - Artifacts are durable handoffs. Downstream nodes should consume named artifacts, not raw logs or assumed workspace state.
 - Inside `repeat` loops, prior-iteration artifacts need explicit selectors such as `iteration: "previous"` or `iteration: "latest_failed"`; Agentflow also injects `repeat_history` so retrying nodes can see what already happened.
 - Checks prove hard facts or gate control flow. Do not add AI checks just to repeat outcome verification.
@@ -20,10 +20,11 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 - Do not wrap mature CLIs or protocols just to make them "agent tools"; wrappers should add auth isolation, stable I/O, reuse, or auditability.
 - Do not over-prescribe implementation mechanics. Give agents clear intent, authority, context, artifacts, and validation; let them decide exact files and approach unless the user specified them.
 - In GitHub repos, consider rollout strategy before authoring: prefer small reviewable PRs, `establish_base -> parallel_prs`, or `cascading_prs` over one large PR unless the user asks otherwise.
-- A graph is not complete until validation passes: plugin resolution when needed, `validate`, `--review`, `--run-ready`, and `--show-compiled`.
+- A graph is not complete until plugin resolution passes when needed and `agentflow validate --graph <path>` reports the graph run-ready. Use `--show-compiled` or `--output-dir` only when inspection artifacts are useful.
 - `supervision.profile` is required and must point at a real profile so supervisor verification and recovery have explicit harness/model settings.
 - Supervisor recovery is graph-causal: a failed node may be a symptom of an upstream node, artifact, context, workspace, validation strategy, or environment problem. Do not author supervisor authority pauses as planned workflow nodes.
-- `repos`, `profiles`, sandbox, and tools define authority. Constraints should name scope boundaries and high-impact limits.
+- `repos`, `profiles`, sandbox, and tools define authority. Constraints should be prohibition-style boundaries that start with `Do not`; put positive success requirements in `acceptance_criteria`.
+- Harness-native Codex/Cursor config is isolated by default. Declare native MCP/plugins/config only in `profiles.*.harness_config`; use `isolation: "inherit_user"` only when accepting non-reproducible local harness behavior.
 
 ## Route By Task
 
@@ -49,21 +50,21 @@ Agentflow is a supervised local runtime for long-running coding work. Humans aut
 5. Inventory relevant local CLIs and decide what stays as ordinary terminal use versus plugin-bundled tools.
 6. Define node contracts: each executable node gets `intent.goal`, `intent.acceptance_criteria`, `intent.constraints`, context when needed, and named artifacts when it must publish durable evidence.
 7. Add checks, a required supervisor profile, and a bounded supervision budget that match risk; terminal delivery is automatic.
-8. Resolve plugins when declared, then run `agentflow validate --graph <path>`.
-9. Run `agentflow validate --graph <path> --review`, `--run-ready`, and `--show-compiled` before considering the graph complete.
+8. Resolve plugins when declared, then run `agentflow validate --graph <path>` before considering the graph complete.
+9. Use `agentflow validate --graph <path> --show-compiled` or `--output-dir <path>` when reviewers or downstream agents need the compiled contract and validation package.
 10. After a run, inspect `delivery/reviewer-guide.md`, `delivery/manifest.json`, `delivery/run-map.md`, and declared artifacts before raw runtime files.
 
 ## Authoring Posture
 
 - Treat the authored DAG as the human contract, not a prose plan.
 - Use `context` for node material and `artifacts` for durable handoffs.
-- Treat `repos` and `profiles` as operational authority; put scope boundaries and out-of-scope notes in graph or node `intent.constraints`.
+- Treat `repos` and `profiles` as operational authority; put scope boundaries and out-of-scope notes in graph or node `intent.constraints`, phrased as `Do not ...` constraints.
 - Keep downstream references on named artifacts from public node ids.
 - Treat `intent.acceptance_criteria` as a runtime contract: passing `agent` attempts are graded by the outcome verifier, and deterministic failures use the same contract for causal recovery. Vague criteria produce vague verification and weak recovery.
 - Do not author boilerplate iteration guidance ("iterate until done", "investigate ambiguity", "stop only when blocked") in graph or node `intent.constraints`. The runtime injects a `## Working Loop` section into every standard agent prompt that already covers this, and outcome verification will reject early-bailing.
 - Use deterministic checks for hard facts. Reach for AI checks only when another node depends on the gate or when the deterministic command is genuinely unavailable; do not stack an AI `check` after every agent node to re-evaluate the same acceptance criteria.
 - Treat checks, outcome verification, supervisor `semantic_evaluation`, managed pattern evaluation, and `agentflow eval` as separate lanes. Use `agentflow-evals` for the offline eval lane.
-- Make high-impact limits explicit in graph or node `intent.constraints` before granting credential-backed, external, or mutating tools.
+- Make high-impact limits explicit in graph or node `intent.constraints` before granting credential-backed, external, or mutating tools, and phrase them as `Do not ...` boundaries.
 - Do not widen scope through supervisor behavior; use repeat-scoped checkpoints or graph edits for planned human decisions, and reserve `pause_for_human` for authority boundaries the runtime must not infer.
 
 ## Runtime CLI Posture

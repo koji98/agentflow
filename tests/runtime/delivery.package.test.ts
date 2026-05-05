@@ -192,7 +192,8 @@ describe("delivery package", () => {
       evaluation_ledger: join(runRoot, "delivery", "evaluation-ledger.json"),
       intervention_trace: join(runRoot, "delivery", "intervention-trace.json"),
       supervisor_timeline: join(runRoot, "supervisor-timeline.jsonl"),
-      runtime_log: join(runRoot, "runtime", "log.jsonl")
+      runtime_log: join(runRoot, "runtime", "log.jsonl"),
+      operator_observations: join(runRoot, "runtime", "observations.jsonl")
     });
     expect(manifest.internal_artifacts).toEqual({
       run_record: join(runRoot, "run.json"),
@@ -200,6 +201,7 @@ describe("delivery package", () => {
       events: join(runRoot, "events.jsonl"),
       supervisor_timeline: join(runRoot, "supervisor-timeline.jsonl"),
       runtime_log: join(runRoot, "runtime", "log.jsonl"),
+      operator_observations: join(runRoot, "runtime", "observations.jsonl"),
       interventions: join(runRoot, "interventions.jsonl"),
       node_attempts: join(runRoot, "nodes"),
       workspace_changes: join(runRoot, "workspace-changes")

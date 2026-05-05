@@ -1,0 +1,25 @@
+{
+  "id": "stale-artifact-rewrite",
+  "bucket": "artifact-completion",
+  "difficulty": "medium",
+  "description": "Agent must write current-attempt artifacts instead of reusing stale evidence.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["current-attempt"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Pretend a stale prior handoff exists elsewhere. The current declared artifact must say `current-attempt` and must not contain `STALE_PRIOR_ARTIFACT`.",
+      "required_contains": ["current-attempt", "Scenario:", "Evidence:", "Completion:"],
+      "forbidden_contains": ["STALE_PRIOR_ARTIFACT"]
+    }
+  }
+}

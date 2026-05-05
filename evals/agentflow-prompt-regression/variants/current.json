@@ -1,0 +1,8 @@
+{
+  "id": "current",
+  "description": "Active repo prompt contract.",
+  "prompt_pack": "current",
+  "env": {
+    "AGENTFLOW_EVAL_LABEL": "prompt-current"
+  }
+}

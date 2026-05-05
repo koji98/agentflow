@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Use only local repo, docs, and tool fixtures supplied by this eval.",
+      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -93,7 +93,7 @@
           "constraints": [
             "Do not edit `generated/**`.",
             "Do not add dependencies.",
-            "Prefer specific source and test files over broad generated context."
+            "Do not read broad generated context when specific source and test files are enough."
           ]
         }
       },

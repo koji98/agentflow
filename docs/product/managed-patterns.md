@@ -41,6 +41,8 @@ Add:
 
 The pattern runs authored angles in parallel, synthesizes research packets in balanced batches of at most three inputs, then publishes the public summary, packet, and any authored artifacts. Angle and synthesis artifacts are private evidence packets; the final publisher owns the public artifact shape and required field labels. Synthesis preserves major findings, collapses redundancy, keeps provenance attached to claims, and surfaces uncertainty or conflicts. It is useful for product research, architecture research, implementation research, and multi-axis code review.
 
+Public output is collapsed by default. Authors can opt individual research axes into public artifacts by using object-form angles with `id`, `prompt`, and `public_artifact`; omitted axes remain private evidence while the public `packet` keeps an index of angles and evidence refs.
+
 ### `pattern_deep_work`
 
 Use when the job is “work, validate, critique, and fix until done.”
@@ -63,13 +65,14 @@ Add:
       {
         "id": "acceptance_rubric",
         "kind": "rubric",
+        "target": "workspace",
         "rubric": "The workspace satisfies the goal and acceptance criteria without violating constraints.",
         "weight": 0.4
       },
       {
         "id": "handoff_quality",
-        "kind": "artifact_rubric",
-        "artifact": "summary",
+        "kind": "rubric",
+        "target": "artifact:summary",
         "rubric": "The summary clearly describes changes, validation evidence, and residual risks.",
         "weight": 0.2
       }
@@ -84,7 +87,9 @@ Criteria weights must sum to `1`. Required criteria are hard blockers. Each cycl
 
 Managed patterns do not have a second supervisor. The normal runtime supervisor still handles internal node failures: context repair, harness failure, artifact repair, malformed grader output, environment issues, workspace cleanup, and recoverable validation strategy failures.
 
-For `pattern_deep_work`, a failed command criterion, low rubric score, or weak artifact is normal loop feedback and does not spend supervisor budget. Runtime failures still go to the normal supervisor: context repair, harness failure, artifact repair, malformed evaluator output, environment issues, workspace cleanup, and recoverable validation strategy failures. Max-cycle exhaustion fails the managed node with scorecard evidence unless the supervisor can produce a real material delta.
+Managed workflows emit `managed.progress` events at their internal boundaries so operators can see whether the pattern is moving, receiving ordinary feedback, or approaching a terminal boundary. These events are monitoring evidence; they do not create a second supervisor loop.
+
+For `pattern_deep_work`, a failed command criterion, low rubric score, or weak artifact is normal loop feedback and does not spend supervisor budget while the managed loop still has cycles available. Runtime failures still go to the normal supervisor: context repair, harness failure, artifact repair, malformed evaluator output, environment issues, workspace cleanup, and recoverable validation strategy failures. When the managed repeat exhausts its allowed cycles, Agentflow records a `managed.progress` exhaustion event, persists the completion packet with scorecard blockers/regressions, and gives the normal supervisor one chance to recover if it can produce a real material delta. If there is no material delta, the managed node fails with scorecard evidence and downstream work remains blocked.
 
 ## Validation
 

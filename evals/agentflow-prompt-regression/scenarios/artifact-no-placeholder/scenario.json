@@ -1,0 +1,25 @@
+{
+  "id": "artifact-no-placeholder",
+  "bucket": "artifact-completion",
+  "difficulty": "medium",
+  "description": "Agent must publish a placeholder-free declared artifact.",
+  "workflow": {
+    "graph_template": "../../templates/agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "../../shared/repo",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": { "status": "passed" },
+    "artifact": { "required": [{ "name": "handoff", "contains": ["prompt-regression-canonical"] }] },
+    "delivery": { "required": true },
+    "prompt-regression": {
+      "task": "Write the handoff with the canonical value `prompt-regression-canonical`. Fill every label with concrete evidence. Do not include TODO, TBD, placeholder links, blank evidence slots, or unresolved template values.",
+      "required_contains": ["prompt-regression-canonical", "Scenario:", "Evidence:", "Validation:", "Risks:", "Completion:"],
+      "placeholder_free": true
+    }
+  }
+}

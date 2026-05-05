@@ -1040,7 +1040,8 @@ describe("formatToolContract", () => {
     expect(prompt).toContain("## Available Tools");
     expect(prompt).toContain("### babysit-poll (from plugin \"babysit\" (tool: poll))");
     expect(prompt).toContain("run `<tool> --help` when usage is unclear");
-    expect(prompt).toContain("Use `af --help` only when the options below are insufficient.");
+    expect(prompt).toContain("`af complete check`: run before final response");
+    expect(prompt).not.toContain("Use `af --help` only when the options below are insufficient.");
   });
 
   it("renders graph and node intent into agent prompts", () => {

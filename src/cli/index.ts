@@ -27,6 +27,7 @@ import { applyCommand } from "./commands/apply.js";
 import { authCommand } from "./commands/auth.js";
 import { evalCommand } from "./commands/eval.js";
 import { inspectCommand } from "./commands/inspect.js";
+import { observeCommand } from "./commands/observe.js";
 import { pluginCommand } from "./commands/plugin.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
@@ -57,19 +58,17 @@ interface GraphCliCommand {
   ) => Promise<GraphCliCommandResult>;
 }
 
-const repeatableOptionNames = new Set(["config"]);
+const repeatableOptionNames = new Set(["config", "evidence"]);
 
 const optionDescriptions: Record<string, string> = {
   graph: "--graph <path>               Authored graph document to validate or run.",
   label: "--label <label>              Optional label appended to the generated run or eval artifact root.",
-  "run-ready": "--run-ready                  Also check local runtime dependencies during validate.",
   "run-root": "--run-root <path>            Existing run root to resume.",
   "runs-root": "--runs-root <path>           Absolute runs root directory to enumerate.",
   latest: "--latest                     Resume the most recent resumable run discovered for the supplied --graph.",
+  strict: "--strict                     Fail validate when serious authoring review findings are present.",
   "show-compiled": "--show-compiled              Include the compiled graph payload in the validate output.",
-  review: "--review                     Include deeper authoring review findings in validate output.",
-  "strict-review": "--strict-review              Fail validate when serious authoring review findings are present.",
-  diagram: "--diagram                    Include Mermaid for the compiled graph in validate output.",
+  "output-dir": "--output-dir <path>          Write a validation package with compiled graph, review, readiness, and context files.",
   "diagram-output": "--diagram-output <path>      Write Mermaid for the compiled graph to a file.",
   "diagram-image-output": "--diagram-image-output <path> Render Mermaid for the compiled graph to an image file.",
   "diagram-image-renderer": "--diagram-image-renderer <npx|mmdc> Choose the Mermaid image renderer.",
@@ -87,10 +86,25 @@ const optionDescriptions: Record<string, string> = {
   trials: "--trials <n>                Trial count per selected scenario and variant.",
   "eval-root": "--eval-root <path>           Eval artifact root to write or inspect.",
   concurrency: "--concurrency <n>           Number of eval trials to run concurrently.",
-  format: "--format <json|markdown>      Eval report output format.",
+  format: "--format <format>           Output format for commands that support formatted output.",
   baseline: "--baseline <variant>        Baseline variant for eval compare.",
   candidate: "--candidate <variant>       Candidate variant for eval compare.",
   trial: "--trial <n>                 Trial number for eval inspect.",
+  run: "--run <run-root-or-id>        Run root path or discovered run id.",
+  kind: "--kind <kind>                Observation kind: observation, issue, risk, or blocker.",
+  summary: "--summary <text>           Required short observation or resolution summary.",
+  body: "--body <text>                Optional longer observation body.",
+  node: "--node <authored-id>         Optional authored node id to scope an observation.",
+  attempt: "--attempt <execution-id>   Optional execution id to scope an observation.",
+  evidence: "--evidence <json>          Structured evidence JSON object; repeatable.",
+  severity: "--severity <level>         Observation severity: info, warning, or error.",
+  author: "--author <name>             Observation author; defaults to AGENTFLOW_OBSERVER or USER.",
+  blocking: "--blocking                 Mark an observation as completion-blocking.",
+  "blocked-on": "--blocked-on <text>        Blocking condition or external dependency.",
+  "recoverable-by": "--recoverable-by <text>    Who or what can resolve the blocker.",
+  active: "--active                    Show only active observations.",
+  observation: "--observation <id>        Observation id to resolve.",
+  resolution: "--resolution <state>       Resolution state: resolved or superseded.",
   scope: "--scope <scope>              Credential scope for auth commands.",
   key: "--key <field>                 Credential field key for auth commands.",
   value: "--value <value>              Non-secret credential field value for auth set.",
@@ -116,7 +130,7 @@ function renderGraphHelp(): string {
     '  "intent": {',
     '    "goal": "Implement a reviewable change in the selected repository.",',
     '    "acceptance_criteria": ["The implementation is understandable, tested, and ready for review."],',
-    '    "constraints": ["Keep the change scoped to src/** and tests/** unless the graph goal requires otherwise."]',
+    '    "constraints": ["Do not change files outside src/** and tests/** unless the graph goal requires otherwise."]',
     "  },",
     '  "repos": { "main": { "path": "." } },',
     '  "profiles": {',
@@ -136,7 +150,7 @@ function renderGraphHelp(): string {
     '        "intent": {',
     '          "goal": "Implement the requested change and publish reviewer evidence.",',
     '          "acceptance_criteria": ["The handoff names changed files, validation, and risks."],',
-    '          "constraints": ["Write a concise handoff artifact before finishing."]',
+    '          "constraints": ["Do not finish without writing a concise handoff artifact."]',
     "        },",
     '        "context": [{ "from": "text", "name": "goal", "text": "Keep the change small." }],',
     '        "artifacts": { "handoff": { "from": "output_dir", "path": "handoff.md", "description": "Markdown handoff from this node." } }',
@@ -190,7 +204,7 @@ function renderGraphHelp(): string {
     "",
     "Key rules:",
     "- The runtime executes compiled graphs only.",
-    "- validate reports authored validation, compiled validation, and declared readiness; add --run-ready for local machine dependency checks.",
+    "- validate runs authored validation, compilation, full authoring review, local readiness checks, plugin tool help, credential diagnostics, and context analysis by default.",
     "- sequence, parallel, and repeat are authoring containers, not executable runtime nodes.",
     "- pattern_deep_research and pattern_deep_work are implemented as managed patterns that lower into generated primitive subgraphs.",
     "- plugin workflow nodes use type = plugin, uses = plugin_alias/workflow_id, and config = workflow-specific settings; run agentflow plugin resolve --graph first.",
@@ -199,6 +213,7 @@ function renderGraphHelp(): string {
     "- repeat context selectors support latest, latest_passed, latest_failed, previous, or a positive integer ordinal.",
     "- launch profile and workspace backend come from graph defaults.",
     "- executable nodes may still select node-level profiles inside the authored graph.",
+    "- profiles may set harness_config for declared Codex/Cursor native config; default isolation ignores ambient user harness config unless isolation = inherit_user.",
     "- codex-cli profiles may set skip_git_repo_check for intentional non-git workspace roots.",
     "- profiles, exec nodes, and deterministic check nodes may set env_files for repo-local dotenv-style command environment.",
     "- profiles and agent nodes may set artifact_repair.max_attempts from 0 to 3; agent nodes default to one repair attempt.",
@@ -220,13 +235,12 @@ function renderGraphHelp(): string {
     "",
     "Recommended local workflow:",
     "1. agentflow validate --graph agentflow.graph.json",
-    "2. agentflow validate --graph agentflow.graph.json --review for substantive graphs, or --strict-review for release gates",
-    "3. agentflow validate --graph agentflow.graph.json --run-ready when local launch readiness matters",
-    "4. agentflow validate --graph agentflow.graph.json --show-compiled, --diagram-output graph.mmd, or --diagram-image-output graph.svg to inspect the compiled graph (image export uses npx by default)",
-    "5. agentflow eval validate evals/<suite-id> when workflow evaluation suites exist",
-    "6. agentflow run --graph agentflow.graph.json",
-    "7. agentflow runs list --graph agentflow.graph.json to discover prior run roots",
-    "8. agentflow inspect <run-root> for failure stderr tails and summaries"
+    "2. agentflow validate --graph agentflow.graph.json --strict for release gates",
+    "3. agentflow validate --graph agentflow.graph.json --show-compiled, --output-dir .agentflow/validation/latest, --diagram-output graph.mmd, or --diagram-image-output graph.svg to inspect/export the compiled graph (image export uses npx by default)",
+    "4. agentflow eval validate evals/<suite-id> when workflow evaluation suites exist",
+    "5. agentflow run --graph agentflow.graph.json",
+    "6. agentflow runs list --graph agentflow.graph.json to discover prior run roots",
+    "7. agentflow inspect <run-root> for failure stderr tails and summaries"
   ].join("\n");
 }
 
@@ -249,6 +263,7 @@ const commandRegistry = {
   run: runCommand,
   runs: runsCommand,
   inspect: inspectCommand,
+  observe: observeCommand,
   resume: resumeCommand,
   apply: applyCommand,
   auth: authCommand,
@@ -343,47 +358,40 @@ function renderInteractiveValidateResult(output: Record<string, unknown>): strin
   const edgeCount = compiledSummary && typeof compiledSummary.edge_count === "number"
     ? compiledSummary.edge_count
     : undefined;
-  const readiness = isRecord(output.readiness) ? output.readiness : undefined;
+  const checksRecord = isRecord(output.checks) ? output.checks : undefined;
+  const readiness = checksRecord && isRecord(checksRecord.readiness) ? checksRecord.readiness : undefined;
   const readinessStatus = readiness && typeof readiness.status === "string" ? readiness.status : undefined;
   const blockedCount = readiness && typeof readiness.blocked_count === "number" ? readiness.blocked_count : 0;
   const warningCount = readiness && typeof readiness.warning_count === "number" ? readiness.warning_count : 0;
   const passedCount = readiness && typeof readiness.passed_count === "number" ? readiness.passed_count : 0;
-  const authoringReview = isRecord(output.authoring_review) ? output.authoring_review : undefined;
+  const context = checksRecord && isRecord(checksRecord.context) ? checksRecord.context : undefined;
+  const contextStatus = context && typeof context.status === "string" ? context.status : undefined;
+  const authoringReview = checksRecord && isRecord(checksRecord.authoring_review) ? checksRecord.authoring_review : undefined;
   const reviewSummary = authoringReview && isRecord(authoringReview.summary) ? authoringReview.summary : undefined;
   const reviewStatus = authoringReview && typeof authoringReview.status === "string" ? authoringReview.status : undefined;
   const reviewMode = authoringReview && typeof authoringReview.mode === "string" ? authoringReview.mode : undefined;
   const seriousReviewCount = reviewSummary && typeof reviewSummary.serious_count === "number" ? reviewSummary.serious_count : 0;
   const warningReviewCount = reviewSummary && typeof reviewSummary.warning_count === "number" ? reviewSummary.warning_count : 0;
-  const checks = readiness && Array.isArray(readiness.checks) ? readiness.checks : [];
-  const readinessMode = output.readiness_mode === "run-ready" ? "run-ready" : "declared";
-  const problemChecks = checks
-    .filter((check): check is Record<string, unknown> =>
-      isRecord(check) && (check.status === "blocked" || check.status === "warning")
-    )
+  const findings = isRecord(output.findings) ? output.findings : undefined;
+  const blockers = findings && Array.isArray(findings.blockers) ? findings.blockers : [];
+  const warnings = findings && Array.isArray(findings.warnings) ? findings.warnings : [];
+  const problemFindings = [...blockers, ...warnings]
+    .filter((finding): finding is Record<string, unknown> => isRecord(finding))
     .slice(0, 6)
-    .map((check) => `- ${String(check.status)} ${String(check.kind ?? "check")} ${String(check.target ?? "")}: ${String(check.message ?? "")}`);
-  const reviewFindings = authoringReview && Array.isArray(authoringReview.findings)
-    ? authoringReview.findings
-        .filter((finding): finding is Record<string, unknown> =>
-          isRecord(finding) && (finding.severity === "serious" || finding.severity === "warning")
-        )
-        .slice(0, 6)
-        .map((finding) =>
-          `- ${String(finding.severity)} ${String(finding.category ?? "review")}${finding.node_id ? ` ${String(finding.node_id)}` : ""}: ${String(finding.message ?? "")}`
-        )
-    : [];
+    .map((finding) =>
+      `- ${String(finding.severity ?? "warning")} ${String(finding.source ?? "validate")} ${String(finding.target ?? finding.node_id ?? finding.path ?? "")}: ${String(finding.message ?? "")}`
+    );
 
   const headline =
     status === "passed"
-      ? readinessMode === "run-ready"
-        ? "Graph validated and run-ready."
-        : "Graph validated."
+      ? "Graph validated and run-ready."
       : "Graph validation failed.";
   const readinessLine = readinessStatus
-    ? `Readiness: ${readinessStatus} (${passedCount} passed, ${warningCount} warnings, ${blockedCount} blocked; mode: ${readinessMode})`
+    ? `Readiness: ${readinessStatus} (${passedCount} passed, ${warningCount} warnings, ${blockedCount} blocked)`
     : undefined;
+  const contextLine = contextStatus ? `Context: ${contextStatus}` : undefined;
   const reviewLine = reviewStatus
-    ? `Authoring review: ${reviewStatus} (${seriousReviewCount} serious, ${warningReviewCount} warnings; mode: ${reviewMode ?? "standard"})`
+    ? `Authoring review: ${reviewStatus} (${seriousReviewCount} serious, ${warningReviewCount} warnings; mode: ${reviewMode ?? "review"})`
     : undefined;
   const nextSteps = isRecord(output.next_steps) ? output.next_steps : undefined;
   const runStep = nextSteps && typeof nextSteps.run === "string" ? nextSteps.run : undefined;
@@ -399,11 +407,9 @@ function renderInteractiveValidateResult(output: Record<string, unknown>): strin
       ? [`Compiled: ${nodeCount ?? "?"} nodes · ${edgeCount ?? "?"} edges`]
       : []),
     ...(readinessLine ? [readinessLine] : []),
+    ...(contextLine ? [contextLine] : []),
     ...(reviewLine ? [reviewLine] : []),
-    ...(readinessMode !== "run-ready" && status === "passed"
-      ? ["Run-ready checks: not requested; add --run-ready to check git, commands, and harness binaries."]
-      : []),
-    ...(problemChecks.length > 0 || reviewFindings.length > 0 ? ["Issues:", ...problemChecks, ...reviewFindings] : []),
+    ...(problemFindings.length > 0 ? ["Issues:", ...problemFindings] : []),
     ...(runStep && status === "passed" ? [`Run: ${runStep}`] : [])
   ].join("\n");
 }
@@ -434,26 +440,28 @@ function renderMainHelp(): string {
     "",
     "Local workflow:",
     "  1. graph-help: review the authored graph contract and minimal example",
-    "  2. validate: check authored, compiled, authoring review, diagram, and optional run-ready phases without running the graph",
+    "  2. validate: check authored, compiled, full review, local readiness, and context phases without running the graph",
     "  3. run: execute the compiled graph and write durable artifacts under the run root",
     "  4. runs list: enumerate previous run roots for a graph",
     "  5. inspect: review a single recorded run root",
-    "  6. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work (use --latest with --graph to pick the most recent resumable run)",
-    "  7. apply: apply captured workspace changes from a run back to a git repo",
-    "  8. auth: configure plugin-tool credentials without exposing secret values to agent harnesses",
-    "  9. eval: validate or run local eval suites for Agentflow graphs",
-    "  10. plugin: resolve Git or local plugin packages for a graph",
+    "  6. observe: add live human observations to an active run without pausing it",
+    "  7. resume: recompile the original graph for a failed or canceled run root and preserve unchanged passed work (use --latest with --graph to pick the most recent resumable run)",
+    "  8. apply: apply captured workspace changes from a run back to a git repo",
+    "  9. auth: configure plugin-tool credentials without exposing secret values to agent harnesses",
+    "  10. eval: validate or run local eval suites for Agentflow graphs",
+    "  11. plugin: resolve Git or local plugin packages for a graph",
     "",
     "Examples:",
     "  agentflow graph-help",
     "  agentflow validate --graph agentflow.graph.json",
-    "  agentflow validate --graph agentflow.graph.json --run-ready",
     "  agentflow validate --graph agentflow.graph.json --show-compiled",
-    "  agentflow validate --graph agentflow.graph.json --review",
+    "  agentflow validate --graph agentflow.graph.json --strict",
+    "  agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest",
     "  agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd",
     "  agentflow run --graph agentflow.graph.json",
     "  agentflow runs list --graph agentflow.graph.json",
     "  agentflow inspect .agentflow/runs/<run-id>",
+    "  agentflow observe add --run .agentflow/runs/<run-id> --kind observation --summary \"Backend worker is running\"",
     "  agentflow resume --run-root .agentflow/runs/<run-id>",
     "  agentflow resume --graph agentflow.graph.json --latest",
     "  agentflow apply --run-root .agentflow/runs/<run-id>",
@@ -619,6 +627,7 @@ export async function executeCli(
     command.name !== "auth" &&
     command.name !== "plugin" &&
     command.name !== "runs" &&
+    command.name !== "observe" &&
     command.name !== "inspect"
   ) {
     return {
