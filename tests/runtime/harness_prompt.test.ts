@@ -112,6 +112,7 @@ describe("harness prompt rendering", () => {
       }
     }));
 
+    expect(prompt).toContain("If the node task, authored goal, acceptance criteria, or artifact description names required labels");
     expect(prompt).toContain("copy those strings exactly into the artifact body");
     expect(prompt).toContain("`Scenario:` is not satisfied by `# Scenario` or a paraphrase");
     expect(prompt).toContain("Forbidden or excluded content overrides exact-phrase copying");
@@ -155,7 +156,7 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("--contract-implication <effect>");
     expect(prompt).toContain("Investigate ambiguity instead of guessing");
     expect(prompt).toContain("Agentflow is the runner, not the work target.");
-    expect(prompt).toContain("Do not consult ambient Agentflow playbooks");
+    expect(prompt).toContain("Do not load, invoke, announce, or use ambient skills");
     expect(prompt).toContain("If the node task names `af context show`, run that exact command before optional runtime status checks");
     expect(prompt).toContain("stop and respond immediately");
     expect(prompt).not.toContain("Use `af --help` only when the options below are insufficient.");

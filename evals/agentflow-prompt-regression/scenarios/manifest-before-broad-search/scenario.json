@@ -17,7 +17,7 @@
     "artifact": { "required": [{ "name": "handoff", "contains": ["manifest-first"] }] },
     "delivery": { "required": true },
     "prompt-regression": {
-      "task": "Use `af context show` before broad repo search. Write a handoff that includes the exact literal token `manifest-first` in the artifact body and names the context fixture evidence.",
+      "task": "Use `af context show` before broad repo search. Write a handoff that includes the exact literal token `manifest-first` and the exact phrase `context fixture` in the artifact body.",
       "required_contains": [
         "manifest-first",
         { "text": "context fixture", "case_sensitive": false },

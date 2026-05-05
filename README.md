@@ -321,7 +321,7 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | `prerequisites` | Local launch checks for files, commands, env vars, and repos. |
 | `graph` | The execution shape: containers, executable nodes, or managed patterns. |
 
-Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
+Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Constraint strings should start with `Do not`; positive requirements belong in acceptance criteria. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
 
 Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime pauses chosen only when recovery needs credentials, scope, product intent, security/compliance judgment, or graph-contract authority that the runtime must not infer.
 

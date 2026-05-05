@@ -282,7 +282,7 @@ Secret fields are stored in macOS Keychain. Secret values must be supplied throu
 
 ## Tool Policy
 
-Tool risk is described in the tool `description` and bounded by graph or node `intent.constraints`.
+Tool risk is described in the tool `description` and bounded by graph or node `intent.constraints`. Constraint strings should start with `Do not`, for example `Do not call mutating endpoints outside the target project.`
 
 - Declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent.
 - Tools share the node sandbox and timeout.

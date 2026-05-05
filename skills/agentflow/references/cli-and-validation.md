@@ -6,10 +6,9 @@ Core commands:
 agentflow graph-help
 agentflow plugin resolve --graph agentflow.graph.json
 agentflow validate --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json --review
-agentflow validate --graph agentflow.graph.json --strict-review
-agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json --strict
 agentflow validate --graph agentflow.graph.json --show-compiled
+agentflow validate --graph agentflow.graph.json --output-dir .agentflow/validation/latest
 agentflow validate --graph agentflow.graph.json --diagram-output graph.mmd
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest
@@ -39,19 +38,18 @@ af spawn --brief "..." --artifact helper-report.md --wait
 af wait --agent <helper-id> --artifact helper-report.md
 ```
 
-## Validation Levels
+## Validation Contract
 
-- `validate`: authored graph, normalization, compilation, standard authoring review, graph diagnostics, plugin lockfile shape.
-- `--review`: deeper node-by-node and graph-intent authoring review for substantive graphs.
-- `--strict-review`: fail validation when serious authoring review findings are present; use for release gates and reusable templates.
-- `--run-ready`: local repos, command availability, env files, plugin executables, plugin tool `--help` contracts, harness readiness, and real context token analysis.
-- `--show-compiled`: compiled primitive graph, managed expansions, tool contracts, profile resolution, delivery and supervision contracts.
-- `--diagram` / `--diagram-output`: Mermaid view of compiled nodes, scopes, artifacts, supervision, and delivery.
+- `validate`: authored graph, normalization, launch profile resolution, compilation, full authoring review, local repos, command availability, env files, plugin executables, plugin tool `--help` contracts, harness readiness, credential reference diagnostics, and real context token analysis.
+- `--strict`: fail validation when serious authoring findings are present; use for release gates, reusable templates, and CI-owned graphs.
+- `--show-compiled`: include the full compiled primitive graph, managed expansions, tool contracts, profile resolution, delivery, and supervision contracts in JSON output.
+- `--output-dir`: write a validation package with JSON and Markdown reports for authored/compiled summaries, managed expansion, review, readiness, context analysis, and Mermaid.
+- `--diagram-output`: write a Mermaid view of compiled nodes, scopes, artifacts, supervision, and delivery.
 - `--diagram-image-output`: rendered image from the compiled Mermaid diagram. Defaults to `npx -y @mermaid-js/mermaid-cli`; use `--diagram-image-package` to pin or replace the npx package, or `--diagram-image-renderer mmdc` for an installed binary.
 
-Plain `validate` is the minimum. For any graph that delegates meaningful work, run `--review`; for CI, release, or shared plugin workflow graphs, prefer `--strict-review`.
+Plain `validate` is the launch preflight. It should be the command humans and agents trust before a run.
 
-`--run-ready` tokenizes the current matched context with the runtime tokenizer. It reports sample glob matches, largest files, truncation risk, default ignored roots, explicit ignored-root opt-ins, and projected `max_total_tokens` failures before launch. Broad globs skip dependency and generated roots such as `.git`, `.agentflow`, `node_modules`, `.venv`, build output, coverage, `generated`, `gen`, and `__generated__` unless the authored context path explicitly starts inside that root.
+Default validation tokenizes the current matched context with the runtime tokenizer. It reports sample glob matches, largest files, truncation risk, default ignored roots, explicit ignored-root opt-ins, and projected `max_total_tokens` failures before launch. Broad globs skip dependency and generated roots such as `.git`, `.agentflow`, `node_modules`, `.venv`, build output, coverage, `generated`, `gen`, and `__generated__` unless the authored context path explicitly starts inside that root.
 
 ## Completion Gate
 
@@ -60,19 +58,17 @@ Do not consider an authored graph complete until the relevant validation command
 ```bash
 agentflow plugin resolve --graph agentflow.graph.json
 agentflow validate --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json --review
-agentflow validate --graph agentflow.graph.json --run-ready
 agentflow validate --graph agentflow.graph.json --show-compiled
 ```
 
-Use `plugin resolve` only when the graph declares plugins. Use `--strict-review` instead of `--review` for release gates, reusable templates, and CI-owned graphs. Use `--diagram-output` or `--diagram-image-output` when reviewers need to understand managed pattern expansion, repeat loops, or parallel handoffs.
+Use `plugin resolve` only when the graph declares plugins. Use `--strict` for release gates, reusable templates, and CI-owned graphs. Use `--output-dir`, `--diagram-output`, or `--diagram-image-output` when reviewers need to understand managed pattern expansion, repeat loops, or parallel handoffs.
 
 ## Before Launch
 
 Confirm:
 
 - `intent.goal` and acceptance criteria match the requested work.
-- scope boundaries and high-impact limits are explicit in `constraints`.
+- scope boundaries and high-impact limits are explicit in `constraints` and each non-empty constraint starts with `Do not`.
 - write-capable nodes use a write-capable sandbox.
 - plugin tools have clear descriptions, expected credential scopes, valid non-secret config, and passing `--help` output.
 - managed patterns publish the artifacts downstream nodes reference.

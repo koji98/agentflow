@@ -6,6 +6,7 @@ Included skills:
 
 - `agentflow`: supervised graph authoring, validation, execution, inspection, resume, supervision, delivery packages, and Codex/Cursor harness behavior.
 - `agentflow-evals`: workflow eval suites, scenarios, variants, criteria, environment simulation, trajectory checks, trace packets, scorecards, benchmark reports, prompt-pack comparisons, and dogfood/capability evals.
+- `agentflow-grill-me`: pre-plan interrogation for Agentflow plans, graphs, workflows, feature designs, and implementation plans.
 - `agentflow-plugins`: Git or local plugin workflows, plugin-bundled CLI tools, and secure plugin auth.
 
 The `agentflow` skill routes to compact references:
@@ -30,5 +31,7 @@ The `agentflow-evals` skill owns:
 - `references/suite-authoring.md`
 - `references/grading-and-reporting.md`
 - `references/operations-and-dogfood.md`
+
+The `agentflow-grill-me` skill is intentionally self-contained in `SKILL.md`.
 
 The repository `docs/` remain the canonical human-facing docs. The skill references are packaged agent-facing guidance for installed use and mirror the supervised v1 contract.

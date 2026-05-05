@@ -54,7 +54,7 @@ For the implementation model behind these files, see `docs/technical/context-and
 5. Check missing artifact diagnostics against the node's declared `artifacts`.
 6. Check `runtime/log.jsonl` and helper sessions when the failure involves worker evidence or helper sub-nodes.
 7. Check context omissions in `context/packet.json`.
-8. Re-run `agentflow validate --graph <graph> --run-ready` if the failure suggests local environment drift.
+8. Re-run `agentflow validate --graph <graph>` if the failure suggests local environment drift.
 
 ## Resume
 

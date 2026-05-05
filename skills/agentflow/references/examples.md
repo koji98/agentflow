@@ -13,7 +13,7 @@ Plugin tool example:
 
 ```bash
 agentflow plugin resolve --graph docs/examples/graphs/ship-feature.graph.json
-agentflow validate --graph docs/examples/graphs/ship-feature.graph.json --run-ready
+agentflow validate --graph docs/examples/graphs/ship-feature.graph.json
 ```
 
 ## Best-Practice Single Agent Graph
@@ -31,7 +31,7 @@ Use this as the default copy source for focused implementation work.
       "The final handoff names changed files, validation evidence, and residual risks."
     ],
     "constraints": [
-      "Keep public payment provider configuration unchanged.",
+      "Do not change public payment provider configuration.",
       "Do not modify unrelated checkout flows."
     ]
   },
@@ -398,7 +398,7 @@ Use the same graph and switch launch profiles:
 }
 ```
 
-Both harnesses receive the same Agentflow context, artifacts, tools, timeout, and delivery contract.
+Both harnesses receive the same Agentflow context, artifacts, tools, timeout, and delivery contract. Ambient Codex/Cursor config is ignored by default; declare intentional native config in `profiles.*.harness_config`, or use `isolation: "inherit_user"` only when non-reproducible local harness config is part of the run.
 
 ## Eval Examples
 

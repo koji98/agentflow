@@ -35,8 +35,8 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 8. Implement credential-free, side-effect-free executable `--help` for every plugin tool.
 9. Run `agentflow plugin resolve --graph <path>`.
 10. Run `agentflow validate --graph <path>`.
-11. Run `agentflow validate --graph <path> --run-ready`.
-12. Run `agentflow validate --graph <path> --review` or `--strict-review` when the plugin graph is team-owned or release-bound.
+11. Run `agentflow validate --graph <path> --strict` when the plugin graph is team-owned or release-bound.
+12. Use `agentflow validate --graph <path> --show-compiled` when the compiled graph needs inspection.
 13. Inspect `validate --show-compiled` for workflow lowering and tool policy; use `--diagram-output` or `--diagram-image-output` when reviewing nontrivial workflow expansion.
 
 ## Authoring Posture

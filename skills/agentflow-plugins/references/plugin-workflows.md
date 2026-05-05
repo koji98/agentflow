@@ -285,7 +285,7 @@ Policy:
 - graph config values are exposed to the tool subprocess as `AGENTFLOW_TOOL_<CALLABLE_NAME>_<KEY>` environment variables, with non-alphanumeric characters converted to `_`
 - default CLI arguments are not declared in the manifest; the executable defines its own interface, and agents pass arguments when invoking the callable tool
 - every plugin tool executable must support credential-free, side-effect-free `--help` that exits `0` and includes purpose, usage, options, defaults, output, exit codes, and examples
-- `agentflow validate --graph <path> --run-ready` executes resolved plugin tools with `--help` and blocks launch if the help contract fails
+- `agentflow validate --graph <path>` executes resolved plugin tools with `--help` and blocks launch if the help contract fails
 
 For the generated wrapper, launcher, credential isolation, harness prompt, and tool invocation ledger mechanics, see `docs/technical/runtime-tooling.md` in the repository.
 
@@ -293,6 +293,6 @@ For the generated wrapper, launcher, credential isolation, harness prompt, and t
 
 ```bash
 agentflow plugin resolve --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json --run-ready
+agentflow validate --graph agentflow.graph.json --strict
 agentflow validate --graph agentflow.graph.json --show-compiled
 ```

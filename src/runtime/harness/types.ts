@@ -344,7 +344,7 @@ function formatArtifactContract(
     "- For multi-line Markdown, write a file and publish it with `af artifact write <name> --file <path>`, or write directly to the declared artifact path; avoid large shell-escaped `--content` payloads.",
     "- Write normal Markdown with real line breaks; do not encode newlines as literal `\\n`.",
     "- If a declared artifact path ends in `.json`, write valid JSON that parses cleanly before publishing or completing.",
-    "- If the authored goal, acceptance criteria, or artifact description names required labels, fields, section headings, or exact phrases, copy those strings exactly into the artifact body. For example, `Scenario:` is not satisfied by `# Scenario` or a paraphrase.",
+    "- If the node task, authored goal, acceptance criteria, or artifact description names required labels, fields, section headings, backticked strings, or exact phrases, copy those strings exactly into the artifact body. For example, `Scenario:` is not satisfied by `# Scenario` or a paraphrase.",
     "- Forbidden or excluded content overrides exact-phrase copying. If a phrase is named only to say not to include it, omit it.",
     "- If the contract says an artifact must not contain a phrase, token, value, or example, do not write that forbidden content anywhere in the artifact, including in a negated sentence saying you excluded it.",
     "- If the contract says not to use, include, cite, rely on, or summarize some material, omit that material from the artifact entirely. Do not restate excluded content to explain that it was ignored.",
@@ -707,7 +707,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     hasSupervisorRecoveryEnvelope
       ? "A supervisor recovery envelope appears before the authored node task. Use it to recover from prior failure while preserving the unchanged authored contract."
       : "The node task is the controlling objective. Use graph context only to understand why this node exists.",
-    "Agentflow is the runner, not the work target. Do not consult ambient Agentflow playbooks or unrelated Agentflow docs; this prompt is the runtime contract unless materialized context explicitly says otherwise.",
+    "Agentflow is the runner, not the work target. Do not load, invoke, announce, or use ambient skills, Agentflow playbooks, AGENTS.md files outside the workspace, or unrelated Agentflow docs; this prompt is the runtime contract unless materialized context explicitly says otherwise.",
     "",
     ...formatContractPriority(hasSupervisorRecoveryEnvelope),
     "",

@@ -114,6 +114,22 @@ function pushCodexConfigArgs(args: string[], config: NonNullable<AgentInvocation
   }
 }
 
+function buildCodexSpawnEnv(invocation: AgentInvocation, codexHomePath?: string): NodeJS.ProcessEnv {
+  const env = buildHarnessSpawnEnv(invocation);
+
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("CODEX_") && key !== "CODEX_HOME") {
+      delete env[key];
+    }
+  }
+
+  if (codexHomePath) {
+    env.CODEX_HOME = codexHomePath;
+  }
+
+  return env;
+}
+
 async function prepareIsolatedCodexHome(invocation: AgentInvocation): Promise<{
   path: string;
   cleanup(): Promise<void>;
@@ -225,10 +241,7 @@ export function createCodexCliHarness(
       return new Promise<HarnessResult>((resolve, reject) => {
         const child = spawn(binary, args, {
           cwd: invocation.repoPath,
-          env: {
-            ...buildHarnessSpawnEnv(invocation),
-            ...(codexHome ? { CODEX_HOME: codexHome.path } : {})
-          },
+          env: buildCodexSpawnEnv(invocation, codexHome?.path),
           stdio: ["pipe", "pipe", "pipe"]
         });
         const stdoutChunks: Buffer[] = [];

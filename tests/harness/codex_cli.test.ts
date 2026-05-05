@@ -41,7 +41,11 @@ process.stdin.on("end", () => {
       AGENTFLOW_OUTPUT_DIR: process.env.AGENTFLOW_OUTPUT_DIR,
       AGENTFLOW_CONTEXT_PACKET: process.env.AGENTFLOW_CONTEXT_PACKET,
       AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST,
-      CODEX_HOME: process.env.CODEX_HOME
+      CODEX_HOME: process.env.CODEX_HOME,
+      CODEX_CI: process.env.CODEX_CI,
+      CODEX_INTERNAL_ORIGINATOR_OVERRIDE: process.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
+      CODEX_SHELL: process.env.CODEX_SHELL,
+      CODEX_THREAD_ID: process.env.CODEX_THREAD_ID
     }, null, 2));
   }
 
@@ -463,7 +467,11 @@ describe("codex cli harness", () => {
         model: "gpt-5-codex",
         baseEnv: {
           ...process.env,
-          CODEX_HOME: userCodexHome
+          CODEX_HOME: userCodexHome,
+          CODEX_THREAD_ID: "ambient-thread",
+          CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop",
+          CODEX_SHELL: "1",
+          CODEX_CI: "1"
         },
         nodeGoal: "Use the local Codex configuration.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
@@ -483,6 +491,10 @@ describe("codex cli harness", () => {
 
       expect(result.status).toBe("passed");
       expect(env.CODEX_HOME).toBe(userCodexHome);
+      expect(env).not.toHaveProperty("CODEX_THREAD_ID");
+      expect(env).not.toHaveProperty("CODEX_INTERNAL_ORIGINATOR_OVERRIDE");
+      expect(env).not.toHaveProperty("CODEX_SHELL");
+      expect(env).not.toHaveProperty("CODEX_CI");
       expect(argv).not.toContain("mcp_servers={}");
       expect(argv).not.toContain("plugins={}");
       expect(argv).not.toContain("notify=[]");
@@ -493,6 +505,66 @@ describe("codex cli harness", () => {
         process.env.MOCK_ARGV_PATH = previousArgvPath;
       }
 
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("scrubs ambient Codex session state from isolated child processes", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-session-scrub-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCodexBinary(tempRoot);
+    const harness = createCodexCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
+    process.env.MOCK_ENV_PATH = mock.env_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-session-scrub",
+        executionId: "exec-session-scrub",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-codex",
+        baseEnv: {
+          ...process.env,
+          CODEX_HOME: join(tempRoot, "user-codex-home"),
+          CODEX_THREAD_ID: "ambient-thread",
+          CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "Codex Desktop",
+          CODEX_SHELL: "1",
+          CODEX_CI: "1"
+        },
+        nodeGoal: "Complete without ambient Codex session state.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+
+      expect(result.status).toBe("passed");
+      expect(env.CODEX_HOME).toContain("agentflow-codex-home-");
+      expect(env).not.toHaveProperty("CODEX_THREAD_ID");
+      expect(env).not.toHaveProperty("CODEX_INTERNAL_ORIGINATOR_OVERRIDE");
+      expect(env).not.toHaveProperty("CODEX_SHELL");
+      expect(env).not.toHaveProperty("CODEX_CI");
+    } finally {
       if (previousEnvPath === undefined) {
         delete process.env.MOCK_ENV_PATH;
       } else {
