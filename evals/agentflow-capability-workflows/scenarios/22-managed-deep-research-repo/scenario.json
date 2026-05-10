@@ -19,7 +19,7 @@
     "artifact": {
       "required": [
         {
-          "name": "handoff",
+          "name": "summary",
           "contains": [
             "Scenario:",
             "Validation:"

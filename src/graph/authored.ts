@@ -3,6 +3,7 @@ import type {
   ArtifactSourceKind,
   CheckKind,
   ContextSelector,
+  CursorSandboxMode,
   FailureBehavior,
   HarnessName,
   PrerequisiteKind,
@@ -63,6 +64,14 @@ export interface CursorHarnessPermissions {
 export interface CursorHarnessConfig {
   config?: Record<string, unknown>;
   permissions?: CursorHarnessPermissions;
+  /** Overrides the Cursor CLI `--sandbox` flag. Use disabled for Cursor allowlist mode on systems without OS sandbox support. */
+  sandbox_mode?: CursorSandboxMode;
+  /** Cursor MCP server identifiers that must be authenticated and loadable for run-ready validation. */
+  required_mcps?: string[];
+  /** When true, passes `--approve-mcps` so Cursor Agent auto-approves MCP servers (needed for headless Glean/MCP use). */
+  approve_mcps?: boolean;
+  /** When true, passes `--trust` for headless workspace trust without prompts. */
+  trust_workspace?: boolean;
 }
 
 export interface HarnessConfig {
@@ -164,6 +173,11 @@ export interface ArtifactDefinition {
   description: string;
 }
 
+export interface ManagedArtifactForward {
+  node: string;
+  artifact: string;
+}
+
 export interface FilePrerequisite {
   kind: Extract<PrerequisiteKind, "file">;
   path: string;
@@ -209,6 +223,7 @@ export interface BaseExecutableNode extends BaseNode {
   intent: ExecutableNodeIntent;
   context?: ContextItem[];
   artifacts?: Record<string, ArtifactDefinition>;
+  managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
   timeout_sec?: number;
 }
 

@@ -60,13 +60,6 @@ function buildDocument(stepOverrides = {}) {
               "Compare whether the public artifact contract is easy for downstream nodes to consume."
             ]
           },
-          artifacts: {
-            evidence_map: {
-              from: "output_dir",
-              path: "evidence-map.json",
-              description: "Evidence map for the research recommendation."
-            }
-          },
           ...stepOverrides
         }
       ]
@@ -126,11 +119,11 @@ describe("deep research managed pattern", () => {
         type: "agent",
         artifacts: expect.objectContaining({
           summary: expect.objectContaining({ path: "summary.md" }),
-          packet: expect.objectContaining({ path: "packet.json" }),
-          evidence_map: expect.objectContaining({ path: "evidence-map.json" })
+          packet: expect.objectContaining({ path: "packet.json" })
         })
       })
     );
+    expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["packet", "summary"]);
     expect(JSON.stringify(finalNode)).toContain("final research publisher");
     expect(JSON.stringify(finalNode)).not.toContain("expert");
   });
@@ -190,7 +183,7 @@ describe("deep research managed pattern", () => {
     ]);
   });
 
-  it("keeps deep research collapsed by default and publishes only selected public axes", () => {
+  it("keeps deep research collapsed by default and exposes selected raw angle reports", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildDocument({
         research: {
@@ -198,20 +191,13 @@ describe("deep research managed pattern", () => {
             {
               id: "architecture",
               prompt: "Investigate whether the implementation follows established Agentflow architecture.",
-              public_artifact: "architecture_findings"
+              as_artifact: true
             },
             {
               id: "risk",
               prompt: "Identify correctness, maintainability, and rollout risks in the managed pattern design."
             }
           ]
-        },
-        artifacts: {
-          architecture_findings: {
-            from: "output_dir",
-            path: "architecture-findings.md",
-            description: "Public architecture-axis research findings."
-          }
         }
       })
     );
@@ -236,11 +222,23 @@ describe("deep research managed pattern", () => {
         artifacts: expect.objectContaining({
           summary: expect.objectContaining({ path: "summary.md" }),
           packet: expect.objectContaining({ path: "packet.json" }),
-          architecture_findings: expect.objectContaining({ path: "architecture-findings.md" })
-        })
+          architecture: expect.objectContaining({
+            path: "angles/architecture.md",
+            description: 'Raw Markdown report for deep research angle "architecture".'
+          })
+        }),
+        managed_artifact_forwards: {
+          architecture: {
+            node: "market_scan__managed__pattern_deep_research__angle_01",
+            artifact: "angle_report_01"
+          }
+        }
       })
     );
-    expect(JSON.stringify(finalNode)).toContain("architecture_findings");
+    if (!finalNode || finalNode.type !== "agent") {
+      throw new Error("Expected final managed node to be an agent.");
+    }
+    expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["architecture", "packet", "summary"]);
     expect(JSON.stringify(finalNode)).toContain("risk");
   });
 
@@ -251,7 +249,18 @@ describe("deep research managed pattern", () => {
         type: "sequence",
         id: "root",
         steps: [
-          buildDocument().graph.steps[0],
+          buildDocument({
+            research: {
+              angles: [
+                "Investigate whether the implementation follows established Agentflow architecture.",
+                {
+                  id: "risk",
+                  prompt: "Identify correctness, maintainability, and rollout risks in the managed pattern design.",
+                  as_artifact: true
+                }
+              ]
+            }
+          }).graph.steps[0],
           {
             type: "agent",
             id: "handoff",
@@ -275,6 +284,10 @@ describe("deep research managed pattern", () => {
               {
                 ref: "market_scan.packet",
                 name: "research_packet"
+              },
+              {
+                ref: "market_scan.risk",
+                name: "risk_angle_report"
               }
             ]
           }

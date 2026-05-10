@@ -171,6 +171,118 @@ function createHarness(
 }
 
 describe("runtime engine", () => {
+  it("publishes exposed deep research angle reports as raw public artifacts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-research-angle-artifact-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-deep-research-angle-artifact",
+      repos: {
+        main: {
+          path: "."
+        }
+      },
+      defaults: {
+        launch_profile: "default",
+        workspace_backend: "inplace"
+      },
+      profiles: {
+        default: {
+          harness: "codex-cli"
+        }
+      },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_deep_research",
+            id: "market_scan",
+            repo: "main",
+            profile: "default",
+            research: {
+              angles: [
+                {
+                  id: "risk",
+                  prompt: "Identify correctness, maintainability, and rollout risks in the managed pattern design.",
+                  as_artifact: true
+                },
+                "Compare whether the public artifact contract is easy for downstream nodes to consume."
+              ]
+            }
+          }
+        ]
+      }
+    });
+
+    const rawRiskReport = "RAW RISK ANGLE REPORT\nfindings, evidence, sources, conflicts, uncertainty, and confidence for the risk angle.\n";
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: {
+        main: repoDir
+      },
+      executors: {
+        agent: async ({ node, execution_dir }) => {
+          const outputDir = resolveExecutionArtifactsDirectory(execution_dir);
+
+          if (node.authored_id.endsWith("__angle_01")) {
+            await writeFile(join(outputDir, "angle-report.md"), rawRiskReport);
+            await writeFile(
+              join(outputDir, "packet.json"),
+              JSON.stringify({ angle: "risk", findings: [], evidence: [], sources: [], conflicts: [], uncertainty: [], confidence: "high" })
+            );
+          } else if (node.authored_id.endsWith("__angle_02")) {
+            await writeFile(
+              join(outputDir, "angle-report.md"),
+              "RAW CONTRACT ANGLE REPORT\nfindings, evidence, sources, conflicts, uncertainty, and confidence for the contract angle.\n"
+            );
+            await writeFile(
+              join(outputDir, "packet.json"),
+              JSON.stringify({ angle: "contract", findings: [], evidence: [], sources: [], conflicts: [], uncertainty: [], confidence: "high" })
+            );
+          } else if (node.authored_id === "market_scan") {
+            expect(await readFile(join(outputDir, "angles", "risk.md"), "utf8")).toBe(rawRiskReport);
+            await writeFile(join(outputDir, "summary.md"), "Synthesized summary.\n");
+            await writeFile(join(outputDir, "packet.json"), JSON.stringify({ answer: "synthesized" }));
+            await writeFile(join(outputDir, "angles", "risk.md"), "PUBLISHER SHOULD NOT WIN\n");
+          }
+
+          return {
+            status: "passed",
+            outcome: "passed",
+            result: { node: node.authored_id },
+            stdout: "",
+            stderr: ""
+          };
+        }
+      }
+    });
+
+    const finalAttempt = run.attempts.find((attempt) => attempt.authored_id === "market_scan");
+    expect(run.outcome).toBe("passed");
+    expect(finalAttempt?.artifacts.risk).toBeDefined();
+    await expect(readFile(finalAttempt!.artifacts.risk!, "utf8")).resolves.toBe(rawRiskReport);
+
+    const manifest = JSON.parse(await readFile(join(runRoot, "delivery", "manifest.json"), "utf8")) as {
+      artifact_taxonomy: { declared_artifacts: Array<{ label: string; path: string }> };
+    };
+    expect(manifest.artifact_taxonomy.declared_artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "market_scan.risk",
+          path: finalAttempt!.artifacts.risk
+        })
+      ])
+    );
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("repairs an upstream worker when a downstream check is the failed symptom", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-causal-supervisor-"));
     const repoDir = join(tempRoot, "repo");

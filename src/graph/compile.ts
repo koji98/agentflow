@@ -386,6 +386,7 @@ function compileExecutableNode(
     effective_policy: nodePolicyResolution.policy,
     context: node.context ?? [],
     declared_artifacts: node.artifacts ?? {},
+    ...(node.managed_artifact_forwards ? { managed_artifact_forwards: node.managed_artifact_forwards } : {}),
     ...(lowered_from ? { lowered_from } : {}),
     ...(scopeFrame.cleanup_scope_id
       ? { is_cleanup: true as const, cleanup_scope_id: scopeFrame.cleanup_scope_id }

@@ -52,16 +52,13 @@
         "research": {
           "angles": [
             "Investigate the intended user-facing contract for deep research and deep work.",
-            "Identify how public artifacts should be shaped so downstream nodes can consume them without internal ids.",
+            {
+              "id": "artifact_contract",
+              "prompt": "Identify how public artifacts should be shaped so downstream nodes can consume them without internal ids.",
+              "as_artifact": true
+            },
             "Assess how supervisor recovery should interact with managed-pattern internal failures and loop feedback."
           ]
-        },
-        "artifacts": {
-          "recommendation_matrix": {
-            "from": "output_dir",
-            "path": "recommendation-matrix.md",
-            "description": "Comparison matrix for managed-pattern usage decisions."
-          }
         },
         "intent": {
           "goal": "Recommend how Agentflow managed patterns should be used for research, review, and implementation work.",
@@ -88,6 +85,10 @@
           {
             "ref": "managed_patterns_research.packet",
             "name": "research_packet"
+          },
+          {
+            "ref": "managed_patterns_research.artifact_contract",
+            "name": "artifact_contract_angle"
           }
         ],
         "artifacts": {

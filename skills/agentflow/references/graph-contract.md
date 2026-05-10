@@ -147,7 +147,7 @@ Sandboxes: `read-only`, `workspace-write`, `danger-full-access`.
 
 Agents that declare artifacts need a write-capable sandbox.
 
-`harness_config.isolation` defaults to `isolated`, so ambient Codex/Cursor user config is ignored unless the profile explicitly opts into `inherit_user`. Declare harness-native Codex MCP/plugins/config or Cursor config/permissions under the matching `harness_config.codex` or `harness_config.cursor` key. Do not put harness-specific config under a profile for the other harness.
+`harness_config.isolation` defaults to `isolated`, so ambient Codex/Cursor user config is ignored unless the profile explicitly opts into `inherit_user`. Declare harness-native Codex MCP/plugins/config or Cursor config/permissions under the matching `harness_config.codex` or `harness_config.cursor` key. Cursor profiles may set `harness_config.cursor.sandbox_mode` to `enabled` or `disabled` to override the Cursor Agent `--sandbox` flag independently from Agentflow graph authority, `required_mcps` to require `agent mcp list-tools <identifier>` readiness from the node repo workspace, and may set `approve_mcps` or `trust_workspace` to pass the matching Cursor Agent headless flags. Do not put harness-specific config under a profile for the other harness.
 
 ## Plugin Tools
 

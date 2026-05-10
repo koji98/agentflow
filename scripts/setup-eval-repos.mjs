@@ -458,7 +458,7 @@ const repos = {
     "package.json": packageJson("managed-deep-research-repo"),
     "AGENTFLOW_EVAL_TASK.md": task(
       "Scenario: managed-deep-research-repo",
-      "Use the managed deep research pattern to investigate this repository's job pipeline design. Do not edit repository files. Produce public research artifacts and a handoff that recommends whether the pipeline is ready for a retry/backoff change."
+      "Use the managed deep research pattern to investigate this repository's job pipeline design. Do not edit repository files. Produce public research artifacts that recommend whether the pipeline is ready for a retry/backoff change."
     ),
     "README.md": [
       "# Managed Research Fixture",
@@ -820,11 +820,11 @@ const templates = {
           id: "repo_research",
           repo: "main",
           intent: {
-            goal: "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research handoff about whether the job pipeline is ready for a retry/backoff change.",
+            goal: "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research package about whether the job pipeline is ready for a retry/backoff change.",
             acceptance_criteria: [
             "The research covers all authored angles.",
             "No repository files are modified.",
-            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+            "The summary includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
           ],
             constraints: [
             "Do not edit repository files.",
@@ -847,15 +847,12 @@ const templates = {
               "Review whether the repository has enough local validation evidence for a retry/backoff change.",
               "Identify rollout risks if retry behavior changes.",
               "Assess maintainability risks in the current pipeline design.",
-              "Recommend the smallest safe next change direction based on local evidence."
+              {
+                id: "recommendation",
+                prompt: "Recommend the smallest safe next change direction based on local evidence.",
+                as_artifact: true
+              }
             ]
-          },
-          artifacts: {
-            handoff: {
-              from: "output_dir",
-              path: "handoff.md",
-              description: "Managed deep research handoff with Scenario:, Changed files:, Validation:, and Risks: fields."
-            }
           }
         },
         { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
@@ -1172,9 +1169,11 @@ function graphDocument(templateName) {
 function scenarioJson([id, template, bucket, difficulty, description]) {
   const expectsTerminalFailure = id === "16-terminal-repeated-failure" || id === "21-no-delta-recovery-stop";
   const outcome = expectsTerminalFailure ? "failed" : "passed";
-  const requiredArtifacts = expectsTerminalFailure ? [] : [
-      { name: "handoff", contains: ["Scenario:", "Validation:"] }
-    ];
+  const requiredArtifacts = expectsTerminalFailure
+    ? []
+    : id === "22-managed-deep-research-repo"
+      ? [{ name: "summary", contains: ["Scenario:", "Validation:"] }]
+      : [{ name: "handoff", contains: ["Scenario:", "Validation:"] }];
   const supervisor = {};
 
   if (id === "15-supervisor-retry-envelope") {
@@ -1281,7 +1280,8 @@ function loadScenario(id) {
 const scenario = loadScenario(scenarioId);
 const expectedStatus = scenario.criteria?.outcome?.status ?? "passed";
 const artifacts = packet.artifacts ?? [];
-const handoff = artifacts.find((artifact) => artifact.name === "handoff");
+const requiredArtifact = scenario.criteria?.artifact?.required?.[0] ?? { name: "handoff" };
+const handoff = artifacts.find((artifact) => artifact.name === requiredArtifact.name);
 const handoffText = String(handoff?.content ?? "");
 const placeholderPattern = /todo|tbd|lorem ipsum|placeholder|not implemented/i;
 const manifest = packet.delivery?.manifest;
@@ -1293,10 +1293,10 @@ function assert(id, passed, evidence) {
 
 assert("expected_status", packet.outcome.status === expectedStatus, \`expected=\${expectedStatus}; actual=\${packet.outcome.status}\`);
 if (expectedStatus === "passed") {
-  assert("handoff_exists", Boolean(handoff), handoff?.path ?? "missing");
-  assert("handoff_has_validation", /Validation:/i.test(handoffText), "handoff validation section");
-  assert("handoff_has_scenario", handoffText.includes("Scenario:"), "handoff scenario section");
-  assert("handoff_not_placeholder", !placeholderPattern.test(handoffText), "placeholder scan");
+  assert("required_artifact_exists", Boolean(handoff), handoff?.path ?? \`missing \${requiredArtifact.name}\`);
+  assert("required_artifact_has_validation", /Validation:/i.test(handoffText), \`\${requiredArtifact.name} validation section\`);
+  assert("required_artifact_has_scenario", handoffText.includes("Scenario:"), \`\${requiredArtifact.name} scenario section\`);
+  assert("required_artifact_not_placeholder", !placeholderPattern.test(handoffText), "placeholder scan");
 }
 assert("delivery_manifest", Boolean(packet.delivery?.manifest_path && manifest), packet.delivery?.manifest_path ?? "missing");
 

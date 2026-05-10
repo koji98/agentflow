@@ -7,6 +7,7 @@ import type { CompiledExecutableNode, CompiledGraph, ResolvedTool } from "../gra
 import type { HarnessName } from "../graph/schema.js";
 import { resolveSubpathWithinRoot } from "../path_rules.js";
 import type { HarnessAdapter } from "./harness/types.js";
+import { resolveCliBinary } from "./harness/types.js";
 import { createCredentialStore } from "../auth/store.js";
 import type { CredentialScopeSpec } from "../auth/types.js";
 
@@ -14,7 +15,7 @@ export type ReadinessCheckStatus = "passed" | "warning" | "blocked";
 export type ReadinessStatus = "ready" | "warnings" | "blocked";
 
 export interface ReadinessCheckResult {
-  kind: "file" | "command" | "env" | "repo" | "harness" | "credential" | "tool";
+  kind: "file" | "command" | "env" | "repo" | "harness" | "credential" | "tool" | "mcp";
   required: boolean;
   status: ReadinessCheckStatus;
   target: string;
@@ -411,6 +412,32 @@ function collectPluginTools(graph: Pick<CompiledGraph, "nodes">): ResolvedTool[]
   return [...tools.values()].sort((left, right) => left.callable_name.localeCompare(right.callable_name));
 }
 
+interface RequiredCursorMcpCheck {
+  node: CompiledExecutableNode;
+  identifier: string;
+}
+
+function collectRequiredCursorMcps(graph: Pick<CompiledGraph, "nodes">): RequiredCursorMcpCheck[] {
+  const checks = new Map<string, RequiredCursorMcpCheck>();
+
+  for (const node of graph.nodes) {
+    if (node.kind !== "agent" || node.effective_policy.harness !== "cursor-cli") {
+      continue;
+    }
+
+    for (const identifier of node.effective_policy.harness_config?.cursor?.required_mcps ?? []) {
+      const key = `${node.repo}:${identifier}`;
+      if (!checks.has(key)) {
+        checks.set(key, { node, identifier });
+      }
+    }
+  }
+
+  return [...checks.values()].sort((left, right) =>
+    `${left.node.repo}:${left.identifier}`.localeCompare(`${right.node.repo}:${right.identifier}`)
+  );
+}
+
 function helpValidationEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const safeEnvironment: NodeJS.ProcessEnv = {};
   for (const key of ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SystemRoot", "ComSpec"]) {
@@ -574,6 +601,76 @@ async function evaluateCredentialReadiness(
   }
 }
 
+function summarizeProcessOutput(stdout: string | Buffer | undefined, stderr: string | Buffer | undefined): string {
+  return `${stdout?.toString() ?? ""}\n${stderr?.toString() ?? ""}`
+    .trim()
+    .split(/\r?\n/u)
+    .slice(-20)
+    .join("\n");
+}
+
+async function evaluateCursorMcpReadiness(
+  check: RequiredCursorMcpCheck,
+  repoSources: Record<string, string>,
+  environment: NodeJS.ProcessEnv
+): Promise<ReadinessCheckResult> {
+  const repoRoot = repoSources[check.node.repo];
+  const target = `${check.node.repo}:${check.identifier}`;
+
+  if (!repoRoot) {
+    return buildIssue(
+      "mcp",
+      true,
+      target,
+      false,
+      `Cursor MCP "${check.identifier}" cannot be checked because repo "${check.node.repo}" is unavailable.`
+    );
+  }
+
+  const binary = resolveCliBinary(undefined, "AGENTFLOW_CURSOR_CLI_BIN", "agent");
+  const result = spawnSync(binary, ["mcp", "list-tools", check.identifier], {
+    cwd: repoRoot,
+    env: environment,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+    timeout: 15000,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const detail = result.error instanceof Error
+    ? result.error.message
+    : summarizeProcessOutput(result.stdout, result.stderr);
+  const setupHint =
+    `Run: cd '${quoteForSingleQuotedShell(repoRoot)}' && ${binary} mcp login '${quoteForSingleQuotedShell(check.identifier)}' && ${binary} mcp enable '${quoteForSingleQuotedShell(check.identifier)}' && ${binary} mcp list-tools '${quoteForSingleQuotedShell(check.identifier)}'`;
+
+  if (result.error instanceof Error) {
+    return buildIssue(
+      "mcp",
+      true,
+      target,
+      false,
+      `Cursor MCP "${check.identifier}" readiness check could not run with "${binary}": ${detail}.`
+    );
+  }
+
+  if (result.status !== 0) {
+    return buildIssue(
+      "mcp",
+      true,
+      target,
+      false,
+      `Cursor MCP "${check.identifier}" is not ready for repo "${check.node.repo}" at ${repoRoot}${detail ? ` (${detail})` : ""}. ${setupHint}`
+    );
+  }
+
+  return buildIssue(
+    "mcp",
+    true,
+    target,
+    true,
+    `Cursor MCP "${check.identifier}" is authenticated and lists tools for repo "${check.node.repo}".`
+  );
+}
+
 async function evaluateMachineReadiness(options: {
   graph: Pick<CompiledGraph, "launch" | "nodes"> & Partial<Pick<CompiledGraph, "credential_specs" | "supervisor_effective_policy">>;
   repo_sources: Record<string, string>;
@@ -616,6 +713,10 @@ async function evaluateMachineReadiness(options: {
 
   for (const harnessName of collectRequiredHarnesses(options.graph)) {
     checks.push(await evaluateHarnessReadiness(harnessName, options.harnesses));
+  }
+
+  for (const check of collectRequiredCursorMcps(options.graph)) {
+    checks.push(await evaluateCursorMcpReadiness(check, options.repo_sources, options.env));
   }
 
   for (const tool of collectPluginTools(options.graph)) {

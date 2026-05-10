@@ -39,9 +39,9 @@ Add:
 }
 ```
 
-The pattern runs authored angles in parallel, synthesizes research packets in balanced batches of at most three inputs, then publishes the public summary, packet, and any authored artifacts. Angle and synthesis artifacts are private evidence packets; the final publisher owns the public artifact shape and required field labels. Synthesis preserves major findings, collapses redundancy, keeps provenance attached to claims, and surfaces uncertainty or conflicts. It is useful for product research, architecture research, implementation research, and multi-axis code review.
+The pattern runs authored angles in parallel, synthesizes research packets in balanced batches of at most three inputs, then publishes the public summary, packet, and any selected raw angle reports. Angle and synthesis artifacts are private evidence packets unless an angle uses `as_artifact: true`. Synthesis preserves major findings, collapses redundancy, keeps provenance attached to claims, and surfaces uncertainty or conflicts. It is useful for product research, architecture research, implementation research, and multi-axis code review.
 
-Public output is collapsed by default. Authors can opt individual research axes into public artifacts by using object-form angles with `id`, `prompt`, and `public_artifact`; omitted axes remain private evidence while the public `packet` keeps an index of angles and evidence refs.
+Public output is collapsed by default. Authors can expose an individual raw angle report by using object-form angles with `id`, `prompt`, and `as_artifact: true`; downstream nodes reference it as `my_research.<angle_id>`.
 
 ### `pattern_deep_work`
 

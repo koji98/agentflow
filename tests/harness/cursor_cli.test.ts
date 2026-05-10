@@ -131,6 +131,45 @@ describe("cursor cli harness", () => {
     }
   });
 
+  it("includes stderr in structured output failures", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-stderr-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+    const binary_path = join(tempRoot, "stderr-agent.mjs");
+    await writeFile(
+      binary_path,
+      "#!/usr/bin/env node\nprocess.stderr.write('Sandbox mode is enabled but not available on this system.\\n'); process.exit(1);\n"
+    );
+    await chmod(binary_path, 0o755);
+
+    try {
+      const result = await createCursorCliHarness({ binary: binary_path }).run({
+        runId: "run-stderr",
+        executionId: "exec-stderr",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        nodeGoal: "Fail with stderr.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.metadata?.error).toContain("stdout was not a JSON object");
+      expect(result.metadata?.error).toContain("Sandbox mode is enabled but not available");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails closed on cursor JSON envelopes without successful result text", async () => {
     const cases = [
       {
@@ -719,6 +758,65 @@ describe("cursor cli harness", () => {
         delete process.env.MOCK_ENV_PATH;
       } else {
         process.env.MOCK_ENV_PATH = previousEnvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("passes cursor MCP, trust, and sandbox override flags from harness_config", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-mcp-flags-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCursorBinary(tempRoot);
+    const harness = createCursorCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    process.env.MOCK_ARGV_PATH = mock.argv_path;
+
+    try {
+      await harness.run({
+        runId: "run-mcp-flags",
+        executionId: "exec-mcp-flags",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        nodeGoal: "Use MCP.",
+        contextPacketPath: join(executionDir, "context", "packet.json"),
+        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "isolated",
+          cursor: {
+            sandbox_mode: "disabled",
+            approve_mcps: true,
+            trust_workspace: true
+          }
+        }
+      });
+
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+      expect(argv).toEqual(
+        expect.arrayContaining(["--approve-mcps", "--trust"])
+      );
+      expect(argv).toEqual(
+        expect.arrayContaining(["--sandbox", "disabled"])
+      );
+    } finally {
+      if (previousArgvPath === undefined) {
+        delete process.env.MOCK_ARGV_PATH;
+      } else {
+        process.env.MOCK_ARGV_PATH = previousArgvPath;
       }
 
       await rm(tempRoot, { recursive: true, force: true });

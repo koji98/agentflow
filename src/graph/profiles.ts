@@ -139,6 +139,17 @@ function mergeCursorPermissions(
   };
 }
 
+function mergeOptionalStringArrays(
+  base: string[] | undefined,
+  overlay: string[] | undefined
+): string[] | undefined {
+  if (!base && !overlay) {
+    return undefined;
+  }
+
+  return [...new Set([...(base ?? []), ...(overlay ?? [])])];
+}
+
 function mergeCursorHarnessConfig(
   base: CursorHarnessConfig | undefined,
   overlay: CursorHarnessConfig | undefined
@@ -149,10 +160,18 @@ function mergeCursorHarnessConfig(
 
   const config = mergeUnknownRecordMaps(base?.config, overlay?.config);
   const permissions = mergeCursorPermissions(base?.permissions, overlay?.permissions);
+  const sandbox_mode = overlay?.sandbox_mode ?? base?.sandbox_mode;
+  const required_mcps = mergeOptionalStringArrays(base?.required_mcps, overlay?.required_mcps);
+  const approve_mcps = overlay?.approve_mcps ?? base?.approve_mcps;
+  const trust_workspace = overlay?.trust_workspace ?? base?.trust_workspace;
 
   return {
     ...(config ? { config } : {}),
-    ...(permissions ? { permissions } : {})
+    ...(permissions ? { permissions } : {}),
+    ...(sandbox_mode ? { sandbox_mode } : {}),
+    ...(required_mcps ? { required_mcps } : {}),
+    ...(approve_mcps !== undefined ? { approve_mcps } : {}),
+    ...(trust_workspace !== undefined ? { trust_workspace } : {})
   };
 }
 

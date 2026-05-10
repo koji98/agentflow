@@ -156,7 +156,11 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("--contract-implication <effect>");
     expect(prompt).toContain("Investigate ambiguity instead of guessing");
     expect(prompt).toContain("Agentflow is the runner, not the work target.");
-    expect(prompt).toContain("Do not load, invoke, announce, or use ambient skills");
+    expect(prompt).toContain("Use the node task, graph context, and materialized context as the contract for this node.");
+    expect(prompt).not.toContain("ambient skills");
+    expect(prompt).not.toContain("Agentflow playbooks");
+    expect(prompt).not.toContain("AGENTS.md files outside");
+    expect(prompt).not.toContain("unrelated Agentflow docs");
     expect(prompt).toContain("If the node task names `af context show`, run that exact command before optional runtime status checks");
     expect(prompt).toContain("stop and respond immediately");
     expect(prompt).not.toContain("Use `af --help` only when the options below are insufficient.");

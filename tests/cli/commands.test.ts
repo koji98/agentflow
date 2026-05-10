@@ -765,6 +765,130 @@ fs.writeFileSync(outputPath, \`rendered svg\\n\${mermaid}\`);
     }
   });
 
+  it("checks required Cursor MCPs from the node repo workspace during default validate", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-cursor-mcp-"));
+    const repoDir = join(tempRoot, "repo");
+    const graphPath = join(tempRoot, "agentflow.graph.json");
+    const mockAgent = join(tempRoot, "mock-agent.mjs");
+    const previousCursor = process.env.AGENTFLOW_CURSOR_CLI_BIN;
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+    await writeFile(
+      mockAgent,
+      `#!/usr/bin/env node
+if (process.argv[2] === "mcp" && process.argv[3] === "list-tools") {
+  const identifier = process.argv[4];
+  if (identifier === "Glean") {
+    process.stdout.write("Tools for Glean (1):\\n- search (query)\\n");
+    process.exit(0);
+  }
+  process.stderr.write("MCP '" + identifier + "' requires authentication.\\nPlease run: cursor agent mcp login " + identifier + "\\n");
+  process.exit(1);
+}
+process.exit(0);
+`,
+      "utf8"
+    );
+    await chmod(mockAgent, 0o755);
+    await writeFile(
+      graphPath,
+      `${JSON.stringify(
+        {
+          version: "1",
+          graph_id: "cli-run-ready-cursor-mcp",
+          intent: { goal: "Exercise cursor MCP readiness.", acceptance_criteria: ["CLI behavior matches the command contract."] },
+          repos: {
+            main: {
+              path: "./repo"
+            }
+          },
+          defaults: {
+            launch_profile: "default",
+            workspace_backend: "inplace"
+          },
+          profiles: {
+            default: {
+              harness: "cursor-cli",
+              harness_config: {
+                cursor: {
+                  required_mcps: ["Glean"]
+                }
+              }
+            }
+          },
+          graph: {
+            type: "sequence",
+            id: "root",
+            steps: [
+              {
+                type: "agent",
+                id: "probe",
+                repo: "main",
+                intent: {
+                  goal: "Probe MCP.",
+                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                  constraints: []
+                }
+              }
+            ]
+          }
+        },
+        null,
+        2
+      )}\n`
+    );
+    process.env.AGENTFLOW_CURSOR_CLI_BIN = mockAgent;
+
+    try {
+      const readyResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
+      const readyPayload = JSON.parse(readyResult.stdout);
+
+      expect(readyResult.exitCode).toBe(0);
+      expect(readyPayload.checks.readiness.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "mcp",
+            target: "main:Glean",
+            status: "passed",
+            message: expect.stringContaining("Cursor MCP \"Glean\" is authenticated")
+          })
+        ])
+      );
+
+      const graph = JSON.parse(await readFile(graphPath, "utf8")) as Record<string, unknown>;
+      const defaultProfile = (graph.profiles as Record<string, unknown>).default as Record<string, unknown>;
+      defaultProfile.harness_config = {
+        cursor: {
+          required_mcps: ["MissingMcp"]
+        }
+      };
+      await writeFile(graphPath, `${JSON.stringify(graph, null, 2)}\n`);
+
+      const blockedResult = await executeCli(["validate", "--graph", graphPath], tempRoot);
+      const blockedPayload = JSON.parse(blockedResult.stdout);
+
+      expect(blockedResult.exitCode).toBe(1);
+      expect(blockedPayload.checks.readiness.checks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "mcp",
+            target: "main:MissingMcp",
+            status: "blocked",
+            message: expect.stringContaining("agent mcp login")
+          })
+        ])
+      );
+    } finally {
+      if (previousCursor === undefined) {
+        delete process.env.AGENTFLOW_CURSOR_CLI_BIN;
+      } else {
+        process.env.AGENTFLOW_CURSOR_CLI_BIN = previousCursor;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("blocks default validate when node context would exceed token budget", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-context-"));
     const repoDir = join(tempRoot, "repo");
