@@ -9,8 +9,8 @@ import type {
 import {
   artifactContext,
   body,
+  defaultManagedPublicArtifacts,
   managedId,
-  mergeManagedPublicArtifacts,
   renderPrompt,
   section,
   sharedAgentBase,
@@ -28,7 +28,7 @@ export interface PatternDeepResearchConfig extends BaseExecutableNode, ManagedPa
 export interface PatternDeepResearchAngle {
   id: string;
   prompt: string;
-  public_artifact?: string;
+  as_artifact?: boolean;
 }
 
 function workflowNodeId(rootId: string, suffix: string): string {
@@ -89,8 +89,8 @@ function balancedGroups<T>(items: T[], maxGroupSize = 3): T[][] {
 }
 
 function formatAngleLabel(angle: PatternDeepResearchAngle): string {
-  return angle.public_artifact
-    ? `${angle.id}: ${angle.prompt} (public artifact: ${angle.public_artifact})`
+  return angle.as_artifact
+    ? `${angle.id}: ${angle.prompt} (exposed raw angle artifact)`
     : `${angle.id}: ${angle.prompt}`;
 }
 
@@ -109,11 +109,11 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
       angle.prompt,
       "Stay focused on this angle. Do not duplicate the other angle workers unless overlap is needed to explain a conflict."
     ]),
-    ...(angle.public_artifact
+    ...(angle.as_artifact
       ? [
-          section("Selected Public Axis", [
-            `The final publisher will write public artifact \`${angle.public_artifact}\` for this axis if the evidence supports it.`,
-            "Your angle packet should preserve the strongest claims, evidence refs, conflicts, uncertainty, and confidence for that public artifact."
+          section("Exposed Raw Angle Report", [
+            `This angle's Markdown report will be exposed as public artifact \`${angle.id}\` after the whole managed research node passes.`,
+            "Write the report as raw angle evidence. It will not be rewritten by the final publisher."
           ])
         ]
       : []),
@@ -172,7 +172,7 @@ function buildFinalPrompt(
   publicArtifacts: Record<string, ArtifactDefinition>,
   inputCount: number
 ): string {
-  const publicAxisArtifacts = config.research.angles.filter((angle) => angle.public_artifact);
+  const exposedAngleArtifacts = config.research.angles.filter((angle) => angle.as_artifact);
   return renderPrompt([
     body(`You are the final research publisher for a managed deep research result from ${inputCount} research packet${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
     section("Managed Workflow Contract", [
@@ -187,10 +187,10 @@ function buildFinalPrompt(
       "Resolve disagreements explicitly. Preserve uncertainty and cite the evidence behind important claims.",
       "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
     ]),
-    ...(publicAxisArtifacts.length > 0
+    ...(exposedAngleArtifacts.length > 0
       ? [
-          section("Selected Public Axis Artifacts", publicAxisArtifacts.map((angle) =>
-            `- ${angle.public_artifact}: publish the final evidence-backed findings for angle \`${angle.id}\`.`
+          section("Exposed Raw Angle Artifacts", exposedAngleArtifacts.map((angle) =>
+            `- ${angle.id}: runtime forwards the raw Markdown report for angle \`${angle.id}\`; do not rewrite it.`
           ))
         ]
       : []),
@@ -198,7 +198,7 @@ function buildFinalPrompt(
       "Write exactly the declared public artifacts.",
       ...formatArtifactContract(publicArtifacts),
       "Honor each artifact description literally, including any required field labels or handoff sections.",
-      "The `packet` artifact must include answer, findings, evidence, sources, uncertainties, confidence, recommended next actions, and an angle index with each angle id, public artifact when selected, source refs, confidence, conflicts, and private evidence paths."
+      "The `packet` artifact must include answer, findings, evidence, sources, uncertainties, confidence, recommended next actions, and an angle index with each angle id, exposed raw artifact when selected, source refs, confidence, conflicts, and private evidence paths."
     ]),
     section("Quality Bar", [
       "The final package should be useful for a downstream design, implementation, review, or decision node without making the reader inspect private internal artifacts.",
@@ -241,10 +241,48 @@ function buildSynthesisArtifacts(layer: number, group: number): Record<string, A
   };
 }
 
+function buildPublicArtifacts(angles: PatternDeepResearchAngle[]): Record<string, ArtifactDefinition> {
+  const artifacts = defaultManagedPublicArtifacts();
+
+  for (const angle of angles) {
+    if (!angle.as_artifact) {
+      continue;
+    }
+    artifacts[angle.id] = {
+      from: "output_dir",
+      path: `angles/${angle.id}.md`,
+      description: `Raw Markdown report for deep research angle "${angle.id}".`
+    };
+  }
+
+  return artifacts;
+}
+
+function buildManagedArtifactForwards(
+  rootId: string,
+  angles: PatternDeepResearchAngle[]
+): AgentNode["managed_artifact_forwards"] {
+  const forwards: NonNullable<AgentNode["managed_artifact_forwards"]> = {};
+
+  angles.forEach((angle, index) => {
+    if (!angle.as_artifact) {
+      return;
+    }
+    const suffix = zeroPad(index + 1);
+    forwards[angle.id] = {
+      node: workflowNodeId(rootId, `angle_${suffix}`),
+      artifact: `angle_report_${suffix}`
+    };
+  });
+
+  return Object.keys(forwards).length > 0 ? forwards : undefined;
+}
+
 export function buildPatternDeepResearch(config: PatternDeepResearchConfig): SequenceNode {
   const workflowId = workflowNodeId(config.id, "workflow");
   const fanoutId = workflowNodeId(config.id, "angle_fanout");
-  const publicArtifacts = mergeManagedPublicArtifacts(config.artifacts);
+  const publicArtifacts = buildPublicArtifacts(config.research.angles);
+  const managedArtifactForwards = buildManagedArtifactForwards(config.id, config.research.angles);
   const agentShared = sharedAgentBase(config);
 
   const angleNodes: AgentNode[] = config.research.angles.map((angle, index) => {
@@ -348,6 +386,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         ...agentShared,
         context: materialContexts(materials),
         artifacts: publicArtifacts,
+        ...(managedArtifactForwards ? { managed_artifact_forwards: managedArtifactForwards } : {}),
         intent: {
           goal: buildFinalPrompt(config, publicArtifacts, materials.length),
           acceptance_criteria: config.intent.acceptance_criteria,

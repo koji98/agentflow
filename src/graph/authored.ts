@@ -173,6 +173,11 @@ export interface ArtifactDefinition {
   description: string;
 }
 
+export interface ManagedArtifactForward {
+  node: string;
+  artifact: string;
+}
+
 export interface FilePrerequisite {
   kind: Extract<PrerequisiteKind, "file">;
   path: string;
@@ -218,6 +223,7 @@ export interface BaseExecutableNode extends BaseNode {
   intent: ExecutableNodeIntent;
   context?: ContextItem[];
   artifacts?: Record<string, ArtifactDefinition>;
+  managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
   timeout_sec?: number;
 }
 

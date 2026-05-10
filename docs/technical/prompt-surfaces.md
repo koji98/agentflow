@@ -37,7 +37,7 @@ Role text is useful only when it changes authority, scope, output contract, or e
 | Deep work publisher | `src/managed/pattern_deep_work.ts` | managed agent | Publish public artifacts only from latest passing scorecard. | scorecard, work notes, draft artifacts | declared public artifacts | `tests/graph/deep_work.test.ts` |
 | Deep research angle worker | `src/managed/pattern_deep_research.ts` | managed agent | Private research for one assigned angle. | final contract, assigned angle, context | `angle-report.md`, `packet.json` | `tests/graph/deep_research.test.ts` |
 | Deep research synthesis worker | `src/managed/pattern_deep_research.ts` | managed agent | Collapse packets without losing unique findings or provenance. | input packets/reports | synthesis report and packet | `tests/graph/deep_research.test.ts` |
-| Deep research publisher | `src/managed/pattern_deep_research.ts` | managed agent | Owns final public artifact contract; private reports are evidence. | final contract, selected axes, synthesis packets | declared public artifacts | `tests/graph/deep_research.test.ts` |
+| Deep research publisher | `src/managed/pattern_deep_research.ts` | managed agent | Publishes final summary and packet; raw selected angle reports are forwarded by runtime. | final contract, exposed angle refs, synthesis packets | summary, packet, exposed raw angle artifacts | `tests/graph/deep_research.test.ts` |
 
 ## Known Failure Modes
 

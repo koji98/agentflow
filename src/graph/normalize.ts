@@ -75,7 +75,6 @@ import {
 } from "../managed/pattern_deep_work.js";
 import {
   defaultManagedPublicArtifacts,
-  mergeManagedPublicArtifacts,
   type ManagedPatternAgentOptions,
   type ManagedPatternRuntime
 } from "../managed/foundation.js";
@@ -1564,6 +1563,7 @@ function normalizeExecutableBase(
   diagnostics: GraphDiagnostic[],
   options: {
     allow_artifacts?: boolean;
+    artifacts_disallowed_message?: string;
   } = {}
 ): BaseExecutableNode | undefined {
   const allow_artifacts = options.allow_artifacts ?? true;
@@ -1581,7 +1581,7 @@ function normalizeExecutableBase(
   if (!allow_artifacts && record.artifacts !== undefined) {
     diagnostics.push({
       path: `${path}.artifacts`,
-      message: 'Field "artifacts" does not apply to this node kind.'
+      message: options.artifacts_disallowed_message ?? 'Field "artifacts" does not apply to this node kind.'
     });
   }
 
@@ -2137,8 +2137,7 @@ function normalizeManagedAgentOptions(
 function normalizePatternDeepResearchConfig(
   value: unknown,
   path: string,
-  diagnostics: GraphDiagnostic[],
-  publicArtifacts: Record<string, ArtifactDefinition>
+  diagnostics: GraphDiagnostic[]
 ): PatternDeepResearchConfig["research"] | undefined {
   const record = asRecord(value);
 
@@ -2201,7 +2200,7 @@ function normalizePatternDeepResearchConfig(
       return [];
     }
 
-    pushUnknownKeyDiagnostics(angleRecord, anglePath, ["id", "prompt", "public_artifact"], diagnostics);
+    pushUnknownKeyDiagnostics(angleRecord, anglePath, ["id", "prompt", "as_artifact"], diagnostics);
     const id = normalizeManagedLocalId(
       angleRecord.id,
       `${anglePath}.id`,
@@ -2209,11 +2208,7 @@ function normalizePatternDeepResearchConfig(
       diagnostics
     );
     const prompt = readRequiredString(angleRecord.prompt, `${anglePath}.prompt`, diagnostics);
-    const public_artifact = readOptionalString(
-      angleRecord.public_artifact,
-      `${anglePath}.public_artifact`,
-      diagnostics
-    );
+    const as_artifact = readBoolean(angleRecord.as_artifact, `${anglePath}.as_artifact`, diagnostics);
 
     if (prompt && prompt.trim().split(/\s+/u).length < 3) {
       diagnostics.push({
@@ -2222,21 +2217,14 @@ function normalizePatternDeepResearchConfig(
       });
     }
 
-    if (public_artifact && !publicArtifacts[public_artifact]) {
-      diagnostics.push({
-        path: `${anglePath}.public_artifact`,
-        message: `research angle public_artifact references unknown public artifact "${public_artifact}".`
-      });
-    }
-
-    if (!id || !prompt || (public_artifact && !publicArtifacts[public_artifact])) {
+    if (!id || !prompt) {
       return [];
     }
 
     return [{
       id,
       prompt,
-      ...(public_artifact ? { public_artifact } : {})
+      ...(as_artifact ? { as_artifact } : {})
     }];
   });
 
@@ -2249,6 +2237,24 @@ function normalizePatternDeepResearchConfig(
       });
     }
     seenIds.add(angle.id);
+  });
+
+  angles.forEach((angle, index) => {
+    if (!angle.as_artifact) {
+      return;
+    }
+    if (angle.id === "summary" || angle.id === "packet") {
+      diagnostics.push({
+        path: `${path}.angles[${index}].id`,
+        message: `Research angle id "${angle.id}" cannot be exposed as an artifact because that public artifact is reserved by pattern_deep_research.`
+      });
+    }
+    if (reservedArtifactNames.includes(angle.id as (typeof reservedArtifactNames)[number])) {
+      diagnostics.push({
+        path: `${path}.angles[${index}].id`,
+        message: `Research angle id "${angle.id}" cannot be exposed as an artifact because that artifact name is reserved by Agentflow.`
+      });
+    }
   });
 
   return {
@@ -2273,7 +2279,6 @@ function normalizePatternDeepResearchNode(
       "profile",
       "intent",
       "context",
-      "artifacts",
       "timeout_sec",
       "model",
       "reasoning_effort",
@@ -2286,13 +2291,15 @@ function normalizePatternDeepResearchNode(
     diagnostics
   );
 
-  const base = normalizeExecutableBase(record, path, diagnostics);
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    allow_artifacts: false,
+    artifacts_disallowed_message: "pattern_deep_research publishes only summary, packet, and angle reports selected with as_artifact."
+  });
   const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
   const research = normalizePatternDeepResearchConfig(
     record.research,
     `${path}.research`,
-    diagnostics,
-    mergeManagedPublicArtifacts(base?.artifacts)
+    diagnostics
   );
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 

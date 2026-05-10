@@ -89,7 +89,7 @@ describe("managed pattern normalization edges", () => {
     );
   });
 
-  it("validates deep research public axis artifact references", () => {
+  it("rejects obsolete deep research public axis artifact references", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({
         type: "pattern_deep_research",
@@ -116,7 +116,47 @@ describe("managed pattern normalization edges", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "$.graph.steps[0].research.angles[0].public_artifact",
-          message: 'research angle public_artifact references unknown public artifact "missing_axis".'
+          message: 'Unknown field "public_artifact" is not part of the graph contract.'
+        })
+      ])
+    );
+  });
+
+  it("rejects authored artifacts on deep research managed patterns", () => {
+    const normalized = normalizeAuthoredGraphDocument(
+      buildEnvelope({
+        type: "pattern_deep_research",
+        id: "market_scan",
+        intent: {
+          goal: "Research a managed pattern change.",
+          acceptance_criteria: ["The node satisfies its acceptance criteria."],
+          constraints: []
+        },
+        research: {
+          angles: [
+            {
+              id: "architecture",
+              prompt: "Assess whether the implementation follows the local architecture.",
+              as_artifact: true
+            }
+          ]
+        },
+        artifacts: {
+          custom: {
+            from: "output_dir",
+            path: "custom.md",
+            description: "Custom deep research artifact."
+          }
+        }
+      })
+    );
+
+    expect(normalized.document).toBeUndefined();
+    expect(normalized.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.graph.steps[0].artifacts",
+          message: "pattern_deep_research publishes only summary, packet, and angle reports selected with as_artifact."
         })
       ])
     );

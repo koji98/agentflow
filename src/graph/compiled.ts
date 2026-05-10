@@ -5,6 +5,7 @@ import type {
   DeterministicPassIf,
   ExecutableNodeIntent,
   GraphIntent,
+  ManagedArtifactForward,
   GraphPrerequisites,
   SupervisionPolicy
 } from "./authored.js";
@@ -32,6 +33,7 @@ export interface CompiledExecutableNodeBase {
   effective_policy: EffectiveNodePolicy;
   context: ContextItem[];
   declared_artifacts: Record<string, ArtifactDefinition>;
+  managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
   lowered_from?: LoweredManagedKind;
   is_cleanup?: boolean;
   cleanup_scope_id?: string;

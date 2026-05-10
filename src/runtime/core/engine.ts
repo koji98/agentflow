@@ -2793,6 +2793,49 @@ async function materializePresentDeclaredArtifacts(options: {
   return artifacts;
 }
 
+async function copyManagedArtifactForwards(options: {
+  node: CompiledExecutableNode;
+  session: RuntimeSession;
+  attempt: RuntimeNodeAttempt;
+  workspacePath: string;
+}): Promise<void> {
+  const forwards = options.node.managed_artifact_forwards;
+  if (!forwards) {
+    return;
+  }
+
+  const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
+
+  for (const [name, forward] of Object.entries(forwards)) {
+    const definition = options.node.declared_artifacts[name];
+    if (!definition) {
+      throw new Error(`Managed artifact forward "${name}" does not match a declared artifact.`);
+    }
+
+    const sourceCompiledIds = options.session.graph.authored_to_compiled[forward.node] ?? [];
+    const sourceAttempt = sourceCompiledIds
+      .flatMap((compiledId) => listAttemptsForCompiledNode(options.session.attempts, compiledId))
+      .reverse()
+      .find((attempt) => attempt.outcome === "passed" && attempt.artifacts[forward.artifact]);
+    const sourcePath = sourceAttempt?.artifacts[forward.artifact];
+
+    if (!sourcePath) {
+      throw new Error(
+        `Managed artifact forward "${name}" could not find source artifact "${forward.node}.${forward.artifact}".`
+      );
+    }
+
+    const destinationRoot = definition.from === "output_dir" ? artifactsRoot : options.workspacePath;
+    const destinationPath = resolveSubpathWithinRoot(
+      destinationRoot,
+      definition.path,
+      `Managed artifact forward "${name}" path`
+    );
+    await mkdir(dirname(destinationPath), { recursive: true });
+    await copyFile(sourcePath, destinationPath);
+  }
+}
+
 async function hasUsableCapturedAgentResponse(
   automaticArtifacts: Record<string, string>
 ): Promise<boolean> {
@@ -3257,6 +3300,13 @@ async function executeNode(
       ...(activeRecoveryEnvelope ? { recovery_envelope: activeRecoveryEnvelope } : {})
     });
 
+    await copyManagedArtifactForwards({
+      node,
+      session,
+      attempt,
+      workspacePath: workspace.workspace_path
+    });
+
     let result: RuntimeNodeExecutionResult;
     const usedCustomAgentExecutor =
       node.kind === "agent" && Boolean(options.executors?.agent);
@@ -3447,6 +3497,12 @@ async function executeNode(
     await ensureCheckpointPassFeedbackArtifact(node, attempt, result);
 
     automaticArtifacts = await writeAutomaticArtifacts(node, attempt, result);
+    await copyManagedArtifactForwards({
+      node,
+      session,
+      attempt,
+      workspacePath: workspace.workspace_path
+    });
     const materialized =
       result.status !== "passed"
         ? {
@@ -3473,6 +3529,12 @@ async function executeNode(
             harnesses: options.harnesses ?? {}
           });
     const artifacts = materialized.artifacts;
+    await copyManagedArtifactForwards({
+      node,
+      session,
+      attempt,
+      workspacePath: workspace.workspace_path
+    });
     artifactRepairMetadata = materialized.repair_metadata;
 
     if (materialized.canceled) {
