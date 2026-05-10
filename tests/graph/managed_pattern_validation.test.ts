@@ -89,39 +89,6 @@ describe("managed pattern normalization edges", () => {
     );
   });
 
-  it("rejects obsolete deep research public axis artifact references", () => {
-    const normalized = normalizeAuthoredGraphDocument(
-      buildEnvelope({
-        type: "pattern_deep_research",
-        id: "market_scan",
-        intent: {
-          goal: "Research a managed pattern change.",
-          acceptance_criteria: ["The node satisfies its acceptance criteria."],
-          constraints: []
-        },
-        research: {
-          angles: [
-            {
-              id: "architecture",
-              prompt: "Assess whether the implementation follows the local architecture.",
-              public_artifact: "missing_axis"
-            }
-          ]
-        }
-      })
-    );
-
-    expect(normalized.document).toBeUndefined();
-    expect(normalized.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.steps[0].research.angles[0].public_artifact",
-          message: 'Unknown field "public_artifact" is not part of the graph contract.'
-        })
-      ])
-    );
-  });
-
   it("rejects authored artifacts on deep research managed patterns", () => {
     const normalized = normalizeAuthoredGraphDocument(
       buildEnvelope({

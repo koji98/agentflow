@@ -166,7 +166,9 @@ describe("pattern deep work", () => {
     expect(planPrompt).toContain("implementation planner");
     expect(planPrompt).toContain("You do not edit files in this phase.");
     expect(planPrompt).toContain("treat that as expected first-cycle state");
-    expect(planPrompt).toContain("do not consult ambient Codex or Agentflow playbooks");
+    expect(planPrompt).toContain("This prompt and materialized context are sufficient for the planning phase.");
+    expect(planPrompt).not.toContain("ambient Codex");
+    expect(planPrompt).not.toContain("Agentflow playbooks");
     expect(planPrompt).toContain("Do not wait for, search globally for, or report a blocker solely because first-cycle private materials are missing.");
     expect(planPrompt).not.toContain("senior");
     expect(generateValidateNode).toEqual(

@@ -707,7 +707,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     hasSupervisorRecoveryEnvelope
       ? "A supervisor recovery envelope appears before the authored node task. Use it to recover from prior failure while preserving the unchanged authored contract."
       : "The node task is the controlling objective. Use graph context only to understand why this node exists.",
-    "Agentflow is the runner, not the work target. Do not load, invoke, announce, or use ambient skills, Agentflow playbooks, AGENTS.md files outside the workspace, or unrelated Agentflow docs; this prompt is the runtime contract unless materialized context explicitly says otherwise.",
+    "Agentflow is the runner, not the work target. Use the node task, graph context, and materialized context as the contract for this node.",
     "",
     ...formatContractPriority(hasSupervisorRecoveryEnvelope),
     "",
