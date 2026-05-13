@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentflow Plan Review"
+  short_description: "Review Agentflow graphs before launch"
+  default_prompt: "Use $agentflow-plan-review to review this Agentflow graph before launch."

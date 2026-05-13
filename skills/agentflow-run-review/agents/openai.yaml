@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentflow Run Review"
+  short_description: "Learn from completed Agentflow runs"
+  default_prompt: "Use $agentflow-run-review to extract lessons from this completed Agentflow run."

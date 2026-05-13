@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentflow Intake"
+  short_description: "Clarify Agentflow workflow intent"
+  default_prompt: "Use $agentflow-intake to grill me before authoring an Agentflow graph."

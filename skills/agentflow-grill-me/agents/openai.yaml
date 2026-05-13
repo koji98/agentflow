@@ -1,4 +1,0 @@
-interface:
-  display_name: "Agentflow Grill Me"
-  short_description: "Pressure-test a plan before writing it"
-  default_prompt: "Use $agentflow-grill-me to interview me until an Agentflow plan, graph, workflow, or feature design is ready to write."

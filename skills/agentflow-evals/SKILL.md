@@ -7,7 +7,7 @@ description: Use when designing, validating, running, inspecting, or improving A
 
 Agentflow evals are offline workflow benchmarks. They run normal Agentflow graphs through local scenario environments, compare variants across repeated trials, grade hard facts with required criteria, rate qualitative behavior with quality criteria, evaluate trajectories when useful, simulate tools deterministically, and write auditable reports.
 
-Use this skill for `agentflow eval`. Use `agentflow` for graph authoring and run debugging. Use `agentflow-plugins` for plugin workflows and plugin-bundled tools.
+Use this skill for `agentflow eval`. Use `agentflow-authoring` for graph authoring, `agentflow-operations` for run debugging, `agentflow-run-review` for completed-run learning, and `agentflow-plugins` for plugin workflows and plugin-bundled tools.
 
 ## Must Know
 
@@ -26,7 +26,9 @@ Use this skill for `agentflow eval`. Use `agentflow` for graph authoring and run
 - Need suite/scenario/variant layout or schemas: read [references/suite-authoring.md](references/suite-authoring.md).
 - Need criteria, quality judges, trajectory checks, scorecards, trace packets, or benchmark comparison: read [references/grading-and-reporting.md](references/grading-and-reporting.md).
 - Need dogfood suite, real validation, capability/regression posture, or troubleshooting: read [references/operations-and-dogfood.md](references/operations-and-dogfood.md).
-- Need graph primitives, node contracts, runtime supervision, or delivery package semantics: use `agentflow`.
+- Need graph primitives or node contracts: use `agentflow-authoring`.
+- Need runtime supervision, run inspection, resume, or delivery package semantics: use `agentflow-operations`.
+- Need to extract eval scenarios from completed runs: use `agentflow-run-review`.
 
 ## Default Workflow
 
