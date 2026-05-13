@@ -4,34 +4,12 @@ This repository ships installable skills under `skills/`.
 
 Included skills:
 
-- `agentflow`: supervised graph authoring, validation, execution, inspection, resume, supervision, delivery packages, and Codex/Cursor harness behavior.
+- `agentflow-intake`: clarify an Agentflow idea before graph authoring; produce a workflow brief with outcome, scope, authority, evidence, assurance profile, and open questions.
+- `agentflow-authoring`: convert a workflow brief into an Agentflow graph contract with outcome-sized nodes, artifacts, checks, managed patterns, and authority boundaries.
+- `agentflow-plan-review`: review draft graphs before launch for over-specificity, brittle checks, weak artifacts, poor context, authority gaps, and validation readiness.
+- `agentflow-operations`: validate, resolve plugins, launch, inspect, resume, apply, debug, and review Agentflow delivery packages.
+- `agentflow-run-review`: review completed runs to extract graph lessons, plugin opportunities, eval scenarios, docs updates, and skill improvements.
 - `agentflow-evals`: workflow eval suites, scenarios, variants, criteria, environment simulation, trajectory checks, trace packets, scorecards, benchmark reports, prompt-pack comparisons, and dogfood/capability evals.
-- `agentflow-grill-me`: pre-plan interrogation for Agentflow plans, graphs, workflows, feature designs, and implementation plans.
 - `agentflow-plugins`: Git or local plugin workflows, plugin-bundled CLI tools, and secure plugin auth.
-
-The `agentflow` skill routes to compact references:
-
-- `references/graph-authoring.md`
-- `references/common-patterns.md`
-- `references/github-rollout.md`
-- `references/managed-workflows.md`
-- `references/run-debugging.md`
-- `references/graph-contract.md`
-- `references/cli-and-validation.md`
-- `references/failure-and-validation.md`
-- `references/examples.md`
-
-The `agentflow-plugins` skill owns:
-
-- `references/plugin-workflows.md`
-
-The `agentflow-evals` skill owns:
-
-- `references/eval-patterns.md`
-- `references/suite-authoring.md`
-- `references/grading-and-reporting.md`
-- `references/operations-and-dogfood.md`
-
-The `agentflow-grill-me` skill is intentionally self-contained in `SKILL.md`.
 
 The repository `docs/` remain the canonical human-facing docs. The skill references are packaged agent-facing guidance for installed use and mirror the supervised v1 contract.

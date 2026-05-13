@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentflow Authoring"
+  short_description: "Write strong Agentflow graph contracts"
+  default_prompt: "Use $agentflow-authoring to convert this workflow brief into an Agentflow graph."

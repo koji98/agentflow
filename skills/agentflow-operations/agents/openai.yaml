@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentflow Operations"
+  short_description: "Run, inspect, and resume Agentflow"
+  default_prompt: "Use $agentflow-operations to validate, run, inspect, or resume this Agentflow workflow."
