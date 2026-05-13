@@ -46,7 +46,7 @@
           {
             "name": "skill_reference",
             "from": "workspace_file",
-            "path": "skills/agentflow/references/managed-workflows.md"
+            "path": "skills/agentflow-authoring/references/managed-patterns.md"
           }
         ],
         "artifacts": {

@@ -21,7 +21,9 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 ## Route By Task
 
 - Need workflow plugin layout, manifests, `plugin_file`, `plugin://`, config, lockfiles, or public artifacts: read [references/plugin-workflows.md](references/plugin-workflows.md).
-- Need graph primitives, supervision, delivery, or run behavior: use `agentflow`.
+- Need graph primitives or node contracts: use `agentflow-authoring`.
+- Need validation, launch, supervision, delivery, or run behavior: use `agentflow-operations`.
+- Need to decide whether a completed run should become a plugin: use `agentflow-run-review`.
 
 ## Default Workflow
 

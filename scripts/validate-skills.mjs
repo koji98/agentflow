@@ -7,27 +7,54 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const jsonMode = process.argv.includes("--json");
 
-const requiredReferences = [
-  "graph-authoring.md",
-  "common-patterns.md",
-  "github-rollout.md",
-  "managed-workflows.md",
-  "run-debugging.md",
-  "graph-contract.md",
-  "cli-and-validation.md",
-  "failure-and-validation.md",
-  "examples.md"
-];
+const requiredSkillReferences = {
+  "agentflow-authoring": [
+    "composition-model.md",
+    "managed-patterns.md",
+    "deterministic-vs-rubric.md",
+    "graph-quality-bar.md"
+  ],
+  "agentflow-evals": [
+    "eval-patterns.md",
+    "suite-authoring.md",
+    "grading-and-reporting.md",
+    "operations-and-dogfood.md"
+  ],
+  "agentflow-intake": [
+    "workflow-brief.md",
+    "assurance-profiles.md",
+    "grill-questions.md"
+  ],
+  "agentflow-operations": [
+    "validation-launch-resume.md",
+    "delivery-review.md",
+    "failure-triage.md"
+  ],
+  "agentflow-plan-review": [
+    "review-rubric.md",
+    "anti-patterns.md"
+  ],
+  "agentflow-plugins": [
+    "plugin-workflows.md"
+  ],
+  "agentflow-run-review": [
+    "run-postmortem.md",
+    "plugin-extraction.md",
+    "eval-extraction.md"
+  ]
+};
 
-const requiredAgentflowPluginReferences = [
-  "plugin-workflows.md"
-];
-
-const requiredAgentflowEvalReferences = [
-  "eval-patterns.md",
-  "suite-authoring.md",
-  "grading-and-reporting.md",
-  "operations-and-dogfood.md"
+const expectedSkillDirs = Object.keys(requiredSkillReferences).sort();
+const deletedBroadSkillTokenPattern = new RegExp(`\\$${"agentflow"}(?!-)`, "u");
+const deletedGrillSkillName = `agentflow-${"grill-me"}`;
+const deletedBroadSkillPath = `skills/${"agentflow"}/`;
+const textFiles = [
+  "skills/README.md",
+  ...expectedSkillDirs.flatMap((skill) => [
+    `skills/${skill}/SKILL.md`,
+    `skills/${skill}/agents/openai.yaml`,
+    ...requiredSkillReferences[skill].map((reference) => `skills/${skill}/references/${reference}`)
+  ])
 ];
 
 const staleSkillContractPatterns = [
@@ -77,23 +104,13 @@ const staleSkillContractPatterns = [
   }
 ];
 
-const artifactContextReferenceFiles = new Set([
-  "skills/agentflow/references/graph-authoring.md",
-  "skills/agentflow/references/graph-contract.md",
-  "skills/agentflow/references/cli-and-validation.md",
-  "skills/agentflow/references/failure-and-validation.md",
-  "skills/agentflow/references/examples.md"
-]);
+const artifactContextReferenceFiles = new Set(
+  textFiles.filter((file) => !file.startsWith("skills/agentflow-evals/"))
+);
 
-const graphContractReferenceFiles = new Set([
-  "skills/agentflow/SKILL.md",
-  "skills/agentflow/agents/openai.yaml",
-  "skills/agentflow-plugins/SKILL.md",
-  "skills/agentflow-plugins/agents/openai.yaml",
-  "skills/README.md",
-  ...requiredReferences.map((reference) => `skills/agentflow/references/${reference}`),
-  ...requiredAgentflowPluginReferences.map((reference) => `skills/agentflow-plugins/references/${reference}`)
-]);
+const graphContractReferenceFiles = new Set(
+  textFiles.filter((file) => !file.startsWith("skills/agentflow-evals/"))
+);
 
 const staleArtifactContextPatterns = [
   {
@@ -150,29 +167,15 @@ async function validateSkills() {
 
   record(
     "packaged skills",
-    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-evals", "agentflow-grill-me", "agentflow-plugins"]),
-    JSON.stringify(skillDirs) === JSON.stringify(["agentflow", "agentflow-evals", "agentflow-grill-me", "agentflow-plugins"])
-      ? "skills/agentflow, skills/agentflow-evals, skills/agentflow-grill-me, and skills/agentflow-plugins are packaged."
-      : `Expected skills/agentflow, skills/agentflow-evals, skills/agentflow-grill-me, and skills/agentflow-plugins, found: ${skillDirs.join(", ") || "none"}`
+    JSON.stringify(skillDirs) === JSON.stringify(expectedSkillDirs),
+    JSON.stringify(skillDirs) === JSON.stringify(expectedSkillDirs)
+      ? `Packaged skills match the focused Agentflow workflow set: ${expectedSkillDirs.join(", ")}.`
+      : `Expected focused Agentflow skills ${expectedSkillDirs.join(", ")}, found: ${skillDirs.join(", ") || "none"}`
   );
 
-  const requiredFiles = [
-    "skills/agentflow/SKILL.md",
-    "skills/agentflow/agents/openai.yaml",
-    "skills/agentflow-evals/SKILL.md",
-    "skills/agentflow-evals/agents/openai.yaml",
-    "skills/agentflow-grill-me/SKILL.md",
-    "skills/agentflow-grill-me/agents/openai.yaml",
-    "skills/agentflow-plugins/SKILL.md",
-    "skills/agentflow-plugins/agents/openai.yaml",
-    "skills/README.md",
-    ...requiredReferences.map((reference) => `skills/agentflow/references/${reference}`),
-    ...requiredAgentflowEvalReferences.map((reference) => `skills/agentflow-evals/references/${reference}`),
-    ...requiredAgentflowPluginReferences.map((reference) => `skills/agentflow-plugins/references/${reference}`)
-  ];
   const missingFiles = [];
 
-  for (const file of requiredFiles) {
+  for (const file of textFiles) {
     if (!await fileExists(file)) {
       missingFiles.push(file);
     }
@@ -186,58 +189,105 @@ async function validateSkills() {
       : `Missing required skill files: ${missingFiles.join(", ")}`
   );
 
-  if (await fileExists("skills/agentflow/SKILL.md")) {
-    const skill = await readText("skills/agentflow/SKILL.md");
-    const missingReferences = [
-      ...requiredReferences.filter(
-      (reference) => !skill.includes(`references/${reference}`)
-      ),
-      ...(!skill.includes("agentflow-evals") ? ["agentflow-evals"] : []),
-      ...(!skill.includes("agentflow-plugins") ? ["agentflow-plugins"] : [])
-    ];
+  const missingReferenceRoutes = [];
 
-    record(
-      "router references",
-      missingReferences.length === 0,
-      missingReferences.length === 0
-        ? "SKILL.md routes to every required reference."
-        : `SKILL.md does not route to: ${missingReferences.join(", ")}`
-    );
+  for (const [skill, references] of Object.entries(requiredSkillReferences)) {
+    const skillPath = `skills/${skill}/SKILL.md`;
+    if (!await fileExists(skillPath)) {
+      continue;
+    }
+
+    const skillText = await readText(skillPath);
+    for (const reference of references) {
+      if (!skillText.includes(`references/${reference}`)) {
+        missingReferenceRoutes.push(`${skillPath} -> references/${reference}`);
+      }
+    }
   }
 
-  if (await fileExists("skills/agentflow-evals/SKILL.md")) {
-    const skill = await readText("skills/agentflow-evals/SKILL.md");
-    const missingReferences = [
-      ...requiredAgentflowEvalReferences.filter(
-        (reference) => !skill.includes(`references/${reference}`)
-      ),
-      ...(!skill.includes("agentflow-plugins") ? ["agentflow-plugins"] : []),
-      ...(!skill.includes("agentflow") ? ["agentflow"] : [])
-    ];
+  record(
+    "reference routes",
+    missingReferenceRoutes.length === 0,
+    missingReferenceRoutes.length === 0
+      ? "Each focused SKILL.md routes to its required references."
+      : `Missing reference routes: ${missingReferenceRoutes.join(", ")}`
+  );
 
-    record(
-      "eval router references",
-      missingReferences.length === 0,
-      missingReferences.length === 0
-        ? "agentflow-evals/SKILL.md routes to every required reference and adjacent skill."
-        : `agentflow-evals/SKILL.md does not route to: ${missingReferences.join(", ")}`
-    );
+  const staleRoutingMatches = [];
+  for (const file of textFiles) {
+    if (!await fileExists(file)) {
+      continue;
+    }
+
+    const text = await readText(file);
+    if (deletedBroadSkillTokenPattern.test(text)) {
+      staleRoutingMatches.push(`${file}: stale deleted broad skill reference`);
+    }
+    if (text.includes(deletedGrillSkillName) || text.includes(deletedBroadSkillPath)) {
+      staleRoutingMatches.push(`${file}: stale deleted skill path or name`);
+    }
   }
 
-  const textFiles = [
-    "skills/agentflow/SKILL.md",
-    "skills/agentflow/agents/openai.yaml",
-    "skills/agentflow-evals/SKILL.md",
-    "skills/agentflow-evals/agents/openai.yaml",
-    "skills/agentflow-grill-me/SKILL.md",
-    "skills/agentflow-grill-me/agents/openai.yaml",
-    "skills/agentflow-plugins/SKILL.md",
-    "skills/agentflow-plugins/agents/openai.yaml",
-    "skills/README.md",
-    ...requiredReferences.map((reference) => `skills/agentflow/references/${reference}`),
-    ...requiredAgentflowEvalReferences.map((reference) => `skills/agentflow-evals/references/${reference}`),
-    ...requiredAgentflowPluginReferences.map((reference) => `skills/agentflow-plugins/references/${reference}`)
+  record(
+    "no stale deleted-skill routes",
+    staleRoutingMatches.length === 0,
+    staleRoutingMatches.length === 0
+      ? "Skill package contains no deleted broad-skill or grill-skill routing references."
+      : `Stale routing references found: ${staleRoutingMatches.join("; ")}`
+  );
+
+  const defaultPromptMismatches = [];
+
+  for (const skill of expectedSkillDirs) {
+    const openAiYamlPath = `skills/${skill}/agents/openai.yaml`;
+    if (!await fileExists(openAiYamlPath)) {
+      continue;
+    }
+
+    const openAiYaml = await readText(openAiYamlPath);
+    if (!openAiYaml.includes(`$${skill}`)) {
+      defaultPromptMismatches.push(openAiYamlPath);
+    }
+  }
+
+  record(
+    "default prompts name matching skills",
+    defaultPromptMismatches.length === 0,
+    defaultPromptMismatches.length === 0
+      ? "Every generated agents/openai.yaml default_prompt names its matching skill."
+      : `default_prompt does not name the matching skill in: ${defaultPromptMismatches.join(", ")}`
+  );
+
+  const requiredConstraintGuidance = [
+    "skills/agentflow-authoring/SKILL.md",
+    "skills/agentflow-authoring/references/graph-quality-bar.md",
+    "skills/agentflow-plan-review/SKILL.md",
+    "skills/agentflow-plan-review/references/review-rubric.md",
+    "skills/agentflow-plan-review/references/anti-patterns.md",
+    "skills/agentflow-intake/references/workflow-brief.md"
   ];
+  const missingConstraintGuidance = [];
+
+  for (const file of requiredConstraintGuidance) {
+    if (!await fileExists(file)) {
+      missingConstraintGuidance.push(file);
+      continue;
+    }
+
+    const text = await readText(file);
+    if (!text.includes("Do not")) {
+      missingConstraintGuidance.push(file);
+    }
+  }
+
+  record(
+    "constraint guidance uses Do not",
+    missingConstraintGuidance.length === 0,
+    missingConstraintGuidance.length === 0
+      ? 'Authoring and review guidance requires graph and node constraints to start with "Do not".'
+      : `Missing Do not constraint guidance in: ${missingConstraintGuidance.join(", ")}`
+  );
+
   const patchMarkerFiles = [];
 
   for (const file of textFiles) {

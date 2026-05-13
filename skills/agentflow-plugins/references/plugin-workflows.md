@@ -293,6 +293,6 @@ For the generated wrapper, launcher, credential isolation, harness prompt, and t
 
 ```bash
 agentflow plugin resolve --graph agentflow.graph.json
-agentflow validate --graph agentflow.graph.json --strict
+agentflow validate --graph agentflow.graph.json
 agentflow validate --graph agentflow.graph.json --show-compiled
 ```
