@@ -44,7 +44,7 @@ Start with:
 6. `trace-packet.json`
 7. the underlying run root named in `run-root.txt`
 
-For prompt iteration, inspect `scorecard.prompt_feedback`, quality rationales, and concrete failed assertions before changing prompts or context surfaces.
+For prompt changes, inspect `scorecard.prompt_feedback`, quality rationales, and concrete failed assertions before changing prompts or context surfaces.
 
 ## Iteration Loop
 

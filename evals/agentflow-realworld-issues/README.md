@@ -10,7 +10,7 @@ npm run dev -- eval validate evals/agentflow-realworld-issues
 npm run dev -- eval run evals/agentflow-realworld-issues --variant current --scenario all --trials 1 --concurrency 1
 ```
 
-For prompt iteration, run repeated trials after the single-trial pass is stable:
+For prompt and workflow changes, run repeated trials after the single-trial pass is stable:
 
 ```bash
 npm run dev -- eval run evals/agentflow-realworld-issues --variant current --scenario all --trials 5 --concurrency 1
