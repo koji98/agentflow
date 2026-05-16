@@ -149,7 +149,8 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 - `af milestone add/log/complete/block` records macro work state and audit evidence.
 - `af artifact write <name>` publishes declared artifact content from stdin.
 - `af complete check` builds the mechanical completion packet for the current attempt.
-- `af spawn --purpose <investigation|implementation|verification|repair>` creates a helper sub-node with its own runtime metadata, selected plugin tools, output directory, logs, artifact contract, and optional `--wait` behavior.
+- `af spawn --role <evidence_mapper|causal_investigator|verification_auditor|repair_planner>` creates a read-only supervisor helper with its own runtime metadata, case-file pointers, output directory, logs, artifact contract, and optional `--wait` behavior.
+- `af spawn --purpose <investigation|implementation|verification|repair>` remains the managed-pattern helper form for bounded helper work with selected plugin tools when that authority is explicitly available.
 
 The default `af --help` surface is intentionally small because it is part of agent correctness. It shows the normal completion loop commands and omits debug/orchestration commands such as `diagnose`, `learn`, `tools list`, and `spawn`. `af <command> --help` remains the authoritative in-node runtime API reference for commands the runtime exposes to the current authority. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.
 
@@ -179,7 +180,7 @@ The graph contract exposes one required supervisor profile, `supervision.profile
 
 Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Budget-spending recovery chains attach artifacts under the symptom attempt's `interventions/` directory, while any repaired upstream target writes normal attempt folders that are linked from the chain. Durable human pauses set run status to `paused` and include resume options plus the recovery plan that explains the precise unblock request.
 
-On a failed or rejected executable attempt, the symptom is not automatically treated as the cause. The runtime persists the exact rendered prompt, builds a causal case file, constructs an upstream cone from graph edges, artifact producers, context provenance, prior attempts, workspace diffs, repeat/managed state, and verification evidence, then ranks likely recovery targets. The supervisor repairs the nearest intent-aligned cause first, reruns the failed gate, and continues only when each retry records a material delta: target changed, context changed, evidence added, validation guidance changed, workspace repaired, environment repaired, or an artifact was repaired. Budget is spent once per recovery chain, not once per helper, gatherer, target attempt, or rerun gate.
+On a failed or rejected executable attempt, the symptom is not automatically treated as the cause. The runtime persists the exact rendered prompt, builds a causal case file, constructs an upstream cone from graph edges, artifact producers, context provenance, prior attempts, workspace diffs, repeat/managed state, and verification evidence, then ranks likely recovery targets. The supervisor repairs the nearest intent-aligned cause first, reruns the failed gate, and continues only when each retry records a material delta: pointer context changed, a requirement evidence map was produced, a target was reranked with evidence, validation guidance changed, workspace was repaired, environment was repaired, or an artifact was repaired. Generic advice to reread the case file is not a material delta. Budget is spent once per recovery chain, not once per helper, gatherer, target attempt, or rerun gate.
 
 Context contract failures are deterministic recovery cases. If authored context cannot be packaged because a pointer is unsafe or unresolved, a required artifact is missing, a source is non-text, or a broad glob needs operator attention, the supervisor writes `context-analysis.{json,md}`, writes `context-repair-patch.json`, and retries with a compact repair packet before the authored context. The repair packet contains a bounded file index, sample matches, largest files, default ignored roots, omitted-entry provenance, and live workspace paths for manual inspection. It does not change graph intent, node intent, repo authority, sandbox, or declared artifacts.
 
@@ -191,9 +192,9 @@ Artifact repair is part of the same causal recovery chain. A downstream failed c
 
 Failed harness attempts do not publish declared artifacts, even if they wrote files in the output directory before failing. Those files can be surfaced as prior-attempt evidence for later repair or retry prompts, but downstream refs and delivery handoffs only consume artifacts materialized from successful attempts or accepted repairs.
 
-`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same causal recovery loop. A retried or repaired target receives a supervisor recovery case before the original authored task, and the same case is resolved into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af orient` surfaces the active recovery and context pointers. The case names the symptom node, selected recovery target, material delta, forbidden actions, and unchanged graph/node authority. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
+`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same causal recovery loop. A retried or repaired target receives a supervisor recovery case before the original authored task, and the same case is resolved into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af orient` surfaces the active recovery and context pointers. The case names the symptom node, selected recovery target, requirement evidence map, material delta, forbidden actions, and unchanged graph/node authority. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
 
-Supervisor helpers can use read-only diagnostics through `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, and `af diagnose validation`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. `af spawn --purpose investigation` creates read-only causal-analysis helpers; `af spawn --purpose implementation`, `--purpose verification`, and `--purpose repair` create bounded helper sessions for managed or supervisor-authorized work. There is no standalone `af wait`; use `af spawn ... --wait` when the parent needs a terminal helper result before continuing.
+Supervisor helpers can use read-only diagnostics through `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, `af diagnose validation`, `af diagnose evidence-map`, and `af diagnose recovery-delta`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. Fixed helper roles are spawned dynamically only when a case proves the need: `evidence_mapper`, `causal_investigator`, `verification_auditor`, and `repair_planner`. They are read-only and cannot request plugin tools. Managed patterns may still use purpose-based implementation helpers for bounded internal work. There is no standalone `af wait`; use `af spawn ... --wait` when the parent needs a terminal helper result before continuing.
 
 Managed monitoring and supervisor events:
 
@@ -273,28 +274,24 @@ Policy rules:
 
 ## Delivery Package
 
-Terminal delivery is part of the runtime contract. The package collector reads run state, events, attempts, checks, interventions, git metadata, and artifacts, then writes:
+Terminal delivery is part of the runtime contract. The package collector reads final run state, events, attempts, checks, interventions, git metadata, milestones, and artifacts, then writes:
 
-- task brief
-- implementation summary
-- grouped change map
-- milestone evidence
-- evaluation ledger
-- reviewer guide
-- risk notes
-- follow-up items
-- intervention trace
-- manifest
-- run map
+- `01-review-brief.md`: primary human handoff with outcome, contract, changed files, final artifacts, validation evidence, active risks, recovered issues, and intervention summary
+- `02-run-learnings.md`: future-run improvements for workspace docs, tests, scripts, graph shape, skills, plugins, and evals
+- `03-audit-index.md`: map to raw context packets, tool ledgers, milestone files, supervisor timeline, runtime logs, and resume/debug files
+- `evidence/`: semantic machine files for artifact index, change map, validation ledger, decision log, intervention trace, milestones, and workspace improvements
+- `manifest.json`: semantic file map and taxonomy
 
-The manifest keeps the entrypoint maps and adds an explicit `artifact_taxonomy` object:
+The manifest keeps semantic entrypoint maps and an explicit `artifact_taxonomy` object:
 
-- `human_entrypoints`: reviewer guide, task brief, implementation summary, risk notes, follow-up items, and run map
-- `declared_artifacts`: graph outcome artifacts grouped by node/artifact name
+- `human_entrypoints`: review brief, run learnings, and audit index
+- `declared_artifacts`: final accepted graph outcome artifacts grouped by node/artifact name
 - `resume_required`: stable files needed for resume and replay
 - `audit_trail`: events, attempts, tool invocation ledgers, and workspace-change captures
 - `debug_only`: raw logs, context packets/provenance, tool sidecars, and runtime coordination files
 - `empty_or_noop`: empty ledgers/logs or no-change captures that should not look important
+
+Prior failed attempts that were later retried or repaired are reported as recovered issues. They remain audit evidence but are not active follow-up items.
 
 If delivery package creation fails, the run is marked failed with a `delivery_package_failed` reason. This keeps the promise that a terminal run returns reviewable evidence, not just a raw diff.
 

@@ -27,7 +27,7 @@ sequenceDiagram
   Runtime->>Supervisor: observe checkpoint health
   Supervisor-->>Runtime: continue, repair causal target, or request authority
   Runtime->>Delivery: write terminal delivery package
-  Delivery-->>Human: reviewer guide, run map, ledgers
+  Delivery-->>Human: review brief, run learnings, audit index
 ```
 
 ## Validate
@@ -94,7 +94,7 @@ Each attempt is the unit of execution and audit. A typical agent attempt include
 
 The attempt boundary matters because supervisor interventions attach to a specific attempt, downstream refs select from attempts, and resume decides whether completed attempts remain compatible with the current compiled contract.
 
-Managed pattern internals also emit `managed.progress` events at meaningful boundaries such as internal node completion, ordinary deep-work completion feedback, repeated no-delta stalls, and managed repeat exhaustion. Ordinary managed feedback stays inside the pattern while the pattern can still make progress. When deep work repeats the same blocker without material delta, or when a managed repeat exhausts its authored cycles, the runtime records managed progress evidence and routes the failed boundary through the normal supervisor path. The supervisor may retry only when it can attach a material delta such as new evidence, repaired context, changed validation strategy, workspace cleanup, or safe environment repair.
+Managed pattern internals also emit `managed.progress` events at meaningful boundaries such as internal node completion, ordinary deep-work completion feedback, repeated no-delta stalls, and managed repeat exhaustion. Ordinary managed feedback stays inside the pattern while the pattern can still make progress. When deep work repeats the same blocker without material delta, or when a managed repeat exhausts its authored cycles, the runtime records managed progress evidence and routes the failed boundary through the normal supervisor path. The supervisor may retry only when it can attach a material delta such as a requirement evidence map, repaired context, changed validation strategy, workspace cleanup, safe environment repair, target rerank with evidence, or accepted artifact repair.
 
 ## Supervision
 
@@ -119,7 +119,7 @@ flowchart TD
 
 Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, `interventions.jsonl`, and state. Budget-spending recovery chains attach artifacts under the symptom attempt's `interventions/` directory. If the selected recovery target is upstream, the target writes normal attempt folders and the chain links the symptom, target, material delta, and rerun gate.
 
-For recovery-oriented actions, the supervisor records a failure fingerprint, writes `causal-case-file.{json,md}`, ranks targets in `causal-targets.json`, writes `recovery-chain.{json,md}`, merges evidence into `recovery-plan.{json,md}`, writes `runtime-overlay.json`, records `material-delta.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the selected target's next attempt prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
+For recovery-oriented actions, the supervisor records a failure fingerprint, writes `requirement-evidence-map.{json,md}`, writes `causal-case-file.{json,md}`, ranks targets in `causal-targets.json`, writes `recovery-chain.{json,md}`, merges evidence into `recovery-plan.{json,md}`, writes `runtime-overlay.json`, records `material-delta.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the selected target's next attempt prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. Generic retry advice and target changes without evidence are not material deltas. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
 
 Context pointer packaging can fail before the harness runs. Those failures are classified as `context_contract_failure`, analyzed with the shared run-ready context analyzer, and retried with a compact `supervisor_context_repair` packet when the supervisor can safely repair the packaging without changing graph authority.
 
@@ -144,6 +144,8 @@ Paused supervisor runs additionally require explicit `--human-action` and option
 
 ## Delivery
 
-Terminal runs always attempt to write the delivery package. The collector reads state, attempts, events, checks, interventions, workspace changes, and declared artifacts, then writes human entrypoints such as `reviewer-guide.md`, `implementation-summary.md`, `risk-notes.md`, and `run-map.md`.
+Terminal runs always attempt to write the delivery package. The collector reads state, attempts, events, checks, interventions, workspace changes, milestones, and declared artifacts, then writes `delivery/01-review-brief.md`, `delivery/02-run-learnings.md`, `delivery/03-audit-index.md`, and semantic evidence files under `delivery/evidence/`.
+
+Delivery is derived from final runtime state. Final accepted attempts and artifacts are the review surface; failed prior attempts that were later repaired or retried are listed as recovered issues, not active follow-ups. Active failures are reserved for unresolved terminal failures or active blocking observations.
 
 If delivery creation fails, the run is marked failed. This keeps the runtime contract honest: a successful terminal run must be reviewable, not merely complete.

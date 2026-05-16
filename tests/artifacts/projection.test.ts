@@ -426,7 +426,7 @@ describe("artifacts projection", () => {
             expect(snapshot.run.supervisor_status).toBe("healthy");
             expect(snapshot.run.intervention_count).toBe(0);
             expect(snapshot.run.delivery_manifest).toBe(join(fixture.runRoot, "delivery", "manifest.json"));
-            expect(snapshot.run.reviewer_guide).toBe(join(fixture.runRoot, "delivery", "reviewer-guide.md"));
+            expect(snapshot.run.review_brief).toBe(join(fixture.runRoot, "delivery", "01-review-brief.md"));
             expect(snapshot.overlay_nodes.some((node) => node.compiled_id === fixture.compiledVerifyId)).toBe(true);
             expect(snapshot.run_diagnostics).toEqual([]);
             expect(snapshot.recent_events.at(-1)?.type).toBe("delivery.package.completed");

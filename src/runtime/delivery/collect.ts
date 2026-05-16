@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { resolveRunArtifactPaths } from "../../artifacts/paths.js";
 import type { CompiledGraph } from "../../graph/compiled.js";
@@ -10,12 +11,18 @@ import type { OutcomeVerificationResult } from "../verification/types.js";
 import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
 import { readOperatorObservations } from "../observations/index.js";
 import type { OperatorObservation } from "../completion/index.js";
+import type { RuntimeMilestone } from "../completion/types.js";
 
 export interface DeliveryEvidence {
   graph_id: string;
   run_id: string;
   status: RuntimeStateSnapshot["status"];
+  evidence_status: RuntimeStateSnapshot["evidence_status"];
+  started_at: RuntimeStateSnapshot["started_at"];
+  ended_at?: RuntimeStateSnapshot["ended_at"];
   intent: CompiledGraph["intent"];
+  node_statuses: RuntimeStateSnapshot["node_statuses"];
+  latest_execution_by_compiled_id: RuntimeStateSnapshot["latest_execution_by_compiled_id"];
   attempts: RuntimeNodeAttempt[];
   events: RuntimeEventEnvelope[];
   supervisor_timeline: SupervisorDecision[];
@@ -74,6 +81,11 @@ export interface DeliveryEvidence {
     iteration_index?: number;
     artifacts: NodeWorkspaceChangeArtifacts;
   }>;
+  milestone_states: Array<{
+    execution_id: string;
+    path: string;
+    milestones: RuntimeMilestone[];
+  }>;
 }
 
 async function readTextArtifact(path: string | undefined): Promise<string | undefined> {
@@ -108,6 +120,47 @@ async function readJsonlRecords(path: string): Promise<Array<Record<string, unkn
         return [];
       }
     });
+}
+
+async function readMilestoneStates(runRoot: string): Promise<DeliveryEvidence["milestone_states"]> {
+  const milestoneDir = join(runRoot, "runtime", "milestones");
+  let entries: string[];
+  try {
+    entries = await readdir(milestoneDir);
+  } catch {
+    return [];
+  }
+
+  const states = await Promise.all(
+    entries
+      .filter((entry) => entry.endsWith(".json"))
+      .map(async (entry) => {
+        const path = join(milestoneDir, entry);
+        const contents = await readTextArtifact(path);
+        if (!contents) {
+          return undefined;
+        }
+        try {
+          const parsed = JSON.parse(contents) as unknown;
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return undefined;
+          }
+          const candidate = parsed as Record<string, unknown>;
+          if (typeof candidate.execution_id !== "string" || !Array.isArray(candidate.milestones)) {
+            return undefined;
+          }
+          return {
+            execution_id: candidate.execution_id,
+            path,
+            milestones: candidate.milestones as RuntimeMilestone[]
+          };
+        } catch {
+          return undefined;
+        }
+      })
+  );
+
+  return states.filter((state): state is NonNullable<typeof state> => state !== undefined);
 }
 
 function readVerification(attempt: RuntimeNodeAttempt): VerificationRecordedPayload | undefined {
@@ -269,12 +322,18 @@ export async function collectDeliveryEvidence(options: {
       artifacts
     }];
   });
+  const milestoneStates = await readMilestoneStates(options.run_root);
 
   return {
     graph_id: options.graph.graph_id,
     run_id: options.state.run_id,
     status: options.state.status,
+    evidence_status: options.state.evidence_status,
+    started_at: options.state.started_at,
+    ...(options.state.ended_at ? { ended_at: options.state.ended_at } : {}),
     intent: options.graph.intent,
+    node_statuses: options.state.node_statuses,
+    latest_execution_by_compiled_id: options.state.latest_execution_by_compiled_id,
     attempts: options.attempts,
     events: options.events,
     supervisor_timeline: supervisorTimeline,
@@ -287,6 +346,7 @@ export async function collectDeliveryEvidence(options: {
     tool_invocations: toolInvocations,
     workspace_changes: Object.values(options.state.workspace_change_artifacts),
     outcome_verifications: outcomeVerifications,
-    node_workspace_changes: nodeWorkspaceChanges
+    node_workspace_changes: nodeWorkspaceChanges,
+    milestone_states: milestoneStates
   };
 }

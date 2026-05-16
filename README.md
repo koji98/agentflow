@@ -150,7 +150,7 @@ npm run validate:smoke
    agentflow run --graph agentflow.graph.json
    ```
 
-5. Review the terminal delivery package, starting with `delivery/manifest.json` and `delivery/reviewer-guide.md`.
+5. Review the terminal delivery package, starting with `delivery/01-review-brief.md`, then `delivery/02-run-learnings.md` and `delivery/03-audit-index.md` when needed.
 
 ## Minimal Graph
 
@@ -169,7 +169,7 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
     "acceptance_criteria": [
       "The change is implemented.",
       "Tests or checks provide evidence.",
-      "The reviewer guide explains risk and review order."
+      "The review brief explains risk and review order."
     ]
   },
   "repos": {
@@ -341,7 +341,7 @@ Use `checkpoint` for authored human gates, usually inside a `repeat` body. Super
 | `agentflow` | Humans and automation outside a run. | Validate, run, resume, inspect, observe live runs, resolve plugins, auth, eval, and report. |
 | `af` | Agents inside a node attempt. | Orient to the node contract, track milestone evidence, publish declared artifacts, and check completion readiness. |
 | Run root | Operators and debuggers. | Durable state, events, attempts, context packets, logs, supervisor interventions, and delivery files. |
-| `delivery/` | Human reviewers. | High-signal terminal package with reviewer guide, implementation summary, evidence ledger, risks, and follow-ups. |
+| `delivery/` | Human reviewers. | High-signal terminal package with review brief, run learnings, audit index, and semantic evidence files. |
 
 Agentflow injects `af` into every agent node on `PATH`. Humans normally do not use `af` outside a running node.
 

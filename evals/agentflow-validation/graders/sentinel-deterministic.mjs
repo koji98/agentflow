@@ -84,6 +84,14 @@ function findFiles(root, basename, limit = 20) {
   return found;
 }
 
+function readJsonIfPresent(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 function runFocusedCommand(command) {
   try {
     execFileSync("sh", ["-lc", command], {
@@ -171,7 +179,21 @@ if (scenarioId === "all-primitives-checkpoint-loop") {
 }
 
 if (scenarioId === "supervisor-recovery-gauntlet") {
+  const runRoot = process.env.AGENTFLOW_EVAL_RUN_ROOT;
+  const evidenceMaps = findFiles(runRoot, "requirement-evidence-map.json", 50);
+  const materialDeltas = findFiles(runRoot, "material-delta.json", 50)
+    .map((path) => ({ path, value: readJsonIfPresent(path) }));
   assert("capability_support_visible", /context|stale docs|validation|recovery|Validation/i.test(combinedArtifacts), "supervisor gauntlet evidence");
+  assert(
+    "requirement_evidence_maps_present",
+    evidenceMaps.length > 0,
+    evidenceMaps.map((path) => relative(runRoot, path)).join(",") || "none"
+  );
+  assert(
+    "material_deltas_nonempty",
+    materialDeltas.every((entry) => Array.isArray(entry.value) && entry.value.length > 0),
+    materialDeltas.map((entry) => `${relative(runRoot, entry.path)}:${Array.isArray(entry.value) ? entry.value.length : "invalid"}`).join(",") || "none"
+  );
 }
 
 const passed = assertions.every((entry) => entry.passed);

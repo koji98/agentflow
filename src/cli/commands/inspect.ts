@@ -250,7 +250,7 @@ export const inspectCommand = {
               intervention_count: state.supervisor.intervention_count,
               supervisor_budget_remaining: state.supervisor.budget_remaining,
               delivery_package: deliveryManifestPath,
-              reviewer_guide: `${artifactPaths.delivery_dir}/reviewer-guide.md`,
+              review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md`,
               ...(deliveryTaxonomySummary
                 ? { delivery_artifact_taxonomy: deliveryTaxonomySummary }
                 : {}),

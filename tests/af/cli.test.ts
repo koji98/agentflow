@@ -95,10 +95,12 @@ describe("af runtime CLI", () => {
     let tempRoot: string;
     let originalMetadata: string | undefined;
     let originalCodexBin: string | undefined;
+    let originalSpawnMode: string | undefined;
     beforeEach(async () => {
         tempRoot = await mkdtemp(join(tmpdir(), "agentflow-af-cli-"));
         originalMetadata = process.env.AGENTFLOW_RUNTIME_METADATA;
         originalCodexBin = process.env.AGENTFLOW_CODEX_CLI_BIN;
+        originalSpawnMode = process.env.AGENTFLOW_SPAWN_MODE;
     });
     afterEach(async () => {
         if (originalMetadata === undefined) {
@@ -112,6 +114,12 @@ describe("af runtime CLI", () => {
         }
         else {
             process.env.AGENTFLOW_CODEX_CLI_BIN = originalCodexBin;
+        }
+        if (originalSpawnMode === undefined) {
+            delete process.env.AGENTFLOW_SPAWN_MODE;
+        }
+        else {
+            process.env.AGENTFLOW_SPAWN_MODE = originalSpawnMode;
         }
         await rm(tempRoot, { recursive: true, force: true });
     });
@@ -141,10 +149,6 @@ describe("af runtime CLI", () => {
         expect(milestone.exitCode).toBe(0);
         expect(milestone.stdout).toContain("af milestone add --title");
         expect(milestone.stdout).toContain("chain-of-thought");
-        const contextShow = await executeAfCli(["context", "show", "--help"]);
-        expect(contextShow.exitCode).toBe(0);
-        expect(contextShow.stdout).toContain("context_packet_path");
-        expect(contextShow.stdout).toContain("Read-only inspection");
         const completeCheck = await executeAfCli(["complete", "check", "--help"]);
         expect(completeCheck.exitCode).toBe(0);
         expect(completeCheck.stdout).toContain("af complete check");
@@ -225,16 +229,6 @@ describe("af runtime CLI", () => {
                     status: "blocked"
                 }]
         }));
-        const statusWithObservation = outputOf<{
-            operator_observations: {
-                active: number;
-                blocking: number;
-            };
-        }>(await executeAfCli(["status"]));
-        expect(statusWithObservation.operator_observations).toEqual(expect.objectContaining({
-            active: 1,
-            blocking: 1
-        }));
         const blockedComplete = await executeAfCli(["complete", "check"]);
         expect(blockedComplete.exitCode).toBe(1);
         expect(blockedComplete.output).toEqual(expect.objectContaining({
@@ -283,6 +277,15 @@ describe("af runtime CLI", () => {
             "--brief",
             "Missing explicit purpose."
         ])).rejects.toThrow("af spawn requires --purpose.");
+        await expect(executeAfCli([
+            "spawn",
+            "--role",
+            "evidence_mapper",
+            "--brief",
+            "Read-only helpers cannot request tools.",
+            "--tools",
+            "not-granted"
+        ])).rejects.toThrow("read-only and cannot request plugin tools");
     });
     it("exposes supervisor learn and diagnose helpers", async () => {
         const runtime = await createRuntime(tempRoot);
@@ -394,6 +397,34 @@ describe("af runtime CLI", () => {
         }>(await executeAfCli(["diagnose", "validation", "--node", "validate", "--json"]));
         expect(validation.validation.command).toBe("npm");
         expect(validation.validation.args).toEqual(["test"]);
+        const evidenceMap = outputOf<{
+            command: string;
+            requirement_evidence_map: {
+                requirements: Array<{
+                    requirement: string;
+                    status: string;
+                }>;
+            };
+        }>(await executeAfCli(["diagnose", "evidence-map", "--node", "validate", "--json"]));
+        expect(evidenceMap.command).toBe("af diagnose evidence-map");
+        expect(evidenceMap.requirement_evidence_map.requirements).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                requirement: "The focused validation command exits successfully.",
+                status: "missing"
+            })
+        ]));
+        const caseFilePath = join(runtime.root, "case-file.json");
+        await writeFile(caseFilePath, `${JSON.stringify({
+            requirement_evidence_map: evidenceMap.requirement_evidence_map
+        }, null, 2)}\n`, "utf8");
+        const recoveryDelta = outputOf<{
+            command: string;
+            retry_allowed: boolean;
+            retry_blocked_reason: string;
+        }>(await executeAfCli(["diagnose", "recovery-delta", "--case", caseFilePath, "--json"]));
+        expect(recoveryDelta.command).toBe("af diagnose recovery-delta");
+        expect(recoveryDelta.retry_allowed).toBe(false);
+        expect(recoveryDelta.retry_blocked_reason).toContain("No available run evidence");
     });
     it("records af stdout sidecar logs in the invocation ledger", async () => {
         const runtime = await createRuntime(tempRoot);
@@ -441,14 +472,20 @@ describe("af runtime CLI", () => {
             status: string;
             agent: {
                 status: string;
+                role?: string;
+                sandbox: string;
+                input_case_file?: string;
+                prompt_path?: string;
             };
             artifact: string;
         }>(await executeAfCli([
             "spawn",
-            "--purpose",
-            "implementation",
+            "--role",
+            "evidence_mapper",
             "--brief",
-            "Write the helper validation report.",
+            "Map failed requirements to evidence.",
+            "--case",
+            join(runtime.root, "case-file.json"),
             "--artifact",
             "helper-report.md",
             "--wait",
@@ -457,7 +494,57 @@ describe("af runtime CLI", () => {
         ]));
         expect(spawned.status).toBe("passed");
         expect(spawned.agent.status).toBe("completed");
+        expect(spawned.agent.role).toBe("evidence_mapper");
+        expect(spawned.agent.sandbox).toBe("read-only");
+        expect(spawned.agent.input_case_file).toBe(join(runtime.root, "case-file.json"));
         await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");
+        await expect(readFile(spawned.agent.prompt_path!, "utf8")).resolves.toContain("evidence mapper");
+    });
+    it("records fixed read-only helper role metadata without launching a standing team", async () => {
+        const runtime = await createRuntime(tempRoot);
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        process.env.AGENTFLOW_SPAWN_MODE = "broker";
+        const spawned = outputOf<{
+            role: string;
+            agent_id: string;
+            output_dir: string;
+        }>(await executeAfCli([
+            "spawn",
+            "--role",
+            "repair_planner",
+            "--brief",
+            "Plan the smallest material delta.",
+            "--case",
+            join(runtime.root, "case-file.json"),
+            "--output-schema",
+            "repair_planner.v1",
+            "--evidence-map",
+            join(runtime.root, "evidence-map.json"),
+            "--material-delta",
+            join(runtime.root, "material-delta.json")
+        ]));
+        expect(spawned.role).toBe("repair_planner");
+        const sessionPath = join(runtime.root, "runtime", "helpers", spawned.agent_id, "session.json");
+        const session = JSON.parse(await readFile(sessionPath, "utf8")) as {
+            status: string;
+            purpose: string;
+            role: string;
+            sandbox: string;
+            input_case_file: string;
+            output_schema: string;
+            evidence_map_path: string;
+            material_delta_path: string;
+        };
+        expect(session).toEqual(expect.objectContaining({
+            status: "starting",
+            purpose: "repair",
+            role: "repair_planner",
+            sandbox: "read-only",
+            input_case_file: join(runtime.root, "case-file.json"),
+            output_schema: "repair_planner.v1",
+            evidence_map_path: join(runtime.root, "evidence-map.json"),
+            material_delta_path: join(runtime.root, "material-delta.json")
+        }));
     });
     it("does not expose a standalone af wait command", async () => {
         const runtime = await createRuntime(tempRoot);
@@ -474,6 +561,12 @@ describe("af runtime CLI", () => {
         const supervisionShow = await executeAfCli(["supervision", "show"]);
         expect(supervisionShow.exitCode).toBe(2);
         expect(supervisionShow.stdout).toContain("Unknown af command: supervision show");
+        const status = await executeAfCli(["status"]);
+        expect(status.exitCode).toBe(2);
+        expect(status.stdout).toContain("Unknown af command: status");
+        const contextShow = await executeAfCli(["context", "show"]);
+        expect(contextShow.exitCode).toBe(2);
+        expect(contextShow.stdout).toContain("Unknown af command: context show");
     });
     it("fails af spawn --wait when the helper exits without its required artifact", async () => {
         const runtime = await createRuntime(tempRoot);

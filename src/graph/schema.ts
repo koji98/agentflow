@@ -33,15 +33,16 @@ export const toolNamePattern = /^[a-z0-9][a-z0-9-]*$/;
 export const edgeOutcomes = ["passed", "failed"] as const;
 export const failureBehaviors = ["fail", "continue"] as const;
 export const deliverySections = [
-  "task_brief",
-  "implementation_summary",
-  "grouped_change_map",
+  "review_brief",
+  "run_learnings",
+  "audit_index",
+  "artifact_index",
+  "change_map",
+  "validation_ledger",
   "decision_log",
-  "evaluation_ledger",
-  "reviewer_guide",
-  "risk_notes",
-  "follow_up_items",
-  "intervention_trace"
+  "intervention_trace",
+  "milestones",
+  "workspace_improvements"
 ] as const;
 
 export type GraphVersion = typeof graphVersion;

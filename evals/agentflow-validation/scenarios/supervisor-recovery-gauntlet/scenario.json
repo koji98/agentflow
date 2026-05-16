@@ -2,7 +2,7 @@
   "id": "supervisor-recovery-gauntlet",
   "bucket": "simulated-control",
   "difficulty": "hard",
-  "description": "Generated local monorepo fixture that exercises support capabilities and supervisor recovery/resume evidence.",
+  "description": "Generated local monorepo fixture that exercises support capabilities, supervisor recovery, authority-boundary handling, and resume-surface evidence.",
   "environment": {
     "repo": "repo",
     "init_git": true,
