@@ -18,6 +18,13 @@ import type { HarnessAdapter } from "../runtime/harness/types.js";
 import { renderHarnessPrompt } from "../runtime/harness/types.js";
 import type { SupervisorCausalContext, SupervisorRecoveryTarget } from "./causal.js";
 import type { FailureClassification } from "./classifier.js";
+import {
+  buildRequirementEvidenceMap,
+  evidenceMapHasActionableEvidence,
+  evidenceMapRequiresAuthority,
+  renderRequirementEvidenceMapMarkdown,
+  selectEvidenceMapDelta
+} from "./evidence_map.js";
 import type {
   SupervisorCaseFile,
   SupervisorContextRepairPatch,
@@ -34,7 +41,8 @@ import type {
   SupervisorWorkspaceRepairPatch,
   SupervisorEnvironmentRepair,
   SupervisorCausalCaseFile,
-  SupervisorCausalTargetRecord
+  SupervisorCausalTargetRecord,
+  SupervisorRequirementEvidenceMap
 } from "./types.js";
 
 const evidenceConcurrencyCap = 4;
@@ -158,6 +166,18 @@ function renderCaseFileMarkdown(caseFile: SupervisorCaseFile): string {
     "```json",
     JSON.stringify(caseFile.result, null, 2),
     "```",
+    "",
+    "## Requirement Evidence Map",
+    "```json",
+    JSON.stringify(caseFile.requirement_evidence_map, null, 2),
+    "```",
+    ...(caseFile.retry_blocked_reason
+      ? [
+          "",
+          "## Retry Blocked Reason",
+          caseFile.retry_blocked_reason
+        ]
+      : []),
     ...renderCausalSectionMarkdown(caseFile)
   ].join("\n");
 }
@@ -592,14 +612,31 @@ async function writeEvidencePatch(options: {
 function selectApplyAction(options: {
   action: SupervisorActionKind;
   classification: FailureClassification;
+  caseFile?: SupervisorCaseFile;
+  requirementEvidenceMap?: SupervisorRequirementEvidenceMap;
   patches: SupervisorEvidencePatch[];
   causalContext?: SupervisorCausalContext;
 }): SupervisorRecoveryPlan["apply_action"] {
+  if (
+    options.classification.class === "graph_context_gap" ||
+    options.classification.class === "unprovable_requirement"
+  ) {
+    return "fail_contract_gap";
+  }
+
   if (options.classification.class === "non_recoverable") {
     return "fail_terminal";
   }
 
+  if (options.classification.class === "authority_required") {
+    return "pause_for_authority";
+  }
+
   if (!options.classification.retryable && options.classification.recommended_action === "pause_for_human") {
+    return "pause_for_authority";
+  }
+
+  if (options.requirementEvidenceMap && evidenceMapRequiresAuthority(options.requirementEvidenceMap)) {
     return "pause_for_authority";
   }
 
@@ -614,6 +651,9 @@ function selectApplyAction(options: {
   if (operation === "repair_context") {
     return "repair_context";
   }
+  if (operation === "repair_evidence_context") {
+    return "repair_evidence_context";
+  }
   if (operation === "repair_artifact") {
     return "repair_artifact";
   }
@@ -625,6 +665,35 @@ function selectApplyAction(options: {
   }
   if (operation === "repair_environment") {
     return "repair_environment";
+  }
+  if (operation === "rerun_check") {
+    return "rerun_check";
+  }
+  if (operation === "fail_contract_gap") {
+    return "fail_contract_gap";
+  }
+  const repeated = options.caseFile ? options.caseFile.repeated_fingerprint_count >= 2 : false;
+  const hasActionableEvidenceMap = options.requirementEvidenceMap
+    ? evidenceMapHasActionableEvidence(options.requirementEvidenceMap)
+    : false;
+  const hasMaterialEvidencePatch = options.patches.some((patch) =>
+    patch.status === "passed" &&
+    !patch.scope_or_authority_changed &&
+    patch.sources.some((source) =>
+      Boolean(source.url) ||
+      (
+        Boolean(source.path) &&
+        !["supervisor case file", "exact failed node prompt"].includes(source.label.toLowerCase())
+      )
+    )
+  );
+  if (
+    repeated &&
+    ["semantic_misalignment", "repeated_failure", "unknown"].includes(options.classification.class) &&
+    !hasActionableEvidenceMap &&
+    !hasMaterialEvidencePatch
+  ) {
+    return "fail_contract_gap";
   }
   if (operation === "repair_current_node" || operation === "repair_upstream_node" || operation === "investigate_causal_cone") {
     return "retry_with_evidence";
@@ -656,9 +725,11 @@ function selectApplyAction(options: {
 function retryableApplyAction(action: SupervisorRecoveryPlan["apply_action"]): boolean {
   return [
     "repair_context",
+    "repair_evidence_context",
     "repair_validation_strategy",
     "repair_workspace",
     "repair_environment",
+    "rerun_check",
     "retry_with_evidence"
   ].includes(action);
 }
@@ -730,6 +801,8 @@ function buildRuntimeOverlay(options: {
   classification: FailureClassification;
   symptomCompiledId: string;
   causalContext?: SupervisorCausalContext;
+  requirementEvidenceMap?: SupervisorRequirementEvidenceMap;
+  selectedDelta?: SupervisorMaterialDelta;
   contextRepairPatch?: SupervisorContextRepairPatch;
   workspaceRepairPatch?: SupervisorWorkspaceRepairPatch;
   evidencePatches: SupervisorEvidencePatch[];
@@ -746,12 +819,36 @@ function buildRuntimeOverlay(options: {
   }
 
   if (
-    options.applyAction === "retry_with_evidence"
-    && options.evidencePatches.some((patch) => patch.status === "passed" && !patch.scope_or_authority_changed)
+    options.selectedDelta &&
+    options.applyAction === "retry_with_evidence" &&
+    !deltas.some((delta) => delta.kind === options.selectedDelta?.kind)
+  ) {
+    deltas.push(options.selectedDelta);
+  }
+
+  const selectedTarget = options.causalContext?.selected_target;
+  if (
+    selectedTarget &&
+    options.applyAction === "retry_with_evidence" &&
+    selectedTarget.target_compiled_id !== options.symptomCompiledId &&
+    selectedTarget.evidence.length > 0
   ) {
     deltas.push({
-      kind: "evidence_added",
-      summary: "Added supervisor evidence from a successful gather for the retry."
+      kind: "target_reranked_with_evidence",
+      summary: `Reranked recovery from symptom ${options.symptomCompiledId} to ${selectedTarget.target_compiled_id} using causal evidence.`,
+      artifact_paths: {}
+    });
+  }
+
+  if (
+    options.requirementEvidenceMap &&
+    evidenceMapHasActionableEvidence(options.requirementEvidenceMap) &&
+    options.applyAction === "retry_with_evidence" &&
+    !deltas.some((delta) => delta.kind === "requirement_evidence_mapped")
+  ) {
+    deltas.push({
+      kind: "requirement_evidence_mapped",
+      summary: "Mapped failed requirements to current run evidence so the retry has a concrete evidence target."
     });
   }
 
@@ -829,6 +926,7 @@ function buildRetryDirective(options: {
   caseFile: SupervisorCaseFile;
   patches: SupervisorEvidencePatch[];
   runtimeOverlay?: SupervisorRuntimeOverlay;
+  requirementEvidenceMapPath?: string;
 }): SupervisorRecoveryEnvelope["retry_directive"] {
   const retryGuidance = options.patches.flatMap((patch) => patch.retry_guidance);
   const overlayGuidance = options.runtimeOverlay?.context_repair
@@ -856,8 +954,15 @@ function buildRetryDirective(options: {
         `Final handoff must include: ${options.runtimeOverlay.validation_strategy.required_handoff_evidence.join(", ")}.`
       ]
     : [];
+  const evidenceMapGuidance = options.runtimeOverlay?.material_delta.some((delta) => delta.kind === "requirement_evidence_mapped")
+    ? [
+        "Use the requirement evidence map to address each failed or missing requirement before retry completion.",
+        "Do not retry by only rereading the case file; cite the concrete evidence paths or produce new valid evidence."
+      ]
+    : [];
   const evidenceToRead = [
     options.caseFile.prompt_path ?? "",
+    options.requirementEvidenceMapPath ?? "",
     ...options.patches.flatMap((patch) => Object.values(patch.artifact_paths).filter((path) => basename(path) === "evidence-patch.md"))
   ].filter(Boolean);
   const dedupedGuidance = [
@@ -866,6 +971,7 @@ function buildRetryDirective(options: {
       ...workspaceGuidance,
       ...environmentGuidance,
       ...validationGuidance,
+      ...evidenceMapGuidance,
       ...retryGuidance
     ])
   ].slice(0, 12);
@@ -932,10 +1038,13 @@ function buildRecoveryPlan(options: {
   patches: SupervisorEvidencePatch[];
   runtimeOverlay?: SupervisorRuntimeOverlay;
   causalContext?: SupervisorCausalContext;
+  requirementEvidenceMapPath?: string;
 }): SupervisorRecoveryPlan {
   const applyAction = selectApplyAction({
     action: options.action,
     classification: options.classification,
+    caseFile: options.caseFile,
+    requirementEvidenceMap: options.caseFile.requirement_evidence_map,
     patches: options.patches,
     ...(options.causalContext ? { causalContext: options.causalContext } : {})
   });
@@ -947,7 +1056,8 @@ function buildRecoveryPlan(options: {
           classification: options.classification,
           caseFile: options.caseFile,
           patches: options.patches,
-          ...(options.runtimeOverlay ? { runtimeOverlay: options.runtimeOverlay } : {})
+          ...(options.runtimeOverlay ? { runtimeOverlay: options.runtimeOverlay } : {}),
+          ...(options.requirementEvidenceMapPath ? { requirementEvidenceMapPath: options.requirementEvidenceMapPath } : {})
         })
       : undefined;
 
@@ -980,7 +1090,9 @@ function buildRecoveryPlan(options: {
           }
         }
       : {}),
-    ...(applyAction === "fail_terminal" ? { terminal_reason: options.classification.summary } : {}),
+    ...(applyAction === "fail_terminal" || applyAction === "fail_contract_gap"
+      ? { terminal_reason: options.caseFile.retry_blocked_reason ?? options.classification.summary }
+      : {}),
     confidence: conflicts.length > 0 ? "medium" : "high",
     merged_claims: mergedClaims,
     provenance: options.patches.map((patch) => ({
@@ -1089,6 +1201,8 @@ export async function runSupervisorRecoveryCycle(options: {
   await mkdir(interventionDir, { recursive: true });
   const caseFileJsonPath = join(interventionDir, "case-file.json");
   const caseFileMarkdownPath = join(interventionDir, "case-file.md");
+  const requirementEvidenceMapJsonPath = join(interventionDir, "requirement-evidence-map.json");
+  const requirementEvidenceMapMarkdownPath = join(interventionDir, "requirement-evidence-map.md");
   const causalCaseFileJsonPath = join(interventionDir, "causal-case-file.json");
   const causalCaseFileMarkdownPath = join(interventionDir, "causal-case-file.md");
   const causalTargetsJsonPath = join(interventionDir, "causal-targets.json");
@@ -1110,6 +1224,13 @@ export async function runSupervisorRecoveryCycle(options: {
     ? await readFile(options.attempt.prompt_path, "utf8").catch(() => undefined)
     : undefined;
   const causalCase = options.causal_context ? toCausalCaseFile(options.causal_context) : undefined;
+  const requirementEvidenceMap = buildRequirementEvidenceMap({
+    node: options.node,
+    attempt: options.attempt,
+    result: options.result,
+    generatedAt: startedAt
+  });
+  const evidenceMapDelta = selectEvidenceMapDelta(requirementEvidenceMap);
 
   const caseFile: SupervisorCaseFile = {
     case_id: options.intervention_id,
@@ -1141,6 +1262,11 @@ export async function runSupervisorRecoveryCycle(options: {
       stderr_path: options.attempt.stderr_log_path
     },
     artifacts: options.attempt.artifacts,
+    requirement_evidence_map: requirementEvidenceMap,
+    available_evidence: requirementEvidenceMap.available_evidence,
+    missing_evidence: requirementEvidenceMap.missing_evidence,
+    ...(evidenceMapDelta.delta ? { selected_delta: evidenceMapDelta.delta } : {}),
+    ...(evidenceMapDelta.blockedReason ? { retry_blocked_reason: evidenceMapDelta.blockedReason } : {}),
     prior_interventions: options.prior_interventions,
     evidence: options.classification.evidence,
     ...(causalCase ? { causal: causalCase } : {}),
@@ -1158,6 +1284,8 @@ export async function runSupervisorRecoveryCycle(options: {
         }
       : {})
   };
+  await writeFile(requirementEvidenceMapJsonPath, `${JSON.stringify(requirementEvidenceMap, null, 2)}\n`, "utf8");
+  await writeFile(requirementEvidenceMapMarkdownPath, renderRequirementEvidenceMapMarkdown(requirementEvidenceMap), "utf8");
   await writeFile(caseFileJsonPath, `${JSON.stringify(caseFile, null, 2)}\n`, "utf8");
   await writeFile(caseFileMarkdownPath, `${renderCaseFileMarkdown(caseFile)}\n`, "utf8");
   if (causalCase) {
@@ -1228,6 +1356,8 @@ export async function runSupervisorRecoveryCycle(options: {
   const plannedApplyAction = selectApplyAction({
     action: options.action,
     classification: options.classification,
+    caseFile,
+    requirementEvidenceMap,
     patches: evidencePatches,
     ...(options.causal_context ? { causalContext: options.causal_context } : {})
   });
@@ -1247,6 +1377,8 @@ export async function runSupervisorRecoveryCycle(options: {
     classification: options.classification,
     symptomCompiledId: options.node.compiled_id,
     ...(options.causal_context ? { causalContext: options.causal_context } : {}),
+    requirementEvidenceMap,
+    ...(evidenceMapDelta.delta ? { selectedDelta: evidenceMapDelta.delta } : {}),
     ...(contextRepairPatch ? { contextRepairPatch } : {}),
     ...(workspaceRepairPatch ? { workspaceRepairPatch } : {}),
     evidencePatches
@@ -1263,7 +1395,8 @@ export async function runSupervisorRecoveryCycle(options: {
     caseFile,
     patches: evidencePatches,
     ...(runtimeOverlay ? { runtimeOverlay } : {}),
-    ...(options.causal_context ? { causalContext: options.causal_context } : {})
+    ...(options.causal_context ? { causalContext: options.causal_context } : {}),
+    requirementEvidenceMapPath: requirementEvidenceMapMarkdownPath
   });
   await writeFile(recoveryPlanJsonPath, `${JSON.stringify(recoveryPlan, null, 2)}\n`, "utf8");
   await writeFile(recoveryPlanMarkdownPath, `${renderRecoveryPlanMarkdown(recoveryPlan)}\n`, "utf8");
@@ -1345,6 +1478,8 @@ export async function runSupervisorRecoveryCycle(options: {
     intervention_dir: interventionDir,
     case_file_json: caseFileJsonPath,
     case_file_markdown: caseFileMarkdownPath,
+    requirement_evidence_map_json: requirementEvidenceMapJsonPath,
+    requirement_evidence_map_markdown: requirementEvidenceMapMarkdownPath,
     ...(causalCase
       ? {
           causal_case_file_json: causalCaseFileJsonPath,
@@ -1393,7 +1528,7 @@ export async function runSupervisorRecoveryCycle(options: {
     intervention_id: options.intervention_id,
     decision_id: options.decision_id,
     action: options.action,
-    status: recoveryPlan.apply_action === "fail_terminal" ? "failed" : "passed",
+    status: recoveryPlan.apply_action === "fail_terminal" || recoveryPlan.apply_action === "fail_contract_gap" ? "failed" : "passed",
     target_compiled_id: recoveryPlan.recovery_target?.target_compiled_id ?? options.node.compiled_id,
     target_execution_id: recoveryPlan.recovery_target?.target_prior_execution_id ?? options.attempt.execution_id,
     started_at: startedAt,
@@ -1410,6 +1545,11 @@ export async function runSupervisorRecoveryCycle(options: {
         plan_id: recoveryPlan.plan_id,
         apply_action: recoveryPlan.apply_action,
         confidence: recoveryPlan.confidence
+      },
+      requirement_evidence_map: {
+        map_id: requirementEvidenceMap.map_id,
+        missing_count: requirementEvidenceMap.missing_evidence.length,
+        path: requirementEvidenceMapJsonPath
       },
       ...(recoveryPlan.recovery_target ? { recovery_target: recoveryPlan.recovery_target } : {})
     },

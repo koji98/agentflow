@@ -3,6 +3,6 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test": "node tests/recovery.test.js"
+    "test": "node scripts/validation-gate.js && node tests/recovery.test.js"
   }
 }

@@ -240,7 +240,9 @@
         "intent": {
           "goal": "Publish the final primitive-flow handoff.",
           "acceptance_criteria": [
-            "The handoff cites checkpoint feedback, validation, and primitive node coverage."
+            "The handoff cites checkpoint feedback, validation, and primitive node coverage.",
+            "The handoff includes a primitive evidence table with primitive, node id, and concrete evidence pointer.",
+            "The handoff states that the downstream `ai_review` node is the AI-check primitive and cannot have a completed result until after the handoff is reviewed."
           ],
           "constraints": []
         },
@@ -284,7 +286,7 @@
           "profile": "review"
         },
         "check_kind": "ai",
-        "rubric": "Return JSON only. Pass if the final handoff proves sequence, exec, parallel, repeat, agent, deterministic check, AI check, and checkpoint coverage.",
+        "rubric": "Return JSON only. Pass if the final handoff provides concrete evidence for sequence, exec, parallel, repeat, agent, deterministic check, and checkpoint coverage, and explicitly identifies this current `ai_review` evaluator as the AI-check primitive whose result is produced after handoff review.",
         "intent": {
           "goal": "AI-review the primitive coverage handoff.",
           "acceptance_criteria": [

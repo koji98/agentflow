@@ -314,6 +314,7 @@ export interface EvalTracePacket {
   };
   delivery: {
     manifest_path?: string;
+    review_brief_path?: string;
     manifest?: unknown;
   };
   metrics: {

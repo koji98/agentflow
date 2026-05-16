@@ -292,9 +292,9 @@ export function createRuntimeProgressReporter(
         }
 
         case "delivery.package.completed": {
-          const payload = event.payload as { manifest_path?: string; reviewer_guide?: string };
+          const payload = event.payload as { manifest_path?: string; review_brief?: string };
           writeLine(
-            `agentflow: delivery package ready${payload.manifest_path ? ` · ${payload.manifest_path}` : ""}${payload.reviewer_guide ? ` · reviewer=${payload.reviewer_guide}` : ""}`
+            `agentflow: delivery package ready${payload.manifest_path ? ` · ${payload.manifest_path}` : ""}${payload.review_brief ? ` · review=${payload.review_brief}` : ""}`
           );
           return;
         }

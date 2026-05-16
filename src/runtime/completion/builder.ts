@@ -48,6 +48,7 @@ interface HelperSessionSnapshot {
   parent_agent_id: string;
   status: "starting" | "running" | "completed" | "failed" | "canceled";
   purpose: HelperPurpose;
+  role?: "evidence_mapper" | "causal_investigator" | "verification_auditor" | "repair_planner";
   brief?: string;
   artifacts: Record<string, string>;
   evidence_ref: string;
@@ -70,6 +71,15 @@ function hasHelperStatus(value: string | undefined): HelperSessionSnapshot["stat
 
 function hasHelperPurpose(value: string | undefined): HelperPurpose | undefined {
   return value === "investigation" || value === "implementation" || value === "verification" || value === "repair"
+    ? value
+    : undefined;
+}
+
+function hasHelperRole(value: string | undefined): HelperSessionSnapshot["role"] | undefined {
+  return value === "evidence_mapper" ||
+    value === "causal_investigator" ||
+    value === "verification_auditor" ||
+    value === "repair_planner"
     ? value
     : undefined;
 }
@@ -752,6 +762,7 @@ async function readHelperSessions(options: BuildCompletionPacketOptions): Promis
     const parentAgentId = hasOwnString(parsed, "parent_agent_id");
     const status = hasHelperStatus(hasOwnString(parsed, "status"));
     const purpose = hasHelperPurpose(hasOwnString(parsed, "purpose"));
+    const role = hasHelperRole(hasOwnString(parsed, "role"));
     if (!agentId || !parentAgentId || parentAgentId !== options.attempt.execution_id || !status || !purpose) {
       return undefined;
     }
@@ -769,6 +780,7 @@ async function readHelperSessions(options: BuildCompletionPacketOptions): Promis
       parent_agent_id: parentAgentId,
       status,
       purpose,
+      ...(role ? { role } : {}),
       ...(brief ? { brief } : {}),
       artifacts,
       evidence_ref: evidenceRef
@@ -802,6 +814,7 @@ async function summarizeHelpers(options: BuildCompletionPacketOptions): Promise<
     latest: artifactState.slice(-5).map((entry) => ({
       agent_id: entry.session.agent_id,
       purpose: entry.session.purpose,
+      ...(entry.session.role ? { role: entry.session.role } : {}),
       status: entry.session.status,
       summary: entry.session.brief ?? `${entry.session.purpose} helper ${entry.session.status}`,
       artifact_refs: entry.present,

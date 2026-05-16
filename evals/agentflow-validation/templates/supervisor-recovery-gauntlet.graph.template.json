@@ -2,11 +2,11 @@
   "version": "1",
   "graph_id": "sentinel-supervisor-gauntlet-{{variant.id}}-{{trial.index}}",
   "intent": {
-    "goal": "Exercise support capabilities, managed tools, CLI hints, context pointers, downstream checks, and supervisor resume surfaces.",
+    "goal": "Exercise support capabilities, managed tools, CLI hints, context pointers, downstream checks, and supervisor authority-boundary/resume surfaces.",
     "acceptance_criteria": [
       "The node prompt includes selected skills, managed tools, CLI hints, and context pointer what/why.",
-      "The run produces reviewable evidence for missing context, stale docs, validation repair, workspace cleanup, and authority pause handling.",
-      "Supervisor resume input can continue a paused run when scripted."
+      "The run produces reviewable evidence for missing context, stale docs, validation repair, workspace cleanup, and authority-boundary handling.",
+      "The handoff truthfully distinguishes live pauses from scripted resume surfaces; it must not invent a human pause if the run did not pause."
     ],
     "constraints": [
       "Do not mutate remote services.",
@@ -98,7 +98,8 @@
           "goal": "Resolve the local monorepo recovery gauntlet and publish a handoff.",
           "acceptance_criteria": [
             "`npm test` passes.",
-            "The handoff discusses missing context, stale docs conflict, validation strategy repair, workspace pollution cleanup, authority pause, and resume evidence.",
+            "The handoff discusses missing context, stale docs conflict, validation strategy repair, workspace pollution cleanup, authority-boundary handling, and scripted resume evidence.",
+            "The handoff truthfully states whether a live human pause occurred and does not fabricate pause/resume evidence.",
             "The handoff cites context pointers and managed tool or CLI evidence."
           ],
           "constraints": [
@@ -151,7 +152,7 @@
           "handoff": {
             "from": "output_dir",
             "path": "handoff.md",
-            "description": "Supervisor gauntlet handoff with recovery classifications, validation, and risks."
+            "description": "Supervisor gauntlet handoff with recovery classifications, authority-boundary handling, validation, and risks."
           }
         }
       },
@@ -181,7 +182,7 @@
           "repo": "main"
         },
         "check_kind": "ai",
-        "rubric": "Return JSON only. Pass when the handoff contains concrete evidence for missing context, stale docs conflict, validation repair, workspace cleanup, authority pause, and resume behavior.",
+        "rubric": "Return JSON only. Pass when the handoff contains concrete evidence for missing context, stale docs conflict, validation repair, workspace cleanup, authority-boundary handling, and scripted resume behavior. Do not require evidence of a live human pause when the handoff truthfully says no pause occurred.",
         "intent": {
           "goal": "Review the supervisor gauntlet handoff semantically.",
           "acceptance_criteria": [

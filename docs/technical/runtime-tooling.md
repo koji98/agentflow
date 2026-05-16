@@ -188,7 +188,9 @@ Common commands:
 - `af artifact write <name>`: publish declared artifact content from stdin to its declared destination.
 - `af complete check`: build the runtime completion packet and report whether the current attempt is `ready_for_verification`, `incomplete`, or `blocked`.
 
-`af --help` is intentionally narrow for normal agents. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` are explicit supervisor or managed-pattern tools, but they are not part of the ordinary worker completion loop. There is no standalone `af wait`; `af spawn --purpose <investigation|implementation|verification|repair> ... --wait` is the blocking orchestration form when orchestration authority is granted.
+`af --help` is intentionally narrow for normal agents. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` are explicit supervisor or managed-pattern tools, but they are not part of the ordinary worker completion loop. There is no standalone `af wait`; `af spawn --role <evidence_mapper|causal_investigator|verification_auditor|repair_planner> ... --wait` is the read-only supervisor-helper form, and `af spawn --purpose <investigation|implementation|verification|repair> ... --wait` remains the managed-pattern helper form when orchestration authority is granted.
+
+Supervisor diagnostics include `af diagnose evidence-map --node <id> [--attempt latest|N] --json` and `af diagnose recovery-delta --case <case-file> --json`. Evidence maps connect failed requirements to available, missing, conflicting, or authority-bound evidence. Recovery deltas are advisory diagnostics; retries still require the engine to record a valid material delta in the recovery plan.
 
 The runtime CLI is file-backed. It coordinates through the run root and runtime directory, not through a live in-memory service exposed to the model.
 

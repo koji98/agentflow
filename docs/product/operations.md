@@ -104,7 +104,7 @@ Inspect reports:
 - failed nodes and stderr tails
 - run summary path
 - interventions ledger path
-- delivery package manifest and reviewer guide paths
+- delivery package manifest and review brief paths
 - delivery artifact taxonomy counts when the delivery manifest is available
 - recent events
 
@@ -113,9 +113,10 @@ Manual files worth opening:
 - `<run-root>/events.jsonl`
 - `<run-root>/interventions.jsonl`
 - `<run-root>/delivery/manifest.json`
-- `<run-root>/delivery/run-map.md`
-- `<run-root>/delivery/reviewer-guide.md`
-- `<run-root>/delivery/evaluation-ledger.json`
+- `<run-root>/delivery/01-review-brief.md`
+- `<run-root>/delivery/02-run-learnings.md`
+- `<run-root>/delivery/03-audit-index.md`
+- `<run-root>/delivery/evidence/validation-ledger.json`
 - `<run-root>/summary.md`
 
 Runtime coordination files are under `<run-root>/runtime/`. They are useful when debugging worker evidence and helper sub-nodes:
@@ -218,16 +219,15 @@ The real validator skips only when `codex-cli` is unavailable. When the binary e
 
 At terminal state, review in this order:
 
-1. `delivery/reviewer-guide.md`
-2. `delivery/task-brief.md`
-3. `delivery/implementation-summary.md`
-4. `delivery/risk-notes.md`
-5. `delivery/follow-up-items.md`
-6. `delivery/run-map.md` when you need the run tree explained
-7. evidence files named by `delivery/manifest.json`
-8. internal runtime artifacts only for resume debugging, failed repair diagnosis, or low-level audit
+1. `delivery/01-review-brief.md`
+2. `delivery/02-run-learnings.md`
+3. `delivery/03-audit-index.md` only when debugging or auditing raw evidence
+4. evidence files named by `delivery/manifest.json`
+5. internal runtime artifacts only for resume debugging, failed repair diagnosis, or low-level audit
 
-The reviewer guide should explain review order, risk areas, failed checks, supervisor interventions, and follow-up items. `delivery/manifest.json` includes an `artifact_taxonomy` that labels human entrypoints, declared artifacts, resume-required files, audit trail files, debug-only files, and empty/no-op files so operators do not have to guess which files are for review versus resume/debugging. Treat missing or low-quality delivery artifacts as a failed run quality signal even if code changes exist.
+The review brief is the primary human handoff: outcome, success contract, changed files, final declared artifacts, validation evidence, active risks, recovered issues, and intervention summary. Run learnings capture future improvements for workspace docs, tests, scripts, graph shape, skills, plugins, and evals. The audit index maps raw context packets, tool ledgers, milestones, supervisor timeline, and runtime logs without making them the default review path.
+
+`delivery/manifest.json` keeps semantic machine keys for human entrypoints and evidence files. Generated human-facing Markdown files use numeric prefixes so local file browsers present the review order clearly. Treat missing or low-quality delivery artifacts as a failed run quality signal even if code changes exist.
 
 ## Applying Captured Changes
 

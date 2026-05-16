@@ -191,6 +191,9 @@ function makeTarget(options: {
 }
 
 function classifyCurrentNodeOperation(classification: FailureClassification): SupervisorRecoveryOperation {
+  if (classification.class === "graph_context_gap" || classification.class === "unprovable_requirement") {
+    return "fail_contract_gap";
+  }
   if (classification.class === "context_contract_failure" || classification.class === "missing_context") {
     return "repair_context";
   }

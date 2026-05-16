@@ -215,6 +215,7 @@ export interface CompletionHelperSummary {
   latest: Array<{
     agent_id: string;
     purpose: HelperPurpose;
+    role?: "evidence_mapper" | "causal_investigator" | "verification_auditor" | "repair_planner";
     status: "starting" | "running" | "completed" | "failed" | "canceled";
     summary: string;
     artifact_refs: string[];

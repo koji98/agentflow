@@ -12,6 +12,7 @@ export type SupervisorActionKind = (typeof supervisorActionKinds)[number];
 
 export type FailureClass =
   | "context_contract_failure"
+  | "graph_context_gap"
   | "missing_context"
   | "missing_dependency_docs"
   | "wrong_local_pattern"
@@ -19,6 +20,8 @@ export type FailureClass =
   | "artifact_contract_failure"
   | "completion_contract_failure"
   | "semantic_misalignment"
+  | "unprovable_requirement"
+  | "authority_required"
   | "policy_or_scope_risk"
   | "harness_unavailable"
   | "operator_pause"
@@ -52,11 +55,14 @@ export type SupervisorRecoveryOperation =
   | "repair_upstream_node"
   | "repair_artifact"
   | "repair_context"
+  | "repair_evidence_context"
   | "repair_validation_strategy"
   | "repair_workspace"
   | "repair_environment"
+  | "rerun_check"
   | "investigate_causal_cone"
-  | "pause_for_authority";
+  | "pause_for_authority"
+  | "fail_contract_gap";
 
 export interface SupervisorCausalCaseFile {
   symptom: {
@@ -134,6 +140,11 @@ export interface SupervisorCaseFile {
   };
   result: Record<string, unknown>;
   artifacts: Record<string, string>;
+  requirement_evidence_map: SupervisorRequirementEvidenceMap;
+  available_evidence: SupervisorEvidenceReference[];
+  missing_evidence: SupervisorRequirementEvidence[];
+  selected_delta?: SupervisorMaterialDelta;
+  retry_blocked_reason?: string;
   prior_interventions: SupervisorInterventionRecord[];
   evidence: Record<string, unknown>;
   causal?: SupervisorCausalCaseFile;
@@ -171,13 +182,57 @@ export interface SupervisorEvidencePatch {
 export type SupervisorApplyAction =
   | "retry_node"
   | "repair_context"
+  | "repair_evidence_context"
   | "repair_artifact"
   | "repair_validation_strategy"
   | "repair_workspace"
   | "repair_environment"
+  | "rerun_check"
   | "retry_with_evidence"
   | "pause_for_authority"
-  | "fail_terminal";
+  | "fail_terminal"
+  | "fail_contract_gap";
+
+export type SupervisorRequirementEvidenceStatus =
+  | "available"
+  | "missing"
+  | "conflicting"
+  | "outside_authority"
+  | "unknown";
+
+export interface SupervisorEvidenceReference {
+  label: string;
+  path?: string;
+  url?: string;
+  digest?: string;
+  kind?: string;
+}
+
+export interface SupervisorRequirementEvidence {
+  id: string;
+  requirement: string;
+  source:
+    | "goal"
+    | "acceptance_criteria"
+    | "constraint"
+    | "check_rubric"
+    | "failure_issue"
+    | "failure_summary";
+  status: SupervisorRequirementEvidenceStatus;
+  evidence_refs: SupervisorEvidenceReference[];
+  missing_reason?: string;
+}
+
+export interface SupervisorRequirementEvidenceMap {
+  map_id: string;
+  node_compiled_id: string;
+  node_authored_id: string;
+  attempt_execution_id?: string;
+  generated_at: string;
+  requirements: SupervisorRequirementEvidence[];
+  available_evidence: SupervisorEvidenceReference[];
+  missing_evidence: SupervisorRequirementEvidence[];
+}
 
 export interface SupervisorContextRepairMaterial {
   key: string;
@@ -229,12 +284,13 @@ export interface SupervisorEnvironmentRepair {
 export interface SupervisorMaterialDelta {
   kind:
     | "context_changed"
+    | "context_overlay_added"
     | "workspace_cleaned"
     | "artifact_repaired"
     | "validation_strategy_changed"
     | "environment_repaired"
-    | "evidence_added"
-    | "recovery_target_changed";
+    | "requirement_evidence_mapped"
+    | "target_reranked_with_evidence";
   summary: string;
   artifact_paths?: Record<string, string>;
 }

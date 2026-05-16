@@ -428,7 +428,7 @@ export const resumeCommand = {
             run_root,
             run_id: runRecord.run_id,
             delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
-            reviewer_guide: `${artifactPaths.delivery_dir}/reviewer-guide.md`
+            review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md`
           }
         };
       }
@@ -697,7 +697,7 @@ export const resumeCommand = {
         supervisor_budget_reset: resetSupervisorBudget,
         supervisor_budget_remaining: resumed.state.supervisor.budget_remaining,
         delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
-        reviewer_guide: `${artifactPaths.delivery_dir}/reviewer-guide.md`,
+        review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md`,
         repo_workspaces: resumed.state.repo_workspaces,
         workspace_change_artifacts: resumed.state.workspace_change_artifacts,
         attempt_count: resumed.attempts.length,

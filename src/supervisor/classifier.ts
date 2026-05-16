@@ -248,6 +248,53 @@ export function classifyNodeFailure(input: {
   }
 
   if (
+    lowerMessage.includes("graph context gap") ||
+    lowerMessage.includes("graph-context gap") ||
+    lowerMessage.includes("required graph context is missing")
+  ) {
+    return classifyResult({
+      class: "graph_context_gap",
+      summary: message || "The graph did not provide evidence needed to complete the requirement.",
+      retryable: false,
+      recommended_action: "fail",
+      gather_plan: noGatherPlan(),
+      evidence
+    });
+  }
+
+  if (
+    lowerMessage.includes("unprovable requirement") ||
+    lowerMessage.includes("cannot prove the requirement") ||
+    lowerMessage.includes("no available evidence can prove")
+  ) {
+    return classifyResult({
+      class: "unprovable_requirement",
+      summary: message || "The requirement cannot be proven from the current graph evidence.",
+      retryable: false,
+      recommended_action: "fail",
+      gather_plan: noGatherPlan(),
+      evidence
+    });
+  }
+
+  if (
+    lowerMessage.includes("authority required") ||
+    lowerMessage.includes("requires authority") ||
+    lowerMessage.includes("requires credential") ||
+    lowerMessage.includes("requires approval") ||
+    lowerMessage.includes("requires remote side effect")
+  ) {
+    return classifyResult({
+      class: "authority_required",
+      summary: message || "Recovery requires authority the supervisor cannot infer.",
+      retryable: false,
+      recommended_action: "pause_for_human",
+      gather_plan: noGatherPlan(),
+      evidence
+    });
+  }
+
+  if (
     lowerMessage.includes("non-recoverable") ||
     lowerMessage.includes("nonrecoverable") ||
     lowerMessage.includes("cannot recover") ||

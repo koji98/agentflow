@@ -271,7 +271,7 @@ export const runCommand = {
         intervention_count: run.state.supervisor.intervention_count,
         supervisor_budget_remaining: run.state.supervisor.budget_remaining,
         delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
-        reviewer_guide: `${artifactPaths.delivery_dir}/reviewer-guide.md`,
+        review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md`,
         repo_workspaces: run.state.repo_workspaces,
         workspace_change_artifacts: run.state.workspace_change_artifacts,
         attempt_count: run.attempts.length,

@@ -236,9 +236,10 @@ export function renderRunSummary(
       "## Delivery Package",
       "",
       `- Manifest: \`${deliveryManifest.manifest_path}\``,
-      `- Reviewer guide: \`${deliveryManifest.sections.reviewer_guide}\``,
+      `- Review brief: \`${deliveryManifest.sections.review_brief}\``,
       `- Intervention count: \`${deliveryManifest.intervention_count}\``,
-      `- Failed evidence count: \`${deliveryManifest.failed_check_count}\``,
+      `- Active failure count: \`${deliveryManifest.active_failure_count}\``,
+      `- Recovered issue count: \`${deliveryManifest.recovered_issue_count}\``,
       ""
     );
   }

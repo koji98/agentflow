@@ -237,10 +237,15 @@ process.stdin.on("end", () => {
 }
 async function assertDeliveryAndInspect(runRoot: string, expectedStatus = "passed") {
     const manifestPath = join(runRoot, "delivery", "manifest.json");
-    const reviewerGuidePath = join(runRoot, "delivery", "reviewer-guide.md");
-    const implementationSummaryPath = join(runRoot, "delivery", "implementation-summary.md");
+    const reviewBriefPath = join(runRoot, "delivery", "01-review-brief.md");
+    const runLearningsPath = join(runRoot, "delivery", "02-run-learnings.md");
     const manifest = await readJson<{
         status: string;
+        human_entrypoints: {
+            review_brief: string;
+            run_learnings: string;
+            audit_index: string;
+        };
         artifact_taxonomy: {
             declared_artifacts: Array<{
                 label: string;
@@ -248,15 +253,18 @@ async function assertDeliveryAndInspect(runRoot: string, expectedStatus = "passe
             }>;
         };
     }>(manifestPath);
-    const reviewerGuide = await readFile(reviewerGuidePath, "utf8");
-    const implementationSummary = await readFile(implementationSummaryPath, "utf8");
+    const reviewBrief = await readFile(reviewBriefPath, "utf8");
+    const runLearnings = await readFile(runLearningsPath, "utf8");
     const inspect = await executeCli(["inspect", runRoot]);
     const inspectPayload = JSON.parse(inspect.stdout);
     expect(manifest.status).toBe(expectedStatus);
-    expect(reviewerGuide).toContain("Reviewer Guide");
-    expect(implementationSummary).toContain("Declared Handoff Artifacts");
+    expect(manifest.human_entrypoints.review_brief).toBe(reviewBriefPath);
+    expect(reviewBrief).toContain("Review Brief");
+    expect(reviewBrief).toContain("Final Declared Artifacts");
+    expect(runLearnings).toContain("Run Learnings");
     expect(inspect.exitCode).toBe(0);
     expect(inspectPayload.run_status).toBe(expectedStatus);
+    expect(inspectPayload.review_brief).toBe(reviewBriefPath);
     expect(inspectPayload.delivery_artifact_taxonomy).toEqual(expect.objectContaining({
         human_entrypoints: expect.any(Number),
         declared_artifacts: expect.any(Number),

@@ -58,7 +58,7 @@
             "Write the declared `handoff` artifact.",
             "Include literal labels `Scenario:`, `Evidence:`, `Validation:`, `Risks:`, and `Completion:`.",
             "Run or cite the local validation/tool command when the scenario asks for one.",
-            "Use `af` runtime logging when the scenario asks for a progress, finding, or decision record.",
+            "Use `af milestone` evidence logs when the scenario asks for a progress, finding, validation, or decision record.",
             "Run `af complete check` before the final response and stop when it reports ready for verification."
           ],
           "constraints": [

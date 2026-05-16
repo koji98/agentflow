@@ -98,7 +98,7 @@ describe("supervisor recovery cycle", () => {
         expect(recovery.evidence_patches.map((patch) => patch.kind)).toEqual(["dependency_metadata", "external_context"]);
         expect(recovery.recovery_plan.runtime_overlay?.material_delta).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                kind: "evidence_added"
+                kind: "requirement_evidence_mapped"
             })
         ]));
         expect(recovery.recovery_envelope?.retry_directive.unchanged_contract).toEqual({
@@ -287,9 +287,52 @@ describe("supervisor recovery cycle", () => {
         });
         expect(recovery.recovery_plan.runtime_overlay?.material_delta).not.toEqual(expect.arrayContaining([
             expect.objectContaining({
-                kind: "recovery_target_changed"
+                kind: "target_reranked_with_evidence"
             })
         ]));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("stops repeated semantic failures when no material evidence delta exists", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-no-delta-stop-"));
+        const runtimeAttempt = attempt(tempRoot);
+        delete runtimeAttempt.prompt_path;
+        delete runtimeAttempt.context_manifest_path;
+        const failedResult: RuntimeNodeExecutionResult = {
+            status: "failed",
+            outcome: "failed",
+            result: { exit_code: 1 },
+            stdout: "",
+            stderr: "AI evaluator returned a failing judgment without evidence to prove the required behavior."
+        };
+        const classification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: failedResult,
+            repeated_fingerprint_count: 2
+        });
+        const recovery = await runSupervisorRecoveryCycle({
+            action: "run_diagnostic",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: failedResult,
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification,
+            failure_fingerprint: "fingerprint-1",
+            repeated_fingerprint_count: 2,
+            prior_interventions: [],
+            workspace_path: tempRoot
+        });
+        expect(recovery.recovery_plan.apply_action).toBe("fail_contract_gap");
+        expect(recovery.recovery_plan.terminal_reason).toContain("No available run evidence");
+        expect(recovery.recovery_envelope).toBeUndefined();
+        expect(recovery.intervention.status).toBe("failed");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("writes a workspace repair overlay when failed-attempt changes can be restored", async () => {

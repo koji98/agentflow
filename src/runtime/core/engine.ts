@@ -1751,7 +1751,7 @@ async function handleFailedNodeWithSupervisor(options: {
     return false;
   }
 
-  if (recovery.recovery_plan.apply_action === "fail_terminal") {
+  if (recovery.recovery_plan.apply_action === "fail_terminal" || recovery.recovery_plan.apply_action === "fail_contract_gap") {
     options.session.supervisor.status = "exhausted";
     return false;
   }
@@ -1765,9 +1765,11 @@ async function handleFailedNodeWithSupervisor(options: {
     options.session.manifest.repo_workspaces[recoveryTargetNode.repo]?.workspace_path ?? options.attempt.execution_dir;
   const retryableOverlayAction = [
     "repair_context",
+    "repair_evidence_context",
     "repair_validation_strategy",
     "repair_workspace",
     "repair_environment",
+    "rerun_check",
     "retry_with_evidence"
   ].includes(recovery.recovery_plan.apply_action);
   const hasMaterialDelta = (recovery.recovery_plan.runtime_overlay?.material_delta.length ?? 0) > 0;
@@ -4424,9 +4426,10 @@ async function finalizeRun(
     });
     await emitEvent(session, writer, runOwner, events, onEvent, "delivery.package.completed", {
       manifest_path: deliveryManifest.manifest_path,
-      reviewer_guide: deliveryManifest.sections.reviewer_guide,
+      review_brief: deliveryManifest.sections.review_brief,
       intervention_count: deliveryManifest.intervention_count,
-      failed_check_count: deliveryManifest.failed_check_count
+      active_failure_count: deliveryManifest.active_failure_count,
+      recovered_issue_count: deliveryManifest.recovered_issue_count
     });
     state = buildRuntimeStateSnapshot(session);
     attempts = await readRunExecutionAttempts(writer.run_root);

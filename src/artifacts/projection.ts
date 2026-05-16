@@ -69,7 +69,7 @@ export interface ProjectedRunSummary {
   supervisor_status: RuntimeStateSnapshot["supervisor"]["status"];
   intervention_count: number;
   delivery_manifest: string;
-  reviewer_guide: string;
+  review_brief: string;
   started_at: string;
   ended_at?: string;
 }
@@ -308,7 +308,7 @@ function buildRunSummary(
     supervisor_status: state.supervisor.status,
     intervention_count: state.supervisor.intervention_count,
     delivery_manifest: `${deliveryDir}/manifest.json`,
-    reviewer_guide: `${deliveryDir}/reviewer-guide.md`,
+    review_brief: `${deliveryDir}/01-review-brief.md`,
     started_at: state.started_at,
     ...(state.ended_at ? { ended_at: state.ended_at } : {})
   };
