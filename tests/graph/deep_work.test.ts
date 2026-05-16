@@ -170,6 +170,14 @@ describe("pattern deep work", () => {
         if (!criteriaPanel || criteriaPanel.type !== "parallel") {
             throw new Error("Expected completion criteria to run in parallel.");
         }
+        for (const loweredNode of [planNode, generateValidateNode, gateNode, finalNode, ...criteriaPanel.steps]) {
+            expect(loweredNode).toEqual(expect.objectContaining({
+                runtime: {
+                    repo: "main",
+                    profile: "default"
+                }
+            }));
+        }
         expect(criteriaPanel.steps).toHaveLength(3);
         expect(criteriaPanel.steps[0]).toEqual(expect.objectContaining({
             type: "check",

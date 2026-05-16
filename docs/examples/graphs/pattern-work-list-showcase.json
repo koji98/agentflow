@@ -1,0 +1,133 @@
+{
+  "version": "1",
+  "graph_id": "pattern-work-list-showcase",
+  "intent": {
+    "goal": "Demonstrate a managed work-list pattern for bounded unknown work items.",
+    "acceptance_criteria": [
+      "The graph validates against the current v1 contract.",
+      "The managed node plans, freezes, executes, verifies, and publishes stable work-list artifacts.",
+      "A downstream deterministic check verifies the stable work_items artifact."
+    ],
+    "constraints": [
+      "Do not depend on dynamic item refs."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "../../.."
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "inplace"
+  },
+  "profiles": {
+    "default": {
+      "harness": "codex-cli",
+      "sandbox": "workspace-write"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_work_list",
+        "id": "bounded_delivery",
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "intent": {
+          "goal": "Inspect the repository docs and produce a bounded list of documentation quality observations.",
+          "acceptance_criteria": [
+            "The work list is frozen before execution starts.",
+            "Every item has a completed evidence handoff.",
+            "The final handoff summarizes completed observations, validation evidence, risks, and downstream constraints."
+          ],
+          "constraints": [
+            "Do not edit repository files."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "kind": "workspace_file",
+              "name": "docs_readme",
+              "path": "docs/README.md",
+              "what": "Documentation entrypoint.",
+              "why": "The work-list planner needs a bounded source file for the showcase task."
+            }
+          ]
+        },
+        "work_list": {
+          "planning_goal": "Discover the ordered documentation observations needed to satisfy this showcase contract.",
+          "item_guidance": {
+            "what_counts_as_one_item": "One coherent documentation observation with its own evidence handoff.",
+            "done_when": [
+              "The observation is grounded in the provided docs pointer.",
+              "Relevant evidence is cited.",
+              "The item handoff records result, evidence, risks, and downstream implications."
+            ]
+          },
+          "item_worker": {
+            "kind": "agent"
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "verify_work_items_artifact",
+        "check_kind": "deterministic",
+        "command": "node",
+        "args": [
+          "-e",
+          "const fs=require('node:fs'); const path=require('node:path'); const input=process.env.AGENTFLOW_CONTEXT_WORK_ITEMS; const outputDir=process.env.AGENTFLOW_OUTPUT_DIR; const data=JSON.parse(fs.readFileSync(input,'utf8')); const items=Array.isArray(data.items)?data.items:[]; const passed=data.status==='completed' && items.length>0 && items.every((item,index)=>item && item.id===`w${index+1}` && item.status==='completed' && typeof item.summary==='string' && item.summary.trim().length>0); const result={passed,status:data.status,item_count:items.length}; if (outputDir) { fs.mkdirSync(outputDir,{recursive:true}); fs.writeFileSync(path.join(outputDir,'verification.json'), JSON.stringify(result,null,2)+'\\n'); } console.log(JSON.stringify(result)); process.exit(passed?0:1);"
+        ],
+        "pass_if": {
+          "json_path": "$.passed",
+          "equals": true
+        },
+        "intent": {
+          "goal": "Verify the managed work-list node published a stable completed work_items artifact.",
+          "acceptance_criteria": [
+            "The artifact status is completed.",
+            "The artifact includes at least one sequential completed item with a summary."
+          ],
+          "constraints": [
+            "Do not edit repository files."
+          ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "kind": "artifact",
+              "name": "work_items",
+              "ref": "bounded_delivery.work_items",
+              "what": "Stable public work item index from the managed work-list node.",
+              "why": "The deterministic check verifies downstream nodes can consume the stable graph-addressable artifact."
+            }
+          ]
+        },
+        "artifacts": {
+          "verification": {
+            "from": "output_dir",
+            "path": "verification.json",
+            "description": "Structured result for the work_items artifact verification."
+          }
+        }
+      }
+    ]
+  }
+}

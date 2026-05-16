@@ -15,7 +15,8 @@ describe("managed pattern registry", () => {
 
     expect(statuses).toEqual({
       pattern_deep_research: "implemented",
-      pattern_deep_work: "implemented"
+      pattern_deep_work: "implemented",
+      pattern_work_list: "implemented"
     });
 
     managedPatternDescriptors.forEach((descriptor) => {

@@ -30,6 +30,24 @@ Good for:
 
 Completion criteria should mix hard commands when stable and rubric criteria when correctness is semantic. Required criteria are blockers. Weights should reflect the evidence that matters, not equal distribution by habit.
 
+## `pattern_work_list`
+
+Use when the task is "discover the finite list, freeze it, then work the list to a stable handoff."
+
+Good for:
+
+- reviewable implementation slices when the exact slice count is unknown upfront
+- migration batches
+- documentation passes
+- audit findings
+- cleanup lists with bounded scope
+
+The planner writes `work-list.md` and `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Agents do not check off items manually. Runtime records item status in the ledger and publishes stable public artifacts: `summary`, `packet`, and `work_items`.
+
+Use `item_worker.kind: "agent"` for one-pass item execution. Use `item_worker.kind: "deep_work"` when the frozen list needs criteria, scorecard feedback, and bounded retries before publishing. Work-list rubric criteria can target `workspace`, `item_handoff`, or `work_list_ledger`.
+
+Downstream nodes should reference stable artifacts such as `my_work_list.work_items`; do not depend on dynamic item ids like `my_work_list.w3`.
+
 ## Avoid
 
 - Using managed patterns to hide vague requirements.

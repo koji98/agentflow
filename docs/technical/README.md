@@ -28,7 +28,6 @@ flowchart LR
 5. `outcome-verification.md`: how every passing `agent` attempt is graded by a fresh-context verifier, what the verifier prompt and output schema look like, and how rejection routes through the supervisor.
 6. `prompt-surfaces.md`: canonical prompt renderer inventory, section model, authority boundaries, and prompt coverage.
 7. `prompt-cruft-rubric.md`: rejection rubric for prompt text that does not map to a real contract or eval.
-8. `prompt-iteration-report.md`: index of dated prompt iteration reports and the report template.
 
 ## Medium-Level Model
 

@@ -441,7 +441,7 @@ function latestOutcomeOverall(session: RuntimeSession, compiledId: string): Grap
 }
 
 interface ManagedProgressInfo {
-  managed_kind: "pattern_deep_research" | "pattern_deep_work";
+  managed_kind: "pattern_deep_research" | "pattern_deep_work" | "pattern_work_list";
   managed_authored_id: string;
   phase: string;
 }
@@ -450,7 +450,11 @@ function parseManagedAuthoredId(
   authoredId: string,
   loweredFrom?: CompiledExecutableNode["lowered_from"]
 ): ManagedProgressInfo | undefined {
-  if (loweredFrom === "pattern_deep_research" || loweredFrom === "pattern_deep_work") {
+  if (
+    loweredFrom === "pattern_deep_research"
+    || loweredFrom === "pattern_deep_work"
+    || loweredFrom === "pattern_work_list"
+  ) {
     return {
       managed_kind: loweredFrom,
       managed_authored_id: authoredId,
@@ -458,7 +462,7 @@ function parseManagedAuthoredId(
     };
   }
 
-  for (const managedKind of ["pattern_deep_research", "pattern_deep_work"] as const) {
+  for (const managedKind of ["pattern_deep_research", "pattern_deep_work", "pattern_work_list"] as const) {
     const marker = `__managed__${managedKind}__`;
     const markerIndex = authoredId.indexOf(marker);
 

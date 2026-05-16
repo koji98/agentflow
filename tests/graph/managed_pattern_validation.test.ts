@@ -48,7 +48,7 @@ describe("managed pattern normalization edges", () => {
         expect(normalized.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 path: "$.graph.steps[0].type",
-                message: "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_deep_work."
+                message: "Node type must be one of: agent, exec, check, checkpoint, sequence, parallel, repeat, pattern_deep_research, pattern_deep_work, pattern_work_list."
             })
         ]));
     });
@@ -220,5 +220,163 @@ describe("managed pattern normalization edges", () => {
                 message: "Expected one of: command, rubric."
             })
         ]));
+    });
+    it("validates work-list required planning and guidance fields", () => {
+        const normalized = normalizeAuthoredGraphDocument(buildEnvelope({
+            type: "pattern_work_list",
+            id: "deliver",
+            intent: {
+                goal: "Deliver a bounded work list.",
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                constraints: []
+            },
+            work_list: {
+                item_guidance: {
+                    what_counts_as_one_item: "One coherent reviewable unit.",
+                    done_when: []
+                },
+                item_worker: {
+                    kind: "agent"
+                }
+            }
+        }));
+        expect(normalized.document).toBeUndefined();
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].work_list.planning_goal",
+                message: "Expected a non-empty string."
+            }),
+            expect.objectContaining({
+                path: "$.graph.steps[0].work_list.item_guidance.done_when",
+                message: "pattern_work_list.work_list.item_guidance.done_when must include at least one item."
+            })
+        ]));
+    });
+    it("rejects unsupported work-list item worker kinds", () => {
+        const normalized = normalizeAuthoredGraphDocument(buildEnvelope({
+            type: "pattern_work_list",
+            id: "deliver",
+            intent: {
+                goal: "Deliver a bounded work list.",
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                constraints: []
+            },
+            work_list: {
+                planning_goal: "Discover the ordered work items needed for the node.",
+                item_guidance: {
+                    what_counts_as_one_item: "One coherent reviewable unit.",
+                    done_when: ["The item is complete with evidence."]
+                },
+                item_worker: {
+                    kind: "simple"
+                }
+            }
+        }));
+        expect(normalized.document).toBeUndefined();
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].work_list.item_worker.kind",
+                message: "Expected one of: agent, deep_work."
+            })
+        ]));
+    });
+    it("requires completion criteria for deep_work item workers", () => {
+        const normalized = normalizeAuthoredGraphDocument(buildEnvelope({
+            type: "pattern_work_list",
+            id: "deliver",
+            intent: {
+                goal: "Deliver a bounded work list.",
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                constraints: []
+            },
+            work_list: {
+                planning_goal: "Discover the ordered work items needed for the node.",
+                item_guidance: {
+                    what_counts_as_one_item: "One coherent reviewable unit.",
+                    done_when: ["The item is complete with evidence."]
+                },
+                item_worker: {
+                    kind: "deep_work",
+                    completion: {
+                        criteria: []
+                    }
+                }
+            }
+        }));
+        expect(normalized.document).toBeUndefined();
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].work_list.item_worker.completion.criteria",
+                message: "pattern_work_list deep_work item workers require at least one completion criterion."
+            })
+        ]));
+    });
+    it("rejects work-list rubric targets outside runtime item evidence", () => {
+        const normalized = normalizeAuthoredGraphDocument(buildEnvelope({
+            type: "pattern_work_list",
+            id: "deliver",
+            intent: {
+                goal: "Deliver a bounded work list.",
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                constraints: []
+            },
+            work_list: {
+                planning_goal: "Discover the ordered work items needed for the node.",
+                item_guidance: {
+                    what_counts_as_one_item: "One coherent reviewable unit.",
+                    done_when: ["The item is complete with evidence."]
+                },
+                item_worker: {
+                    kind: "deep_work",
+                    completion: {
+                        criteria: [
+                            {
+                                id: "summary_quality",
+                                kind: "rubric",
+                                target: "artifact:summary",
+                                rubric: "The final summary is useful.",
+                                weight: 1
+                            }
+                        ]
+                    }
+                }
+            }
+        }));
+        expect(normalized.document).toBeUndefined();
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].work_list.item_worker.completion.criteria[0].target",
+                message: 'work-list rubric target must be "workspace", "item_handoff", or "work_list_ledger".'
+            })
+        ]));
+    });
+    it("accepts work-list agent item workers and default public artifacts", () => {
+        const normalized = normalizeAuthoredGraphDocument(buildEnvelope({
+            type: "pattern_work_list",
+            id: "deliver",
+            intent: {
+                goal: "Deliver a bounded work list.",
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                constraints: []
+            },
+            work_list: {
+                planning_goal: "Discover the ordered work items needed for the node.",
+                item_guidance: {
+                    what_counts_as_one_item: "One coherent reviewable unit.",
+                    done_when: ["The item is complete with evidence."]
+                },
+                item_worker: {
+                    kind: "agent"
+                }
+            }
+        }));
+        expect(normalized.diagnostics).toEqual([]);
+        expect(normalized.lowered_managed_nodes).toEqual([
+            {
+                authored_id: "deliver",
+                managed_kind: "pattern_work_list",
+                lowered_to: "sequence"
+            }
+        ]);
     });
 });

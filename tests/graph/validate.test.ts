@@ -223,6 +223,152 @@ describe("graph validation", () => {
             })
         ]));
     });
+    it("rejects authored repeat nodes nested inside another repeat", async () => {
+        const diagnostics = await validateGraph({
+            version: "1",
+            graph_id: "invalid-nested-repeat",
+            intent: TEST_INTENT,
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "repeat",
+                        id: "outer_retry",
+                        max_attempts: 2,
+                        body: {
+                            type: "sequence",
+                            id: "outer_body",
+                            steps: [
+                                {
+                                    type: "repeat",
+                                    id: "inner_retry",
+                                    max_attempts: 2,
+                                    body: {
+                                        type: "sequence",
+                                        id: "inner_body",
+                                        steps: [
+                                            {
+                                                type: "check",
+                                                id: "inner_gate",
+                                                check_kind: "deterministic",
+                                                command: "true"
+                                            }
+                                        ]
+                                    },
+                                    until: {
+                                        node: "inner_gate"
+                                    }
+                                },
+                                {
+                                    type: "check",
+                                    id: "outer_gate",
+                                    check_kind: "deterministic",
+                                    command: "true"
+                                }
+                            ]
+                        },
+                        until: {
+                            node: "outer_gate"
+                        }
+                    }
+                ]
+            }
+        });
+        expect(diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].body.steps[0]",
+                message: expect.stringContaining("Nested repeat nodes are not supported")
+            })
+        ]));
+    });
+    it("rejects pattern_deep_work inside repeat because it lowers to an internal repeat", async () => {
+        const diagnostics = await validateGraph({
+            version: "1",
+            graph_id: "invalid-deep-work-in-repeat",
+            intent: TEST_INTENT,
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "repeat",
+                        id: "outer_retry",
+                        max_attempts: 2,
+                        body: {
+                            type: "sequence",
+                            id: "outer_body",
+                            steps: [
+                                {
+                                    type: "pattern_deep_work",
+                                    id: "managed_work",
+                                    intent: {
+                                        goal: "Publish a nested managed handoff.",
+                                        acceptance_criteria: ["The managed work produces a summary."],
+                                        constraints: ["Do not edit lockfiles."]
+                                    },
+                                    completion: {
+                                        max_cycles: 1,
+                                        pass_threshold: 1,
+                                        criteria: [
+                                            {
+                                                id: "summary_quality",
+                                                kind: "rubric",
+                                                target: "artifact:summary",
+                                                rubric: "The summary satisfies the managed work goal.",
+                                                weight: 1,
+                                                required: true
+                                            }
+                                        ]
+                                    }
+                                },
+                                {
+                                    type: "check",
+                                    id: "outer_gate",
+                                    check_kind: "deterministic",
+                                    command: "true"
+                                }
+                            ]
+                        },
+                        until: {
+                            node: "outer_gate"
+                        }
+                    }
+                ]
+            }
+        });
+        expect(diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                message: expect.stringContaining("pattern_deep_work lowers to an internal repeat")
+            })
+        ]));
+    });
     it("rejects checkpoint nodes outside repeat bodies", async () => {
         const diagnostics = await validateGraph({
             version: "1",

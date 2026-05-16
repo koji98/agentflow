@@ -923,6 +923,15 @@ async function validateNormalizedDocument(
 
   visitNodes(document.graph, (node, metadata) => {
     if (node.type === "repeat") {
+      if (metadata.nearest_repeat_id) {
+        diagnostics.push({
+          path: metadata.path,
+          message:
+            `Nested repeat nodes are not supported in this release; repeat "${node.id}" is inside repeat "${metadata.nearest_repeat_id}". ` +
+            "pattern_deep_work lowers to an internal repeat, so do not place pattern_deep_work inside an authored repeat."
+        });
+      }
+
       const descendants = collectDescendantNodes(node.body);
       const untilTarget = descendants.find((descendant) => descendant.id === node.until.node);
 

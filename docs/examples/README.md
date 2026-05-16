@@ -4,7 +4,7 @@ These examples are runnable references for the product docs.
 
 ## Graphs
 
-`graphs/` contains graph examples for validation, plugin resolution, managed patterns, and read-only showcase runs.
+`graphs/` contains graph examples for validation, plugin resolution, managed patterns, work-list orchestration, and read-only showcase runs.
 
 ## Evals
 

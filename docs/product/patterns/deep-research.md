@@ -17,8 +17,7 @@ Required fields:
 Common fields:
 
 - `intent.constraints`
-- `repo`
-- `profile`
+- `runtime`
 - `support`
 
 ## Public Artifacts

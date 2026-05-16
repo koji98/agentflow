@@ -5,7 +5,8 @@ export const containerNodeKinds = ["sequence", "parallel", "repeat"] as const;
 export const authoredNodeKinds = [...executableNodeKinds, ...containerNodeKinds] as const;
 export const managedPatternKinds = [
   "pattern_deep_research",
-  "pattern_deep_work"
+  "pattern_deep_work",
+  "pattern_work_list"
 ] as const;
 export const workspaceBackends = ["inplace", "worktree"] as const;
 export const harnessNames = ["codex-cli", "cursor-cli"] as const;

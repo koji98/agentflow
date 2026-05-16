@@ -70,6 +70,17 @@ import {
   type PatternDeepWorkRubricCriterion
 } from "../managed/pattern_deep_work.js";
 import {
+  buildPatternWorkList,
+  type PatternWorkListBlock,
+  type PatternWorkListCommandCriterion,
+  type PatternWorkListCompletionCriterion,
+  type PatternWorkListConfig,
+  type PatternWorkListDeepWorkCompletion,
+  type PatternWorkListItemGuidance,
+  type PatternWorkListItemWorker,
+  type PatternWorkListRubricCriterion
+} from "../managed/pattern_work_list.js";
+import {
   defaultManagedPublicArtifacts,
   type ManagedPatternAgentOptions,
   type ManagedPatternRuntime
@@ -2212,9 +2223,13 @@ function normalizeManagedRuntime(
 
   pushUnknownKeyDiagnostics(record, path, ["repo", "profile", "max_concurrency"], diagnostics);
 
+  const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
+  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
   const max_concurrency = readPositiveInteger(record.max_concurrency, `${path}.max_concurrency`, diagnostics);
 
   return {
+    ...(repo ? { repo } : {}),
+    ...(profile ? { profile } : {}),
     ...(max_concurrency !== undefined ? { max_concurrency } : {})
   };
 }
@@ -2720,6 +2735,360 @@ function normalizePatternDeepWorkNode(
   });
 }
 
+function normalizeWorkListRubricTarget(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternWorkListRubricCriterion["target"] | undefined {
+  const target = readRequiredString(value, path, diagnostics);
+  if (!target) {
+    return undefined;
+  }
+
+  if (target === "workspace" || target === "item_handoff" || target === "work_list_ledger") {
+    return target;
+  }
+
+  diagnostics.push({
+    path,
+    message: 'work-list rubric target must be "workspace", "item_handoff", or "work_list_ledger".'
+  });
+  return undefined;
+}
+
+function normalizeWorkListCompletionCriterion(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternWorkListCompletionCriterion | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "work-list completion criteria must be objects."
+    });
+    return undefined;
+  }
+
+  const kind = readEnumValue(
+    record.kind,
+    `${path}.kind`,
+    ["command", "rubric"] as const,
+    diagnostics,
+    { required: true }
+  );
+  const id = normalizeCriterionId(record.id, `${path}.id`, diagnostics);
+  const weight = readBoundedNumber(record.weight, `${path}.weight`, diagnostics, {
+    minimum: 0,
+    maximum: 1,
+    required: true
+  });
+  const required = readBoolean(record.required, `${path}.required`, diagnostics);
+
+  if (kind === "command") {
+    pushUnknownKeyDiagnostics(record, path, ["id", "kind", "command", "weight", "required"], diagnostics);
+    const command = readRequiredString(record.command, `${path}.command`, diagnostics);
+
+    if (!id || weight === undefined || !command) {
+      return undefined;
+    }
+
+    return {
+      id,
+      kind,
+      command,
+      weight,
+      ...(required !== undefined ? { required } : {})
+    } satisfies PatternWorkListCommandCriterion;
+  }
+
+  if (kind === "rubric") {
+    pushUnknownKeyDiagnostics(record, path, ["id", "kind", "target", "rubric", "weight", "required"], diagnostics);
+    const target = normalizeWorkListRubricTarget(record.target, `${path}.target`, diagnostics);
+    const rubric = readRequiredString(record.rubric, `${path}.rubric`, diagnostics);
+
+    if (!id || weight === undefined || !target || !rubric) {
+      return undefined;
+    }
+
+    return {
+      id,
+      kind,
+      target,
+      rubric,
+      weight,
+      ...(required !== undefined ? { required } : {})
+    } satisfies PatternWorkListRubricCriterion;
+  }
+
+  return undefined;
+}
+
+function normalizeWorkListDeepWorkCompletion(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternWorkListDeepWorkCompletion | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_work_list.item_worker.completion must be an object for deep_work item workers."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["max_cycles", "pass_threshold", "criteria"], diagnostics);
+
+  const max_cycles = readBoundedInteger(record.max_cycles, `${path}.max_cycles`, diagnostics, {
+    minimum: 1,
+    maximum: 5
+  }) ?? 3;
+  const pass_threshold = readBoundedNumber(record.pass_threshold, `${path}.pass_threshold`, diagnostics, {
+    minimum: 0,
+    maximum: 1
+  }) ?? 0.85;
+
+  if (!Array.isArray(record.criteria)) {
+    diagnostics.push({
+      path: `${path}.criteria`,
+      message: "pattern_work_list.item_worker.completion.criteria must be an array."
+    });
+    return undefined;
+  }
+
+  if (record.criteria.length === 0) {
+    diagnostics.push({
+      path: `${path}.criteria`,
+      message: "pattern_work_list deep_work item workers require at least one completion criterion."
+    });
+  }
+
+  const criteria = record.criteria
+    .map((criterion, index) => normalizeWorkListCompletionCriterion(
+      criterion,
+      `${path}.criteria[${index}]`,
+      diagnostics
+    ))
+    .filter((criterion): criterion is PatternWorkListCompletionCriterion => criterion !== undefined);
+
+  const seenIds = new Set<string>();
+  criteria.forEach((criterion, index) => {
+    if (seenIds.has(criterion.id)) {
+      diagnostics.push({
+        path: `${path}.criteria[${index}].id`,
+        message: `Duplicate completion criterion id "${criterion.id}".`
+      });
+    }
+    seenIds.add(criterion.id);
+  });
+
+  const weightTotal = criteria.reduce((sum, criterion) => sum + criterion.weight, 0);
+  if (criteria.length > 0 && Math.abs(weightTotal - 1) > 0.001) {
+    diagnostics.push({
+      path: `${path}.criteria`,
+      message: `Completion criterion weights must sum to 1. Current total is ${Number(weightTotal.toFixed(4))}.`
+    });
+  }
+
+  if (criteria.length === 0) {
+    return undefined;
+  }
+
+  return {
+    max_cycles,
+    pass_threshold,
+    criteria
+  };
+}
+
+function normalizePatternWorkListItemGuidance(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternWorkListItemGuidance | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_work_list.work_list.item_guidance must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["what_counts_as_one_item", "done_when"], diagnostics);
+
+  const what_counts_as_one_item = readRequiredString(
+    record.what_counts_as_one_item,
+    `${path}.what_counts_as_one_item`,
+    diagnostics
+  );
+  const done_when = readStringArray(record.done_when, `${path}.done_when`, diagnostics);
+
+  if (!done_when || done_when.length === 0) {
+    diagnostics.push({
+      path: `${path}.done_when`,
+      message: "pattern_work_list.work_list.item_guidance.done_when must include at least one item."
+    });
+  }
+
+  if (!what_counts_as_one_item || !done_when || done_when.length === 0) {
+    return undefined;
+  }
+
+  return {
+    what_counts_as_one_item,
+    done_when
+  };
+}
+
+function normalizePatternWorkListItemWorker(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternWorkListItemWorker | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_work_list.work_list.item_worker must be an object."
+    });
+    return undefined;
+  }
+
+  const kind = readEnumValue(
+    record.kind,
+    `${path}.kind`,
+    ["agent", "deep_work"] as const,
+    diagnostics,
+    { required: true }
+  );
+
+  if (kind === "agent") {
+    pushUnknownKeyDiagnostics(record, path, ["kind"], diagnostics);
+    return { kind };
+  }
+
+  if (kind === "deep_work") {
+    pushUnknownKeyDiagnostics(record, path, ["kind", "completion"], diagnostics);
+    const completion = normalizeWorkListDeepWorkCompletion(
+      record.completion,
+      `${path}.completion`,
+      diagnostics
+    );
+
+    if (!completion) {
+      return undefined;
+    }
+
+    return {
+      kind,
+      completion
+    };
+  }
+
+  return undefined;
+}
+
+function normalizePatternWorkListBlock(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternWorkListBlock | undefined {
+  const record = asRecord(value);
+
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_work_list.work_list must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["planning_goal", "item_guidance", "item_worker"], diagnostics);
+
+  const planning_goal = readRequiredString(record.planning_goal, `${path}.planning_goal`, diagnostics);
+  const item_guidance = normalizePatternWorkListItemGuidance(
+    record.item_guidance,
+    `${path}.item_guidance`,
+    diagnostics
+  );
+  const item_worker = normalizePatternWorkListItemWorker(
+    record.item_worker,
+    `${path}.item_worker`,
+    diagnostics
+  );
+
+  if (!planning_goal || !item_guidance || !item_worker) {
+    return undefined;
+  }
+
+  return {
+    planning_goal,
+    item_guidance,
+    item_worker
+  };
+}
+
+function normalizePatternWorkListNode(
+  record: Record<string, unknown>,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  loweredManagedNodes: LoweredManagedNode[]
+): SequenceNode | undefined {
+  pushUnknownKeyDiagnostics(
+    record,
+    path,
+    [
+      "type",
+      "id",
+      "label",
+      "runtime",
+      "intent",
+      "support",
+      "artifacts",
+      "model",
+      "reasoning_effort",
+      "sandbox",
+      "artifact_repair",
+      "work_list"
+    ],
+    diagnostics
+  );
+
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    runtime_extra_keys: ["max_concurrency"]
+  });
+  const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
+  const work_list = normalizePatternWorkListBlock(
+    record.work_list,
+    `${path}.work_list`,
+    diagnostics
+  );
+  const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
+
+  if (!base || !work_list) {
+    return undefined;
+  }
+
+  loweredManagedNodes.push({
+    authored_id: base.id,
+    managed_kind: "pattern_work_list",
+    lowered_to: "sequence"
+  });
+
+  return buildPatternWorkList({
+    ...base,
+    ...agentOptions,
+    work_list,
+    runtime
+  });
+}
+
 export function normalizeGraphNode(
   value: unknown,
   path: string,
@@ -2776,6 +3145,10 @@ export function normalizeGraphNode(
 
   if (type === "pattern_deep_work") {
     return normalizePatternDeepWorkNode(record, path, diagnostics, loweredManagedNodes);
+  }
+
+  if (type === "pattern_work_list") {
+    return normalizePatternWorkListNode(record, path, diagnostics, loweredManagedNodes);
   }
 
   diagnostics.push({

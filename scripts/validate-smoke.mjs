@@ -29,6 +29,7 @@ export const canonicalDocs = [
   "docs/product/patterns/README.md",
   "docs/product/patterns/deep-research.md",
   "docs/product/patterns/deep-work.md",
+  "docs/product/patterns/work-list.md",
   "docs/technical/README.md",
   "docs/technical/architecture.md",
   "docs/technical/runtime-lifecycle.md",
@@ -38,9 +39,6 @@ export const canonicalDocs = [
   "docs/technical/node-workspace-snapshots.md",
   "docs/technical/prompt-surfaces.md",
   "docs/technical/prompt-cruft-rubric.md",
-  "docs/technical/prompt-iteration-template.md",
-  "docs/technical/prompt-iteration-report.md",
-  "docs/technical/prompt-iteration-2026-04-29.md",
   "docs/examples/README.md"
 ];
 

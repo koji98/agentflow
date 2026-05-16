@@ -1071,7 +1071,8 @@ function validateManagedSoftFailureRules(
 
     const path = context.authored_paths.get(node.authored_id) ?? `$.graph.${node.authored_id}`;
     const allowedManagedSoftVerifier =
-      node.authored_id.includes("__managed__pattern_deep_work__criterion_");
+      node.authored_id.includes("__managed__pattern_deep_work__criterion_") ||
+      node.authored_id.includes("__managed__pattern_work_list__criterion_");
 
     if (!allowedManagedSoftVerifier) {
       context.diagnostics.push({

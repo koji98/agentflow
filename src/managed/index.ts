@@ -5,6 +5,10 @@ export {
 export {
   buildPatternDeepWork
 } from "./pattern_deep_work.js";
+export {
+  buildPatternWorkList,
+  defaultPatternWorkListPublicArtifacts
+} from "./pattern_work_list.js";
 export type {
   ManagedPatternRuntime,
   ManagedPatternAgentOptions,
@@ -29,3 +33,14 @@ export type {
   PatternDeepWorkCriterionBase,
   PatternDeepWorkRubricCriterion
 } from "./pattern_deep_work.js";
+export type {
+  PatternWorkListBlock,
+  PatternWorkListCommandCriterion,
+  PatternWorkListCompletionCriterion,
+  PatternWorkListConfig,
+  PatternWorkListCriterionBase,
+  PatternWorkListDeepWorkCompletion,
+  PatternWorkListItemGuidance,
+  PatternWorkListItemWorker,
+  PatternWorkListRubricCriterion
+} from "./pattern_work_list.js";
