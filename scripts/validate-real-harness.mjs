@@ -484,14 +484,12 @@ export function buildSmokeGraphDocument(spec, env = process.env) {
       default: {
         harness: spec.kind,
         model: resolveHarnessModel(spec, env),
-        sandbox: spec.sandbox,
-        timeout_sec: timeoutSec
+        sandbox: spec.sandbox
       },
       supervisor: {
         harness: spec.kind,
         model: resolveHarnessModel(spec, env),
-        sandbox: "read-only",
-        timeout_sec: timeoutSec
+        sandbox: "read-only"
       }
     },
     supervision: {
@@ -505,7 +503,7 @@ export function buildSmokeGraphDocument(spec, env = process.env) {
         {
           type: "agent",
           id: "real-smoke-agent",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: buildSmokePrompt(spec.kind),
             acceptance_criteria: ["The node satisfies its acceptance criteria."],
@@ -526,8 +524,8 @@ export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = proces
       goal: "Validate that supervisor recovery can gather external context and retry a failed real harness node.",
       acceptance_criteria: [
         "The first node attempt is rejected.",
-        "The supervisor writes a case file, external evidence patch, recovery plan, and recovery envelope.",
-        "The retried node uses the recovery envelope and local docs fixture to pass.",
+        "The supervisor writes a case file, external evidence patch, recovery plan, and recovery case.",
+        "The retried node uses the recovery case and local docs fixture to pass.",
         "The inactive fallback sentence containing `INTENTIONAL_FAILURE_DO_NOT_ACCEPT` is an intentional failed attempt and must not be accepted as terminal success."
       ],
       constraints: ["External context is read-only and must not change graph intent or declared artifacts."]
@@ -549,14 +547,12 @@ export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = proces
       default: {
         harness: spec.kind,
         model: resolveHarnessModel(spec, env),
-        sandbox: spec.sandbox,
-        timeout_sec: timeoutSec
+        sandbox: spec.sandbox
       },
       supervisor: {
         harness: spec.kind,
         model: resolveHarnessModel(spec, env),
-        sandbox: "read-only",
-        timeout_sec: timeoutSec
+        sandbox: "read-only"
       }
     },
     graph: {
@@ -566,20 +562,20 @@ export function buildSupervisorRecoveryGraphDocument(spec, docsUrl, env = proces
         {
           type: "agent",
           id: "supervisor-recovery-agent",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: [
             "This is a supervisor recovery validation scenario.",
-            "Run `af status` before deciding what to do.",
+            "Run `af orient` before deciding what to do.",
             "If `supervisor_recovery.active` is false, intentionally fail the node by finishing with exactly this sentence and no extra evidence: `INTENTIONAL_FAILURE_DO_NOT_ACCEPT: missing dependency docs for package fixturelib; please retry after supervisor gathers external context`.",
-            `If \`supervisor_recovery.active\` is true, use the supervisor recovery envelope already present in the prompt/runtime context, fetch or read the local official docs fixture at ${docsUrl}, and finish with the exact phrase: fixturelib token is RECOVERED-FIXTURE-42.`,
+            `If \`supervisor_recovery.active\` is true, use the supervisor recovery case already present in the prompt/runtime context, fetch or read the local official docs fixture at ${docsUrl}, and finish with the exact phrase: fixturelib token is RECOVERED-FIXTURE-42.`,
             "Do not change repository files."
           ].join(" "),
             acceptance_criteria: [
             "Final response includes `fixturelib token is RECOVERED-FIXTURE-42`.",
-            "The final attempt used an active supervisor recovery envelope.",
+            "The final attempt used an active supervisor recovery case.",
             `The final attempt cites or uses the local docs fixture at ${docsUrl}.`,
-            "The inactive fallback sentence containing `INTENTIONAL_FAILURE_DO_NOT_ACCEPT` is deliberately non-compliant and must be rejected when it appears without an active recovery envelope."
+            "The inactive fallback sentence containing `INTENTIONAL_FAILURE_DO_NOT_ACCEPT` is deliberately non-compliant and must be rejected when it appears without an active recovery case."
           ],
             constraints: []
           },
@@ -918,8 +914,8 @@ async function verifySupervisorRecoveryArtifacts(runRoot, expectedRunId) {
   if (retryAttempt.prompt_sha256 !== retryPromptSha256) {
     throw new Error("retried node attempt must record prompt_sha256 for the exact prompt.");
   }
-  if (!retryPrompt.includes("## Supervisor Recovery Envelope")) {
-    throw new Error("second node attempt must receive the supervisor recovery envelope.");
+  if (!retryPrompt.includes("## Supervisor Recovery Case")) {
+    throw new Error("second node attempt must receive the supervisor recovery case.");
   }
 
   const finalAttempt = nodeAttempts.at(-1);

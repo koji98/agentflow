@@ -25,11 +25,13 @@ The harness prompt includes:
 
 - role and node task
 - graph goal, acceptance criteria, and constraints when present
-- workspace path, output directory, sandbox, and timeout expectations
-- context manifest plus paths to `packet.json` and `provenance.json`
+- workspace path, output directory, and sandbox expectations
+- context manifest table plus paths to `packet.json`, `provenance.json`, and source pointers
 - `af` runtime CLI instructions
 - declared artifact contract
-- short plugin tool selection hints
+- optional skills table
+- managed plugin tools table for node-granted tools
+- ambient CLI hints table for normal shell commands
 - validation and final handoff expectations
 
 The harness environment includes:
@@ -101,6 +103,14 @@ For each agent execution, Agentflow creates:
 
 The generated `bin/` directory is prepended to `PATH` only for that node attempt. A downstream or helper node gets its own generated directory and metadata.
 
+## Prompt Support Contract
+
+Skills, managed tools, and CLI hints are selected per prompt-backed node directly or through capabilities. They are support metadata, not authority; required usage belongs in the node `intent` or acceptance criteria. Managed plugin tools are granted only to `agent` nodes; `ai` check nodes may receive skills and CLI hints but not managed tools. `exec`, deterministic `check`, and `checkpoint` nodes use `support.context` only.
+
+The skills table includes skill ref, name, description, and local `SKILL.md` path. The prompt tells agents to open `SKILL.md` only when relevant.
+
+Ambient CLI hints are normal shell commands already available in the environment. They are validated as callable and rendered as command plus description; Agentflow does not generate wrappers, inject config, attach credentials, or write ledgers for them.
+
 ## Prompt Tool Contract
 
 Plugin tools are described to the agent as short selectable CLIs, not as fully inlined API docs. The prompt includes each callable name, plugin origin, description, credential scope names, and configured default keys. It tells the agent to run:
@@ -171,19 +181,18 @@ flowchart LR
 
 Common commands:
 
-- `af status`: inspect run, node, workspace, output directory, sandbox, declared artifacts, granted tools summary, active supervisor recovery, and live human observations relevant to the current node.
-- `af context show`: print the materialized context manifest and packet path.
-- `af artifact write`: publish declared artifacts to their declared destinations.
+- `af orient`: print the compact current-node operating picture, including success contract, workspace boundary, context pointers, runtime state, declared artifacts, support summary, and current milestones.
+- `af milestone add --title <text> --goal <text>`: declare a meaningful phase of work after orientation, including a planning/research milestone when discovery is substantial.
+- `af milestone log <id> --kind finding|decision|validation --summary <text>`: attach audit evidence to a milestone. Validation logs also include `--command` and `--result pass|fail|blocked`.
+- `af milestone complete <id> --evidence <text>` or `af milestone block <id> --blocked-on <text> --recoverable-by <text> --evidence <text>`: close the milestone with evidence or record a true external blocker.
+- `af artifact write <name>`: publish declared artifact content from stdin to its declared destination.
 - `af complete check`: build the runtime completion packet and report whether the current attempt is `ready_for_verification`, `incomplete`, or `blocked`.
-- `af log --type progress --summary ... --evidence ...`: record verified progress only after checking the claim.
-- `af log --type finding --finding-kind <observation|issue|risk|blocker> --summary ... --evidence ...`: record relevant facts as they come up.
-- `af log --type decision --decision ... --rationale ... --contract-implication ... --evidence ...`: record considered decisions with evidence.
 
 `af --help` is intentionally narrow for normal agents. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` are explicit supervisor or managed-pattern tools, but they are not part of the ordinary worker completion loop. There is no standalone `af wait`; `af spawn --purpose <investigation|implementation|verification|repair> ... --wait` is the blocking orchestration form when orchestration authority is granted.
 
 The runtime CLI is file-backed. It coordinates through the run root and runtime directory, not through a live in-memory service exposed to the model.
 
-`af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include declared artifact state, placeholder/empty/stale artifact findings, validation evidence gaps, active blocking findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, and helper session evidence. Outcome verification only judges semantic correctness after this mechanical packet is ready, or after the packet reports a supported blocked state.
+`af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include orientation state, milestone summaries, validation evidence, blocked milestones, declared artifact state, placeholder/empty/stale artifact findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, and helper session evidence. Outcome verification only judges semantic correctness after this mechanical packet is ready, or after the packet reports a supported blocked state.
 
 ## Tool Invocation Evidence
 
@@ -201,8 +210,9 @@ Those records feed debugging and delivery evidence. They are not the main handof
 
 ## Practical Consequences
 
-- Adding a plugin tool to a graph is operator approval to expose that CLI to eligible nodes.
+- Adding a plugin tool to top-level `tools` registers it for reuse; granting it through agent `support.tools` or an agent capability is operator approval to expose that CLI to that agent node.
 - The plugin manifest describes selection and auth/config needs; `--help` describes exact CLI usage.
+- Local CLI commands such as `git`, `npm`, `rg`, `jq`, or `gh` are ambient shell usage. Add them as CLI hints when the prompt should name them, and wrap them as plugin tools only when reuse, credentials, config policy, or audit ledgers are needed.
 - Config values are graph-provided defaults for the tool subprocess, not agent prompt variables.
 - Credentials stay out of the harness context window and environment.
 - Tool behavior is auditable through wrapper ledgers and sidecar logs.

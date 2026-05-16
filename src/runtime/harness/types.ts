@@ -1,8 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 
 import type { ArtifactDefinition } from "../../graph/authored.js";
-import type { ResolvedTool } from "../../graph/compiled.js";
+import type { CliHint } from "../../graph/authored.js";
+import type { ResolvedSkill, ResolvedTool } from "../../graph/compiled.js";
 import type { HarnessCapabilities } from "../../graph/harness_capabilities.js";
 import type { EffectiveHarnessConfig } from "../../graph/profiles.js";
 import type { ReasoningEffort } from "../../graph/schema.js";
@@ -62,6 +64,8 @@ export interface AgentInvocation {
   toolBinDir?: string;
   toolEnv?: Record<string, string>;
   tools?: ResolvedTool[];
+  skills?: ResolvedSkill[];
+  cli?: CliHint[];
   repair?: ArtifactRepairPromptContext;
   supervisorRecoveryEnvelope?: SupervisorRecoveryEnvelope;
   supervisorEvidence?: {
@@ -154,14 +158,41 @@ export function formatMissingHarnessBinaryMessage(
   return `${kind} harness binary "${binary}" is unavailable. Install it on PATH or set ${envVarName}.`;
 }
 
+export function formatInvalidHarnessBinaryMessage(
+  kind: HarnessKind,
+  binary: string,
+  envVarName: string,
+  reason: string
+): string {
+  return `${kind} harness binary "${binary}" is present but failed launch validation (${reason}). Reinstall it or set ${envVarName} to a working binary.`;
+}
+
 export function collectMissingHarnessBinaryDiagnostics(
   kind: HarnessKind,
   binary: string,
   envVarName: string
 ): string[] {
-  return executableCandidates(binary).some((candidate) => canAccessExecutable(candidate))
-    ? []
-    : [formatMissingHarnessBinaryMessage(kind, binary, envVarName)];
+  const hasExecutable = executableCandidates(binary).some((candidate) => canAccessExecutable(candidate));
+  if (!hasExecutable) {
+    return [formatMissingHarnessBinaryMessage(kind, binary, envVarName)];
+  }
+
+  const probe = spawnSync(binary, ["--version"], {
+    encoding: "utf8",
+    stdio: "pipe",
+    timeout: 5_000
+  });
+  if (probe.status === 0) {
+    return [];
+  }
+
+  const reason =
+    probe.error
+      ? probe.error.message
+      : probe.signal
+        ? `terminated by ${probe.signal}`
+        : `exited with code ${probe.status ?? "unknown"}`;
+  return [formatInvalidHarnessBinaryMessage(kind, binary, envVarName, reason)];
 }
 
 export function normalizeHarnessLaunchError(
@@ -238,32 +269,66 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
   );
 
   const lines: string[] = [
-    "## Available Tools",
-    "These CLIs are on PATH. Use a tool only when it directly fits the node task.",
-    "The entries below are selection hints, not full docs; run `<tool> --help` when usage is unclear.",
+    "## Managed Plugin Tools",
+    "These Agentflow-managed plugin CLIs are on PATH. Use a tool only when it directly fits the node task.",
+    "The entries below are selection hints, not full docs; run `<tool> --help` before first use.",
     "Do not invent tool names, hidden subcommands, credentials, or side effects.",
-    "Prefer structured stdout for downstream parsing, and cite tool output in a decision log when it changes direction."
+    "Prefer structured stdout for downstream parsing, and cite direction-changing tool output in milestone decision evidence.",
+    "",
+    "| Callable | Origin | Description | Config keys | Credential scopes |",
+    "| --- | --- | --- | --- | --- |"
   ];
 
   for (const tool of sortedTools) {
     const origin = describeToolOrigin(tool);
-    lines.push("");
-    lines.push(`### ${tool.callable_name}${origin ? ` (${origin})` : ""}`);
-    if (tool.description) {
-      lines.push(tool.description);
-    }
-    if (tool.credentials && tool.credentials.length > 0) {
-      lines.push(`Credentials: ${tool.credentials.join(", ")}`);
-      lines.push("Credential values are resolved only inside the tool subprocess and are not exported to the agent environment.");
-    }
     const configEntries = Object.entries(tool.config);
-    if (configEntries.length > 0) {
-      lines.push("");
-      lines.push("Configured defaults are applied inside the tool subprocess and are not exported to the agent environment:");
-      for (const [key] of configEntries.sort(([left], [right]) => left.localeCompare(right))) {
-        lines.push(`  - ${key}: configured`);
-      }
-    }
+    lines.push(`| \`${tool.callable_name}\` | ${origin} | ${tool.description ?? ""} | ${configEntries.map(([key]) => `\`${key}\``).sort().join(", ") || "None"} | ${(tool.credentials ?? []).map((scope) => `\`${scope}\``).join(", ") || "None"} |`);
+  }
+
+  if (sortedTools.some((tool) => (tool.credentials ?? []).length > 0)) {
+    lines.push("");
+    lines.push("Credential values are resolved only inside the tool subprocess and are not exported to the agent environment.");
+  }
+
+  return lines;
+}
+
+function formatSkillContract(skills: ResolvedSkill[] | undefined): string[] {
+  if (!skills || skills.length === 0) {
+    return [];
+  }
+
+  const lines = [
+    "## Optional Skills",
+    "These skills are available for this node. Open the SKILL.md only when it is relevant to the node task.",
+    "If the node contract requires a skill, that requirement appears in the node intent or acceptance criteria.",
+    "",
+    "| Ref | Name | Description | Path |",
+    "| --- | --- | --- | --- |"
+  ];
+
+  for (const skill of [...skills].sort((left, right) => left.ref.localeCompare(right.ref))) {
+    lines.push(`| \`${skill.ref}\` | ${skill.name} | ${skill.description} | \`${skill.path}\` |`);
+  }
+
+  return lines;
+}
+
+function formatCliContract(cli: CliHint[] | undefined): string[] {
+  if (!cli || cli.length === 0) {
+    return [];
+  }
+
+  const lines = [
+    "## Ambient CLI Hints",
+    "These are normal shell commands available in the environment. They are not Agentflow-managed tools and have no injected config, credentials, wrappers, or invocation ledger.",
+    "",
+    "| Command | Description |",
+    "| --- | --- |"
+  ];
+
+  for (const hint of [...cli].sort((left, right) => left.cmd.localeCompare(right.cmd))) {
+    lines.push(`| \`${hint.cmd}\` | ${hint.description ?? ""} |`);
   }
 
   return lines;
@@ -272,17 +337,17 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
 function formatRuntimeCliContract(): string[] {
   return [
     "## Agentflow Runtime CLI",
-    "`af` is on PATH. Use the commands below as the runtime contract.",
-    "- `af context show`: inspect the runtime context packet and manifest before broad repo search.",
-    "- `af status`: inspect current run, node, sandbox, declared artifacts, granted tools, supervisor recovery, and live human observations.",
-    "- `af artifact write <name> --file <path>` or `--content <text>`: publish declared artifacts.",
-    "- `af log --type progress --summary <text> --evidence <json>`: record verified progress only after checking the claim.",
-    "- `af log --type finding --finding-kind <observation|issue|risk|blocker> --summary <text> --evidence <json>`: record relevant facts as they arise.",
-    "- Every `af log --evidence` JSON value must include `kind` and `summary`; `kind` must be one of `command_output`, `artifact`, `workspace_diff`, `context`, `runtime_event`, `external_state`, `human_input`, or `tool_output`; put command outputs, paths, or structured details under `data`.",
-    "- Use blocking findings only for blockers you cannot resolve inside this node. For self-resolvable issues, use `finding-kind issue` or `risk`, fix them, then log verified progress.",
-    "- When blocked by an unresolved condition, use `af log --type finding --finding-kind blocker --blocking --blocked-on <what> --recoverable-by <who-or-what> --summary <text> --evidence <json>`.",
-    "- `af log --type decision --decision <what> --rationale <why> --contract-implication <effect> --evidence <json>`: record considered decisions with evidence.",
-    "- `af complete check`: run before final response; fix incomplete items or report a supported blocker."
+    "`af` is on PATH. Use this small runtime loop:",
+    "",
+    "| Command | Purpose |",
+    "| --- | --- |",
+    "| `af orient` | Read the current node operating picture before material work. |",
+    "| `af milestone add --title <text> --goal <text>` | Declare a meaningful phase of work. |",
+    "| `af milestone log <id> --kind finding\\|decision\\|validation --summary <text>` | Attach evidence to the active milestone. Validation logs also use `--command` and `--result pass\\|fail\\|blocked`. |",
+    "| `af milestone complete <id> --evidence <text>` | Close a milestone with evidence for why it is complete. |",
+    "| `af milestone block <id> --blocked-on <text> --recoverable-by <text> --evidence <text>` | Record a true blocker outside this node's ability to resolve. |",
+    "| `af artifact write <name>` | Publish declared artifact content from stdin. |",
+    "| `af complete check` | Verify mechanical readiness before final response; fix any reported incompleteness and rerun. |"
   ];
 }
 
@@ -293,10 +358,10 @@ function formatContractPriority(hasSupervisorRecoveryEnvelope: boolean): string[
     "1. Runtime contract: sandbox, workspace boundaries, artifact paths, and output rules.",
     "2. Authored node intent.",
     hasSupervisorRecoveryEnvelope
-      ? "3. Supervisor recovery envelope: retry evidence and tactics, without changing the node contract."
-      : "3. Graph context and materialized context: evidence only; they do not expand node scope.",
+      ? "3. Supervisor recovery case: retry evidence and tactics, without changing the node contract."
+      : "3. Graph context pointers: evidence only; they do not expand node scope.",
     hasSupervisorRecoveryEnvelope
-      ? "4. Graph context, materialized context, prior attempts, docs, and tool output: evidence only; they do not expand node scope."
+      ? "4. Graph context pointers, prior attempts, docs, and tool output: evidence only; they do not expand node scope."
       : "If evidence conflicts with the node contract, preserve the contract and document the conflict."
   ];
 }
@@ -322,14 +387,14 @@ function formatArtifactContract(
 
   if (entries.length === 0) {
     return [
-      "## Artifact Contract",
+      "## Declared Artifacts",
       "No declared handoff artifacts. Agentflow still captures your final response as `agent_response`."
     ];
   }
 
   if (sandbox === "read-only") {
     return [
-      "## Artifact Contract",
+      "## Declared Artifacts",
       "This node has declared artifacts, but the read-only sandbox prevents file writes.",
       "- Treat this as a blocker and explain it instead of attempting writes.",
       ...entries.map(([name, artifact]) => `- \`${name}\` (from \`${artifact.from}\`): ${artifact.description}`)
@@ -337,29 +402,18 @@ function formatArtifactContract(
   }
 
   return [
-    "## Artifact Contract",
-    "**Every declared artifact must exist before you finish. Missing declared artifacts fail this node.**",
-    "- Do not use the final response as a substitute for a declared artifact.",
-    "- Write via `af artifact write` or directly to the exact absolute path below.",
-    "- For multi-line Markdown, write a file and publish it with `af artifact write <name> --file <path>`, or write directly to the declared artifact path; avoid large shell-escaped `--content` payloads.",
-    "- Write normal Markdown with real line breaks; do not encode newlines as literal `\\n`.",
-    "- If a declared artifact path ends in `.json`, write valid JSON that parses cleanly before publishing or completing.",
-    "- If the node task, authored goal, acceptance criteria, or artifact description names required labels, fields, section headings, backticked strings, or exact phrases, copy those strings exactly into the artifact body. For example, `Scenario:` is not satisfied by `# Scenario` or a paraphrase.",
-    "- Forbidden or excluded content overrides exact-phrase copying. If a phrase is named only to say not to include it, omit it.",
-    "- If the contract says an artifact must not contain a phrase, token, value, or example, do not write that forbidden content anywhere in the artifact, including in a negated sentence saying you excluded it.",
-    "- If the contract says not to use, include, cite, rely on, or summarize some material, omit that material from the artifact entirely. Do not restate excluded content to explain that it was ignored.",
-    "- `Risks:` sections should contain only live risks for the requested deliverable. If the only possible risk is ignored context/noise, write that no live deliverable risk remains instead of naming the ignored material.",
-    "- Do not copy stale prior-artifact payloads, any value or content described as stale/noise, forbidden examples, or unrelated runner/harness text into durable artifacts merely to say you ignored them. Summarize why they are non-authoritative without preserving exact marker values unless the node explicitly requires those values.",
-    "- If you mention validation, include the exact command/tool name and observed result; never leave a blank command, lone backslash, or generic `run this` statement.",
-    "- Do not write prospective completion-state claims into artifacts. Avoid statements like `af complete check remains to be run`, `ready once validation is recorded`, or other future/pending completion text; artifacts must stay true after the final completion check runs.",
-    "- Before finishing, verify each artifact exists and contains no placeholder text, blank evidence slots, or unresolved template values.",
+    "## Declared Artifacts",
+    "Every declared artifact must exist before you finish. Publish content with `af artifact write <name>` using stdin.",
+    "",
+    "| Name | Destination | Description |",
+    "| --- | --- | --- |",
     ...entries.map(([name, artifact]) => {
       const absolutePath =
         artifact.from === "output_dir"
           ? `${outputDir}/${artifact.path}`
           : `${repoPath}/${artifact.path}`;
 
-      return `- \`${name}\` (from \`${artifact.from}\`): ${absolutePath}\n  Expected content: ${artifact.description}`;
+      return `| \`${name}\` | \`${absolutePath}\` | ${artifact.description} |`;
     })
   ];
 }
@@ -381,7 +435,7 @@ function formatWorkspaceContract(invocation: AgentInvocation): string[] {
 
 function formatInlineContextManifest(manifest: string | undefined): string {
   const trimmed = manifest?.trim() ?? "";
-  return trimmed.length > 0 ? trimmed : "_(No materialized context items.)_";
+  return trimmed.length > 0 ? trimmed : "_(No context pointers.)_";
 }
 
 function formatBullets(values: string[] | undefined, emptyText: string): string[] {
@@ -419,45 +473,37 @@ function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[]
 
   const directive = envelope.retry_directive;
   return [
-    "## Supervisor Recovery Envelope",
-    "This is a retry after a failed prior execution. The supervisor recovery envelope is additive evidence for this retry.",
-    "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
-    "Use this envelope to change tactics, not to change the task. The current attempt must still produce current-attempt artifacts at the current paths.",
-    `Prior execution: \`${envelope.prior_execution_id}\`. Classification: \`${envelope.classification}\`. Repeated matching symptom count: ${envelope.repeated_fingerprint_count}.`,
-    `Audit artifacts: case file \`${envelope.case_file_path}\`, recovery plan \`${envelope.recovery_plan_path}\`.`,
+    "## Supervisor Recovery Case",
+    "Retry with a changed tactic while preserving the original node contract.",
     "",
-    "### Recovery Summary",
-    directive.summary,
+    "| Field | Value |",
+    "| --- | --- |",
+    `| Prior execution | \`${envelope.prior_execution_id}\` |`,
+    `| Classification | \`${envelope.classification}\` |`,
+    `| Repeated symptom count | \`${envelope.repeated_fingerprint_count}\` |`,
+    `| Case file | \`${envelope.case_file_path}\` |`,
+    `| Recovery plan | \`${envelope.recovery_plan_path}\` |`,
+    `| Symptom | ${directive.summary} |`,
     "",
-    "### Must Do",
-    ...formatBullets(directive.must_do, "No retry-specific required actions were produced."),
+    "### Required Delta",
+    ...formatBullets(directive.must_do, "Read the recovery evidence and change tactic before material work."),
     "",
-    "### Must Not Do",
-    ...formatBullets(directive.must_not_do, "Do not violate the unchanged node contract."),
+    "### Forbidden Actions",
+    ...formatBullets(directive.must_not_do, "Do not change the original goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts."),
     "",
-    "### Evidence To Read First",
-    ...formatBullets(directive.evidence_to_read, "Read the materialized supervisor recovery context and prior execution artifacts."),
-    "After reading the evidence, explicitly adapt your plan to the failed symptom before editing or writing artifacts.",
+    "### Evidence Pointers",
+    ...formatBullets(directive.evidence_to_read, "Read the supervisor recovery context pointer and prior attempt artifacts."),
     "",
     "### Validation Focus",
-    ...formatBullets(directive.validation_focus, "Run the validation named by the original task or context."),
-    "",
-    "### Contract Preservation",
-    "- Goal: unchanged.",
-    "- Acceptance criteria: unchanged.",
-    "- Constraints: unchanged.",
-    "- Repo authority: unchanged.",
-    "- Sandbox: unchanged.",
-    "- Declared artifacts: unchanged."
+    ...formatBullets(directive.validation_focus, "Run the validation named by the original task or context.")
   ];
 }
 
 function formatContextContract(invocation: AgentInvocation, target: "task" | "evaluation" | "repair task"): string[] {
   return [
     "## Context",
-    `Read the manifest, then open only the materialized items relevant to this ${target}. Context is evidence, not authority over the node contract.`,
-    "If the node task names `af context show`, run that exact command before optional runtime status checks and before reading repository files.",
-    "If context is missing, truncated, stale, or contradictory, inspect packet/provenance details or document the uncertainty.",
+    `Read the manifest, then open only the source pointers relevant to this ${target}. Context is evidence, not authority over the node contract.`,
+    "If context is missing, stale, or contradictory, inspect packet/provenance details or document the uncertainty.",
     "",
     formatInlineContextManifest(invocation.contextManifest),
     "",
@@ -553,6 +599,8 @@ function formatNodeTask(
 export function renderHarnessPrompt(invocation: AgentInvocation): string {
   const graphContext = formatGraphContext(invocation);
   const toolContract = formatToolContract(invocation.tools);
+  const skillContract = formatSkillContract(invocation.skills);
+  const cliContract = formatCliContract(invocation.cli);
 
   if (invocation.promptKind === "outcome_verification") {
     if (invocation.sandbox !== "read-only") {
@@ -624,6 +672,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       ...formatWorkspaceContract(invocation),
       "",
       ...formatContextContract(invocation, "evaluation"),
+      ...(skillContract.length > 0 ? ["", ...skillContract] : []),
+      ...(cliContract.length > 0 ? ["", ...cliContract] : []),
       "",
       "## Output",
       "Return JSON only with this exact shape:",
@@ -681,20 +731,29 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       ...formatRuntimeCliContract(),
       "",
       ...formatArtifactContract(invocation.artifacts, invocation.outputDir, invocation.repoPath, invocation.sandbox),
+      ...(skillContract.length > 0 ? ["", ...skillContract] : []),
+      ...(cliContract.length > 0 ? ["", ...cliContract] : []),
       ...(toolContract.length > 0 ? ["", ...toolContract] : []),
       "",
       "## Repair Instructions",
-      "- Inspect the workspace, output directory, context, prior response, and logs as needed.",
-      "- If the artifact content exists in the wrong location, move or copy it to the expected absolute path.",
-      "- If the handoff was never written, write it now from the completed work, workspace changes, and available context.",
-      "- Finish only after every missing artifact exists at its exact expected absolute path."
+      ...(invocation.sandbox === "read-only"
+        ? [
+            "- Inspect the workspace, output directory, context, prior response, and logs as needed.",
+            "- The read-only sandbox cannot produce missing artifacts. Report the concrete blocker without claiming repair success.",
+            "- Do not attempt artifact writes, source edits, or mutating shell commands."
+          ]
+        : [
+            "- Run `af orient`, create a repair milestone, inspect only evidence needed to repair the missing artifact, publish each missing artifact with `af artifact write <name>`, complete the milestone with evidence, then run `af complete check`.",
+            "- If artifact content exists in prior evidence, use it only after checking it still satisfies the current artifact description.",
+            "- Finish only after every missing artifact exists and `af complete check` reports ready."
+          ])
     ].join("\n");
   }
 
   const hasSupervisorRecoveryEnvelope = Boolean(invocation.supervisorRecoveryEnvelope);
   const supervisorRecoveryEnvelope = formatSupervisorRecoveryEnvelope(invocation);
   const nodeTask = formatNodeTask(invocation, {
-    title: hasSupervisorRecoveryEnvelope ? "Original Authored Node Task (Still Binding)" : "Node Task",
+    title: hasSupervisorRecoveryEnvelope ? "Success Contract (Original Authored Node Task)" : "Success Contract",
     emptyGoal: "Complete the authored node intent goal.",
     emptyAcceptanceCriteria: "No node intent acceptance criteria were authored.",
     emptyConstraints: "No node-level constraints were authored."
@@ -705,33 +764,37 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "Agentflow is a local graph runner for long-running engineering work.",
     "You are executing one node in a wider Agentflow graph. Complete this node's task; future nodes consume only named artifacts and the final response.",
     hasSupervisorRecoveryEnvelope
-      ? "A supervisor recovery envelope appears before the authored node task. Use it to recover from prior failure while preserving the unchanged authored contract."
+      ? "A supervisor recovery case appears before graph context. Use it to recover from prior failure while preserving the unchanged authored contract."
       : "The node task is the controlling objective. Use graph context only to understand why this node exists.",
-    "Agentflow is the runner, not the work target. Use the node task, graph context, and materialized context as the contract for this node.",
+    "Agentflow is the runner, not the work target. Use the node task and graph context pointers as the contract for this node.",
+    "",
+    ...nodeTask,
     "",
     ...formatContractPriority(hasSupervisorRecoveryEnvelope),
     "",
+    ...formatWorkspaceContract(invocation),
+    "",
     "## Working Loop",
-    "Drive the node to completion within its boundary: run exact `af` commands named by the node task first, inspect only the runtime context/status needed for the task, make the smallest maintainable change, run named validation, publish declared artifacts, and run `af complete check`.",
-    "When the node task says to use `af context show`, run `af context show` before `af status` and before any broad repo search.",
+    "Drive the node to completion within its boundary.",
+    "1. Run `af orient` before material work.",
+    "2. Understand the plan before committing to execution milestones: read any relevant plan, research, context pointer, or supervisor case; check it against the goal, acceptance criteria, and constraints.",
+    "3. If no adequate plan exists, do the necessary discovery and planning required to choose a defensible execution path. If that work is substantial, create a planning/research milestone first, log findings and decisions there, complete it, then add execution milestones.",
+    "There is no discovery quota or ceiling; do the amount required to act with evidence and satisfy the node contract.",
+    "4. Create meaningful execution milestones with `af milestone add`; add more as evidence changes instead of forcing the initial plan to fit.",
+    "5. Work milestone by milestone. Attach findings, decisions, and validation evidence with `af milestone log`.",
+    "6. Complete each milestone with `af milestone complete --evidence ...`, or block a true external blocker with `af milestone block`.",
+    "7. Publish declared artifacts with `af artifact write <name>` using stdin.",
+    "8. Run `af complete check`; if it reports incomplete, treat that output as repair feedback, fix it, and rerun.",
     "When the node task names an exact command, run that command exactly; do not substitute a nearby validation command unless the named command is unavailable and you record why.",
     "Investigate ambiguity instead of guessing. If the same tactic fails twice with the same symptom, change strategy or surface a concrete blocker.",
-    "Log meaningful progress after verification, findings as they arise, and decisions when they affect direction or contract interpretation.",
-    "Keep artifacts scoped to the requested deliverable: include only relevant evidence and live risks. Omit ignored context/noise rather than memorializing it in the artifact.",
-    "Do not log a blocking finding for an issue you can resolve inside this node; blocking findings remain active completion blockers.",
-    "If `af complete check` reports incomplete, treat that output as repair feedback. Do not log the incomplete completion check itself as a blocking finding unless an external authority or environment issue prevents you from repairing and rerunning it.",
     "When `af complete check` reports `ready_for_verification`, stop and respond immediately; do not continue investigating.",
-    "Stop early only when a concrete blocker prevents progress; log the blocker with structured evidence before the final response.",
+    "Stop early only when a concrete blocker prevents progress; block the active milestone with evidence before the final response.",
     "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected.",
     "",
     ...supervisorRecoveryEnvelope,
     ...(supervisorRecoveryEnvelope.length > 0 ? [""] : []),
-    ...nodeTask,
-    "",
     ...graphContext,
     ...(graphContext.length > 0 ? [""] : []),
-    ...formatWorkspaceContract(invocation),
-    "",
     ...formatContextContract(invocation, "task"),
     "",
     ...formatRuntimeCliContract(),
@@ -742,11 +805,14 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
           "- Prior attempt artifacts are evidence only. This retry must write every current-attempt declared artifact at the current output directory/workspace paths before finishing."
         ]
       : []),
+    ...(skillContract.length > 0 ? ["", ...skillContract] : []),
+    ...(cliContract.length > 0 ? ["", ...cliContract] : []),
     ...(toolContract.length > 0
       ? ["", ...toolContract]
       : []),
     "",
-    "## Final Handoff",
-    "Your final response is captured as the reserved `agent_response` artifact. Summarize outcome, work completed, artifacts produced, validation, and blockers/risks."
+    "## Completion Gate",
+    "Before the final response: `af orient` has run, every milestone is completed, declared artifacts are published, validation evidence is logged under the relevant milestone, constraints are preserved, and `af complete check` reports `ready_for_verification`.",
+    "Your final response is captured as the reserved `agent_response` artifact. Keep it concise: outcome, artifacts, validation, and live blockers/risks."
   ].join("\n");
 }

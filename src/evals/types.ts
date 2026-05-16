@@ -90,6 +90,21 @@ export interface EvalEnvironmentSimulation {
   tool_calls: EvalSimulationRule[];
 }
 
+export interface EvalCheckpointDecisionScript {
+  decision: "pass" | "deny" | "abort";
+  feedback?: string;
+}
+
+export interface EvalCheckpointScript {
+  decisions: EvalCheckpointDecisionScript[];
+}
+
+export interface EvalSupervisorResumeScript {
+  human_action: "approve" | "fail" | "add_context" | "retry_with_guidance" | "rebuild_context_then_retry";
+  human_note?: string;
+  reset_supervisor_budget?: boolean;
+}
+
 export interface EvalScenarioEnvironment {
   repo: string;
   repo_path: string;
@@ -99,6 +114,8 @@ export interface EvalScenarioEnvironment {
   tools?: string;
   tools_path?: string;
   simulation?: EvalEnvironmentSimulation;
+  scripted_checkpoints?: EvalCheckpointScript;
+  scripted_resume?: EvalSupervisorResumeScript;
 }
 
 export interface EvalScenarioWorkflow {

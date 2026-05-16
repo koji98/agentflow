@@ -1,0 +1,73 @@
+{
+  "id": "supervisor-recovery-gauntlet",
+  "bucket": "simulated-control",
+  "difficulty": "hard",
+  "description": "Generated local monorepo fixture that exercises support capabilities and supervisor recovery/resume evidence.",
+  "environment": {
+    "repo": "repo",
+    "init_git": true,
+    "scripted_resume": {
+      "human_action": "retry_with_guidance",
+      "human_note": "Use local source and tests as authority; do not mutate remote services.",
+      "reset_supervisor_budget": true
+    }
+  },
+  "workflow": {
+    "graph_template": "../../templates/supervisor-recovery-gauntlet.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Validation"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "docs/stale-contract.md",
+        "remote-service-write.log",
+        "tmp/pollution.txt"
+      ]
+    },
+    "supervisor": {},
+    "trajectory": {
+      "match": "contains_any_order",
+      "events": [
+        {
+          "kind": "node_attempt"
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "sentinel-deterministic": {},
+    "sentinel-quality": {
+      "dimensions": [
+        "agentflow_mission_fit",
+        "recovery_quality"
+      ]
+    }
+  },
+  "metadata": {
+    "simulated": {
+      "control": "supervisor-recovery-gauntlet",
+      "failure_classes": [
+        "missing_context",
+        "missing_dependency_docs",
+        "semantic_misalignment",
+        "policy_or_scope_risk",
+        "operator_pause"
+      ]
+    }
+  }
+}

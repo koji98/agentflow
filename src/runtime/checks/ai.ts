@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 
+import type { CliHint } from "../../graph/authored.js";
+import type { ResolvedSkill } from "../../graph/compiled.js";
 import type { EffectiveHarnessConfig } from "../../graph/profiles.js";
 import type { ReasoningEffort } from "../../graph/schema.js";
 import type { HarnessAdapter, HarnessResult } from "../harness/types.js";
@@ -34,6 +36,8 @@ export interface RunAiCheckInvocation {
   context_packet_path: string;
   context_manifest_path: string;
   output_dir: string;
+  skills?: ResolvedSkill[];
+  cli?: CliHint[];
   timeout_sec: number;
   signal: AbortSignal | undefined;
   on_stdout_chunk?: (chunk: string) => void;
@@ -236,6 +240,8 @@ export async function runAiCheck(
       contextManifest,
       outputDir: invocation.output_dir,
       artifacts: {},
+      ...(invocation.skills ? { skills: invocation.skills } : {}),
+      ...(invocation.cli ? { cli: invocation.cli } : {}),
       timeoutSec: invocation.timeout_sec,
       signal: invocation.signal,
       ...(invocation.on_stdout_chunk ? { onStdoutChunk: invocation.on_stdout_chunk } : {}),

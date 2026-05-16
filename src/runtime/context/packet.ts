@@ -42,9 +42,9 @@ export interface ContextPacketMaterializedItem {
   key: string;
   source: ContextPacketSource;
   description?: string;
-  materialized_path: string;
-  tokens: number;
-  truncated: boolean;
+  pointer_path: string;
+  digest?: string;
+  size_bytes?: number;
   binding?: ContextPacketLiveWorkspaceBinding;
 }
 
@@ -62,13 +62,11 @@ export interface ContextPacket {
   authored_id: string;
   repo_alias: string;
   workspace_path: string;
-  tokenizer: string;
   materials: ContextPacketMaterializedItem[];
   omitted: ContextPacketOmittedItem[];
   totals: {
-    material_count: number;
+    pointer_count: number;
     file_count: number;
-    total_tokens: number;
   };
 }
 
@@ -99,9 +97,17 @@ export interface WorkspaceGlobContextProvenance {
   digest: string;
 }
 
+export interface PluginFileContextProvenance {
+  from: "plugin_file";
+  key: string;
+  path: string;
+  digest: string;
+}
+
 export type ContextInputProvenance =
   | WorkspaceFileContextProvenance
-  | WorkspaceGlobContextProvenance;
+  | WorkspaceGlobContextProvenance
+  | PluginFileContextProvenance;
 
 export interface ContextHarnessInstructionProvenance {
   repo_alias: string;

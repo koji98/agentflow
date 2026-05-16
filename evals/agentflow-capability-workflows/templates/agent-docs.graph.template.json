@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -26,17 +26,18 @@
       "harness": "{{workflow.harness}}",
       "model": "gpt-5.4-mini",
       "reasoning_effort": "low",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900
+      "sandbox": "workspace-write"
     },
     "supervisor": {
-      "harness": "codex-cli",
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
       "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 0,
-    "profile": "supervisor"
+    "profile": "supervisor",
+    "max_total_interventions": 0
   },
   "graph": {
     "type": "sequence",
@@ -45,38 +46,8 @@
       {
         "type": "agent",
         "id": "implement",
-        "repo": "main",
-        "context": [
-          {
-            "name": "task",
-            "from": "workspace_file",
-            "path": "AGENTFLOW_EVAL_TASK.md"
-          },
-          {
-            "name": "source",
-            "from": "workspace_glob",
-            "path": "src/**",
-            "max_files": 30
-          },
-          {
-            "name": "repo_docs",
-            "from": "workspace_glob",
-            "path": "docs/**",
-            "max_files": 20
-          },
-          {
-            "name": "tests",
-            "from": "workspace_glob",
-            "path": "tests/**",
-            "max_files": 20
-          }
-        ],
-        "artifacts": {
-          "handoff": {
-            "from": "output_dir",
-            "path": "handoff.md",
-            "description": "Scenario handoff with literal Scenario:, Changed files:, Validation:, Docs evidence:, and Risks: fields."
-          }
+        "runtime": {
+          "repo": "main"
         },
         "intent": {
           "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. The current docs fixture is {{environment.docs_url}}. Use it when the task says local repo docs may be stale or missing. Run `npm test` and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
@@ -91,24 +62,67 @@
             "Do not widen the task beyond the fixture repo.",
             "Do not add dependencies.",
             "Do not edit `docs/**`; stale repo docs are conflict evidence only, not part of the requested change.",
-            "Do not skip the docs fixture URL when it is available; if unavailable, record the exact probe and fallback evidence in `Docs evidence:`."
+            "Read the docs fixture URL directly when possible; if the URL is unavailable, record the exact probe and fallback evidence in `Docs evidence:`."
           ]
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "what": "Workspace file AGENTFLOW_EVAL_TASK.md.",
+              "why": "It defines the fixture task and acceptance surface."
+            },
+            {
+              "name": "source",
+              "kind": "workspace_glob",
+              "path": "src/**",
+              "max_files": 30,
+              "what": "Workspace files matching src/**.",
+              "why": "It provides the scoped implementation surface."
+            },
+            {
+              "name": "repo_docs",
+              "kind": "workspace_glob",
+              "path": "docs/**",
+              "max_files": 20,
+              "what": "Workspace files matching docs/**.",
+              "why": "It provides local documentation authority or conflict evidence."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "tests/**",
+              "max_files": 20,
+              "what": "Workspace files matching tests/**.",
+              "why": "It provides deterministic validation evidence."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Scenario handoff with literal Scenario:, Changed files:, Validation:, Docs evidence:, and Risks: fields."
+          }
         }
       },
       {
         "type": "check",
         "id": "verify",
-        "repo": "main",
+        "runtime": {
+          "repo": "main"
+        },
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "test"
         ],
         "intent": {
-          "goal": "Run the scenario validation suite and confirm the implementation follows the current docs fixture.",
+          "goal": "Run verify.",
           "acceptance_criteria": [
-            "`npm test` exits successfully.",
-            "The validation evidence reflects the local docs fixture behavior."
+            "The node satisfies its local eval contract."
           ],
           "constraints": []
         }

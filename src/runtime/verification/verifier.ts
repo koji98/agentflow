@@ -514,6 +514,30 @@ function buildPromptCompletionPacket(packet: CompletionPacket): OutcomeVerificat
       kind: finding.kind,
       summary: finding.summary
     })),
+    orientation: {
+      orient_called: packet.orientation.orient_called
+    },
+    milestones: {
+      total: packet.milestones.total,
+      active: packet.milestones.active,
+      completed: packet.milestones.completed,
+      blocked: packet.milestones.blocked,
+      validation_logs: packet.milestones.validation_logs,
+      milestones: packet.milestones.milestones.map((milestone) => ({
+        id: milestone.id,
+        title: milestone.title,
+        status: milestone.status,
+        ...(milestone.completion_evidence ? { completion_evidence: milestone.completion_evidence } : {}),
+        ...(milestone.blocked_on ? { blocked_on: milestone.blocked_on } : {}),
+        logs: milestone.logs.map((log) => ({
+          kind: log.kind,
+          summary: log.summary,
+          ...(log.command ? { command: log.command } : {}),
+          ...(log.result ? { result: log.result } : {}),
+          ...(log.evidence ? { evidence: log.evidence } : {})
+        }))
+      }))
+    },
     packet_path: packet.packet_path
   };
 }

@@ -1,0 +1,73 @@
+{
+  "id": "all-primitives-checkpoint-loop",
+  "bucket": "simulated-control",
+  "difficulty": "hard",
+  "description": "Generated local service fixture that exercises all primitive node types and scripted checkpoint feedback.",
+  "environment": {
+    "repo": "repo",
+    "init_git": true,
+    "scripted_checkpoints": {
+      "decisions": [
+        {
+          "decision": "deny",
+          "feedback": "Add checkpoint feedback evidence and validation details before approving."
+        },
+        {
+          "decision": "pass"
+        }
+      ]
+    }
+  },
+  "workflow": {
+    "graph_template": "../../templates/all-primitives-checkpoint-loop.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Validation"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "tmp/pollution.txt"
+      ]
+    },
+    "supervisor": {},
+    "trajectory": {
+      "match": "contains_any_order",
+      "events": [
+        {
+          "kind": "node_attempt"
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "sentinel-deterministic": {},
+    "sentinel-quality": {
+      "dimensions": [
+        "agentflow_mission_fit",
+        "recovery_quality"
+      ]
+    }
+  },
+  "metadata": {
+    "simulated": {
+      "control": "checkpoint-loop",
+      "hidden_oracles": [
+        "AGENTFLOW_HIDDEN_ORACLE_DO_NOT_QUOTE"
+      ]
+    }
+  }
+}

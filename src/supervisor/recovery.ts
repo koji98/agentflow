@@ -13,7 +13,6 @@ import {
   type ContextAnalysisReport,
   type ContextAnalysisNode
 } from "../runtime/context/analyze.js";
-import { countContextTokens } from "../runtime/context/tokenizer.js";
 import type { RuntimeNodeExecutionResult } from "../runtime/core/engine.js";
 import type { HarnessAdapter } from "../runtime/harness/types.js";
 import { renderHarnessPrompt } from "../runtime/harness/types.js";
@@ -242,7 +241,7 @@ function patchGuidance(kind: SupervisorEvidenceGatherKind, caseFile: SupervisorC
     case "external_context":
       return [
         "Use read-only external docs or public examples to resolve missing knowledge.",
-        "Cite the external source in the final handoff or decision log.",
+        "Cite the external source in the final handoff or milestone evidence.",
         ...promptGuidance
       ];
     case "dependency_metadata":
@@ -673,18 +672,17 @@ function buildContextRepairPatch(options: {
   return {
     patch_id: `${options.caseFile.case_id}__context_repair`,
     strategy: "replace_authored_context",
-    reason: "Authored context exceeded the node token budget; supervisor replaced it with a compact index and omission provenance.",
+    reason: "Supervisor provided a compact pointer index and omission provenance for the authored context.",
     materials: [
       {
         key: "supervisor_context_repair",
         title: "Supervisor context repair package",
-        text,
-        tokens: countContextTokens(text)
+        text
       }
     ],
     omitted: options.analysis.items.map((item) => ({
       key: item.key,
-      reason: `Original ${item.kind} context "${item.name}" was not materialized directly after context repair. Use the compact index and live workspace paths when more detail is needed.`,
+      reason: `Original ${item.kind} context "${item.name}" was not provided directly after context repair. Use the compact index and live workspace paths when more detail is needed.`,
       source_name: item.name,
       ...(item.path ? { source_path: item.path } : {})
     })),
@@ -743,7 +741,7 @@ function buildRuntimeOverlay(options: {
   if (options.contextRepairPatch) {
     deltas.push({
       kind: "context_changed",
-      summary: "Replaced authored context materialization with a compact supervisor context repair package."
+      summary: "Replaced the authored context pointer packet with a compact supervisor context repair package."
     });
   }
 
@@ -778,7 +776,7 @@ function buildRuntimeOverlay(options: {
         "Refresh runtime PATH and Agentflow metadata for the next attempt.",
         "Validate local runtime/tool availability through the normal executor setup path."
       ],
-      retry_effect: "The next attempt receives freshly materialized wrappers and runtime metadata without changing graph authority."
+      retry_effect: "The next attempt receives freshly generated wrappers and runtime metadata without changing graph authority."
     };
     deltas.push({
       kind: "environment_repaired",
@@ -998,7 +996,7 @@ function buildRecoveryPlan(options: {
 function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): string {
   const directive = envelope.retry_directive;
   return [
-    "# Supervisor Recovery Envelope",
+    "# Supervisor Recovery Case",
     "",
     "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
     "",
@@ -1181,7 +1179,7 @@ export async function runSupervisorRecoveryCycle(options: {
       : undefined;
   if (contextAnalysis) {
     const contextAnalysisReport: ContextAnalysisReport = {
-      status: contextAnalysis.would_exceed_total ? "blocked" : contextAnalysis.warnings.length > 0 ? "warnings" : "passed",
+      status: contextAnalysis.warnings.length > 0 ? "warnings" : "passed",
       nodes: [contextAnalysis],
       diagnostics: []
     };

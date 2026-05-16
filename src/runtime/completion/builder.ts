@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -14,12 +15,17 @@ import {
   type CompletionDeclaredArtifact,
   type CompletionHelperSummary,
   type CompletionManagedSummary,
+  type CompletionMilestoneSummary,
+  type CompletionOrientationSummary,
   type CompletionPacket,
   type CompletionStatus,
   type CompletionValidationEvidence,
   type HelperPurpose,
   type OperatorObservation,
-  type RuntimeLogEntry
+  type RuntimeLogEntry,
+  type RuntimeMilestone,
+  type RuntimeMilestoneLogEntry,
+  type RuntimeMilestoneState
 } from "./types.js";
 
 interface ArtifactInspection {
@@ -414,12 +420,193 @@ function completionPacketPath(executionDir: string): string {
   return join(executionDir, "completion-packet.json");
 }
 
-function runtimeLogPath(runRoot: string): string {
-  return join(runRoot, "runtime", "log.jsonl");
+function runtimeLogPath(runRoot: string, runtimeDir?: string): string {
+  return join(runtimeDir ?? join(runRoot, "runtime"), "log.jsonl");
+}
+
+function safeRuntimeStateSegment(value: string): string {
+  const sanitized = value
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "execution";
+  if (sanitized.length <= 120) {
+    return sanitized;
+  }
+  const hash = createHash("sha1").update(value).digest("hex").slice(0, 16);
+  const prefix = sanitized.slice(0, 96).replace(/_+$/g, "") || "execution";
+  return `${prefix}_${hash}`;
+}
+
+function milestonePath(runRoot: string, executionId: string, runtimeDir?: string): string {
+  return join(runtimeDir ?? join(runRoot, "runtime"), "milestones", `${safeRuntimeStateSegment(executionId)}.json`);
 }
 
 function helpersRootPath(options: BuildCompletionPacketOptions): string {
   return join(options.runtimeDir ?? join(options.runRoot, "runtime"), "helpers");
+}
+
+function toolInvocationsPath(options: BuildCompletionPacketOptions): string {
+  return options.toolInvocationsPath ?? join(options.attempt.execution_dir, "tool-invocations.jsonl");
+}
+
+function hasMilestoneStatus(value: string | undefined): RuntimeMilestone["status"] | undefined {
+  return value === "active" || value === "completed" || value === "blocked" ? value : undefined;
+}
+
+function hasMilestoneLogKind(value: string | undefined): RuntimeMilestoneLogEntry["kind"] | undefined {
+  return value === "finding" || value === "decision" || value === "validation" ? value : undefined;
+}
+
+function hasValidationResult(value: string | undefined): RuntimeMilestoneLogEntry["result"] | undefined {
+  return value === "pass" || value === "fail" || value === "blocked" ? value : undefined;
+}
+
+function normalizeMilestoneLog(value: unknown): RuntimeMilestoneLogEntry | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const kind = hasMilestoneLogKind(hasOwnString(value, "kind"));
+  const summary = hasOwnString(value, "summary");
+  const logId = hasOwnString(value, "log_id");
+  if (!kind || !summary || !logId) {
+    return undefined;
+  }
+  const evidence = hasOwnString(value, "evidence");
+  const command = hasOwnString(value, "command");
+  const result = hasValidationResult(hasOwnString(value, "result"));
+  return {
+    log_id: logId,
+    kind,
+    summary,
+    ...(evidence ? { evidence } : {}),
+    ...(command ? { command } : {}),
+    ...(result ? { result } : {}),
+    created_at: hasOwnString(value, "created_at") ?? new Date().toISOString()
+  };
+}
+
+function normalizeMilestone(value: unknown): RuntimeMilestone | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const id = hasOwnString(value, "id");
+  const executionId = hasOwnString(value, "execution_id");
+  const title = hasOwnString(value, "title");
+  const goal = hasOwnString(value, "goal");
+  const status = hasMilestoneStatus(hasOwnString(value, "status"));
+  if (!id || !executionId || !title || !goal || !status) {
+    return undefined;
+  }
+  const logs = Array.isArray(value.logs)
+    ? value.logs.flatMap((entry) => {
+        const normalized = normalizeMilestoneLog(entry);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+  const milestone: RuntimeMilestone = {
+    id,
+    execution_id: executionId,
+    title,
+    goal,
+    status,
+    logs,
+    created_at: hasOwnString(value, "created_at") ?? new Date().toISOString(),
+    updated_at: hasOwnString(value, "updated_at") ?? new Date().toISOString()
+  };
+  const optionalStrings: Array<[keyof RuntimeMilestone, string | undefined]> = [
+    ["run_id", hasOwnString(value, "run_id")],
+    ["graph_id", hasOwnString(value, "graph_id")],
+    ["agent_id", hasOwnString(value, "agent_id")],
+    ["node_id", hasOwnString(value, "node_id")],
+    ["compiled_id", hasOwnString(value, "compiled_id")],
+    ["completion_evidence", hasOwnString(value, "completion_evidence")],
+    ["blocked_on", hasOwnString(value, "blocked_on")],
+    ["recoverable_by", hasOwnString(value, "recoverable_by")],
+    ["blocked_evidence", hasOwnString(value, "blocked_evidence")],
+    ["completed_at", hasOwnString(value, "completed_at")],
+    ["blocked_at", hasOwnString(value, "blocked_at")]
+  ];
+  for (const [key, optional] of optionalStrings) {
+    if (optional) {
+      (milestone as unknown as Record<string, unknown>)[key] = optional;
+    }
+  }
+  return milestone;
+}
+
+async function readMilestones(options: BuildCompletionPacketOptions): Promise<RuntimeMilestone[]> {
+  let raw: string;
+  try {
+    raw = await readFile(milestonePath(options.runRoot, options.attempt.execution_id, options.runtimeDir), "utf8");
+  } catch {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed) || parsed.version !== "1" || parsed.execution_id !== options.attempt.execution_id) {
+    return [];
+  }
+  const state = parsed as Partial<RuntimeMilestoneState>;
+  return Array.isArray(state.milestones)
+    ? state.milestones.flatMap((entry) => {
+        const normalized = normalizeMilestone(entry);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+}
+
+async function orientationSummary(options: BuildCompletionPacketOptions): Promise<CompletionOrientationSummary> {
+  let raw: string;
+  try {
+    raw = await readFile(toolInvocationsPath(options), "utf8");
+  } catch {
+    return { orient_called: false };
+  }
+
+  for (const line of raw.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (!isRecord(parsed) || parsed.execution_id !== options.attempt.execution_id) {
+      continue;
+    }
+    const argv = Array.isArray(parsed.argv) ? parsed.argv : [];
+    if (
+      parsed.kind === "af" &&
+      parsed.exit_code === 0 &&
+      argv.length === 1 &&
+      argv[0] === "orient"
+    ) {
+      const evidenceRef = hasOwnString(parsed, "stdout_path");
+      return evidenceRef
+        ? { orient_called: true, evidence_ref: evidenceRef }
+        : { orient_called: true };
+    }
+  }
+
+  return { orient_called: false };
+}
+
+function milestoneSummary(milestones: RuntimeMilestone[]): CompletionMilestoneSummary {
+  return {
+    total: milestones.length,
+    active: milestones.filter((milestone) => milestone.status === "active").length,
+    completed: milestones.filter((milestone) => milestone.status === "completed").length,
+    blocked: milestones.filter((milestone) => milestone.status === "blocked").length,
+    validation_logs: milestones.reduce((count, milestone) =>
+      count + milestone.logs.filter((entry) => entry.kind === "validation").length, 0),
+    milestones
+  };
 }
 
 function normalizeEvidence(value: unknown): RuntimeLogEntry["evidence"] | undefined {
@@ -519,10 +706,14 @@ function parseRuntimeLogLine(line: string): RuntimeLogEntry | undefined {
   };
 }
 
-async function readRuntimeLogs(runRoot: string, executionId: string): Promise<RuntimeLogEntry[]> {
+async function readRuntimeLogs(
+  runRoot: string,
+  executionId: string,
+  runtimeDir?: string
+): Promise<RuntimeLogEntry[]> {
   let raw: string;
   try {
-    raw = await readFile(runtimeLogPath(runRoot), "utf8");
+    raw = await readFile(runtimeLogPath(runRoot, runtimeDir), "utf8");
   } catch {
     return [];
   }
@@ -719,10 +910,29 @@ function logContainsCommandEvidence(logs: RuntimeLogEntry[], command: string): R
   });
 }
 
+function milestoneContainsCommandEvidence(milestones: RuntimeMilestone[], command: string): {
+  milestone: RuntimeMilestone;
+  log: RuntimeMilestoneLogEntry;
+} | undefined {
+  for (const milestone of milestones) {
+    for (const log of milestone.logs) {
+      if (
+        log.kind === "validation" &&
+        log.command?.includes(command) &&
+        (log.result === "pass" || log.result === "fail" || log.result === "blocked")
+      ) {
+        return { milestone, log };
+      }
+    }
+  }
+  return undefined;
+}
+
 async function buildValidationEvidence(options: {
   acceptanceCriteria: string[];
   attempt: RuntimeNodeAttempt;
   logs: RuntimeLogEntry[];
+  milestones: RuntimeMilestone[];
 }): Promise<CompletionValidationEvidence[]> {
   const commands = extractLiteralCommands(options.acceptanceCriteria);
   if (commands.length === 0) {
@@ -739,6 +949,17 @@ async function buildValidationEvidence(options: {
         source: "runtime_log",
         evidence_ref: logEvidence.log_id,
         summary: logEvidence.summary
+      } satisfies CompletionValidationEvidence;
+    }
+
+    const milestoneEvidence = milestoneContainsCommandEvidence(options.milestones, command);
+    if (milestoneEvidence) {
+      return {
+        requirement: command,
+        status: milestoneEvidence.log.result === "blocked" ? "blocked" : "present",
+        source: "milestone",
+        evidence_ref: `${milestoneEvidence.milestone.id}:${milestoneEvidence.log.log_id}`,
+        summary: milestoneEvidence.log.summary
       } satisfies CompletionValidationEvidence;
     }
 
@@ -805,8 +1026,11 @@ function normalizeManaged(managed: CompletionManagedSummary | undefined): Comple
 }
 
 function decideCompletionStatus(options: {
+  nodeKind: BuildCompletionPacketOptions["node"]["kind"];
+  orientation: CompletionOrientationSummary;
   artifactFindings: CompletionArtifactFinding[];
   validationEvidence: CompletionValidationEvidence[];
+  milestones: CompletionMilestoneSummary;
   activeBlockers: RuntimeLogEntry[];
   observations: OperatorObservation[];
   managed: CompletionManagedSummary;
@@ -815,6 +1039,25 @@ function decideCompletionStatus(options: {
   const reasons: string[] = [];
   let blocked = false;
   let incomplete = false;
+
+  if (options.nodeKind === "agent") {
+    if (!options.orientation.orient_called) {
+      incomplete = true;
+      reasons.push("af orient was not run for this agent node.");
+    }
+    if (options.milestones.total === 0) {
+      incomplete = true;
+      reasons.push("No milestones were created for this agent node.");
+    }
+    if (options.milestones.active > 0) {
+      incomplete = true;
+      reasons.push(`${options.milestones.active} milestone(s) are still active.`);
+    }
+    if (options.milestones.blocked > 0) {
+      blocked = true;
+      reasons.push(`${options.milestones.blocked} milestone(s) are blocked.`);
+    }
+  }
 
   for (const finding of options.artifactFindings) {
     reasons.push(finding.summary);
@@ -926,7 +1169,9 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
     artifactFindings.push(...inspected.findings);
   }
 
-  const logs = await readRuntimeLogs(options.runRoot, options.attempt.execution_id);
+  const logs = await readRuntimeLogs(options.runRoot, options.attempt.execution_id, options.runtimeDir);
+  const orientation = await orientationSummary(options);
+  const milestones = milestoneSummary(await readMilestones(options));
   const activeBlockers = logs.filter((log) =>
     log.type === "finding" &&
     (log.finding_kind === "blocker" || log.blocking === true)
@@ -938,7 +1183,8 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
       ...options.node.intent.constraints
     ],
     attempt: options.attempt,
-    logs
+    logs,
+    milestones: milestones.milestones
   });
   const activeObservations = (options.observations ?? []).filter((observation) =>
     observationRelevant(observation, options)
@@ -947,8 +1193,11 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
   const helpers = await summarizeHelpers(options);
   const supervisor = supervisorSummary(options);
   const status = decideCompletionStatus({
+    nodeKind: options.node.kind,
+    orientation,
     artifactFindings,
     validationEvidence,
+    milestones,
     activeBlockers,
     observations: activeObservations,
     managed,
@@ -980,6 +1229,8 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
       .map((artifact) => artifact.name),
     artifact_findings: artifactFindings,
     validation_evidence: validationEvidence,
+    orientation,
+    milestones,
     runtime_logs: runtimeLogSummary(logs),
     active_blockers: activeBlockers,
     operator_observations: observationSummary(options.observations ?? [], options),

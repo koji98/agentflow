@@ -50,7 +50,7 @@ Resolution clones Git plugins into `.agentflow/plugins`, checks out the requeste
 4. Publish workflow handoff artifacts from one `publish_node`.
 5. Give every tool a clear `description` and executable `--help` output with arguments, defaults, output format, exit codes, examples, and safety notes.
 6. Declare `credentials` for tools that need auth.
-7. Keep inline `tools[].config` values non-secret and schema-backed; generated launchers expose them to tool subprocesses as environment strings.
+7. Keep managed tool `config` values non-secret and schema-backed; generated launchers expose them to tool subprocesses as environment strings.
 8. Resolve the plugin from a consumer graph and inspect `validate --show-compiled`.
 
 Minimal package:
@@ -176,7 +176,7 @@ Minimal `workflow.json`:
 
 Inside workflow graphs:
 
-- `context.from = "plugin_file"` embeds plugin-owned text.
+- `kind: "plugin_file"` embeds plugin-owned text and requires `name`, `path`, `what`, and `why`.
 - Plain relative paths such as `./context/guidance.md` resolve inside the workflow directory.
 - `plugin://...` strings resolve from the plugin package root, which lets workflows reuse package-level scripts and shared context without wrapper files.
 - config placeholders use `{{config.key}}`.
@@ -189,7 +189,7 @@ Each tool declares:
 
 - `executable`
 - `description`
-- optional `config_schema` for non-secret graph `tools[].config` values
+- optional `config_schema` for non-secret managed tool `config` values
 - optional `credentials` for secure auth scopes
 
 Plugin tools do not declare default CLI arguments in the manifest. The executable owns its interface, documents it in `--help`, and receives the arguments the agent passes when invoking the generated callable tool.
@@ -240,15 +240,54 @@ Consumer graph:
 
 ```json
 {
-  "tools": [
-    {
-      "from_plugin": "babysit",
-      "tool": "poll",
+  "plugins": {
+    "babysit": {
+      "path": "./agentflow-plugins/babysit"
+    }
+  },
+  "tools": {
+    "pr_poll": {
+      "ref": "babysit/poll",
+      "alias": "babysit-poll",
       "config": {
         "poll_interval_ms": "15000"
       }
     }
-  ]
+  },
+  "capabilities": {
+    "pr_review": {
+      "tools": [
+        {
+          "ref": "pr_poll"
+        }
+      ]
+    }
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "watch_pr",
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "intent": {
+          "goal": "Produce the PR handoff.",
+          "acceptance_criteria": ["The handoff cites plugin-produced PR status."]
+        },
+        "support": {
+          "capabilities": [
+            {
+              "ref": "pr_review"
+            }
+          ]
+        }
+      }
+    ]
+  }
 }
 ```
 
@@ -264,7 +303,7 @@ Runtime behavior:
 - Generated tool launchers resolve credentials just before starting the plugin tool subprocess and inject `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into that child process.
 - Generated tool launchers do not resolve credentials for `--help`; they pass non-secret config defaults and append an `Agentflow configured defaults` section with secret-looking keys redacted.
 - The harness prompt includes each tool's description, origin, credential scope names, and configured default keys, but never configured values.
-- Tools share the node sandbox and timeout.
+- Tools share the node sandbox.
 
 For the full implementation flow from compiled tool declaration to generated wrapper, launcher, credential resolution, harness prompt, and invocation ledger, see `../technical/runtime-tooling.md`.
 
@@ -284,11 +323,11 @@ Secret fields are stored in macOS Keychain. Secret values must be supplied throu
 
 Tool risk is described in the tool `description` and bounded by graph or node `intent.constraints`. Constraint strings should start with `Do not`, for example `Do not call mutating endpoints outside the target project.`
 
-- Declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent.
-- Tools share the node sandbox and timeout.
+- Declaring a tool in top-level `tools` registers the reusable managed tool; granting it through agent `support.tools` or an agent capability is the operator approval to expose that CLI to that agent node.
+- Tools share the node sandbox.
 - Tools that need auth declare `credentials`; configure those values with `agentflow auth`.
 - `af` is a reserved callable name for Agentflow's runtime CLI and cannot be used as a plugin tool alias.
-- `tools[].config` is for non-secret graph-provided config values only. It is not a CLI argument schema; exact CLI arguments belong in the tool's own `--help` and are passed by the agent at invocation time. Secret-looking keys such as `token`, `secret`, `password`, or `api_key` are rejected; put those in plugin `credentials` and configure them with `agentflow auth`.
+- Managed tool `config` is for non-secret graph-provided config values only. It is not a CLI argument schema; exact CLI arguments belong in the tool's own `--help` and are passed by the agent at invocation time. Secret-looking keys such as `token`, `secret`, `password`, or `api_key` are rejected; put those in plugin `credentials` and configure them with `agentflow auth`.
 
 These rules keep tool authority visible in the graph and consistent across Codex CLI and Cursor CLI.
 

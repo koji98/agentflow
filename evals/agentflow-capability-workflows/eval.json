@@ -20,7 +20,7 @@
     "scenarios/14-stale-docs-conflict/scenario.json",
     "scenarios/15-supervisor-retry-envelope/scenario.json",
     "scenarios/16-terminal-repeated-failure/scenario.json",
-    "scenarios/17-context-overflow-repair/scenario.json",
+    "scenarios/17-context-pointer-provenance/scenario.json",
     "scenarios/18-noisy-generated-tree/scenario.json",
     "scenarios/19-validation-timeout-strategy/scenario.json",
     "scenarios/20-workspace-pollution-cleanup/scenario.json",

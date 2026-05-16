@@ -33,7 +33,6 @@
       {
         "type": "exec",
         "id": "echo_case",
-        "repo": "main",
         "command": "node",
         "args": [
           "-e",
@@ -53,6 +52,9 @@
             "The run trace records this executable attempt."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main"
         }
       }
     ]

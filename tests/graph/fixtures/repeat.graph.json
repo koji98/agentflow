@@ -21,17 +21,11 @@
     "default": {
       "harness": "codex-cli",
       "model": "gpt-5-codex",
-      "sandbox": "workspace-write",
-      "timeout_sec": 1800,
-      "input_rules": {
-        "max_total_tokens": 128000,
-        "max_tokens_per_item": 32000
-      }
+      "sandbox": "workspace-write"
     },
     "review": {
-      "harness": "cursor-cli",
-      "sandbox": "read-only",
-      "timeout_sec": 900
+      "harness": "codex-cli",
+      "sandbox": "read-only"
     },
     "supervisor": {
       "harness": "codex-cli",
@@ -45,7 +39,6 @@
       {
         "type": "agent",
         "id": "understand",
-        "repo": "main",
         "artifacts": {
           "notes": {
             "from": "output_dir",
@@ -59,6 +52,9 @@
             "The notes artifact explains the relevant timeout flow and likely repair areas."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main"
         }
       },
       {
@@ -69,7 +65,6 @@
           {
             "type": "exec",
             "id": "lint",
-            "repo": "main",
             "command": "npm",
             "args": [
               "run",
@@ -81,12 +76,14 @@
                 "The lint command exits successfully."
               ],
               "constraints": []
+            },
+            "runtime": {
+              "repo": "main"
             }
           },
           {
             "type": "exec",
             "id": "typecheck",
-            "repo": "main",
             "command": "npm",
             "args": [
               "run",
@@ -98,6 +95,9 @@
                 "The typecheck command exits successfully."
               ],
               "constraints": []
+            },
+            "runtime": {
+              "repo": "main"
             }
           }
         ]
@@ -113,50 +113,65 @@
             {
               "type": "agent",
               "id": "implement_fix",
-              "repo": "main",
-              "context": [
-                {
-                  "name": "sources",
-                  "from": "workspace_glob",
-                  "path": "src/**/*.ts",
-                  "max_files": 4
-                },
-                {
-                  "ref": "understand.agent_response",
-                  "name": "understand_response"
-                }
-              ],
               "intent": {
                 "goal": "Implement the timeout fix.",
                 "acceptance_criteria": [
                   "The timeout behavior is fixed in source while preserving existing architecture."
                 ],
                 "constraints": []
+              },
+              "runtime": {
+                "repo": "main"
+              },
+              "support": {
+                "context": [
+                  {
+                    "name": "sources",
+                    "path": "src/**/*.ts",
+                    "max_files": 4,
+                    "kind": "workspace_glob",
+                    "what": "Test context sources.",
+                    "why": "Required by this test graph."
+                  },
+                  {
+                    "ref": "understand.agent_response",
+                    "name": "understand_response",
+                    "kind": "artifact",
+                    "what": "Test context understand_response.",
+                    "why": "Required by this test graph."
+                  }
+                ]
               }
             },
             {
               "type": "agent",
               "id": "repair_notes",
-              "repo": "main",
-              "profile": "review",
-              "context": [
-                {
-                  "ref": "implement_fix.agent_response",
-                  "name": "implementation_response"
-                }
-              ],
               "intent": {
                 "goal": "Review the fix and tighten any rough edges.",
                 "acceptance_criteria": [
                   "The review identifies and addresses correctness or maintainability issues in the fix."
                 ],
                 "constraints": []
+              },
+              "runtime": {
+                "repo": "main",
+                "profile": "review"
+              },
+              "support": {
+                "context": [
+                  {
+                    "ref": "implement_fix.agent_response",
+                    "name": "implementation_response",
+                    "kind": "artifact",
+                    "what": "Test context implementation_response.",
+                    "why": "Required by this test graph."
+                  }
+                ]
               }
             },
             {
               "type": "check",
               "id": "verify_fix",
-              "repo": "main",
               "check_kind": "deterministic",
               "command": "npm",
               "args": [
@@ -180,6 +195,9 @@
                 "constraints": [
                   "Do not modify workspace files."
                 ]
+              },
+              "runtime": {
+                "repo": "main"
               }
             }
           ]
@@ -191,20 +209,27 @@
       {
         "type": "agent",
         "id": "handoff",
-        "repo": "main",
-        "context": [
-          {
-            "ref": "verify_fix.verification",
-            "name": "verification",
-            "iteration": "latest_passed"
-          }
-        ],
         "intent": {
           "goal": "Summarize the fix and remaining risks.",
           "acceptance_criteria": [
             "The final handoff cites validation evidence and any remaining risks."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "ref": "verify_fix.verification",
+              "name": "verification",
+              "iteration": "latest_passed",
+              "kind": "artifact",
+              "what": "Test context verification.",
+              "why": "Required by this test graph."
+            }
+          ]
         }
       }
     ]

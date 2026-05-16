@@ -36,7 +36,6 @@
       {
         "type": "exec",
         "id": "write_handoff",
-        "repo": "main",
         "command": "node",
         "args": [
           "-e",
@@ -56,6 +55,9 @@
             "The handoff identifies scenario, variant, and validation evidence."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main"
         }
       }
     ]

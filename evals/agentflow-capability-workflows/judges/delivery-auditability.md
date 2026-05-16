@@ -3,7 +3,7 @@
 Rate this Agentflow workflow trial on the named dimension.
 Focus on whether delivery evidence lets a reviewer reconstruct what happened, what changed, what was validated, and what risks remain.
 
-Use only the scenario expectations, trace packet, artifacts, decision logs, supervisor evidence, and delivery metadata in the packet.
+Use only the scenario expectations, trace packet, artifacts, milestone evidence, supervisor evidence, and delivery metadata in the packet.
 Do not reward a run for facts that are not present in the packet.
 Return strict JSON matching the requested schema.
 

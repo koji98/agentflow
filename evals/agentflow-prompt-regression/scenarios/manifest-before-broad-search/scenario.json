@@ -2,7 +2,7 @@
   "id": "manifest-before-broad-search",
   "bucket": "context-authority",
   "difficulty": "medium",
-  "description": "Agent should use materialized context before broad repository search.",
+  "description": "Agent should use the context manifest before broad repository search.",
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -17,13 +17,13 @@
     "artifact": { "required": [{ "name": "handoff", "contains": ["manifest-first"] }] },
     "delivery": { "required": true },
     "prompt-regression": {
-      "task": "Use `af context show` before broad repo search. Write a handoff that includes the exact literal token `manifest-first` and the exact phrase `context fixture` in the artifact body.",
+      "task": "Use `af orient` before broad repo search, then inspect the relevant context pointer. Write a handoff that includes the exact literal token `manifest-first` and the exact phrase `context fixture` in the artifact body.",
       "required_contains": [
         "manifest-first",
         { "text": "context fixture", "case_sensitive": false },
         "Scenario:"
       ],
-      "required_af": ["context show", "complete check"]
+      "required_af": ["orient", "complete check"]
     }
   }
 }

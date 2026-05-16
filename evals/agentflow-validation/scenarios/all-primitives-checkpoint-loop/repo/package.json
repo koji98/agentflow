@@ -1,0 +1,8 @@
+{
+  "name": "agentflow-sentinel-primitives",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node tests/service.test.js"
+  }
+}

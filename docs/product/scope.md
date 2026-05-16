@@ -51,7 +51,7 @@ Required behavior:
 - produce a delivery package for terminal runs
 - evaluate workflow quality offline through local suites, scenario environments, variants, repeated trials, criteria, trajectory checks, deterministic simulation, and benchmark reports
 
-Implementation details for these runtime paths live under `../technical/`. Those docs explain how validation compiles graphs, how context packets and artifacts are materialized, how generated `af` and plugin tool wrappers enter the harness environment, and how credentials stay out of the agent context window.
+Implementation details for these runtime paths live under `../technical/`. Those docs explain how validation compiles graphs, how context packets are resolved, how artifacts are projected, how generated `af` and plugin tool wrappers enter the harness environment, and how credentials stay out of the agent context window.
 
 ## Documentation Bar
 

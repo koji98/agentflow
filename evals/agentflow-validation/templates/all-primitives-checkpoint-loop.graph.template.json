@@ -1,0 +1,311 @@
+{
+  "version": "1",
+  "graph_id": "sentinel-all-primitives-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "Exercise every primitive graph node type and checkpoint feedback flow.",
+    "acceptance_criteria": [
+      "Sequence, exec, parallel, repeat, agent, deterministic check, AI check, and checkpoint nodes are present.",
+      "The checkpoint denies once with feedback and then passes.",
+      "The final handoff records loop evidence."
+    ],
+    "constraints": [
+      "Use only the generated local service fixture."
+    ]
+  },
+  "skill_sources": {
+    "validation": {
+      "path": "{{suite.dir}}/skills"
+    }
+  },
+  "capabilities": {
+    "evidence_handoff": {
+      "skills": [
+        "validation/evidence-handoff"
+      ],
+      "cli": [
+        {
+          "cmd": "node",
+          "description": "Run fixture scripts."
+        },
+        {
+          "cmd": "npm",
+          "description": "Run fixture validation."
+        }
+      ]
+    }
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "workspace-write"
+    },
+    "review": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "read-only"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "exec",
+        "id": "prepare_fixture",
+        "runtime": {
+          "repo": "main"
+        },
+        "command": "node",
+        "args": [
+          "scripts/prepare.js"
+        ],
+        "artifacts": {
+          "prep": {
+            "from": "output_dir",
+            "path": "prep.md",
+            "description": "Preparation evidence for primitive checkpoint loop."
+          }
+        },
+        "intent": {
+          "goal": "Prepare the local service fixture for primitive flow testing.",
+          "acceptance_criteria": [
+            "The command writes prep.md."
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "type": "parallel",
+        "id": "parallel_probe",
+        "max_concurrency": 2,
+        "steps": [
+          {
+            "type": "exec",
+            "id": "probe_config",
+            "runtime": {
+              "repo": "main"
+            },
+            "command": "node",
+            "args": [
+              "scripts/probe-config.js"
+            ],
+            "intent": {
+              "goal": "Probe service configuration.",
+              "acceptance_criteria": [
+                "The config probe exits successfully."
+              ],
+              "constraints": []
+            }
+          },
+          {
+            "type": "agent",
+            "id": "probe_contract",
+            "runtime": {
+              "repo": "main"
+            },
+            "intent": {
+              "goal": "Inspect the service contract and write contract-notes.md.",
+              "acceptance_criteria": [
+                "The notes identify the local service validation contract."
+              ],
+              "constraints": [
+                "Do not edit workspace files."
+              ]
+            },
+            "support": {
+              "context": [
+                {
+                  "name": "task",
+                  "kind": "workspace_file",
+                  "path": "AGENTFLOW_EVAL_TASK.md",
+                  "what": "Generated service fixture task.",
+                  "why": "It defines the primitive loop contract."
+                }
+              ]
+            },
+            "artifacts": {
+              "notes": {
+                "from": "output_dir",
+                "path": "contract-notes.md",
+                "description": "Service contract notes."
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "repeat",
+        "id": "checkpoint_loop",
+        "max_attempts": 2,
+        "body": {
+          "type": "sequence",
+          "id": "checkpoint_body",
+          "steps": [
+            {
+              "type": "exec",
+              "id": "write_checkpoint_draft",
+              "runtime": {
+                "repo": "main"
+              },
+              "command": "node",
+              "args": [
+                "scripts/write-draft.js"
+              ],
+              "artifacts": {
+                "draft": {
+                  "from": "output_dir",
+                  "path": "draft.md",
+                  "description": "Draft handoff reviewed by checkpoint."
+                }
+              },
+              "intent": {
+                "goal": "Write a draft handoff for checkpoint review.",
+                "acceptance_criteria": [
+                  "draft.md exists and contains checkpoint evidence."
+                ],
+                "constraints": []
+              }
+            },
+            {
+              "type": "checkpoint",
+              "id": "review_checkpoint",
+              "runtime": {
+                "repo": "main"
+              },
+              "review_from": {
+                "node": "write_checkpoint_draft",
+                "artifact": "draft"
+              },
+              "intent": {
+                "goal": "Review the checkpoint draft and approve only after feedback has been incorporated.",
+                "acceptance_criteria": [
+                  "The draft cites checkpoint feedback and validation."
+                ],
+                "constraints": [
+                  "Deny once in the scripted eval to prove loop feedback."
+                ]
+              }
+            }
+          ]
+        },
+        "until": {
+          "node": "review_checkpoint"
+        }
+      },
+      {
+        "type": "check",
+        "id": "deterministic_validation",
+        "runtime": {
+          "repo": "main"
+        },
+        "check_kind": "deterministic",
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "intent": {
+          "goal": "Run primitive fixture validation.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully."
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "type": "agent",
+        "id": "final_handoff",
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Publish the final primitive-flow handoff.",
+          "acceptance_criteria": [
+            "The handoff cites checkpoint feedback, validation, and primitive node coverage."
+          ],
+          "constraints": []
+        },
+        "support": {
+          "capabilities": [
+            {
+              "ref": "evidence_handoff"
+            }
+          ],
+          "context": [
+            {
+              "name": "prep",
+              "kind": "artifact",
+              "ref": "prepare_fixture.prep",
+              "what": "Preparation evidence artifact.",
+              "why": "It proves exec setup ran before the loop."
+            },
+            {
+              "name": "checkpoint_draft",
+              "kind": "artifact",
+              "ref": "write_checkpoint_draft.draft",
+              "iteration": "latest_passed",
+              "what": "Latest passing checkpoint draft.",
+              "why": "It provides approved checkpoint evidence for the final handoff."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Primitive flow handoff with checkpoint, validation, and risks."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "ai_review",
+        "runtime": {
+          "repo": "main",
+          "profile": "review"
+        },
+        "check_kind": "ai",
+        "rubric": "Return JSON only. Pass if the final handoff proves sequence, exec, parallel, repeat, agent, deterministic check, AI check, and checkpoint coverage.",
+        "intent": {
+          "goal": "AI-review the primitive coverage handoff.",
+          "acceptance_criteria": [
+            "The review returns passing structured JSON only when primitive coverage evidence is adequate."
+          ],
+          "constraints": [
+            "Do not mutate the workspace."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "name": "handoff",
+              "kind": "artifact",
+              "ref": "final_handoff.handoff",
+              "what": "Final primitive-flow handoff.",
+              "why": "It is the evidence surface for AI review."
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

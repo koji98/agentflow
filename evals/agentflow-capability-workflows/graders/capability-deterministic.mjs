@@ -51,7 +51,7 @@ const expectedChangedFiles = {
   ],
   "15-supervisor-retry-envelope": [],
   "16-terminal-repeated-failure": [],
-  "17-context-overflow-repair": [
+  "17-context-pointer-provenance": [
     "src/router.js"
   ],
   "18-noisy-generated-tree": [
@@ -77,7 +77,8 @@ function loadScenario(id) {
 const scenario = loadScenario(scenarioId);
 const expectedStatus = scenario.criteria?.outcome?.status ?? "passed";
 const artifacts = packet.artifacts ?? [];
-const handoff = artifacts.find((artifact) => artifact.name === "handoff");
+const requiredArtifact = scenario.criteria?.artifact?.required?.[0] ?? { name: "handoff" };
+const handoff = artifacts.find((artifact) => artifact.name === requiredArtifact.name);
 const handoffText = String(handoff?.content ?? "");
 const placeholderPattern = /todo|tbd|lorem ipsum|placeholder|not implemented/i;
 const manifest = packet.delivery?.manifest;
@@ -89,10 +90,10 @@ function assert(id, passed, evidence) {
 
 assert("expected_status", packet.outcome.status === expectedStatus, `expected=${expectedStatus}; actual=${packet.outcome.status}`);
 if (expectedStatus === "passed") {
-  assert("handoff_exists", Boolean(handoff), handoff?.path ?? "missing");
-  assert("handoff_has_validation", /Validation:/i.test(handoffText), "handoff validation section");
-  assert("handoff_has_scenario", handoffText.includes("Scenario:"), "handoff scenario section");
-  assert("handoff_not_placeholder", !placeholderPattern.test(handoffText), "placeholder scan");
+  assert("required_artifact_exists", Boolean(handoff), handoff?.path ?? `missing ${requiredArtifact.name}`);
+  assert("required_artifact_has_validation", /Validation:/i.test(handoffText), `${requiredArtifact.name} validation section`);
+  assert("required_artifact_has_scenario", handoffText.includes("Scenario:"), `${requiredArtifact.name} scenario section`);
+  assert("required_artifact_not_placeholder", !placeholderPattern.test(handoffText), "placeholder scan");
 }
 assert("delivery_manifest", Boolean(packet.delivery?.manifest_path && manifest), packet.delivery?.manifest_path ?? "missing");
 
@@ -141,11 +142,8 @@ if (scenarioId === "16-terminal-repeated-failure") {
   assert("failure_attempts", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
 }
 
-if (scenarioId === "17-context-overflow-repair") {
-  assert("context_repair_classified", packet.supervisor?.classifications?.includes("context_contract_failure"), "context_contract_failure classification");
-  assert("context_repair_applied", packet.supervisor?.apply_actions?.includes("repair_context"), "repair_context apply action");
-  assert("context_repair_attempts", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
-  assert("handoff_mentions_supervisor_context", /Supervisor context:|context repair|recovery envelope/i.test(handoffText), "handoff supervisor-context evidence");
+if (scenarioId === "17-context-pointer-provenance") {
+  assert("pointer_context_handoff", /Pointer context:/i.test(handoffText), "handoff pointer-context evidence");
 }
 
 if (scenarioId === "18-noisy-generated-tree") {

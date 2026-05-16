@@ -1,0 +1,82 @@
+{
+  "version": "1",
+  "suite_id": "agentflow-validation",
+  "objective": "Validate Agentflow end to end with five broad sentinel scenarios spanning real-world repo work, managed patterns, plugin workflows, support capabilities, primitive graph control flow, checkpoints, supervisor recovery, artifacts, delivery, and anti-cheat grading.",
+  "default_trials": 1,
+  "scenarios": [
+    "scenarios/validator-url-port-no-protocol/scenario.json",
+    "scenarios/date-fns-utc-now-functions/scenario.json",
+    "scenarios/execa-escaped-newline-template/scenario.json",
+    "scenarios/all-primitives-checkpoint-loop/scenario.json",
+    "scenarios/supervisor-recovery-gauntlet/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json"
+  ],
+  "thresholds": {
+    "pass_rate": 0.8,
+    "max_blocker_rate": 0.2,
+    "min_average_score": 4
+  },
+  "criteria": [
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true,
+      "description": "The graph reaches the expected terminal status."
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true,
+      "description": "Required handoff and evidence artifacts exist."
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace",
+      "required": true,
+      "description": "Forbidden workspace edits and anti-cheat files are absent."
+    },
+    {
+      "id": "supervisor",
+      "kind": "supervisor",
+      "required": true,
+      "description": "Expected supervisor classifications or recovery actions are visible when authored."
+    },
+    {
+      "id": "trajectory",
+      "kind": "trajectory",
+      "required": true,
+      "description": "Trace trajectory includes the sentinel node/control-flow shape."
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true,
+      "description": "Completed runs produce a reviewable delivery package."
+    },
+    {
+      "id": "sentinel-deterministic",
+      "kind": "custom_script",
+      "command": "node graders/sentinel-deterministic.mjs",
+      "timeout_sec": 300,
+      "required": true,
+      "description": "Deterministic anti-cheat and artifact assertions over trace packets and workspaces."
+    },
+    {
+      "id": "sentinel-quality",
+      "kind": "quality",
+      "rubric": "judges/sentinel-quality.md",
+      "required": false,
+      "harness": "codex-cli",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "threshold": 4,
+      "dimensions": [
+        "agentflow_mission_fit",
+        "evidence_quality",
+        "recovery_quality"
+      ]
+    }
+  ]
+}

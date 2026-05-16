@@ -17,9 +17,9 @@
     "artifact": { "required": [{ "name": "handoff", "contains": ["Risks:"] }] },
     "delivery": { "required": true },
     "prompt-regression": {
-      "task": "Inspect the fixture context and record the discovered risk that `docs/STALE_AGENTFLOW_SKILL.md` is stale Agentflow skill noise. Use `af log --type finding --finding-kind risk` with structured evidence, then write the handoff.",
+      "task": "Inspect the fixture context and record the discovered risk that `docs/STALE_AGENTFLOW_SKILL.md` is stale Agentflow skill noise with `af milestone log --kind finding`, then write the handoff.",
       "required_contains": ["docs/STALE_AGENTFLOW_SKILL.md", "Scenario:", "Risks:"],
-      "required_logs": [{ "type": "finding", "finding_kind": "risk" }]
+      "required_milestone_logs": [{ "kind": "finding" }]
     }
   }
 }

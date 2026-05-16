@@ -5,22 +5,19 @@ import type {
   AuthoredGraphDocument,
   AuthoredGraphNode,
   BaseExecutableNode,
-  CommandPrerequisite,
   CheckNode,
   CheckpointNode,
   ContainerGraphNode,
   ArtifactDefinition,
   ArtifactReference,
+  CapabilityDefinition,
+  CliHint,
   ContextItem,
   DeterministicCheckDefaults,
   DeterministicPassIf,
-  EnvPrerequisite,
   ExecNode,
   ExecutableNodeIntent,
   ExecutableGraphNode,
-  FilePrerequisite,
-  GraphPrerequisiteCheck,
-  GraphPrerequisites,
   GraphDefaults,
   GraphIntent,
   GraphProfile,
@@ -28,15 +25,15 @@ import type {
   CodexHarnessConfig,
   CursorHarnessConfig,
   CursorHarnessPermissions,
-  InputRules,
+  ManagedToolDefinition,
+  NodeRuntimeSelection,
+  NodeSupport,
   ParallelNode,
-  PluginToolReference,
   RepeatNode,
-  RepoPrerequisite,
   RepoDefinition,
   SequenceNode,
+  SkillSourceDeclaration,
   SupervisionPolicy,
-  ToolDeclaration
 } from "./authored.js";
 import {
   authoredNodeKinds,
@@ -50,7 +47,6 @@ import {
   graphVersion,
   harnessNames,
   managedPatternKinds,
-  prerequisiteKinds,
   reasoningEfforts,
   reservedArtifactNames,
   sandboxModes,
@@ -429,57 +425,6 @@ function readEnumArray<T extends readonly string[]>(
     .filter((item): item is T[number] => item !== undefined);
 }
 
-function normalizeInputRules(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): InputRules | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "input_rules must be an object."
-    });
-    return undefined;
-  }
-
-  pushUnknownKeyDiagnostics(
-    record,
-    path,
-    ["max_total_tokens", "max_tokens_per_item"],
-    diagnostics
-  );
-
-  if (record.max_files !== undefined) {
-    diagnostics.push({
-      path: `${path}.max_files`,
-      message:
-        "input_rules.max_files is no longer supported. Use input_rules.max_total_tokens for global context budgets and glob.max_files to cap specific globs."
-    });
-  }
-
-  const max_total_tokens = readPositiveInteger(
-    record.max_total_tokens,
-    `${path}.max_total_tokens`,
-    diagnostics
-  );
-  const max_tokens_per_item = readPositiveInteger(
-    record.max_tokens_per_item,
-    `${path}.max_tokens_per_item`,
-    diagnostics
-  );
-
-  return {
-    ...(max_total_tokens !== undefined ? { max_total_tokens } : {}),
-    ...(max_tokens_per_item !== undefined ? { max_tokens_per_item } : {})
-  };
-}
-
 function normalizePassIf(
   value: unknown,
   path: string,
@@ -827,8 +772,6 @@ function normalizeGraphProfile(
       "sandbox",
       "skip_git_repo_check",
       "env_files",
-      "timeout_sec",
-      "input_rules",
       "deterministic_check_defaults",
       "ai_check_defaults",
       "artifact_repair",
@@ -852,8 +795,6 @@ function normalizeGraphProfile(
     diagnostics
   );
   const env_files = readStringArray(record.env_files, `${path}.env_files`, diagnostics);
-  const timeout_sec = readPositiveInteger(record.timeout_sec, `${path}.timeout_sec`, diagnostics);
-  const input_rules = normalizeInputRules(record.input_rules, `${path}.input_rules`, diagnostics);
   const deterministic_check_defaults = normalizeDeterministicCheckDefaults(
     record.deterministic_check_defaults,
     `${path}.deterministic_check_defaults`,
@@ -882,8 +823,6 @@ function normalizeGraphProfile(
     ...(sandbox ? { sandbox } : {}),
     ...(skip_git_repo_check !== undefined ? { skip_git_repo_check } : {}),
     ...(env_files !== undefined ? { env_files } : {}),
-    ...(timeout_sec !== undefined ? { timeout_sec } : {}),
-    ...(input_rules ? { input_rules } : {}),
     ...(deterministic_check_defaults ? { deterministic_check_defaults } : {}),
     ...(ai_check_defaults ? { ai_check_defaults } : {}),
     ...(artifact_repair ? { artifact_repair } : {}),
@@ -1112,25 +1051,19 @@ function normalizeContextItem(
     return undefined;
   }
 
-  const hasRef = "ref" in record;
-  const hasFrom = "from" in record;
+  const kind = readRequiredString(record.kind, `${path}.kind`, diagnostics);
+  const what = readRequiredString(record.what, `${path}.what`, diagnostics);
+  const why = readRequiredString(record.why, `${path}.why`, diagnostics);
 
-  if (hasRef && hasFrom) {
-    diagnostics.push({
-      path,
-      message: "context item must define either ref (artifact) or from (text/workspace_file/workspace_glob), not both."
-    });
-    return undefined;
-  }
-
-  if (hasRef) {
+  if (kind === "artifact") {
     return normalizeArtifactContextRef(record, path, diagnostics);
   }
 
-  const from = readEnumValue(record.from, `${path}.from`, contextSourceKinds, diagnostics, {
-    required: true
-  });
+  if (!kind || !what || !why) {
+    return undefined;
+  }
 
+  const from = readEnumValue(kind, `${path}.kind`, contextSourceKinds, diagnostics);
   if (!from) {
     return undefined;
   }
@@ -1142,19 +1075,35 @@ function normalizeContextItem(
   }
 
   if (from === "workspace_file") {
-    pushUnknownKeyDiagnostics(record, path, ["name", "from", "path"], diagnostics);
+    pushUnknownKeyDiagnostics(record, path, ["name", "kind", "path", "what", "why"], diagnostics);
     const itemPath = readRequiredString(record.path, `${path}.path`, diagnostics);
     return itemPath
       ? {
           name,
           from,
-          path: itemPath
+          path: itemPath,
+          what,
+          why
+        }
+      : undefined;
+  }
+
+  if (from === "plugin_file") {
+    pushUnknownKeyDiagnostics(record, path, ["name", "kind", "path", "what", "why"], diagnostics);
+    const itemPath = readRequiredString(record.path, `${path}.path`, diagnostics);
+    return itemPath
+      ? {
+          name,
+          from,
+          path: itemPath,
+          what,
+          why
         }
       : undefined;
   }
 
   if (from === "workspace_glob") {
-    pushUnknownKeyDiagnostics(record, path, ["name", "from", "path", "max_files"], diagnostics);
+    pushUnknownKeyDiagnostics(record, path, ["name", "kind", "path", "max_files", "what", "why"], diagnostics);
     const itemPath = readRequiredString(record.path, `${path}.path`, diagnostics);
     const max_files = readPositiveInteger(record.max_files, `${path}.max_files`, diagnostics);
 
@@ -1166,22 +1115,13 @@ function normalizeContextItem(
       name,
       from,
       path: itemPath,
+      what,
+      why,
       ...(max_files !== undefined ? { max_files } : {})
     };
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["name", "from", "text"], diagnostics);
-  const text = readRequiredString(record.text, `${path}.text`, diagnostics);
-
-  if (!text) {
-    return undefined;
-  }
-
-  return {
-    name,
-    from,
-    text
-  };
+  return undefined;
 }
 
 function normalizeArtifactContextRef(
@@ -1192,13 +1132,15 @@ function normalizeArtifactContextRef(
   pushUnknownKeyDiagnostics(
     record,
     path,
-    ["ref", "name", "iteration", "attempt", "if_available"],
+    ["kind", "ref", "name", "iteration", "attempt", "if_available", "what", "why"],
     diagnostics
   );
 
   const ref = readRequiredString(record.ref, `${path}.ref`, diagnostics);
+  const what = readRequiredString(record.what, `${path}.what`, diagnostics);
+  const why = readRequiredString(record.why, `${path}.why`, diagnostics);
 
-  if (!ref) {
+  if (!ref || !what || !why) {
     return undefined;
   }
 
@@ -1276,6 +1218,8 @@ function normalizeArtifactContextRef(
     name,
     node,
     artifact: artifact ?? "",
+    what,
+    why,
     ...(iteration !== undefined ? { iteration } : {}),
     ...(attempt !== undefined ? { attempt } : {}),
     ...(if_available !== undefined ? { if_available } : {})
@@ -1304,6 +1248,147 @@ function normalizeContextItems(
     .filter((item): item is ContextItem => item !== undefined);
 
   return items;
+}
+
+function normalizeSupportReferences(
+  value: unknown,
+  path: string,
+  label: string,
+  diagnostics: GraphDiagnostic[]
+): { ref: string }[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    diagnostics.push({
+      path,
+      message: `${label} must be an array of { ref } objects.`
+    });
+    return undefined;
+  }
+
+  return value
+    .map((item, index) => {
+      const itemPath = `${path}[${index}]`;
+      const record = asRecord(item);
+      if (!record) {
+        diagnostics.push({
+          path: itemPath,
+          message: `${label} entries must be objects.`
+        });
+        return undefined;
+      }
+      pushUnknownKeyDiagnostics(record, itemPath, ["ref"], diagnostics);
+      const ref = readRequiredString(record.ref, `${itemPath}.ref`, diagnostics);
+      return ref ? { ref } : undefined;
+    })
+    .filter((item): item is { ref: string } => item !== undefined);
+}
+
+function normalizeCliHints(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): CliHint[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    diagnostics.push({
+      path,
+      message: "cli must be an array of command hint objects."
+    });
+    return undefined;
+  }
+
+  return value
+    .map((item, index) => {
+      const itemPath = `${path}[${index}]`;
+      const record = asRecord(item);
+      if (!record) {
+        diagnostics.push({
+          path: itemPath,
+          message: "CLI hint must be an object."
+        });
+        return undefined;
+      }
+      pushUnknownKeyDiagnostics(record, itemPath, ["cmd", "description"], diagnostics);
+      const cmd = readRequiredString(record.cmd, `${itemPath}.cmd`, diagnostics);
+      const description = readOptionalString(record.description, `${itemPath}.description`, diagnostics);
+      return cmd
+        ? {
+            cmd,
+            ...(description ? { description } : {})
+          }
+        : undefined;
+    })
+    .filter((item): item is CliHint => item !== undefined);
+}
+
+function normalizeNodeSupport(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): NodeSupport | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "support must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["capabilities", "skills", "tools", "cli", "context"], diagnostics);
+
+  const capabilities = normalizeSupportReferences(record.capabilities, `${path}.capabilities`, "support.capabilities", diagnostics);
+  const skills = readStringArray(record.skills, `${path}.skills`, diagnostics);
+  const tools = normalizeSupportReferences(record.tools, `${path}.tools`, "support.tools", diagnostics);
+  const cli = normalizeCliHints(record.cli, `${path}.cli`, diagnostics);
+  const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
+
+  return {
+    ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
+    ...(skills && skills.length > 0 ? { skills } : {}),
+    ...(tools && tools.length > 0 ? { tools } : {}),
+    ...(cli && cli.length > 0 ? { cli } : {}),
+    ...(context && context.length > 0 ? { context } : {})
+  };
+}
+
+function normalizeRuntimeSelection(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[],
+  extraKeys: readonly string[] = []
+): NodeRuntimeSelection | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "runtime must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["repo", "profile", ...extraKeys], diagnostics);
+  const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
+  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
+
+  return {
+    ...(repo ? { repo } : {}),
+    ...(profile ? { profile } : {})
+  };
 }
 
 function normalizeArtifactReference(
@@ -1446,117 +1531,6 @@ function normalizeSelector(
   return readEnumValue(value, path, contextSelectors, diagnostics);
 }
 
-function normalizeGraphPrerequisiteCheck(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): GraphPrerequisiteCheck | undefined {
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "Prerequisite check must be an object."
-    });
-    return undefined;
-  }
-
-  const kind = readEnumValue(record.kind, `${path}.kind`, prerequisiteKinds, diagnostics, {
-    required: true
-  });
-  const required = readBoolean(record.required, `${path}.required`, diagnostics);
-
-  if (!kind) {
-    return undefined;
-  }
-
-  if (kind === "file") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "path", "required"], diagnostics);
-    const prerequisitePath = readRequiredString(record.path, `${path}.path`, diagnostics);
-
-    return prerequisitePath
-      ? {
-          kind,
-          path: prerequisitePath,
-          ...(required !== undefined ? { required } : {})
-        } satisfies FilePrerequisite
-      : undefined;
-  }
-
-  if (kind === "command") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "command", "required"], diagnostics);
-    const command = readRequiredString(record.command, `${path}.command`, diagnostics);
-
-    return command
-      ? {
-          kind,
-          command,
-          ...(required !== undefined ? { required } : {})
-        } satisfies CommandPrerequisite
-      : undefined;
-  }
-
-  if (kind === "env") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "name", "required"], diagnostics);
-    const name = readRequiredString(record.name, `${path}.name`, diagnostics);
-
-    return name
-      ? {
-          kind,
-          name,
-          ...(required !== undefined ? { required } : {})
-        } satisfies EnvPrerequisite
-      : undefined;
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["kind", "repo", "required"], diagnostics);
-  const repo = readRequiredString(record.repo, `${path}.repo`, diagnostics);
-
-  return repo
-    ? {
-        kind,
-        repo,
-        ...(required !== undefined ? { required } : {})
-      } satisfies RepoPrerequisite
-    : undefined;
-}
-
-function normalizeGraphPrerequisites(
-  value: unknown,
-  path: string,
-  diagnostics: GraphDiagnostic[]
-): GraphPrerequisites | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const record = asRecord(value);
-
-  if (!record) {
-    diagnostics.push({
-      path,
-      message: "prerequisites must be an object."
-    });
-    return undefined;
-  }
-
-  pushUnknownKeyDiagnostics(record, path, ["checks"], diagnostics);
-
-  if (!Array.isArray(record.checks)) {
-    diagnostics.push({
-      path: `${path}.checks`,
-      message: "prerequisites.checks must be an array."
-    });
-    return undefined;
-  }
-
-  return {
-    checks: record.checks
-      .map((item, index) => normalizeGraphPrerequisiteCheck(item, `${path}.checks[${index}]`, diagnostics))
-      .filter((item): item is GraphPrerequisiteCheck => item !== undefined)
-  };
-}
-
 function normalizeExecutableBase(
   record: Record<string, unknown>,
   path: string,
@@ -1564,19 +1538,23 @@ function normalizeExecutableBase(
   options: {
     allow_artifacts?: boolean;
     artifacts_disallowed_message?: string;
+    runtime_extra_keys?: readonly string[];
   } = {}
 ): BaseExecutableNode | undefined {
   const allow_artifacts = options.allow_artifacts ?? true;
   const id = readRequiredString(record.id, `${path}.id`, diagnostics);
   const label = readOptionalString(record.label, `${path}.label`, diagnostics);
-  const repo = readOptionalString(record.repo, `${path}.repo`, diagnostics);
-  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
+  const runtime = normalizeRuntimeSelection(
+    record.runtime,
+    `${path}.runtime`,
+    diagnostics,
+    options.runtime_extra_keys ?? []
+  );
   const intent = normalizeExecutableNodeIntent(record.intent, `${path}.intent`, diagnostics);
-  const context = normalizeContextItems(record.context, `${path}.context`, diagnostics);
+  const support = normalizeNodeSupport(record.support, `${path}.support`, diagnostics);
   const artifacts = allow_artifacts
     ? normalizeArtifacts(record.artifacts, `${path}.artifacts`, diagnostics)
     : undefined;
-  const timeout_sec = readPositiveInteger(record.timeout_sec, `${path}.timeout_sec`, diagnostics);
 
   if (!allow_artifacts && record.artifacts !== undefined) {
     diagnostics.push({
@@ -1592,41 +1570,53 @@ function normalizeExecutableBase(
   return {
     id,
     ...(label ? { label } : {}),
-    ...(repo ? { repo } : {}),
-    ...(profile ? { profile } : {}),
+    ...(runtime ? { runtime } : {}),
     intent,
-    ...(context ? { context } : {}),
+    ...(support ? { support } : {}),
     ...(artifacts ? { artifacts } : {}),
-    ...(timeout_sec !== undefined ? { timeout_sec } : {})
   };
 }
 
-function normalizeToolDeclaration(
-  value: unknown,
+function parseManagedToolRef(
+  ref: string,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ToolDeclaration | undefined {
-  const record = asRecord(value);
-  if (!record) {
-    diagnostics.push({ path, message: "Tool declaration must be an object." });
-    return undefined;
-  }
-
-  if (record.from_plugin === undefined && record.tool === undefined) {
+): { pluginAlias: string; toolName: string } | undefined {
+  const slashIndex = ref.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === ref.length - 1 || ref.indexOf("/", slashIndex + 1) !== -1) {
     diagnostics.push({
       path,
-      message:
-        "Tool declarations must reference a plugin tool with { from_plugin, tool, alias?, config? }. Inline executable tools are no longer supported; bundle the executable in a plugin instead."
+      message: 'Managed tool refs must use "pluginAlias/toolName" form.'
     });
     return undefined;
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["from_plugin", "tool", "alias", "config"], diagnostics);
+  return {
+    pluginAlias: ref.slice(0, slashIndex),
+    toolName: ref.slice(slashIndex + 1)
+  };
+}
 
-  const from_plugin = readRequiredString(record.from_plugin, `${path}.from_plugin`, diagnostics);
-  const tool = readRequiredString(record.tool, `${path}.tool`, diagnostics);
+function normalizeManagedToolDefinition(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ManagedToolDefinition | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({ path, message: "Managed tool definition must be an object." });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["ref", "alias", "config"], diagnostics);
+
+  const ref = readRequiredString(record.ref, `${path}.ref`, diagnostics);
   const alias = readOptionalString(record.alias, `${path}.alias`, diagnostics);
   const config = readStringRecord(record.config, `${path}.config`, diagnostics);
+
+  if (ref) {
+    parseManagedToolRef(ref, `${path}.ref`, diagnostics);
+  }
 
   if (alias !== undefined && !toolNamePattern.test(alias)) {
     diagnostics.push({
@@ -1635,35 +1625,170 @@ function normalizeToolDeclaration(
     });
   }
 
-  if (!from_plugin || !tool) {
+  if (!ref) {
     return undefined;
   }
 
   return {
-    from_plugin,
-    tool,
+    ref,
     ...(alias ? { alias } : {}),
     ...(config ? { config } : {})
-  } satisfies PluginToolReference;
+  };
 }
 
-function normalizeToolDeclarations(
+function normalizeManagedToolDefinitions(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): ToolDeclaration[] | undefined {
+): Record<string, ManagedToolDefinition> | undefined {
   if (value === undefined) {
     return undefined;
   }
 
-  if (!Array.isArray(value)) {
-    diagnostics.push({ path, message: "tools must be an array when provided." });
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({ path, message: "tools must be an object map when provided." });
     return undefined;
   }
 
-  return value
-    .map((item, index) => normalizeToolDeclaration(item, `${path}[${index}]`, diagnostics))
-    .filter((item): item is ToolDeclaration => item !== undefined);
+  const definitions: Record<string, ManagedToolDefinition> = {};
+  Object.entries(record).forEach(([name, definition]) => {
+    if (!/^[a-z][a-z0-9_]*$/u.test(name)) {
+      diagnostics.push({
+        path: `${path}.${name}`,
+        message: 'Tool registry names must match /^[a-z][a-z0-9_]*$/.'
+      });
+      return;
+    }
+
+    const normalized = normalizeManagedToolDefinition(definition, `${path}.${name}`, diagnostics);
+    if (normalized) {
+      definitions[name] = normalized;
+    }
+  });
+
+  return definitions;
+}
+
+function normalizeSkillSources(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): Record<string, SkillSourceDeclaration> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "skill_sources must be an object keyed by source alias."
+    });
+    return undefined;
+  }
+
+  const sources: Record<string, SkillSourceDeclaration> = {};
+  Object.entries(record).forEach(([alias, item]) => {
+    const itemPath = `${path}.${alias}`;
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/u.test(alias)) {
+      diagnostics.push({
+        path: itemPath,
+        message: "Skill source aliases must use letters, numbers, underscores, or hyphens, and must start with a letter or number."
+      });
+      return;
+    }
+
+    const sourceRecord = asRecord(item);
+    if (!sourceRecord) {
+      diagnostics.push({
+        path: itemPath,
+        message: "Skill source declaration must be an object."
+      });
+      return;
+    }
+
+    pushUnknownKeyDiagnostics(sourceRecord, itemPath, ["source", "ref", "path"], diagnostics);
+    const hasPath = sourceRecord.path !== undefined;
+    const hasGit = sourceRecord.source !== undefined || sourceRecord.ref !== undefined;
+
+    if (hasPath && hasGit) {
+      diagnostics.push({
+        path: itemPath,
+        message: "Skill source declaration must use either { path } or { source, ref }, not both."
+      });
+      return;
+    }
+
+    if (hasPath) {
+      const sourcePath = readRequiredString(sourceRecord.path, `${itemPath}.path`, diagnostics);
+      if (sourcePath) {
+        sources[alias] = { path: sourcePath };
+      }
+      return;
+    }
+
+    const source = readRequiredString(sourceRecord.source, `${itemPath}.source`, diagnostics);
+    const ref = readRequiredString(sourceRecord.ref, `${itemPath}.ref`, diagnostics);
+    if (source && ref) {
+      sources[alias] = { source, ref };
+    }
+  });
+
+  return sources;
+}
+
+function normalizeCapabilities(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): Record<string, CapabilityDefinition> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "capabilities must be an object map."
+    });
+    return undefined;
+  }
+
+  const capabilities: Record<string, CapabilityDefinition> = {};
+  Object.entries(record).forEach(([name, item]) => {
+    const itemPath = `${path}.${name}`;
+    if (!/^[a-z][a-z0-9_]*$/u.test(name)) {
+      diagnostics.push({
+        path: itemPath,
+        message: 'Capability names must match /^[a-z][a-z0-9_]*$/.'
+      });
+      return;
+    }
+
+    const capabilityRecord = asRecord(item);
+    if (!capabilityRecord) {
+      diagnostics.push({
+        path: itemPath,
+        message: "Capability definition must be an object."
+      });
+      return;
+    }
+
+    pushUnknownKeyDiagnostics(capabilityRecord, itemPath, ["skills", "tools", "cli"], diagnostics);
+    const skills = readStringArray(capabilityRecord.skills, `${itemPath}.skills`, diagnostics);
+    const tools = normalizeSupportReferences(capabilityRecord.tools, `${itemPath}.tools`, "capability.tools", diagnostics);
+    const cli = normalizeCliHints(capabilityRecord.cli, `${itemPath}.cli`, diagnostics);
+
+    capabilities[name] = {
+      ...(skills && skills.length > 0 ? { skills } : {}),
+      ...(tools && tools.length > 0 ? { tools } : {}),
+      ...(cli && cli.length > 0 ? { cli } : {})
+    };
+  });
+
+  return capabilities;
 }
 
 function normalizeAgentNode(
@@ -1678,17 +1803,14 @@ function normalizeAgentNode(
       "type",
       "id",
       "label",
-      "repo",
-      "profile",
+      "runtime",
       "intent",
-      "context",
+      "support",
       "artifacts",
-      "timeout_sec",
       "model",
       "reasoning_effort",
       "sandbox",
-      "artifact_repair",
-      "tools"
+      "artifact_repair"
     ],
     diagnostics
   );
@@ -1707,7 +1829,6 @@ function normalizeAgentNode(
     `${path}.artifact_repair`,
     diagnostics
   );
-  const tools = normalizeToolDeclarations(record.tools, `${path}.tools`, diagnostics);
 
   if (!base) {
     return undefined;
@@ -1719,8 +1840,7 @@ function normalizeAgentNode(
     ...(model ? { model } : {}),
     ...(reasoning_effort ? { reasoning_effort } : {}),
     ...(sandbox ? { sandbox } : {}),
-    ...(artifact_repair ? { artifact_repair } : {}),
-    ...(tools && tools.length > 0 ? { tools } : {})
+    ...(artifact_repair ? { artifact_repair } : {})
   };
 }
 
@@ -1736,12 +1856,10 @@ function normalizeExecNode(
       "type",
       "id",
       "label",
-      "repo",
-      "profile",
+      "runtime",
       "intent",
-      "context",
+      "support",
       "artifacts",
-      "timeout_sec",
       "command",
       "args",
       "cwd",
@@ -1788,12 +1906,10 @@ function normalizeCheckNode(
       "type",
       "id",
       "label",
-      "repo",
-      "profile",
+      "runtime",
       "intent",
-      "context",
+      "support",
       "artifacts",
-      "timeout_sec",
       "check_kind",
       "command",
       "args",
@@ -1891,12 +2007,10 @@ function normalizeCheckpointNode(
       "type",
       "id",
       "label",
-      "repo",
-      "profile",
+      "runtime",
       "intent",
-      "context",
+      "support",
       "artifacts",
-      "timeout_sec",
       "review_from"
     ],
     diagnostics
@@ -2096,7 +2210,7 @@ function normalizeManagedRuntime(
     return {};
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["max_concurrency"], diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["repo", "profile", "max_concurrency"], diagnostics);
 
   const max_concurrency = readPositiveInteger(record.max_concurrency, `${path}.max_concurrency`, diagnostics);
 
@@ -2123,14 +2237,14 @@ function normalizeManagedAgentOptions(
     `${path}.artifact_repair`,
     diagnostics
   );
-  const tools = normalizeToolDeclarations(record.tools, `${path}.tools`, diagnostics);
+  const support = normalizeNodeSupport(record.support, `${path}.support`, diagnostics);
 
   return {
     ...(model ? { model } : {}),
     ...(reasoning_effort ? { reasoning_effort } : {}),
     ...(sandbox ? { sandbox } : {}),
     ...(artifact_repair ? { artifact_repair } : {}),
-    ...(tools && tools.length > 0 ? { tools } : {})
+    ...(support ? { support } : {})
   };
 }
 
@@ -2275,16 +2389,13 @@ function normalizePatternDeepResearchNode(
       "type",
       "id",
       "label",
-      "repo",
-      "profile",
+      "runtime",
       "intent",
-      "context",
-      "timeout_sec",
+      "support",
       "model",
       "reasoning_effort",
       "sandbox",
       "artifact_repair",
-      "tools",
       "research",
       "runtime"
     ],
@@ -2293,7 +2404,8 @@ function normalizePatternDeepResearchNode(
 
   const base = normalizeExecutableBase(record, path, diagnostics, {
     allow_artifacts: false,
-    artifacts_disallowed_message: "pattern_deep_research publishes only summary, packet, and angle reports selected with as_artifact."
+    artifacts_disallowed_message: "pattern_deep_research publishes only summary, packet, and angle reports selected with as_artifact.",
+    runtime_extra_keys: ["max_concurrency"]
   });
   const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
   const research = normalizePatternDeepResearchConfig(
@@ -2560,24 +2672,23 @@ function normalizePatternDeepWorkNode(
       "type",
       "id",
       "label",
-      "repo",
-      "profile",
+      "runtime",
       "intent",
-      "context",
+      "support",
       "artifacts",
-      "timeout_sec",
       "model",
       "reasoning_effort",
       "sandbox",
       "artifact_repair",
-      "tools",
       "completion",
       "runtime"
     ],
     diagnostics
   );
 
-  const base = normalizeExecutableBase(record, path, diagnostics);
+  const base = normalizeExecutableBase(record, path, diagnostics, {
+    runtime_extra_keys: ["max_concurrency"]
+  });
   const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
   const publicArtifacts = {
     ...defaultManagedPublicArtifacts(),
@@ -2702,9 +2813,10 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
       "repos",
       "defaults",
       "profiles",
-      "prerequisites",
       "config",
       "config_schema",
+      "skill_sources",
+      "capabilities",
       "tools",
       "graph"
     ],
@@ -2723,11 +2835,6 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
   const intent = normalizeGraphIntent(documentRecord.intent, "$.intent", diagnostics);
   const supervision = normalizeSupervisionPolicy(documentRecord.supervision, "$.supervision", diagnostics);
   const defaults = normalizeGraphDefaults(documentRecord.defaults, "$.defaults", diagnostics);
-  const prerequisites = normalizeGraphPrerequisites(
-    documentRecord.prerequisites,
-    "$.prerequisites",
-    diagnostics
-  );
 
   const repos: Record<string, RepoDefinition> = {};
   if (documentRecord.repos === undefined) {
@@ -2759,6 +2866,8 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
       }
     });
   }
+
+  const skill_sources = normalizeSkillSources(documentRecord.skill_sources, "$.skill_sources", diagnostics);
 
   if (defaults?.launch_profile && !(defaults.launch_profile in profiles)) {
     diagnostics.push({
@@ -2809,7 +2918,8 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     }
   }
 
-  const tools = normalizeToolDeclarations(documentRecord.tools, "$.tools", diagnostics);
+  const capabilities = normalizeCapabilities(documentRecord.capabilities, "$.capabilities", diagnostics);
+  const tools = normalizeManagedToolDefinitions(documentRecord.tools, "$.tools", diagnostics);
 
   const normalizedGraph = normalizeGraphNode(
     documentRecord.graph,
@@ -2844,10 +2954,11 @@ export function normalizeAuthoredGraphDocument(value: unknown): NormalizedGraphD
     repos,
     defaults: effectiveDefaults,
     ...(Object.keys(profiles).length > 0 ? { profiles } : {}),
-    ...(prerequisites ? { prerequisites } : {}),
     ...(config ? { config } : {}),
     ...(config_schema ? { config_schema } : {}),
-    ...(tools && tools.length > 0 ? { tools } : {}),
+    ...(skill_sources && Object.keys(skill_sources).length > 0 ? { skill_sources } : {}),
+    ...(capabilities && Object.keys(capabilities).length > 0 ? { capabilities } : {}),
+    ...(tools && Object.keys(tools).length > 0 ? { tools } : {}),
     graph: normalizedGraph as ContainerGraphNode
   };
 
@@ -2891,7 +3002,7 @@ function resolveArtifactContextRefs(
 
   const visit = (node: AuthoredGraphNode, path: string): void => {
     if (node.type === "agent" || node.type === "exec" || node.type === "check" || node.type === "checkpoint") {
-      const items = node.context;
+      const items = node.support?.context;
 
       if (!items) {
         return;
@@ -2903,7 +3014,7 @@ function resolveArtifactContextRefs(
       });
 
       items.forEach((item, index) => {
-        const itemPath = `${path}.context[${index}]`;
+        const itemPath = `${path}.support.context[${index}]`;
         if (!("ref" in item)) {
           return;
         }
@@ -2926,7 +3037,7 @@ function resolveArtifactContextRefs(
       nameCounts.forEach((count, name) => {
         if (count > 1) {
           diagnostics.push({
-            path: `${path}.context`,
+            path: `${path}.support.context`,
             message: `Duplicate context item name "${name}". Each context item in a node must have a unique name; provide an explicit "name" field to disambiguate.`
           });
         }

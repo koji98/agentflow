@@ -14,14 +14,14 @@ This pass implemented the prompt-quality release gate and used real `codex-cli` 
 - Average score: `5`
 - Threshold passed: `true`
 
-Targeted real `codex-cli` reruns were used before the final gate for failures in exact artifact content, verifier ambiguity, Codex harness MCP contamination, managed JSON artifact readiness, and manifest-first context inspection. The manifest-first failure exposed an agent stall after optional `af status`; the worker prompt now prioritizes exact `af` commands named by the node task, `af context show` before optional status when requested, and explicit evidence-kind values for `af log`.
+Targeted real `codex-cli` reruns were used before the final gate for failures in exact artifact content, verifier ambiguity, Codex harness MCP contamination, managed JSON artifact readiness, and manifest-first context inspection. The manifest-first failure exposed an agent stall during orientation; the worker prompt now prioritizes `af orient`, context pointer inspection, and milestone-owned evidence.
 
 ## Changes
 
 - Added prompt surface governance docs, cruft rejection rules, and a reusable prompt-iteration template.
 - Removed generic persona wording from managed prompts and kept role text tied to authority/output contracts.
 - Tightened standard worker prompt guidance for exact artifact labels, JSON artifacts, validation evidence, completion checks, runtime logs, and unsupported blockers.
-- Made task-named `af` commands operationally first-class: if the node says to run `af context show`, the agent must do that before optional `af status` or repo search.
+- Made task-named `af` commands operationally first-class: if the node says to run `af orient`, the agent must do that before broad repo search.
 - Isolated Agentflow-managed Codex executions from user-level Codex MCP/plugin config by default through a minimal per-run `CODEX_HOME`; later harness policy work keeps that default while allowing explicit profile-declared Codex config or deliberate `inherit_user` opt-in.
 - Hardened completion packets for required exact content, forbidden content, evidence `data`, command evidence, completion-check blocker misuse, current-attempt artifacts, and invalid declared JSON artifacts.
 - Extended verifier prompts so completion packets, declared artifact status, captured evidence, artifact findings, and ambiguity rules are explicit inputs.

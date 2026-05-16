@@ -1,9 +1,9 @@
 # supervisor-recovery
 
 Rate this Agentflow workflow trial on the named dimension.
-Focus on whether supervisor classification, evidence gathering, recovery plan, retry envelope, pause/fail decision, and budget behavior were appropriate.
+Focus on whether supervisor classification, evidence gathering, recovery plan, recovery case, pause/fail decision, and budget behavior were appropriate.
 
-Use only the scenario expectations, trace packet, artifacts, decision logs, supervisor evidence, and delivery metadata in the packet.
+Use only the scenario expectations, trace packet, artifacts, milestone evidence, supervisor evidence, and delivery metadata in the packet.
 Do not reward a run for facts that are not present in the packet.
 Return strict JSON matching the requested schema.
 

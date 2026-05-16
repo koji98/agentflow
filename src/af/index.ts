@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, realpathSync, readFileSync } from "node:fs";
-import { access, appendFile, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -18,7 +18,6 @@ import {
 } from "../artifacts/reader.js";
 import type { ArtifactDefinition } from "../graph/authored.js";
 import type { CompiledExecutableNode, CompiledGraph, ResolvedTool } from "../graph/compiled.js";
-import { builtInInputRules } from "../graph/profiles.js";
 import type { ReasoningEffort } from "../graph/schema.js";
 import type { CredentialSpecMap } from "../auth/types.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
@@ -28,12 +27,14 @@ import type { SupervisorRecoveryEnvelope } from "../supervisor/types.js";
 import {
   buildCompletionPacket,
   helperPurposes,
+  milestoneLogKinds,
   persistCompletionPacket,
-  type CompletionEvidence,
-  type FindingKind,
   type HelperPurpose,
   type RuntimeLogEntry,
-  type RuntimeLogType
+  type RuntimeMilestone,
+  type RuntimeMilestoneLogEntry,
+  type RuntimeMilestoneLogKind,
+  type RuntimeMilestoneState
 } from "../runtime/completion/index.js";
 import { readOperatorObservations } from "../runtime/observations/index.js";
 
@@ -132,6 +133,18 @@ function safeLogSegment(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "command";
+}
+
+function safeRuntimeStateSegment(value: string): string {
+  const sanitized = value
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "execution";
+  if (sanitized.length <= 120) {
+    return sanitized;
+  }
+  const hash = createHash("sha1").update(value).digest("hex").slice(0, 16);
+  const prefix = sanitized.slice(0, 96).replace(/_+$/g, "") || "execution";
+  return `${prefix}_${hash}`;
 }
 
 async function writeAfInvocationSidecars(options: {
@@ -248,6 +261,79 @@ function helperPath(metadata: RuntimeMetadata, helperId: string): string {
 
 function helpersDir(metadata: RuntimeMetadata): string {
   return join(metadataRuntimeDir(metadata), "helpers");
+}
+
+function milestoneStatePath(metadata: RuntimeMetadata): string {
+  return join(metadataRuntimeDir(metadata), "milestones", `${safeRuntimeStateSegment(metadata.execution_id)}.json`);
+}
+
+async function readMilestoneState(metadata: RuntimeMetadata): Promise<RuntimeMilestoneState> {
+  try {
+    const state = await readJsonFile<RuntimeMilestoneState>(milestoneStatePath(metadata));
+    if (state.version === "1" && state.execution_id === metadata.execution_id && Array.isArray(state.milestones)) {
+      return state;
+    }
+  } catch {
+    // Missing milestone state is the normal first-use path.
+  }
+  return {
+    version: "1",
+    execution_id: metadata.execution_id,
+    milestones: []
+  };
+}
+
+async function writeMilestoneState(metadata: RuntimeMetadata, state: RuntimeMilestoneState): Promise<void> {
+  await writeJsonFile(milestoneStatePath(metadata), state);
+}
+
+function nextMilestoneId(milestones: RuntimeMilestone[]): string {
+  const highest = milestones.reduce((max, milestone) => {
+    const match = /^m(\d+)$/u.exec(milestone.id);
+    return match?.[1] ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `m${highest + 1}`;
+}
+
+function findMilestone(state: RuntimeMilestoneState, id: string): RuntimeMilestone {
+  const milestone = state.milestones.find((candidate) => candidate.id === id);
+  if (!milestone) {
+    throw new Error(`Milestone "${id}" does not exist.`);
+  }
+  return milestone;
+}
+
+function requireMilestoneText(value: string | undefined, message: string): string {
+  if (!value || value.trim().length === 0) {
+    throw new Error(message);
+  }
+  return value.trim();
+}
+
+function requireValidationResult(value: string | undefined): RuntimeMilestoneLogEntry["result"] {
+  if (value === "pass" || value === "fail" || value === "blocked") {
+    return value;
+  }
+  throw new Error("af milestone log --kind validation requires --result pass|fail|blocked.");
+}
+
+function renderMilestoneList(milestones: RuntimeMilestone[]): string {
+  if (milestones.length === 0) {
+    return "No milestones created yet.";
+  }
+
+  return [
+    "| ID | Status | Title | Goal | Evidence |",
+    "| --- | --- | --- | --- | --- |",
+    ...milestones.map((milestone) => {
+      const evidence = milestone.status === "completed"
+        ? milestone.completion_evidence ?? ""
+        : milestone.status === "blocked"
+          ? milestone.blocked_on ?? ""
+          : "";
+      return `| \`${milestone.id}\` | \`${milestone.status}\` | ${milestone.title} | ${milestone.goal} | ${evidence} |`;
+    })
+  ].join("\n");
 }
 
 function requireRuntimeMetadata(): RuntimeMetadata {
@@ -375,23 +461,24 @@ function renderHelp(): string {
     "Agentflow runtime CLI (`af`)",
     "",
     "Purpose:",
-    "  Runtime broker for Agentflow agents. Use it to inspect node state, read context, publish artifacts, record structured evidence, and check completion.",
+    "  Runtime broker for Agentflow agents. Use it to orient to the node contract, track milestone evidence, publish artifacts, and check completion.",
     "",
     "Usage:",
     "  af <command> [subcommand] [options]",
     "  af <command> [subcommand] --help",
     "",
     "Agent commands:",
-    "  af status",
-    "  af context show",
-    "  af artifact write <name> (--file <path> | --content <text> | --stdin)",
+    "  af orient",
+    "  af milestone add --title <text> --goal <text>",
+    "  af milestone log <id> --kind <finding|decision|validation> --summary <text>",
+    "  af milestone complete <id> --evidence <text>",
+    "  af milestone block <id> --blocked-on <text> --recoverable-by <text> --evidence <text>",
+    "  af milestone list",
+    "  af artifact write <name>",
     "  af complete check",
-    "  af log --type progress --summary <text> --evidence <json>",
-    "  af log --type finding --finding-kind <observation|issue|risk|blocker> --summary <text> --evidence <json>",
-    "  af log --type decision --decision <text> --rationale <text> --contract-implication <text> --evidence <json>",
     "",
     "Output:",
-    "  Commands print JSON unless a command explicitly streams artifact contents or help text.",
+    "  af orient prints Markdown. Other commands print JSON unless a command explicitly streams help text.",
     "",
     "Exit codes:",
     "  0 success",
@@ -399,12 +486,12 @@ function renderHelp(): string {
     "  2 invalid command or arguments",
     "",
     "Examples:",
-    "  af status",
-    "  af artifact write handoff --file /tmp/handoff.md",
+    "  af orient",
+    "  af milestone add --title \"Understand target\" --goal \"Identify files and validation commands\"",
+    "  af milestone log m1 --kind validation --command \"npm test\" --result pass --summary \"Tests passed\"",
+    "  af milestone complete m1 --evidence \"Target files and validation path are known\"",
+    "  af artifact write handoff < handoff.md",
     "  af complete check",
-    "  af log --type progress --summary \"Implemented parser changes\" --evidence '{\"kind\":\"command_output\",\"ref\":\"npm test\",\"summary\":\"tests passed\",\"status\":\"passed\"}'",
-    "  af log --type decision --decision \"Use branch feature/foo\" --rationale \"It matches the node contract\" --contract-implication \"handoff cites branch\" --evidence '{\"kind\":\"runtime_event\",\"summary\":\"git status showed clean main\"}'",
-    "  af context show",
     "",
     "Safety:",
     "  `af` acts only inside the current Agentflow runtime metadata and node sandbox."
@@ -413,6 +500,19 @@ function renderHelp(): string {
 
 function commandHelp(commandPath: string): string | undefined {
   const help: Record<string, string[]> = {
+    orient: [
+      "af orient - print the compact current-node operating picture.",
+      "",
+      "Usage:",
+      "  af orient",
+      "  af orient --help",
+      "",
+      "Output:",
+      "  Markdown containing the success contract, workspace boundary, context pointers, active runtime state, declared artifacts, support summary, and current milestones.",
+      "",
+      "Safety:",
+      "  Read-only orientation; no workspace or artifact writes."
+    ],
     status: [
       "af status - inspect the current Agentflow runtime session.",
       "",
@@ -489,18 +589,13 @@ function commandHelp(commandPath: string): string | undefined {
       "af artifact write - publish a declared artifact for downstream nodes.",
       "",
       "Usage:",
-      "  af artifact write <name> --file <path>",
-      "  af artifact write <name> --content <text>",
-      "  af artifact write <name> --stdin",
+      "  af artifact write <name>",
       "",
       "Arguments:",
       "  <name>  Declared artifact name. Required.",
       "",
       "Options:",
-      "  --file <path>     Copy content from a local file. Default: unset",
-      "  --content <text>  Write inline text content. Default: unset",
-      "  --stdin           Read artifact content from stdin. Default: false",
-      "  --help            Show this help and exit. Default: false",
+      "  --help  Show this help and exit. Default: false",
       "",
       "Output:",
       "  JSON object with command, status, artifact, and destination path.",
@@ -510,11 +605,13 @@ function commandHelp(commandPath: string): string | undefined {
       "  1 write failure or undeclared artifact",
       "",
       "Examples:",
-      "  af artifact write handoff --file /tmp/handoff.md",
-      "  af artifact write summary --content \"Ready for review\"",
+      "  af artifact write handoff < handoff.md",
+      "  af artifact write handoff <<'EOF'",
+      "  # Handoff",
+      "  EOF",
       "",
       "Safety:",
-      "  Writes only to the declared artifact destination enforced by Agentflow."
+      "  Reads content from stdin and writes only to the declared artifact destination enforced by Agentflow."
     ],
     "complete check": [
       "af complete check - report whether the current attempt is mechanically ready for outcome verification.",
@@ -533,44 +630,45 @@ function commandHelp(commandPath: string): string | undefined {
       "Safety:",
       "  Read-only. Persists the same completion packet the runtime enforces after attempts."
     ],
-    log: [
-      "af log - record a durable runtime note for supervisor and delivery review.",
+    milestone: [
+      "af milestone - track macro-level node progress and audit evidence.",
       "",
       "Usage:",
-      "  af log --type progress --summary <text> --evidence <json>",
-      "  af log --type finding --finding-kind <observation|issue|risk|blocker> --summary <text> --evidence <json>",
-      "  af log --type decision --decision <text> --rationale <text> --contract-implication <text> --evidence <json>",
-      "  af log --help",
+      "  af milestone add --title <text> --goal <text>",
+      "  af milestone log <id> --kind <finding|decision|validation> --summary <text> [--evidence <text>]",
+      "  af milestone log <id> --kind validation --command <cmd> --result <pass|fail|blocked> --summary <text>",
+      "  af milestone complete <id> --evidence <text>",
+      "  af milestone block <id> --blocked-on <text> --recoverable-by <text> --evidence <text>",
+      "  af milestone list",
+      "  af milestone --help",
       "",
       "Options:",
-      "  --type <type>                    One of progress, finding, decision. Default: progress",
-      "  --finding-kind <kind>            One of observation, issue, risk, blocker. Required for --type finding.",
-      "  --summary <text>                 Short note summary. Required except for --type decision, where it defaults to --decision.",
-      "  --body <text>                    Longer note body. Default: unset",
-      "  --artifact <name>                Artifact reference to attach. Repeatable/comma-separated. Default: none",
-      "  --decision <text>                Decision made. Required for --type decision.",
-      "  --rationale <text>               Why the decision was made. Required for --type decision.",
-      "  --contract-implication <text>    How this affects the node contract. Required for --type decision.",
-      "  --evidence <json>                Evidence object. Repeatable/comma-separated. Required.",
-      "  --blocking                       Mark finding as a blocker. Default: false",
-      "  --blocked-on <text>              What blocks completion. Required for blocking findings.",
-      "  --recoverable-by <text>          What would unblock completion. Default: unset",
-      "  --help                           Show this help and exit. Default: false",
+      "  --title <text>           Milestone title. Required for add.",
+      "  --goal <text>            Milestone goal. Required for add.",
+      "  --kind <kind>            finding, decision, or validation. Required for log.",
+      "  --summary <text>         Short audit summary. Required for log.",
+      "  --evidence <text>        Evidence pointer or concise evidence summary.",
+      "  --command <cmd>          Validation command. Required for validation logs.",
+      "  --result <result>        pass, fail, or blocked. Required for validation logs.",
+      "  --blocked-on <text>      True blocker. Required for block.",
+      "  --recoverable-by <text>  What would unblock completion. Required for block.",
+      "  --help                   Show this help and exit. Default: false",
       "",
       "Output:",
-      "  JSON object with command, status, log_id, type, and guidance for safe continuation.",
+      "  JSON object with command, status, milestone, and log details.",
       "",
       "Exit codes:",
       "  0 success",
       "  1 missing required fields, invalid type, or write failure",
       "",
       "Examples:",
-      "  af log --type progress --summary \"Implemented parser changes\" --evidence '{\"kind\":\"command_output\",\"ref\":\"npm test\",\"summary\":\"tests passed\",\"status\":\"passed\"}'",
-      "  af log --type finding --finding-kind blocker --summary \"Need worker\" --blocking --blocked-on \"backend worker\" --evidence '{\"kind\":\"external_state\",\"summary\":\"worker offline\"}'",
-      "  af log --type decision --decision \"Use branch feature/foo\" --rationale \"It matches the node contract\" --contract-implication \"handoff cites branch\" --evidence '{\"kind\":\"runtime_event\",\"summary\":\"git status showed clean main\"}'",
+      "  af milestone add --title \"Understand target\" --goal \"Find relevant source and tests\"",
+      "  af milestone log m1 --kind finding --summary \"Parser lives in src/parser.ts\" --evidence \"src/parser.ts:42\"",
+      "  af milestone log m1 --kind validation --command \"npm test\" --result pass --summary \"Tests passed\"",
+      "  af milestone complete m1 --evidence \"Relevant source, tests, and validation path identified\"",
       "",
       "Safety:",
-      "  Records structured evidence only; it is not a synchronous supervisor chat channel."
+      "  Milestones are audit evidence and completion gates, not chain-of-thought logs."
     ],
     spawn: [
       "af spawn - start a focused helper agent.",
@@ -603,7 +701,7 @@ function commandHelp(commandPath: string): string | undefined {
     ]
   };
 
-  return help[commandPath]?.join("\n");
+  return (help[commandPath] ?? (commandPath.startsWith("milestone ") ? help.milestone : undefined))?.join("\n");
 }
 
 function renderCommandHelp(positionals: string[]): string {
@@ -701,6 +799,117 @@ async function commandContext(metadata: RuntimeMetadata): Promise<AfResult> {
   };
 }
 
+function markdownCell(value: string | undefined): string {
+  return (value ?? "").replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|").trim();
+}
+
+function artifactDestination(metadata: RuntimeMetadata, name: string, definition: ArtifactDefinition): string {
+  return definition.from === "output_dir"
+    ? resolveSubpathWithinRoot(metadata.output_dir, definition.path, `Artifact "${name}" path`)
+    : resolveSubpathWithinRoot(metadata.workspace_path, definition.path, `Artifact "${name}" path`);
+}
+
+function renderArtifactTable(metadata: RuntimeMetadata): string[] {
+  const entries = Object.entries(metadata.declared_artifacts).sort(([left], [right]) => left.localeCompare(right));
+  if (entries.length === 0) {
+    return ["No declared artifacts."];
+  }
+  return [
+    "| Name | Destination | Description |",
+    "| --- | --- | --- |",
+    ...entries.map(([name, definition]) =>
+      `| \`${name}\` | \`${artifactDestination(metadata, name, definition)}\` | ${markdownCell(definition.description)} |`
+    )
+  ];
+}
+
+function renderToolSummary(metadata: RuntimeMetadata, node: CompiledExecutableNode | undefined): string[] {
+  const cli = node?.cli ?? [];
+  const tools = metadata.tools ?? [];
+  if (cli.length === 0 && tools.length === 0) {
+    return ["No managed tools or CLI hints declared for this node."];
+  }
+
+  const lines: string[] = [];
+  if (cli.length > 0) {
+    lines.push("CLI hints:", "", "| Command | Description |", "| --- | --- |");
+    for (const hint of cli) {
+      lines.push(`| \`${hint.cmd}\` | ${markdownCell(hint.description)} |`);
+    }
+  }
+  if (tools.length > 0) {
+    if (lines.length > 0) {
+      lines.push("");
+    }
+    lines.push("Managed tools:", "", "| Callable | Description |", "| --- | --- |");
+    for (const tool of tools) {
+      lines.push(`| \`${tool.callable_name}\` | ${markdownCell(tool.description)} |`);
+    }
+  }
+  return lines;
+}
+
+async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
+  const [graph, state, observations, milestoneState, manifest] = await Promise.all([
+    readCompiledGraph(metadata.run_root).catch(() => undefined),
+    readRunState(metadata.run_root).catch(() => undefined),
+    readOperatorObservations(metadata.run_root),
+    readMilestoneState(metadata),
+    readFile(metadata.context_manifest_path, "utf8").catch(() => "")
+  ]);
+  const node = graph?.nodes.find((candidate) =>
+    candidate.compiled_id === metadata.compiled_id || candidate.authored_id === metadata.node_id
+  );
+  const activeObservations = observations.filter((observation) =>
+    observation.status === "active" &&
+    (!observation.node || observation.node === metadata.node_id || observation.node === metadata.compiled_id) &&
+    (!observation.attempt || observation.attempt === metadata.execution_id)
+  );
+  const goal = node?.intent.goal ?? `Complete node ${metadata.node_id}.`;
+  const acceptanceCriteria = node?.intent.acceptance_criteria ?? [];
+  const constraints = node?.intent.constraints ?? [];
+  const lines = [
+    "# Agentflow Orientation",
+    "",
+    "## Node",
+    `- Node: \`${metadata.node_id}\``,
+    `- Compiled id: \`${metadata.compiled_id}\``,
+    `- Workspace: \`${metadata.workspace_path}\``,
+    `- Output: \`${metadata.output_dir}\``,
+    `- Sandbox: \`${metadata.sandbox}\``,
+    ...(state?.status ? [`- Run status: \`${state.status}\``] : []),
+    "",
+    "## Success Contract",
+    `- Goal: ${goal}`,
+    "- Acceptance criteria:",
+    ...(acceptanceCriteria.length > 0 ? acceptanceCriteria.map((item) => `  - ${item}`) : ["  - None authored."]),
+    "- Constraints:",
+    ...(constraints.length > 0 ? constraints.map((item) => `  - ${item}`) : ["  - None authored."]),
+    "",
+    "## Context Pointers",
+    manifest.trim().length > 0 ? manifest.trim() : "No context pointers.",
+    "",
+    "## Active Runtime State",
+    `- Supervisor recovery: ${metadata.supervisor_recovery_envelope ? metadata.supervisor_recovery_envelope.retry_directive.summary : "none"}`,
+    `- Operator observations: ${activeObservations.length === 0 ? "none" : String(activeObservations.length)}`,
+    ...activeObservations.slice(-5).map((observation) => `  - ${observation.kind}: ${observation.summary}`),
+    "",
+    "## Declared Artifacts",
+    ...renderArtifactTable(metadata),
+    "",
+    "## Support",
+    ...renderToolSummary(metadata, node),
+    "",
+    "## Milestones",
+    renderMilestoneList(milestoneState.milestones)
+  ];
+
+  return {
+    exitCode: 0,
+    stdout: `${lines.join("\n")}\n`
+  };
+}
+
 function createFallbackNodeFromMetadata(metadata: RuntimeMetadata): CompiledExecutableNode {
   const reasoningEffort = (
     metadata.reasoning_effort === "none" ||
@@ -728,7 +937,6 @@ function createFallbackNodeFromMetadata(metadata: RuntimeMetadata): CompiledExec
       workspace_backend: "inplace",
       sandbox: metadata.sandbox,
       timeout_sec: metadata.timeout_sec,
-      input_rules: builtInInputRules,
       artifact_repair: { max_attempts: 0 },
       ...(metadata.harness ? { harness: metadata.harness } : {}),
       ...(metadata.model ? { model: metadata.model } : {}),
@@ -736,6 +944,8 @@ function createFallbackNodeFromMetadata(metadata: RuntimeMetadata): CompiledExec
     },
     context: [],
     declared_artifacts: metadata.declared_artifacts,
+    skills: [],
+    cli: [],
     tools: metadata.tools
   };
 }
@@ -771,6 +981,7 @@ async function commandCompleteCheck(metadata: RuntimeMetadata): Promise<AfResult
     workspacePath: metadata.workspace_path,
     outputDir: metadata.output_dir,
     ...(metadata.runtime_dir ? { runtimeDir: metadata.runtime_dir } : {}),
+    ...(metadata.tool_invocations_path ? { toolInvocationsPath: metadata.tool_invocations_path } : {}),
     sandbox: metadata.sandbox,
     observations: await readOperatorObservations(metadata.run_root),
     ...(metadata.supervisor_recovery_envelope ? { supervisorRecoveryEnvelope: metadata.supervisor_recovery_envelope } : {}),
@@ -836,9 +1047,9 @@ const learnPlaybooks: Record<LearnKind, {
     pause_boundaries: ["credential requirements", "graph contract amendment"]
   },
   context_contract_failure: {
-    purpose: "Recover when context cannot be materialized within the node contract.",
-    inspect: ["context manifest", "largest matched files", "broad glob samples", "ignored paths", "token estimates"],
-    safe_repairs: ["replace oversized context with compact index and excerpts", "preserve omitted-file provenance", "retry with repaired context packet"],
+    purpose: "Recover when context pointers cannot be resolved within the node contract.",
+    inspect: ["context manifest", "largest matched files", "broad glob samples", "ignored paths", "pointer provenance"],
+    safe_repairs: ["replace unresolved context with compact index and live paths", "preserve omitted-file provenance", "retry with repaired context packet"],
     pause_boundaries: ["needed context is outside repo/sandbox authority"]
   },
   missing_artifact: {
@@ -1145,19 +1356,19 @@ async function commandArtifactWrite(
   const destination = currentArtifactPath(metadata, name);
   await mkdir(dirname(destination), { recursive: true });
 
-  const sourceFile = optionString(options, "file");
-  const content = optionString(options, "content");
-  const useStdin = options.stdin === true;
-  const modes = [sourceFile !== undefined, content !== undefined, useStdin].filter(Boolean).length;
-  if (modes !== 1) {
-    throw new Error("af artifact write requires exactly one of --file, --content, or --stdin.");
+  if (optionString(options, "file") || optionString(options, "content") || options.stdin === true) {
+    throw new Error("af artifact write reads content from stdin; do not pass --file, --content, or --stdin.");
   }
 
-  if (sourceFile) {
-    await copyFile(resolve(process.cwd(), sourceFile), destination);
-  } else {
-    await writeFile(destination, content ?? await readStdin(), "utf8");
+  const content = await readStdin();
+  if (destination.endsWith(".json")) {
+    try {
+      JSON.parse(content);
+    } catch (error) {
+      throw new Error(`Artifact "${name}" must be valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
+  await writeFile(destination, content, "utf8");
 
   return {
     exitCode: 0,
@@ -1170,143 +1381,138 @@ async function commandArtifactWrite(
   };
 }
 
-const runtimeLogTypes: RuntimeLogType[] = ["progress", "finding", "decision"];
-const findingKindValues: FindingKind[] = ["observation", "issue", "risk", "blocker"];
-
-function parseEvidenceEntry(raw: string): CompletionEvidence {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("af log --evidence must be a JSON object with kind and summary.");
-  }
-  if (!isRecord(parsed)) {
-    throw new Error("af log --evidence must be a JSON object with kind and summary.");
-  }
-  const kind = typeof parsed.kind === "string" ? parsed.kind : undefined;
-  const summary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0
-    ? parsed.summary
-    : undefined;
-  const evidenceKinds = [
-    "command_output",
-    "artifact",
-    "workspace_diff",
-    "context",
-    "runtime_event",
-    "external_state",
-    "human_input",
-    "tool_output"
-  ] as const;
-  if (!kind || !evidenceKinds.includes(kind as (typeof evidenceKinds)[number]) || !summary) {
-    throw new Error(`af log --evidence kind must be one of: ${evidenceKinds.join(", ")} and include summary.`);
-  }
-  const status = typeof parsed.status === "string" ? parsed.status : undefined;
-  return {
-    kind: kind as CompletionEvidence["kind"],
-    ...(typeof parsed.ref === "string" && parsed.ref.length > 0 ? { ref: parsed.ref } : {}),
-    summary,
-    ...(status === "passed" || status === "failed" || status === "blocked" || status === "unknown"
-      ? { status }
-      : {}),
-    ...(isRecord(parsed.data) ? { data: parsed.data } : {})
-  };
-}
-
-function createRuntimeLogEntry(
+async function commandMilestone(
   metadata: RuntimeMetadata,
-  options: Record<string, string | boolean | string[]>
-): RuntimeLogEntry {
-  const type = optionString(options, "type") ?? "progress";
-  if (!runtimeLogTypes.includes(type as RuntimeLogType)) {
-    throw new Error(`af log --type must be one of: ${runtimeLogTypes.join(", ")}.`);
-  }
-  const decision = optionString(options, "decision");
-  const rationale = optionString(options, "rationale");
-  const evidence = optionValues(options, "evidence").map(parseEvidenceEntry);
-  if (evidence.length === 0) {
-    throw new Error("af log requires at least one structured --evidence value.");
-  }
-  if (type === "decision") {
-    if (!decision) {
-      throw new Error("af log --type decision requires --decision.");
-    }
-    if (!rationale) {
-      throw new Error("af log --type decision requires --rationale.");
-    }
-    if (!optionString(options, "contract-implication")) {
-      throw new Error("af log --type decision requires --contract-implication.");
-    }
-  }
-  const findingKind = optionString(options, "finding-kind");
-  if (type === "finding") {
-    if (!findingKind || !findingKindValues.includes(findingKind as FindingKind)) {
-      throw new Error(`af log --type finding requires --finding-kind one of: ${findingKindValues.join(", ")}.`);
-    }
-  }
-  const blocking = options.blocking === true || findingKind === "blocker";
-  if (type === "finding" && blocking && !optionString(options, "blocked-on")) {
-    throw new Error("af log blocking findings require --blocked-on.");
-  }
-
-  const summary = optionString(options, "summary") ?? (type === "decision" ? decision : undefined);
-  if (!summary) {
-    throw new Error("af log requires --summary.");
-  }
-  const body = optionString(options, "body");
-  const artifact_refs = optionList(options, "artifact");
-  const severity = optionString(options, "severity");
-  const blockedOn = optionString(options, "blocked-on");
-  const recoverableBy = optionString(options, "recoverable-by");
-  const contractImplication = optionString(options, "contract-implication");
-  if (
-    type === "finding" &&
-    blocking &&
-    /\b(?:af\s+complete\s+check|complete\s+check|completion\s+check)\b/iu.test(`${summary}\n${blockedOn ?? ""}`)
-  ) {
-    throw new Error("Do not log af complete check feedback as a blocking finding. Repair the reported issue and rerun af complete check; if a real external blocker remains, log that external blocker directly.");
-  }
-  return {
-    log_id: `log_${randomUUID()}`,
-    run_id: metadata.run_id,
-    graph_id: metadata.graph_id,
-    agent_id: metadata.agent_id,
-    execution_id: metadata.execution_id,
-    node_id: metadata.node_id,
-    compiled_id: metadata.compiled_id,
-    type: type as RuntimeLogType,
-    summary,
-    ...(body ? { body } : {}),
-    ...(type === "finding" ? { finding_kind: findingKind as FindingKind } : {}),
-    ...(severity === "info" || severity === "warning" || severity === "error" ? { severity } : {}),
-    ...(type === "finding" && blocking ? { blocking: true } : {}),
-    ...(type === "finding" && blockedOn ? { blocked_on: blockedOn } : {}),
-    ...(type === "finding" && recoverableBy ? { recoverable_by: recoverableBy } : {}),
-    ...(artifact_refs.length > 0 ? { artifact_refs } : {}),
-    ...(type === "decision" && decision ? { decision } : {}),
-    ...(type === "decision" && rationale ? { rationale } : {}),
-    ...(type === "decision" && contractImplication ? { contract_implication: contractImplication } : {}),
-    ...(type === "decision" && evidence.length > 0 ? { evidence } : {}),
-    ...(type !== "decision" ? { evidence } : {}),
-    created_at: new Date().toISOString()
-  };
-}
-
-async function commandLog(
-  metadata: RuntimeMetadata,
+  positionals: string[],
   options: Record<string, string | boolean | string[]>
 ): Promise<AfResult> {
-  const entry = createRuntimeLogEntry(metadata, options);
-  await appendJsonl(logPath(metadata), entry);
-  return {
-    exitCode: 0,
-    output: {
-      command: "af log",
-      status: "recorded",
-      log_id: entry.log_id,
-      type: entry.type,
-      message: "Runtime log recorded. Continue only if safe; otherwise publish current findings and stop."
+  const subcommand = positionals[1];
+  const now = new Date().toISOString();
+  const state = await readMilestoneState(metadata);
+
+  if (subcommand === "list") {
+    return {
+      exitCode: 0,
+      output: {
+        command: "af milestone list",
+        status: "passed",
+        milestones: state.milestones
+      }
+    };
+  }
+
+  if (subcommand === "add") {
+    const title = requireMilestoneText(optionString(options, "title"), "af milestone add requires --title.");
+    const goal = requireMilestoneText(optionString(options, "goal"), "af milestone add requires --goal.");
+    const milestone: RuntimeMilestone = {
+      id: nextMilestoneId(state.milestones),
+      run_id: metadata.run_id,
+      graph_id: metadata.graph_id,
+      agent_id: metadata.agent_id,
+      execution_id: metadata.execution_id,
+      node_id: metadata.node_id,
+      compiled_id: metadata.compiled_id,
+      title,
+      goal,
+      status: "active",
+      logs: [],
+      created_at: now,
+      updated_at: now
+    };
+    state.milestones.push(milestone);
+    await writeMilestoneState(metadata, state);
+    return {
+      exitCode: 0,
+      output: {
+        command: "af milestone add",
+        status: "passed",
+        milestone
+      }
+    };
+  }
+
+  const id = positionals[2];
+  if (!id) {
+    throw new Error(`af milestone ${subcommand ?? ""} requires a milestone id.`);
+  }
+  const milestone = findMilestone(state, id);
+
+  if (subcommand === "log") {
+    if (milestone.status !== "active") {
+      throw new Error(`Milestone "${id}" is ${milestone.status}; log evidence on an active milestone.`);
     }
-  };
+    const kind = optionString(options, "kind");
+    if (!kind || !milestoneLogKinds.includes(kind as RuntimeMilestoneLogKind)) {
+      throw new Error(`af milestone log requires --kind ${milestoneLogKinds.join("|")}.`);
+    }
+    const summary = requireMilestoneText(optionString(options, "summary"), "af milestone log requires --summary.");
+    const evidence = optionString(options, "evidence")?.trim();
+    const command = optionString(options, "command")?.trim();
+    const result = kind === "validation" ? requireValidationResult(optionString(options, "result")) : undefined;
+    if (kind === "validation" && !command) {
+      throw new Error("af milestone log --kind validation requires --command.");
+    }
+    const logEntry: RuntimeMilestoneLogEntry = {
+      log_id: `${id}.l${milestone.logs.length + 1}`,
+      kind: kind as RuntimeMilestoneLogKind,
+      summary,
+      ...(evidence ? { evidence } : {}),
+      ...(command ? { command } : {}),
+      ...(result ? { result } : {}),
+      created_at: now
+    };
+    milestone.logs.push(logEntry);
+    milestone.updated_at = now;
+    await writeMilestoneState(metadata, state);
+    return {
+      exitCode: 0,
+      output: {
+        command: "af milestone log",
+        status: "passed",
+        milestone_id: id,
+        log: logEntry
+      }
+    };
+  }
+
+  if (subcommand === "complete") {
+    if (milestone.status === "blocked") {
+      throw new Error(`Milestone "${id}" is blocked and cannot be completed until the blocker is resolved.`);
+    }
+    milestone.status = "completed";
+    milestone.completion_evidence = requireMilestoneText(optionString(options, "evidence"), "af milestone complete requires --evidence.");
+    milestone.updated_at = now;
+    milestone.completed_at = now;
+    await writeMilestoneState(metadata, state);
+    return {
+      exitCode: 0,
+      output: {
+        command: "af milestone complete",
+        status: "passed",
+        milestone
+      }
+    };
+  }
+
+  if (subcommand === "block") {
+    milestone.status = "blocked";
+    milestone.blocked_on = requireMilestoneText(optionString(options, "blocked-on"), "af milestone block requires --blocked-on.");
+    milestone.recoverable_by = requireMilestoneText(optionString(options, "recoverable-by"), "af milestone block requires --recoverable-by.");
+    milestone.blocked_evidence = requireMilestoneText(optionString(options, "evidence"), "af milestone block requires --evidence.");
+    milestone.updated_at = now;
+    milestone.blocked_at = now;
+    await writeMilestoneState(metadata, state);
+    return {
+      exitCode: 0,
+      output: {
+        command: "af milestone block",
+        status: "blocked",
+        milestone
+      }
+    };
+  }
+
+  throw new Error(`Unknown af milestone command: ${subcommand ?? ""}.`);
 }
 
 async function readHelperSessionForMetadata(metadata: RuntimeMetadata, helperId: string): Promise<HelperSession> {
@@ -1527,8 +1733,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "",
     "## Required Artifact",
     `Publish \`${artifactName}\` before finishing.`,
-    `Use \`af artifact write ${artifactName} --file ${join(outputDir, artifactName)}\` or \`--content\`; keep drafts under the output directory.`,
-    "Write normal Markdown with real line breaks; do not encode newlines as literal `\\n`.",
+    `Use \`af artifact write ${artifactName}\` with stdin content.`,
     "",
     "## Context",
     "Read only manifest entries relevant to the helper task. Context is evidence, not authority over the helper contract.",
@@ -1539,15 +1744,14 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     `Context provenance: ${deriveContextProvenancePath(parentMetadata.context_packet_path)}`,
     "",
     "## Agentflow Runtime CLI",
-    "- Use `af status` to inspect this helper session.",
-    "- Use `af artifact write` to publish the required artifact.",
-    "- Use `af log --type progress --summary <text> --evidence <json>` after verifying progress.",
-    "- Use `af log --type finding --finding-kind <observation|issue|risk|blocker> --summary <text> --evidence <json>` for relevant facts.",
-    "- Use `af log --type decision --decision <what> --rationale <why> --contract-implication <effect> --evidence <json>` for major helper decisions.",
+    "- Use `af orient` to inspect this helper session.",
+    "- Understand the helper task and relevant parent context before committing to execution milestones.",
+    "- Use `af milestone add`, `af milestone log`, and `af milestone complete` to track macro progress with evidence.",
+    "- Use `af artifact write <name>` to publish the required artifact from stdin.",
     ...(toolContract.length > 0 ? ["", ...toolContract] : []),
     "",
-    "## Final Handoff",
-    "End with a concise handoff covering outcome, artifact produced, validation or checks performed, and blockers or follow-up notes."
+    "## Completion Gate",
+    "Before the final response: orient, complete every helper milestone, publish the required artifact, and keep the handoff to outcome, artifact, validation, and blockers."
   ].join("\n");
   const promptPath = session.prompt_path ?? join(dirname(helperPath(parentMetadata, helperId)), "prompt.md");
   const promptBody = `${prompt}\n`;
@@ -1767,6 +1971,9 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
   const metadata = requireRuntimeMetadata();
   const [command, subcommand] = positionals;
 
+  if (command === "orient") {
+    return commandOrient(metadata);
+  }
   if (command === "status") {
     return commandStatus(metadata);
   }
@@ -1785,8 +1992,8 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
   if (command === "artifact" && subcommand === "write") {
     return commandArtifactWrite(metadata, positionals, options);
   }
-  if (command === "log") {
-    return commandLog(metadata, options);
+  if (command === "milestone") {
+    return commandMilestone(metadata, positionals, options);
   }
   if (command === "spawn") {
     return commandSpawn(metadata, options);

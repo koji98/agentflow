@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 function readJson(path) {
@@ -71,8 +71,31 @@ function simulationEvents(packet) {
   return packet.simulation_events ?? [];
 }
 
-function logEntries(runRoot) {
-  return readJsonl(join(runRoot, "runtime", "log.jsonl"));
+function milestoneEntries(runRoot) {
+  const milestoneDir = join(runRoot, "runtime", "milestones");
+  if (!existsSync(milestoneDir)) {
+    return [];
+  }
+  return readdirSync(milestoneDir)
+    .filter((entry) => entry.endsWith(".json"))
+    .flatMap((entry) => {
+      const state = readJson(join(milestoneDir, entry));
+      return (state.milestones ?? []).map((milestone) => ({
+        ...milestone,
+        source_file: entry
+      }));
+    });
+}
+
+function milestoneLogEntries(runRoot) {
+  return milestoneEntries(runRoot).flatMap((milestone) =>
+    (milestone.logs ?? []).map((entry) => ({
+      ...entry,
+      milestone_id: milestone.id,
+      milestone_title: milestone.title,
+      milestone_status: milestone.status
+    }))
+  );
 }
 
 function trialRootFromOutputDir() {
@@ -94,7 +117,8 @@ const config = scenario.criteria?.["prompt-regression"] ?? {};
 const handoff = artifactContent(packet, config.artifact ?? "handoff");
 const commands = afCommands(packet);
 const simulations = simulationEvents(packet);
-const logs = logEntries(process.env.AGENTFLOW_EVAL_RUN_ROOT);
+const milestones = milestoneEntries(process.env.AGENTFLOW_EVAL_RUN_ROOT);
+const milestoneLogs = milestoneLogEntries(process.env.AGENTFLOW_EVAL_RUN_ROOT);
 const assertions = [];
 const blockers = [];
 
@@ -147,36 +171,36 @@ for (const forbidden of config.forbidden_af ?? ["diagnose", "learn", "spawn"]) {
   );
 }
 
-for (const required of config.required_logs ?? []) {
-  const matched = logs.some((entry) => {
-    if (entry.type !== required.type) {
+for (const required of config.required_milestone_logs ?? []) {
+  const matched = milestoneLogs.some((entry) => {
+    if (entry.kind !== required.kind) {
       return false;
     }
-    if (required.finding_kind && entry.finding_kind !== required.finding_kind) {
+    if (required.result && entry.result !== required.result) {
       return false;
     }
-    if (!Array.isArray(entry.evidence) || entry.evidence.length === 0) {
+    if (required.command_contains && !String(entry.command ?? "").includes(required.command_contains)) {
       return false;
     }
-    if (required.type === "decision" && (!entry.rationale || !entry.contract_implication)) {
+    if (!entry.summary) {
       return false;
     }
     return true;
   });
   check(
-    `required_log:${required.type}${required.finding_kind ? `:${required.finding_kind}` : ""}`,
+    `required_milestone_log:${required.kind}${required.result ? `:${required.result}` : ""}`,
     matched,
-    JSON.stringify(logs.map((entry) => ({ type: entry.type, finding_kind: entry.finding_kind, summary: entry.summary }))),
-    `required runtime log missing: ${required.type}`
+    JSON.stringify(milestoneLogs.map((entry) => ({ kind: entry.kind, result: entry.result, command: entry.command, summary: entry.summary }))),
+    `required milestone log missing: ${required.kind}`
   );
 }
 
-if (config.forbid_blocking_logs) {
+if (config.forbid_blocked_milestones) {
   check(
-    "no_blocking_log",
-    !logs.some((entry) => entry.blocking === true),
-    JSON.stringify(logs.map((entry) => ({ type: entry.type, blocking: entry.blocking, summary: entry.summary }))),
-    "runtime log contained an unsupported blocker"
+    "no_blocked_milestone",
+    !milestones.some((entry) => entry.status === "blocked"),
+    JSON.stringify(milestones.map((entry) => ({ id: entry.id, status: entry.status, blocked_on: entry.blocked_on }))),
+    "milestone state contained an unsupported blocker"
   );
 }
 
@@ -235,7 +259,8 @@ console.log(JSON.stringify({
   blockers,
   metrics: {
     af_command_count: commands.length,
-    runtime_log_count: logs.length,
+    milestone_count: milestones.length,
+    milestone_log_count: milestoneLogs.length,
     simulation_event_count: simulations.length,
     artifact_bytes: Buffer.byteLength(handoff, "utf8")
   }

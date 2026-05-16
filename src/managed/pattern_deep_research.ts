@@ -11,6 +11,7 @@ import {
   body,
   defaultManagedPublicArtifacts,
   managedId,
+  mergeSupportContext,
   renderPrompt,
   section,
   sharedAgentBase,
@@ -97,17 +98,18 @@ function formatAngleLabel(angle: PatternDeepResearchAngle): string {
 function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepResearchAngle, index: number): string {
   return renderPrompt([
     body("You are a research angle worker investigating one assigned angle for a larger managed research workflow. Your private report will be synthesized later, so gather useful evidence and preserve uncertainty clearly."),
-    section("Final Managed Workflow Contract", [
-      "This is a private helper node inside a managed workflow. The final managed node owns the public artifact shape and final acceptance criteria below.",
-      "Use this contract to understand what your evidence must support, but do not format this private angle report as the final public artifact unless the private output contract below says so.",
-      `Goal: ${config.intent.goal}`,
-      ...formatList("Final acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
-    ]),
     section("Assigned Angle", [
       `Angle id: ${angle.id}`,
       angle.prompt,
-      "Stay focused on this angle. Do not duplicate the other angle workers unless overlap is needed to explain a conflict."
+      "This assigned angle is your controlling objective. Do not let the broader workflow goal shift your focus.",
+      "Do not duplicate other angle workers unless overlap is needed to explain a conflict."
+    ]),
+    section("Final Managed Workflow Contract", [
+      "This is a private helper node inside a managed workflow. The final managed node owns the public artifact shape and final acceptance criteria below.",
+      "Use this contract as background for what your angle evidence must support, not as permission to broaden the assigned angle.",
+      `Goal: ${config.intent.goal}`,
+      ...formatList("Final acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     ...(angle.as_artifact
       ? [
@@ -127,12 +129,15 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
     section("Output Contract", [
       "Write `angle-report.md` and `packet.json` to the output directory.",
       "These are private research artifacts for synthesis, not the final public handoff.",
+      `The assigned angle id is ${angle.id}. Use that value in the report metadata and set the top-level packet angle field to the same value.`,
       "The report should be readable by a human researcher and focused on the assigned angle.",
-      "The packet must be JSON with `angle`, `findings`, `evidence`, `sources`, `conflicts`, `uncertainty`, and `confidence` fields."
+      "The packet must be JSON with `angle`, `findings`, `evidence`, `sources`, `conflicts`, `uncertainty`, and `confidence` fields.",
+      "Before finishing, re-open both artifacts and verify the report heading/metadata and packet `angle` field match the assigned angle id exactly."
     ]),
     section("Quality Bar", [
       "Do not produce a shallow summary. Produce the most useful evidence-backed answer for this angle.",
-      "Mark uncertainty instead of guessing. Include minority or conflicting evidence when it matters."
+      "Mark uncertainty instead of guessing. Include minority or conflicting evidence when it matters.",
+      `Final reminder: complete angle \`${angle.id}\`, not the entire research workflow.`
     ])
   ]);
 }
@@ -189,15 +194,14 @@ function buildFinalPrompt(
     ]),
     ...(exposedAngleArtifacts.length > 0
       ? [
-          section("Exposed Raw Angle Artifacts", exposedAngleArtifacts.map((angle) =>
-            `- ${angle.id}: runtime forwards the raw Markdown report for angle \`${angle.id}\`; do not rewrite it.`
+          section("Runtime-Forwarded Raw Angle Artifacts", exposedAngleArtifacts.map((angle) =>
+            `- ${angle.id}: Agentflow forwards the raw Markdown report for angle \`${angle.id}\`; do not rewrite or republish it.`
           ))
         ]
       : []),
-    section("Public Artifact Contract", [
-      "Write exactly the declared public artifacts.",
+    section("Declared Public Artifacts", [
+      "Publish the declared public artifacts.",
       ...formatArtifactContract(publicArtifacts),
-      "Honor each artifact description literally, including any required field labels or handoff sections.",
       "The `packet` artifact must include answer, findings, evidence, sources, uncertainties, confidence, recommended next actions, and an angle index with each angle id, exposed raw artifact when selected, source refs, confidence, conflicts, and private evidence paths."
     ]),
     section("Quality Bar", [
@@ -293,7 +297,6 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       id: workflowNodeId(config.id, `angle_${suffix}`),
       label: `Research Angle ${suffix}`,
       ...agentShared,
-      ...(config.context ? { context: config.context } : {}),
       artifacts: buildAngleArtifacts(index),
       intent: {
         goal: buildAnglePrompt(config, angle, index),
@@ -338,7 +341,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         id: workflowNodeId(config.id, `synthesis_${suffix}`),
         label: `Research Synthesis ${zeroPad(layer)}.${zeroPad(group)}`,
         ...agentShared,
-        context: materialContexts(groupMaterials),
+        support: mergeSupportContext(agentShared.support, materialContexts(groupMaterials)),
         artifacts: buildSynthesisArtifacts(layer, group),
         intent: {
           goal: buildSynthesisPrompt(config, groupMaterials.length, layer, group),
@@ -384,7 +387,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         id: config.id,
         ...(config.label ? { label: config.label } : { label: "Publish Deep Research" }),
         ...agentShared,
-        context: materialContexts(materials),
+        support: mergeSupportContext(agentShared.support, materialContexts(materials)),
         artifacts: publicArtifacts,
         ...(managedArtifactForwards ? { managed_artifact_forwards: managedArtifactForwards } : {}),
         intent: {

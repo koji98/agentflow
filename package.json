@@ -24,6 +24,7 @@
     "inspect": "tsx src/cli/index.ts inspect",
     "setup:eval-repos": "node scripts/setup-eval-repos.mjs",
     "setup:realworld-evals": "node scripts/setup-realworld-evals.mjs",
+    "setup:validation-evals": "node scripts/setup-realworld-evals.mjs --suite evals/agentflow-validation --repos-root eval-repos/agentflow-validation",
     "setup:link": "npm link",
     "setup:unlink": "npm unlink --global agentflow",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -45,7 +46,6 @@
     "vitest": "2.1.9"
   },
   "dependencies": {
-    "ignore": "^7.0.5",
-    "js-tiktoken": "^1.0.21"
+    "ignore": "^7.0.5"
   }
 }

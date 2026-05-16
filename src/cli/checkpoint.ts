@@ -42,6 +42,10 @@ export interface CheckpointDecision {
   feedback?: string;
 }
 
+export interface ScriptedCheckpointOptions {
+  decisions: CheckpointDecision[];
+}
+
 interface CheckpointRenderInput {
   node: CompiledCheckpointNode;
   review_artifact_path: string;
@@ -146,6 +150,79 @@ function createReadlinePromptAdapter(
     },
     close() {
       rl.close();
+    }
+  };
+}
+
+function normalizeScriptedCheckpointDecision(value: unknown, index: number): CheckpointDecision {
+  if (typeof value === "string") {
+    if (value === "pass" || value === "abort") {
+      return { decision: value };
+    }
+    throw new Error(`Scripted checkpoint decision ${index + 1} must be pass, deny, or abort.`);
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Scripted checkpoint decision ${index + 1} must be an object.`);
+  }
+
+  const record = value as Record<string, unknown>;
+  const decision = record.decision;
+  if (decision !== "pass" && decision !== "deny" && decision !== "abort") {
+    throw new Error(`Scripted checkpoint decision ${index + 1} must be pass, deny, or abort.`);
+  }
+
+  const feedback = typeof record.feedback === "string" ? record.feedback.trim() : undefined;
+  if (decision === "deny" && !feedback) {
+    throw new Error(`Scripted checkpoint decision ${index + 1} denies the checkpoint but does not include feedback.`);
+  }
+
+  return {
+    decision,
+    ...(feedback ? { feedback } : {})
+  };
+}
+
+export function parseScriptedCheckpointDecisions(value: string): CheckpointDecision[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(
+      `AGENTFLOW_EVAL_CHECKPOINT_DECISIONS must be JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("AGENTFLOW_EVAL_CHECKPOINT_DECISIONS must be a JSON array.");
+  }
+
+  return parsed.map((entry, index) => normalizeScriptedCheckpointDecision(entry, index));
+}
+
+function createScriptedPromptAdapter(decision: CheckpointDecision | undefined): CheckpointPromptAdapter {
+  const scriptedLines =
+    decision?.decision === "pass"
+      ? ["1"]
+      : decision?.decision === "abort"
+        ? ["3"]
+        : decision?.decision === "deny"
+          ? ["2", ...(decision.feedback ?? "").split(/\r?\n/u), ""]
+          : [];
+
+  return {
+    write() {
+      // Eval scripts intentionally suppress checkpoint UI output.
+    },
+    async readLine() {
+      const next = scriptedLines.shift();
+      if (next === undefined) {
+        throw new Error("Scripted checkpoint decisions were exhausted before the checkpoint prompt completed.");
+      }
+      return next;
+    },
+    close() {
+      // Nothing to close for scripted input.
     }
   };
 }
@@ -262,7 +339,7 @@ export function createInteractiveCheckpointExecutor(
       );
     }
 
-    const reviewText = await readFile(reviewMaterial.materialized_path, "utf8");
+    const reviewText = await readFile(reviewMaterial.pointer_path, "utf8");
     const contextManifestPreview = truncatePreview(
       await readFile(context.context_manifest_path, "utf8"),
       {
@@ -271,10 +348,10 @@ export function createInteractiveCheckpointExecutor(
       }
     );
     const supporting_context = packet.materials
-      .filter((item) => item.materialized_path !== reviewMaterial.materialized_path)
+      .filter((item) => item.pointer_path !== reviewMaterial.pointer_path)
       .map((item) => ({
         label: describeContextSource(item.source),
-        path: item.materialized_path
+        path: item.pointer_path
       }));
 
     const adapter = create_prompt_adapter(streams);
@@ -283,7 +360,7 @@ export function createInteractiveCheckpointExecutor(
       adapter.write(
         `\n${renderCheckpointReview({
           node: context.node,
-          review_artifact_path: reviewMaterial.materialized_path,
+          review_artifact_path: reviewMaterial.pointer_path,
           review_preview: truncatePreview(reviewText),
           supporting_context,
           context_manifest_preview: contextManifestPreview
@@ -298,13 +375,13 @@ export function createInteractiveCheckpointExecutor(
           outcome: "passed",
           result: {
             checkpoint_decision: "pass",
-            review_artifact_path: reviewMaterial.materialized_path
+            review_artifact_path: reviewMaterial.pointer_path
           },
           stdout: undefined,
           stderr: undefined,
           metadata: {
             checkpoint_decision: "pass",
-            review_artifact_path: reviewMaterial.materialized_path
+            review_artifact_path: reviewMaterial.pointer_path
           }
         };
       }
@@ -314,13 +391,13 @@ export function createInteractiveCheckpointExecutor(
           status: "canceled",
           result: {
             checkpoint_decision: "abort",
-            review_artifact_path: reviewMaterial.materialized_path
+            review_artifact_path: reviewMaterial.pointer_path
           },
           stdout: undefined,
           stderr: undefined,
           metadata: {
             checkpoint_decision: "abort",
-            review_artifact_path: reviewMaterial.materialized_path
+            review_artifact_path: reviewMaterial.pointer_path
           }
         };
       }
@@ -337,14 +414,14 @@ export function createInteractiveCheckpointExecutor(
         outcome: "failed",
         result: {
           checkpoint_decision: "deny",
-          review_artifact_path: reviewMaterial.materialized_path,
+          review_artifact_path: reviewMaterial.pointer_path,
           operator_feedback_path: feedbackPath
         },
         stdout: undefined,
         stderr: undefined,
         metadata: {
           checkpoint_decision: "deny",
-          review_artifact_path: reviewMaterial.materialized_path,
+          review_artifact_path: reviewMaterial.pointer_path,
           operator_feedback_path: feedbackPath
         }
       };
@@ -354,8 +431,33 @@ export function createInteractiveCheckpointExecutor(
   };
 }
 
+export function createScriptedCheckpointExecutor(
+  options: ScriptedCheckpointOptions
+): RuntimeNodeExecutor<CompiledCheckpointNode> {
+  let decisionIndex = 0;
+  const streams: CheckpointTerminalStreams = {
+    stdin: { isTTY: true } as NodeJS.ReadableStream & TtyLike,
+    stderr: {
+      isTTY: true,
+      write() {
+        return true;
+      }
+    } as unknown as NodeJS.WritableStream & TtyLike
+  };
+
+  return createInteractiveCheckpointExecutor({
+    streams,
+    create_prompt_adapter: () => {
+      const decision = options.decisions[decisionIndex];
+      decisionIndex += 1;
+      return createScriptedPromptAdapter(decision);
+    }
+  });
+}
+
 export const checkpointPromptTestUtils = {
   truncatePreview,
   renderCheckpointReview,
-  promptForDecision
+  promptForDecision,
+  normalizeScriptedCheckpointDecision
 };

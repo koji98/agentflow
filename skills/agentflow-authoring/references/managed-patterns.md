@@ -14,7 +14,7 @@ Good for:
 - reviewing a work product
 - run postmortems
 
-Angles should be sentence-style prompts. Public outputs should be `summary`, `packet`, and any authored extras. Downstream nodes should reference public artifacts from the authored pattern id.
+Angles should be sentence-style prompts. Graph-addressable outputs are `summary`, `packet`, and any angle reports selected with `as_artifact: true`. Downstream nodes should reference artifacts from the authored pattern id.
 
 ## `pattern_deep_work`
 

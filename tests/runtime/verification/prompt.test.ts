@@ -87,7 +87,7 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("Do not refactor unrelated modules.");
   });
 
-  it("includes the agent response snippet, declared artifacts, decision log, and workspace diff paths", () => {
+  it("includes the agent response snippet, declared artifacts, runtime decision evidence, and workspace diff paths", () => {
     const prompt = renderOutcomeVerificationPrompt(buildInput());
     expect(prompt).toContain("Done.");
     expect(prompt).toContain("Added widget module.");
@@ -185,14 +185,14 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("No per-node workspace diff was captured");
   });
 
-  it("renders an empty decision log as missing audit evidence rather than a blocker", () => {
+  it("renders empty runtime decision evidence as missing audit evidence rather than a blocker", () => {
     const prompt = renderOutcomeVerificationPrompt(
       buildInput({
         decision_log_entries: []
       })
     );
-    expect(prompt).toContain("Missing or sparse decision logs should usually be a warning, not a blocker");
-    expect(prompt).toContain("(no decision log entries captured)");
+    expect(prompt).toContain("Missing or sparse decision evidence should usually be a warning, not a blocker");
+    expect(prompt).toContain("(no runtime decision entries captured)");
   });
 
   it("does not require captured execution evidence", () => {

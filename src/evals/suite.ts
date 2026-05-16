@@ -1,10 +1,20 @@
-import { access, readFile, stat } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { harnessNames, reasoningEfforts } from "../graph/schema.js";
+import {
+  readSkillSourceDeclarations,
+  loadResolvedSkillSources,
+  resolveSkillSourcesForGraph
+} from "../skills/sources.js";
+import { expandPluginWorkflows, resolvePluginsForGraph } from "../plugins/workflows.js";
+import { validateAuthoredGraphDocument } from "../graph/validate.js";
 import type {
   EvalCriterion,
   EvalCriterionKind,
+  EvalCheckpointDecisionScript,
+  EvalCheckpointScript,
   EvalDiagnostic,
   EvalEnvironmentSimulation,
   EvalJudgePayload,
@@ -12,6 +22,7 @@ import type {
   EvalScenarioEnvironment,
   EvalScenarioMetadata,
   EvalScenarioRealWorldMetadata,
+  EvalSupervisorResumeScript,
   EvalScenarioWorkflow,
   EvalSimulationMatch,
   EvalSimulationRule,
@@ -53,6 +64,24 @@ function readNumber(value: unknown): number | undefined {
 
 function readStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function pushUnknownFieldDiagnostics(
+  value: Record<string, unknown>,
+  path: string,
+  allowedFields: readonly string[],
+  diagnostics: EvalDiagnostic[]
+): void {
+  const allowed = new Set(allowedFields);
+  Object.keys(value)
+    .filter((key) => !allowed.has(key))
+    .sort((left, right) => left.localeCompare(right))
+    .forEach((key) => {
+      diagnostics.push({
+        path: `${path}.${key}`,
+        message: `Unknown field "${key}" is not part of the eval contract.`
+      });
+    });
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -270,6 +299,13 @@ function normalizeSuite(value: unknown, suiteDir: string, diagnostics: EvalDiagn
     return undefined;
   }
 
+  pushUnknownFieldDiagnostics(
+    value,
+    "$",
+    ["version", "suite_id", "objective", "default_trials", "scenarios", "variants", "criteria", "thresholds"],
+    diagnostics
+  );
+
   const version = value.version;
   const suiteId = readString(value.suite_id);
   const objective = readString(value.objective);
@@ -285,14 +321,6 @@ function normalizeSuite(value: unknown, suiteDir: string, diagnostics: EvalDiagn
 
   if (version !== "1") {
     diagnostics.push({ path: "$.version", message: 'Eval suite version must be "1".' });
-  }
-
-  if (value.graders !== undefined) {
-    diagnostics.push({ path: "$.graders", message: "Legacy top-level graders are not supported; use criteria with kind custom_script." });
-  }
-
-  if (value.judges !== undefined) {
-    diagnostics.push({ path: "$.judges", message: "Legacy top-level judges are not supported; use criteria with kind quality." });
   }
 
   if (!suiteId) {
@@ -703,6 +731,91 @@ function normalizeSimulation(
   };
 }
 
+function normalizeScriptedCheckpoints(
+  value: unknown,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalCheckpointScript | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "scripted_checkpoints must be an object." });
+    return undefined;
+  }
+
+  const rawDecisions = Array.isArray(value.decisions) ? value.decisions : [];
+  if (!Array.isArray(value.decisions) || rawDecisions.length === 0) {
+    diagnostics.push({ path: `${path}.decisions`, message: "scripted_checkpoints requires a non-empty decisions array." });
+  }
+
+  const decisions: EvalCheckpointDecisionScript[] = [];
+  rawDecisions.forEach((decisionValue, index) => {
+    const decisionPath = `${path}.decisions[${index}]`;
+    if (!isRecord(decisionValue)) {
+      diagnostics.push({ path: decisionPath, message: "Checkpoint decision entries must be objects." });
+      return;
+    }
+
+    const decision = readString(decisionValue.decision);
+    const feedback = typeof decisionValue.feedback === "string" ? decisionValue.feedback.trim() : undefined;
+    if (decision !== "pass" && decision !== "deny" && decision !== "abort") {
+      diagnostics.push({ path: `${decisionPath}.decision`, message: "Checkpoint decision must be pass, deny, or abort." });
+      return;
+    }
+
+    if (decision === "deny" && !feedback) {
+      diagnostics.push({ path: `${decisionPath}.feedback`, message: "Deny checkpoint decisions require feedback." });
+      return;
+    }
+
+    decisions.push({
+      decision,
+      ...(feedback ? { feedback } : {})
+    });
+  });
+
+  return decisions.length > 0 ? { decisions } : undefined;
+}
+
+function normalizeScriptedResume(
+  value: unknown,
+  path: string,
+  diagnostics: EvalDiagnostic[]
+): EvalSupervisorResumeScript | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    diagnostics.push({ path, message: "scripted_resume must be an object." });
+    return undefined;
+  }
+
+  const humanAction = readString(value.human_action);
+  const allowedActions = new Set(["approve", "fail", "add_context", "retry_with_guidance", "rebuild_context_then_retry"]);
+  if (!humanAction || !allowedActions.has(humanAction)) {
+    diagnostics.push({
+      path: `${path}.human_action`,
+      message: "scripted_resume human_action must be approve, fail, add_context, retry_with_guidance, or rebuild_context_then_retry."
+    });
+    return undefined;
+  }
+
+  const humanNote = typeof value.human_note === "string" ? value.human_note.trim() : undefined;
+  const resetSupervisorBudget = readBoolean(value.reset_supervisor_budget);
+  if (value.reset_supervisor_budget !== undefined && resetSupervisorBudget === undefined) {
+    diagnostics.push({ path: `${path}.reset_supervisor_budget`, message: "scripted_resume reset_supervisor_budget must be boolean." });
+  }
+
+  return {
+    human_action: humanAction as EvalSupervisorResumeScript["human_action"],
+    ...(humanNote ? { human_note: humanNote } : {}),
+    ...(resetSupervisorBudget !== undefined ? { reset_supervisor_budget: resetSupervisorBudget } : {})
+  };
+}
+
 function normalizeScenarioCriteria(value: unknown, path: string, diagnostics: EvalDiagnostic[]): Record<string, Record<string, unknown>> {
   if (!isRecord(value)) {
     diagnostics.push({ path, message: "Eval scenario requires criteria object keyed by criterion id." });
@@ -731,17 +844,12 @@ function normalizeScenario(
     return undefined;
   }
 
-  if (value.fixture !== undefined) {
-    diagnostics.push({ path: `scenario:${scenarioPath}.fixture`, message: "Legacy fixture is not supported; use environment." });
-  }
-
-  if (value.expected !== undefined) {
-    diagnostics.push({ path: `scenario:${scenarioPath}.expected`, message: "Legacy expected is not supported; express expectations as criteria." });
-  }
-
-  if (value.grading !== undefined) {
-    diagnostics.push({ path: `scenario:${scenarioPath}.grading`, message: "Legacy grading is not supported; use quality criteria." });
-  }
+  pushUnknownFieldDiagnostics(
+    value,
+    `scenario:${scenarioPath}`,
+    ["id", "bucket", "difficulty", "description", "workflow", "environment", "criteria", "metadata"],
+    diagnostics
+  );
 
   const scenarioDir = dirname(scenarioPath);
   const id = readString(value.id);
@@ -806,6 +914,16 @@ function normalizeScenario(
     init_git: readBoolean(environmentRecord?.init_git) ?? true
   };
   const simulation = normalizeSimulation(environmentRecord?.simulation, scenarioDir, `scenario:${scenarioPath}.environment.simulation`, diagnostics);
+  const scriptedCheckpoints = normalizeScriptedCheckpoints(
+    environmentRecord?.scripted_checkpoints,
+    `scenario:${scenarioPath}.environment.scripted_checkpoints`,
+    diagnostics
+  );
+  const scriptedResume = normalizeScriptedResume(
+    environmentRecord?.scripted_resume,
+    `scenario:${scenarioPath}.environment.scripted_resume`,
+    diagnostics
+  );
 
   if (docs && docsPath) {
     environment.docs = docs;
@@ -819,6 +937,14 @@ function normalizeScenario(
 
   if (simulation) {
     environment.simulation = simulation;
+  }
+
+  if (scriptedCheckpoints) {
+    environment.scripted_checkpoints = scriptedCheckpoints;
+  }
+
+  if (scriptedResume) {
+    environment.scripted_resume = scriptedResume;
   }
 
   const workflow: EvalScenarioWorkflow = {
@@ -877,6 +1003,50 @@ async function readJson(path: string, diagnostics: EvalDiagnostic[], diagnosticP
       message: `JSON file could not be loaded: ${error instanceof Error ? error.message : String(error)}`
     });
     return undefined;
+  }
+}
+
+async function validateRenderedGraphContract(options: {
+  graph: unknown;
+}): Promise<EvalDiagnostic[]> {
+  const diagnostics: EvalDiagnostic[] = [];
+  const validationDir = await mkdtemp(join(tmpdir(), "agentflow-eval-rendered-"));
+  const graphPath = join(validationDir, "rendered-graph.json");
+
+  try {
+    await writeFile(graphPath, `${JSON.stringify(options.graph, null, 2)}\n`, "utf8");
+    const [pluginResolution, skillResolution] = await Promise.all([
+      resolvePluginsForGraph(validationDir, graphPath),
+      resolveSkillSourcesForGraph(validationDir, graphPath)
+    ]);
+
+    diagnostics.push(...pluginResolution.diagnostics);
+    diagnostics.push(...skillResolution.diagnostics);
+
+    if (diagnostics.length > 0) {
+      return diagnostics;
+    }
+
+    const skillSourceDiagnostics: EvalDiagnostic[] = [];
+    const skillSourceDeclarations = readSkillSourceDeclarations(options.graph, skillSourceDiagnostics);
+    const resolvedSkillSources = await loadResolvedSkillSources(
+      graphPath,
+      skillSourceDeclarations,
+      skillSourceDiagnostics
+    );
+    const pluginExpansion = await expandPluginWorkflows(graphPath, options.graph);
+    const graphDiagnostics = await validateAuthoredGraphDocument(pluginExpansion.document, {
+      resolved_plugins: pluginExpansion.resolved_plugins,
+      resolved_skill_sources: resolvedSkillSources,
+      graph_dir: validationDir
+    });
+
+    diagnostics.push(...skillSourceDiagnostics);
+    diagnostics.push(...pluginExpansion.diagnostics);
+    diagnostics.push(...graphDiagnostics);
+    return diagnostics;
+  } finally {
+    await rm(validationDir, { recursive: true, force: true });
   }
 }
 
@@ -1002,6 +1172,18 @@ async function validateLoadedPaths(loaded: LoadedEvalSuite): Promise<void> {
           message: diagnostic.message
         }))
       );
+
+      if (rendered.diagnostics.length === 0) {
+        const graphDiagnostics = await validateRenderedGraphContract({
+          graph: rendered.graph
+        });
+        diagnostics.push(
+          ...graphDiagnostics.map((diagnostic) => ({
+            path: `scenario:${scenario.id}.variant:${variant.id}.rendered_graph${diagnostic.path.startsWith("$") ? diagnostic.path.slice(1) : `.${diagnostic.path}`}`,
+            message: diagnostic.message
+          }))
+        );
+      }
     }
   }
 }

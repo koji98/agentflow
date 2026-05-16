@@ -52,7 +52,7 @@ Use evals as an engineering loop:
 
 1. Run a baseline on a small scenario set.
 2. Inspect report, failing scorecards, trace packets, prompt feedback, and run roots.
-3. Change one thing: graph shape, prompt pack, context materialization, tool exposure, supervisor behavior, or criteria.
+3. Change one thing: graph shape, prompt pack, context pointer packaging, tool exposure, supervisor behavior, or criteria.
 4. Rerun the same scenarios and trial count with the same fixtures.
 5. Compare baseline and candidate.
 6. Promote stable, important scenarios to a regression gate.
@@ -90,7 +90,7 @@ It contains 20 local fake-workflow scenarios covering:
 - repeated failure fingerprints
 - parallel evidence gathering
 - noisy context manifests
-- truncated context provenance
+- pointer context provenance
 - stale local docs
 - machine-resolvable conflicts
 - human-authority conflicts
@@ -100,7 +100,7 @@ It is a capability eval. It is useful even when the pass rate is below 100%, bec
 
 The larger prompt/context iteration suite is `evals/agentflow-capability-workflows`.
 
-It generates ignored local repo fixtures under `eval-repos/agentflow-capability-workflows/` with `npm run setup:eval-repos`. Use it when you need harder end-to-end coverage across code repair, dependency docs, stale docs, noisy monorepos, local tools, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, exhausted-recovery boundaries, context-overflow repair, and generated-tree noise control.
+It generates ignored local repo fixtures under `eval-repos/agentflow-capability-workflows/` with `npm run setup:eval-repos`. Use it when you need harder end-to-end coverage across code repair, dependency docs, stale docs, noisy monorepos, local tools, no-repo-edit audit, sequence handoff, worktree backend behavior, supervisor retry envelopes, exhausted-recovery boundaries, pointer-provenance handling, and generated-tree noise control.
 
 The highest-signal issue suite is `evals/agentflow-realworld-issues`.
 

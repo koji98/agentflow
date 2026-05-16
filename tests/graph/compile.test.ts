@@ -1,1031 +1,885 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-
 import { describe, expect, it } from "vitest";
-
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument as normalizeRawAuthoredGraphDocument } from "../../src/graph/normalize.js";
-import { builtInCodexReasoningEffort, resolveLaunchConfig } from "../../src/graph/profiles.js";
+import { builtInCodexReasoningEffort, builtInTimeoutSeconds, resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
-
-const fixturePath = fileURLToPath(
-  new URL("./fixtures/repeat.graph.json", import.meta.url)
-);
-
+const fixturePath = fileURLToPath(new URL("./fixtures/repeat.graph.json", import.meta.url));
 async function readFixture(): Promise<unknown> {
-  const contents = await readFile(fixturePath, "utf8");
-  return JSON.parse(contents) as unknown;
+    const contents = await readFile(fixturePath, "utf8");
+    return JSON.parse(contents) as unknown;
 }
-
 function normalizeAuthoredGraphDocument(value: unknown) {
-  if (typeof value !== "object" || value === null || Array.isArray(value) || "intent" in value) {
-    return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults(value as never));
-  }
-
-  return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults({
-    intent: {
-      goal: "Test supervised graph contract.",
-      acceptance_criteria: ["The graph compiles under the current contract."]
-    },
-    ...value
-  } as never));
-}
-
-describe("graph compilation", () => {
-  it("carries supervised v1 intent, supervision, and delivery into the compiled contract", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "compiled-supervised-contract",
-      intent: {
-        goal: "Ship the supervised runtime.",
-        acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
-      },
-      supervision: { profile: "supervisor", max_total_interventions: 3 },
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "exec",
-            id: "version",
-            command: "node",
-            args: ["--version"]
-          }
-        ]
-      }
-    });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual([]);
-    expect(compilation.compiled_graph).toEqual(
-      expect.objectContaining({
-        intent: expect.objectContaining({
-          goal: "Ship the supervised runtime.",
-          acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
-        }),
-        supervision: expect.objectContaining({
-          max_total_interventions: 3
-        })
-      })
-    );
-  });
-
-  it("compiles a dedicated supervisor profile when authored", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "compiled-supervisor-profile",
-      supervision: {
-        profile: "supervisor",
-        max_total_interventions: 3
-      },
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          model: "gpt-5-codex",
-          sandbox: "workspace-write"
-        },
-        supervisor: {
-          model: "gpt-5.2",
-          reasoning_effort: "high",
-          sandbox: "read-only",
-          timeout_sec: 300
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "exec",
-            id: "version",
-            command: "node",
-            args: ["--version"]
-          }
-        ]
-      }
-    });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual([]);
-    expect(compilation.compiled_graph?.supervisor_effective_policy).toEqual(
-      expect.objectContaining({
-        profile_name: "supervisor",
-        harness: "codex-cli",
-        model: "gpt-5.2",
-        reasoning_effort: "high",
-        sandbox: "read-only",
-        timeout_sec: 300
-      })
-    );
-  });
-
-  it("compiles node intent into the executable contract", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "compiled-node-intent",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "agent",
-            id: "implement",
-            intent: {
-              goal: "Implement timeout handling with a reviewable handoff.",
-              acceptance_criteria: [
-              "Timeout behavior is tested.",
-              "The handoff lists changed files and risk."
-            ],
-              constraints: ["Implement timeout handling with a reviewable handoff."]
-            },
-          }
-        ]
-      }
-    });
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual([]);
-    expect(compilation.compiled_graph?.nodes).toEqual([
-      expect.objectContaining({
-        kind: "agent",
-        authored_id: "implement",
+    if (typeof value !== "object" || value === null || Array.isArray(value) || "intent" in value) {
+        return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults(value as never));
+    }
+    return normalizeRawAuthoredGraphDocument(withNodeIntentDefaults({
         intent: {
-          goal: "Implement timeout handling with a reviewable handoff.",
-          acceptance_criteria: [
-          "Timeout behavior is tested.",
-          "The handoff lists changed files and risk."
-        ],
-          constraints: ["Implement timeout handling with a reviewable handoff."]
+            goal: "Test supervised graph contract.",
+            acceptance_criteria: ["The graph compiles under the current contract."]
         },
-      })
-    ]);
-  });
-
-  it("compiles the repeat fixture into explicit nodes, scopes, and repeat edges", async () => {
-    const normalized = normalizeAuthoredGraphDocument(await readFixture());
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual([]);
-    expect(compilation.compiled_graph).toBeDefined();
-
-    const compiledGraph = compilation.compiled_graph!;
-    const verifyFixId = "root__repair_loop__repair_body__verify_fix";
-    const implementFixId = "root__repair_loop__repair_body__implement_fix";
-    const repairNotes = compiledGraph.nodes.find((node) => node.authored_id === "repair_notes");
-    const understand = compiledGraph.nodes.find((node) => node.authored_id === "understand");
-
-    expect(compiledGraph.entry_node_ids).toEqual(["root__understand"]);
-    expect(compiledGraph.nodes).toHaveLength(7);
-    expect(compiledGraph.scopes).toHaveLength(4);
-    expect(compiledGraph.authored_to_compiled.verify_fix).toEqual([verifyFixId]);
-    expect(compiledGraph.edges).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from: verifyFixId,
-          to: implementFixId,
-          on: "failed",
-          kind: "repeat-back",
-          repeat_scope_id: "scope__root__repair_loop"
-        }),
-        expect.objectContaining({
-          from: verifyFixId,
-          to: "root__handoff",
-          on: "passed",
-          kind: "flow"
-        })
-      ])
-    );
-
-    expect(compiledGraph.scopes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          scope_id: "scope__root__repair_loop",
-          kind: "repeat",
-          until_compiled_id: verifyFixId,
-          body_entry_node_ids: [implementFixId],
-          body_exit_node_ids: [verifyFixId]
-        })
-      ])
-    );
-    expect(repairNotes).toEqual(
-      expect.objectContaining({
-        kind: "agent",
-        repeat_scope_id: "scope__root__repair_loop",
-        effective_policy: expect.objectContaining({
-          profile_name: "review",
-          harness: "cursor-cli",
-          sandbox: "read-only"
-        })
-      })
-    );
-    expect(understand).toEqual(
-      expect.objectContaining({
-        kind: "agent"
-      })
-    );
-  });
-
-  it("compiles repeat checkpoints into executable nodes with repeat-back edges", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "checkpoint-repeat-compile",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "repeat",
-            id: "retry",
-            max_attempts: 3,
-            body: {
-              type: "sequence",
-              id: "body",
-              steps: [
-                {
-                  type: "agent",
-                  id: "draft",
-                  intent: {
-                    goal: "Draft the artifact.",
-                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
-                    constraints: []
-                  },
-                  artifacts: {
-                    draft_spec: {
-                      from: "output_dir",
-                      path: "draft.md",
-                      description: "Test artifact produced at draft.md."
+        ...value
+    } as never));
+}
+describe("graph compilation", () => {
+    it("carries supervised v1 intent, supervision, and delivery into the compiled contract", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "compiled-supervised-contract",
+            intent: {
+                goal: "Ship the supervised runtime.",
+                acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
+            },
+            supervision: { profile: "supervisor", max_total_interventions: 3 },
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "version",
+                        command: "node",
+                        args: ["--version"]
                     }
-                  }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual([]);
+        expect(compilation.compiled_graph).toEqual(expect.objectContaining({
+            intent: expect.objectContaining({
+                goal: "Ship the supervised runtime.",
+                acceptance_criteria: ["Compiled contract includes supervision and delivery policy."]
+            }),
+            supervision: expect.objectContaining({
+                max_total_interventions: 3
+            })
+        }));
+    });
+    it("compiles a dedicated supervisor profile when authored", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "compiled-supervisor-profile",
+            supervision: {
+                profile: "supervisor",
+                max_total_interventions: 3
+            },
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli",
+                    model: "gpt-5-codex",
+                    sandbox: "workspace-write"
                 },
-                {
-                  type: "checkpoint",
-                  id: "review",
-                  intent: {
-                    goal: "Review the draft.",
-                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
-                    constraints: []
-                  },
-                  review_from: {
+                supervisor: {
+                    model: "gpt-5.2",
+                    reasoning_effort: "high",
+                    sandbox: "read-only"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "version",
+                        command: "node",
+                        args: ["--version"]
+                    }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual([]);
+        expect(compilation.compiled_graph?.supervisor_effective_policy).toEqual(expect.objectContaining({
+            profile_name: "supervisor",
+            harness: "codex-cli",
+            model: "gpt-5.2",
+            reasoning_effort: "high",
+            sandbox: "read-only",
+            timeout_sec: builtInTimeoutSeconds
+        }));
+    });
+    it("compiles node intent into the executable contract", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "compiled-node-intent",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "agent",
+                        id: "implement",
+                        intent: {
+                            goal: "Implement timeout handling with a reviewable handoff.",
+                            acceptance_criteria: [
+                                "Timeout behavior is tested.",
+                                "The handoff lists changed files and risk."
+                            ],
+                            constraints: ["Implement timeout handling with a reviewable handoff."]
+                        }
+                    }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual([]);
+        expect(compilation.compiled_graph?.nodes).toEqual([
+            expect.objectContaining({
+                kind: "agent",
+                authored_id: "implement",
+                intent: {
+                    goal: "Implement timeout handling with a reviewable handoff.",
+                    acceptance_criteria: [
+                        "Timeout behavior is tested.",
+                        "The handoff lists changed files and risk."
+                    ],
+                    constraints: ["Implement timeout handling with a reviewable handoff."]
+                },
+            })
+        ]);
+    });
+    it("compiles the repeat fixture into explicit nodes, scopes, and repeat edges", async () => {
+        const normalized = normalizeAuthoredGraphDocument(await readFixture());
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual([]);
+        expect(compilation.compiled_graph).toBeDefined();
+        const compiledGraph = compilation.compiled_graph!;
+        const verifyFixId = "root__repair_loop__repair_body__verify_fix";
+        const implementFixId = "root__repair_loop__repair_body__implement_fix";
+        const repairNotes = compiledGraph.nodes.find((node) => node.authored_id === "repair_notes");
+        const understand = compiledGraph.nodes.find((node) => node.authored_id === "understand");
+        expect(compiledGraph.entry_node_ids).toEqual(["root__understand"]);
+        expect(compiledGraph.nodes).toHaveLength(7);
+        expect(compiledGraph.scopes).toHaveLength(4);
+        expect(compiledGraph.authored_to_compiled.verify_fix).toEqual([verifyFixId]);
+        expect(compiledGraph.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                from: verifyFixId,
+                to: implementFixId,
+                on: "failed",
+                kind: "repeat-back",
+                repeat_scope_id: "scope__root__repair_loop"
+            }),
+            expect.objectContaining({
+                from: verifyFixId,
+                to: "root__handoff",
+                on: "passed",
+                kind: "flow"
+            })
+        ]));
+        expect(compiledGraph.scopes).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                scope_id: "scope__root__repair_loop",
+                kind: "repeat",
+                until_compiled_id: verifyFixId,
+                body_entry_node_ids: [implementFixId],
+                body_exit_node_ids: [verifyFixId]
+            })
+        ]));
+        expect(repairNotes).toEqual(expect.objectContaining({
+            kind: "agent",
+            repeat_scope_id: "scope__root__repair_loop",
+            effective_policy: expect.objectContaining({
+                profile_name: "review",
+                harness: "codex-cli",
+                sandbox: "read-only"
+            })
+        }));
+        expect(understand).toEqual(expect.objectContaining({
+            kind: "agent"
+        }));
+    });
+    it("compiles repeat checkpoints into executable nodes with repeat-back edges", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "checkpoint-repeat-compile",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "repeat",
+                        id: "retry",
+                        max_attempts: 3,
+                        body: {
+                            type: "sequence",
+                            id: "body",
+                            steps: [
+                                {
+                                    type: "agent",
+                                    id: "draft",
+                                    intent: {
+                                        goal: "Draft the artifact.",
+                                        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                                        constraints: []
+                                    },
+                                    artifacts: {
+                                        draft_spec: {
+                                            from: "output_dir",
+                                            path: "draft.md",
+                                            description: "Test artifact produced at draft.md."
+                                        }
+                                    }
+                                },
+                                {
+                                    type: "checkpoint",
+                                    id: "review",
+                                    intent: {
+                                        goal: "Review the draft.",
+                                        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                                        constraints: []
+                                    },
+                                    review_from: {
+                                        node: "draft",
+                                        artifact: "draft_spec"
+                                    }
+                                }
+                            ]
+                        },
+                        until: {
+                            node: "review"
+                        }
+                    }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual([]);
+        const compiledGraph = compilation.compiled_graph!;
+        const reviewId = "root__retry__body__review";
+        expect(compiledGraph.nodes).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                compiled_id: reviewId,
+                kind: "checkpoint",
+                review_from: expect.objectContaining({
                     node: "draft",
                     artifact: "draft_spec"
-                  }
-                }
-              ]
-            },
-            until: {
-              node: "review"
-            }
-          }
-        ]
-      }
+                })
+            })
+        ]));
+        expect(compiledGraph.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                from: reviewId,
+                to: "root__retry__body__draft",
+                on: "failed",
+                kind: "repeat-back",
+                repeat_scope_id: "scope__root__retry"
+            })
+        ]));
+        expect(compiledGraph.scopes).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                scope_id: "scope__root__retry",
+                kind: "repeat",
+                until_compiled_id: reviewId,
+                body_exit_node_ids: [reviewId]
+            })
+        ]));
     });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual([]);
-
-    const compiledGraph = compilation.compiled_graph!;
-    const reviewId = "root__retry__body__review";
-
-    expect(compiledGraph.nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          compiled_id: reviewId,
-          kind: "checkpoint",
-          review_from: expect.objectContaining({
-            node: "draft",
-            artifact: "draft_spec"
-          })
-        })
-      ])
-    );
-    expect(compiledGraph.edges).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          from: reviewId,
-          to: "root__retry__body__draft",
-          on: "failed",
-          kind: "repeat-back",
-          repeat_scope_id: "scope__root__retry"
-        })
-      ])
-    );
-    expect(compiledGraph.scopes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          scope_id: "scope__root__retry",
-          kind: "repeat",
-          until_compiled_id: reviewId,
-          body_exit_node_ids: [reviewId]
-        })
-      ])
-    );
-  });
-
-  it("requires iteration selectors for references that leave a repeat scope", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "ambiguous-repeat-ref",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "repeat",
-            id: "retry",
-            max_attempts: 2,
-            body: {
-              type: "sequence",
-              id: "body",
-              steps: [
-                {
-                  type: "agent",
-                  id: "fix",
-                  intent: {
-                    goal: "Apply the fix.",
-                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
-                    constraints: []
-                  },
-                },
-                {
-                  type: "check",
-                  id: "verify",
-                  check_kind: "deterministic",
-                  command: "npm"
+    it("requires iteration selectors for references that leave a repeat scope", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "ambiguous-repeat-ref",
+            repos: {
+                main: {
+                    path: "."
                 }
-              ]
             },
-            until: {
-              node: "verify"
-            }
-          },
-          {
-            type: "agent",
-            id: "handoff",
-            intent: {
-              goal: "Summarize the run.",
-              acceptance_criteria: ["The node satisfies its acceptance criteria."],
-              constraints: []
+            defaults: {
+                launch_profile: "default"
             },
-            context: [
-              {
-                ref: "fix.agent_response",
-                name: "fix_response"
-              }
-            ]
-          }
-        ]
-      }
-    });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: expect.stringContaining("context[0].iteration"),
-          message: expect.stringContaining("latest_failed")
-        })
-      ])
-    );
-  });
-
-  it("names the actual repeat body exit when repeat.until resolves before the body exit", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "repeat-body-exit-mismatch",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {}
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "repeat",
-            id: "retry",
-            max_attempts: 2,
-            body: {
-              type: "sequence",
-              id: "body",
-              steps: [
-                {
-                  type: "check",
-                  id: "verify",
-                  check_kind: "deterministic",
-                  command: "sh"
-                },
-                {
-                  type: "agent",
-                  id: "summarize",
-                  intent: {
-                    goal: "Summarize the latest attempt.",
-                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
-                    constraints: []
-                  },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
                 }
-              ]
             },
-            until: {
-              node: "verify"
-            }
-          }
-        ]
-      }
-    });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.steps[0].until.node",
-          message: expect.stringContaining('currently exits through "summarize"')
-        })
-      ])
-    );
-  });
-
-  it("rejects parallel sibling context references that are not ordered by the graph", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "parallel-context-gap",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "parallel",
-            id: "fanout",
-            steps: [
-              {
-                type: "agent",
-                id: "inspect",
-                intent: {
-                  goal: "Inspect the repo.",
-                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
-                  constraints: []
-                },
-              },
-              {
-                type: "agent",
-                id: "report",
-                intent: {
-                  goal: "Write the report.",
-                  acceptance_criteria: ["The node satisfies its acceptance criteria."],
-                  constraints: []
-                },
-                context: [
-                  {
-                    ref: "inspect.agent_response",
-                    name: "inspect_response"
-                  }
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "repeat",
+                        id: "retry",
+                        max_attempts: 2,
+                        body: {
+                            type: "sequence",
+                            id: "body",
+                            steps: [
+                                {
+                                    type: "agent",
+                                    id: "fix",
+                                    intent: {
+                                        goal: "Apply the fix.",
+                                        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                                        constraints: []
+                                    }
+                                },
+                                {
+                                    type: "check",
+                                    id: "verify",
+                                    check_kind: "deterministic",
+                                    command: "npm"
+                                }
+                            ]
+                        },
+                        until: {
+                            node: "verify"
+                        }
+                    },
+                    {
+                        type: "agent",
+                        id: "handoff",
+                        intent: {
+                            goal: "Summarize the run.",
+                            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                            constraints: []
+                        },
+                        support: {
+                            context: [
+                                {
+                                    kind: "artifact",
+                                    ref: "fix.agent_response",
+                                    name: "fix_response",
+                                    what: "Pointer evidence used by the node under test.",
+                                    why: "This context is required by the test scenario."
+                                }
+                            ]
+                        }
+                    }
                 ]
-              }
-            ]
-          }
-        ]
-      }
-    });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: expect.stringContaining("context[0].node"),
-          message: expect.stringContaining("not guaranteed to execute before")
-        })
-      ])
-    );
-  });
-
-  it("resolves check-specific profile defaults and forces AI checks into read-only mode", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "check-profile-defaults",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          model: "gpt-5-codex",
-          sandbox: "workspace-write",
-          env_files: [".env.defaults"],
-          deterministic_check_defaults: {
-            pass_if: {
-              exit_code: 3
             }
-          },
-          ai_check_defaults: {
-            model: "gpt-5-judge",
-            rubric: "Be strict."
-          }
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "exec",
-            id: "profile_env_command",
-            command: "node"
-          },
-          {
-            type: "check",
-            id: "local_gate",
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: expect.stringContaining("context[0].iteration"),
+                message: expect.stringContaining("latest_failed")
+            })
+        ]));
+    });
+    it("names the actual repeat body exit when repeat.until resolves before the body exit", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "repeat-body-exit-mismatch",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {}
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "repeat",
+                        id: "retry",
+                        max_attempts: 2,
+                        body: {
+                            type: "sequence",
+                            id: "body",
+                            steps: [
+                                {
+                                    type: "check",
+                                    id: "verify",
+                                    check_kind: "deterministic",
+                                    command: "sh"
+                                },
+                                {
+                                    type: "agent",
+                                    id: "summarize",
+                                    intent: {
+                                        goal: "Summarize the latest attempt.",
+                                        acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                                        constraints: []
+                                    }
+                                }
+                            ]
+                        },
+                        until: {
+                            node: "verify"
+                        }
+                    }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].until.node",
+                message: expect.stringContaining('currently exits through "summarize"')
+            })
+        ]));
+    });
+    it("rejects parallel sibling context references that are not ordered by the graph", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "parallel-context-gap",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "parallel",
+                        id: "fanout",
+                        steps: [
+                            {
+                                type: "agent",
+                                id: "inspect",
+                                intent: {
+                                    goal: "Inspect the repo.",
+                                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                                    constraints: []
+                                }
+                            },
+                            {
+                                type: "agent",
+                                id: "report",
+                                intent: {
+                                    goal: "Write the report.",
+                                    acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                                    constraints: []
+                                },
+                                support: {
+                                    context: [
+                                        {
+                                            kind: "artifact",
+                                            ref: "inspect.agent_response",
+                                            name: "inspect_response",
+                                            what: "Pointer evidence used by the node under test.",
+                                            why: "This context is required by the test scenario."
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: expect.stringContaining("context[0].node"),
+                message: expect.stringContaining("not guaranteed to execute before")
+            })
+        ]));
+    });
+    it("resolves check-specific profile defaults and forces AI checks into read-only mode", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "check-profile-defaults",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli",
+                    model: "gpt-5-codex",
+                    sandbox: "workspace-write",
+                    env_files: [".env.defaults"],
+                    deterministic_check_defaults: {
+                        pass_if: {
+                            exit_code: 3
+                        }
+                    },
+                    ai_check_defaults: {
+                        model: "gpt-5-judge",
+                        rubric: "Be strict."
+                    }
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "profile_env_command",
+                        command: "node"
+                    },
+                    {
+                        type: "check",
+                        id: "local_gate",
+                        check_kind: "deterministic",
+                        command: "npm",
+                        env_files: [".env.local"],
+                        env: {
+                            ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
+                        }
+                    },
+                    {
+                        type: "check",
+                        id: "ai_gate",
+                        check_kind: "ai",
+                        intent: {
+                            goal: "Evaluate the change.",
+                            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                            constraints: []
+                        }
+                    }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual([]);
+        const compiledGraph = compilation.compiled_graph!;
+        const profileEnvCommand = compiledGraph.nodes.find((node) => node.authored_id === "profile_env_command");
+        const deterministicCheck = compiledGraph.nodes.find((node) => node.authored_id === "local_gate");
+        const aiCheck = compiledGraph.nodes.find((node) => node.authored_id === "ai_gate");
+        expect(profileEnvCommand).toEqual(expect.objectContaining({
+            kind: "exec",
+            env_files: [".env.defaults"]
+        }));
+        expect(deterministicCheck).toEqual(expect.objectContaining({
+            kind: "check",
             check_kind: "deterministic",
-            command: "npm",
             env_files: [".env.local"],
             env: {
-              ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
+                ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
+            },
+            pass_if: {
+                exit_code: 3
             }
-          },
-          {
-            type: "check",
-            id: "ai_gate",
+        }));
+        expect(aiCheck).toEqual(expect.objectContaining({
+            kind: "check",
             check_kind: "ai",
-            intent: {
-              goal: "Evaluate the change.",
-              acceptance_criteria: ["The node satisfies its acceptance criteria."],
-              constraints: []
-            },
-          }
-        ]
-      }
+            rubric: "Be strict.",
+            effective_policy: expect.objectContaining({
+                harness: "codex-cli",
+                model: "gpt-5-judge",
+                reasoning_effort: builtInCodexReasoningEffort,
+                sandbox: "read-only"
+            })
+        }));
     });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual([]);
-
-    const compiledGraph = compilation.compiled_graph!;
-    const profileEnvCommand = compiledGraph.nodes.find((node) => node.authored_id === "profile_env_command");
-    const deterministicCheck = compiledGraph.nodes.find((node) => node.authored_id === "local_gate");
-    const aiCheck = compiledGraph.nodes.find((node) => node.authored_id === "ai_gate");
-
-    expect(profileEnvCommand).toEqual(
-      expect.objectContaining({
-        kind: "exec",
-        env_files: [".env.defaults"]
-      })
-    );
-    expect(deterministicCheck).toEqual(
-      expect.objectContaining({
-        kind: "check",
-        check_kind: "deterministic",
-        env_files: [".env.local"],
-        env: {
-          ACCESS_E2E_ALPHA_ADMIN_USER_ID: "user_123"
-        },
-        pass_if: {
-          exit_code: 3
-        }
-      })
-    );
-    expect(aiCheck).toEqual(
-      expect.objectContaining({
-        kind: "check",
-        check_kind: "ai",
-        rubric: "Be strict.",
-        effective_policy: expect.objectContaining({
-          harness: "codex-cli",
-          model: "gpt-5-judge",
-          reasoning_effort: builtInCodexReasoningEffort,
-          sandbox: "read-only"
-        })
-      })
-    );
-  });
-
-  it("applies launch overrides across the compiled graph while preserving node profile overrides", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "launch-override-graph",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default",
-        workspace_backend: "worktree"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          model: "gpt-5-codex",
-          sandbox: "workspace-write",
-          timeout_sec: 900,
-          input_rules: {
-            max_total_tokens: 32000,
-            max_tokens_per_item: 8000
-          }
-        },
-        review: {
-          harness: "cursor-cli",
-          model: "gpt-5-review",
-          sandbox: "read-only",
-          timeout_sec: 120,
-          input_rules: {
-            max_total_tokens: 16000,
-            max_tokens_per_item: 4000
-          }
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "agent",
-            id: "inspect",
-            intent: {
-              goal: "Inspect the codebase.",
-              acceptance_criteria: ["The node satisfies its acceptance criteria."],
-              constraints: []
-            },
-          },
-          {
-            type: "exec",
-            id: "format",
-            profile: "default",
-            command: "npm",
-            args: ["run", "format"]
-          },
-          {
-            type: "check",
-            id: "judge",
-            check_kind: "ai",
-            intent: {
-              goal: "Judge the change.",
-              acceptance_criteria: ["The node satisfies its acceptance criteria."],
-              constraints: []
-            },
-          }
-        ]
-      }
-    });
-
-    const launch = resolveLaunchConfig(normalized.document!, {
-      launchProfile: "review",
-      workspaceBackend: "inplace"
-    });
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual([]);
-    expect(compilation.compiled_graph?.launch).toEqual({
-      launch_profile: "review",
-      workspace_backend: "inplace"
-    });
-    expect(compilation.compiled_graph?.nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          authored_id: "inspect",
-          effective_policy: expect.objectContaining({
-            profile_name: "review",
-            workspace_backend: "inplace",
-            harness: "cursor-cli",
-            model: "gpt-5-review",
-            sandbox: "read-only",
-            timeout_sec: 120,
-            input_rules: {
-              max_total_tokens: 16000,
-              max_tokens_per_item: 4000
-            }
-          })
-        }),
-        expect.objectContaining({
-          authored_id: "format",
-          effective_policy: expect.objectContaining({
-            profile_name: "default",
-            workspace_backend: "inplace",
-            timeout_sec: 900,
-            input_rules: {
-              max_total_tokens: 32000,
-              max_tokens_per_item: 8000
-            }
-          })
-        }),
-        expect.objectContaining({
-          authored_id: "judge",
-          effective_policy: expect.objectContaining({
-            profile_name: "review",
-            workspace_backend: "inplace",
-            harness: "cursor-cli",
-            model: "gpt-5-review",
-            sandbox: "read-only"
-          })
-        })
-      ])
-    );
-  });
-
-  it("does not leak launch-profile models across node profiles that switch harnesses", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "cross-harness-model-boundary",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli",
-          model: "gpt-5-codex"
-        },
-        review: {
-          harness: "cursor-cli",
-          sandbox: "read-only",
-          ai_check_defaults: {
-            rubric: "Review the change."
-          }
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "agent",
-            id: "review_patch",
-            profile: "review",
-            intent: {
-              goal: "Review the patch.",
-              acceptance_criteria: ["The node satisfies its acceptance criteria."],
-              constraints: []
-            },
-          },
-          {
-            type: "check",
-            id: "judge_patch",
-            profile: "review",
-            check_kind: "ai",
-            intent: {
-              goal: "Judge the patch.",
-              acceptance_criteria: ["The node satisfies its acceptance criteria."],
-              constraints: []
-            },
-          }
-        ]
-      }
-    });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual([]);
-
-    const reviewPatch = compilation.compiled_graph?.nodes.find(
-      (node) => node.authored_id === "review_patch"
-    );
-    const judgePatch = compilation.compiled_graph?.nodes.find(
-      (node) => node.authored_id === "judge_patch"
-    );
-
-    expect(reviewPatch).toEqual(
-      expect.objectContaining({
-        effective_policy: expect.objectContaining({
-          profile_name: "review",
-          harness: "cursor-cli"
-        })
-      })
-    );
-    expect(reviewPatch?.effective_policy.model).toBeUndefined();
-
-    expect(judgePatch).toEqual(
-      expect.objectContaining({
-        effective_policy: expect.objectContaining({
-          profile_name: "review",
-          harness: "cursor-cli",
-          sandbox: "read-only"
-        }),
-        rubric: "Review the change."
-      })
-    );
-    expect(judgePatch?.effective_policy.model).toBeUndefined();
-  });
-
-  it("rejects repeat bodies that compile to multiple entry and exit nodes", () => {
-    const normalized = normalizeAuthoredGraphDocument({
-      version: "1",
-      graph_id: "repeat-body-shape",
-      repos: {
-        main: {
-          path: "."
-        }
-      },
-      defaults: {
-        launch_profile: "default"
-      },
-      profiles: {
-        default: {
-          harness: "codex-cli"
-        }
-      },
-      graph: {
-        type: "sequence",
-        id: "root",
-        steps: [
-          {
-            type: "repeat",
-            id: "retry",
-            max_attempts: 2,
-            body: {
-              type: "parallel",
-              id: "body",
-              steps: [
-                {
-                  type: "exec",
-                  id: "repair",
-                  command: "placeholder"
-                },
-                {
-                  type: "check",
-                  id: "verify",
-                  check_kind: "deterministic",
-                  command: "placeholder"
+    it("applies launch overrides across the compiled graph while preserving node profile overrides", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "launch-override-graph",
+            repos: {
+                main: {
+                    path: "."
                 }
-              ]
             },
-            until: {
-              node: "verify"
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "worktree"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli",
+                    model: "gpt-5-codex",
+                    sandbox: "workspace-write"
+                },
+                review: {
+                    harness: "cursor-cli",
+                    model: "gpt-5-review",
+                    sandbox: "read-only"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "agent",
+                        id: "inspect",
+                        intent: {
+                            goal: "Inspect the codebase.",
+                            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                            constraints: []
+                        }
+                    },
+                    {
+                        type: "exec",
+                        id: "format",
+                        command: "npm",
+                        args: ["run", "format"],
+                        runtime: {
+                            profile: "default"
+                        }
+                    },
+                    {
+                        type: "check",
+                        id: "judge",
+                        check_kind: "ai",
+                        intent: {
+                            goal: "Judge the change.",
+                            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                            constraints: []
+                        }
+                    }
+                ]
             }
-          }
-        ]
-      }
+        });
+        const launch = resolveLaunchConfig(normalized.document!, {
+            launchProfile: "review",
+            workspaceBackend: "inplace"
+        });
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual([]);
+        expect(compilation.compiled_graph?.launch).toEqual({
+            launch_profile: "review",
+            workspace_backend: "inplace"
+        });
+        expect(compilation.compiled_graph?.nodes).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                authored_id: "inspect",
+                effective_policy: expect.objectContaining({
+                    profile_name: "review",
+                    workspace_backend: "inplace",
+                    harness: "cursor-cli",
+                    model: "gpt-5-review",
+                    sandbox: "read-only",
+                    timeout_sec: builtInTimeoutSeconds
+                })
+            }),
+            expect.objectContaining({
+                authored_id: "format",
+                effective_policy: expect.objectContaining({
+                    profile_name: "default",
+                    workspace_backend: "inplace",
+                    timeout_sec: builtInTimeoutSeconds
+                })
+            }),
+            expect.objectContaining({
+                authored_id: "judge",
+                effective_policy: expect.objectContaining({
+                    profile_name: "review",
+                    workspace_backend: "inplace",
+                    harness: "cursor-cli",
+                    model: "gpt-5-review",
+                    sandbox: "read-only"
+                })
+            })
+        ]));
     });
-
-    const launch = resolveLaunchConfig(normalized.document!);
-    const compilation = compileAuthoredGraph(
-      normalized.document!,
-      launch,
-      normalized.lowered_managed_nodes
-    );
-
-    expect(compilation.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "$.graph.steps[0].body",
-          message: "repeat.body must compile to a single entry region."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].body",
-          message: "repeat.body must compile to a single exit region."
-        }),
-        expect.objectContaining({
-          path: "$.graph.steps[0].until.node",
-          message: expect.stringContaining('currently exits through "repair"')
-        })
-      ])
-    );
-  });
-
+    it("does not leak launch-profile models across node profiles that switch harnesses", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "cross-harness-model-boundary",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli",
+                    model: "gpt-5-codex"
+                },
+                review: {
+                    harness: "cursor-cli",
+                    sandbox: "read-only",
+                    ai_check_defaults: {
+                        rubric: "Review the change."
+                    }
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "agent",
+                        id: "review_patch",
+                        intent: {
+                            goal: "Review the patch.",
+                            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                            constraints: []
+                        },
+                        runtime: {
+                            profile: "review"
+                        }
+                    },
+                    {
+                        type: "check",
+                        id: "judge_patch",
+                        check_kind: "ai",
+                        intent: {
+                            goal: "Judge the patch.",
+                            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                            constraints: []
+                        },
+                        runtime: {
+                            profile: "review"
+                        }
+                    }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual([]);
+        const reviewPatch = compilation.compiled_graph?.nodes.find((node) => node.authored_id === "review_patch");
+        const judgePatch = compilation.compiled_graph?.nodes.find((node) => node.authored_id === "judge_patch");
+        expect(reviewPatch).toEqual(expect.objectContaining({
+            effective_policy: expect.objectContaining({
+                profile_name: "review",
+                harness: "cursor-cli"
+            })
+        }));
+        expect(reviewPatch?.effective_policy.model).toBeUndefined();
+        expect(judgePatch).toEqual(expect.objectContaining({
+            effective_policy: expect.objectContaining({
+                profile_name: "review",
+                harness: "cursor-cli",
+                sandbox: "read-only"
+            }),
+            rubric: "Review the change."
+        }));
+        expect(judgePatch?.effective_policy.model).toBeUndefined();
+    });
+    it("rejects repeat bodies that compile to multiple entry and exit nodes", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "repeat-body-shape",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "repeat",
+                        id: "retry",
+                        max_attempts: 2,
+                        body: {
+                            type: "parallel",
+                            id: "body",
+                            steps: [
+                                {
+                                    type: "exec",
+                                    id: "repair",
+                                    command: "placeholder"
+                                },
+                                {
+                                    type: "check",
+                                    id: "verify",
+                                    check_kind: "deterministic",
+                                    command: "placeholder"
+                                }
+                            ]
+                        },
+                        until: {
+                            node: "verify"
+                        }
+                    }
+                ]
+            }
+        });
+        const launch = resolveLaunchConfig(normalized.document!);
+        const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes);
+        expect(compilation.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].body",
+                message: "repeat.body must compile to a single entry region."
+            }),
+            expect.objectContaining({
+                path: "$.graph.steps[0].body",
+                message: "repeat.body must compile to a single exit region."
+            }),
+            expect.objectContaining({
+                path: "$.graph.steps[0].until.node",
+                message: expect.stringContaining('currently exits through "repair"')
+            })
+        ]));
+    });
 });

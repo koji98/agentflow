@@ -4,7 +4,7 @@ Agentflow is a local-first runtime for supervised agent workflows in real reposi
 
 You write a graph that states the intent, authority, context, tools, validation, and artifacts for the work. Agentflow validates that contract, runs substantial nodes through agent harnesses such as Codex CLI or Cursor CLI, supervises failures, and produces a durable delivery package for review.
 
-Agentflow exists because long-running agent work needs more than an ad hoc prompt. Teams need the original intent preserved, the right context materialized, failures repaired without losing the thread, and final evidence organized so a human can review the result.
+Agentflow exists because long-running agent work needs more than an ad hoc prompt. Teams need the original intent preserved, the right context pointed to clearly, failures repaired without losing the thread, and final evidence organized so a human can review the result.
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Graph | A file-backed execution contract for a workflow. | Keeps intent, authority, context, validation, and delivery explicit before launch. | [Product scope](docs/product/scope.md), [operations](docs/product/operations.md) |
 | Node | A meaningful unit of work: `agent`, `exec`, `check`, `checkpoint`, or a container such as `sequence`, `parallel`, or `repeat`. | Lets agents own outcomes instead of receiving tiny brittle prompt fragments. | [Examples](docs/examples/README.md) |
-| Context | The material Agentflow gives a node: authored text, selected files, globs, prior artifacts, and supervisor repair packets. | Context quality is prompt quality. Too much noise hurts runs; missing context causes avoidable failures. | [Context and artifacts](docs/technical/context-and-artifacts.md) |
+| Context | Pointer metadata Agentflow gives a node: selected files, globs, prior artifacts, plugin files, and supervisor repair packets. | Context quality is prompt quality. Too much noise hurts runs; missing context causes avoidable failures. | [Context and artifacts](docs/technical/context-and-artifacts.md) |
 | Artifacts | Named durable outputs produced by nodes. | Future nodes and reviewers consume artifacts, not hidden chat state. | [Runtime lifecycle](docs/technical/runtime-lifecycle.md) |
 | Checks | Deterministic or AI gates inside the run. | Provides hard evidence and semantic sensors without relying on final prose alone. | [Outcome verification](docs/technical/outcome-verification.md) |
 | Supervisor | The runtime recovery system for failed or misaligned node attempts. | Keeps the graph progressing when context, validation, artifact, workspace, or environment issues are machine-fixable. | [Architecture](docs/technical/architecture.md) |
@@ -186,21 +186,18 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "medium",
-      "sandbox": "workspace-write",
-      "timeout_sec": 1800
+      "sandbox": "workspace-write"
     },
     "cursor": {
       "harness": "cursor-cli",
       "model": "auto",
-      "sandbox": "workspace-write",
-      "timeout_sec": 1800
+      "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "medium",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900
+      "sandbox": "workspace-write"
     }
   },
   "supervision": {
@@ -214,8 +211,10 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
       {
         "type": "agent",
         "id": "implement_slice",
-        "repo": "main",
-        "profile": "codex",
+        "runtime": {
+          "repo": "main",
+          "profile": "codex"
+        },
         "intent": {
           "goal": "Implement the scoped change and leave reviewer-ready evidence.",
           "acceptance_criteria": [
@@ -226,13 +225,17 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
             "Do not finish without writing a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md."
           ]
         },
-        "context": [
-          {
-            "name": "goal",
-            "from": "text",
-            "text": "Keep the change focused and reviewable."
-          }
-        ],
+        "support": {
+          "context": [
+            {
+              "name": "goal",
+              "kind": "workspace_file",
+              "path": "README.md",
+              "what": "Repository overview and local workflow guidance.",
+              "why": "It helps the implementation node stay aligned with the current repo contract."
+            }
+          ]
+        },
         "artifacts": {
           "change_summary": {
             "from": "output_dir",
@@ -244,7 +247,9 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
       {
         "type": "check",
         "id": "test",
-        "repo": "main",
+        "runtime": {
+          "repo": "main"
+        },
         "intent": {
           "goal": "Run the repository test suite to validate the scoped change.",
           "acceptance_criteria": [
@@ -264,7 +269,7 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
 }
 ```
 
-Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, tool contract, artifact contract, output directory, and timeout budget. Harness-native config is isolated by default and may be declared in `profiles.*.harness_config`; inheriting local Codex or Cursor config requires an explicit `isolation: "inherit_user"` opt-in. `model: "auto"` means Agentflow does not pass an explicit model flag to the selected harness.
+Switching from Codex CLI to Cursor CLI is a launch-profile choice, not a different graph language. Both harnesses receive the same context packet, runtime CLI, optional support metadata, artifact contract, and output directory. Harness-native config is isolated by default and may be declared in `profiles.*.harness_config`; inheriting local Codex or Cursor config requires an explicit `isolation: "inherit_user"` opt-in. `model: "auto"` means Agentflow does not pass an explicit model flag to the selected harness.
 
 ## CLI Commands
 
@@ -301,7 +306,7 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | Plugin author | [docs/product/plugins.md](docs/product/plugins.md) | Workflow exports, CLI tool exports, credentials, config, naming, and consumption. |
 | Runtime implementer | [docs/technical/README.md](docs/technical/README.md) | Implementation reading order for runtime, context, tools, verification, and delivery. |
 | Runtime debugger | [docs/technical/runtime-lifecycle.md](docs/technical/runtime-lifecycle.md) | Launch-to-delivery execution flow. |
-| Context debugger | [docs/technical/context-and-artifacts.md](docs/technical/context-and-artifacts.md) | Context materialization, artifact refs, and downstream handoffs. |
+| Context debugger | [docs/technical/context-and-artifacts.md](docs/technical/context-and-artifacts.md) | Context pointer resolution, artifact refs, and downstream handoffs. |
 | Tooling debugger | [docs/technical/runtime-tooling.md](docs/technical/runtime-tooling.md) | Generated `af` and plugin tool wrappers. |
 | Example user | [docs/examples/README.md](docs/examples/README.md) | Runnable graph, eval, and plugin examples. |
 | Agent authoring with skills | [skills](skills) | Agentflow, plugin, and eval skill guidance aligned to the repo contract. |
@@ -315,13 +320,17 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | `intent` | Top-level goal, constraints, and acceptance criteria. |
 | `repos` | Local repository aliases. Defaults to `main` at `.` when omitted. |
 | `defaults` | Launch profile and workspace backend defaults. |
-| `profiles` | Harness, model, sandbox, env, timeout, harness-native config isolation, tool policy, and budget settings. |
+| `profiles` | Harness, model, sandbox, env, artifact repair, and harness-native config isolation. |
 | `supervision` | Required supervisor profile plus total recovery budget. |
-| `plugins` and `tools` | Plugin-bundled CLI capabilities exposed to eligible nodes. |
-| `prerequisites` | Local launch checks for files, commands, env vars, and repos. |
+| `plugins` | Reusable workflow and managed tool packages resolved into the graph. |
+| `skill_sources` | Installable or local skill collections; only referenced skills are prompted. |
+| `tools` | Registry of managed plugin tool declarations; not a global grant. |
+| `capabilities` | Reusable bundles of skill refs, managed tool grants, and ambient CLI hints. |
 | `graph` | The execution shape: containers, executable nodes, or managed patterns. |
 
 Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Constraint strings should start with `Do not`; positive requirements belong in acceptance criteria. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
+
+Executable nodes choose repo/profile in `runtime` and receive non-authoritative help in `support`. `support.context` entries require `what` and `why`; skills and managed tools are selected directly or through `support.capabilities`; CLI hints are plain shell commands validated as callable and rendered in the prompt without wrappers, config, credentials, or ledgers.
 
 Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime pauses chosen only when recovery needs credentials, scope, product intent, security/compliance judgment, or graph-contract authority that the runtime must not infer.
 
@@ -330,7 +339,7 @@ Use `checkpoint` for authored human gates, usually inside a `repeat` body. Super
 | Surface | Who uses it | Purpose |
 | --- | --- | --- |
 | `agentflow` | Humans and automation outside a run. | Validate, run, resume, inspect, observe live runs, resolve plugins, auth, eval, and report. |
-| `af` | Agents inside a node attempt. | Inspect node contract, show context, write artifacts, log structured progress/findings/decisions, and check completion readiness. |
+| `af` | Agents inside a node attempt. | Orient to the node contract, track milestone evidence, publish declared artifacts, and check completion readiness. |
 | Run root | Operators and debuggers. | Durable state, events, attempts, context packets, logs, supervisor interventions, and delivery files. |
 | `delivery/` | Human reviewers. | High-signal terminal package with reviewer guide, implementation summary, evidence ledger, risks, and follow-ups. |
 
@@ -343,6 +352,7 @@ Agentflow includes local-first eval suites for workflow quality and real-world i
 ```bash
 npm run setup:eval-repos
 npm run setup:realworld-evals
+agentflow eval validate evals/agentflow-validation
 agentflow eval validate evals/agentflow-capability-workflows
 agentflow eval validate evals/agentflow-realworld-issues
 ```

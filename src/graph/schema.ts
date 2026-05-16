@@ -19,7 +19,7 @@ export const contextSelectors = [
   "latest_failed",
   "previous"
 ] as const;
-export const contextSourceKinds = ["text", "workspace_file", "workspace_glob"] as const;
+export const contextSourceKinds = ["workspace_file", "workspace_glob", "plugin_file"] as const;
 export const artifactSourceKinds = ["output_dir", "workspace"] as const;
 export const reservedArtifactNames = ["agent_response", "verification_json", "stdout", "stderr"] as const;
 export const canonicalNodeArtifacts = {
@@ -32,7 +32,6 @@ export const reservedToolNames = ["af"] as const;
 export const toolNamePattern = /^[a-z0-9][a-z0-9-]*$/;
 export const edgeOutcomes = ["passed", "failed"] as const;
 export const failureBehaviors = ["fail", "continue"] as const;
-export const prerequisiteKinds = ["file", "command", "env", "repo"] as const;
 export const deliverySections = [
   "task_brief",
   "implementation_summary",
@@ -64,7 +63,6 @@ export type ReservedArtifactName = (typeof reservedArtifactNames)[number];
 export type CanonicalNodeArtifactKind = keyof typeof canonicalNodeArtifacts;
 export type GraphOutcome = (typeof edgeOutcomes)[number];
 export type FailureBehavior = (typeof failureBehaviors)[number];
-export type PrerequisiteKind = (typeof prerequisiteKinds)[number];
 export type DeliverySection = (typeof deliverySections)[number];
 
 export interface GraphDiagnostic {

@@ -1,8 +1,8 @@
 {
-  "id": "truncated-context-provenance",
+  "id": "pointer-provenance",
   "bucket": "valid-noisy-evidence",
   "difficulty": "hard",
-  "description": "Node should inspect provenance when a context snippet is truncated.",
+  "description": "Node should inspect context pointer provenance before relying on source evidence.",
   "workflow": {
     "graph_template": "../../shared/graph.exec.template.json",
     "harness": "codex-cli",
@@ -21,7 +21,7 @@
         {
           "name": "handoff",
           "contains": [
-            "scenario=truncated-context-provenance"
+            "scenario=pointer-provenance"
           ]
         }
       ]

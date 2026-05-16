@@ -1,0 +1,84 @@
+{
+  "id": "validator-url-port-no-protocol",
+  "bucket": "realworld-pinned-repo",
+  "difficulty": "hard",
+  "description": "Fix validator.js URL parsing so hostnames with numeric ports and no protocol are accepted when protocol is not required.",
+  "workflow": {
+    "graph_template": "../../templates/validator-url-port-no-protocol.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "metadata": {
+    "realworld": {
+      "source_repo": "validatorjs/validator.js",
+      "license": "MIT",
+      "base_sha": "4af61243ba0ae93f29e7689040e188b5849ff1b0",
+      "issue_url": "https://github.com/validatorjs/validator.js/issues/2620",
+      "pr_url": "https://github.com/validatorjs/validator.js/pull/2622",
+      "oracle_commit_sha": "430cd2a48d6d0a61e755bd280884e1a53d58ce58",
+      "package_manager": "npm",
+      "regression_patch": "regression.patch",
+      "setup_command": "npm install --ignore-scripts --no-audit --no-fund --legacy-peer-deps",
+      "focused_test_command": "npx mocha --require @babel/register --exit test/agentflow-realworld-url-port.test.js",
+      "allowed_changed_globs": [
+        "src/lib/isURL.js"
+      ],
+      "forbidden_changed_globs": [
+        "AGENTFLOW_EVAL_TASK.md",
+        "package.json",
+        "package-lock.json",
+        "test/**",
+        "**/agentflow-realworld-*"
+      ],
+      "hidden_oracle_changed_files": [
+        "src/lib/isURL.js",
+        "test/validators.test.js"
+      ]
+    }
+  },
+  "environment": {
+    "repo": "../../../../eval-repos/agentflow-validation/validator-url-port-no-protocol",
+    "init_git": true
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Validation"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": []
+    },
+    "supervisor": {
+      "classifications": [],
+      "gatherers": [],
+      "apply_actions": []
+    },
+    "trajectory": {
+      "match": "contains_any_order",
+      "events": [
+        {
+          "kind": "node_attempt"
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "sentinel-deterministic": {},
+    "sentinel-quality": {
+      "dimensions": [
+        "agentflow_mission_fit",
+        "evidence_quality"
+      ]
+    }
+  }
+}

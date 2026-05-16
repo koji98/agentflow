@@ -24,8 +24,7 @@
       "harness": "{{workflow.harness}}",
       "model": "gpt-5.4-mini",
       "reasoning_effort": "low",
-      "sandbox": "workspace-write",
-      "timeout_sec": 600
+      "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
@@ -43,7 +42,6 @@
       {
         "type": "pattern_deep_work",
         "id": "managed_probe",
-        "repo": "main",
         "intent": {
           "goal": "{{criteria.prompt-regression.task}}",
           "acceptance_criteria": [
@@ -74,6 +72,9 @@
             "path": "summary.md",
             "description": "Managed prompt-regression summary with literal Scenario:, Evidence:, Validation:, Risks:, and Completion: fields."
           }
+        },
+        "runtime": {
+          "repo": "main"
         }
       }
     ]

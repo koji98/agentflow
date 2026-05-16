@@ -174,20 +174,26 @@ function buildCodexArgs(
 } {
   const last_message_path = join(invocation.outputDir, "last_message.txt");
   const executionRoot = deriveHarnessExecutionRoot(invocation.outputDir);
+  const addedDirs = new Set<string>();
+  const pushAddDir = (path: string | undefined) => {
+    if (!path || addedDirs.has(path)) {
+      return;
+    }
+    addedDirs.add(path);
+    args.push("--add-dir", path);
+  };
   const args = [
     "exec",
+    "--cd",
+    invocation.repoPath,
     "--sandbox",
-    invocation.sandbox,
-    "--add-dir",
-    executionRoot,
-    "--output-last-message",
-    last_message_path
+    invocation.sandbox
   ];
+  pushAddDir(executionRoot);
+  pushAddDir(invocation.outputDir);
+  pushAddDir(invocation.runtimeDir);
+  args.push("--output-last-message", last_message_path);
   pushCodexConfigArgs(args, harnessConfig);
-
-  if (invocation.runtimeDir) {
-    args.push("--add-dir", invocation.runtimeDir);
-  }
 
   if (invocation.skipGitRepoCheck) {
     args.push("--skip-git-repo-check");
@@ -267,6 +273,9 @@ export function createCodexCliHarness(
           stderrChunks.push(chunk);
           invocation.onStderrChunk?.(chunk.toString("utf8"));
         });
+        child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+          stderrChunks.push(Buffer.from(`\n[codex-cli stdin error] ${error.message}\n`));
+        });
         child.on("error", (error) => {
           if (timeout) {
             clearTimeout(timeout);
@@ -332,8 +341,7 @@ export function createCodexCliHarness(
           });
         });
 
-        child.stdin.write(prompt);
-        child.stdin.end();
+        child.stdin.end(prompt);
       });
     },
     async cancel(executionId: string): Promise<void> {

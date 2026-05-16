@@ -1,9 +1,8 @@
-import type { AuthoredGraphDocument } from "../../src/graph/authored.js";
-
-export function withNodeIntentDefaults<TDocument extends AuthoredGraphDocument | Parameters<typeof import("../../src/graph/normalize.js").normalizeAuthoredGraphDocument>[0]>(
-  document: TDocument
-): TDocument {
+export function withNodeIntentDefaults<TDocument>(document: TDocument): TDocument {
   const clone = structuredClone(document) as TDocument;
+  const graphDocument = clone && typeof clone === "object" && "graph" in (clone as Record<string, unknown>)
+    ? clone as Record<string, unknown>
+    : undefined;
 
   function visit(node: unknown): void {
     if (!node || typeof node !== "object" || Array.isArray(node)) {
@@ -33,25 +32,26 @@ export function withNodeIntentDefaults<TDocument extends AuthoredGraphDocument |
     }
   }
 
-  if (clone && typeof clone === "object" && "graph" in (clone as Record<string, unknown>)) {
-    const document = clone as Record<string, unknown>;
-    const profiles =
-      document.profiles && typeof document.profiles === "object" && !Array.isArray(document.profiles)
-        ? document.profiles as Record<string, unknown>
-        : {};
+  if (graphDocument) {
+    graphDocument.intent ??= {
+      goal: "Run the test graph.",
+      acceptance_criteria: ["The graph satisfies the current Agentflow contract."]
+    };
+    const profiles = graphDocument.profiles && typeof graphDocument.profiles === "object" && !Array.isArray(graphDocument.profiles)
+      ? graphDocument.profiles as Record<string, unknown>
+      : {};
     profiles.default ??= { harness: "codex-cli" };
     profiles.supervisor ??= { harness: "codex-cli", sandbox: "read-only" };
-    document.profiles = profiles;
-    document.supervision ??= { profile: "supervisor", max_total_interventions: 3 };
-    if (
-      document.supervision &&
-      typeof document.supervision === "object" &&
-      !Array.isArray(document.supervision) &&
-      !("profile" in document.supervision)
-    ) {
-      (document.supervision as Record<string, unknown>).profile = "supervisor";
-    }
-    visit(document.graph);
+    graphDocument.profiles = profiles;
+
+    const supervision = graphDocument.supervision && typeof graphDocument.supervision === "object" && !Array.isArray(graphDocument.supervision)
+      ? graphDocument.supervision as Record<string, unknown>
+      : {};
+    supervision.profile ??= "supervisor";
+    supervision.max_total_interventions ??= 3;
+    graphDocument.supervision = supervision;
+    visit(graphDocument.graph);
   }
+
   return clone;
 }

@@ -19,7 +19,7 @@
     "prompt-regression": {
       "task": "There is harmless ambiguous evidence in stale docs. Write the handoff with `non-blocker ambiguity` and explain why it does not contradict the authored contract.",
       "required_contains": ["non-blocker ambiguity", { "any": ["contradict", "conflict"] }, "Scenario:"],
-      "forbid_blocking_logs": true
+      "forbid_blocked_milestones": true
     }
   }
 }

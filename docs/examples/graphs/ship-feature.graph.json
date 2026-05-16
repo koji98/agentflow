@@ -15,18 +15,12 @@
     "default": {
       "harness": "cursor-cli",
       "model": "auto",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900,
-      "input_rules": {
-        "max_total_tokens": 96000,
-        "max_tokens_per_item": 32000
-      }
+      "sandbox": "workspace-write"
     },
     "review": {
       "harness": "cursor-cli",
       "model": "auto",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900
+      "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
@@ -38,12 +32,21 @@
       "path": "../plugins/babysit"
     }
   },
-  "tools": [
-    {
-      "from_plugin": "babysit",
-      "tool": "poll"
+  "tools": {
+    "pr_poll": {
+      "ref": "babysit/poll",
+      "alias": "babysit-poll"
     }
-  ],
+  },
+  "capabilities": {
+    "pr_watch": {
+      "tools": [
+        {
+          "ref": "pr_poll"
+        }
+      ]
+    }
+  },
   "graph": {
     "type": "sequence",
     "id": "root",
@@ -51,14 +54,6 @@
       {
         "type": "agent",
         "id": "draft_release_notes",
-        "repo": "main",
-        "context": [
-          {
-            "name": "readme",
-            "from": "workspace_file",
-            "path": "README.md"
-          }
-        ],
         "artifacts": {
           "release_notes": {
             "from": "output_dir",
@@ -75,19 +70,25 @@
           "constraints": [
             "Do not modify files in the repository."
           ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "readme",
+              "path": "README.md",
+              "what": "Workspace file README.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            }
+          ]
         }
       },
       {
         "type": "agent",
         "id": "watch_pr",
-        "repo": "main",
-        "profile": "review",
-        "context": [
-          {
-            "ref": "draft_release_notes.release_notes",
-            "name": "release_notes"
-          }
-        ],
         "artifacts": {
           "ship_handoff": {
             "from": "output_dir",
@@ -103,6 +104,26 @@
           ],
           "constraints": [
             "Do not modify files in the repository."
+          ]
+        },
+        "runtime": {
+          "repo": "main",
+          "profile": "review"
+        },
+        "support": {
+          "capabilities": [
+            {
+              "ref": "pr_watch"
+            }
+          ],
+          "context": [
+            {
+              "ref": "draft_release_notes.release_notes",
+              "name": "release_notes",
+              "what": "Artifact reference draft_release_notes.release_notes.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            }
           ]
         }
       }

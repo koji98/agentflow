@@ -128,14 +128,12 @@ async function writeRealEvalSuite(tempRoot) {
         default: {
           harness,
           model: process.env.AGENTFLOW_CODEX_MODEL ?? "gpt-5.4-mini",
-          sandbox: "workspace-write",
-          timeout_sec: 240
+          sandbox: "workspace-write"
         },
         supervisor: {
           harness,
           model: process.env.AGENTFLOW_CODEX_MODEL ?? "gpt-5.4-mini",
-          sandbox: "read-only",
-          timeout_sec: 240
+          sandbox: "read-only"
         }
       },
       supervision: {
@@ -148,7 +146,7 @@ async function writeRealEvalSuite(tempRoot) {
         steps: [{
           type: "agent",
           id: "complete",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: `Write the handoff artifact at the declared path. The artifact must include the exact word "validation" and mention this local docs URL: {{environment.docs_url}}`,
             acceptance_criteria: ["The node satisfies its acceptance criteria."],

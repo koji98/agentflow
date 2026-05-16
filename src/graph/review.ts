@@ -291,7 +291,7 @@ function reviewExecutableNode(
       node_id: node.authored_id,
       compiled_id: node.compiled_id,
       message: `Node "${node.authored_id}" receives ${node.context.length} context items.`,
-      recommendation: "Trim context to the files, prior artifacts, and short text needed for the node outcome."
+      recommendation: "Trim context to the workspace files, plugin files, and prior artifacts needed for the node outcome."
     });
   }
 
@@ -317,18 +317,6 @@ function reviewExecutableNode(
         compiled_id: node.compiled_id,
         message: `Node "${node.authored_id}" allows ${item.max_files} files from workspace_glob "${item.path}".`,
         recommendation: "Lower max_files or split the work so the node receives focused context."
-      });
-    }
-
-    if ("from" in item && item.from === "text" && item.text.length > 8000) {
-      pushFinding(findings, {
-        severity: "warning",
-        category: "context",
-        ...(path ? { path: `${path}.context[${index}].text` } : {}),
-        node_id: node.authored_id,
-        compiled_id: node.compiled_id,
-        message: `Node "${node.authored_id}" has a long inline text context item.`,
-        recommendation: "Move large context into a named file or artifact so provenance stays readable."
       });
     }
 

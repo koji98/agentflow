@@ -50,7 +50,7 @@ The captured diff is not always the same thing as "what this node intentionally 
 - `inplace` parallel nodes share a repo,
 - work spans repos outside the node's primary workspace.
 
-In those cases, the diff remains useful for audit and investigation, but declared artifacts, decision logs, command evidence, commit ranges, or PR base/head facts are usually stronger supervision evidence.
+In those cases, the diff remains useful for audit and investigation, but declared artifacts, milestone evidence, command evidence, commit ranges, or PR base/head facts are usually stronger supervision evidence.
 
 ## Resume Safety
 

@@ -28,9 +28,10 @@ Common top-level fields:
 - `defaults`
 - `profiles`
 - `supervision`
-- `prerequisites`
 - `plugins`
+- `skill_sources`
 - `tools`
+- `capabilities`
 - `config_schema`
 - `config`
 
@@ -52,7 +53,9 @@ Common top-level fields:
 
 The normalizer rejects unknown graph fields and invalid enum values. Missing `intent.goal` is a hard schema error.
 
-Repository and profile authority stay explicit outside `intent`. Top-level `repos` bind aliases to local checkouts, top-level `profiles` define harness authority, and executable nodes choose `repo` and `profile`. Scope boundaries and out-of-scope notes are authored in graph-level or node-level `intent.constraints`. Constraint strings should be prohibition-style boundaries that start with `Do not`; put positive success requirements in `acceptance_criteria`.
+Repository and profile authority stay explicit outside `intent`. Top-level `repos` bind aliases to local checkouts, top-level `profiles` define harness authority, and executable nodes choose `runtime.repo` and `runtime.profile`. Scope boundaries and out-of-scope notes are authored in graph-level or node-level `intent.constraints`. Constraint strings should be prohibition-style boundaries that start with `Do not`; put positive success requirements in `acceptance_criteria`.
+
+Support surfaces are intentionally non-authoritative. `support.context` points at workspace files, globs, plugin files, or prior artifacts and must explain `what` the pointer is plus `why` this node needs it. `skill_sources` declare installable skill collections, `capabilities` bundle selected skill refs, managed tool grants, and ambient CLI hints, and top-level `tools` is a managed plugin tool registry rather than a global grant.
 
 ## Compilation
 
@@ -63,7 +66,9 @@ Compilation lowers the authored graph into primitive runtime structures:
 - scopes for cleanup, repeat, and parallel behavior
 - resolved profiles and workspace policy
 - resolved plugin workflow expansions
-- resolved plugin tool contracts
+- resolved selected skill metadata
+- resolved plugin tool contracts granted to each node
+- ambient CLI hints granted to each node
 - supervision contract copied into the compiled graph
 - graph and node intent copied into executable nodes
 
@@ -85,7 +90,7 @@ Terminal runs write stable resume and audit state such as `run.json`, `compiled_
 
 ## Context And Artifacts
 
-Nodes receive context through a materialized packet under the execution directory:
+Nodes receive context through a pointer packet under the execution directory:
 
 - `context/packet.json`
 - `context/manifest.md`
@@ -93,10 +98,12 @@ Nodes receive context through a materialized packet under the execution director
 
 Context sources are:
 
-- `text`
 - `workspace_file`
 - `workspace_glob`
+- `plugin_file`
 - named prior artifacts through `ref`
+
+Authored context lives under node `support.context`; the runtime resolves source pointers and writes a manifest table with each item’s name, kind, pointer, `what`, and `why`.
 
 Artifacts are declared with `artifacts` and produced from either:
 
@@ -112,7 +119,7 @@ Reserved automatic artifacts:
 
 Downstream nodes should consume named artifacts, not rediscover scratch files.
 
-See `context-and-artifacts.md` for the materialization lifecycle, token budget behavior, repeat selectors, and how artifact refs are derived from `ref`.
+See `context-and-artifacts.md` for the context resolution lifecycle, repeat selectors, and how artifact refs are derived from `ref`.
 
 ## Harness Contract
 
@@ -138,17 +145,17 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 
 `af` commands are file-backed against the run root:
 
-- `af status` and `af context show` orient the node against the current runtime contract.
-- `af artifact write` publishes declared artifacts.
+- `af orient` orients the node against the current runtime contract and context pointers.
+- `af milestone add/log/complete/block` records macro work state and audit evidence.
+- `af artifact write <name>` publishes declared artifact content from stdin.
 - `af complete check` builds the mechanical completion packet for the current attempt.
-- `af log --type <progress|finding|decision>` appends structured worker evidence to `runtime/log.jsonl`. Findings use `--finding-kind <observation|issue|risk|blocker>`. Decisions carry `decision`, `rationale`, `contract_implication`, and structured `evidence[]`.
 - `af spawn --purpose <investigation|implementation|verification|repair>` creates a helper sub-node with its own runtime metadata, selected plugin tools, output directory, logs, artifact contract, and optional `--wait` behavior.
 
 The default `af --help` surface is intentionally small because it is part of agent correctness. It shows the normal completion loop commands and omits debug/orchestration commands such as `diagnose`, `learn`, `tools list`, and `spawn`. `af <command> --help` remains the authoritative in-node runtime API reference for commands the runtime exposes to the current authority. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.
 
 Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocations.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and stdout/stderr sidecar paths when output is captured.
 
-Agents do not rely on synchronous coordination with other graph nodes. Durable work moves through declared artifacts, worker notes are recorded with `af log`, helper sub-node coordination stays under the parent node's runtime contract, and completion state moves through `completion-packet.json` rather than final-response claims.
+Agents do not rely on synchronous coordination with other graph nodes. Durable work moves through declared artifacts, worker evidence is recorded in milestone state, helper sub-node coordination stays under the parent node's runtime contract, and completion state moves through `completion-packet.json` rather than final-response claims.
 
 See `runtime-tooling.md` for the generated `af` wrapper, plugin launcher, credential isolation, harness environment, and tool invocation ledger flow.
 
@@ -174,7 +181,7 @@ Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into
 
 On a failed or rejected executable attempt, the symptom is not automatically treated as the cause. The runtime persists the exact rendered prompt, builds a causal case file, constructs an upstream cone from graph edges, artifact producers, context provenance, prior attempts, workspace diffs, repeat/managed state, and verification evidence, then ranks likely recovery targets. The supervisor repairs the nearest intent-aligned cause first, reruns the failed gate, and continues only when each retry records a material delta: target changed, context changed, evidence added, validation guidance changed, workspace repaired, environment repaired, or an artifact was repaired. Budget is spent once per recovery chain, not once per helper, gatherer, target attempt, or rerun gate.
 
-Context contract failures are deterministic recovery cases. If authored context cannot be packaged because it exceeds `max_total_tokens`, explodes through broad globs, includes non-tokenizable material, or otherwise cannot fit the context contract, the supervisor writes `context-analysis.{json,md}`, writes `context-repair-patch.json`, and retries with a compact repair packet before the authored context. The repair packet contains a bounded file index, sample matches, largest files, default ignored roots, omitted-entry provenance, and live workspace paths for manual inspection. It does not change graph intent, node intent, repo authority, sandbox, or declared artifacts.
+Context contract failures are deterministic recovery cases. If authored context cannot be packaged because a pointer is unsafe or unresolved, a required artifact is missing, a source is non-text, or a broad glob needs operator attention, the supervisor writes `context-analysis.{json,md}`, writes `context-repair-patch.json`, and retries with a compact repair packet before the authored context. The repair packet contains a bounded file index, sample matches, largest files, default ignored roots, omitted-entry provenance, and live workspace paths for manual inspection. It does not change graph intent, node intent, repo authority, sandbox, or declared artifacts.
 
 Workspace and environment repair are also runtime overlays, not graph contract features. Workspace repair consumes the node snapshot artifacts for the failed attempt and restores only that attempt's tracked/untracked diff before retry. Environment repair is limited to safe local substrate refresh, such as regenerating Agentflow tool wrappers and PATH/runtime metadata for the next attempt.
 
@@ -184,7 +191,7 @@ Artifact repair is part of the same causal recovery chain. A downstream failed c
 
 Failed harness attempts do not publish declared artifacts, even if they wrote files in the output directory before failing. Those files can be surfaced as prior-attempt evidence for later repair or retry prompts, but downstream refs and delivery handoffs only consume artifacts materialized from successful attempts or accepted repairs.
 
-`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same causal recovery loop. A retried or repaired target receives a `SupervisorRecoveryEnvelope` before the original authored task, and the same envelope is materialized into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af context show` also shows the `supervisor_context_repair` material and the authored entries omitted by the overlay. The envelope names the symptom node, the selected recovery target, the material delta, and states that graph intent, node intent, repo authority, sandbox, and declared artifacts are unchanged. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
+`retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same causal recovery loop. A retried or repaired target receives a supervisor recovery case before the original authored task, and the same case is resolved into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af orient` surfaces the active recovery and context pointers. The case names the symptom node, selected recovery target, material delta, forbidden actions, and unchanged graph/node authority. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
 
 Supervisor helpers can use read-only diagnostics through `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, and `af diagnose validation`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. `af spawn --purpose investigation` creates read-only causal-analysis helpers; `af spawn --purpose implementation`, `--purpose verification`, and `--purpose repair` create bounded helper sessions for managed or supervisor-authorized work. There is no standalone `af wait`; use `af spawn ... --wait` when the parent needs a terminal helper result before continuing.
 
@@ -252,14 +259,14 @@ Plugin-bundled tools are runtime-visible CLI capabilities. Tool exports declare:
 - callable name, derived from graph declaration alias or `plugin-tool`
 - `executable`
 - `description`
-- optional config schema for non-secret graph `tools[].config` values
+- optional config schema for non-secret managed tool `config` values
 - optional credential scopes
 
 Policy rules:
 
 - declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent
 - tool wrappers run inside the same node sandbox and timeout
-- credential values and non-secret inline `tools[].config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
+- credential values and non-secret managed tool `config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
 - plugin manifests do not declare default CLI arguments; exact tool CLI arguments belong in the tool's `--help` and are passed by the agent when invoking the callable tool
 - `config_schema` only validates graph-provided default config values
 - executable `--help` is required for every plugin tool, must run without credentials or side effects, and is checked by `agentflow validate --graph ...`
@@ -271,7 +278,7 @@ Terminal delivery is part of the runtime contract. The package collector reads r
 - task brief
 - implementation summary
 - grouped change map
-- decision log
+- milestone evidence
 - evaluation ledger
 - reviewer guide
 - risk notes
@@ -280,7 +287,7 @@ Terminal delivery is part of the runtime contract. The package collector reads r
 - manifest
 - run map
 
-The manifest keeps the legacy entrypoint maps and adds an explicit `artifact_taxonomy` object:
+The manifest keeps the entrypoint maps and adds an explicit `artifact_taxonomy` object:
 
 - `human_entrypoints`: reviewer guide, task brief, implementation summary, risk notes, follow-up items, and run map
 - `declared_artifacts`: graph outcome artifacts grouped by node/artifact name

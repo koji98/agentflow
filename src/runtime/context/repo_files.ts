@@ -97,7 +97,9 @@ export async function walkRelativeFilesSorted(
         : entry.name;
 
     if (entry.isDirectory()) {
-      files.push(...(await walkRelativeFilesSorted(rootPath, nextRelativePath, includeIgnoredRoot)));
+      for (const file of await walkRelativeFilesSorted(rootPath, nextRelativePath, includeIgnoredRoot)) {
+        files.push(file);
+      }
       continue;
     }
 

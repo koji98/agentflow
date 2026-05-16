@@ -1,15 +1,15 @@
 {
-  "id": "17-context-overflow-repair",
-  "bucket": "context-contract-recovery",
+  "id": "17-context-pointer-provenance",
+  "bucket": "context-pointer-provenance",
   "difficulty": "hard",
-  "description": "Confirm oversized authored context is repaired into a compact runtime overlay before retry.",
+  "description": "Confirm pointer-only context gives enough provenance for a targeted fix without broad rewrites.",
   "workflow": {
-    "graph_template": "../../templates/agent-context-overflow.graph.template.json",
+    "graph_template": "../../templates/agent-context-pointer-provenance.graph.template.json",
     "harness": "codex-cli",
     "workspace_backend": "inplace"
   },
   "environment": {
-    "repo": "../../../../eval-repos/agentflow-capability-workflows/17-context-overflow-repair",
+    "repo": "../../../../eval-repos/agentflow-capability-workflows/17-context-pointer-provenance",
     "init_git": true
   },
   "criteria": {
@@ -30,18 +30,7 @@
     "workspace": {
       "forbidden_edits": []
     },
-    "supervisor": {
-      "classifications": [
-        "context_contract_failure"
-      ],
-      "gatherers": [
-        "local_context",
-        "pattern_mining"
-      ],
-      "apply_actions": [
-        "repair_context"
-      ]
-    },
+    "supervisor": {},
     "delivery": {
       "required": true
     },

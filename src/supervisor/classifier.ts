@@ -87,19 +87,18 @@ function isContextFailureMessage(lowerMessage: string): boolean {
     "context provenance",
     "context could not be resolved",
     "execution context could not be resolved",
-    "materialized context",
-    "context material"
+    "context pointer",
+    "context source"
   ].some((fragment) => lowerMessage.includes(fragment));
 }
 
 function isContextContractFailureMessage(lowerMessage: string): boolean {
   return (
-    lowerMessage.includes("would exceed max_total_tokens")
-    || lowerMessage.includes("max_total_tokens")
-    || lowerMessage.includes("context materialization")
-    || lowerMessage.includes("materializing context")
-    || lowerMessage.includes("non-tokenizable context")
-    || lowerMessage.includes("could not be materialized")
+    lowerMessage.includes("context pointer")
+    || lowerMessage.includes("context packet")
+    || lowerMessage.includes("context manifest")
+    || lowerMessage.includes("context provenance")
+    || lowerMessage.includes("context could not be resolved")
   );
 }
 

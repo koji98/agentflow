@@ -6,7 +6,7 @@ import type {
   ExecutableNodeIntent,
   GraphIntent,
   ManagedArtifactForward,
-  GraphPrerequisites,
+  CliHint,
   SupervisionPolicy
 } from "./authored.js";
 import type {
@@ -34,6 +34,8 @@ export interface CompiledExecutableNodeBase {
   context: ContextItem[];
   declared_artifacts: Record<string, ArtifactDefinition>;
   managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
+  skills: ResolvedSkill[];
+  cli: CliHint[];
   lowered_from?: LoweredManagedKind;
   is_cleanup?: boolean;
   cleanup_scope_id?: string;
@@ -44,7 +46,7 @@ export interface ResolvedToolPluginSource {
   alias: string;
   tool: string;
   plugin_root: string;
-  declared_at: "graph" | "agent";
+  declared_at: "registry";
   declaration_path: string;
 }
 
@@ -58,6 +60,14 @@ export interface ResolvedTool {
   config_schema?: Record<string, unknown>;
   credentials?: string[];
   source: ResolvedToolSource;
+}
+
+export interface ResolvedSkill {
+  ref: string;
+  source_alias: string;
+  name: string;
+  description: string;
+  path: string;
 }
 
 export interface CompiledAgentNode extends CompiledExecutableNodeBase {
@@ -154,7 +164,6 @@ export interface CompiledGraph {
   edges: CompiledEdge[];
   scopes: CompiledScope[];
   authored_to_compiled: Record<string, string[]>;
-  prerequisites: GraphPrerequisites;
   credential_specs?: CredentialSpecMap;
 }
 

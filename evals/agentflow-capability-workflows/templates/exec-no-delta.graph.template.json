@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -26,17 +26,18 @@
       "harness": "{{workflow.harness}}",
       "model": "gpt-5.4-mini",
       "reasoning_effort": "low",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900
+      "sandbox": "workspace-write"
     },
     "supervisor": {
-      "harness": "codex-cli",
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
       "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 2,
-    "profile": "supervisor"
+    "profile": "supervisor",
+    "max_total_interventions": 2
   },
   "graph": {
     "type": "sequence",
@@ -45,16 +46,17 @@
       {
         "type": "exec",
         "id": "no_delta",
-        "repo": "main",
+        "runtime": {
+          "repo": "main"
+        },
         "command": "node",
         "args": [
           "scripts/no-delta.js"
         ],
         "intent": {
-          "goal": "Exercise the no-material-delta failure path for supervisor recovery.",
+          "goal": "Run no_delta.",
           "acceptance_criteria": [
-            "The command exits according to the fixture script's no-delta contract.",
-            "Supervisor evidence can distinguish repeated failure from a useful repair."
+            "The node satisfies its local eval contract."
           ],
           "constraints": []
         }

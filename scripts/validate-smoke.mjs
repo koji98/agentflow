@@ -219,7 +219,63 @@ async function initializeGitRepo(repoDir) {
 async function createMockCodexBinary(tempRoot) {
   const binaryPath = join(tempRoot, "mock-codex.mjs");
   const source = `#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+
+function runAf(args, input) {
+  return spawnSync("af", args, {
+    input,
+    encoding: "utf8",
+    env: process.env,
+    maxBuffer: 1024 * 1024
+  });
+}
+
+function markAgentflowRuntimeReady() {
+  if (!process.env.AGENTFLOW_RUNTIME_METADATA) return;
+
+  const orient = runAf(["orient"]);
+  if (orient.status !== 0) return;
+
+  const added = runAf([
+    "milestone",
+    "add",
+    "--title",
+    "Run smoke harness",
+    "--goal",
+    "Return a passing deterministic harness result."
+  ]);
+  if (added.status !== 0) return;
+
+  let milestoneId = "m1";
+  try {
+    milestoneId = JSON.parse(added.stdout).milestone.id ?? milestoneId;
+  } catch {
+    // m1 is the first id for a fresh execution.
+  }
+
+  runAf([
+    "milestone",
+    "log",
+    milestoneId,
+    "--kind",
+    "validation",
+    "--command",
+    "validate-smoke mock harness",
+    "--result",
+    "pass",
+    "--summary",
+    "Mock harness returned the deterministic smoke verdict."
+  ]);
+  runAf([
+    "milestone",
+    "complete",
+    milestoneId,
+    "--evidence",
+    "Mock harness completed the smoke node and produced a passing verdict."
+  ]);
+  runAf(["complete", "check"]);
+}
 
 let stdin = "";
 process.stdin.setEncoding("utf8");
@@ -227,6 +283,8 @@ process.stdin.on("data", (chunk) => {
   stdin += chunk;
 });
 process.stdin.on("end", () => {
+  markAgentflowRuntimeReady();
+
   const args = process.argv.slice(2);
   const outputIndex = args.findIndex((arg) => arg === "--output-last-message");
   const lastMessagePath = outputIndex >= 0 ? args[outputIndex + 1] : undefined;
@@ -247,6 +305,64 @@ process.stdin.on("end", () => {
 async function createMockCursorBinary(tempRoot) {
   const binaryPath = join(tempRoot, "mock-agent.mjs");
   const source = `#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+
+function runAf(args) {
+  return spawnSync("af", args, {
+    encoding: "utf8",
+    env: process.env,
+    maxBuffer: 1024 * 1024
+  });
+}
+
+function markAgentflowRuntimeReady() {
+  if (!process.env.AGENTFLOW_RUNTIME_METADATA) return;
+
+  const orient = runAf(["orient"]);
+  if (orient.status !== 0) return;
+
+  const added = runAf([
+    "milestone",
+    "add",
+    "--title",
+    "Run smoke harness",
+    "--goal",
+    "Return a passing deterministic harness result."
+  ]);
+  if (added.status !== 0) return;
+
+  let milestoneId = "m1";
+  try {
+    milestoneId = JSON.parse(added.stdout).milestone.id ?? milestoneId;
+  } catch {
+    // m1 is the first id for a fresh execution.
+  }
+
+  runAf([
+    "milestone",
+    "log",
+    milestoneId,
+    "--kind",
+    "validation",
+    "--command",
+    "validate-smoke mock harness",
+    "--result",
+    "pass",
+    "--summary",
+    "Mock harness returned the deterministic smoke verdict."
+  ]);
+  runAf([
+    "milestone",
+    "complete",
+    milestoneId,
+    "--evidence",
+    "Mock harness completed the smoke node and produced a passing verdict."
+  ]);
+  runAf(["complete", "check"]);
+}
+
+markAgentflowRuntimeReady();
+
 process.stdout.write(JSON.stringify({
   type: "result",
   subtype: "success",
@@ -299,13 +415,11 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
       default: {
         harness: harnessKind,
         model: harnessKind === "codex-cli" ? "gpt-5-codex" : "gpt-5-cursor",
-        sandbox: harnessKind === "codex-cli" ? "workspace-write" : "read-only",
-        timeout_sec: 30
+        sandbox: harnessKind === "codex-cli" ? "workspace-write" : "read-only"
       },
       supervisor: {
         harness: harnessKind,
-        sandbox: "read-only",
-        timeout_sec: 30
+        sandbox: "read-only"
       }
     },
     supervision: {
@@ -319,7 +433,9 @@ async function createRunSmokeFixture(harnessKind, workspaceBackend) {
         {
           type: "agent",
           id: "smoke-agent",
-          repo: "main",
+          runtime: {
+            repo: "main"
+          },
           intent: {
             goal: `Run the ${harnessKind} smoke test.`,
             acceptance_criteria: [
