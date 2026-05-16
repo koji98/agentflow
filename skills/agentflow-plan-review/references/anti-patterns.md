@@ -7,7 +7,7 @@
 - Context flood: broad globs instead of curated source, docs, or artifacts.
 - Review theater: AI check after every agent node with no control-flow purpose.
 - Hidden handoff: downstream node relies on previous workspace state or raw logs.
-- Managed-pattern overuse: deep research/work everywhere even when one accountable node plus checks is enough.
+- Managed-pattern overuse: managed patterns everywhere even when one accountable node plus checks is enough.
 - Managed-pattern underuse: open-ended high-risk work forced into a single node with vague acceptance criteria.
 - Plugin premature abstraction: wrapper around a mature CLI without auth, stable I/O, reuse, or policy value.
 - Human gate confusion: checkpoint used for runtime recovery instead of planned product or authority judgment.

@@ -188,7 +188,7 @@ Simulation proxy binaries are generated before tool fixtures on `PATH`. Calls ar
 
 ## Portable Fixtures
 
-Commit only small seed fixtures required to run the suite on a fresh checkout. Do not commit cloned third-party repos, `.git` directories, dependency installs, generated trial workspaces, prompt iteration outputs, generated eval repos, or eval output roots.
+Commit only small seed fixtures required to run the suite on a fresh checkout. Do not commit cloned third-party repos, `.git` directories, dependency installs, generated trial workspaces, prompt-surface experiment outputs, generated eval repos, or eval output roots.
 
 If a scenario needs a real upstream repository, provide a documented setup script or clone command that creates the fixture locally before validation. Real-world issue scenarios should commit only metadata plus local regression patches. Hidden oracle fields are for graders and reports; do not expose upstream PR patches in graph context.
 

@@ -85,6 +85,35 @@ Add:
 
 Criteria weights must sum to `1`. Required criteria are hard blockers. Each cycle plans the next move, generates and validates a candidate, grades completion criteria, writes a completion scorecard, and retries with feedback until the score reaches `pass_threshold` or `max_cycles` is exhausted.
 
+### `pattern_work_list`
+
+Use when the job is “plan the ordered work items, freeze the list, then work through each item.”
+
+Add:
+
+```json
+{
+  "work_list": {
+    "planning_goal": "Discover the ordered work items needed to satisfy this node contract.",
+    "item_guidance": {
+      "what_counts_as_one_item": "One coherent reviewable unit of work with its own evidence handoff.",
+      "done_when": [
+        "The item goal is satisfied.",
+        "Relevant validation has been run or clearly explained.",
+        "The item handoff records evidence, risks, and downstream implications."
+      ]
+    },
+    "item_worker": {
+      "kind": "agent"
+    }
+  }
+}
+```
+
+The pattern runs a planner, deterministically freezes `work-list.json`, runs frozen items sequentially, verifies that every frozen item completed, then publishes `summary`, `packet`, and `work_items`. Use `item_worker.kind: "deep_work"` when item execution needs completion criteria and bounded retry semantics over the frozen list.
+
+`pattern_work_list` is generic. It does not know about branches, PRs, migrations, APIs, or UI. Those belong in the node intent, item guidance, and downstream artifacts.
+
 ## Supervisor Role
 
 Managed patterns do not have a second supervisor. The normal runtime supervisor still handles internal node failures: context repair, harness failure, artifact repair, malformed grader output, environment issues, workspace cleanup, and recoverable validation strategy failures.

@@ -105,6 +105,14 @@ describe("deep research managed pattern", () => {
         if (fanout.steps[0]?.type !== "agent") {
             throw new Error("Expected first angle to be an agent.");
         }
+        for (const loweredNode of [...fanout.steps, finalNode]) {
+            expect(loweredNode).toEqual(expect.objectContaining({
+                runtime: {
+                    repo: "main",
+                    profile: "default"
+                }
+            }));
+        }
         expect(fanout.steps[0].intent.goal).toContain("The assigned angle id is angle_01.");
         expect(fanout.steps[0].intent.goal).toContain("verify the report heading/metadata and packet `angle` field match");
         expect(JSON.stringify(fanout.steps[0])).not.toContain("expert");

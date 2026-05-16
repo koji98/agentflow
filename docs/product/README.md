@@ -19,3 +19,4 @@ These docs explain how to use Agentflow well: what belongs in the graph contract
 - `managed-patterns.md`: managed pattern catalog and shared behavior.
 - `patterns/deep-research.md`: deep research pattern.
 - `patterns/deep-work.md`: deep work pattern.
+- `patterns/work-list.md`: bounded discovered work-list pattern.

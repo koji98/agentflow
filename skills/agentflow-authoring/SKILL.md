@@ -32,6 +32,7 @@ If the brief is missing or vague, use `agentflow-intake` first. If a graph is al
 
 - Use `pattern_deep_research` when the job is to understand, compare, plan, or review.
 - Use `pattern_deep_work` when the job is to produce or mutate through a bounded feedback loop.
+- Use `pattern_work_list` when the bounded outcome is known, but discovery must determine the finite ordered list of reviewable work items before execution.
 - Use deterministic `check` nodes for existing tests, builds, typechecks, smoke scripts, schema checks, or stable commands.
 - Use rubrics, artifacts, or review nodes for semantic correctness or open implementation paths.
 - Use checkpoints for planned human decisions; leave runtime authority pauses to supervisor behavior.

@@ -18,7 +18,7 @@ Agentflow also ships an offline eval surface for confidence in workflows. `agent
 - Workspace backends are `inplace` and `worktree`.
 - Executable node kinds are `agent`, `exec`, `check`, and `checkpoint`.
 - Container node kinds are `sequence`, `parallel`, and `repeat`.
-- Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
+- Managed patterns are `pattern_deep_research`, `pattern_deep_work`, and `pattern_work_list`.
 - Team capabilities enter through plugin-bundled CLI tools with a clear description, optional non-secret config schema, and credential requirements when auth is needed.
 - Eval suites use version `"1"` and live outside the graph contract. See `evals.md`.
 

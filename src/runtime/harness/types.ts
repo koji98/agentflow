@@ -796,6 +796,9 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     ...graphContext,
     ...(graphContext.length > 0 ? [""] : []),
     ...formatContextContract(invocation, "task"),
+    ...(skillContract.length > 0 ? ["", ...skillContract] : []),
+    ...(cliContract.length > 0 ? ["", ...cliContract] : []),
+    ...(toolContract.length > 0 ? ["", ...toolContract] : []),
     "",
     ...formatRuntimeCliContract(),
     "",
@@ -804,11 +807,6 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       ? [
           "- Prior attempt artifacts are evidence only. This retry must write every current-attempt declared artifact at the current output directory/workspace paths before finishing."
         ]
-      : []),
-    ...(skillContract.length > 0 ? ["", ...skillContract] : []),
-    ...(cliContract.length > 0 ? ["", ...cliContract] : []),
-    ...(toolContract.length > 0
-      ? ["", ...toolContract]
       : []),
     "",
     "## Completion Gate",

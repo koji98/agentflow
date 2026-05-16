@@ -27,7 +27,7 @@ flowchart LR
 | Artifacts | Named durable outputs produced by nodes. | Future nodes and reviewers consume artifacts, not hidden chat state. | [Runtime lifecycle](docs/technical/runtime-lifecycle.md) |
 | Checks | Deterministic or AI gates inside the run. | Provides hard evidence and semantic sensors without relying on final prose alone. | [Outcome verification](docs/technical/outcome-verification.md) |
 | Supervisor | The runtime recovery system for failed or misaligned node attempts. | Keeps the graph progressing when context, validation, artifact, workspace, or environment issues are machine-fixable. | [Architecture](docs/technical/architecture.md) |
-| Managed patterns | Higher-level workflow shapes that compile into normal graph execution. | Gives authors simple contracts for common deep research and deep work loops. | [Managed patterns](docs/product/managed-patterns.md) |
+| Managed patterns | Higher-level workflow shapes that compile into normal graph execution. | Gives authors simple contracts for common research, work, and discovered-list loops. | [Managed patterns](docs/product/managed-patterns.md) |
 | Plugins | Packaged workflow exports and CLI tools. | Lets teams expose reusable capabilities, credential boundaries, and composed CLI behavior. | [Plugins](docs/product/plugins.md) |
 | Evals | Offline workflow evaluations across scenarios, variants, trials, criteria, trajectory, and simulation. | Gives teams confidence in graphs, plugins, prompts, tools, and supervisor behavior. | [Evals](docs/product/evals.md) |
 | Delivery | Terminal run package with summaries, evidence, decisions, risks, and review order. | Lets humans review the result without spelunking raw logs first. | [Operations](docs/product/operations.md) |
@@ -301,7 +301,7 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | New reader | [docs/README.md](docs/README.md) | Full documentation map split by product, technical, and examples. |
 | Workflow author | [docs/product/operations.md](docs/product/operations.md) | Validation, launch, resume, inspect, and delivery workflow. |
 | Product reviewer | [docs/product/scope.md](docs/product/scope.md) | Active product boundary and release bar. |
-| Managed-pattern author | [docs/product/managed-patterns.md](docs/product/managed-patterns.md), [patterns](docs/product/patterns/README.md) | When to use deep research or deep work and how their contracts behave. |
+| Managed-pattern author | [docs/product/managed-patterns.md](docs/product/managed-patterns.md), [patterns](docs/product/patterns/README.md) | When to use managed patterns and how their contracts behave. |
 | Eval author | [docs/product/evals.md](docs/product/evals.md) | Suites, scenarios, variants, criteria, trajectory checks, simulation, reports, and comparison. |
 | Plugin author | [docs/product/plugins.md](docs/product/plugins.md) | Workflow exports, CLI tool exports, credentials, config, naming, and consumption. |
 | Runtime implementer | [docs/technical/README.md](docs/technical/README.md) | Implementation reading order for runtime, context, tools, verification, and delivery. |
@@ -328,7 +328,7 @@ Image export uses `npx -y @mermaid-js/mermaid-cli` by default. Use `--diagram-im
 | `capabilities` | Reusable bundles of skill refs, managed tool grants, and ambient CLI hints. |
 | `graph` | The execution shape: containers, executable nodes, or managed patterns. |
 
-Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Constraint strings should start with `Do not`; positive requirements belong in acceptance criteria. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research` and `pattern_deep_work`.
+Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `intent.goal` and non-empty `intent.acceptance_criteria`, with optional `intent.constraints` normalized to `[]`. Constraint strings should start with `Do not`; positive requirements belong in acceptance criteria. Containers are `sequence`, `parallel`, and `repeat`. Managed patterns are `pattern_deep_research`, `pattern_deep_work`, and `pattern_work_list`.
 
 Executable nodes choose repo/profile in `runtime` and receive non-authoritative help in `support`. `support.context` entries require `what` and `why`; skills and managed tools are selected directly or through `support.capabilities`; CLI hints are plain shell commands validated as callable and rendered in the prompt without wrappers, config, credentials, or ledgers.
 

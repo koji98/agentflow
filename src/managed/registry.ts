@@ -50,6 +50,31 @@ export const managedPatternDescriptors = [
       { id: "gate", label: "Completion Gate", summary: "Aggregate a deterministic weighted scorecard and loop on misses.", mode: "repair-loop" },
       { id: "publish", label: "Publish Work", summary: "Write final declared artifacts from the latest passing cycle.", mode: "single-agent" }
     ]
+  }),
+  definePattern({
+    kind: "pattern_work_list",
+    label: "Pattern Work List",
+    summary:
+      "Managed work-list pattern that plans a finite ordered list, freezes it, executes items sequentially with an agent or deep-work item worker, verifies item completion, and publishes stable handoff artifacts.",
+    contract_status: "implemented",
+    runtime_shape: "compiled-subgraph",
+    orchestration: {
+      summary:
+        "Plan the ordered item list, deterministically freeze it, run frozen items sequentially, verify all items completed, then publish stable summary, packet, and work-items artifacts.",
+      planner: true,
+      fan_out: false,
+      council: false,
+      validation: true
+    },
+    phases: [
+      { id: "plan", label: "Plan Work List", summary: "Discover the finite ordered list of work items needed for the node contract.", mode: "single-agent" },
+      { id: "freeze", label: "Freeze Work List", summary: "Validate and freeze sequential item ids, concrete item goals, and acceptance criteria.", mode: "deterministic-check" },
+      { id: "run_items", label: "Run Items", summary: "Execute frozen items sequentially and write item evidence handoffs.", mode: "single-agent" },
+      { id: "criteria", label: "Completion Criteria", summary: "When deep_work is selected, run command criteria and targeted rubric checks in parallel.", mode: "parallel-agents" },
+      { id: "gate", label: "Completion Gate", summary: "When deep_work is selected, aggregate a deterministic weighted scorecard and repeat item execution on misses.", mode: "repair-loop" },
+      { id: "verify", label: "Verify Item Ledger", summary: "Deterministically verify every frozen item completed before publication.", mode: "deterministic-check" },
+      { id: "publish", label: "Publish Work List", summary: "Write final stable public artifacts from the verified item ledger.", mode: "single-agent" }
+    ]
   })
 ] as const satisfies readonly ManagedPatternDescriptor[];
 
