@@ -9,11 +9,12 @@ import type {
   AuthoredGraphSummary,
   ContainerGraphNode,
   ArtifactReference,
+  CliHint,
   ContextItem,
   ExecutableGraphNode,
-  GraphPrerequisiteCheck,
   ResolvedArtifactContextRef,
-  ToolDeclaration,
+  ManagedToolDefinition,
+  SupportReference,
   GraphProfile,
   HarnessConfig
 } from "./authored.js";
@@ -29,6 +30,11 @@ import type { GraphDiagnostic } from "./schema.js";
 import type { HarnessName } from "./schema.js";
 import { expandPluginWorkflows, type PluginToolExport, type ResolvedPlugin } from "../plugins/workflows.js";
 import {
+  loadResolvedSkillSources,
+  readSkillSourceDeclarations,
+  type ResolvedSkillSource
+} from "../skills/sources.js";
+import {
   interpolateGraphConfig,
   mergeConfig,
   validateConfigAgainstSchema,
@@ -43,6 +49,7 @@ export interface LoadedGraphDocument {
   absolute_path: string;
   lowered_managed_nodes: LoweredManagedNode[];
   resolved_plugins?: ResolvedPlugin[];
+  resolved_skill_sources?: ResolvedSkillSource[];
 }
 
 interface NodeMetadata {
@@ -173,48 +180,6 @@ function validateArtifactPath(
     diagnostics.push({
       path,
       message: `Artifact "${artifactName}" path "${artifactPath}" must stay within its source root.`
-    });
-  }
-}
-
-function validatePrerequisiteCheck(
-  check: GraphPrerequisiteCheck,
-  path: string,
-  repoAliases: Set<string>,
-  repoCount: number,
-  diagnostics: ValidationDiagnostic[]
-): void {
-  if (check.kind === "file") {
-    const repoAlias = readQualifiedRepoAlias(check.path);
-
-    if (repoAlias && !repoAliases.has(repoAlias)) {
-      diagnostics.push({
-        path: `${path}.path`,
-        message: `Unknown repo alias "${repoAlias}" in prerequisite path "${check.path}".`
-      });
-    }
-
-    if (!repoAlias && repoCount > 1) {
-      diagnostics.push({
-        path: `${path}.path`,
-        message: `Prerequisite path "${check.path}" must be repo-qualified when multiple repos exist.`
-      });
-    }
-
-    if (!isRelativeSubpath(readQualifiedRepoPath(check.path))) {
-      diagnostics.push({
-        path: `${path}.path`,
-        message: `Prerequisite path "${check.path}" must stay within the selected repo root.`
-      });
-    }
-
-    return;
-  }
-
-  if (check.kind === "repo" && !repoAliases.has(check.repo)) {
-    diagnostics.push({
-      path: `${path}.repo`,
-      message: `Unknown repo alias "${check.repo}".`
     });
   }
 }
@@ -353,16 +318,29 @@ function validateArtifactReference(
 
 interface ValidateNormalizedDocumentOptions {
   resolved_plugins?: ResolvedPlugin[];
+  resolved_skill_sources?: ResolvedSkillSource[];
   graph_dir?: string;
 }
 
-function callableNameForToolDeclaration(declaration: ToolDeclaration): string {
-  return declaration.alias ?? `${declaration.from_plugin}-${declaration.tool}`;
+function splitManagedToolRef(ref: string): { pluginAlias: string; toolName: string } | undefined {
+  const slashIndex = ref.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === ref.length - 1 || ref.indexOf("/", slashIndex + 1) !== -1) {
+    return undefined;
+  }
+  return {
+    pluginAlias: ref.slice(0, slashIndex),
+    toolName: ref.slice(slashIndex + 1)
+  };
+}
+
+function callableNameForToolDeclaration(declaration: ManagedToolDefinition): string {
+  const split = splitManagedToolRef(declaration.ref);
+  return declaration.alias ?? (split ? `${split.pluginAlias}-${split.toolName}` : declaration.ref);
 }
 
 interface ValidatedToolDeclaration {
   exported: PluginToolExport;
-  declaration: ToolDeclaration;
+  declaration: ManagedToolDefinition;
 }
 
 interface ToolDeclarationValidationResult {
@@ -371,7 +349,7 @@ interface ToolDeclarationValidationResult {
 }
 
 function validateToolDeclarations(
-  tools: ToolDeclaration[],
+  tools: Record<string, ManagedToolDefinition>,
   basePath: string,
   pluginsByAlias: Map<string, ResolvedPlugin>,
   diagnostics: ValidationDiagnostic[],
@@ -382,23 +360,31 @@ function validateToolDeclarations(
   const callableNames = new Set<string>();
   const toolsByCallable = new Map<string, ValidatedToolDeclaration>();
 
-  tools.forEach((declaration, index) => {
-    const declarationPath = `${basePath}[${index}]`;
-
-    const plugin = pluginsByAlias.get(declaration.from_plugin);
-    if (!plugin) {
+  Object.entries(tools).forEach(([toolId, declaration]) => {
+    const declarationPath = `${basePath}.${toolId}`;
+    const split = splitManagedToolRef(declaration.ref);
+    if (!split) {
       diagnostics.push({
-        path: `${declarationPath}.from_plugin`,
-        message: `Plugin "${declaration.from_plugin}" is not declared or resolved.`
+        path: `${declarationPath}.ref`,
+        message: 'Managed tool refs must use "pluginAlias/toolName" form.'
       });
       return;
     }
 
-    const exported = plugin.manifest.tools[declaration.tool];
+    const plugin = pluginsByAlias.get(split.pluginAlias);
+    if (!plugin) {
+      diagnostics.push({
+        path: `${declarationPath}.ref`,
+        message: `Plugin "${split.pluginAlias}" is not declared or resolved.`
+      });
+      return;
+    }
+
+    const exported = plugin.manifest.tools[split.toolName];
     if (!exported) {
       diagnostics.push({
-        path: `${declarationPath}.tool`,
-        message: `Plugin "${declaration.from_plugin}" does not export tool "${declaration.tool}".`
+        path: `${declarationPath}.ref`,
+        message: `Plugin "${split.pluginAlias}" does not export tool "${split.toolName}".`
       });
       return;
     }
@@ -528,6 +514,142 @@ function validateToolConfig(
   }
 }
 
+function splitSkillRef(ref: string): { sourceAlias: string; skillPath: string } | undefined {
+  const slashIndex = ref.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === ref.length - 1) {
+    return undefined;
+  }
+  return {
+    sourceAlias: ref.slice(0, slashIndex),
+    skillPath: ref.slice(slashIndex + 1)
+  };
+}
+
+function validateSkillRefs(
+  refs: string[],
+  path: string,
+  skillSourcesByAlias: Map<string, ResolvedSkillSource>,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  refs.forEach((ref, index) => {
+    const refPath = `${path}[${index}]`;
+    const split = splitSkillRef(ref);
+    if (!split) {
+      diagnostics.push({
+        path: refPath,
+        message: 'Skill refs must use "sourceAlias/skillName" form.'
+      });
+      return;
+    }
+    const source = skillSourcesByAlias.get(split.sourceAlias);
+    if (!source) {
+      diagnostics.push({
+        path: refPath,
+        message: `Skill source "${split.sourceAlias}" is not declared or resolved.`
+      });
+      return;
+    }
+    if (!source.skills.has(split.skillPath)) {
+      diagnostics.push({
+        path: refPath,
+        message: `Skill "${ref}" is not installed in source "${split.sourceAlias}".`
+      });
+    }
+  });
+}
+
+function validateToolRefs(
+  refs: SupportReference[],
+  path: string,
+  toolIds: Set<string>,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  refs.forEach((ref, index) => {
+    if (!toolIds.has(ref.ref)) {
+      diagnostics.push({
+        path: `${path}[${index}].ref`,
+        message: `Managed tool "${ref.ref}" is not declared in top-level tools.`
+      });
+    }
+  });
+}
+
+function validateCliHints(
+  cli: CliHint[],
+  path: string,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  const descriptions = new Map<string, string>();
+  cli.forEach((hint, index) => {
+    const existing = descriptions.get(hint.cmd);
+    if (existing !== undefined && existing !== (hint.description ?? "")) {
+      diagnostics.push({
+        path: `${path}[${index}].cmd`,
+        message: `CLI hint "${hint.cmd}" is declared with conflicting descriptions.`
+      });
+    }
+    descriptions.set(hint.cmd, hint.description ?? "");
+  });
+}
+
+function validateExecutableSupportSurface(
+  node: ExecutableGraphNode,
+  metadata: NodeMetadata,
+  document: AuthoredGraphDocument,
+  diagnostics: ValidationDiagnostic[]
+): void {
+  const isPromptBacked = node.type === "agent" || (node.type === "check" && node.check_kind === "ai");
+
+  if (node.type !== "agent") {
+    (node.support?.tools ?? []).forEach((_, index) => {
+      diagnostics.push({
+        path: `${metadata.path}.support.tools[${index}]`,
+        message: "Managed plugin tools can only be granted to agent nodes."
+      });
+    });
+
+    (node.support?.capabilities ?? []).forEach((capability, index) => {
+      const definition = document.capabilities?.[capability.ref];
+      if ((definition?.tools ?? []).length === 0) {
+        return;
+      }
+      diagnostics.push({
+        path: `${metadata.path}.support.capabilities[${index}].ref`,
+        message: `Capability "${capability.ref}" grants managed plugin tools, but managed plugin tools can only be granted to agent nodes.`
+      });
+    });
+  }
+
+  if (isPromptBacked) {
+    return;
+  }
+
+  (node.support?.skills ?? []).forEach((_, index) => {
+    diagnostics.push({
+      path: `${metadata.path}.support.skills[${index}]`,
+      message: "Skills can only be attached to prompt-backed agent or AI check nodes."
+    });
+  });
+
+  (node.support?.cli ?? []).forEach((_, index) => {
+    diagnostics.push({
+      path: `${metadata.path}.support.cli[${index}]`,
+      message: "CLI hints can only be attached to prompt-backed agent or AI check nodes."
+    });
+  });
+
+  (node.support?.capabilities ?? []).forEach((capability, index) => {
+    const definition = document.capabilities?.[capability.ref];
+    if ((definition?.skills ?? []).length === 0 && (definition?.cli ?? []).length === 0) {
+      return;
+    }
+    diagnostics.push({
+      path: `${metadata.path}.support.capabilities[${index}].ref`,
+      message: `Capability "${capability.ref}" grants prompt support, but skills and CLI hints can only be attached to prompt-backed agent or AI check nodes.`
+    });
+  });
+}
+
 async function validateNormalizedDocument(
   document: AuthoredGraphDocument,
   options: ValidateNormalizedDocumentOptions = {}
@@ -540,18 +662,17 @@ async function validateNormalizedDocument(
   const pluginsByAlias = new Map<string, ResolvedPlugin>(
     (options.resolved_plugins ?? []).map((plugin) => [plugin.alias, plugin])
   );
+  const skillSourcesByAlias = new Map<string, ResolvedSkillSource>(
+    (options.resolved_skill_sources ?? []).map((source) => [source.alias, source])
+  );
   const harnessConfigDiagnostics = new Set<string>();
 
   const graphToolValidation = validateToolDeclarations(
-    document.tools ?? [],
+    document.tools ?? {},
     "$.tools",
     pluginsByAlias,
     diagnostics
   );
-
-  (document.prerequisites?.checks ?? []).forEach((check, index) => {
-    validatePrerequisiteCheck(check, `$.prerequisites.checks[${index}]`, repoAliases, repoCount, diagnostics);
-  });
 
   Object.entries(document.profiles ?? {}).forEach(([profileName, profile]) => {
     validateEnvFiles(profile.env_files, `$.profiles.${profileName}.env_files`, diagnostics);
@@ -592,6 +713,23 @@ async function validateNormalizedDocument(
     );
   }
 
+  const topLevelToolIds = new Set(Object.keys(document.tools ?? {}));
+  Object.entries(document.capabilities ?? {}).forEach(([capabilityName, capability]) => {
+    validateSkillRefs(
+      capability.skills ?? [],
+      `$.capabilities.${capabilityName}.skills`,
+      skillSourcesByAlias,
+      diagnostics
+    );
+    validateToolRefs(
+      capability.tools ?? [],
+      `$.capabilities.${capabilityName}.tools`,
+      topLevelToolIds,
+      diagnostics
+    );
+    validateCliHints(capability.cli ?? [], `$.capabilities.${capabilityName}.cli`, diagnostics);
+  });
+
   const launch = resolveLaunchConfig(document);
   const supervisorResolution = resolveSupervisorPolicy(document, launch);
   if (supervisorResolution.supervisor_profile && !supervisorResolution.supervisor_profile.harness) {
@@ -612,8 +750,9 @@ async function validateNormalizedDocument(
         diagnostics.push(diagnostic);
       }
 
-      const effectiveProfileName = node.profile ?? launch.launch_profile;
-      const effectiveProfile = node.profile ? resolution.node_profile : resolution.launch_profile;
+      const runtimeProfile = node.runtime?.profile;
+      const effectiveProfileName = runtimeProfile ?? launch.launch_profile;
+      const effectiveProfile = runtimeProfile ? resolution.node_profile : resolution.launch_profile;
       if (effectiveProfile && !effectiveProfile.harness) {
         validateHarnessConfigForHarness(
           effectiveProfileName,
@@ -636,14 +775,14 @@ async function validateNormalizedDocument(
 
       if (
         resolution.policy?.harness === "cursor-cli" &&
-        node.profile &&
+        runtimeProfile &&
         resolution.node_profile?.harness !== "cursor-cli" &&
         resolution.node_profile?.reasoning_effort !== undefined
       ) {
         diagnostics.push({
-          path: `$.profiles.${node.profile}.reasoning_effort`,
+          path: `$.profiles.${runtimeProfile}.reasoning_effort`,
           message:
-            `Cursor profile "${node.profile}" cannot set reasoning_effort because Cursor model ids encode reasoning effort. ` +
+            `Cursor profile "${runtimeProfile}" cannot set reasoning_effort because Cursor model ids encode reasoning effort. ` +
             "Choose the appropriate Cursor model id instead."
         });
       }
@@ -652,14 +791,14 @@ async function validateNormalizedDocument(
         resolution.policy?.harness === "cursor-cli" &&
         node.type === "check" &&
         node.check_kind === "ai" &&
-        node.profile &&
+        runtimeProfile &&
         resolution.node_profile?.harness !== "cursor-cli" &&
         resolution.node_profile?.ai_check_defaults?.reasoning_effort !== undefined
       ) {
         diagnostics.push({
-          path: `$.profiles.${node.profile}.ai_check_defaults.reasoning_effort`,
+          path: `$.profiles.${runtimeProfile}.ai_check_defaults.reasoning_effort`,
           message:
-            `Cursor profile "${node.profile}" cannot set ai_check_defaults.reasoning_effort because Cursor model ids encode reasoning effort. ` +
+            `Cursor profile "${runtimeProfile}" cannot set ai_check_defaults.reasoning_effort because Cursor model ids encode reasoning effort. ` +
             "Choose the appropriate Cursor model id instead."
         });
       }
@@ -708,32 +847,47 @@ async function validateNormalizedDocument(
     }
 
     if (isExecutableNode(node)) {
-      if (repoCount > 1 && !node.repo) {
+      const runtimeRepo = node.runtime?.repo;
+      const runtimeProfile = node.runtime?.profile;
+
+      if (repoCount > 1 && !runtimeRepo) {
         diagnostics.push({
-          path: `${metadata.path}.repo`,
+          path: `${metadata.path}.runtime.repo`,
           message: "Executable nodes must declare repo when multiple repos exist."
         });
       }
 
-      if (node.repo && !repoAliases.has(node.repo)) {
+      if (runtimeRepo && !repoAliases.has(runtimeRepo)) {
         diagnostics.push({
-          path: `${metadata.path}.repo`,
-          message: `Unknown repo alias "${node.repo}".`
+          path: `${metadata.path}.runtime.repo`,
+          message: `Unknown repo alias "${runtimeRepo}".`
         });
       }
 
-      if (node.profile && !document.profiles?.[node.profile]) {
+      if (runtimeProfile && !document.profiles?.[runtimeProfile]) {
         diagnostics.push({
-          path: `${metadata.path}.profile`,
-          message: `Node references unknown profile "${node.profile}".`
+          path: `${metadata.path}.runtime.profile`,
+          message: `Node references unknown profile "${runtimeProfile}".`
         });
       }
+
+      for (const [index, capability] of (node.support?.capabilities ?? []).entries()) {
+        if (!document.capabilities?.[capability.ref]) {
+          diagnostics.push({
+            path: `${metadata.path}.support.capabilities[${index}].ref`,
+            message: `Capability "${capability.ref}" is not declared.`
+          });
+        }
+      }
+      validateSkillRefs(node.support?.skills ?? [], `${metadata.path}.support.skills`, skillSourcesByAlias, diagnostics);
+      validateToolRefs(node.support?.tools ?? [], `${metadata.path}.support.tools`, topLevelToolIds, diagnostics);
+      validateCliHints(node.support?.cli ?? [], `${metadata.path}.support.cli`, diagnostics);
 
       const contextNames = new Set<string>();
-      (node.context ?? []).forEach((item, index) => {
+      (node.support?.context ?? []).forEach((item, index) => {
         if (contextNames.has(item.name)) {
           diagnostics.push({
-            path: `${metadata.path}.context[${index}].name`,
+            path: `${metadata.path}.support.context[${index}].name`,
             message: `Context item name "${item.name}" is duplicated on node "${node.id}".`
           });
         }
@@ -747,7 +901,7 @@ async function validateNormalizedDocument(
         if (item.from === "workspace_file" || item.from === "workspace_glob") {
           validateWorkspaceContextPath(
             item,
-            `${metadata.path}.context[${index}].path`,
+            `${metadata.path}.support.context[${index}].path`,
             repoAliases,
             diagnostics
           );
@@ -759,41 +913,11 @@ async function validateNormalizedDocument(
         validateEnvFiles(node.env_files, `${metadata.path}.env_files`, diagnostics);
       }
 
+      validateExecutableSupportSurface(node, metadata, document, diagnostics);
+
       Object.entries(node.artifacts ?? {}).forEach(([name, artifact]) => {
         validateArtifactPath(name, artifact.path, `${metadata.path}.artifacts.${name}.path`, diagnostics);
       });
-    }
-  }, "$.graph");
-
-  visitNodes(document.graph, (node, metadata) => {
-    if (node.type !== "agent") {
-      return;
-    }
-
-    const agentNode = node as AgentNode;
-    const sandbox = resolveNodePolicy(document, launch, agentNode).policy?.sandbox;
-
-    if (agentNode.tools) {
-      const agentToolValidation = validateToolDeclarations(
-        agentNode.tools ?? [],
-        `${metadata.path}.tools`,
-        pluginsByAlias,
-        diagnostics,
-        {
-          ...(sandbox ? { sandbox } : {})
-        }
-      );
-
-      const conflictingNames = [...agentToolValidation.callable_names].filter((name) =>
-        graphToolValidation.callable_names.has(name)
-      );
-      for (const name of conflictingNames) {
-        diagnostics.push({
-          path: `${metadata.path}.tools`,
-          message: `Tool name "${name}" conflicts with a graph-level tool of the same name.`
-        });
-      }
-
     }
   }, "$.graph");
 
@@ -821,14 +945,14 @@ async function validateNormalizedDocument(
     }
 
     if (isExecutableNode(node)) {
-      (node.context ?? []).forEach((item, index) => {
+      (node.support?.context ?? []).forEach((item, index) => {
         if (!("ref" in item)) {
           return;
         }
 
         validateArtifactReference(
           item,
-          `${metadata.path}.context[${index}]`,
+          `${metadata.path}.support.context[${index}]`,
           node.id,
           nodeIndex,
           diagnostics
@@ -908,16 +1032,25 @@ export async function loadAuthoredGraphDocument(
       interpolated = interpolation.document;
     }
 
+    const skillSourceDiagnostics: ValidationDiagnostic[] = [];
+    const skillSourceDeclarations = readSkillSourceDeclarations(interpolated, skillSourceDiagnostics);
+    const resolvedSkillSources = await loadResolvedSkillSources(
+      absolute_path,
+      skillSourceDeclarations,
+      skillSourceDiagnostics
+    );
     const pluginExpansion = await expandPluginWorkflows(absolute_path, interpolated);
     const normalized = normalizeAuthoredGraphDocument(pluginExpansion.document);
     const documentDiagnostics = normalized.document
       ? await validateNormalizedDocument(normalized.document, {
           resolved_plugins: pluginExpansion.resolved_plugins,
+          resolved_skill_sources: resolvedSkillSources,
           graph_dir: dirname(absolute_path)
         })
       : [];
     const diagnostics = [
       ...configDiagnostics,
+      ...skillSourceDiagnostics,
       ...pluginExpansion.diagnostics,
       ...normalized.diagnostics,
       ...documentDiagnostics
@@ -932,7 +1065,8 @@ export async function loadAuthoredGraphDocument(
         diagnostics,
         absolute_path,
         lowered_managed_nodes: loweredManagedNodes,
-        resolved_plugins: pluginExpansion.resolved_plugins
+        resolved_plugins: pluginExpansion.resolved_plugins,
+        resolved_skill_sources: resolvedSkillSources
       };
     }
 
@@ -941,12 +1075,14 @@ export async function loadAuthoredGraphDocument(
       diagnostics: [],
       absolute_path,
       lowered_managed_nodes: loweredManagedNodes,
-      resolved_plugins: pluginExpansion.resolved_plugins
+      resolved_plugins: pluginExpansion.resolved_plugins,
+      resolved_skill_sources: resolvedSkillSources
     };
   } catch (error) {
     return {
       absolute_path,
       lowered_managed_nodes: [],
+      resolved_skill_sources: [],
       diagnostics: [
         {
           path: graphPath,

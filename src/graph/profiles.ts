@@ -8,7 +8,6 @@ import type {
   HarnessIsolationMode,
   CodexHarnessConfig,
   CursorHarnessConfig,
-  InputRules
 } from "./authored.js";
 import type {
   GraphDiagnostic,
@@ -19,11 +18,6 @@ import type {
 } from "./schema.js";
 import { getHarnessCapabilities } from "./harness_capabilities.js";
 import { workspaceBackends } from "./schema.js";
-
-export interface EffectiveInputRules {
-  max_total_tokens: number;
-  max_tokens_per_item: number;
-}
 
 export interface EffectiveHarnessConfig extends Omit<HarnessConfig, "isolation"> {
   isolation: HarnessIsolationMode;
@@ -39,7 +33,6 @@ export interface EffectiveNodePolicy {
   sandbox?: SandboxMode;
   skip_git_repo_check?: boolean;
   timeout_sec: number;
-  input_rules: EffectiveInputRules;
   artifact_repair?: Required<ArtifactRepairPolicy>;
 }
 
@@ -66,11 +59,6 @@ export interface LaunchOverrides {
   workspaceBackend?: string;
 }
 
-export const builtInInputRules: EffectiveInputRules = {
-  max_total_tokens: 128000,
-  max_tokens_per_item: 32000
-};
-
 export const builtInTimeoutSeconds = 1800;
 export const builtInCodexReasoningEffort: ReasoningEffort = "medium";
 export const builtInAgentArtifactRepairPolicy: Required<ArtifactRepairPolicy> = {
@@ -79,16 +67,6 @@ export const builtInAgentArtifactRepairPolicy: Required<ArtifactRepairPolicy> = 
 export const builtInHarnessConfig: EffectiveHarnessConfig = {
   isolation: "isolated"
 };
-
-function mergeInputRules(...rules: Array<InputRules | undefined>): EffectiveInputRules {
-  return rules.reduce<EffectiveInputRules>(
-    (current, next) => ({
-      max_total_tokens: next?.max_total_tokens ?? current.max_total_tokens,
-      max_tokens_per_item: next?.max_tokens_per_item ?? current.max_tokens_per_item
-    }),
-    builtInInputRules
-  );
-}
 
 function mergeUnknownRecordMaps(
   base: Record<string, unknown> | undefined,
@@ -356,26 +334,18 @@ export function resolveNodePolicy(
 } {
   const diagnostics: GraphDiagnostic[] = [];
   const launch_profile = launch.profile;
-  const profile_name = node.profile ?? launch.launch_profile;
-  const node_profile = node.profile ? document.profiles?.[node.profile] : undefined;
+  const runtimeProfile = node.runtime?.profile;
+  const profile_name = runtimeProfile ?? launch.launch_profile;
+  const node_profile = runtimeProfile ? document.profiles?.[runtimeProfile] : undefined;
 
-  if (node.profile && !node_profile) {
+  if (runtimeProfile && !node_profile) {
     diagnostics.push({
-      path: `$.graph.${node.id}.profile`,
-      message: `Node references unknown profile "${node.profile}".`
+      path: `$.graph.${node.id}.runtime.profile`,
+      message: `Node references unknown profile "${runtimeProfile}".`
     });
   }
 
-  const timeout_sec =
-    node.timeout_sec ??
-    node_profile?.timeout_sec ??
-    launch_profile?.timeout_sec ??
-    builtInTimeoutSeconds;
-
-  const input_rules = mergeInputRules(
-    launch_profile?.input_rules,
-    node_profile?.input_rules
-  );
+  const timeout_sec = builtInTimeoutSeconds;
   const artifact_repair =
     node.type === "agent"
       ? {
@@ -430,14 +400,14 @@ export function resolveNodePolicy(
 
     if (!harness) {
       diagnostics.push({
-        path: `$.graph.${node.id}.profile`,
+        path: `$.graph.${node.id}.runtime.profile`,
         message: `${node.type} nodes require a resolved harness from the launch or node profile.`
       });
     }
 
     if (isAiCheck(node) && harness && !getHarnessCapabilities(harness)?.supports_ai_check) {
       diagnostics.push({
-        path: `$.graph.${node.id}.profile`,
+        path: `$.graph.${node.id}.runtime.profile`,
         message: `AI checks require a harness with a strict read-only evaluation contract. "${harness}" does not support AI checks.`
       });
     }
@@ -454,7 +424,6 @@ export function resolveNodePolicy(
       ...(sandbox ? { sandbox } : {}),
       ...(skip_git_repo_check !== undefined ? { skip_git_repo_check } : {}),
       timeout_sec,
-      input_rules,
       ...(artifact_repair ? { artifact_repair } : {})
     },
     diagnostics,
@@ -493,10 +462,7 @@ export function resolveSupervisorPolicy(
 
   const harness = supervisor_profile.harness ?? launch_profile?.harness;
   const harness_config = resolveHarnessConfig(launch_profile, supervisor_profile, harness);
-  const timeout_sec =
-    supervisor_profile.timeout_sec ??
-    launch_profile?.timeout_sec ??
-    builtInTimeoutSeconds;
+  const timeout_sec = builtInTimeoutSeconds;
   const model =
     supervisor_profile.model ??
     (canInheritLaunchModel(launch_profile, supervisor_profile) ? launch_profile?.model : undefined);

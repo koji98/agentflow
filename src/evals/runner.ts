@@ -6,6 +6,9 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { runCommand } from "../cli/commands/run.js";
+import { resumeCommand } from "../cli/commands/resume.js";
+import { resolvePluginsForGraph } from "../plugins/workflows.js";
+import { resolveSkillSourcesForGraph } from "../skills/sources.js";
 import type {
   EvalAssertionResult,
   EvalBenchmark,
@@ -35,6 +38,19 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function gitStatusForPath(repo: string, relativePath: string): Promise<string[]> {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["status", "--porcelain=v1", "--", relativePath],
+    { cwd: repo }
+  );
+
+  return stdout
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function sanitizePathSegment(value: string): string {
@@ -386,8 +402,23 @@ async function prepareTrialEnvironment(options: {
   };
 }
 
+function buildEvalRuntimeEnv(options: {
+  scenario: EvalScenario;
+  env: Record<string, string>;
+}): Record<string, string> {
+  return {
+    ...options.env,
+    ...(options.scenario.environment.scripted_checkpoints
+      ? {
+          AGENTFLOW_EVAL_CHECKPOINT_DECISIONS: JSON.stringify(options.scenario.environment.scripted_checkpoints.decisions)
+        }
+      : {})
+  };
+}
+
 async function runGraphForTrial(options: {
   currentWorkingDirectory: string;
+  scenario: EvalScenario;
   rendered_graph_file: string;
   graph_runs_root: string;
   label: string;
@@ -403,6 +434,10 @@ async function runGraphForTrial(options: {
   await mkdir(options.graph_runs_root, { recursive: true });
 
   try {
+    const runtimeEnv = buildEvalRuntimeEnv({
+      scenario: options.scenario,
+      env: options.env
+    });
     const result = await runCommand.run(
       {
         graph: options.rendered_graph_file,
@@ -414,9 +449,9 @@ async function runGraphForTrial(options: {
       [],
       {
         ...process.env,
-        ...options.env
+        ...runtimeEnv
       },
-      options.env
+      runtimeEnv
     );
     const output =
       result.output && typeof result.output === "object" && !Array.isArray(result.output)
@@ -424,6 +459,40 @@ async function runGraphForTrial(options: {
         : undefined;
     const runRoot = typeof output?.run_root === "string" ? output.run_root : undefined;
     const status = typeof output?.status === "string" ? output.status : undefined;
+
+    if (status === "paused" && runRoot && options.scenario.environment.scripted_resume) {
+      const resumeScript = options.scenario.environment.scripted_resume;
+      const resumeResult = await resumeCommand.run(
+        {
+          "run-root": runRoot,
+          "human-action": resumeScript.human_action,
+          ...(resumeScript.human_note ? { "human-note": resumeScript.human_note } : {}),
+          ...(resumeScript.reset_supervisor_budget ? { "reset-supervisor-budget": true } : {})
+        },
+        options.currentWorkingDirectory,
+        options.signal,
+        [],
+        {
+          ...process.env,
+          ...runtimeEnv
+        },
+        runtimeEnv
+      );
+      const resumeOutput =
+        resumeResult.output && typeof resumeResult.output === "object" && !Array.isArray(resumeResult.output)
+          ? resumeResult.output as Record<string, unknown>
+          : undefined;
+      const resumedRunRoot = typeof resumeOutput?.run_root === "string" ? resumeOutput.run_root : runRoot;
+      const resumedStatus = typeof resumeOutput?.status === "string" ? resumeOutput.status : undefined;
+
+      return {
+        run_root: resumedRunRoot,
+        ...(resumedStatus ? { status: resumedStatus } : {}),
+        ...(resumeOutput ? { output: resumeOutput } : {}),
+        exit_code: resumeResult.exitCode,
+        ...(resumeOutput && typeof resumeOutput.message === "string" ? { error: resumeOutput.message } : {})
+      };
+    }
 
     return {
       ...(runRoot ? { run_root: runRoot } : {}),
@@ -552,15 +621,31 @@ async function evaluateWorkspaceCriterion(options: {
   const blockers: string[] = [];
 
   for (const relativePath of forbiddenEdits) {
-    const forbiddenPath = options.environment?.repo ? resolve(options.environment.repo, relativePath) : undefined;
-    const exists = forbiddenPath ? await pathExists(forbiddenPath) : false;
+    const repoPath = options.environment?.repo;
+    const forbiddenPath = repoPath ? resolve(repoPath, relativePath) : undefined;
+    let statusLines: string[] = [];
+    let statusError: string | undefined;
+
+    if (repoPath) {
+      try {
+        statusLines = await gitStatusForPath(repoPath, relativePath);
+      } catch (error) {
+        statusError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    const passed = Boolean(repoPath) && !statusError && statusLines.length === 0;
     assertions.push({
       id: `forbidden_edit:${relativePath}`,
-      passed: !exists,
-      evidence: forbiddenPath ?? "repo unavailable"
+      passed,
+      evidence: statusError
+        ? `git status failed for ${forbiddenPath ?? relativePath}: ${statusError}`
+        : statusLines.length > 0
+          ? statusLines.join("\n")
+          : `${forbiddenPath ?? relativePath} unchanged`
     });
-    if (exists) {
-      blockers.push(`Forbidden path exists after trial: ${relativePath}.`);
+    if (!passed) {
+      blockers.push(`Forbidden workspace edit detected: ${relativePath}.`);
     }
   }
 
@@ -871,7 +956,9 @@ function buildScorecard(options: {
 }): EvalTrialResult["scorecard"] {
   const requiredPassed = options.criteria_results.every((result) => !result.required || result.status === "passed");
   const passed = requiredPassed && !options.error;
-  const scores = options.criteria_results.map((result) => {
+  const requiredCriteriaResults = options.criteria_results.filter((result) => result.required);
+  const gateCriteriaResults = requiredCriteriaResults.length > 0 ? requiredCriteriaResults : options.criteria_results;
+  const scores = gateCriteriaResults.map((result) => {
     if (typeof result.score === "number") {
       return result.score <= 1 ? result.score * 5 : result.score;
     }
@@ -885,7 +972,7 @@ function buildScorecard(options: {
     }
   }
 
-  const blockerCount = options.criteria_results.reduce((sum, result) => sum + result.blockers.length, 0);
+  const blockerCount = gateCriteriaResults.reduce((sum, result) => sum + result.blockers.length, 0);
 
   return {
     schema_version: "1",
@@ -1017,6 +1104,44 @@ async function runTrial(options: {
       };
     }
 
+    const [pluginResolution, skillResolution] = await Promise.all([
+      resolvePluginsForGraph(trialRoot, renderedGraphFile),
+      resolveSkillSourcesForGraph(trialRoot, renderedGraphFile)
+    ]);
+    const resolutionDiagnostics = [...pluginResolution.diagnostics, ...skillResolution.diagnostics];
+
+    if (resolutionDiagnostics.length > 0) {
+      const error = resolutionDiagnostics.map((diagnostic) => `${diagnostic.path}: ${diagnostic.message}`).join(" ");
+      const scorecard = buildScorecard({
+        suite_id: options.loaded.suite.suite_id,
+        scenario: options.scenario,
+        variant: options.variant,
+        trial_id: trialId,
+        criteria_results: [errorCriterionResult(error)],
+        error
+      })!;
+      await Promise.all([
+        writeJson(criteriaResultsFile, scorecard.criteria_results),
+        writeJson(scorecardFile, scorecard),
+        writeFile(summaryFile, `# Eval Trial ${trialId}\n\n${error}\n`, "utf8")
+      ]);
+
+      return {
+        scenario_id: options.scenario.id,
+        variant_id: options.variant.id,
+        trial_id: trialId,
+        trial_index: options.trial_index,
+        status: "errored",
+        passed: false,
+        rendered_graph_file: renderedGraphFile,
+        trial_file: trialFile,
+        scorecard_file: scorecardFile,
+        summary_file: summaryFile,
+        error,
+        scorecard
+      };
+    }
+
     const env = {
       ...options.variant.env,
       ...(options.variant.prompt_pack ? { AGENTFLOW_EVAL_PROMPT_PACK: options.variant.prompt_pack } : {}),
@@ -1026,6 +1151,7 @@ async function runTrial(options: {
     };
     const graphRun = await runGraphForTrial({
       currentWorkingDirectory: trialRoot,
+      scenario: options.scenario,
       rendered_graph_file: renderedGraphFile,
       graph_runs_root: join(trialRoot, "runs"),
       label: `${options.scenario.id}-${options.variant.id}-${trialId}`,

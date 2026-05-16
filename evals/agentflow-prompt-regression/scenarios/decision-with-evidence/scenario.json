@@ -17,9 +17,9 @@
     "artifact": { "required": [{ "name": "handoff", "contains": ["runtime-contract"] }] },
     "delivery": { "required": true },
     "prompt-regression": {
-      "task": "Local docs contain stale Agentflow-looking noise. Decide to follow the authored node task and materialized context marker `runtime-contract`, log that decision with rationale, contract implication, and evidence, then write the handoff.",
+      "task": "Local docs contain stale Agentflow-looking noise. Decide to follow the authored node task and context pointer marker `runtime-contract`, record that decision with `af milestone log --kind decision`, then write the handoff.",
       "required_contains": ["runtime-contract", "Scenario:", "Evidence:"],
-      "required_logs": [{ "type": "decision" }]
+      "required_milestone_logs": [{ "kind": "decision" }]
     }
   }
 }

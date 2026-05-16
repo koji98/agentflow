@@ -41,6 +41,7 @@ process.stdin.on("end", () => {
       AGENTFLOW_OUTPUT_DIR: process.env.AGENTFLOW_OUTPUT_DIR,
       AGENTFLOW_CONTEXT_PACKET: process.env.AGENTFLOW_CONTEXT_PACKET,
       AGENTFLOW_CONTEXT_MANIFEST: process.env.AGENTFLOW_CONTEXT_MANIFEST,
+      AGENTFLOW_RUNTIME_DIR: process.env.AGENTFLOW_RUNTIME_DIR,
       CODEX_HOME: process.env.CODEX_HOME,
       CODEX_CI: process.env.CODEX_CI,
       CODEX_INTERNAL_ORIGINATOR_OVERRIDE: process.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
@@ -116,10 +117,23 @@ process.kill(process.pid, "SIGKILL");
   return binary_path;
 }
 
+async function createBrokenCodexBinary(tempRoot: string): Promise<string> {
+  const binary_path = join(tempRoot, "broken-codex.sh");
+  const source = `#!/bin/sh
+echo "vendored codex binary missing" >&2
+exit 127
+`;
+
+  await writeFile(binary_path, source);
+  await chmod(binary_path, 0o755);
+  return binary_path;
+}
+
 describe("codex cli harness", () => {
   it("reports readiness availability from the resolved binary path", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-preflight-"));
     const availableBinary = await createMockCodexBinary(tempRoot);
+    const brokenBinary = await createBrokenCodexBinary(tempRoot);
     const missingBinary = join(tempRoot, "missing-codex");
 
     try {
@@ -134,6 +148,13 @@ describe("codex cli harness", () => {
         }).checkReadiness?.()
       ).toEqual([
         `codex-cli harness binary "${missingBinary}" is unavailable. Install it on PATH or set AGENTFLOW_CODEX_CLI_BIN.`
+      ]);
+      expect(
+        createCodexCliHarness({
+          binary: brokenBinary
+        }).checkReadiness?.()
+      ).toEqual([
+        `codex-cli harness binary "${brokenBinary}" is present but failed launch validation (exited with code 127). Reinstall it or set AGENTFLOW_CODEX_CLI_BIN to a working binary.`
       ]);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -208,6 +229,7 @@ describe("codex cli harness", () => {
     const repoDir = join(tempRoot, "repo");
     const executionDir = join(tempRoot, "execution");
     const outputDir = join(executionDir, "artifacts");
+    const runtimeDir = join(executionDir, "runtime");
     await mkdir(repoDir, { recursive: true });
     await mkdir(executionDir, { recursive: true });
 
@@ -229,6 +251,7 @@ describe("codex cli harness", () => {
         executionId: "exec-1",
         repoAlias: "main",
         repoPath: repoDir,
+        runtimeDir,
         sandbox: "workspace-write",
         skipGitRepoCheck: true,
         model: "gpt-5-codex",
@@ -237,7 +260,7 @@ describe("codex cli harness", () => {
         nodeGoal: "Implement the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
-        contextManifest: "# Context Manifest\n\n- Materialized items: `1`\n",
+        contextManifest: "# Context Manifest\n\n- Pointer items: `1`\n",
         outputDir,
         artifacts: {
           handoff: {
@@ -263,10 +286,16 @@ describe("codex cli harness", () => {
       expect(argv).toEqual(
         expect.arrayContaining([
           "exec",
+          "--cd",
+          repoDir,
           "--sandbox",
           "workspace-write",
           "--add-dir",
           executionDir,
+          "--add-dir",
+          outputDir,
+          "--add-dir",
+          runtimeDir,
           "--output-last-message",
           join(outputDir, "last_message.txt"),
           "--skip-git-repo-check",
@@ -283,9 +312,9 @@ describe("codex cli harness", () => {
       expect(prompt).toContain("## Role");
       expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
       expect(prompt).toContain("You are executing one node in a wider Agentflow graph.");
-      expect(prompt).toContain("## Node Task");
+      expect(prompt).toContain("## Success Contract");
       expect(prompt).toContain("Implement the change.");
-      expect(prompt.indexOf("## Node Task")).toBeLessThan(prompt.indexOf("## Graph Context"));
+      expect(prompt.indexOf("## Success Contract")).toBeLessThan(prompt.indexOf("## Graph Context"));
       expect(prompt).toContain("## Context");
       expect(prompt).toContain("# Context Manifest");
       expect(prompt).toContain("Context packet:");
@@ -293,24 +322,24 @@ describe("codex cli harness", () => {
       expect(prompt).toContain("Context provenance:");
       expect(prompt).toContain("Output directory");
       expect(prompt).toContain("Sandbox: workspace-write - edit files in the workspace");
-      expect(prompt).toContain("## Artifact Contract");
+      expect(prompt).toContain("## Declared Artifacts");
       expect(prompt).toContain("Every declared artifact must exist before you finish");
-      expect(prompt).toContain("`handoff` (from `output_dir`)");
+      expect(prompt).toContain("| `handoff` |");
       expect(prompt).toContain(`${outputDir}/handoff.md`);
       expect(prompt).not.toContain("$AGENTFLOW_OUTPUT_DIR/handoff.md");
-      expect(prompt).toContain("Expected content: Markdown handoff for downstream nodes.");
-      expect(prompt).toContain("`junit` (from `workspace`)");
+      expect(prompt).toContain("Markdown handoff for downstream nodes.");
+      expect(prompt).toContain("| `junit` |");
       expect(prompt).toContain(`${repoDir}/reports/junit.xml`);
       expect(prompt).not.toContain("$AGENTFLOW_WORKSPACE/reports/junit.xml");
-      expect(prompt).toContain("Expected content: JUnit XML report written by the workspace validation command.");
-      expect(prompt).toContain("## Final Handoff");
+      expect(prompt).toContain("JUnit XML report written by the workspace validation command.");
+      expect(prompt).toContain("## Completion Gate");
       expect(prompt).toContain("captured as the reserved `agent_response` artifact");
-      expect(prompt).toContain("Summarize outcome, work completed, artifacts produced, validation, and blockers/risks.");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,
         AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
         AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md"),
+        AGENTFLOW_RUNTIME_DIR: runtimeDir,
         CODEX_HOME: expect.stringContaining("agentflow-codex-home-")
       });
       expect(result.outputJson).toEqual({

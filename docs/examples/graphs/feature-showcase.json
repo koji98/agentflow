@@ -16,30 +16,19 @@
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "medium",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900,
-      "input_rules": {
-        "max_total_tokens": 96000,
-        "max_tokens_per_item": 32000
-      }
+      "sandbox": "workspace-write"
     },
     "analysis": {
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "high",
-      "sandbox": "workspace-write",
-      "timeout_sec": 1200,
-      "input_rules": {
-        "max_total_tokens": 128000,
-        "max_tokens_per_item": 32000
-      }
+      "sandbox": "workspace-write"
     },
     "review": {
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "medium",
       "sandbox": "workspace-write",
-      "timeout_sec": 900,
       "ai_check_defaults": {
         "model": "gpt-5-codex",
         "reasoning_effort": "medium"
@@ -57,26 +46,6 @@
       {
         "type": "agent",
         "id": "survey_repo",
-        "repo": "main",
-        "profile": "analysis",
-        "context": [
-          {
-            "name": "readme",
-            "from": "workspace_file",
-            "path": "README.md"
-          },
-          {
-            "name": "docs",
-            "from": "workspace_glob",
-            "path": "docs/product/*.md",
-            "max_files": 4
-          },
-          {
-            "name": "demo_goal",
-            "from": "text",
-            "text": "Produce a feature showcase run that stays read-only and easy to inspect."
-          }
-        ],
         "artifacts": {
           "survey_notes": {
             "from": "output_dir",
@@ -93,6 +62,36 @@
           "constraints": [
             "Do not modify files."
           ]
+        },
+        "runtime": {
+          "repo": "main",
+          "profile": "analysis"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "readme",
+              "path": "README.md",
+              "what": "Workspace file README.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            },
+            {
+              "name": "docs",
+              "path": "docs/product/*.md",
+              "max_files": 4,
+              "what": "Workspace files matching docs/product/*.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_glob"
+            },
+            {
+              "name": "demo_goal",
+              "path": "README.md",
+              "what": "Repository README for the feature showcase fixture.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            }
+          ]
         }
       },
       {
@@ -103,7 +102,6 @@
           {
             "type": "exec",
             "id": "print_package_summary",
-            "repo": "main",
             "command": "node",
             "args": [
               "-e",
@@ -116,12 +114,14 @@
                 "Stdout includes package name and a bounded list of script names."
               ],
               "constraints": []
+            },
+            "runtime": {
+              "repo": "main"
             }
           },
           {
             "type": "check",
             "id": "verify_package_contract",
-            "repo": "main",
             "check_kind": "deterministic",
             "command": "node",
             "args": [
@@ -146,6 +146,9 @@
                 "The package scripts include validate, compile, and run entries."
               ],
               "constraints": []
+            },
+            "runtime": {
+              "repo": "main"
             }
           }
         ]
@@ -153,18 +156,6 @@
       {
         "type": "agent",
         "id": "synthesize_constraints",
-        "repo": "main",
-        "profile": "analysis",
-        "context": [
-          {
-            "ref": "survey_repo.agent_response",
-            "name": "survey_response"
-          },
-          {
-            "ref": "verify_package_contract.package_contract",
-            "name": "package_contract"
-          }
-        ],
         "artifacts": {
           "constraints_brief": {
             "from": "output_dir",
@@ -181,6 +172,28 @@
           "constraints": [
             "Do not modify files."
           ]
+        },
+        "runtime": {
+          "repo": "main",
+          "profile": "analysis"
+        },
+        "support": {
+          "context": [
+            {
+              "ref": "survey_repo.agent_response",
+              "name": "survey_response",
+              "what": "Artifact reference survey_repo.agent_response.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            },
+            {
+              "ref": "verify_package_contract.package_contract",
+              "name": "package_contract",
+              "what": "Artifact reference verify_package_contract.package_contract.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            }
+          ]
         }
       },
       {
@@ -194,18 +207,6 @@
             {
               "type": "agent",
               "id": "draft_walkthrough",
-              "repo": "main",
-              "profile": "analysis",
-              "context": [
-                {
-                  "ref": "synthesize_constraints.agent_response",
-                  "name": "constraints_response"
-                },
-                {
-                  "ref": "survey_repo.agent_response",
-                  "name": "survey_response"
-                }
-              ],
               "artifacts": {
                 "walkthrough_draft": {
                   "from": "output_dir",
@@ -220,31 +221,35 @@
                   "The walkthrough draft stays read-only and uses prior artifacts as context."
                 ],
                 "constraints": [
-            "Do not modify files; keep the survey read-only."
+                  "Do not modify files; keep the survey read-only."
+                ]
+              },
+              "runtime": {
+                "repo": "main",
+                "profile": "analysis"
+              },
+              "support": {
+                "context": [
+                  {
+                    "ref": "synthesize_constraints.agent_response",
+                    "name": "constraints_response",
+                    "what": "Artifact reference synthesize_constraints.agent_response.",
+                    "why": "Needed to complete this node intent.",
+                    "kind": "artifact"
+                  },
+                  {
+                    "ref": "survey_repo.agent_response",
+                    "name": "survey_response",
+                    "what": "Artifact reference survey_repo.agent_response.",
+                    "why": "Needed to complete this node intent.",
+                    "kind": "artifact"
+                  }
                 ]
               }
             },
             {
               "type": "agent",
               "id": "tighten_walkthrough",
-              "repo": "main",
-              "profile": "review",
-              "context": [
-                {
-                  "ref": "draft_walkthrough.agent_response",
-                  "name": "draft_response"
-                },
-                {
-                  "ref": "review_walkthrough.verification_json",
-                  "name": "failed_review_verification",
-                  "iteration": "latest_failed",
-                  "if_available": true
-                },
-                {
-                  "ref": "verify_package_contract.verification_json",
-                  "name": "package_contract_result"
-                }
-              ],
               "artifacts": {
                 "walkthrough_final": {
                   "from": "output_dir",
@@ -261,25 +266,44 @@
                 "constraints": [
                   "Do not modify files."
                 ]
+              },
+              "runtime": {
+                "repo": "main",
+                "profile": "review"
+              },
+              "support": {
+                "context": [
+                  {
+                    "ref": "draft_walkthrough.agent_response",
+                    "name": "draft_response",
+                    "what": "Artifact reference draft_walkthrough.agent_response.",
+                    "why": "Needed to complete this node intent.",
+                    "kind": "artifact"
+                  },
+                  {
+                    "ref": "review_walkthrough.verification_json",
+                    "name": "failed_review_verification",
+                    "iteration": "latest_failed",
+                    "if_available": true,
+                    "what": "Artifact reference review_walkthrough.verification_json.",
+                    "why": "Needed to complete this node intent.",
+                    "kind": "artifact"
+                  },
+                  {
+                    "ref": "verify_package_contract.verification_json",
+                    "name": "package_contract_result",
+                    "what": "Artifact reference verify_package_contract.verification_json.",
+                    "why": "Needed to complete this node intent.",
+                    "kind": "artifact"
+                  }
+                ]
               }
             },
             {
               "type": "check",
               "id": "review_walkthrough",
-              "repo": "main",
-              "profile": "review",
               "check_kind": "ai",
               "rubric": "Pass only if the walkthrough clearly mentions validate, compile, run, and ui or web monitor flow, accurately describes the repository as local-first, and does not claim the showcase edits files. Fail if any of those are missing or misleading.",
-              "context": [
-                {
-                  "ref": "tighten_walkthrough.agent_response",
-                  "name": "walkthrough_response"
-                },
-                {
-                  "ref": "synthesize_constraints.agent_response",
-                  "name": "constraints_response"
-                }
-              ],
               "intent": {
                 "goal": "Review the current walkthrough and decide whether it is clear, concrete, and sufficient for a developer to validate, compile, run, and inspect a graph in this repository.",
                 "acceptance_criteria": [
@@ -287,6 +311,28 @@
                   "The walkthrough is accurate about local-first and read-only behavior."
                 ],
                 "constraints": []
+              },
+              "runtime": {
+                "repo": "main",
+                "profile": "review"
+              },
+              "support": {
+                "context": [
+                  {
+                    "ref": "tighten_walkthrough.agent_response",
+                    "name": "walkthrough_response",
+                    "what": "Artifact reference tighten_walkthrough.agent_response.",
+                    "why": "Needed to complete this node intent.",
+                    "kind": "artifact"
+                  },
+                  {
+                    "ref": "synthesize_constraints.agent_response",
+                    "name": "constraints_response",
+                    "what": "Artifact reference synthesize_constraints.agent_response.",
+                    "why": "Needed to complete this node intent.",
+                    "kind": "artifact"
+                  }
+                ]
               }
             }
           ]
@@ -298,23 +344,6 @@
       {
         "type": "agent",
         "id": "final_handoff",
-        "repo": "main",
-        "profile": "default",
-        "context": [
-          {
-            "ref": "survey_repo.agent_response",
-            "name": "survey_response"
-          },
-          {
-            "ref": "verify_package_contract.package_contract",
-            "name": "package_contract"
-          },
-          {
-            "ref": "review_walkthrough.verification_json",
-            "name": "review_report",
-            "iteration": "latest_passed"
-          }
-        ],
         "intent": {
           "goal": "Produce a final handoff that explains what this showcase run demonstrated. Mention the graph version, the node kinds used, the profile strategy, the deterministic package contract check, the AI walkthrough review, and the final commands a user would run next.",
           "acceptance_criteria": [
@@ -323,6 +352,36 @@
           ],
           "constraints": [
             "Do not modify files."
+          ]
+        },
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "support": {
+          "context": [
+            {
+              "ref": "survey_repo.agent_response",
+              "name": "survey_response",
+              "what": "Artifact reference survey_repo.agent_response.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            },
+            {
+              "ref": "verify_package_contract.package_contract",
+              "name": "package_contract",
+              "what": "Artifact reference verify_package_contract.package_contract.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            },
+            {
+              "ref": "review_walkthrough.verification_json",
+              "name": "review_report",
+              "iteration": "latest_passed",
+              "what": "Artifact reference review_walkthrough.verification_json.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            }
           ]
         }
       }

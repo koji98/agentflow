@@ -4,12 +4,13 @@ import type {
   ArtifactRepairPolicy,
   BaseExecutableNode,
   CheckNode,
-  ContextItem
+  ContextItem,
+  NodeRuntimeSelection,
+  NodeSupport
 } from "../graph/authored.js";
 import type { ContextSelector, ReasoningEffort, SandboxMode } from "../graph/schema.js";
-import type { ToolDeclaration } from "../graph/authored.js";
 
-export interface ManagedPatternRuntime {
+export interface ManagedPatternRuntime extends NodeRuntimeSelection {
   max_concurrency?: number;
 }
 
@@ -18,7 +19,7 @@ export interface ManagedPatternAgentOptions {
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
   artifact_repair?: ArtifactRepairPolicy;
-  tools?: ToolDeclaration[];
+  support?: NodeSupport;
 }
 
 export type ManagedPatternExecutableConfig = BaseExecutableNode & ManagedPatternAgentOptions;
@@ -34,34 +35,94 @@ export function managedId(rootId: string, kind: string, suffix: string): string 
 
 export function sharedNodeBase(
   config: BaseExecutableNode
-): Pick<AgentNode, "repo" | "profile" | "timeout_sec"> {
+): Pick<AgentNode, "runtime" | "support"> {
   return {
-    ...(config.repo ? { repo: config.repo } : {}),
-    ...(config.profile ? { profile: config.profile } : {}),
-    ...(config.timeout_sec !== undefined ? { timeout_sec: config.timeout_sec } : {})
+    ...(config.runtime ? { runtime: config.runtime } : {}),
+    ...(config.support ? { support: config.support } : {})
+  };
+}
+
+function supportWithOnly(
+  support: NodeSupport | undefined,
+  fields: Array<keyof NodeSupport>
+): NodeSupport | undefined {
+  if (!support) {
+    return undefined;
+  }
+
+  const narrowed: NodeSupport = {};
+
+  if (fields.includes("context") && support.context && support.context.length > 0) {
+    narrowed.context = support.context;
+  }
+  if (fields.includes("skills") && support.skills && support.skills.length > 0) {
+    narrowed.skills = support.skills;
+  }
+  if (fields.includes("cli") && support.cli && support.cli.length > 0) {
+    narrowed.cli = support.cli;
+  }
+
+  return Object.keys(narrowed).length > 0 ? narrowed : undefined;
+}
+
+export function supportForNonPromptNode(support: NodeSupport | undefined): NodeSupport | undefined {
+  return supportWithOnly(support, ["context"]);
+}
+
+export function supportForAiCheck(support: NodeSupport | undefined): NodeSupport | undefined {
+  return supportWithOnly(support, ["context", "skills", "cli"]);
+}
+
+export function sharedNonPromptNodeBase(
+  config: BaseExecutableNode
+): Pick<CheckNode, "runtime" | "support"> {
+  const support = supportForNonPromptNode(config.support);
+
+  return {
+    ...(config.runtime ? { runtime: config.runtime } : {}),
+    ...(support ? { support } : {})
   };
 }
 
 export function sharedAgentBase(
   config: ManagedPatternExecutableConfig
-): Pick<AgentNode, "repo" | "profile" | "timeout_sec" | "model" | "reasoning_effort" | "sandbox" | "artifact_repair" | "tools"> {
+): Pick<AgentNode, "runtime" | "support" | "model" | "reasoning_effort" | "sandbox" | "artifact_repair"> {
   return {
     ...sharedNodeBase(config),
     ...(config.model ? { model: config.model } : {}),
     ...(config.reasoning_effort ? { reasoning_effort: config.reasoning_effort } : {}),
     ...(config.sandbox ? { sandbox: config.sandbox } : {}),
-    ...(config.artifact_repair ? { artifact_repair: config.artifact_repair } : {}),
-    ...(config.tools && config.tools.length > 0 ? { tools: config.tools } : {})
+    ...(config.artifact_repair ? { artifact_repair: config.artifact_repair } : {})
   };
 }
 
 export function sharedAiCheckBase(
   config: ManagedPatternExecutableConfig
-): Pick<CheckNode, "repo" | "profile" | "timeout_sec" | "model" | "reasoning_effort"> {
+): Pick<CheckNode, "runtime" | "support" | "model" | "reasoning_effort"> {
+  const support = supportForAiCheck(config.support);
+
   return {
-    ...sharedNodeBase(config),
+    ...(config.runtime ? { runtime: config.runtime } : {}),
+    ...(support ? { support } : {}),
     ...(config.model ? { model: config.model } : {}),
     ...(config.reasoning_effort ? { reasoning_effort: config.reasoning_effort } : {})
+  };
+}
+
+export function mergeSupportContext(
+  support: NodeSupport | undefined,
+  context: ContextItem[]
+): NodeSupport {
+  if (context.length === 0) {
+    return support ?? {};
+  }
+
+  return {
+    ...(support ?? {}),
+    context: [
+      ...(support?.context ?? []),
+      ...context
+    ]
   };
 }
 
@@ -119,6 +180,8 @@ export function artifactContext(
     iteration?: ContextSelector;
     attempt?: ContextSelector;
     if_available?: boolean;
+    what?: string;
+    why?: string;
   } = {}
 ): Extract<ContextItem, { ref: string }> {
   return {
@@ -126,6 +189,8 @@ export function artifactContext(
     name,
     node,
     artifact,
+    what: options.what ?? `Artifact "${artifact}" produced by node "${node}".`,
+    why: options.why ?? "This downstream managed node needs the producer artifact as evidence for its own contract.",
     ...(options.iteration !== undefined ? { iteration: options.iteration } : {}),
     ...(options.attempt !== undefined ? { attempt: options.attempt } : {}),
     ...(options.if_available !== undefined ? { if_available: options.if_available } : {})
@@ -136,7 +201,9 @@ export function workspaceFileContext(name: string, path: string): Extract<Contex
   return {
     name,
     from: "workspace_file",
-    path
+    path,
+    what: `Workspace file ${path}.`,
+    why: "This managed node needs this workspace file as evidence for its own contract."
   };
 }
 

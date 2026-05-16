@@ -19,6 +19,13 @@ agentflow eval validate evals/agentflow-workflow-quality
 agentflow eval run evals/agentflow-workflow-quality --variant current --trials 1
 ```
 
+For the five-scenario sentinel suite that exercises Agentflow end to end, use:
+
+```bash
+agentflow eval validate evals/agentflow-validation
+agentflow eval run evals/agentflow-validation --variant current --scenario all-primitives-checkpoint-loop --trials 1
+```
+
 For the larger local-repo capability suite used for prompt and context iteration, generate ignored fixtures first:
 
 ```bash

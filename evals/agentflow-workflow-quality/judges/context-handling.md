@@ -1,1 +1,1 @@
-Rate context handling: prioritization, stale/truncated/noisy context treatment, provenance inspection, and uncertainty reporting. Return strict JSON.
+Rate context handling: prioritization, stale/noisy context treatment, pointer provenance inspection, and uncertainty reporting. Return strict JSON.

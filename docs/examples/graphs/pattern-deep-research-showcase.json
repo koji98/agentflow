@@ -16,12 +16,7 @@
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "medium",
-      "sandbox": "workspace-write",
-      "timeout_sec": 1200,
-      "input_rules": {
-        "max_total_tokens": 128000,
-        "max_tokens_per_item": 32000
-      }
+      "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
@@ -35,20 +30,6 @@
       {
         "type": "pattern_deep_research",
         "id": "managed_patterns_research",
-        "repo": "main",
-        "profile": "default",
-        "context": [
-          {
-            "name": "readme",
-            "from": "workspace_file",
-            "path": "README.md"
-          },
-          {
-            "name": "managed_patterns_doc",
-            "from": "workspace_file",
-            "path": "docs/product/managed-patterns.md"
-          }
-        ],
         "research": {
           "angles": [
             "Investigate the intended user-facing contract for deep research and deep work.",
@@ -70,27 +51,33 @@
             "Do not change files during this research showcase.",
             "Do not treat non-repository material as primary authority."
           ]
+        },
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "readme",
+              "path": "README.md",
+              "what": "Workspace file README.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            },
+            {
+              "name": "managed_patterns_doc",
+              "path": "docs/product/managed-patterns.md",
+              "what": "Workspace file docs/product/managed-patterns.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            }
+          ]
         }
       },
       {
         "type": "agent",
         "id": "handoff",
-        "repo": "main",
-        "profile": "default",
-        "context": [
-          {
-            "ref": "managed_patterns_research.summary",
-            "name": "research_summary"
-          },
-          {
-            "ref": "managed_patterns_research.packet",
-            "name": "research_packet"
-          },
-          {
-            "ref": "managed_patterns_research.artifact_contract",
-            "name": "artifact_contract_angle"
-          }
-        ],
         "artifacts": {
           "handoff": {
             "from": "output_dir",
@@ -105,12 +92,40 @@
             "The handoff includes concrete validation or inspection guidance."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "support": {
+          "context": [
+            {
+              "ref": "managed_patterns_research.summary",
+              "name": "research_summary",
+              "what": "Artifact reference managed_patterns_research.summary.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            },
+            {
+              "ref": "managed_patterns_research.packet",
+              "name": "research_packet",
+              "what": "Artifact reference managed_patterns_research.packet.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            },
+            {
+              "ref": "managed_patterns_research.artifact_contract",
+              "name": "artifact_contract_angle",
+              "what": "Artifact reference managed_patterns_research.artifact_contract.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            }
+          ]
         }
       },
       {
         "type": "check",
         "id": "validate_skill_docs",
-        "repo": "main",
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
@@ -124,6 +139,9 @@
             "The validation evidence supports the final handoff."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main"
         }
       }
     ]

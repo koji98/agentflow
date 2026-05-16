@@ -32,7 +32,7 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 3. Keep workflow config small and schema-backed.
 4. Expose public artifacts from one `publish_node`.
 5. Declare a clear tool `description`; put detailed CLI usage in the executable's `--help`.
-6. Use plugin `credentials` plus `agentflow auth` for tools that need auth; keep inline `tools[].config` for non-secret graph-provided defaults only.
+6. Use plugin `credentials` plus `agentflow auth` for tools that need auth; keep managed tool `config` for non-secret graph-provided defaults only.
 7. Keep tool config schemas string-only and reject secrets such as tokens, passwords, or API keys.
 8. Implement credential-free, side-effect-free executable `--help` for every plugin tool.
 9. Run `agentflow plugin resolve --graph <path>`.
@@ -48,7 +48,7 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 - Plugin tools are ordinary CLIs launched inside the node sandbox.
 - A plugin tool may wrap one CLI, but it is often most valuable when it composes several CLIs into one stable capability that agents should not reimplement every run.
 - Plugin ids, workflow ids, and tool aliases should be stable, domain-based, and descriptive; avoid generic names like `run`, `check`, `deploy`, `poll`, or `sync` unless the plugin domain makes the generated callable unambiguous.
-- Plugin `tools[].config` is for non-secret graph-provided defaults only; use credential scopes for anything sensitive.
+- Managed tool `config` is for non-secret graph-provided defaults only; use credential scopes for anything sensitive.
 - Tool launchers expose graph config to the plugin subprocess as `AGENTFLOW_TOOL_<CALLABLE_NAME>_<KEY>` environment variables.
 - Tool `config_schema` validates those graph config defaults; it is not the tool's CLI argument schema.
 - Plugin manifests do not declare default CLI arguments; agents pass CLI arguments when invoking the generated callable tool.

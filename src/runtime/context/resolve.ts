@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
 import type { ContextItem } from "../../graph/authored.js";
@@ -14,6 +14,7 @@ import type {
   ContextPacketSource,
   RuntimeSupervisorContextRepairContext,
   ContextProvenance,
+  PluginFileContextProvenance,
   WorkspaceFileContextProvenance,
   WorkspaceGlobContextProvenance
 } from "./packet.js";
@@ -35,26 +36,12 @@ import {
   defaultContextIgnoredRoots,
   listRepoFiles
 } from "./repo_files.js";
-import {
-  contextTokenizerName,
-  countContextTokens,
-  decodeContextTokens,
-  encodeContextText
-} from "./tokenizer.js";
 import { buildRepeatHistory } from "./repeat_history.js";
 import type { SupervisorRecoveryEnvelope } from "../../supervisor/types.js";
-
-interface PreparedMaterialization {
-  text: string;
-  tokens: number;
-  truncated: boolean;
-}
 
 interface MaterializationAccumulator {
   materials: ContextPacketMaterializedItem[];
   omitted: ContextPacketOmittedItem[];
-  total_tokens: number;
-  max_total_tokens: number;
 }
 
 export interface ResolveContextOptions {
@@ -68,91 +55,49 @@ export interface ResolveContextOptions {
   recovery_envelope?: SupervisorRecoveryEnvelope;
 }
 
-const truncatedTextNotice =
-  "[Truncated by Agentflow. Read the original file for full context.]\n";
-
-function tryDecodeUtf8(buffer: Buffer): string | undefined {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-  } catch {
-    return undefined;
-  }
-}
-
-function buildTruncatedTextCandidate(tokens: number[], prefixTokenCount: number): string {
-  const selected = decodeContextTokens(tokens.slice(0, prefixTokenCount));
-  const trimmed = selected.replace(/\s+$/u, "");
-  const prefix = trimmed.length > 0 ? `${trimmed}\n\n` : "";
-  return `${prefix}${truncatedTextNotice}`;
-}
-
-function truncateTextToTokenLimit(text: string, maxTokens: number): PreparedMaterialization {
-  const sourceTokens = encodeContextText(text);
-
-  if (sourceTokens.length <= maxTokens) {
-    return {
-      text,
-      tokens: sourceTokens.length,
-      truncated: false
-    };
-  }
-
-  let low = 0;
-  let high = Math.min(sourceTokens.length, maxTokens);
-
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    const candidate = buildTruncatedTextCandidate(sourceTokens, mid);
-
-    if (countContextTokens(candidate) <= maxTokens) {
-      low = mid;
-    } else {
-      high = mid - 1;
-    }
-  }
-
-  let materializedText = buildTruncatedTextCandidate(sourceTokens, low);
-  let tokens = countContextTokens(materializedText);
-
-  if (tokens > maxTokens) {
-    materializedText = decodeContextTokens(encodeContextText(truncatedTextNotice).slice(0, maxTokens));
-    tokens = countContextTokens(materializedText);
-  }
-
+async function writeRuntimeContextFile(
+  destinationPath: string,
+  text: string
+): Promise<Pick<ContextPacketMaterializedItem, "pointer_path" | "digest" | "size_bytes">> {
+  await mkdir(dirname(destinationPath), { recursive: true });
+  await writeFile(destinationPath, text, "utf8");
+  const contents = Buffer.from(text, "utf8");
   return {
-    text: materializedText,
-    tokens,
-    truncated: true
+    pointer_path: destinationPath,
+    digest: createDigest(contents),
+    size_bytes: contents.byteLength
   };
 }
 
-function prepareTextMaterialization(
-  contents: string,
-  maxTokensPerItem: number
-): PreparedMaterialization {
-  return truncateTextToTokenLimit(contents, maxTokensPerItem);
-}
-
-function prepareBufferMaterialization(
-  contents: Buffer,
-  maxTokensPerItem: number
-): PreparedMaterialization | undefined {
-  const text = tryDecodeUtf8(contents);
-  return text === undefined ? undefined : prepareTextMaterialization(text, maxTokensPerItem);
-}
-
-async function writePreparedMaterialization(
-  destinationPath: string,
-  materialized: PreparedMaterialization
-): Promise<void> {
-  await mkdir(dirname(destinationPath), { recursive: true });
-  await writeFile(destinationPath, materialized.text, "utf8");
+function buildFilePointer(
+  pointerPath: string,
+  contents: Buffer
+): Pick<ContextPacketMaterializedItem, "pointer_path" | "digest" | "size_bytes"> {
+  return {
+    pointer_path: pointerPath,
+    digest: createDigest(contents),
+    size_bytes: contents.byteLength
+  };
 }
 
 type ArtifactContextItem = Extract<ContextItem, { ref: string }>;
 
 function isArtifactContextItem(item: ContextItem): item is ArtifactContextItem {
   return "ref" in item;
+}
+
+function artifactReferenceKey(reference: {
+  node: string;
+  artifact: string;
+  iteration?: unknown;
+  attempt?: unknown;
+}): string {
+  return JSON.stringify({
+    node: reference.node,
+    artifact: reference.artifact,
+    iteration: reference.iteration,
+    attempt: reference.attempt
+  });
 }
 
 function describeReservedArtifact(artifact: string): string | undefined {
@@ -195,12 +140,12 @@ function describeContextItem(item: ContextItem, index: number): string {
     return `${key} (artifact "${item.ref}")`;
   }
 
-  if (item.from === "text") {
-    return `${key} (text "${item.name}")`;
-  }
-
   if (item.from === "workspace_file") {
     return `${key} (workspace file "${item.path}")`;
+  }
+
+  if (item.from === "plugin_file") {
+    return `${key} (plugin file "${item.path}")`;
   }
 
   return `${key} (workspace glob "${item.path}")`;
@@ -214,55 +159,16 @@ function explicitIgnoredRootOptIn(pattern: string): string | undefined {
     : undefined;
 }
 
-function createBudgetOverflowError(
-  descriptor: string,
-  currentTokens: number,
-  nextTokens: number,
-  maxTotalTokens: number
-): Error {
-  return new Error(
-    `Materializing ${descriptor} would exceed max_total_tokens ${maxTotalTokens}. Current tokens: ${currentTokens}. Next item tokens: ${nextTokens}.`
-  );
-}
-
-async function appendMaterializedItem(
+function appendPointerItem(
   accumulator: MaterializationAccumulator,
-  item: ContextPacketMaterializedItem,
-  materialized: PreparedMaterialization,
-  descriptor: string
-): Promise<void> {
-  if (accumulator.total_tokens + materialized.tokens > accumulator.max_total_tokens) {
-    throw createBudgetOverflowError(
-      descriptor,
-      accumulator.total_tokens,
-      materialized.tokens,
-      accumulator.max_total_tokens
-    );
-  }
-
-  await writePreparedMaterialization(item.materialized_path, materialized);
-  accumulator.materials.push(item);
-  accumulator.total_tokens += materialized.tokens;
-}
-
-function appendNonTokenizableOmission(
-  accumulator: MaterializationAccumulator,
-  key: string,
-  source: ContextPacketSource,
-  ifAvailable: boolean
+  item: ContextPacketMaterializedItem
 ): void {
-  accumulator.omitted.push({
-    key,
-    source,
-    reason: "Material is not valid UTF-8 text and cannot be tokenized.",
-    if_available: ifAvailable
-  });
+  accumulator.materials.push(item);
 }
 
 async function materializeRepeatHistoryContext(
   options: ResolveContextOptions,
-  accumulator: MaterializationAccumulator,
-  maxTokensPerItem: number
+  accumulator: MaterializationAccumulator
 ): Promise<void> {
   const history = await buildRepeatHistory({
     compiled_graph: options.compiled_graph,
@@ -286,46 +192,32 @@ async function materializeRepeatHistoryContext(
     return;
   }
 
-  const remainingTokens = accumulator.max_total_tokens - accumulator.total_tokens;
+  const pointer = await writeRuntimeContextFile(
+    join(
+      options.execution_dir,
+      "context",
+      "runtime",
+      history.source.name,
+      "repeat-history.md"
+    ),
+    history.text
+  );
 
-  if (remainingTokens <= 0) {
-    accumulator.omitted.push({
-      key: history.source.name,
-      source: history.source,
-      description: history.description,
-      reason: "Repeat history was omitted because authored context consumed the available token budget.",
-      if_available: true
-    });
-    return;
-  }
-
-  const materialized = prepareTextMaterialization(history.text, Math.min(maxTokensPerItem, remainingTokens));
-
-  await appendMaterializedItem(
+  appendPointerItem(
     accumulator,
     {
       key: history.source.name,
       source: history.source,
       description: history.description,
-      materialized_path: join(
-        options.execution_dir,
-        "context",
-        "materialized",
-        history.source.name,
-        "repeat-history.md"
-      ),
-      tokens: materialized.tokens,
-      truncated: materialized.truncated
-    },
-    materialized,
-    "runtime repeat history"
+      ...pointer
+    }
   );
 }
 
 function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope): string {
   const directive = envelope.retry_directive;
   return [
-    "# Supervisor Recovery Envelope",
+    "# Supervisor Recovery Case",
     "",
     "This node is being retried after a supervisor recovery cycle.",
     "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
@@ -363,8 +255,7 @@ function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope):
 
 async function materializeSupervisorRecoveryEnvelopeContext(
   options: ResolveContextOptions,
-  accumulator: MaterializationAccumulator,
-  maxTokensPerItem: number
+  accumulator: MaterializationAccumulator
 ): Promise<void> {
   const envelope = options.recovery_envelope;
 
@@ -383,49 +274,32 @@ async function materializeSupervisorRecoveryEnvelopeContext(
     case_file_path: envelope.case_file_path
   };
   const description = "Supervisor recovery envelope, merged evidence, and retry directive for this retry attempt.";
-  const remainingTokens = accumulator.max_total_tokens - accumulator.total_tokens;
 
-  if (remainingTokens <= 0) {
-    accumulator.omitted.push({
-      key: source.name,
-      source,
-      description,
-      reason: "Supervisor recovery envelope was omitted because prior runtime context consumed the available token budget.",
-      if_available: true
-    });
-    return;
-  }
-
-  const materialized = prepareTextMaterialization(
-    renderSupervisorRecoveryEnvelope(envelope),
-    Math.min(maxTokensPerItem, remainingTokens)
+  const pointer = await writeRuntimeContextFile(
+    join(
+      options.execution_dir,
+      "context",
+      "runtime",
+      source.name,
+      "recovery-envelope.md"
+    ),
+    renderSupervisorRecoveryEnvelope(envelope)
   );
 
-  await appendMaterializedItem(
+  appendPointerItem(
     accumulator,
     {
       key: source.name,
       source,
       description,
-      materialized_path: join(
-        options.execution_dir,
-        "context",
-        "materialized",
-        source.name,
-        "recovery-envelope.md"
-      ),
-      tokens: materialized.tokens,
-      truncated: materialized.truncated
-    },
-    materialized,
-    "runtime supervisor recovery envelope"
+      ...pointer
+    }
   );
 }
 
 async function materializeSupervisorContextRepair(
   options: ResolveContextOptions,
-  accumulator: MaterializationAccumulator,
-  maxTokensPerItem: number
+  accumulator: MaterializationAccumulator
 ): Promise<boolean> {
   const patch = options.recovery_envelope?.runtime_overlay?.context_repair;
 
@@ -434,7 +308,6 @@ async function materializeSupervisorContextRepair(
   }
 
   for (const [index, material] of patch.materials.entries()) {
-    const remainingTokens = accumulator.max_total_tokens - accumulator.total_tokens;
     const source: RuntimeSupervisorContextRepairContext = {
       name: "supervisor_context_repair",
       from: "runtime_supervisor_context_repair",
@@ -443,40 +316,25 @@ async function materializeSupervisorContextRepair(
       reason: patch.reason
     };
 
-    if (remainingTokens <= 0) {
-      accumulator.omitted.push({
-        key: material.key,
-        source,
-        description: material.title,
-        reason: "Supervisor context repair material was omitted because prior runtime context consumed the available token budget.",
-        if_available: true
-      });
-      continue;
-    }
-
-    const prepared = prepareTextMaterialization(
-      material.text,
-      Math.min(maxTokensPerItem, remainingTokens)
+    const pointer = await writeRuntimeContextFile(
+      join(
+        options.execution_dir,
+        "context",
+        "runtime",
+        material.key,
+        `${index + 1}-context-repair.md`
+      ),
+      material.text
     );
 
-    await appendMaterializedItem(
+    appendPointerItem(
       accumulator,
       {
         key: material.key,
         source,
         description: material.title,
-        materialized_path: join(
-          options.execution_dir,
-          "context",
-          "materialized",
-          material.key,
-          `${index + 1}-context-repair.md`
-        ),
-        tokens: prepared.tokens,
-        truncated: prepared.truncated
-      },
-      prepared,
-      `supervisor context repair material "${material.key}"`
+        ...pointer
+      }
     );
   }
 
@@ -484,7 +342,7 @@ async function materializeSupervisorContextRepair(
     accumulator.omitted.push({
       key: item.name || `context_${index + 1}`,
       source: item,
-      reason: "Authored context item was replaced by a supervisor context repair overlay after the original package exceeded the runtime token budget.",
+      reason: "Authored context item was replaced by a supervisor context repair overlay.",
       if_available: true
     });
   }
@@ -592,45 +450,13 @@ function selectAttemptsForReference(
   return selected ? [selected] : [];
 }
 
-async function materializeTextContext(
-  item: Extract<ContextItem, { from: "text" }>,
-  index: number,
-  options: ResolveContextOptions,
-  accumulator: MaterializationAccumulator,
-  maxTokensPerItem: number
-): Promise<void> {
-  const descriptor = describeContextItem(item, index);
-  const key = item.name;
-  const materialized = prepareTextMaterialization(item.text, maxTokensPerItem);
-
-  await appendMaterializedItem(
-    accumulator,
-    {
-      key,
-      source: item,
-      materialized_path: join(
-        options.execution_dir,
-        "context",
-        "materialized",
-        key,
-        `${item.name}.txt`
-      ),
-      tokens: materialized.tokens,
-      truncated: materialized.truncated
-    },
-    materialized,
-    descriptor
-  );
-}
-
 async function materializeWorkspaceFileContext(
   item: Extract<ContextItem, { from: "workspace_file" }>,
   index: number,
   options: ResolveContextOptions,
   cache: ContextDiscoveryCache,
   accumulator: MaterializationAccumulator,
-  contextProvenance: ContextInputProvenance[],
-  maxTokensPerItem: number
+  contextProvenance: ContextInputProvenance[]
 ): Promise<void> {
   const descriptor = describeContextItem(item, index);
   const key = item.name;
@@ -666,38 +492,23 @@ async function materializeWorkspaceFileContext(
     throw error;
   }
 
-  const materialized = prepareBufferMaterialization(contents, maxTokensPerItem);
-
-  if (!materialized) {
-    appendNonTokenizableOmission(accumulator, key, item, false);
-    return;
-  }
-
-  await appendMaterializedItem(
+  const pointer = buildFilePointer(sourcePath, contents);
+  appendPointerItem(
     accumulator,
     {
       key,
       source: item,
-      materialized_path: join(
-        options.execution_dir,
-        "context",
-        "materialized",
-        key,
-        basename(normalizedPath)
-      ),
-      tokens: materialized.tokens,
-      truncated: materialized.truncated,
+      description: `${item.what} Why: ${item.why}`,
+      ...pointer,
       binding: {
         kind: "live_workspace_input",
         requested_path: normalizedPath,
         resolved_path: sourcePath
       }
-    },
-    materialized,
-    descriptor
+    }
   );
 
-  const digest = createDigest(contents);
+  const digest = pointer.digest!;
   cache.file_digests.set(sourcePath, digest);
   contextProvenance.push({
     from: "workspace_file",
@@ -715,8 +526,7 @@ async function materializeWorkspaceGlobContext(
   options: ResolveContextOptions,
   cache: ContextDiscoveryCache,
   accumulator: MaterializationAccumulator,
-  contextProvenance: ContextInputProvenance[],
-  maxTokensPerItem: number
+  contextProvenance: ContextInputProvenance[]
 ): Promise<void> {
   const descriptor = describeContextItem(item, index);
   const key = item.name;
@@ -758,36 +568,20 @@ async function materializeWorkspaceGlobContext(
     const contents = await readFile(sourcePath);
     const digest = createDigest(contents);
     cache.file_digests.set(sourcePath, digest);
-    const materialized = prepareBufferMaterialization(contents, maxTokensPerItem);
-    const materializedKey = `${key}_${matchIndex + 1}`;
-
-    if (!materialized) {
-      appendNonTokenizableOmission(accumulator, materializedKey, item, false);
-      continue;
-    }
-
-    await appendMaterializedItem(
+    const pointerKey = `${key}_${matchIndex + 1}`;
+    appendPointerItem(
       accumulator,
       {
-        key: materializedKey,
+        key: pointerKey,
         source: item,
-        materialized_path: join(
-          options.execution_dir,
-          "context",
-          "materialized",
-          key,
-          `${matchIndex + 1}-${basename(relativePath)}`
-        ),
-        tokens: materialized.tokens,
-        truncated: materialized.truncated,
+        description: `${item.what} Why: ${item.why}`,
+        ...buildFilePointer(sourcePath, contents),
         binding: {
           kind: "live_workspace_input",
           requested_path: relativePath,
           resolved_path: sourcePath
         }
-      },
-      materialized,
-      `${descriptor} match "${relativePath}"`
+      }
     );
 
     files.push({
@@ -807,28 +601,67 @@ async function materializeWorkspaceGlobContext(
   } satisfies WorkspaceGlobContextProvenance);
 }
 
+async function materializePluginFileContext(
+  item: Extract<ContextItem, { from: "plugin_file" }>,
+  index: number,
+  accumulator: MaterializationAccumulator,
+  contextProvenance: ContextInputProvenance[]
+): Promise<void> {
+  const descriptor = describeContextItem(item, index);
+  const key = item.name;
+
+  let contents: Buffer;
+
+  try {
+    contents = await readFile(item.path);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      accumulator.omitted.push({
+        key,
+        source: item,
+        reason: `Requested ${descriptor} was not found at execution time.`,
+        if_available: false
+      });
+      return;
+    }
+
+    throw error;
+  }
+
+  const pointer = buildFilePointer(item.path, contents);
+  appendPointerItem(
+    accumulator,
+    {
+      key,
+      source: item,
+      description: `${item.what} Why: ${item.why}`,
+      ...pointer
+    }
+  );
+
+  contextProvenance.push({
+    from: "plugin_file",
+    key,
+    path: item.path,
+    digest: pointer.digest!
+  } satisfies PluginFileContextProvenance);
+}
+
 async function materializeContextItem(
   item: ContextItem,
   index: number,
   options: ResolveContextOptions,
   cache: ContextDiscoveryCache,
   accumulator: MaterializationAccumulator,
-  contextProvenance: ContextInputProvenance[],
-  maxTokensPerItem: number
+  contextProvenance: ContextInputProvenance[]
 ): Promise<void> {
   if (isArtifactContextItem(item)) {
     await materializeArtifactContext(
       item,
       index,
       options,
-      accumulator,
-      maxTokensPerItem
+      accumulator
     );
-    return;
-  }
-
-  if (item.from === "text") {
-    await materializeTextContext(item, index, options, accumulator, maxTokensPerItem);
     return;
   }
 
@@ -839,8 +672,17 @@ async function materializeContextItem(
       options,
       cache,
       accumulator,
-      contextProvenance,
-      maxTokensPerItem
+      contextProvenance
+    );
+    return;
+  }
+
+  if (item.from === "plugin_file") {
+    await materializePluginFileContext(
+      item,
+      index,
+      accumulator,
+      contextProvenance
     );
     return;
   }
@@ -851,8 +693,7 @@ async function materializeContextItem(
     options,
     cache,
     accumulator,
-    contextProvenance,
-    maxTokensPerItem
+    contextProvenance
   );
 }
 
@@ -860,11 +701,11 @@ async function materializeArtifactContext(
   reference: ArtifactContextItem,
   index: number,
   options: ResolveContextOptions,
-  accumulator: MaterializationAccumulator,
-  maxTokensPerItem: number
+  accumulator: MaterializationAccumulator
 ): Promise<void> {
   const compiledIds = options.compiled_graph.authored_to_compiled[reference.node] ?? [];
   const description = describeArtifactReference(options.compiled_graph, compiledIds, reference);
+  const supportDescription = `${reference.what} Why: ${reference.why}${description ? ` Producer artifact: ${description}` : ""}`;
   const attempts = selectAttemptsForReference(
     options.attempts,
     options.compiled_graph,
@@ -881,7 +722,7 @@ async function materializeArtifactContext(
       accumulator.omitted.push({
         key: reference.name,
         source: reference,
-        ...(description ? { description } : {}),
+        description: supportDescription,
         reason: `No execution matched "${reference.node}".`,
         if_available: true
       });
@@ -904,7 +745,7 @@ async function materializeArtifactContext(
       accumulator.omitted.push({
         key: reference.name,
         source: reference,
-        ...(description ? { description } : {}),
+        description: supportDescription,
         reason: `Selected execution for "${reference.node}" did not produce the requested artifact.`,
         if_available: true
       });
@@ -914,58 +755,75 @@ async function materializeArtifactContext(
     throw new Error(`Required context artifact is missing for "${reference.node}".`);
   }
 
-  const materialized = prepareBufferMaterialization(await readFile(sourcePath), maxTokensPerItem);
+  const contents = await readFile(sourcePath);
   const key = reference.name;
-
-  if (!materialized) {
-    appendNonTokenizableOmission(accumulator, key, reference, reference.if_available ?? false);
-    return;
-  }
-
-  await appendMaterializedItem(
+  appendPointerItem(
     accumulator,
     {
       key,
       source: reference,
-      ...(description ? { description } : {}),
-      materialized_path: join(
-        options.execution_dir,
-        "context",
-        "materialized",
-        key,
-        basename(sourcePath)
-      ),
-      tokens: materialized.tokens,
-      truncated: materialized.truncated
+      description: supportDescription,
+      ...buildFilePointer(sourcePath, contents)
+    }
+  );
+}
+
+async function materializeCheckpointReviewContext(
+  options: ResolveContextOptions,
+  accumulator: MaterializationAccumulator
+): Promise<void> {
+  if (options.node.kind !== "checkpoint") {
+    return;
+  }
+
+  const reviewFrom = options.node.review_from;
+  const alreadyAuthored = (options.node.context ?? []).some(
+    (item) => isArtifactContextItem(item) && artifactReferenceKey(item) === artifactReferenceKey(reviewFrom)
+  );
+
+  if (alreadyAuthored) {
+    return;
+  }
+
+  await materializeArtifactContext(
+    {
+      ref: `${reviewFrom.node}.${reviewFrom.artifact}`,
+      node: reviewFrom.node,
+      artifact: reviewFrom.artifact,
+      ...(reviewFrom.iteration !== undefined ? { iteration: reviewFrom.iteration } : {}),
+      ...(reviewFrom.attempt !== undefined ? { attempt: reviewFrom.attempt } : {}),
+      name: `checkpoint_review_${reviewFrom.artifact}`,
+      what: "Artifact selected by this checkpoint's review_from reference.",
+      why: "It is the required evidence the checkpoint operator reviews before deciding whether the repeat loop may proceed."
     },
-    materialized,
-    describeContextItem(reference, index)
+    -1,
+    options,
+    accumulator
   );
 }
 
 function renderContextManifest(packet: ContextPacket): string {
-  const truncatedCount = packet.materials.filter((item) => item.truncated).length;
   const lines = [
     "# Context Manifest",
     "",
-    "Material paths are relative to this manifest's directory.",
-    `- Materialized items: \`${packet.totals.material_count}\``,
-    `- Truncated items: \`${truncatedCount}\``,
+    "Context entries are pointers. Agentflow does not copy or truncate source context into this prompt package.",
+    `- Pointer items: \`${packet.totals.pointer_count}\``,
     `- Omitted items: \`${packet.omitted.length}\``,
     ""
   ];
 
   if (packet.materials.length > 0) {
-    lines.push("## Materials", "");
+    lines.push("## Pointers", "");
+    lines.push("| Name | Kind | Pointer | What / Why | Digest | Size |");
+    lines.push("| --- | --- | --- | --- | --- | --- |");
 
     for (const item of packet.materials) {
       const bindingSuffix =
         item.binding?.kind === "live_workspace_input"
           ? `; source ${item.binding.requested_path ?? "inline text"}`
           : "";
-      lines.push(
-        `- \`${item.key}\` -> \`${formatManifestMaterializedPath(item.materialized_path)}\` (${item.tokens} tokens${item.truncated ? ", truncated" : ""}${bindingSuffix})${item.description ? `: ${item.description}` : ""}`
-      );
+      const from = "ref" in item.source ? "artifact" : item.source.from;
+      lines.push(`| \`${item.key}\` | \`${from}\` | \`${formatManifestPointerPath(item.pointer_path)}\`${bindingSuffix} | ${item.description ?? ""} | ${item.digest ?? ""} | ${item.size_bytes ?? ""} |`);
     }
 
     lines.push("");
@@ -973,23 +831,23 @@ function renderContextManifest(packet: ContextPacket): string {
 
   if (packet.omitted.length > 0) {
     lines.push("## Omitted", "");
-    lines.push("Omitted entries may indicate optional missing context or token-budget pressure. Inspect provenance or report uncertainty when it matters.");
+    lines.push("Omitted entries may indicate optional missing context or supervisor-provided replacement context. Inspect provenance or report uncertainty when it matters.");
     lines.push("");
 
     for (const item of packet.omitted) {
-      lines.push(`- \`${item.key}\`: ${item.reason}${item.description ? ` Expected content: ${item.description}` : ""}`);
+      lines.push(`- \`${item.key}\`: ${item.reason}${item.description ? ` ${item.description}` : ""}`);
     }
   }
 
   return `${lines.join("\n")}\n`;
 }
 
-function formatManifestMaterializedPath(materializedPath: string): string {
-  const match = /[/\\]context[/\\]materialized[/\\](.+)$/u.exec(materializedPath);
+function formatManifestPointerPath(pointerPath: string): string {
+  const match = /[/\\]context[/\\]runtime[/\\](.+)$/u.exec(pointerPath);
   if (!match?.[1]) {
-    return materializedPath;
+    return pointerPath;
   }
-  return `materialized/${match[1].replace(/\\/gu, "/")}`;
+  return `runtime/${match[1].replace(/\\/gu, "/")}`;
 }
 
 export async function resolveExecutionContext(
@@ -1005,24 +863,25 @@ export async function resolveExecutionContext(
   const contextProvenance: ContextInputProvenance[] = [];
   const accumulator: MaterializationAccumulator = {
     materials: [],
-    omitted: [],
-    total_tokens: 0,
-    max_total_tokens: options.node.effective_policy.input_rules.max_total_tokens
+    omitted: []
   };
 
   await materializeSupervisorRecoveryEnvelopeContext(
     options,
-    accumulator,
-    options.node.effective_policy.input_rules.max_tokens_per_item
+    accumulator
   );
 
   const authoredContextReplaced = await materializeSupervisorContextRepair(
     options,
-    accumulator,
-    options.node.effective_policy.input_rules.max_tokens_per_item
+    accumulator
   );
 
   if (!authoredContextReplaced) {
+    await materializeCheckpointReviewContext(
+      options,
+      accumulator
+    );
+
     for (const [index, item] of (options.node.context ?? []).entries()) {
       await materializeContextItem(
         item,
@@ -1030,16 +889,14 @@ export async function resolveExecutionContext(
         options,
         cache,
         accumulator,
-        contextProvenance,
-        options.node.effective_policy.input_rules.max_tokens_per_item
+        contextProvenance
       );
     }
   }
 
   await materializeRepeatHistoryContext(
     options,
-    accumulator,
-    options.node.effective_policy.input_rules.max_tokens_per_item
+    accumulator
   );
 
   const harness_instructions = await computeHarnessInstructionProvenance({
@@ -1061,13 +918,11 @@ export async function resolveExecutionContext(
     authored_id: options.node.authored_id,
     repo_alias: options.node.repo,
     workspace_path: options.workspace_path,
-    tokenizer: contextTokenizerName,
     materials: accumulator.materials,
     omitted: accumulator.omitted,
     totals: {
-      material_count: accumulator.materials.length,
-      file_count: accumulator.materials.length,
-      total_tokens: accumulator.total_tokens
+      pointer_count: accumulator.materials.length,
+      file_count: accumulator.materials.length
     }
   };
 

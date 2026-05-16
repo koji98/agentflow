@@ -312,7 +312,7 @@ describe("cursor cli harness", () => {
         nodeGoal: "Review the change.",
         contextPacketPath: join(executionDir, "context", "packet.json"),
         contextManifestPath: join(executionDir, "context", "manifest.md"),
-        contextManifest: "# Context Manifest\n\n- Materialized items: `1`\n",
+        contextManifest: "# Context Manifest\n\n- Pointer items: `1`\n",
         outputDir,
         artifacts: {
           review_report: {
@@ -347,7 +347,7 @@ describe("cursor cli harness", () => {
       expect(prompt).toContain("## Role");
       expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
       expect(prompt).toContain("You are executing one node in a wider Agentflow graph.");
-      expect(prompt).toContain("## Node Task");
+      expect(prompt).toContain("## Success Contract");
       expect(prompt).toContain("Review the change.");
       expect(prompt).toContain("## Context");
       expect(prompt).toContain("# Context Manifest");
@@ -355,11 +355,11 @@ describe("cursor cli harness", () => {
       expect(prompt).toContain(join(executionDir, "context", "packet.json"));
       expect(prompt).toContain("Context provenance:");
       expect(prompt).toContain("Sandbox: read-only - cannot modify the workspace");
-      expect(prompt).toContain("## Artifact Contract");
+      expect(prompt).toContain("## Declared Artifacts");
       expect(prompt).toContain("read-only sandbox prevents file writes");
-      expect(prompt).toContain("`review_report` (from `output_dir`)");
+      expect(prompt).toContain("`review_report`");
       expect(prompt).toContain("Markdown review report for downstream nodes.");
-      expect(prompt).toContain("## Final Handoff");
+      expect(prompt).toContain("## Completion Gate");
       expect(prompt).toContain("captured as the reserved `agent_response` artifact");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,

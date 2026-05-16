@@ -17,12 +17,13 @@ import {
   maxConcurrency,
   mergeArtifacts,
   mergeManagedPublicArtifacts,
+  mergeSupportContext,
   outputDirArtifact,
   renderPrompt,
   section,
   sharedAgentBase,
   sharedAiCheckBase,
-  sharedNodeBase,
+  sharedNonPromptNodeBase,
   type ManagedPatternAgentOptions,
   type ManagedPatternRuntime
 } from "./foundation.js";
@@ -121,7 +122,7 @@ function buildPlanPrompt(
       ...formatCriteria(config.completion.criteria)
     ]),
     section("Planning Task", [
-      "This prompt and materialized context are sufficient for the planning phase.",
+      "This prompt and context pointer packet are sufficient for the planning phase.",
       "Read the task context, any prior failed scorecard, criterion verification records, command output excerpts, and current workspace state available to you.",
       "If prior scorecards, work notes, criterion records, or repeat history are omitted because no prior cycle exists, treat that as expected first-cycle state.",
       "Do not wait for, search globally for, or report a blocker solely because first-cycle private materials are missing.",
@@ -157,6 +158,7 @@ function buildGenerateValidatePrompt(
     section("Execution Task", [
       "Follow the cycle plan in context.",
       "Inspect enough repository context to follow local patterns before editing.",
+      "When draft artifacts rely on upstream research, plans, tests, or prior context, cite concrete evidence names, paths, commands, or packet fields instead of using generic references like prior research.",
       "Use available repo, device, and plugin CLIs naturally when they help complete or validate the work.",
       "Run focused validation commands when feasible. If validation fails and the fix is clear, fix and rerun.",
       "If you cannot run a useful validation command, record exactly why and what evidence you used instead.",
@@ -166,6 +168,7 @@ function buildGenerateValidatePrompt(
     section("Output Contract", [
       "Write `work-notes.md` with what changed, validation attempted, and remaining risks.",
       "Also write draft versions of every public artifact so completion criteria can grade them before final publication.",
+      "Draft handoffs and summaries should include enough evidence citations for an evaluator to see why the change, validation, and risk claims are supported.",
       ...formatDraftArtifacts(publicArtifacts)
     ])
   ]);
@@ -214,8 +217,8 @@ function buildFinalPublishPrompt(
       "Use the latest passing completion scorecard, work notes, and draft artifact materials.",
       "Do not claim success beyond the completion evidence."
     ]),
-    section("Public Artifact Contract", [
-      "Write exactly the declared public artifacts.",
+    section("Declared Public Artifacts", [
+      "Publish the declared public artifacts.",
       ...formatPublicArtifacts(publicArtifacts),
       "The `packet` artifact must include completion score, criterion results, validation evidence, residual risks, and next actions."
     ])
@@ -246,10 +249,10 @@ const out = process.env.AGENTFLOW_OUTPUT_DIR;
 
 function readOptionalText(contextKey) {
   if (!contextKey) return undefined;
-  const materializedPath = process.env["AGENTFLOW_CONTEXT_" + contextKey];
-  if (!materializedPath) return undefined;
+  const pointerPath = process.env["AGENTFLOW_CONTEXT_" + contextKey];
+  if (!pointerPath) return undefined;
   try {
-    const text = fs.readFileSync(materializedPath, "utf8");
+    const text = fs.readFileSync(pointerPath, "utf8");
     if (!text.trim()) return undefined;
     return text.length > 4000 ? text.slice(0, 4000) + "\\n...[truncated]" : text;
   } catch {
@@ -259,8 +262,8 @@ function readOptionalText(contextKey) {
 
 function readCriterion(record) {
   const envName = "AGENTFLOW_CONTEXT_" + record.context_key;
-  const materializedPath = process.env[envName];
-  if (!materializedPath) {
+  const pointerPath = process.env[envName];
+  if (!pointerPath) {
     return {
       id: record.id,
       kind: record.kind,
@@ -268,13 +271,13 @@ function readCriterion(record) {
       required: record.required,
       passed: false,
       score: 0,
-      summary: "Criterion result was not materialized.",
+      summary: "Criterion result pointer was not available.",
       evidence_path: null
     };
   }
 
   try {
-    const parsed = JSON.parse(fs.readFileSync(materializedPath, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(pointerPath, "utf8"));
     const passed = parsed.passed === true;
     const rawScore = typeof parsed.score === "number" ? parsed.score : passed ? 1 : 0;
     const score = Math.max(0, Math.min(1, rawScore));
@@ -289,7 +292,7 @@ function readCriterion(record) {
       score,
       weighted_score: score * record.weight,
       summary: typeof parsed.summary === "string" ? parsed.summary : passed ? "Criterion passed." : "Criterion failed.",
-      evidence_path: materializedPath,
+      evidence_path: pointerPath,
       issues: Array.isArray(parsed.issues) ? parsed.issues : [],
       stdout_excerpt: stdoutExcerpt,
       stderr_excerpt: stderrExcerpt
@@ -304,7 +307,7 @@ function readCriterion(record) {
       score: 0,
       weighted_score: 0,
       summary: "Criterion result could not be read: " + (error && error.message ? error.message : String(error)),
-      evidence_path: materializedPath,
+      evidence_path: pointerPath,
       issues: ["criterion_result_unreadable"]
     };
   }
@@ -398,18 +401,21 @@ function buildCriterionNode(
   const id = workflowNodeId(config.id, `criterion_${zeroPad(index + 1)}_${criterion.id}`);
 
   if (criterion.kind === "command") {
+    const checkShared = sharedNonPromptNodeBase(config);
+
     return {
       type: "check",
       id,
       label: `Completion Criterion ${criterion.id}`,
-      ...sharedNodeBase(config),
+      ...checkShared,
       check_kind: "deterministic",
       command: "sh",
       args: ["-lc", criterion.command],
       on_failure: "continue",
-      context: [
-        artifactContext("work_notes", generateValidateId, "work_notes")
-      ],
+      support: mergeSupportContext(
+        checkShared.support,
+        [artifactContext("work_notes", generateValidateId, "work_notes")]
+      ),
       intent: {
         goal: `Run deterministic completion criterion \`${criterion.id}\` for the current deep work cycle.`,
         acceptance_criteria: [
@@ -427,7 +433,10 @@ function buildCriterionNode(
     ...sharedAiCheckBase(config),
     check_kind: "ai",
     on_failure: "continue",
-    context: buildCriterionContext(generateValidateId, publicArtifacts, criterion),
+    support: mergeSupportContext(
+      sharedAiCheckBase(config).support,
+      buildCriterionContext(generateValidateId, publicArtifacts, criterion)
+    ),
     rubric: criterion.rubric,
     intent: {
       goal: buildRubricGoal(criterion),
@@ -521,10 +530,7 @@ function buildPlanContext(
     }
   }
 
-  return [
-    ...(config.context ?? []),
-    ...feedbackContext
-  ];
+  return feedbackContext;
 }
 
 export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNode {
@@ -553,7 +559,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     id: planId,
     label: "Deep Work Plan",
     ...agentShared,
-    context: buildPlanContext(config, generateValidateId, gateId),
+    support: mergeSupportContext(agentShared.support, buildPlanContext(config, generateValidateId, gateId)),
     artifacts: outputDirArtifact("cycle_plan", "cycle-plan.md", "Focused plan for the next deep work cycle."),
     intent: {
       goal: buildPlanPrompt(config, config.completion.max_cycles),
@@ -571,14 +577,13 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     id: generateValidateId,
     label: "Generate And Validate",
     ...agentShared,
-    context: [
-      ...(config.context ?? []),
+    support: mergeSupportContext(agentShared.support, [
       artifactContext("cycle_plan", planId, "cycle_plan"),
       artifactContext("failed_completion_scorecard", gateId, "completion_scorecard", {
         iteration: "latest_failed",
         if_available: true
       })
-    ],
+    ]),
     artifacts: mergeArtifacts(
       outputDirArtifact("work_notes", "work-notes.md", "Notes from the current deep work cycle."),
       buildDraftArtifacts(publicArtifacts)
@@ -598,7 +603,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     type: "check",
     id: gateId,
     label: "Completion Gate",
-    ...sharedNodeBase(config),
+    ...sharedNonPromptNodeBase(config),
     check_kind: "deterministic",
     command: "node",
     args: ["-e", buildGateScript(config.completion.criteria, config.completion.pass_threshold)],
@@ -615,7 +620,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
       json_path: "$.passed",
       equals: true
     },
-    context: buildGateContext(config),
+    support: mergeSupportContext(sharedNonPromptNodeBase(config).support, buildGateContext(config)),
     artifacts: outputDirArtifact(
       "completion_scorecard",
       "scorecard.json",
@@ -655,7 +660,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
         id: config.id,
         ...(config.label ? { label: config.label } : { label: "Publish Deep Work" }),
         ...agentShared,
-        context: buildPublishContext(config, publicArtifacts, generateValidateId, gateId),
+        support: mergeSupportContext(agentShared.support, buildPublishContext(config, publicArtifacts, generateValidateId, gateId)),
         artifacts: publicArtifacts,
         intent: {
           goal: buildFinalPublishPrompt(config, publicArtifacts),

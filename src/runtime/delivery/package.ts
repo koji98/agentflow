@@ -248,7 +248,7 @@ function renderImplementationSummary(evidence: DeliveryEvidence): string {
 
 function renderDecisionLog(evidence: DeliveryEvidence): string {
   const lines = [
-    "# Decision Log",
+    "# Runtime Evidence Log",
     "",
     "## Run",
     "",
@@ -343,7 +343,7 @@ function renderReviewerGuide(manifest: DeliveryPackageManifest, evidence: Delive
     "## What To Ignore Unless Debugging",
     "",
     "- `nodes/` contains per-node audit/debug details: raw logs, context packets, tool ledgers, and harness result JSON.",
-    "- `runtime/` contains worker `af log` evidence, helper sessions, and structured human resume input.",
+    "- `runtime/` contains worker milestone evidence, helper sessions, and structured human resume input.",
     "- Empty/no-op files are called out in the manifest so they do not look like missing review work.",
     "",
     "## Internal Runtime Artifacts",
@@ -620,7 +620,7 @@ async function buildArtifactTaxonomy(options: {
     artifactEntry({
       path: runPaths.runtime_log_file,
       label: "Worker runtime log",
-      purpose: "Structured `af log` evidence recorded by workers during node execution."
+      purpose: "Worker milestone evidence recorded during node execution."
     }),
     artifactEntry({
       path: operatorObservationsPath(runRoot),
@@ -678,14 +678,14 @@ async function buildArtifactTaxonomy(options: {
         ? [{
             path: attempt.context_packet_path,
             label: `${attempt.authored_id} context packet`,
-            purpose: "Exact materialized context contract provided to the node."
+            purpose: "Exact pointer-only context contract provided to the node."
           }]
         : []),
       ...(attempt.context_manifest_path
         ? [{
             path: attempt.context_manifest_path,
             label: `${attempt.authored_id} context manifest`,
-            purpose: "Prompt-facing index of materialized context."
+            purpose: "Prompt-facing index of context pointers and provenance."
           }]
         : []),
       ...(attempt.context_provenance_path
@@ -745,7 +745,7 @@ async function buildArtifactTaxonomy(options: {
     emptyOrNoop.push(await artifactEntry({
       path: runPaths.runtime_log_file,
       label: "Worker runtime log",
-      purpose: "No worker `af log` entries were recorded.",
+      purpose: "No worker milestone evidence was recorded.",
       reason: "empty_ledger"
     }));
   }

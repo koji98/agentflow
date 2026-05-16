@@ -17,9 +17,9 @@
     "artifact": { "required": [{ "name": "handoff", "contains": ["machine-resolvable"] }] },
     "delivery": { "required": true },
     "prompt-regression": {
-      "task": "This task is machine-resolvable. Write a handoff containing `machine-resolvable`; do not log or claim an external blocker.",
+      "task": "This task is machine-resolvable. Write a handoff containing `machine-resolvable`; do not block a milestone or claim an external blocker.",
       "required_contains": ["machine-resolvable", "Completion:"],
-      "forbid_blocking_logs": true,
+      "forbid_blocked_milestones": true,
       "forbidden_contains": ["I am blocked", "cannot proceed"]
     }
   }

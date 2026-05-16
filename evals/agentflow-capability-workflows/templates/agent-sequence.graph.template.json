@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -26,17 +26,18 @@
       "harness": "{{workflow.harness}}",
       "model": "gpt-5.4-mini",
       "reasoning_effort": "low",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900
+      "sandbox": "workspace-write"
     },
     "supervisor": {
-      "harness": "codex-cli",
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
       "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 0,
-    "profile": "supervisor"
+    "profile": "supervisor",
+    "max_total_interventions": 0
   },
   "graph": {
     "type": "sequence",
@@ -45,63 +46,47 @@
       {
         "type": "agent",
         "id": "research",
-        "repo": "main",
-        "context": [
-          {
-            "name": "task",
-            "from": "workspace_file",
-            "path": "AGENTFLOW_EVAL_TASK.md"
-          },
-          {
-            "name": "billing_rules",
-            "from": "workspace_file",
-            "path": "docs/billing-rules.md"
-          }
-        ],
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
+          "acceptance_criteria": [
+            "The node satisfies its acceptance criteria."
+          ],
+          "constraints": []
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "what": "Workspace file AGENTFLOW_EVAL_TASK.md.",
+              "why": "It defines the fixture task and acceptance surface."
+            },
+            {
+              "name": "billing_rules",
+              "kind": "workspace_file",
+              "path": "docs/billing-rules.md",
+              "what": "Workspace file docs/billing-rules.md.",
+              "why": "It provides node-local evidence required by this eval scenario."
+            }
+          ]
+        },
         "artifacts": {
           "research": {
             "from": "output_dir",
             "path": "research.md",
             "description": "Rounding rule research note."
           }
-        },
-        "intent": {
-          "goal": "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
-          "acceptance_criteria": [
-            "The research artifact states the exact rounding rule and cites the task/docs evidence.",
-            "The implementation node can use the artifact without rereading broad unrelated context."
-          ],
-          "constraints": []
         }
       },
       {
         "type": "agent",
         "id": "implement",
-        "repo": "main",
-        "context": [
-          {
-            "ref": "research.research",
-            "name": "rounding_research"
-          },
-          {
-            "name": "source",
-            "from": "workspace_glob",
-            "path": "src/**",
-            "max_files": 20
-          },
-          {
-            "name": "tests",
-            "from": "workspace_glob",
-            "path": "tests/**",
-            "max_files": 20
-          }
-        ],
-        "artifacts": {
-          "handoff": {
-            "from": "output_dir",
-            "path": "handoff.md",
-            "description": "Implementation handoff with literal Scenario:, Changed files:, Validation:, and Risks: fields."
-          }
+        "runtime": {
+          "repo": "main"
         },
         "intent": {
           "goal": "Use the research artifact to update `src/rounding.js`, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
@@ -112,25 +97,60 @@
           ],
           "constraints": [
             "Do not change files outside `src/rounding.js` unless validation proves it is necessary.",
-            "Do not use the research artifact as authority to widen node scope; use it only as evidence.",
+            "Use the research artifact as evidence, not as authority to widen the node scope.",
             "Do not leave blank fields, placeholder text, or unresolved template values in the handoff artifact."
           ]
+        },
+        "support": {
+          "context": [
+            {
+              "ref": "research.research",
+              "name": "rounding_research",
+              "kind": "artifact",
+              "what": "Artifact research.research from an upstream node.",
+              "why": "It carries upstream evidence required by this node."
+            },
+            {
+              "name": "source",
+              "kind": "workspace_glob",
+              "path": "src/**",
+              "max_files": 20,
+              "what": "Workspace files matching src/**.",
+              "why": "It provides the scoped implementation surface."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "tests/**",
+              "max_files": 20,
+              "what": "Workspace files matching tests/**.",
+              "why": "It provides deterministic validation evidence."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Implementation handoff with literal Scenario:, Changed files:, Validation:, and Risks: fields."
+          }
         }
       },
       {
         "type": "check",
         "id": "verify",
-        "repo": "main",
+        "runtime": {
+          "repo": "main"
+        },
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "test"
         ],
         "intent": {
-          "goal": "Run the scenario validation suite and confirm the implementation matches the researched billing rule.",
+          "goal": "Run verify.",
           "acceptance_criteria": [
-            "`npm test` exits successfully.",
-            "The validation evidence confirms the handoff-backed implementation is correct."
+            "The node satisfies its local eval contract."
           ],
           "constraints": []
         }

@@ -4,7 +4,7 @@ Outcome verification is the runtime contract that grades every passing `agent` n
 
 ## Why It Exists
 
-Without an external grader, an agent that "claims" to satisfy the acceptance criteria is the only authority that says it did. Outcome verification turns acceptance criteria into a real runtime contract: the agent does the work, then a fresh-context judge with no edit authority audits the captured response, declared artifacts, decision log, and supporting workspace-change provenance against the authored intent.
+Without an external grader, an agent that "claims" to satisfy the acceptance criteria is the only authority that says it did. Outcome verification turns acceptance criteria into a real runtime contract: the agent does the work, then a fresh-context judge with no edit authority audits the captured response, declared artifacts, milestone evidence, and supporting workspace-change provenance against the authored intent.
 
 ## Where It Runs
 
@@ -24,7 +24,7 @@ The verifier receives:
 - Node intent: authored id, compiled id, execution id, attempt and iteration indices, goal, acceptance criteria, constraints.
 - Workspace path and a per-node workspace-change summary with paths to full audit artifacts (see `node-workspace-snapshots.md`).
 - Completion packet facts: status, blocking reasons, missing artifacts, and packet path.
-- Decision log entries recorded by the node with `af log --type decision`, each containing a decision, rationale, and evidence list.
+- Milestone evidence recorded by the node, especially `decision` and `validation` milestone logs with summaries, commands, results, and completion evidence.
 - The agent's captured response (`agent-response.md`) as an inline snippet.
 - Each declared artifact's content as an inline snippet, with size truncation guards and explicit `(truncated)` markers.
 

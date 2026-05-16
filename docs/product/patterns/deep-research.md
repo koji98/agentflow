@@ -19,7 +19,7 @@ Common fields:
 - `intent.constraints`
 - `repo`
 - `profile`
-- `context`
+- `support`
 
 ## Public Artifacts
 
@@ -30,7 +30,7 @@ Fixed public artifacts:
 
 Authors cannot add arbitrary `artifacts` to `pattern_deep_research`. Use a downstream `agent` node when a workflow needs a custom synthesized deliverable.
 
-Deep research collapses public output by default into `summary` and `packet`. Angle and synthesis artifacts remain private evidence unless an angle uses `as_artifact: true` to expose its raw Markdown report. Downstream nodes should reference the authored pattern id, for example `storage_research.summary` or `storage_research.storage_options`, not generated internal angle ids.
+Deep research collapses graph-addressable output by default into `summary` and `packet`. Angle and synthesis artifacts remain readable in the run tree as evidence packets; use `as_artifact: true` when a downstream graph node needs to reference a raw angle report directly. Downstream nodes should reference the authored pattern id, for example `storage_research.summary` or `storage_research.storage_options`, not generated internal angle ids.
 
 ## Runtime Shape
 
@@ -42,7 +42,7 @@ The pattern lowers into:
 
 Each synthesis node consumes at most three research packets. Groups are split as evenly as possible, so seven angles become synthesis groups of `2`, `2`, and `3`, not `3`, `3`, and `1`. Synthesis preserves major findings, collapses duplicate claims, keeps provenance, and carries conflicts or uncertainty forward.
 
-Angle and synthesis artifacts are private evidence packets. They support the final contract but do not need to match final public formatting. The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes `summary` and `packet`. Exposed angle artifacts are raw angle reports forwarded by the runtime, not rewritten final-publisher output.
+Angle and synthesis artifacts are internal evidence packets in the run tree. They support the final contract but do not need to match final graph-addressable formatting. The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes `summary` and `packet`. Exposed angle artifacts are raw angle reports forwarded by the runtime, not rewritten final-publisher output.
 
 Angles can be authored as strings or objects. Object angles support:
 
@@ -50,7 +50,7 @@ Angles can be authored as strings or objects. Object angles support:
 - `prompt`: sentence-style research prompt
 - `as_artifact`: optional `true` value that exposes the raw angle report as `<pattern_id>.<angle_id>`
 
-If `as_artifact` is omitted, the angle remains private evidence only. The public `packet` includes an angle index with evidence refs and private artifact paths for selective inspection.
+If `as_artifact` is omitted, the angle remains run-tree evidence only and is not addressable by downstream graph nodes. The `packet` includes an angle index with evidence refs and artifact paths for selective inspection.
 
 ## Example
 
@@ -58,8 +58,10 @@ If `as_artifact` is omitted, the angle remains private evidence only. The public
 {
   "type": "pattern_deep_research",
   "id": "storage_research",
-  "repo": "main",
-  "profile": "research",
+  "runtime": {
+    "repo": "main",
+    "profile": "research"
+  },
   "intent": {
     "goal": "Recommend the storage design that best supports resumable supervised runs.",
     "acceptance_criteria": [
@@ -70,14 +72,18 @@ If `as_artifact` is omitted, the angle remains private evidence only. The public
       "Do not treat sources outside repository conventions as primary authority."
     ]
   },
-  "context": [
-    {
-      "name": "runtime_docs",
-      "from": "workspace_glob",
-      "path": "docs/technical/*.md",
-      "max_files": 8
-    }
-  ],
+  "support": {
+    "context": [
+      {
+        "name": "runtime_docs",
+        "kind": "workspace_glob",
+        "path": "docs/technical/*.md",
+        "max_files": 8,
+        "what": "Technical runtime documentation.",
+        "why": "It is primary evidence for resumable supervised run design."
+      }
+    ]
+  },
   "research": {
     "angles": [
       "Investigate how current runtime artifacts support resume and auditability.",

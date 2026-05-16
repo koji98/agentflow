@@ -7,6 +7,12 @@ import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { HarnessName } from "../graph/schema.js";
 import { listAttemptsForCompiledNode, type RuntimeNodeAttempt } from "../runtime/attempts.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../runtime/harness/types.js";
+import {
+  createHarnessWorkspaceWriteMirror,
+  mapOutputArtifactPathToMirror,
+  prepareHarnessWorkspaceWriteMirror,
+  syncAndRemoveHarnessWorkspaceWriteMirror
+} from "../runtime/harness/workspace_mirror.js";
 import type { RuntimeSession } from "../runtime/session.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
 import type { SupervisorInterventionRecord } from "./types.js";
@@ -95,24 +101,6 @@ async function collectPreviousAttemptEvidencePaths(
   return [...new Set(await existingPaths(candidatePaths))];
 }
 
-const sandboxRank = {
-  "read-only": 0,
-  "workspace-write": 1,
-  "danger-full-access": 2
-} as const;
-
-function clampRepairSandbox(
-  nodeSandbox: NonNullable<CompiledAgentNode["effective_policy"]["sandbox"]>,
-  supervisorSandbox: EffectiveSupervisorPolicy["sandbox"] | undefined
-): NonNullable<CompiledAgentNode["effective_policy"]["sandbox"]> {
-  if (!supervisorSandbox) {
-    return nodeSandbox;
-  }
-  return sandboxRank[supervisorSandbox] < sandboxRank[nodeSandbox]
-    ? supervisorSandbox
-    : nodeSandbox;
-}
-
 function buildRepairInvocation(options: {
   node: CompiledAgentNode;
   attempt: RuntimeNodeAttempt;
@@ -126,6 +114,7 @@ function buildRepairInvocation(options: {
   context_manifest_path: string;
   context_manifest: string;
   artifacts_root: string;
+  runtime_dir: string;
   repair_attempt: number;
   max_attempts: number;
   missing_artifacts: MissingDeclaredArtifact[];
@@ -138,16 +127,14 @@ function buildRepairInvocation(options: {
 }): AgentInvocation {
   const priorResponsePath = join(options.artifacts_root, "agent-response.md");
   const supervisorPolicy = options.supervisor_policy;
-  const sandbox = clampRepairSandbox(
-    options.node.effective_policy.sandbox ?? "workspace-write",
-    supervisorPolicy?.sandbox
-  );
+  const sandbox = options.node.effective_policy.sandbox ?? "workspace-write";
   return {
     promptKind: "artifact_repair",
     runId: options.run_id,
     executionId: options.execution_id ?? options.attempt.execution_id,
     repoAlias: options.node.repo,
     repoPath: options.workspace_path,
+    runtimeDir: options.runtime_dir,
     sandbox,
     ...(supervisorPolicy?.skip_git_repo_check ?? options.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
     ...(supervisorPolicy?.harness_config ?? options.node.effective_policy.harness_config
@@ -216,6 +203,7 @@ export async function runRepairArtifactIntervention(options: {
   const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, interventionId);
   const startedAt = new Date().toISOString();
   const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
+  const runtimeDir = join(options.session.run_root, "runtime");
   const previousAttemptEvidencePaths = await collectPreviousAttemptEvidencePaths(
     options.session,
     options.node,
@@ -234,6 +222,7 @@ export async function runRepairArtifactIntervention(options: {
 
   const harnessName = options.supervisor_policy?.harness ?? options.node.effective_policy.harness;
   const harness = harnessName ? options.harnesses[harnessName] : undefined;
+  const sandbox = options.node.effective_policy.sandbox ?? "workspace-write";
 
   if (!harnessName || !harness) {
     const unavailableInvocation = buildRepairInvocation({
@@ -251,6 +240,7 @@ export async function runRepairArtifactIntervention(options: {
       context_manifest_path: options.context_manifest_path,
       context_manifest: contextManifest,
       artifacts_root: artifactsRoot,
+      runtime_dir: runtimeDir,
       repair_attempt: repairAttempt,
       max_attempts: maxAttempts,
       missing_artifacts: options.missing_artifacts,
@@ -302,11 +292,49 @@ export async function runRepairArtifactIntervention(options: {
     };
   }
 
+  const workspaceWriteMirror = createHarnessWorkspaceWriteMirror({
+    harness: harnessName,
+    sandbox,
+    workspace_path: options.workspace_path,
+    run_id: options.session.run_id,
+    execution_id: `${options.attempt.execution_id}__${interventionId}`,
+    execution_dir: options.attempt.execution_dir,
+    output_dir: artifactsRoot,
+    runtime_dir: runtimeDir
+  });
+  await prepareHarnessWorkspaceWriteMirror(workspaceWriteMirror);
+  const repairArtifactsRoot = workspaceWriteMirror?.output_dir ?? artifactsRoot;
+  const repairRuntimeDir = workspaceWriteMirror?.runtime_dir ?? runtimeDir;
+  const repairMissingArtifacts = options.missing_artifacts.map((artifact) => ({
+    ...artifact,
+    expected_path: mapOutputArtifactPathToMirror(workspaceWriteMirror, artifact.expected_path)
+  }));
+
   const repairToolSetup = await prepareAgentTools({
     node: options.node,
     execution_dir: options.attempt.execution_dir,
     workspace_path: options.workspace_path,
-    artifacts_root: artifactsRoot,
+    artifacts_root: repairArtifactsRoot,
+    run_root: options.session.run_root,
+    runtime_dir: repairRuntimeDir,
+    ...(workspaceWriteMirror ? { writable_runtime_dir: workspaceWriteMirror.tool_runtime_dir } : {}),
+    run_id: options.session.run_id,
+    graph_id: options.session.graph.graph_id,
+    execution_id: options.attempt.execution_id,
+    repo_alias: options.node.repo,
+    ...(options.supervisor_policy?.harness ?? options.node.effective_policy.harness
+      ? { harness: options.supervisor_policy?.harness ?? options.node.effective_policy.harness }
+      : {}),
+    ...(options.supervisor_policy?.model ?? options.node.effective_policy.model
+      ? { model: options.supervisor_policy?.model ?? options.node.effective_policy.model }
+      : {}),
+    ...(options.supervisor_policy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort
+      ? { reasoning_effort: options.supervisor_policy?.reasoning_effort ?? options.node.effective_policy.reasoning_effort }
+      : {}),
+    sandbox,
+    timeout_sec: options.supervisor_policy?.timeout_sec ?? options.node.effective_policy.timeout_sec,
+    context_packet_path: options.context_packet_path,
+    context_manifest_path: options.context_manifest_path,
     credential_specs: options.session.graph?.credential_specs ?? {}
   });
   const invocation = buildRepairInvocation({
@@ -323,10 +351,11 @@ export async function runRepairArtifactIntervention(options: {
     context_packet_path: options.context_packet_path,
     context_manifest_path: options.context_manifest_path,
     context_manifest: contextManifest,
-    artifacts_root: artifactsRoot,
+    artifacts_root: repairArtifactsRoot,
+    runtime_dir: repairRuntimeDir,
     repair_attempt: repairAttempt,
     max_attempts: maxAttempts,
-    missing_artifacts: options.missing_artifacts,
+    missing_artifacts: repairMissingArtifacts,
     previous_attempt_evidence_paths: previousAttemptEvidencePaths,
     tool_bin_dir: repairToolSetup.bin_dir,
     tool_env: repairToolSetup.env,
@@ -335,7 +364,14 @@ export async function runRepairArtifactIntervention(options: {
     ...(options.signal ? { signal: options.signal } : {})
   });
   await writeFile(promptPath, `${renderHarnessPrompt(invocation)}\n`, "utf8");
-  const result = await harness.run(invocation);
+  let result: Awaited<ReturnType<HarnessAdapter["run"]>>;
+  try {
+    result = await harness.run(invocation);
+    await syncAndRemoveHarnessWorkspaceWriteMirror(workspaceWriteMirror);
+  } catch (error) {
+    await syncAndRemoveHarnessWorkspaceWriteMirror(workspaceWriteMirror).catch(() => undefined);
+    throw error;
+  }
   const stillMissing = await collectStillMissing(options.missing_artifacts);
   const status =
     result.status === "canceled"

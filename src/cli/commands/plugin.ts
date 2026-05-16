@@ -2,6 +2,7 @@ import {
   renderCommandUsageError
 } from "../command_support.js";
 import { resolvePluginsForGraph } from "../../plugins/workflows.js";
+import { resolveSkillSourcesForGraph } from "../../skills/sources.js";
 
 function renderPluginUsageError(message: string): string {
   return renderCommandUsageError({
@@ -13,7 +14,7 @@ function renderPluginUsageError(message: string): string {
 
 export const pluginCommand = {
   name: "plugin",
-  summary: "Resolve Git or local plugin packages for an authored graph.",
+  summary: "Resolve Git or local plugin and skill packages for an authored graph.",
   usage: "agentflow plugin <resolve> --graph <path/to/agentflow.graph.json>",
   examples: [
     "agentflow plugin resolve --graph ./agentflow.graph.json"
@@ -21,7 +22,8 @@ export const pluginCommand = {
   optionNames: ["graph", "help"] as const,
   helpNotes: [
     "Plugins package reusable managed workflows, CLI tools, and credential metadata.",
-    "resolve clones Git plugins or fingerprints local plugin folders, then writes agentflow.plugins.lock.json next to the graph."
+    "Skill sources package reusable SKILL.md collections for node support.",
+    "resolve clones Git packages or fingerprints local folders, then writes lockfiles next to the graph."
   ] as const,
   async run(
     options: Record<string, string | boolean | string[] | undefined>,
@@ -50,8 +52,12 @@ export const pluginCommand = {
       };
     }
 
-    const result = await resolvePluginsForGraph(currentWorkingDirectory, graphPath);
-    const passed = result.diagnostics.length === 0;
+    const [pluginResult, skillResult] = await Promise.all([
+      resolvePluginsForGraph(currentWorkingDirectory, graphPath),
+      resolveSkillSourcesForGraph(currentWorkingDirectory, graphPath)
+    ]);
+    const diagnostics = [...pluginResult.diagnostics, ...skillResult.diagnostics];
+    const passed = diagnostics.length === 0;
 
     return {
       exitCode: passed ? 0 : 1,
@@ -59,12 +65,14 @@ export const pluginCommand = {
         command: "plugin resolve",
         status: passed ? "passed" : "failed",
         message: passed
-          ? "Plugin workflows resolved and lockfile updated."
-          : "Plugin workflow resolution failed.",
-        graph_path: result.graph_path,
-        lockfile_path: result.lockfile_path,
-        resolved_plugins: result.resolved_plugins,
-        diagnostics: result.diagnostics
+          ? "Plugin and skill sources resolved and lockfiles updated."
+          : "Plugin or skill source resolution failed.",
+        graph_path: pluginResult.graph_path,
+        plugin_lockfile_path: pluginResult.lockfile_path,
+        skill_lockfile_path: skillResult.lockfile_path,
+        resolved_plugins: pluginResult.resolved_plugins,
+        resolved_skill_sources: skillResult.resolved_skill_sources,
+        diagnostics
       }
     };
   }

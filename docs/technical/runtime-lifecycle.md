@@ -40,7 +40,7 @@ Validation follows the same front half as a run, but stops before execution:
 4. Resolve launch settings from `defaults` and `profiles`.
 5. Compile the graph into primitive runtime nodes, edges, scopes, resolved tools, credential specs, and artifact references.
 6. Run full authoring review diagnostics.
-7. Run local readiness checks for repos, commands, harnesses, plugin tool help, credentials, and context token budgets.
+7. Run local readiness checks for repos, commands, ambient CLI hints, harnesses, plugin tool help, credentials, and context pointers.
 8. Optionally emit compiled JSON, a validation package, Mermaid text, or a rendered Mermaid image.
 
 `validate --show-compiled` is the most direct way to inspect the contract the runtime will execute. `validate --output-dir` writes a reusable validation package. `validate --diagram-output` is for reviewing graph shape, dependencies, scopes, and artifact handoffs visually.
@@ -60,7 +60,7 @@ flowchart TD
   refs --> compiled["Compiled graph"]
 ```
 
-Compiled nodes carry the effective policy needed to launch them: repo alias, profile name, workspace backend, harness, model, sandbox, timeout, input token budgets, artifact repair policy, context list, declared artifacts, and granted tools.
+Compiled nodes carry the effective policy needed to launch them: repo alias, profile name, workspace backend, harness, model, sandbox, artifact repair policy, context list, declared artifacts, selected skills, ambient CLI hints, and granted managed tools.
 
 Authored ids remain visible for humans. Compiled ids are stable runtime ids that include scope context, especially inside managed patterns and repeat bodies. The `authored_to_compiled` map preserves that relationship for inspection, delivery, and resume.
 
@@ -121,7 +121,7 @@ Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, 
 
 For recovery-oriented actions, the supervisor records a failure fingerprint, writes `causal-case-file.{json,md}`, ranks targets in `causal-targets.json`, writes `recovery-chain.{json,md}`, merges evidence into `recovery-plan.{json,md}`, writes `runtime-overlay.json`, records `material-delta.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the selected target's next attempt prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
 
-Context materialization can fail before the harness runs. Those failures are classified as `context_contract_failure`, analyzed with the shared run-ready context analyzer, and retried with a compact `supervisor_context_repair` packet when the supervisor can safely repair the packaging without changing graph authority.
+Context pointer packaging can fail before the harness runs. Those failures are classified as `context_contract_failure`, analyzed with the shared run-ready context analyzer, and retried with a compact `supervisor_context_repair` packet when the supervisor can safely repair the packaging without changing graph authority.
 
 Workspace repair uses the node-level baseline and after snapshots captured around every agent/exec attempt. If a failed attempt is classified as a forbidden or unrelated workspace edit, the overlay restores tracked files from the pre-attempt snapshot and removes untracked files introduced by that failed attempt before the retry is scheduled. Environment repair is intentionally narrower: it refreshes per-execution Agentflow tool wrappers and PATH/runtime metadata on the retry without mutating global machine state.
 

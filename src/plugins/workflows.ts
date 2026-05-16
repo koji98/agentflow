@@ -998,7 +998,7 @@ async function rewriteContextItems(
 
   for (const item of value) {
     const record = asRecord(item);
-    if (!record || record.from !== "plugin_file") {
+    if (!record || record.kind !== "plugin_file") {
       rewritten.push(await rewriteWorkflowValue(
         item,
         workflowDir,
@@ -1016,8 +1016,10 @@ async function rewriteContextItems(
 
     const name = typeof record.name === "string" ? record.name : undefined;
     const pluginPath = typeof record.path === "string" ? record.path : undefined;
-    if (!name || !pluginPath) {
-      diagnostics.push({ path: "$.workflow.context", message: "plugin_file context requires name and path." });
+    const what = typeof record.what === "string" ? record.what : undefined;
+    const why = typeof record.why === "string" ? record.why : undefined;
+    if (!name || !pluginPath || !what || !why) {
+      diagnostics.push({ path: "$.workflow.context", message: "plugin_file context requires name, path, what, and why." });
       continue;
     }
 
@@ -1031,8 +1033,10 @@ async function rewriteContextItems(
     resourceDigests[pluginPath] = digestText(text);
     rewritten.push({
       name,
-      from: "text",
-      text
+      kind: "plugin_file",
+      path: resolvedPath,
+      what,
+      why
     });
   }
 
@@ -1174,7 +1178,6 @@ function addContextToExecutables(
   inherited: {
     repo?: unknown;
     profile?: unknown;
-    timeout_sec?: unknown;
   },
   diagnostics: GraphDiagnostic[]
 ): unknown {
@@ -1194,7 +1197,8 @@ function addContextToExecutables(
   }
 
   if (isExecutableType(record.type)) {
-    const currentContext = Array.isArray(record.context) ? record.context : [];
+    const supportRecord = asRecord(record.support) ?? {};
+    const currentContext = Array.isArray(supportRecord.context) ? supportRecord.context : [];
     const currentNames = contextNames(currentContext);
     const duplicates = extraContext
       .map((item) => asRecord(item)?.name)
@@ -1207,16 +1211,18 @@ function addContextToExecutables(
       });
     }
 
-    rewritten.context = [...extraContext, ...currentContext] as ContextItem[];
+    rewritten.support = {
+      ...supportRecord,
+      context: [...extraContext, ...currentContext] as ContextItem[]
+    };
 
-    if (!rewritten.repo && inherited.repo) {
-      rewritten.repo = inherited.repo;
-    }
-    if (!rewritten.profile && inherited.profile) {
-      rewritten.profile = inherited.profile;
-    }
-    if (!rewritten.timeout_sec && inherited.timeout_sec) {
-      rewritten.timeout_sec = inherited.timeout_sec;
+    const runtimeRecord = asRecord(record.runtime) ?? {};
+    if ((!runtimeRecord.repo || !runtimeRecord.profile) && (inherited.repo || inherited.profile)) {
+      rewritten.runtime = {
+        ...runtimeRecord,
+        ...(!runtimeRecord.repo && inherited.repo ? { repo: inherited.repo } : {}),
+        ...(!runtimeRecord.profile && inherited.profile ? { profile: inherited.profile } : {})
+      };
     }
   }
 
@@ -1244,7 +1250,7 @@ async function expandPluginNode(
   pushUnknownFieldDiagnostics(
     record,
     "$.graph",
-    ["type", "id", "label", "uses", "config", "context", "repo", "profile", "timeout_sec"],
+    ["type", "id", "label", "uses", "config", "context", "repo", "profile"],
     diagnostics
   );
 
@@ -1328,19 +1334,13 @@ async function expandPluginNode(
     id
   );
 
-  const pluginConfigContext = {
-    name: "plugin_config",
-    from: "text",
-    text: `${JSON.stringify(config, null, 2)}\n`
-  };
   const forwardedContext = Array.isArray(record.context) ? record.context : [];
   const withContext = addContextToExecutables(
     rewritten,
-    [pluginConfigContext, ...forwardedContext],
+    forwardedContext,
     {
       repo: record.repo,
-      profile: record.profile,
-      timeout_sec: record.timeout_sec
+      profile: record.profile
     },
     diagnostics
   );

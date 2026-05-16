@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -26,17 +26,18 @@
       "harness": "{{workflow.harness}}",
       "model": "gpt-5.4-mini",
       "reasoning_effort": "low",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900
+      "sandbox": "workspace-write"
     },
     "supervisor": {
-      "harness": "codex-cli",
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
       "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 4,
-    "profile": "supervisor"
+    "profile": "supervisor",
+    "max_total_interventions": 0
   },
   "graph": {
     "type": "sequence",
@@ -45,31 +46,56 @@
       {
         "type": "pattern_deep_work",
         "id": "repo_fix",
-        "repo": "main",
-        "context": [
-          {
-            "name": "task",
-            "from": "workspace_file",
-            "path": "AGENTFLOW_EVAL_TASK.md"
-          },
-          {
-            "name": "source",
-            "from": "workspace_glob",
-            "path": "src/**",
-            "max_files": 20
-          },
-          {
-            "name": "tests",
-            "from": "workspace_glob",
-            "path": "tests/**",
-            "max_files": 20
-          },
-          {
-            "name": "package",
-            "from": "workspace_file",
-            "path": "package.json"
-          }
-        ],
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
+          "acceptance_criteria": [
+            "`src/tax.js` applies discount before tax while preserving the exported API.",
+            "`npm test` passes.",
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+          ],
+          "constraints": [
+            "Do not edit files outside `src/tax.js` unless validation proves it is necessary.",
+            "Do not add dependencies or generated files.",
+            "Use local repo files and tests as primary authority."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "what": "Workspace file AGENTFLOW_EVAL_TASK.md.",
+              "why": "It defines the fixture task and acceptance surface."
+            },
+            {
+              "name": "source",
+              "kind": "workspace_glob",
+              "path": "src/**",
+              "max_files": 20,
+              "what": "Workspace files matching src/**.",
+              "why": "It provides the scoped implementation surface."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "tests/**",
+              "max_files": 20,
+              "what": "Workspace files matching tests/**.",
+              "why": "It provides deterministic validation evidence."
+            },
+            {
+              "name": "package",
+              "kind": "workspace_file",
+              "path": "package.json",
+              "what": "Workspace file package.json.",
+              "why": "It provides node-local evidence required by this eval scenario."
+            }
+          ]
+        },
         "artifacts": {
           "handoff": {
             "from": "output_dir",
@@ -103,35 +129,23 @@
               "weight": 0.2
             }
           ]
-        },
-        "intent": {
-          "goal": "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
-          "acceptance_criteria": [
-            "`src/tax.js` applies discount before tax while preserving the exported API.",
-            "`npm test` passes.",
-            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
-          ],
-          "constraints": [
-            "Do not edit files outside `src/tax.js` unless validation proves it is necessary.",
-            "Do not add dependencies or generated files.",
-            "Do not treat sources outside local repo files and tests as primary authority."
-          ]
         }
       },
       {
         "type": "check",
         "id": "verify",
-        "repo": "main",
+        "runtime": {
+          "repo": "main"
+        },
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "test"
         ],
         "intent": {
-          "goal": "Run the local validation suite after deep-work completion and confirm the final workspace satisfies the task.",
+          "goal": "Run verify.",
           "acceptance_criteria": [
-            "`npm test` exits successfully.",
-            "The check evidence confirms the managed loop ended with a valid implementation."
+            "The node satisfies its local eval contract."
           ],
           "constraints": []
         }

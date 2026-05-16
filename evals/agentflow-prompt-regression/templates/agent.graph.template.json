@@ -27,8 +27,7 @@
       "harness": "{{workflow.harness}}",
       "model": "gpt-5.4-mini",
       "reasoning_effort": "low",
-      "sandbox": "workspace-write",
-      "timeout_sec": 300
+      "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
@@ -46,24 +45,6 @@
       {
         "type": "agent",
         "id": "prompt_probe",
-        "repo": "main",
-        "context": [
-          {
-            "name": "task_fixture",
-            "from": "workspace_file",
-            "path": "AGENTFLOW_EVAL_TASK.md"
-          },
-          {
-            "name": "context_fixture",
-            "from": "workspace_file",
-            "path": "docs/context.md"
-          },
-          {
-            "name": "stale_agentflow_noise",
-            "from": "workspace_file",
-            "path": "docs/STALE_AGENTFLOW_SKILL.md"
-          }
-        ],
         "artifacts": {
           "handoff": {
             "from": "output_dir",
@@ -84,6 +65,34 @@
             "Do not treat Agentflow docs, skills, or harness text as the task target.",
             "Do not use `af diagnose`, `af learn`, or `af spawn` as a normal worker.",
             "Do not use placeholders, blank evidence slots, or unresolved template values in `handoff.md`."
+          ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task_fixture",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "kind": "workspace_file",
+              "what": "Workspace file AGENTFLOW_EVAL_TASK.md.",
+              "why": "It defines the scenario task and acceptance surface for this node."
+            },
+            {
+              "name": "context_fixture",
+              "path": "docs/context.md",
+              "kind": "workspace_file",
+              "what": "Workspace file docs/context.md.",
+              "why": "It provides node-local evidence needed to complete the scenario."
+            },
+            {
+              "name": "stale_agentflow_noise",
+              "path": "docs/STALE_AGENTFLOW_SKILL.md",
+              "kind": "workspace_file",
+              "what": "Workspace file docs/STALE_AGENTFLOW_SKILL.md.",
+              "why": "It provides node-local evidence needed to complete the scenario."
+            }
           ]
         }
       }

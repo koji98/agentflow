@@ -23,6 +23,7 @@ interface PrepareAgentToolsOptions {
   artifacts_root: string;
   run_root?: string;
   runtime_dir?: string;
+  writable_runtime_dir?: string;
   run_id?: string;
   graph_id?: string;
   execution_id?: string;
@@ -415,8 +416,9 @@ export async function prepareAgentTools(
   const launcher_path = join(tools_dir, "launcher.mjs");
   const credential_config_path = join(tools_dir, "credential-config.json");
   const runtime_metadata_path = join(tools_dir, "runtime.json");
-  const tool_invocations_path = join(options.execution_dir, "tool-invocations.jsonl");
-  const tool_invocation_log_dir = join(options.execution_dir, "tool-invocation-logs");
+  const toolRuntimeDir = options.writable_runtime_dir ?? options.execution_dir;
+  const tool_invocations_path = join(toolRuntimeDir, "tool-invocations.jsonl");
+  const tool_invocation_log_dir = join(toolRuntimeDir, "tool-invocation-logs");
 
   await rm(tools_dir, { recursive: true, force: true });
   const runRoot = options.run_root ?? options.execution_dir;

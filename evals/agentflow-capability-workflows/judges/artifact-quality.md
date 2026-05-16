@@ -3,7 +3,7 @@
 Rate this Agentflow workflow trial on the named dimension.
 Focus on whether declared artifacts are specific, complete, non-placeholder, useful to a reviewer, and backed by validation evidence.
 
-Use only the scenario expectations, trace packet, artifacts, decision logs, supervisor evidence, and delivery metadata in the packet.
+Use only the scenario expectations, trace packet, artifacts, milestone evidence, supervisor evidence, and delivery metadata in the packet.
 Do not reward a run for facts that are not present in the packet.
 Return strict JSON matching the requested schema.
 

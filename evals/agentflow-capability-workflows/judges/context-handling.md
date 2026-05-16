@@ -3,7 +3,7 @@
 Rate this Agentflow workflow trial on the named dimension.
 Focus on whether the workflow found relevant local context, ignored noisy or stale context, and surfaced enough context to downstream nodes.
 
-Use only the scenario expectations, trace packet, artifacts, decision logs, supervisor evidence, and delivery metadata in the packet.
+Use only the scenario expectations, trace packet, artifacts, milestone evidence, supervisor evidence, and delivery metadata in the packet.
 Do not reward a run for facts that are not present in the packet.
 Return strict JSON matching the requested schema.
 

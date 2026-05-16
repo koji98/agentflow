@@ -26,7 +26,7 @@ agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg
 agentflow validate --graph agentflow.graph.json --diagram-image-output graph.svg --diagram-image-package @mermaid-js/mermaid-cli@latest
 ```
 
-Default `validate` is the launch preflight. It checks authored graph normalization, launch profile/workspace resolution, compilation, full authoring review, local repo/command/harness readiness, plugin tool help, credential references, and real context token analysis without launching a run or mutating workspace files.
+Default `validate` is the launch preflight. It checks authored graph normalization, launch profile/workspace resolution, compilation, full authoring review, local repo/command/harness readiness, plugin tool help, credential references, and context pointer/provenance analysis without launching a run or mutating workspace files.
 
 - `--strict`: fail validation when serious authoring review findings are present.
 - `--show-compiled`: does the compiled primitive graph match the operator's intent?
@@ -70,7 +70,7 @@ Important launch behavior:
 - Supervisor `pause_for_human` is an authority pause, not a graph node; local context, validation, artifact, workspace, and recoverable environment failures should attempt machine recovery before a pause is considered.
 - Terminal runs write the delivery package after run completion.
 
-For the implementation flow behind launch, node attempts, context materialization, generated runtime tooling, supervision, and delivery, see `../technical/runtime-lifecycle.md`.
+For the implementation flow behind launch, node attempts, context pointer resolution, generated runtime tooling, supervision, and delivery, see `../technical/runtime-lifecycle.md`.
 
 ## Progress Events
 
@@ -120,12 +120,12 @@ Manual files worth opening:
 
 Runtime coordination files are under `<run-root>/runtime/`. They are useful when debugging worker evidence and helper sub-nodes:
 
-- `log.jsonl`: structured worker evidence recorded with `af log --type`.
+- `milestones/<execution>.json`: worker milestones and attached finding, decision, and validation evidence.
 - `helpers/<helper-id>/session.json`: helper lifecycle, logs, output directory, and artifact paths.
 - `observations.jsonl`: live human observations added without pausing the run.
 - `human-resume-input.jsonl`: structured human input used when resuming paused runs.
 
-Agents should publish durable results with `af artifact write`, check mechanical readiness with `af complete check`, and record evidence with the three log types: `progress`, `finding`, and `decision`. Findings carry `finding_kind: observation|issue|risk|blocker`; blocking findings also include `blocked_on`, `recoverable_by` when known, and structured evidence. Decision logs use `decision`, `rationale`, `contract_implication`, and `evidence[]` so outcome verification and supervisor recovery can inspect why the node chose a scope-affecting path. A completed agent is not an online collaborator; inspect its artifacts, completion packet, observations, and supervisor timeline rather than expecting live intervention.
+Agents should orient with `af orient`, understand any provided plan/research/context before committing to execution milestones, publish durable results with `af artifact write <name>` from stdin, check mechanical readiness with `af complete check`, and record milestone evidence with `finding`, `decision`, and `validation` logs. A completed agent is not an online collaborator; inspect its artifacts, completion packet, milestone state, observations, and supervisor timeline rather than expecting live intervention.
 
 Operators can add non-pausing live feedback with:
 
@@ -135,9 +135,9 @@ agentflow observe add --run <run-root> --kind blocker --summary "Backend worker 
 agentflow observe resolve --run <run-root> --observation <id> --resolution "Worker restored"
 ```
 
-`af status` and `af complete check` surface active observations relevant to the current node. Observations are evidence, not graph edits; they do not change acceptance criteria, repo authority, sandbox, or declared artifacts.
+`af orient` and `af complete check` surface active observations relevant to the current node. Observations are evidence, not graph edits; they do not change acceptance criteria, repo authority, sandbox, or declared artifacts.
 
-When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --graph <path>` reports real context token analysis before launch when a graph has broad globs, large docs, generated trees, or strict `input_rules.max_total_tokens`.
+When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --graph <path>` reports context analysis before launch when a graph has broad globs, large docs, generated trees, unresolved context pointers, missing CLI hints, or managed tool readiness issues.
 
 ## Resume
 

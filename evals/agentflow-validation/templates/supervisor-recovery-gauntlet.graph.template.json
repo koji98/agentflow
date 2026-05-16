@@ -1,0 +1,208 @@
+{
+  "version": "1",
+  "graph_id": "sentinel-supervisor-gauntlet-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "Exercise support capabilities, managed tools, CLI hints, context pointers, downstream checks, and supervisor resume surfaces.",
+    "acceptance_criteria": [
+      "The node prompt includes selected skills, managed tools, CLI hints, and context pointer what/why.",
+      "The run produces reviewable evidence for missing context, stale docs, validation repair, workspace cleanup, and authority pause handling.",
+      "Supervisor resume input can continue a paused run when scripted."
+    ],
+    "constraints": [
+      "Do not mutate remote services.",
+      "Do not use public network sources."
+    ]
+  },
+  "plugins": {
+    "validation": {
+      "path": "{{suite.dir}}/support-plugin"
+    }
+  },
+  "skill_sources": {
+    "validation": {
+      "path": "{{suite.dir}}/skills"
+    }
+  },
+  "tools": {
+    "oracle_probe": {
+      "ref": "validation/oracle-probe",
+      "alias": "oracle-probe",
+      "config": {
+        "mode": "gauntlet"
+      }
+    }
+  },
+  "capabilities": {
+    "recovery_triage": {
+      "skills": [
+        "validation/recovery-triage",
+        "validation/evidence-handoff"
+      ],
+      "tools": [
+        {
+          "ref": "oracle_probe"
+        }
+      ],
+      "cli": [
+        {
+          "cmd": "node",
+          "description": "Run local gauntlet diagnostics."
+        },
+        {
+          "cmd": "git",
+          "description": "Inspect workspace pollution and changed files."
+        },
+        {
+          "cmd": "npm",
+          "description": "Run fixture validation."
+        }
+      ]
+    }
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "medium",
+      "sandbox": "workspace-write"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 5
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "recover_service",
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Resolve the local monorepo recovery gauntlet and publish a handoff.",
+          "acceptance_criteria": [
+            "`npm test` passes.",
+            "The handoff discusses missing context, stale docs conflict, validation strategy repair, workspace pollution cleanup, authority pause, and resume evidence.",
+            "The handoff cites context pointers and managed tool or CLI evidence."
+          ],
+          "constraints": [
+            "Do not mutate remote services.",
+            "Do not edit stale docs as the fix.",
+            "Do not leak hidden oracle canaries."
+          ]
+        },
+        "support": {
+          "capabilities": [
+            {
+              "ref": "recovery_triage"
+            }
+          ],
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "what": "Supervisor recovery gauntlet task.",
+              "why": "It defines the required recovery classifications and handoff evidence."
+            },
+            {
+              "name": "current_source",
+              "kind": "workspace_glob",
+              "path": "src/**",
+              "max_files": 30,
+              "what": "Current monorepo source files.",
+              "why": "They are the allowed implementation and validation surface."
+            },
+            {
+              "name": "stale_docs",
+              "kind": "workspace_glob",
+              "path": "docs/**",
+              "max_files": 20,
+              "what": "Stale local documentation that conflicts with source behavior.",
+              "why": "The agent must identify it as conflict evidence rather than overwrite it."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "tests/**",
+              "max_files": 20,
+              "what": "Local validation tests.",
+              "why": "They provide deterministic verification for recovery work."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Supervisor gauntlet handoff with recovery classifications, validation, and risks."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "validation",
+        "runtime": {
+          "repo": "main"
+        },
+        "check_kind": "deterministic",
+        "command": "npm",
+        "args": [
+          "test"
+        ],
+        "intent": {
+          "goal": "Run the gauntlet validation suite.",
+          "acceptance_criteria": [
+            "`npm test` exits successfully."
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "type": "check",
+        "id": "handoff_review",
+        "runtime": {
+          "repo": "main"
+        },
+        "check_kind": "ai",
+        "rubric": "Return JSON only. Pass when the handoff contains concrete evidence for missing context, stale docs conflict, validation repair, workspace cleanup, authority pause, and resume behavior.",
+        "intent": {
+          "goal": "Review the supervisor gauntlet handoff semantically.",
+          "acceptance_criteria": [
+            "The AI check passes only with concrete recovery evidence."
+          ],
+          "constraints": [
+            "Do not mutate the workspace."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "name": "handoff",
+              "kind": "artifact",
+              "ref": "recover_service.handoff",
+              "what": "Supervisor gauntlet handoff.",
+              "why": "It is the semantic evidence surface for the reviewer."
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

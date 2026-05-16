@@ -19,7 +19,7 @@ Common fields:
 - `intent.constraints`
 - `repo`
 - `profile`
-- `context`
+- `support`
 - `artifacts`
 - `completion.max_cycles`
 - `completion.pass_threshold`
@@ -63,8 +63,10 @@ The completion criteria panel is not the first validation attempt. The generate-
 {
   "type": "pattern_deep_work",
   "id": "checkout_timeout_impl",
-  "repo": "main",
-  "profile": "default",
+  "runtime": {
+    "repo": "main",
+    "profile": "default"
+  },
   "intent": {
     "goal": "Implement a typed checkout timeout path and publish validation evidence.",
     "acceptance_criteria": [
@@ -77,13 +79,17 @@ The completion criteria panel is not the first validation attempt. The generate-
       "Do not edit lockfiles."
     ]
   },
-  "context": [
-    {
-      "name": "task",
-      "from": "workspace_file",
-      "path": "AGENTFLOW_TASK.md"
-    }
-  ],
+  "support": {
+    "context": [
+      {
+        "name": "task",
+        "kind": "workspace_file",
+        "path": "AGENTFLOW_TASK.md",
+        "what": "The scoped task brief.",
+        "why": "It defines the implementation goal and constraints for the work loop."
+      }
+    ]
+  },
   "completion": {
     "max_cycles": 3,
     "pass_threshold": 0.85,

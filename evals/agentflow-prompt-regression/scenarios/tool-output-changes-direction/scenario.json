@@ -27,10 +27,10 @@
     "artifact": { "required": [{ "name": "handoff", "contains": ["direction=compact"] }] },
     "delivery": { "required": true },
     "prompt-regression": {
-      "task": "Run `fixture-lookup --case direction`. If it returns `direction=compact`, log a decision with evidence explaining the changed direction, then write the compact direction in the handoff.",
+      "task": "Run `fixture-lookup --case direction`. If it returns `direction=compact`, record a milestone decision with evidence explaining the changed direction, then write the compact direction in the handoff.",
       "required_contains": ["direction=compact", "fixture evidence", "Scenario:"],
       "required_simulation": [{ "command": "fixture-lookup", "rule_id": "direction-compact" }],
-      "required_logs": [{ "type": "decision" }]
+      "required_milestone_logs": [{ "kind": "decision" }]
     }
   }
 }

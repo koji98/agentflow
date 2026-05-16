@@ -59,6 +59,64 @@ export interface RuntimeLogEntry {
   created_at: string;
 }
 
+export const milestoneStatuses = ["active", "completed", "blocked"] as const;
+export type RuntimeMilestoneStatus = (typeof milestoneStatuses)[number];
+
+export const milestoneLogKinds = ["finding", "decision", "validation"] as const;
+export type RuntimeMilestoneLogKind = (typeof milestoneLogKinds)[number];
+
+export interface RuntimeMilestoneLogEntry {
+  log_id: string;
+  kind: RuntimeMilestoneLogKind;
+  summary: string;
+  evidence?: string;
+  command?: string;
+  result?: "pass" | "fail" | "blocked";
+  created_at: string;
+}
+
+export interface RuntimeMilestone {
+  id: string;
+  run_id?: string;
+  graph_id?: string;
+  agent_id?: string;
+  execution_id: string;
+  node_id?: string;
+  compiled_id?: string;
+  title: string;
+  goal: string;
+  status: RuntimeMilestoneStatus;
+  logs: RuntimeMilestoneLogEntry[];
+  completion_evidence?: string;
+  blocked_on?: string;
+  recoverable_by?: string;
+  blocked_evidence?: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  blocked_at?: string;
+}
+
+export interface RuntimeMilestoneState {
+  version: "1";
+  execution_id: string;
+  milestones: RuntimeMilestone[];
+}
+
+export interface CompletionMilestoneSummary {
+  total: number;
+  active: number;
+  completed: number;
+  blocked: number;
+  validation_logs: number;
+  milestones: RuntimeMilestone[];
+}
+
+export interface CompletionOrientationSummary {
+  orient_called: boolean;
+  evidence_ref?: string;
+}
+
 export type ObservationKind = FindingKind;
 
 export interface OperatorObservation {
@@ -103,7 +161,7 @@ export interface CompletionArtifactFinding {
 export interface CompletionValidationEvidence {
   requirement: string;
   status: "present" | "missing_evidence" | "blocked" | "advisory";
-  source?: "acceptance_criteria" | "runtime_log" | "captured_transcript" | "supervisor_recovery" | "managed_criteria" | "declared_artifact";
+  source?: "acceptance_criteria" | "runtime_log" | "milestone" | "captured_transcript" | "supervisor_recovery" | "managed_criteria" | "declared_artifact";
   evidence_ref?: string;
   summary?: string;
 }
@@ -185,6 +243,8 @@ export interface CompletionPacket {
   missing_artifacts: string[];
   artifact_findings: CompletionArtifactFinding[];
   validation_evidence: CompletionValidationEvidence[];
+  orientation: CompletionOrientationSummary;
+  milestones: CompletionMilestoneSummary;
   runtime_logs: CompletionRuntimeLogSummary;
   active_blockers: RuntimeLogEntry[];
   operator_observations: CompletionOperatorObservationSummary;
@@ -208,6 +268,8 @@ export interface CompletionProjection {
   missing_artifacts: string[];
   artifact_findings: CompletionArtifactFinding[];
   validation_evidence: CompletionValidationEvidence[];
+  orientation: CompletionOrientationSummary;
+  milestones: CompletionMilestoneSummary;
   active_blockers: Array<Pick<RuntimeLogEntry, "log_id" | "summary" | "finding_kind" | "severity" | "blocked_on" | "recoverable_by">>;
   operator_observations: CompletionOperatorObservationSummary;
   supervisor_recovery: CompletionSupervisorRecoverySummary;
@@ -229,6 +291,7 @@ export interface BuildCompletionPacketOptions {
   workspacePath: string;
   outputDir?: string;
   runtimeDir?: string;
+  toolInvocationsPath?: string;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   priorAttempts?: RuntimeNodeAttempt[];
   supervisorRecoveryEnvelope?: SupervisorRecoveryEnvelope;

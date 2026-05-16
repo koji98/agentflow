@@ -19,7 +19,7 @@
     "scenarios/13-repeated-fingerprint/scenario.json",
     "scenarios/14-parallel-evidence-gather/scenario.json",
     "scenarios/15-noisy-context-manifest/scenario.json",
-    "scenarios/16-truncated-context-provenance/scenario.json",
+    "scenarios/16-pointer-provenance/scenario.json",
     "scenarios/17-stale-local-docs/scenario.json",
     "scenarios/18-machine-resolvable-conflict/scenario.json",
     "scenarios/19-human-authority-conflict/scenario.json",

@@ -1,0 +1,8 @@
+{
+  "name": "agentflow-sentinel-supervisor",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node tests/recovery.test.js"
+  }
+}

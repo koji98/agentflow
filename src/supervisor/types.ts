@@ -183,7 +183,6 @@ export interface SupervisorContextRepairMaterial {
   key: string;
   title: string;
   text: string;
-  tokens: number;
 }
 
 export interface SupervisorContextRepairPatch {

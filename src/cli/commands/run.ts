@@ -11,7 +11,11 @@ import { loadAuthoredGraphDocument, summarizeAuthoredGraph } from "../../graph/v
 import { runCompiledGraph } from "../../runtime/core/engine.js";
 import { createCodexCliHarness } from "../../runtime/harness/codex_cli.js";
 import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
-import { createInteractiveCheckpointExecutor } from "../checkpoint.js";
+import {
+  createInteractiveCheckpointExecutor,
+  createScriptedCheckpointExecutor,
+  parseScriptedCheckpointDecisions
+} from "../checkpoint.js";
 import {
   collectGraphConfigOverrides,
   createGraphCliInvocation,
@@ -137,6 +141,7 @@ export const runCommand = {
       loaded.lowered_managed_nodes,
       {
         ...(loaded.resolved_plugins ? { resolved_plugins: loaded.resolved_plugins } : {}),
+        ...(loaded.resolved_skill_sources ? { resolved_skill_sources: loaded.resolved_skill_sources } : {}),
         graph_dir: dirname(loaded.absolute_path)
       }
     );
@@ -189,6 +194,13 @@ export const runCommand = {
 
     const progress = createRuntimeProgressReporter(compilation.compiled_graph!);
     const explicitRunsRoot = typeof options["runs-root"] === "string" ? options["runs-root"] : undefined;
+    const scriptedCheckpointDecisions =
+      runtimeEnv.AGENTFLOW_EVAL_CHECKPOINT_DECISIONS ?? environment.AGENTFLOW_EVAL_CHECKPOINT_DECISIONS;
+    const checkpointExecutor = scriptedCheckpointDecisions
+      ? createScriptedCheckpointExecutor({
+          decisions: parseScriptedCheckpointDecisions(scriptedCheckpointDecisions)
+        })
+      : createInteractiveCheckpointExecutor();
     const run = await runCompiledGraph({
       on_event: (event) => {
         progress.onEvent(event);
@@ -211,7 +223,7 @@ export const runCommand = {
         "cursor-cli": createCursorCliHarness()
       },
       executors: {
-        checkpoint: createInteractiveCheckpointExecutor()
+        checkpoint: checkpointExecutor
       },
       environment,
       ...(Object.keys(runtimeEnv).length > 0 ? { runtime_env: runtimeEnv } : {}),

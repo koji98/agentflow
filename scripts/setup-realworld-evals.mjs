@@ -268,12 +268,18 @@ export async function setupRealworldEvals(rawOptions = {}) {
   const reposDir = resolve(rawOptions.reposDir ?? defaultReposDir);
   const scenarioFilter = rawOptions.scenario ?? "all";
   const scenarios = await loadSuiteScenarios(suiteDir);
+  const realworldScenarios = scenarios.filter((scenario) => scenario.metadata?.realworld);
   const selected = scenarioFilter === "all"
-    ? scenarios
+    ? realworldScenarios
     : scenarios.filter((scenario) => scenario.id === scenarioFilter);
 
   if (selected.length === 0) {
     throw new Error(`No real-world eval scenarios matched "${scenarioFilter}".`);
+  }
+
+  const nonRealworld = selected.filter((scenario) => !scenario.metadata?.realworld);
+  if (nonRealworld.length > 0) {
+    throw new Error(`Scenario ${nonRealworld.map((scenario) => scenario.id).join(", ")} is not a real-world eval scenario.`);
   }
 
   await mkdir(reposDir, { recursive: true });

@@ -53,7 +53,7 @@ describe("substituteAgentflowTokens", () => {
     );
   });
 
-  it("substitutes per-context-item tokens with the materialized path", () => {
+  it("substitutes per-context-item tokens with the pointer path", () => {
     const result = substituteAgentflowTokens(
       "Use the spec at $AGENTFLOW_CONTEXT_SPEC to seed the change.",
       tokens

@@ -716,6 +716,7 @@ export const validateCommand = {
       loaded.lowered_managed_nodes,
       {
         ...(loaded.resolved_plugins ? { resolved_plugins: loaded.resolved_plugins } : {}),
+        ...(loaded.resolved_skill_sources ? { resolved_skill_sources: loaded.resolved_skill_sources } : {}),
         graph_dir: dirname(loaded.absolute_path)
       }
     );
@@ -815,14 +816,13 @@ export const validateCommand = {
       compiled_summary: buildCompiledSummary(compiledGraph),
       managed_expansion: buildManagedExpansionSummaries(compiledGraph, loaded.lowered_managed_nodes)
     };
-    const contextBlocked = contextAnalysis.status === "blocked";
     const findings = buildValidationFindings({
       strict,
       authoringReview,
       readiness,
       context: contextAnalysis
     });
-    const statusFailed = readiness.status === "blocked" || strictAuthoringBlocked || contextBlocked;
+    const statusFailed = readiness.status === "blocked" || strictAuthoringBlocked;
     const checks = {
       authored: {
         status: "passed",
@@ -884,9 +884,7 @@ export const validateCommand = {
       status: statusFailed ? "failed" : "passed",
       validation_level: "run-ready",
       message:
-        contextBlocked
-          ? `Graph compiled, but context analysis found node context that would exceed token budgets for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
-          : readiness.status === "blocked"
+        readiness.status === "blocked"
             ? `Graph compiled, but readiness validation is blocked for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`
             : strictAuthoringBlocked
               ? `Graph compiled, but strict authoring review found ${authoringReview.summary.serious_count} serious finding(s) for launch profile "${launch.launch_profile}" and workspace backend "${launch.workspace_backend}".`

@@ -1,8 +1,8 @@
 {
-  "id": "af-status-context-first",
+  "id": "af-orient-context-first",
   "bucket": "runtime-cli-discipline",
   "difficulty": "medium",
-  "description": "Ambiguous node should orient with af status and context before broad search.",
+  "description": "Ambiguous node should orient with af orient and context pointers before broad search.",
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -17,9 +17,9 @@
     "artifact": { "required": [{ "name": "handoff", "contains": ["context-first"] }] },
     "delivery": { "required": true },
     "prompt-regression": {
-      "task": "This task has intentionally ambiguous local docs. Orient with `af status` and `af context show`, then write a handoff that says `context-first` and explains the materialized context evidence used.",
+      "task": "This task has intentionally ambiguous local docs. Run `af orient`, inspect the context pointer evidence it names, then write a handoff that says `context-first` and explains the context pointer evidence used.",
       "required_contains": ["context-first", "Scenario:", "Evidence:"],
-      "required_af": ["status", "context show", "complete check"]
+      "required_af": ["orient", "milestone add", "complete check"]
     }
   }
 }

@@ -9,16 +9,18 @@ Use a managed pattern when the operator wants a known lifecycle with inspectable
 Managed nodes use regular node fields:
 
 - `intent`
-- `context`
+- `support.context`
 - `artifacts`
-- normal runtime fields such as `repo`, `profile`, `timeout_sec`, `sandbox`, `model`, `reasoning_effort`, `artifact_repair`, and `tools`
+- `runtime` for repo/profile selection
+- normal agent option fields such as `sandbox`, `model`, `reasoning_effort`, and `artifact_repair`
+- `support` for node-local context, selected skills, managed tools, capabilities, and CLI hints; managed tools are exposed only to the pattern's agent steps
 
 Every managed pattern publishes public artifacts from the authored node id. If `artifacts` is omitted, Agentflow provides:
 
 - `summary`: `summary.md`
 - `packet`: `packet.json`
 
-Authored artifacts merge with these defaults. Internal artifacts are private implementation evidence; downstream nodes should reference only public artifacts such as `my_research.summary` or `my_work.packet`.
+Authored artifacts merge with these defaults. Internal artifacts remain readable in the run tree as implementation evidence, but downstream nodes should reference only graph-addressable artifacts such as `my_research.summary` or `my_work.packet`.
 
 ## Canonical Patterns
 
@@ -39,7 +41,7 @@ Add:
 }
 ```
 
-The pattern runs authored angles in parallel, synthesizes research packets in balanced batches of at most three inputs, then publishes the public summary, packet, and any selected raw angle reports. Angle and synthesis artifacts are private evidence packets unless an angle uses `as_artifact: true`. Synthesis preserves major findings, collapses redundancy, keeps provenance attached to claims, and surfaces uncertainty or conflicts. It is useful for product research, architecture research, implementation research, and multi-axis code review.
+The pattern runs authored angles in parallel, synthesizes research packets in balanced batches of at most three inputs, then publishes the summary, packet, and any selected raw angle reports. Angle and synthesis artifacts remain readable in the run tree as evidence packets; only artifacts explicitly exposed by the pattern contract are addressable by downstream graph nodes. Synthesis preserves major findings, collapses redundancy, keeps provenance attached to claims, and surfaces uncertainty or conflicts. It is useful for product research, architecture research, implementation research, and multi-axis code review.
 
 Public output is collapsed by default. Authors can expose an individual raw angle report by using object-form angles with `id`, `prompt`, and `as_artifact: true`; downstream nodes reference it as `my_research.<angle_id>`.
 

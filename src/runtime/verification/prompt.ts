@@ -41,6 +41,30 @@ export interface OutcomeVerificationPromptCompletionPacket {
     kind: string;
     summary: string;
   }>;
+  orientation?: {
+    orient_called: boolean;
+  };
+  milestones?: {
+    total: number;
+    active: number;
+    completed: number;
+    blocked: number;
+    validation_logs: number;
+    milestones: Array<{
+      id: string;
+      title: string;
+      status: string;
+      completion_evidence?: string;
+      blocked_on?: string;
+      logs: Array<{
+        kind: string;
+        summary: string;
+        command?: string;
+        result?: string;
+        evidence?: string;
+      }>;
+    }>;
+  };
   packet_path: string;
 }
 
@@ -132,7 +156,7 @@ function renderWorkspaceDiff(snippet: OutcomeVerificationPromptInput["workspace_
   const lines: string[] = [
     "## Workspace Diff",
     "Workspace diffs are audit/provenance evidence. They are not the primary pass/fail oracle.",
-    "Use declared artifacts, decision logs, and deterministic command/tool evidence as the primary supervision surface.",
+    "Use declared artifacts, milestone decision/validation logs, and deterministic command/tool evidence as the primary supervision surface.",
     "Do not fail solely because the workspace diff is absent, degraded, ambiguous, or surprising. Fail on workspace evidence only when it provides strong, concrete, actionable proof of a contract violation and no stronger declared evidence resolves the contradiction.",
     `- Status: ${snippet.status}`,
     `- Changed file count: ${snippet.changed_file_count}`
@@ -158,13 +182,13 @@ function renderWorkspaceDiff(snippet: OutcomeVerificationPromptInput["workspace_
 
 function renderDecisionLog(entries: OutcomeVerificationPromptDecisionLogEntry[]): string[] {
   const lines = [
-    "## Decision Log",
-    "Decision log entries are node-authored records of major decisions, rationale, and supporting evidence.",
-    "Use them to understand intentional scope choices and to cross-check final artifacts. Missing or sparse decision logs should usually be a warning, not a blocker, unless the node contract specifically required the missing decision evidence."
+    "## Runtime Decision Evidence",
+    "Runtime decision entries are node-authored records of major decisions, rationale, and supporting evidence.",
+    "Use them to understand intentional scope choices and to cross-check final artifacts. Missing or sparse decision evidence should usually be a warning, not a blocker, unless the node contract specifically required it."
   ];
 
   if (entries.length === 0) {
-    lines.push("", "(no decision log entries captured)");
+    lines.push("", "(no runtime decision entries captured)");
     return lines;
   }
 
@@ -242,6 +266,28 @@ function renderCompletionPacket(packet: OutcomeVerificationPromptCompletionPacke
     `- Packet: ${packet.packet_path}`
   );
 
+  if (packet.orientation) {
+    lines.push(`- af orient called: ${packet.orientation.orient_called}`);
+  }
+
+  if (packet.milestones) {
+    lines.push(
+      `- Milestones: total=${packet.milestones.total}; completed=${packet.milestones.completed}; active=${packet.milestones.active}; blocked=${packet.milestones.blocked}; validation_logs=${packet.milestones.validation_logs}`
+    );
+    for (const milestone of packet.milestones.milestones) {
+      lines.push(`  - ${milestone.id} [${milestone.status}] ${milestone.title}`);
+      if (milestone.completion_evidence) {
+        lines.push(`    - completion evidence: ${milestone.completion_evidence}`);
+      }
+      if (milestone.blocked_on) {
+        lines.push(`    - blocked on: ${milestone.blocked_on}`);
+      }
+      for (const log of milestone.logs) {
+        lines.push(`    - ${log.kind}: ${log.summary}${log.command ? `; command=${log.command}` : ""}${log.result ? `; result=${log.result}` : ""}${log.evidence ? `; evidence=${log.evidence}` : ""}`);
+      }
+    }
+  }
+
   if (packet.missing_artifacts.length > 0) {
     lines.push("- Missing artifacts:");
     for (const artifact of packet.missing_artifacts) {
@@ -290,13 +336,13 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
   const lines: string[] = [
     "## Role",
     "You are an external Agentflow outcome verifier. You did not write this code.",
-    "Audit the agent's just-finished work against the graph goal, the node's authored intent, the declared artifacts, and the decision log.",
+    "Audit the agent's just-finished work against the graph goal, the node's authored intent, the declared artifacts, and the milestone evidence.",
     "You must respond with a single fenced JSON object that follows the schema below. No prose outside the fence.",
     "",
     "## Decision Rule",
     "- Treat the Completion Packet section as primary structured evidence for mechanical readiness.",
     "- Do not pass when completion_status is incomplete. Treat blocked as a terminal attempt state only when the blocker is supported by evidence; blocked is not node success.",
-    "- Pass when the declared artifacts, final response, decision log, and available deterministic evidence reasonably satisfy the authored acceptance criteria.",
+    "- Pass when the declared artifacts, final response, milestone evidence, and available deterministic evidence reasonably satisfy the authored acceptance criteria.",
     "- Treat graph and node acceptance criteria as authoritative over any task text that describes an intentionally failing fallback, blocker report, or retry trigger.",
     "- A final response explicitly marked as an intentional failure, retry request, missing-context fallback, or not-done state is blocker evidence unless the acceptance criteria explicitly say that terminal fallback is acceptable.",
     "- A required declared artifact that is empty, placeholder-only, missing the requested content, or inconsistent with the final response is blocker evidence even when the final response claims success.",
@@ -311,7 +357,7 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "- Workspace diff evidence is supporting audit evidence, not the default source of truth. Do not use it as the sole reason for passed=false unless it is the only authoritative evidence for the node's required change and shows a concrete violation.",
     "- Captured execution evidence is the primary source for commands the agent actually ran. Do not turn a verifier-side command rerun failure into a blocker when the captured node transcript already shows the required command succeeded.",
     "- One blocker finding means passed=false; passed=true may still include low, medium, or high non-blocker findings.",
-    "- Cite exact artifact paths, decision log entries, commands, or response excerpts in evidence so the retrying agent can act without re-discovering the failure.",
+    "- Cite exact artifact paths, milestone evidence, commands, or response excerpts in evidence so the retrying agent can act without re-discovering the failure.",
     "",
     "## Graph Intent",
     `Goal: ${input.graph_goal.length > 0 ? input.graph_goal : "(no graph goal authored)"}`,

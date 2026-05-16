@@ -16,12 +16,7 @@
       "harness": "codex-cli",
       "model": "gpt-5.4-codex",
       "reasoning_effort": "medium",
-      "sandbox": "read-only",
-      "timeout_sec": 900,
-      "input_rules": {
-        "max_total_tokens": 64000,
-        "max_tokens_per_item": 32000
-      }
+      "sandbox": "read-only"
     },
     "supervisor": {
       "harness": "codex-cli",
@@ -35,24 +30,6 @@
       {
         "type": "agent",
         "id": "inspect_repo",
-        "repo": "main",
-        "context": [
-          {
-            "name": "readme",
-            "from": "workspace_file",
-            "path": "README.md"
-          },
-          {
-            "name": "package",
-            "from": "workspace_file",
-            "path": "package.json"
-          },
-          {
-            "name": "scope",
-            "from": "workspace_file",
-            "path": "docs/product/scope.md"
-          }
-        ],
         "intent": {
           "goal": "Inspect this repository and summarize what it does, the main CLI commands a developer would use first, and any obvious operator-facing constraints.",
           "acceptance_criteria": [
@@ -62,12 +39,39 @@
           "constraints": [
             "Do not modify files."
           ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "readme",
+              "path": "README.md",
+              "what": "Workspace file README.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            },
+            {
+              "name": "package",
+              "path": "package.json",
+              "what": "Workspace file package.json.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            },
+            {
+              "name": "scope",
+              "path": "docs/product/scope.md",
+              "what": "Workspace file docs/product/scope.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            }
+          ]
         }
       },
       {
         "type": "check",
         "id": "verify_package_contract",
-        "repo": "main",
         "check_kind": "deterministic",
         "command": "node",
         "args": [
@@ -85,22 +89,14 @@
             "The package metadata exposes the expected workspace structure."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main"
         }
       },
       {
         "type": "agent",
         "id": "summarize_findings",
-        "repo": "main",
-        "context": [
-          {
-            "ref": "inspect_repo.agent_response",
-            "name": "inspection_response"
-          },
-          {
-            "ref": "verify_package_contract.verification_json",
-            "name": "package_contract_result"
-          }
-        ],
         "intent": {
           "goal": "Write a concise handoff summary of the repository. Mention the package name, the main graph validation command, and whether the package metadata looks coherent for local testing.",
           "acceptance_criteria": [
@@ -109,6 +105,27 @@
           ],
           "constraints": [
             "Do not modify files."
+          ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "ref": "inspect_repo.agent_response",
+              "name": "inspection_response",
+              "what": "Artifact reference inspect_repo.agent_response.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            },
+            {
+              "ref": "verify_package_contract.verification_json",
+              "name": "package_contract_result",
+              "what": "Artifact reference verify_package_contract.verification_json.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            }
           ]
         }
       }

@@ -1,0 +1,172 @@
+{
+  "version": "1",
+  "graph_id": "sentinel-execa-escaped-newline-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "Recover an execa-style escaped newline template parser bug using plugin-lowered preparation and repairable artifacts.",
+    "acceptance_criteria": [
+      "The plugin workflow prepares a public parser packet.",
+      "The implementation uses the packet and validates the parser.",
+      "Artifact repair can act on malformed handoff output without retrying unrelated nodes."
+    ],
+    "constraints": [
+      "Do not inspect hidden oracle contents.",
+      "Do not rewrite the full parser."
+    ]
+  },
+  "plugins": {
+    "validation": {
+      "path": "{{suite.dir}}/support-plugin"
+    }
+  },
+  "skill_sources": {
+    "validation": {
+      "path": "{{suite.dir}}/skills"
+    }
+  },
+  "capabilities": {
+    "evidence_handoff": {
+      "skills": [
+        "validation/evidence-handoff"
+      ],
+      "cli": [
+        {
+          "cmd": "npm",
+          "description": "Run execa regression validation."
+        },
+        {
+          "cmd": "git",
+          "description": "Inspect scoped parser changes."
+        }
+      ]
+    }
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "medium",
+      "sandbox": "workspace-write",
+      "artifact_repair": {
+        "max_attempts": 1
+      }
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "plugin",
+        "id": "prepare",
+        "uses": "validation/prepare-parser",
+        "config": {
+          "parser_name": "escaped-newline-template"
+        }
+      },
+      {
+        "type": "agent",
+        "id": "repair_parser",
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Fix the escaped newline template regression and publish a repair handoff.",
+          "acceptance_criteria": [
+            "`{{scenario.metadata.realworld.focused_test_command}}` passes.",
+            "The handoff includes Scenario, Changed files, Validation, and Risks sections.",
+            "The implementation uses the plugin preparation packet."
+          ],
+          "constraints": [
+            "Do not change public parser API names.",
+            "Do not add dependencies.",
+            "Do not edit package manifests, lockfiles, tests, or eval fixture files.",
+            "Only lib/methods/template.js may be changed."
+          ]
+        },
+        "support": {
+          "capabilities": [
+            {
+              "ref": "evidence_handoff"
+            }
+          ],
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "what": "Pinned execa escaped-newline template task.",
+              "why": "It defines the escaped newline regression and scope."
+            },
+            {
+              "name": "parser_packet",
+              "kind": "artifact",
+              "ref": "prepare.packet",
+              "what": "Public parser preparation packet from the plugin workflow.",
+              "why": "It directs the repair node to the relevant parser entry points."
+            },
+            {
+              "name": "source",
+              "kind": "workspace_glob",
+              "path": "lib/methods/**",
+              "max_files": 20,
+              "what": "Parser implementation files.",
+              "why": "They are the scoped edit surface."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "test/methods/**",
+              "max_files": 20,
+              "what": "Parser regression tests.",
+              "why": "They provide deterministic validation."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Parser repair handoff with Scenario, Changed files, Validation, and Risks sections."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "parser_validation",
+        "runtime": {
+          "repo": "main"
+        },
+        "check_kind": "deterministic",
+        "command": "sh",
+        "args": [
+          "-lc",
+          "{{scenario.metadata.realworld.focused_test_command}}"
+        ],
+        "intent": {
+          "goal": "Run the focused escaped newline template regression suite.",
+          "acceptance_criteria": [
+            "`{{scenario.metadata.realworld.focused_test_command}}` exits successfully."
+          ],
+          "constraints": []
+        }
+      }
+    ]
+  }
+}

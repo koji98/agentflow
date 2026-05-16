@@ -59,6 +59,8 @@ export function buildCompletionProjection(
     missing_artifacts: packet.missing_artifacts.slice(0, maxItems),
     artifact_findings: artifactFindings.values,
     validation_evidence: validationEvidence.values,
+    orientation: packet.orientation,
+    milestones: packet.milestones,
     active_blockers: activeBlockers.values,
     operator_observations: packet.operator_observations,
     supervisor_recovery: packet.supervisor_recovery,

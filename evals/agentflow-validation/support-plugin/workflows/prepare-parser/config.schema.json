@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "required": [
+    "parser_name"
+  ],
+  "properties": {
+    "parser_name": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

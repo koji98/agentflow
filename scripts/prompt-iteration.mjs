@@ -34,11 +34,11 @@ function baseInvocation(overrides = {}) {
     contextManifest: [
       "# Context Manifest",
       "",
-      "This is an index of materialized context for the current node.",
+      "This is an index of context pointers for the current node.",
       "",
       "## Materials",
       "",
-      "- `requirements` -> `/run/context/materialized/requirements/brief.md` (240 tokens): Task brief"
+      "- `requirements` -> `/workspace/repo/docs/requirements/brief.md`: Task brief"
     ].join("\n"),
     outputDir: "/run/nodes/agent/executions/001/artifacts",
     artifacts: {},
@@ -113,12 +113,12 @@ function rule(id, description, test, weight = 1) {
 
 function standardAgentRules(extra = []) {
   return [
-    rule("contract-priority", "states source priority and conflict behavior", includes("## Contract Priority", "Apply these sources in this order", "preserve the contract")),
-    rule("start-here", "gives first actions before the loop", includes("## Start Here", "Read the context manifest", "Inspect the artifact contract")),
-    rule("working-loop", "requires inspect/execute/validate/fix loop", includes("## Working Loop", "Repeat until every acceptance criterion is satisfied")),
+    rule("contract-priority", "states source priority and conflict behavior", includes("## Contract Priority", "preserve the contract")),
+    rule("planning-loop", "requires orient/plan/milestone loop", includes("## Working Loop", "af orient", "Understand the plan before committing to execution milestones", "planning/research milestone")),
+    rule("working-loop", "requires milestone/validate/fix loop", includes("af milestone add", "af milestone log", "af complete check")),
     rule("context-evidence", "frames context as evidence, not overriding instructions", includes("Treat context as evidence", "packet/provenance")),
-    rule("runtime-cli", "surfaces af status/context/artifact/log", includes("## Agentflow Runtime CLI", "af status", "af artifact write", "af log --type decision")),
-    rule("handoff", "requires outcome/artifacts/validation handoff", includes("## Final Handoff", "Artifacts produced", "Validation")),
+    rule("runtime-cli", "surfaces orient/milestone/artifact/complete loop", includes("## Agentflow Runtime CLI", "af orient", "af milestone", "af artifact write", "af complete check")),
+    rule("completion-gate", "requires compact completion gate", includes("## Completion Gate", "ready_for_verification")),
     ...extra
   ];
 }
@@ -316,23 +316,23 @@ async function renderScenario(kind, renderHarnessPrompt, renderOutcomeVerificati
 const scenarioRules = {
   "agent-no-tools": standardAgentRules(),
   "agent-declared-artifact": standardAgentRules([
-    rule("artifact-required", "declared artifacts are mandatory", includes("Every declared artifact must exist", "Missing declared artifacts fail this node")),
+    rule("artifact-required", "declared artifacts are mandatory", includes("Every declared artifact must exist", "## Declared Artifacts")),
     rule("artifact-write", "surfaces af artifact write and exact paths", includes("af artifact write", "/run/nodes/agent/executions/001/artifacts/handoff.md")),
-    rule("no-final-substitute", "final response cannot replace artifact", includes("Do not use the final response as a substitute"))
+    rule("no-final-substitute", "final response is captured separately", includes("reserved `agent_response` artifact"))
   ]),
   "agent-with-tools": standardAgentRules([
     rule("tool-help", "requires tool help before first use", includes("Run `<tool> --help`", "Do not invent tool names")),
-    rule("tool-json", "prefers structured stdout", includes("structured stdout (JSON)")),
-    rule("tool-decision-log", "requires logging direction-changing tool results", includes("tool result changes your implementation direction", "af log --type decision"))
+    rule("tool-json", "prefers structured stdout", includes("structured stdout")),
+    rule("tool-decision-log", "requires milestone evidence for direction-changing tool results", includes("af milestone log"))
   ]),
   "agent-read-only": standardAgentRules([
     rule("read-only-blocker", "read-only prompt prevents writes and asks for blocker", includes("read-only sandbox prevents file writes", "Treat this as a blocker")),
     rule("inspect-only", "read-only workspace says inspect/report only", includes("Inspect and report only", "Do not attempt source edits"))
   ]),
   "agent-recovery-retry": standardAgentRules([
-    rule("recovery-before-task", "recovery envelope appears before authored task", before("## Supervisor Recovery Envelope", "## Original Authored Node Task (Still Binding)")),
+    rule("recovery-before-graph", "recovery case appears before graph context", before("## Supervisor Recovery Case", "## Graph Context")),
     rule("unchanged-contract", "states unchanged contract repeatedly", includes("original goal, acceptance criteria, constraints", "Contract Preservation")),
-    rule("evidence-first", "requires reading recovery evidence first", includes("Evidence To Read First", "Read the supervisor recovery envelope")),
+    rule("evidence-first", "requires reading recovery evidence first", includes("Evidence Pointers", "supervisor recovery case")),
     rule("current-artifacts", "current retry must write current attempt artifacts", includes("current-attempt declared artifact", "current output directory"))
   ]),
   "supervisor-evidence-external": [
@@ -496,7 +496,7 @@ async function main() {
     "",
     "- Agent node prompt: added contract priority, explicit start checklist, stronger context uncertainty handling, stronger tool discipline, and clearer retry/current-artifact rules.",
     "- Supervisor evidence prompt: added gather-kind-specific instructions and an exact JSON schema with source/conflict requirements.",
-    "- Context manifest: added context-as-evidence framing, recommended read order, and omitted/truncated uncertainty guidance.",
+    "- Context manifest: added context-as-evidence framing, recommended read order, pointer provenance, and omitted-source uncertainty guidance.",
     "- Outcome verifier prompt: added stricter declared-artifact blocker rules, full-artifact-read guidance for truncated snippets, and exact evidence citation requirements.",
     "- Helper prompt: added contract priority, start checklist, and clearer helper artifact/log guidance.",
     "",

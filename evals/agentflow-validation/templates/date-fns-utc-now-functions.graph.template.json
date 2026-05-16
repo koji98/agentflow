@@ -1,0 +1,290 @@
+{
+  "version": "1",
+  "graph_id": "sentinel-date-fns-utc-now-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "Evaluate and implement a UTC now-helper change in the pinned date-fns fixture.",
+    "acceptance_criteria": [
+      "Parallel research gathers architecture and now-behavior evidence.",
+      "Implementation follows local source patterns and validates deterministically.",
+      "AI review evaluates semantic architecture fit."
+    ],
+    "constraints": [
+      "Do not use live GitHub or upstream patches.",
+      "Do not rewrite unrelated date helpers."
+    ]
+  },
+  "skill_sources": {
+    "validation": {
+      "path": "{{suite.dir}}/skills"
+    }
+  },
+  "capabilities": {
+    "evidence_handoff": {
+      "skills": [
+        "validation/evidence-handoff"
+      ],
+      "cli": [
+        {
+          "cmd": "npm",
+          "description": "Run date-fns fixture validation."
+        },
+        {
+          "cmd": "git",
+          "description": "Inspect scoped workspace changes."
+        }
+      ]
+    }
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "medium",
+      "sandbox": "workspace-write"
+    },
+    "review": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
+      "sandbox": "read-only"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "research",
+        "max_concurrency": 2,
+        "steps": [
+          {
+            "type": "agent",
+            "id": "architecture_research",
+            "runtime": {
+              "repo": "main"
+            },
+            "intent": {
+              "goal": "Research UTC helper architecture and write architecture-research.md.",
+              "acceptance_criteria": [
+                "The artifact names the relevant source files and architecture constraints."
+              ],
+              "constraints": [
+                "Do not edit the workspace."
+              ]
+            },
+            "support": {
+              "context": [
+                {
+                  "name": "task",
+                  "kind": "workspace_file",
+                  "path": "AGENTFLOW_EVAL_TASK.md",
+                  "what": "Pinned date-fns UTC now-helper task.",
+                  "why": "It defines the architecture question."
+                },
+                {
+                  "name": "source",
+                  "kind": "workspace_glob",
+                  "path": "src/**",
+                  "max_files": 30,
+                  "what": "date-fns fixture source tree.",
+                  "why": "It contains the architecture patterns to preserve."
+                }
+              ]
+            },
+            "artifacts": {
+              "architecture": {
+                "from": "output_dir",
+                "path": "architecture-research.md",
+                "description": "UTC helper architecture research."
+              }
+            }
+          },
+          {
+            "type": "agent",
+            "id": "now_research",
+            "runtime": {
+              "repo": "main"
+            },
+            "intent": {
+              "goal": "Research current-date behavior and write now-behavior-research.md.",
+              "acceptance_criteria": [
+                "The artifact names current-date edge cases and validation expectations."
+              ],
+              "constraints": [
+                "Do not edit the workspace."
+              ]
+            },
+            "support": {
+              "context": [
+                {
+                  "name": "task",
+                  "kind": "workspace_file",
+                  "path": "AGENTFLOW_EVAL_TASK.md",
+                  "what": "Pinned date-fns UTC now-helper task.",
+                  "why": "It defines the current-date behavior."
+                },
+                {
+                  "name": "docs",
+                  "kind": "workspace_glob",
+                  "path": "docs/**",
+                  "max_files": 20,
+                  "what": "Local date-fns fixture docs.",
+                  "why": "They provide local date helper guidance."
+                },
+                {
+                  "name": "tests",
+                  "kind": "workspace_glob",
+                  "path": "src/agentflow-realworld-utc-now/test.ts",
+                  "max_files": 20,
+                  "what": "Focused UTC now-helper regression test.",
+                  "why": "It defines deterministic expectations."
+                }
+              ]
+            },
+            "artifacts": {
+              "now-behavior": {
+                "from": "output_dir",
+                "path": "now-behavior-research.md",
+                "description": "UTC now-helper behavior research."
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "agent",
+        "id": "implement",
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Implement the UTC now-helper change and write a handoff.",
+          "acceptance_criteria": [
+            "`{{scenario.metadata.realworld.focused_test_command}}` passes.",
+            "The handoff cites both research artifacts.",
+            "The handoff includes a Scenario section naming date-fns-utc-now-functions, plus Changed files, Validation, and Risks sections.",
+            "The implementation preserves local date helper architecture."
+          ],
+          "constraints": [
+            "Do not edit unrelated date helper files.",
+            "Do not add dependencies."
+          ]
+        },
+        "support": {
+          "capabilities": [
+            {
+              "ref": "evidence_handoff"
+            }
+          ],
+          "context": [
+            {
+              "name": "architecture",
+              "kind": "artifact",
+              "ref": "architecture_research.architecture",
+              "what": "UTC architecture research artifact.",
+              "why": "It identifies the implementation pattern to preserve."
+            },
+            {
+              "name": "now-behavior",
+              "kind": "artifact",
+              "ref": "now_research.now-behavior",
+              "what": "Current-date behavior research artifact.",
+              "why": "It identifies semantic edge cases to validate."
+            },
+            {
+              "name": "source",
+              "kind": "workspace_glob",
+              "path": "src/**",
+              "max_files": 30,
+              "what": "Allowed source implementation surface.",
+              "why": "The implementation should stay within local architecture."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "src/agentflow-realworld-utc-now/test.ts",
+              "max_files": 20,
+              "what": "Focused UTC now-helper tests.",
+              "why": "They provide deterministic validation."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "UTC now-helper handoff with Scenario, Changed files, Validation, and Risks sections."
+          }
+        }
+      },
+      {
+        "type": "check",
+        "id": "deterministic_validation",
+        "runtime": {
+          "repo": "main"
+        },
+        "check_kind": "deterministic",
+        "command": "sh",
+        "args": [
+          "-lc",
+          "{{scenario.metadata.realworld.focused_test_command}}"
+        ],
+        "intent": {
+          "goal": "Run the focused UTC now-helper validation suite.",
+          "acceptance_criteria": [
+            "`{{scenario.metadata.realworld.focused_test_command}}` exits successfully."
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "type": "check",
+        "id": "semantic_architecture_review",
+        "runtime": {
+          "repo": "main",
+          "profile": "review"
+        },
+        "check_kind": "ai",
+        "rubric": "Return JSON only. Pass when the implementation evidence preserves UTC now-helper semantics and local architecture without broad unrelated rewrites.",
+        "intent": {
+          "goal": "Review the UTC now-helper implementation semantically.",
+          "acceptance_criteria": [
+            "The review returns passing structured JSON only when architecture and semantic evidence are adequate."
+          ],
+          "constraints": [
+            "Do not mutate the workspace."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "name": "handoff",
+              "kind": "artifact",
+              "ref": "implement.handoff",
+              "what": "Implementation handoff artifact.",
+              "why": "The AI check grades semantic evidence and risks from this handoff."
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

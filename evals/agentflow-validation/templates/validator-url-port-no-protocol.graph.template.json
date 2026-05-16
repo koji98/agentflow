@@ -1,0 +1,259 @@
+{
+  "version": "1",
+  "graph_id": "sentinel-validator-url-port-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "Fix validator.js URL hostname-port parsing with evidence-backed research and implementation.",
+    "acceptance_criteria": [
+      "The workflow researches parser behavior and local constraints before implementation.",
+      "The implementation validates with the focused local test command.",
+      "The final handoff cites research, changed files, validation, and risks."
+    ],
+    "constraints": [
+      "Do not inspect upstream oracle patches.",
+      "Do not rewrite unrelated utility modules.",
+      "Do not use public network sources."
+    ]
+  },
+  "plugins": {
+    "validation": {
+      "path": "{{suite.dir}}/support-plugin"
+    }
+  },
+  "skill_sources": {
+    "validation": {
+      "path": "{{suite.dir}}/skills"
+    }
+  },
+  "tools": {
+    "oracle_probe": {
+      "ref": "validation/oracle-probe",
+      "alias": "oracle-probe",
+      "config": {
+        "mode": "metadata"
+      }
+    }
+  },
+  "capabilities": {
+    "evidence_handoff": {
+      "skills": [
+        "validation/evidence-handoff"
+      ],
+      "tools": [
+        {
+          "ref": "oracle_probe"
+        }
+      ],
+      "cli": [
+        {
+          "cmd": "npm",
+          "description": "Run fixture validation commands."
+        },
+        {
+          "cmd": "git",
+          "description": "Inspect local changed files."
+        }
+      ]
+    }
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "medium",
+      "sandbox": "workspace-write"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 3
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_deep_research",
+        "id": "url_research",
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Research the local validator.js fixture and determine the smallest source change for protocol-less hostnames with ports.",
+          "acceptance_criteria": [
+            "The research names the target function, edge cases, local tests, and implementation constraints.",
+            "The packet preserves evidence paths and uncertainty."
+          ],
+          "constraints": [
+            "Use only local fixture files and provided context.",
+            "Do not inspect upstream oracle fixtures."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "what": "Pinned validator URL port task.",
+              "why": "It defines the exact target behavior and anti-cheat limits."
+            },
+            {
+              "name": "source",
+              "kind": "workspace_glob",
+              "path": "src/lib/isURL.js",
+              "max_files": 20,
+              "what": "Local validator source files.",
+              "why": "They are the primary implementation evidence for the URL-port fix."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "test/agentflow-realworld-url-port.test.js",
+              "max_files": 20,
+              "what": "Focused local regression tests.",
+              "why": "They define expected semantic behavior without revealing the upstream oracle."
+            }
+          ]
+        },
+        "research": {
+          "angles": [
+            "Identify the existing validator URL implementation and its local behavior.",
+            "Compare the fixture task wording against nearby tests and expected URL hostname-port semantics.",
+            "Find the smallest implementation surface that should change without broad rewrites.",
+            {
+              "id": "validation_plan",
+              "prompt": "Define the focused validation command and upstream-oracle anti-cheat risks.",
+              "as_artifact": true
+            }
+          ]
+        }
+      },
+      {
+        "type": "pattern_deep_work",
+        "id": "url_port_fix",
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Implement the validator URL-port fix and publish a ship-readiness handoff.",
+          "acceptance_criteria": [
+            "`{{scenario.metadata.realworld.focused_test_command}}` passes.",
+            "The change is scoped to the relevant validator source file.",
+            "The handoff includes Scenario, Changed files, Validation, and Risks sections."
+          ],
+          "constraints": [
+            "Do not add dependencies.",
+            "Do not rewrite unrelated validator helpers.",
+            "Do not leak oracle strings."
+          ]
+        },
+        "support": {
+          "capabilities": [
+            {
+              "ref": "evidence_handoff"
+            }
+          ],
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "what": "Pinned validator URL port task.",
+              "why": "It defines the implementation contract."
+            },
+            {
+              "name": "research_summary",
+              "kind": "artifact",
+              "ref": "url_research.summary",
+              "what": "Deep research summary from the prior node.",
+              "why": "It narrows the implementation surface and validation plan."
+            },
+            {
+              "name": "source",
+              "kind": "workspace_glob",
+              "path": "src/lib/isURL.js",
+              "max_files": 20,
+              "what": "Local validator URL implementation files.",
+              "why": "They are the allowed edit surface for the port."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "test/agentflow-realworld-url-port.test.js",
+              "max_files": 20,
+              "what": "Focused local regression tests.",
+              "why": "They provide deterministic validation."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Semantic-port handoff with Scenario, Changed files, Validation, and Risks sections."
+          }
+        },
+        "completion": {
+          "max_cycles": 3,
+          "pass_threshold": 0.85,
+          "criteria": [
+            {
+              "id": "focused_tests",
+              "kind": "command",
+              "command": "{{scenario.metadata.realworld.focused_test_command}}",
+              "weight": 0.55,
+              "required": true
+            },
+            {
+              "id": "url_scope",
+              "kind": "rubric",
+              "target": "workspace",
+              "rubric": "The implementation fixes the requested URL hostname-port semantics without broad rewrites or upstream oracle leakage.",
+              "weight": 0.25
+            },
+            {
+              "id": "handoff_quality",
+              "kind": "rubric",
+              "target": "artifact:handoff",
+              "rubric": "The handoff cites research evidence, changed files, validation command and result, and risks.",
+              "weight": 0.2
+            }
+          ]
+        }
+      },
+      {
+        "type": "check",
+        "id": "focused_validation",
+        "runtime": {
+          "repo": "main"
+        },
+        "check_kind": "deterministic",
+        "command": "sh",
+        "args": [
+          "-lc",
+          "{{scenario.metadata.realworld.focused_test_command}}"
+        ],
+        "intent": {
+          "goal": "Run the focused validator URL port regression suite.",
+          "acceptance_criteria": [
+            "`{{scenario.metadata.realworld.focused_test_command}}` exits successfully."
+          ],
+          "constraints": []
+        }
+      }
+    ]
+  }
+}

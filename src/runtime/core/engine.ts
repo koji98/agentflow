@@ -48,7 +48,12 @@ import {
   type RuntimeEventEnvelope,
   type VerificationRecordedPayload
 } from "../events.js";
-import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../harness/types.js";
+import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter, type HarnessResult } from "../harness/types.js";
+import {
+  createHarnessWorkspaceWriteMirror,
+  prepareHarnessWorkspaceWriteMirror,
+  syncAndRemoveHarnessWorkspaceWriteMirror
+} from "../harness/workspace_mirror.js";
 import { substituteAgentflowTokens } from "../harness/tokens.js";
 import {
   buildRuntimeStateSnapshot,
@@ -1159,7 +1164,7 @@ function retryActionForClassification(classification: FailureClassification): Su
 function actionRetrySummary(action: SupervisorActionKind): string {
   switch (action) {
     case "rebuild_context":
-      return "Supervisor will retry the node with a freshly materialized context packet.";
+      return "Supervisor will retry the node with a freshly resolved context pointer packet.";
     case "run_diagnostic":
       return "Supervisor will retry the node after recording the diagnostic classification.";
     case "semantic_evaluation":
@@ -2119,7 +2124,7 @@ function buildContextMaterialEnv(
       continue;
     }
 
-    env[envName] = material.materialized_path;
+    env[envName] = material.pointer_path;
   }
 
   return env;
@@ -2385,6 +2390,8 @@ async function defaultCheckExecutor(
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
     output_dir: resolveExecutionArtifactsDirectory(context.execution_dir),
+    skills: context.node.skills,
+    cli: context.node.cli,
     timeout_sec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
     ...(context.on_stdout_chunk ? { on_stdout_chunk: context.on_stdout_chunk } : {}),
@@ -2527,13 +2534,28 @@ async function defaultAgentExecutor(
 
   const outputDir = resolveExecutionArtifactsDirectory(context.execution_dir);
   const runtimeDir = join(context.run_root, "runtime");
+  const sandbox = context.node.effective_policy.sandbox ?? "workspace-write";
+  const workspaceWriteMirror = createHarnessWorkspaceWriteMirror({
+    harness: harnessName,
+    sandbox,
+    workspace_path: context.workspace_path,
+    run_id: context.run_id,
+    execution_id: context.attempt.execution_id,
+    execution_dir: context.execution_dir,
+    output_dir: outputDir,
+    runtime_dir: runtimeDir
+  });
+  await prepareHarnessWorkspaceWriteMirror(workspaceWriteMirror);
+  const invocationOutputDir = workspaceWriteMirror?.output_dir ?? outputDir;
+  const invocationRuntimeDir = workspaceWriteMirror?.runtime_dir ?? runtimeDir;
   const toolSetup = await prepareAgentTools({
     node: context.node,
     execution_dir: context.execution_dir,
     workspace_path: context.workspace_path,
-    artifacts_root: outputDir,
+    artifacts_root: invocationOutputDir,
     run_root: context.run_root,
-    runtime_dir: runtimeDir,
+    runtime_dir: invocationRuntimeDir,
+    ...(workspaceWriteMirror ? { writable_runtime_dir: workspaceWriteMirror.tool_runtime_dir } : {}),
     run_id: context.run_id,
     graph_id: context.graph_id,
     execution_id: context.attempt.execution_id,
@@ -2543,7 +2565,7 @@ async function defaultAgentExecutor(
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
-    sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
+    sandbox,
     timeout_sec: context.node.effective_policy.timeout_sec,
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
@@ -2569,8 +2591,8 @@ async function defaultAgentExecutor(
     executionId: context.attempt.execution_id,
     repoAlias: context.node.repo,
     repoPath: context.workspace_path,
-    runtimeDir,
-    sandbox: context.node.effective_policy.sandbox ?? "workspace-write",
+    runtimeDir: invocationRuntimeDir,
+    sandbox,
     ...(context.node.effective_policy.skip_git_repo_check ? { skipGitRepoCheck: true } : {}),
     ...(context.node.effective_policy.harness_config
       ? { harnessConfig: context.node.effective_policy.harness_config }
@@ -2591,7 +2613,7 @@ async function defaultAgentExecutor(
     contextManifest,
     ...(context.supervisor_recovery_envelope ? { supervisorRecoveryEnvelope: context.supervisor_recovery_envelope } : {}),
     promptPath,
-    outputDir,
+    outputDir: invocationOutputDir,
     artifacts: context.node.declared_artifacts,
     timeoutSec: context.node.effective_policy.timeout_sec,
     signal: context.signal,
@@ -2599,14 +2621,23 @@ async function defaultAgentExecutor(
     ...(context.on_stderr_chunk ? { onStderrChunk: context.on_stderr_chunk } : {}),
     toolBinDir: toolSetup.bin_dir,
     toolEnv: toolSetup.env,
-    tools: toolSetup.resolved_tools
+    tools: toolSetup.resolved_tools,
+    skills: context.node.skills,
+    cli: context.node.cli
   };
   const renderedPrompt = renderHarnessPrompt(agentInvocation);
   await mkdir(dirname(promptPath), { recursive: true });
   await writeFile(promptPath, `${renderedPrompt}\n`, "utf8");
   context.attempt.prompt_sha256 = createHash("sha256").update(`${renderedPrompt}\n`).digest("hex");
 
-  const harnessResult = await harnesses[harnessName]!.run(agentInvocation);
+  let harnessResult: HarnessResult;
+  try {
+    harnessResult = await harnesses[harnessName]!.run(agentInvocation);
+    await syncAndRemoveHarnessWorkspaceWriteMirror(workspaceWriteMirror);
+  } catch (error) {
+    await syncAndRemoveHarnessWorkspaceWriteMirror(workspaceWriteMirror).catch(() => undefined);
+    throw error;
+  }
 
   return {
     status: harnessResult.status,

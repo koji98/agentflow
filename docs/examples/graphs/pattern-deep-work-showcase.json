@@ -16,12 +16,7 @@
       "harness": "codex-cli",
       "model": "gpt-5-codex",
       "reasoning_effort": "medium",
-      "sandbox": "workspace-write",
-      "timeout_sec": 1200,
-      "input_rules": {
-        "max_total_tokens": 128000,
-        "max_tokens_per_item": 32000
-      }
+      "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
@@ -35,20 +30,6 @@
       {
         "type": "pattern_deep_work",
         "id": "managed_pattern_docs_update",
-        "repo": "main",
-        "profile": "default",
-        "context": [
-          {
-            "name": "managed_patterns_doc",
-            "from": "workspace_file",
-            "path": "docs/product/managed-patterns.md"
-          },
-          {
-            "name": "skill_reference",
-            "from": "workspace_file",
-            "path": "skills/agentflow-authoring/references/managed-patterns.md"
-          }
-        ],
         "artifacts": {
           "validation_log": {
             "from": "output_dir",
@@ -93,27 +74,33 @@
             "Do not change runtime source in this showcase.",
             "Do not edit package manifests or lockfiles."
           ]
+        },
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "managed_patterns_doc",
+              "path": "docs/product/managed-patterns.md",
+              "what": "Workspace file docs/product/managed-patterns.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            },
+            {
+              "name": "skill_reference",
+              "path": "skills/agentflow-authoring/references/managed-patterns.md",
+              "what": "Workspace file skills/agentflow-authoring/references/managed-patterns.md.",
+              "why": "Needed to complete this node intent.",
+              "kind": "workspace_file"
+            }
+          ]
         }
       },
       {
         "type": "agent",
         "id": "handoff",
-        "repo": "main",
-        "profile": "default",
-        "context": [
-          {
-            "ref": "managed_pattern_docs_update.summary",
-            "name": "work_summary"
-          },
-          {
-            "ref": "managed_pattern_docs_update.packet",
-            "name": "work_packet"
-          },
-          {
-            "ref": "managed_pattern_docs_update.validation_log",
-            "name": "validation_log"
-          }
-        ],
         "artifacts": {
           "handoff": {
             "from": "output_dir",
@@ -128,6 +115,35 @@
             "The handoff names validation evidence and residual risks."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main",
+          "profile": "default"
+        },
+        "support": {
+          "context": [
+            {
+              "ref": "managed_pattern_docs_update.summary",
+              "name": "work_summary",
+              "what": "Artifact reference managed_pattern_docs_update.summary.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            },
+            {
+              "ref": "managed_pattern_docs_update.packet",
+              "name": "work_packet",
+              "what": "Artifact reference managed_pattern_docs_update.packet.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            },
+            {
+              "ref": "managed_pattern_docs_update.validation_log",
+              "name": "validation_log",
+              "what": "Artifact reference managed_pattern_docs_update.validation_log.",
+              "why": "Needed to complete this node intent.",
+              "kind": "artifact"
+            }
+          ]
         }
       }
     ]

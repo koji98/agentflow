@@ -15,7 +15,7 @@ export type ReadinessCheckStatus = "passed" | "warning" | "blocked";
 export type ReadinessStatus = "ready" | "warnings" | "blocked";
 
 export interface ReadinessCheckResult {
-  kind: "file" | "command" | "env" | "repo" | "harness" | "credential" | "tool" | "mcp";
+  kind: "file" | "command" | "env" | "repo" | "harness" | "credential" | "tool" | "mcp" | "cli";
   required: boolean;
   status: ReadinessCheckStatus;
   target: string;
@@ -295,6 +295,50 @@ async function evaluateNodeCommand(
     passed
       ? `Node "${node.authored_id}" command "${command}" is available on PATH.`
       : `Node "${node.authored_id}" command "${command}" is not available on PATH.`
+  );
+}
+
+async function evaluateCliHint(
+  node: CompiledExecutableNode,
+  command: string,
+  repoSources: Record<string, string>,
+  environment: NodeJS.ProcessEnv
+): Promise<ReadinessCheckResult> {
+  const target = `${node.authored_id}: ${command}`;
+  const repoRoot = repoSources[node.repo];
+
+  if (commandUsesPath(command)) {
+    if (!repoRoot && !isAbsolute(command)) {
+      return buildIssue(
+        "cli",
+        true,
+        target,
+        false,
+        `CLI hint "${command}" cannot be checked because repo "${node.repo}" is unavailable.`
+      );
+    }
+    const commandPath = isAbsolute(command) ? command : resolve(repoRoot!, command);
+    const passed = canAccessExecutable(commandPath);
+    return buildIssue(
+      "cli",
+      true,
+      target,
+      passed,
+      passed
+        ? `CLI hint "${command}" is executable at ${commandPath}.`
+        : `CLI hint "${command}" is not executable at ${commandPath}.`
+    );
+  }
+
+  const passed = commandAvailable(command, environment);
+  return buildIssue(
+    "cli",
+    true,
+    target,
+    passed,
+    passed
+      ? `CLI hint "${command}" is available on PATH.`
+      : `CLI hint "${command}" is not available on PATH.`
   );
 }
 
@@ -711,6 +755,12 @@ async function evaluateMachineReadiness(options: {
     checks.push(await evaluateNodeCommand(node, command, options.repo_sources, options.env));
   }
 
+  for (const node of options.graph.nodes) {
+    for (const hint of node.cli) {
+      checks.push(await evaluateCliHint(node, hint.cmd, options.repo_sources, options.env));
+    }
+  }
+
   for (const harnessName of collectRequiredHarnesses(options.graph)) {
     checks.push(await evaluateHarnessReadiness(harnessName, options.harnesses));
   }
@@ -745,7 +795,7 @@ async function evaluateMachineReadiness(options: {
 }
 
 export async function evaluateGraphReadiness(options: {
-  graph: Pick<CompiledGraph, "prerequisites"> & Partial<Pick<CompiledGraph, "launch" | "nodes" | "credential_specs" | "supervisor_effective_policy">>;
+  graph: Partial<Pick<CompiledGraph, "launch" | "nodes" | "credential_specs" | "supervisor_effective_policy">>;
   repo_sources: Record<string, string>;
   repo_source_diagnostics?: Array<{ path: string; message: string }>;
   env?: NodeJS.ProcessEnv;
@@ -763,37 +813,6 @@ export async function evaluateGraphReadiness(options: {
       target: diagnostic.path,
       message: diagnostic.message
     });
-  }
-
-  for (const check of options.graph.prerequisites.checks) {
-    const required = check.required !== false;
-
-    if (check.kind === "file") {
-      checks.push(await evaluateFilePrerequisite(check.path, required, options.repo_sources));
-      continue;
-    }
-
-    if (check.kind === "command") {
-      checks.push(evaluateCommandPrerequisite(check.command, required, environment));
-      continue;
-    }
-
-    if (check.kind === "env") {
-      checks.push(
-        buildIssue(
-          "env",
-          required,
-          check.name,
-          typeof environment[check.name] === "string" && environment[check.name]!.length > 0,
-          typeof environment[check.name] === "string" && environment[check.name]!.length > 0
-            ? `Environment variable "${check.name}" is set.`
-            : `Environment variable "${check.name}" is not set.`
-        )
-      );
-      continue;
-    }
-
-    checks.push(await evaluateRepoPrerequisite(check.repo, required, options.repo_sources));
   }
 
   if (options.machine_checks && options.graph.launch && options.graph.nodes) {

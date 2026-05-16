@@ -1,0 +1,31 @@
+{
+  "schema": "agentflow.plugin/1",
+  "id": "agentflow-validation-support",
+  "version": "0.1.0",
+  "workflows": {
+    "prepare-parser": {
+      "path": "workflows/prepare-parser/workflow.json",
+      "description": "Prepare parser-debug context and publish a public packet for downstream repair nodes."
+    }
+  },
+  "tools": {
+    "oracle-probe": {
+      "executable": "tools/oracle-probe.mjs",
+      "description": "Inspect local sentinel fixture metadata without exposing hidden oracle contents.",
+      "config_schema": {
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "credentials": []
+    }
+  },
+  "credentials": {}
+}

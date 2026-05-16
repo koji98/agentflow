@@ -1,0 +1,74 @@
+{
+  "type": "sequence",
+  "id": "prepare_parser_workflow",
+  "steps": [
+    {
+      "type": "agent",
+      "id": "inspect",
+      "runtime": {
+        "repo": "main"
+      },
+      "intent": {
+        "goal": "Inspect the parser fixture for {{config.parser_name}} and write preparation notes.",
+        "acceptance_criteria": [
+          "The notes identify parser entry points and likely regression reproduction commands."
+        ],
+        "constraints": [
+          "Do not expose hidden oracle contents."
+        ]
+      },
+      "support": {
+        "context": [
+          {
+            "name": "parser_prep",
+            "kind": "plugin_file",
+            "path": "./context/parser-prep.md",
+            "what": "Plugin-owned parser preparation guidance.",
+            "why": "The workflow uses it to prepare a consistent public repair packet."
+          }
+        ]
+      },
+      "artifacts": {
+        "notes": {
+          "from": "output_dir",
+          "path": "parser-notes.md",
+          "description": "Internal parser preparation notes."
+        }
+      }
+    },
+    {
+      "type": "agent",
+      "id": "publish",
+      "runtime": {
+        "repo": "main"
+      },
+      "intent": {
+        "goal": "Publish a public parser packet for downstream repair.",
+        "acceptance_criteria": [
+          "The packet summarizes parser entry points and validation commands."
+        ],
+        "constraints": [
+          "Do not include hidden oracle contents."
+        ]
+      },
+      "support": {
+        "context": [
+          {
+            "kind": "artifact",
+            "ref": "inspect.notes",
+            "name": "notes",
+            "what": "Internal parser notes from the inspect step.",
+            "why": "The public packet should be derived from these notes."
+          }
+        ]
+      },
+      "artifacts": {
+        "packet": {
+          "from": "output_dir",
+          "path": "parser-packet.json",
+          "description": "Public parser preparation packet."
+        }
+      }
+    }
+  ]
+}

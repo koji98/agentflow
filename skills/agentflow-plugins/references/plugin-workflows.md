@@ -185,7 +185,7 @@ Minimal `workflow.json`:
 
 ## Packaged Files
 
-- `context.from = "plugin_file"` injects plugin-owned text context.
+- `kind: "plugin_file"` injects plugin-owned text context and requires `name`, `path`, `what`, and `why`.
 - Plain relative paths such as `./context/guidance.md` resolve inside the workflow directory.
 - `plugin://...` resolves from the plugin package root, which lets workflow graphs reuse package-level scripts and shared context files directly.
 - `{{config.key}}` interpolates workflow config.
@@ -196,7 +196,7 @@ Tools are CLIs. Each export declares:
 
 - `executable`
 - `description`
-- optional `config_schema` for non-secret graph `tools[].config` defaults
+- optional `config_schema` for non-secret managed tool `config` defaults
 - optional `credentials`
 
 The graph-visible callable name is derived from the declaration alias or `plugin-tool`.
@@ -279,8 +279,8 @@ Policy:
 - declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent
 - tools share the node sandbox and timeout
 - credential values are configured through `agentflow auth`, stored in macOS Keychain for secret fields, and injected only into the plugin tool subprocess
-- inline `tools[].config` values are not exported into the agent harness environment; the generated launcher resolves them only for the plugin tool subprocess
-- inline `tools[].config` accepts non-secret graph-provided defaults only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
+- managed tool `config` values are not exported into the agent harness environment; the generated launcher resolves them only for the plugin tool subprocess
+- managed tool `config` accepts non-secret graph-provided defaults only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
 - `config_schema` validates graph config defaults; it is not the tool's CLI argument schema
 - graph config values are exposed to the tool subprocess as `AGENTFLOW_TOOL_<CALLABLE_NAME>_<KEY>` environment variables, with non-alphanumeric characters converted to `_`
 - default CLI arguments are not declared in the manifest; the executable defines its own interface, and agents pass arguments when invoking the callable tool

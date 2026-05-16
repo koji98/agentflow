@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
 import type { ContextItem } from "../../graph/authored.js";
@@ -12,26 +12,20 @@ import {
   defaultContextIgnoredRoots,
   listRepoFilesDetailed
 } from "./repo_files.js";
-import { countContextTokens } from "./tokenizer.js";
 
 export interface ContextAnalysisFileMatch {
   path: string;
-  tokens: number;
-  materialized_tokens: number;
-  truncated: boolean;
+  size_bytes: number;
 }
 
 export interface ContextAnalysisItem {
   key: string;
   name: string;
-  kind: "text" | "workspace_file" | "workspace_glob" | "artifact";
+  kind: "workspace_file" | "workspace_glob" | "plugin_file" | "artifact";
   path?: string;
   repo_alias?: string;
   match_count: number;
-  projected_tokens: number;
-  actual_tokens: number;
-  truncated_count: number;
-  non_tokenizable_count: number;
+  total_size_bytes: number;
   sample_matches: string[];
   largest_matches: ContextAnalysisFileMatch[];
   default_ignored_roots: string[];
@@ -43,16 +37,14 @@ export interface ContextAnalysisNode {
   compiled_id: string;
   authored_id: string;
   repo_alias: string;
-  max_total_tokens: number;
-  max_tokens_per_item: number;
-  projected_total_tokens: number;
-  would_exceed_total: boolean;
+  pointer_count: number;
+  total_size_bytes: number;
   items: ContextAnalysisItem[];
   warnings: string[];
 }
 
 export interface ContextAnalysisReport {
-  status: "passed" | "warnings" | "blocked";
+  status: "passed" | "warnings";
   nodes: ContextAnalysisNode[];
   diagnostics: Array<{
     severity: "warning" | "error";
@@ -74,10 +66,6 @@ function contextItemKind(item: ContextItem): ContextAnalysisItem["kind"] {
   return item.from;
 }
 
-function materializedTokenEstimate(actualTokens: number, maxTokensPerItem: number): number {
-  return Math.min(actualTokens, maxTokensPerItem);
-}
-
 function firstPathSegment(path: string): string | undefined {
   const normalized = normalizeRelativePath(path).replace(/^\/+/u, "");
   const [first] = normalized.split("/");
@@ -91,34 +79,19 @@ function explicitIgnoredRootOptIn(pattern: string): string | undefined {
     : undefined;
 }
 
-function tryDecodeUtf8(buffer: Buffer): string | undefined {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-  } catch {
-    return undefined;
-  }
-}
-
-async function readFileTokenMatch(
+async function readFilePointerMatch(
   root: string,
-  relativePath: string,
-  maxTokensPerItem: number
-): Promise<ContextAnalysisFileMatch | undefined> {
+  relativePath: string
+): Promise<ContextAnalysisFileMatch> {
   const absolutePath = resolveSubpathWithinRoot(
     root,
     relativePath,
     `Context analysis file "${relativePath}"`
   );
-  const text = tryDecodeUtf8(await readFile(absolutePath));
-  if (text === undefined) {
-    return undefined;
-  }
-  const tokens = countContextTokens(text);
+  const fileStat = await stat(absolutePath);
   return {
     path: relativePath,
-    tokens,
-    materialized_tokens: materializedTokenEstimate(tokens, maxTokensPerItem),
-    truncated: tokens > maxTokensPerItem
+    size_bytes: fileStat.size
   };
 }
 
@@ -127,26 +100,39 @@ async function analyzeWorkspaceFile(options: {
   key: string;
   repoAlias: string;
   repoRoot: string;
-  maxTokensPerItem: number;
+  repoRelativePath: string;
 }): Promise<ContextAnalysisItem> {
-  const normalizedPath = normalizeRelativePath(options.item.path);
-  const match = await readFileTokenMatch(options.repoRoot, normalizedPath, options.maxTokensPerItem);
-  return {
-    key: options.key,
-    name: options.item.name,
-    kind: "workspace_file",
-    path: normalizedPath,
-    repo_alias: options.repoAlias,
-    match_count: match ? 1 : 0,
-    projected_tokens: match?.materialized_tokens ?? 0,
-    actual_tokens: match?.tokens ?? 0,
-    truncated_count: match?.truncated ? 1 : 0,
-    non_tokenizable_count: match ? 0 : 1,
-    sample_matches: match ? [match.path] : [],
-    largest_matches: match ? [match] : [],
-    default_ignored_roots: [...defaultContextIgnoredRoots],
-    warnings: match?.truncated ? [`${normalizedPath} will be truncated by max_tokens_per_item.`] : []
-  };
+  const normalizedPath = normalizeRelativePath(options.repoRelativePath);
+  try {
+    const match = await readFilePointerMatch(options.repoRoot, normalizedPath);
+    return {
+      key: options.key,
+      name: options.item.name,
+      kind: "workspace_file",
+      path: normalizedPath,
+      repo_alias: options.repoAlias,
+      match_count: 1,
+      total_size_bytes: match.size_bytes,
+      sample_matches: [match.path],
+      largest_matches: [match],
+      default_ignored_roots: [...defaultContextIgnoredRoots],
+      warnings: []
+    };
+  } catch {
+    return {
+      key: options.key,
+      name: options.item.name,
+      kind: "workspace_file",
+      path: normalizedPath,
+      repo_alias: options.repoAlias,
+      match_count: 0,
+      total_size_bytes: 0,
+      sample_matches: [],
+      largest_matches: [],
+      default_ignored_roots: [...defaultContextIgnoredRoots],
+      warnings: [`Workspace file "${options.item.path}" was not found during context analysis.`]
+    };
+  }
 }
 
 async function analyzeWorkspaceGlob(options: {
@@ -155,7 +141,6 @@ async function analyzeWorkspaceGlob(options: {
   repoAlias: string;
   repoRoot: string;
   repoRelativePattern: string;
-  maxTokensPerItem: number;
 }): Promise<ContextAnalysisItem> {
   const normalizedPattern = normalizeRelativePath(options.repoRelativePattern);
   const ignoredRootOptIn = explicitIgnoredRootOptIn(normalizedPattern);
@@ -166,24 +151,13 @@ async function analyzeWorkspaceGlob(options: {
   const matchedPaths = repoFiles.files
     .filter((filePath) => matcher.test(filePath))
     .slice(0, options.item.max_files ?? Number.MAX_SAFE_INTEGER);
-  const matches: ContextAnalysisFileMatch[] = [];
-  let nonTokenizableCount = 0;
-
-  for (const relativePath of matchedPaths) {
-    const match = await readFileTokenMatch(options.repoRoot, relativePath, options.maxTokensPerItem);
-    if (match) {
-      matches.push(match);
-    } else {
-      nonTokenizableCount += 1;
-    }
-  }
-
+  const matches = await Promise.all(
+    matchedPaths.map((relativePath) => readFilePointerMatch(options.repoRoot, relativePath))
+  );
   const warnings: string[] = [];
+
   if (options.item.max_files === undefined) {
     warnings.push(`workspace_glob "${options.item.path}" has no max_files cap.`);
-  }
-  if (matches.some((match) => match.truncated)) {
-    warnings.push("One or more glob matches will be truncated by max_tokens_per_item.");
   }
 
   return {
@@ -193,19 +167,50 @@ async function analyzeWorkspaceGlob(options: {
     path: options.item.path,
     repo_alias: options.repoAlias,
     match_count: matchedPaths.length,
-    projected_tokens: matches.reduce((sum, match) => sum + match.materialized_tokens, 0),
-    actual_tokens: matches.reduce((sum, match) => sum + match.tokens, 0),
-    truncated_count: matches.filter((match) => match.truncated).length,
-    non_tokenizable_count: nonTokenizableCount,
+    total_size_bytes: matches.reduce((sum, match) => sum + match.size_bytes, 0),
     sample_matches: matchedPaths.slice(0, 10),
     largest_matches: matches
       .slice()
-      .sort((left, right) => right.tokens - left.tokens)
+      .sort((left, right) => right.size_bytes - left.size_bytes)
       .slice(0, 10),
     default_ignored_roots: repoFiles.ignored_roots,
     ...(ignoredRootOptIn ? { explicit_ignored_root_opt_in: ignoredRootOptIn } : {}),
     warnings
   };
+}
+
+async function analyzePluginFile(options: {
+  item: Extract<ContextItem, { from: "plugin_file" }>;
+  key: string;
+}): Promise<ContextAnalysisItem> {
+  try {
+    const fileStat = await stat(options.item.path);
+    return {
+      key: options.key,
+      name: options.item.name,
+      kind: "plugin_file",
+      path: options.item.path,
+      match_count: 1,
+      total_size_bytes: fileStat.size,
+      sample_matches: [options.item.path],
+      largest_matches: [{ path: options.item.path, size_bytes: fileStat.size }],
+      default_ignored_roots: [],
+      warnings: []
+    };
+  } catch {
+    return {
+      key: options.key,
+      name: options.item.name,
+      kind: "plugin_file",
+      path: options.item.path,
+      match_count: 0,
+      total_size_bytes: 0,
+      sample_matches: [],
+      largest_matches: [],
+      default_ignored_roots: [],
+      warnings: [`Plugin file "${options.item.path}" was not found during context analysis.`]
+    };
+  }
 }
 
 async function analyzeContextItem(options: {
@@ -215,7 +220,6 @@ async function analyzeContextItem(options: {
   repo_workspaces: Record<string, string>;
 }): Promise<ContextAnalysisItem> {
   const key = options.item.name || `context_${options.index + 1}`;
-  const maxTokensPerItem = options.node.effective_policy.input_rules.max_tokens_per_item;
 
   if (isArtifactContextItem(options.item)) {
     return {
@@ -223,33 +227,19 @@ async function analyzeContextItem(options: {
       name: options.item.name,
       kind: "artifact",
       match_count: 0,
-      projected_tokens: 0,
-      actual_tokens: 0,
-      truncated_count: 0,
-      non_tokenizable_count: 0,
+      total_size_bytes: 0,
       sample_matches: [],
       largest_matches: [],
       default_ignored_roots: [],
-      warnings: ["Artifact context is runtime-dependent and cannot be token-costed before launch."]
+      warnings: ["Artifact context is runtime-dependent and cannot be resolved before launch."]
     };
   }
 
-  if (options.item.from === "text") {
-    const tokens = countContextTokens(options.item.text);
-    return {
-      key,
-      name: options.item.name,
-      kind: "text",
-      match_count: 1,
-      projected_tokens: materializedTokenEstimate(tokens, maxTokensPerItem),
-      actual_tokens: tokens,
-      truncated_count: tokens > maxTokensPerItem ? 1 : 0,
-      non_tokenizable_count: 0,
-      sample_matches: [],
-      largest_matches: [],
-      default_ignored_roots: [],
-      warnings: tokens > maxTokensPerItem ? ["Inline text context will be truncated by max_tokens_per_item."] : []
-    };
+  if (options.item.from === "plugin_file") {
+    return analyzePluginFile({
+      item: options.item,
+      key
+    });
   }
 
   const split = splitQualifiedPath(options.item.path, options.node.repo);
@@ -262,10 +252,7 @@ async function analyzeContextItem(options: {
       path: options.item.path,
       repo_alias: split.repo_alias,
       match_count: 0,
-      projected_tokens: 0,
-      actual_tokens: 0,
-      truncated_count: 0,
-      non_tokenizable_count: 0,
+      total_size_bytes: 0,
       sample_matches: [],
       largest_matches: [],
       default_ignored_roots: [...defaultContextIgnoredRoots],
@@ -279,7 +266,7 @@ async function analyzeContextItem(options: {
       key,
       repoAlias: split.repo_alias,
       repoRoot,
-      maxTokensPerItem
+      repoRelativePath: split.repo_relative_path
     });
   }
 
@@ -288,8 +275,7 @@ async function analyzeContextItem(options: {
     key,
     repoAlias: split.repo_alias,
     repoRoot,
-    repoRelativePattern: split.repo_relative_path,
-    maxTokensPerItem
+    repoRelativePattern: split.repo_relative_path
   });
 }
 
@@ -307,18 +293,14 @@ export async function analyzeNodeContext(options: {
       })
     )
   );
-  const projectedTotal = items.reduce((sum, item) => sum + item.projected_tokens, 0);
-  const maxTotal = options.node.effective_policy.input_rules.max_total_tokens;
   const warnings = items.flatMap((item) => item.warnings);
 
   return {
     compiled_id: options.node.compiled_id,
     authored_id: options.node.authored_id,
     repo_alias: options.node.repo,
-    max_total_tokens: maxTotal,
-    max_tokens_per_item: options.node.effective_policy.input_rules.max_tokens_per_item,
-    projected_total_tokens: projectedTotal,
-    would_exceed_total: projectedTotal > maxTotal,
+    pointer_count: items.reduce((sum, item) => sum + item.match_count, 0),
+    total_size_bytes: items.reduce((sum, item) => sum + item.total_size_bytes, 0),
     items,
     warnings
   };
@@ -336,32 +318,18 @@ export async function analyzeGraphContext(options: {
       })
     )
   );
-  const diagnostics = nodes.flatMap((node) => {
-    const warnings = node.warnings.map((warning) => ({
+  const diagnostics = nodes.flatMap((node) =>
+    node.warnings.map((warning) => ({
       severity: "warning" as const,
       compiled_id: node.compiled_id,
       authored_id: node.authored_id,
       path: `${node.authored_id}.context`,
       message: warning
-    }));
-    const blocked = node.would_exceed_total
-      ? [
-          {
-            severity: "error" as const,
-            compiled_id: node.compiled_id,
-            authored_id: node.authored_id,
-            path: `${node.authored_id}.context`,
-            message: `Projected context materialization uses ${node.projected_total_tokens} tokens, exceeding max_total_tokens ${node.max_total_tokens}.`
-          }
-        ]
-      : [];
-    return [...blocked, ...warnings];
-  });
+    }))
+  );
 
   return {
-    status: diagnostics.some((diagnostic) => diagnostic.severity === "error")
-      ? "blocked"
-      : diagnostics.length > 0 ? "warnings" : "passed",
+    status: diagnostics.length > 0 ? "warnings" : "passed",
     nodes,
     diagnostics
   };
@@ -380,8 +348,8 @@ export function renderContextAnalysisMarkdown(report: ContextAnalysisReport): st
       "",
       `## ${node.authored_id}`,
       "",
-      `- Projected total tokens: \`${node.projected_total_tokens}\` / \`${node.max_total_tokens}\``,
-      `- Would exceed total: \`${node.would_exceed_total}\``
+      `- Context pointers: \`${node.pointer_count}\``,
+      `- Total pointer target bytes: \`${node.total_size_bytes}\``
     );
     for (const item of node.items) {
       lines.push(
@@ -391,7 +359,7 @@ export function renderContextAnalysisMarkdown(report: ContextAnalysisReport): st
         `- Kind: \`${item.kind}\``,
         ...(item.path ? [`- Path: \`${item.path}\``] : []),
         `- Matches: \`${item.match_count}\``,
-        `- Projected tokens: \`${item.projected_tokens}\``,
+        `- Total bytes: \`${item.total_size_bytes}\``,
         ...(item.default_ignored_roots.length > 0
           ? [`- Default ignored roots: \`${item.default_ignored_roots.join("`, `")}\``]
           : []),
@@ -405,7 +373,7 @@ export function renderContextAnalysisMarkdown(report: ContextAnalysisReport): st
           ? ["- Sample matches:", ...item.sample_matches.map((match) => `  - \`${match}\``)]
           : []),
         ...(item.largest_matches.length > 0
-          ? ["- Largest matches:", ...item.largest_matches.map((match) => `  - \`${match.path}\` (${match.tokens} tokens)`)]
+          ? ["- Largest matches:", ...item.largest_matches.map((match) => `  - \`${match.path}\` (${match.size_bytes} bytes)`)]
           : [])
       );
     }
@@ -416,12 +384,12 @@ export function renderContextAnalysisMarkdown(report: ContextAnalysisReport): st
 
 export function createCompactContextIndex(report: ContextAnalysisNode): string {
   const lines = [
-    "# Supervisor context repair",
+    "# Supervisor context pointer index",
     "",
-    "The authored context package could not be materialized within the node token budget.",
+    "The authored context package is represented as source pointers.",
     "Graph intent, node intent, repo authority, sandbox, and declared artifacts are unchanged.",
     "",
-    `Projected authored context tokens: ${report.projected_total_tokens} / ${report.max_total_tokens}.`,
+    `Context pointers: ${report.pointer_count}.`,
     "",
     "## Context items"
   ];
@@ -433,7 +401,7 @@ export function createCompactContextIndex(report: ContextAnalysisNode): string {
       `- Kind: ${item.kind}`,
       ...(item.path ? [`- Path: ${item.path}`] : []),
       `- Matches: ${item.match_count}`,
-      `- Projected tokens: ${item.projected_tokens}`,
+      `- Total bytes: ${item.total_size_bytes}`,
       ...(item.default_ignored_roots.length > 0
         ? [`- Default ignored roots skipped: ${item.default_ignored_roots.join(", ")}`]
         : []),
@@ -444,7 +412,7 @@ export function createCompactContextIndex(report: ContextAnalysisNode): string {
         ? ["- Sample matches:", ...item.sample_matches.slice(0, 20).map((match) => `  - ${match}`)]
         : []),
       ...(item.largest_matches.length > 0
-        ? ["- Largest matches:", ...item.largest_matches.slice(0, 10).map((match) => `  - ${match.path} (${match.tokens} tokens)`)]
+        ? ["- Largest matches:", ...item.largest_matches.slice(0, 10).map((match) => `  - ${match.path} (${match.size_bytes} bytes)`)]
         : [])
     );
   }

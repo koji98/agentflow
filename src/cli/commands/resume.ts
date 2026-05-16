@@ -24,7 +24,11 @@ import { createCursorCliHarness } from "../../runtime/harness/cursor_cli.js";
 import { createResumedRuntimeSession } from "../../runtime/resume.js";
 import type { RuntimeNodeStatus, RuntimeSession } from "../../runtime/session.js";
 import { resumeWorkspaceFromManifest } from "../../runtime/workspace/resume.js";
-import { createInteractiveCheckpointExecutor } from "../checkpoint.js";
+import {
+  createInteractiveCheckpointExecutor,
+  createScriptedCheckpointExecutor,
+  parseScriptedCheckpointDecisions
+} from "../checkpoint.js";
 import {
   createGraphCliInvocation,
   createGraphPathResolution,
@@ -239,7 +243,11 @@ export const resumeCommand = {
   ] as const,
   async run(
     options: Record<string, string | boolean | string[] | undefined>,
-    currentWorkingDirectory: string
+    currentWorkingDirectory: string,
+    _signal?: AbortSignal,
+    _positionals: readonly string[] = [],
+    environment: NodeJS.ProcessEnv = process.env,
+    runtimeEnv: Record<string, string> = {}
   ) {
     const runRootInput = typeof options["run-root"] === "string" ? options["run-root"] : undefined;
     const graphInput = typeof options.graph === "string" ? options.graph : undefined;
@@ -490,6 +498,7 @@ export const resumeCommand = {
       loaded.lowered_managed_nodes,
       {
         ...(loaded.resolved_plugins ? { resolved_plugins: loaded.resolved_plugins } : {}),
+        ...(loaded.resolved_skill_sources ? { resolved_skill_sources: loaded.resolved_skill_sources } : {}),
         graph_dir: dirname(loaded.absolute_path)
       }
     );
@@ -626,6 +635,13 @@ export const resumeCommand = {
     const workspace = await resumeWorkspaceFromManifest(execution_manifest);
 
     const progress = createRuntimeProgressReporter(compiled_graph);
+    const scriptedCheckpointDecisions =
+      runtimeEnv.AGENTFLOW_EVAL_CHECKPOINT_DECISIONS ?? environment.AGENTFLOW_EVAL_CHECKPOINT_DECISIONS;
+    const checkpointExecutor = scriptedCheckpointDecisions
+      ? createScriptedCheckpointExecutor({
+          decisions: parseScriptedCheckpointDecisions(scriptedCheckpointDecisions)
+        })
+      : createInteractiveCheckpointExecutor();
     const resumed = await resumeCompiledGraph({
       on_event: (event) => {
         progress.onEvent(event);
@@ -641,7 +657,7 @@ export const resumeCommand = {
         "cursor-cli": createCursorCliHarness()
       },
       executors: {
-        checkpoint: createInteractiveCheckpointExecutor()
+        checkpoint: checkpointExecutor
       },
       resumed_session: session,
       prior_events: events,

@@ -6,7 +6,10 @@ import type {
   ExecutableGraphNode,
   AuthoredGraphNode,
   ContainerGraphNode,
-  ToolDeclaration
+  CliHint,
+  ManagedToolDefinition,
+  NodeSupport,
+  SupportReference
 } from "./authored.js";
 import type {
   CompileGraphResult,
@@ -14,6 +17,7 @@ import type {
   CompiledExecutableNode,
   CompiledGraph,
   CompiledScope,
+  ResolvedSkill,
   ResolvedTool,
   ResolvedToolSource
 } from "./compiled.js";
@@ -27,6 +31,7 @@ import type { LaunchResolution } from "./profiles.js";
 import type { GraphDiagnostic, LoweredManagedKind } from "./schema.js";
 import type { AuthoredGraphDocument } from "./authored.js";
 import type { CredentialSpecMap } from "../auth/types.js";
+import type { ResolvedSkillSource } from "../skills/sources.js";
 
 interface ScopeFrame {
   authored_id: string;
@@ -58,8 +63,9 @@ interface CompileContext {
   lowered_managed_kind_by_id: Map<string, LoweredManagedKind>;
   edge_counter: number;
   plugins_by_alias: Map<string, ResolvedPlugin>;
+  skill_sources_by_alias: Map<string, ResolvedSkillSource>;
   graph_dir: string | undefined;
-  graph_scope_tools: ResolvedTool[];
+  tool_registry: Map<string, ResolvedTool>;
   credential_specs: Map<string, CredentialSpecMap[string]>;
 }
 
@@ -130,34 +136,54 @@ function createScopeFrame(
   };
 }
 
-function callableNameForToolDeclaration(declaration: ToolDeclaration): string {
-  return declaration.alias ?? `${declaration.from_plugin}-${declaration.tool}`;
+function splitManagedToolRef(ref: string): { pluginAlias: string; toolName: string } | undefined {
+  const slashIndex = ref.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === ref.length - 1 || ref.indexOf("/", slashIndex + 1) !== -1) {
+    return undefined;
+  }
+  return {
+    pluginAlias: ref.slice(0, slashIndex),
+    toolName: ref.slice(slashIndex + 1)
+  };
+}
+
+function callableNameForToolDeclaration(declaration: ManagedToolDefinition): string {
+  const split = splitManagedToolRef(declaration.ref);
+  return declaration.alias ?? (split ? `${split.pluginAlias}-${split.toolName}` : declaration.ref);
 }
 
 function resolveToolDeclaration(
-  declaration: ToolDeclaration,
+  declaration: ManagedToolDefinition,
   options: {
-    declared_at: "graph" | "agent";
     declaration_path: string;
     plugins_by_alias: Map<string, ResolvedPlugin>;
     credential_specs: Map<string, CredentialSpecMap[string]>;
     diagnostics: GraphDiagnostic[];
   }
 ): ResolvedTool | undefined {
-  const plugin = options.plugins_by_alias.get(declaration.from_plugin);
-  if (!plugin) {
+  const split = splitManagedToolRef(declaration.ref);
+  if (!split) {
     options.diagnostics.push({
-      path: `${options.declaration_path}.from_plugin`,
-      message: `Plugin "${declaration.from_plugin}" is not declared or resolved.`
+      path: `${options.declaration_path}.ref`,
+      message: 'Managed tool refs must use "pluginAlias/toolName" form.'
     });
     return undefined;
   }
 
-  const exported = plugin.manifest.tools[declaration.tool];
+  const plugin = options.plugins_by_alias.get(split.pluginAlias);
+  if (!plugin) {
+    options.diagnostics.push({
+      path: `${options.declaration_path}.ref`,
+      message: `Plugin "${split.pluginAlias}" is not declared or resolved.`
+    });
+    return undefined;
+  }
+
+  const exported = plugin.manifest.tools[split.toolName];
   if (!exported) {
     options.diagnostics.push({
-      path: `${options.declaration_path}.tool`,
-      message: `Plugin "${declaration.from_plugin}" does not export tool "${declaration.tool}".`
+      path: `${options.declaration_path}.ref`,
+      message: `Plugin "${split.pluginAlias}" does not export tool "${split.toolName}".`
     });
     return undefined;
   }
@@ -168,7 +194,7 @@ function resolveToolDeclaration(
     if (!spec) {
       options.diagnostics.push({
         path: `${options.declaration_path}.tool`,
-        message: `Plugin tool "${declaration.from_plugin}/${declaration.tool}" references unknown credential scope "${credentialScope}".`
+        message: `Plugin tool "${split.pluginAlias}/${split.toolName}" references unknown credential scope "${credentialScope}".`
       });
       return undefined;
     }
@@ -204,10 +230,10 @@ function resolveToolDeclaration(
 
   const source: ResolvedToolSource = {
     kind: "plugin",
-    alias: declaration.from_plugin,
-    tool: declaration.tool,
+    alias: split.pluginAlias,
+    tool: split.toolName,
     plugin_root: plugin.root,
-    declared_at: options.declared_at,
+    declared_at: "registry",
     declaration_path: options.declaration_path
   };
 
@@ -222,21 +248,20 @@ function resolveToolDeclaration(
   };
 }
 
-function buildGraphScopeTools(
+function buildToolRegistry(
   document: AuthoredGraphDocument,
   options: {
     plugins_by_alias: Map<string, ResolvedPlugin>;
     credential_specs: Map<string, CredentialSpecMap[string]>;
     diagnostics: GraphDiagnostic[];
   }
-): ResolvedTool[] {
-  const tools: ResolvedTool[] = [];
+): Map<string, ResolvedTool> {
+  const tools = new Map<string, ResolvedTool>();
   const seenNames = new Set<string>();
 
-  (document.tools ?? []).forEach((declaration, index) => {
-    const declarationPath = `$.tools[${index}]`;
+  Object.entries(document.tools ?? {}).forEach(([toolId, declaration]) => {
+    const declarationPath = `$.tools.${toolId}`;
     const resolved = resolveToolDeclaration(declaration, {
-      declared_at: "graph",
       declaration_path: declarationPath,
       plugins_by_alias: options.plugins_by_alias,
       credential_specs: options.credential_specs,
@@ -250,57 +275,174 @@ function buildGraphScopeTools(
     if (seenNames.has(resolved.callable_name)) {
       options.diagnostics.push({
         path: declarationPath,
-        message: `Tool name "${resolved.callable_name}" is already declared in the graph scope.`
+        message: `Tool callable name "${resolved.callable_name}" is already declared by another managed tool registry entry.`
       });
       return;
     }
 
     seenNames.add(resolved.callable_name);
-    tools.push(resolved);
+    tools.set(toolId, resolved);
   });
 
   return tools;
 }
 
+interface ExpandedSupport {
+  skills: string[];
+  toolRefs: SupportReference[];
+  cli: CliHint[];
+}
+
+function mergeCliHints(
+  target: CliHint[],
+  next: CliHint[],
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): void {
+  for (const hint of next) {
+    const existing = target.find((item) => item.cmd === hint.cmd);
+    if (!existing) {
+      target.push(hint);
+      continue;
+    }
+    if ((existing.description ?? "") !== (hint.description ?? "")) {
+      diagnostics.push({
+        path,
+        message: `CLI hint "${hint.cmd}" is declared with conflicting descriptions.`
+      });
+    }
+  }
+}
+
+function expandSupport(
+  document: AuthoredGraphDocument,
+  support: NodeSupport | undefined,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): ExpandedSupport {
+  const skills: string[] = [];
+  const toolRefs: SupportReference[] = [];
+  const cli: CliHint[] = [];
+
+  for (const [index, capabilityRef] of (support?.capabilities ?? []).entries()) {
+    const capability = document.capabilities?.[capabilityRef.ref];
+    if (!capability) {
+      diagnostics.push({
+        path: `${path}.support.capabilities[${index}].ref`,
+        message: `Capability "${capabilityRef.ref}" is not declared.`
+      });
+      continue;
+    }
+
+    skills.push(...(capability.skills ?? []));
+    toolRefs.push(...(capability.tools ?? []));
+    mergeCliHints(cli, capability.cli ?? [], `$.capabilities.${capabilityRef.ref}.cli`, diagnostics);
+  }
+
+  skills.push(...(support?.skills ?? []));
+  toolRefs.push(...(support?.tools ?? []));
+  mergeCliHints(cli, support?.cli ?? [], `${path}.support.cli`, diagnostics);
+
+  return {
+    skills: dedupe(skills),
+    toolRefs,
+    cli
+  };
+}
+
+function splitSkillRef(ref: string): { sourceAlias: string; skillPath: string } | undefined {
+  const slashIndex = ref.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === ref.length - 1) {
+    return undefined;
+  }
+  return {
+    sourceAlias: ref.slice(0, slashIndex),
+    skillPath: ref.slice(slashIndex + 1)
+  };
+}
+
+function buildResolvedSkills(
+  context: CompileContext,
+  skillRefs: string[],
+  nodePath: string
+): ResolvedSkill[] {
+  const resolved: ResolvedSkill[] = [];
+
+  skillRefs.forEach((ref, index) => {
+    const split = splitSkillRef(ref);
+    if (!split) {
+      context.diagnostics.push({
+        path: `${nodePath}.support.skills[${index}]`,
+        message: 'Skill refs must use "sourceAlias/skillName" form.'
+      });
+      return;
+    }
+
+    const source = context.skill_sources_by_alias.get(split.sourceAlias);
+    if (!source) {
+      context.diagnostics.push({
+        path: `${nodePath}.support.skills[${index}]`,
+        message: `Skill source "${split.sourceAlias}" is not declared or resolved.`
+      });
+      return;
+    }
+
+    const skill = source.skills.get(split.skillPath);
+    if (!skill) {
+      context.diagnostics.push({
+        path: `${nodePath}.support.skills[${index}]`,
+        message: `Skill "${ref}" is not installed in source "${split.sourceAlias}".`
+      });
+      return;
+    }
+
+    resolved.push({
+      ref,
+      source_alias: split.sourceAlias,
+      name: skill.name,
+      description: skill.description,
+      path: skill.path
+    });
+  });
+
+  return resolved;
+}
+
 function buildAgentResolvedTools(
   context: CompileContext,
-  agentNode: AgentNode,
+  toolRefs: SupportReference[],
   agentPath: string
 ): ResolvedTool[] {
-  const baseTools = context.graph_scope_tools;
-  const baseNames = new Set<string>(baseTools.map((tool) => tool.callable_name));
-  const effectiveTools: ResolvedTool[] = [...baseTools];
+  const effectiveTools: ResolvedTool[] = [];
+  const seenNames = new Set<string>();
+  const seenRefs = new Set<string>();
 
-  (agentNode.tools ?? []).forEach((declaration, index) => {
-    const declarationPath = `${agentPath}.tools[${index}]`;
-    const resolved = resolveToolDeclaration(declaration, {
-      declared_at: "agent",
-      declaration_path: declarationPath,
-      plugins_by_alias: context.plugins_by_alias,
-      credential_specs: context.credential_specs,
-      diagnostics: context.diagnostics
-    });
+  toolRefs.forEach((reference, index) => {
+    const declarationPath = `${agentPath}.support.tools[${index}]`;
+    if (seenRefs.has(reference.ref)) {
+      return;
+    }
 
+    const resolved = context.tool_registry.get(reference.ref);
     if (!resolved) {
-      return;
-    }
-
-    if (baseNames.has(resolved.callable_name)) {
       context.diagnostics.push({
-        path: declarationPath,
-        message: `Tool name "${resolved.callable_name}" conflicts with a graph-level tool of the same name.`
+        path: `${declarationPath}.ref`,
+        message: `Managed tool "${reference.ref}" is not declared in top-level tools.`
       });
       return;
     }
 
-    if (effectiveTools.some((existing) => existing.callable_name === resolved.callable_name)) {
+    seenRefs.add(reference.ref);
+
+    if (seenNames.has(resolved.callable_name)) {
       context.diagnostics.push({
         path: declarationPath,
-        message: `Tool name "${resolved.callable_name}" is already declared on this agent.`
+        message: `Tool callable name "${resolved.callable_name}" is already granted to this node.`
       });
       return;
     }
 
+    seenNames.add(resolved.callable_name);
     effectiveTools.push(resolved);
   });
 
@@ -351,14 +493,14 @@ function compileExecutableNode(
   node: ExecutableGraphNode,
   path: string
 ): CompiledRegion {
-  const repo = resolveExecutableRepoAlias(context.document, node.repo);
+  const repo = resolveExecutableRepoAlias(context.document, node.runtime?.repo);
   const nodePolicyResolution = resolveNodePolicy(context.document, context.launch, node);
   context.diagnostics.push(...nodePolicyResolution.diagnostics);
   context.authored_paths.set(node.id, path);
 
   if (!repo) {
     context.diagnostics.push({
-      path: `${path}.repo`,
+      path: `${path}.runtime.repo`,
       message: "Executable node could not resolve a repo alias."
     });
     return {
@@ -370,6 +512,30 @@ function compileExecutableNode(
 
   const compiled_id = createCompiledId(scopeFrame, node.id);
   const lowered_from = context.lowered_managed_kind_by_id.get(node.id);
+  const expandedSupport = expandSupport(context.document, node.support, path, context.diagnostics);
+  const resolvedSkills = buildResolvedSkills(context, expandedSupport.skills, path);
+  const isPromptBackedNode = node.type === "agent" || (node.type === "check" && node.check_kind === "ai");
+
+  if (node.type !== "agent" && expandedSupport.toolRefs.length > 0) {
+    context.diagnostics.push({
+      path: `${path}.support`,
+      message: "Managed plugin tools can only be granted to agent nodes."
+    });
+  }
+
+  if (!isPromptBackedNode && expandedSupport.skills.length > 0) {
+    context.diagnostics.push({
+      path: `${path}.support.skills`,
+      message: "Skills can only be attached to prompt-backed agent or AI check nodes."
+    });
+  }
+
+  if (!isPromptBackedNode && expandedSupport.cli.length > 0) {
+    context.diagnostics.push({
+      path: `${path}.support.cli`,
+      message: "CLI hints can only be attached to prompt-backed agent or AI check nodes."
+    });
+  }
 
   const compiledBase = {
     compiled_id,
@@ -384,9 +550,11 @@ function compileExecutableNode(
       ? { repeat_scope_id: scopeFrame.nearest_repeat_scope_id }
       : {}),
     effective_policy: nodePolicyResolution.policy,
-    context: node.context ?? [],
+    context: node.support?.context ?? [],
     declared_artifacts: node.artifacts ?? {},
     ...(node.managed_artifact_forwards ? { managed_artifact_forwards: node.managed_artifact_forwards } : {}),
+    skills: resolvedSkills,
+    cli: expandedSupport.cli,
     ...(lowered_from ? { lowered_from } : {}),
     ...(scopeFrame.cleanup_scope_id
       ? { is_cleanup: true as const, cleanup_scope_id: scopeFrame.cleanup_scope_id }
@@ -396,7 +564,7 @@ function compileExecutableNode(
   let compiledNode: CompiledExecutableNode;
 
   if (node.type === "agent") {
-    const resolvedTools = buildAgentResolvedTools(context, node, path);
+    const resolvedTools = buildAgentResolvedTools(context, expandedSupport.toolRefs, path);
     compiledNode = {
       ...compiledBase,
       kind: "agent",
@@ -916,6 +1084,7 @@ function validateManagedSoftFailureRules(
 
 export interface CompileAuthoredGraphOptions {
   resolved_plugins?: ResolvedPlugin[];
+  resolved_skill_sources?: ResolvedSkillSource[];
   graph_dir?: string;
 }
 
@@ -938,9 +1107,12 @@ export function compileAuthoredGraph(
   const plugins_by_alias = new Map<string, ResolvedPlugin>(
     (options.resolved_plugins ?? []).map((plugin) => [plugin.alias, plugin])
   );
+  const skill_sources_by_alias = new Map<string, ResolvedSkillSource>(
+    (options.resolved_skill_sources ?? []).map((source) => [source.alias, source])
+  );
   const compileDiagnostics: GraphDiagnostic[] = [...launch.diagnostics];
   const credential_specs = new Map<string, CredentialSpecMap[string]>();
-  const graph_scope_tools = buildGraphScopeTools(document, {
+  const tool_registry = buildToolRegistry(document, {
     plugins_by_alias,
     credential_specs,
     diagnostics: compileDiagnostics
@@ -961,8 +1133,9 @@ export function compileAuthoredGraph(
     lowered_managed_kind_by_id,
     edge_counter: 0,
     plugins_by_alias,
+    skill_sources_by_alias,
     graph_dir: options.graph_dir,
-    graph_scope_tools,
+    tool_registry,
     credential_specs
   };
 
@@ -984,7 +1157,6 @@ export function compileAuthoredGraph(
     nodes: context.nodes,
     edges: context.edges,
     scopes: context.scopes,
-    prerequisites: document.prerequisites ?? { checks: [] },
     credential_specs: Object.fromEntries(
       [...context.credential_specs.entries()].sort(([left], [right]) => left.localeCompare(right))
     ),

@@ -8,7 +8,7 @@
       "The delivery package contains enough evidence for eval grading."
     ],
     "constraints": [
-      "Do not use sources outside the local repo, docs, and tool fixtures supplied by this eval.",
+      "Use only local repo, docs, and tool fixtures supplied by this eval.",
       "Do not use public network sources."
     ]
   },
@@ -26,17 +26,18 @@
       "harness": "{{workflow.harness}}",
       "model": "gpt-5.4-mini",
       "reasoning_effort": "low",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900
+      "sandbox": "workspace-write"
     },
     "supervisor": {
-      "harness": "codex-cli",
+      "harness": "{{workflow.harness}}",
+      "model": "gpt-5.4-mini",
+      "reasoning_effort": "low",
       "sandbox": "read-only"
     }
   },
   "supervision": {
-    "max_total_interventions": 4,
-    "profile": "supervisor"
+    "profile": "supervisor",
+    "max_total_interventions": 0
   },
   "graph": {
     "type": "sequence",
@@ -45,37 +46,64 @@
       {
         "type": "pattern_deep_research",
         "id": "repo_research",
-        "repo": "main",
-        "context": [
-          {
-            "name": "task",
-            "from": "workspace_file",
-            "path": "AGENTFLOW_EVAL_TASK.md"
-          },
-          {
-            "name": "readme",
-            "from": "workspace_file",
-            "path": "README.md"
-          },
-          {
-            "name": "source",
-            "from": "workspace_glob",
-            "path": "src/**",
-            "max_files": 20
-          },
-          {
-            "name": "tests",
-            "from": "workspace_glob",
-            "path": "tests/**",
-            "max_files": 20
-          },
-          {
-            "name": "docs",
-            "from": "workspace_glob",
-            "path": "docs/**",
-            "max_files": 20
-          }
-        ],
+        "runtime": {
+          "repo": "main"
+        },
+        "intent": {
+          "goal": "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research package about whether the job pipeline is ready for a retry/backoff change.",
+          "acceptance_criteria": [
+            "The research covers all authored angles.",
+            "No repository files are modified.",
+            "The summary includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+          ],
+          "constraints": [
+            "Do not edit repository files.",
+            "Use local repository files as primary authority.",
+            "Do not use public network sources in this eval scenario."
+          ]
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "what": "Workspace file AGENTFLOW_EVAL_TASK.md.",
+              "why": "It defines the fixture task and acceptance surface."
+            },
+            {
+              "name": "readme",
+              "kind": "workspace_file",
+              "path": "README.md",
+              "what": "Workspace file README.md.",
+              "why": "It provides node-local evidence required by this eval scenario."
+            },
+            {
+              "name": "source",
+              "kind": "workspace_glob",
+              "path": "src/**",
+              "max_files": 20,
+              "what": "Workspace files matching src/**.",
+              "why": "It provides the scoped implementation surface."
+            },
+            {
+              "name": "tests",
+              "kind": "workspace_glob",
+              "path": "tests/**",
+              "max_files": 20,
+              "what": "Workspace files matching tests/**.",
+              "why": "It provides deterministic validation evidence."
+            },
+            {
+              "name": "docs",
+              "kind": "workspace_glob",
+              "path": "docs/**",
+              "max_files": 20,
+              "what": "Workspace files matching docs/**.",
+              "why": "It provides local documentation authority or conflict evidence."
+            }
+          ]
+        },
         "research": {
           "angles": [
             "Investigate the current job pipeline architecture and phase responsibilities.",
@@ -90,35 +118,23 @@
               "as_artifact": true
             }
           ]
-        },
-        "intent": {
-          "goal": "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research package about whether the job pipeline is ready for a retry/backoff change.",
-          "acceptance_criteria": [
-            "The research covers all authored angles.",
-            "No repository files are modified.",
-            "The summary includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
-          ],
-          "constraints": [
-            "Do not edit repository files.",
-            "Do not treat sources outside local repository files as primary authority.",
-            "Do not use public network sources in this eval scenario."
-          ]
         }
       },
       {
         "type": "check",
         "id": "verify",
-        "repo": "main",
+        "runtime": {
+          "repo": "main"
+        },
         "check_kind": "deterministic",
         "command": "npm",
         "args": [
           "test"
         ],
         "intent": {
-          "goal": "Run the local validation suite after the research handoff and confirm the repository fixture remains healthy.",
+          "goal": "Run verify.",
           "acceptance_criteria": [
-            "`npm test` exits successfully.",
-            "The check evidence is available for grading the research workflow."
+            "The node satisfies its local eval contract."
           ],
           "constraints": []
         }

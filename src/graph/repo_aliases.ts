@@ -8,11 +8,13 @@ export function collectReferencedRepoAliases(graph: CompiledGraph): string[] {
     repoAliases.add(node.repo);
 
     for (const item of node.context) {
-      if ("ref" in item || item.from === "text") {
+      if ("ref" in item) {
         continue;
       }
 
-      repoAliases.add(splitQualifiedPath(item.path, node.repo).repo_alias);
+      if (item.from !== "plugin_file") {
+        repoAliases.add(splitQualifiedPath(item.path, node.repo).repo_alias);
+      }
     }
   }
 

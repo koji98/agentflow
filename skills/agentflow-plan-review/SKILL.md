@@ -32,7 +32,7 @@ Use `agentflow-authoring` when no graph exists yet. Use `agentflow-operations` f
 
 - Treat over-specific graph text as a defect when it closes agent freedom without a real constraint.
 - Treat missing artifacts as a defect when later nodes or reviewers need durable handoffs.
-- Treat broad context as a defect unless it is intentionally bounded and token-safe.
+- Treat broad context as a defect unless it is intentionally bounded, pointer-based, and explained with clear `what` and `why`.
 - Treat deterministic checks as brittle when they depend on an optional implementation tactic.
 - Do not redesign the whole graph unless the current shape cannot satisfy the brief.
 

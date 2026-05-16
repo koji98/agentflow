@@ -70,7 +70,7 @@ function noisyMarkdownFiles(prefix, count, linesPerFile) {
           `# Generated/noisy context ${ordinal}`,
           "",
           ...Array.from({ length: linesPerFile }, (__, lineIndex) =>
-            `Line ${lineIndex + 1}: repeated low-value context used to stress Agentflow context materialization.`
+            `Line ${lineIndex + 1}: repeated low-value context used to stress Agentflow context pointer packaging.`
           ),
           ""
         ].join("\n")
@@ -344,7 +344,7 @@ const repos = {
   },
   "15-supervisor-retry-envelope": {
     "package.json": packageJson("supervisor-retry-envelope"),
-    "AGENTFLOW_EVAL_TASK.md": "Supervisor retry envelope fixture.\n",
+    "AGENTFLOW_EVAL_TASK.md": "Supervisor recovery case fixture.\n",
     "scripts/retry-gate.js": [
       "const fs = require('node:fs');",
       "const path = require('node:path');",
@@ -353,7 +353,7 @@ const repos = {
       "  console.error('missing supervisor recovery envelope');",
       "  process.exit(1);",
       "}",
-      "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.md'), 'Scenario: supervisor-retry-envelope\\nValidation: retry envelope observed\\nChanged files: none\\nRisks: none\\n');",
+      "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.md'), 'Scenario: supervisor-retry-envelope\\nValidation: recovery case observed\\nChanged files: none\\nRisks: none\\n');",
       ""
     ].join("\n")
   },
@@ -362,11 +362,11 @@ const repos = {
     "AGENTFLOW_EVAL_TASK.md": "Terminal repeated failure fixture.\n",
     "scripts/always-fail.js": "console.error('intentional repeated failure for eval'); process.exit(1);\n"
   },
-  "17-context-overflow-repair": {
-    "package.json": packageJson("context-overflow-repair"),
+  "17-context-pointer-provenance": {
+    "package.json": packageJson("context-pointer-provenance"),
     "AGENTFLOW_EVAL_TASK.md": task(
-      "Scenario: context-overflow-repair",
-      "Fix `src/router.js` so `normalizeRoute(value)` removes duplicate slashes, preserves a single leading slash, removes a trailing slash except for root, and preserves query strings. This scenario intentionally over-materializes markdown context on the first attempt; use the supervisor context repair packet and live workspace paths after retry."
+      "Scenario: context-pointer-provenance",
+      "Fix `src/router.js` so `normalizeRoute(value)` removes duplicate slashes, preserves a single leading slash, removes a trailing slash except for root, and preserves query strings. Use the context pointer packet and live workspace paths as evidence; do not treat broad markdown noise as inline prompt authority."
     ),
     "src/router.js": [
       "function normalizeRoute(value) {",
@@ -536,7 +536,7 @@ const scenarios = [
   ["14-stale-docs-conflict", "agent-docs", "context-conflict", "hard", "Resolve stale repo docs by preferring the current local HTTP docs fixture."],
   ["15-supervisor-retry-envelope", "exec-recovery", "supervisor-recovery", "medium", "Confirm a failed executable node receives a supervisor recovery envelope on retry."],
   ["16-terminal-repeated-failure", "exec-terminal", "supervisor-boundary", "medium", "Confirm repeated unrecoverable failure records terminal supervisor evidence."],
-  ["17-context-overflow-repair", "agent-context-overflow", "context-contract-recovery", "hard", "Confirm oversized authored context is repaired into a compact runtime overlay before retry."],
+  ["17-context-pointer-provenance", "agent-context-pointer-provenance", "context-pointer-provenance", "hard", "Confirm pointer-only context gives enough provenance for a targeted fix without broad rewrites."],
   ["18-noisy-generated-tree", "agent-noisy-context", "context-noise-control", "hard", "Confirm broad context ignores generated dependency-style trees while preserving useful task context."],
   ["19-validation-timeout-strategy", "exec-validation-strategy", "validation-repair", "hard", "Confirm timeout-like failures receive changed validation strategy before retry."],
   ["20-workspace-pollution-cleanup", "exec-workspace-repair", "workspace-repair", "hard", "Confirm failed-attempt workspace pollution is cleaned before retry."],
@@ -562,7 +562,7 @@ const expectedChangedFiles = {
   "14-stale-docs-conflict": ["src/mode.js"],
   "15-supervisor-retry-envelope": [],
   "16-terminal-repeated-failure": [],
-  "17-context-overflow-repair": ["src/router.js"],
+  "17-context-pointer-provenance": ["src/router.js"],
   "18-noisy-generated-tree": ["src/status.js"],
   "19-validation-timeout-strategy": [],
   "20-workspace-pollution-cleanup": [],
@@ -594,7 +594,7 @@ const templates = {
         {
           type: "agent",
           id: "implement",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. Make the smallest code change that satisfies the task, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
             acceptance_criteria: [
@@ -608,12 +608,12 @@ const templates = {
             "Treat repo context as evidence; do not guess missing facts."
           ]
           },
-          context: [
-            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 30 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 },
-            { name: "docs", from: "workspace_glob", path: "docs/**", max_files: 20 }
-          ],
+          support: { context: [
+            { name: "task", kind: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 30 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 },
+            { name: "docs", kind: "workspace_glob", path: "docs/**", max_files: 20 }
+          ] },
           artifacts: {
             handoff: {
               from: "output_dir",
@@ -625,7 +625,7 @@ const templates = {
         {
           type: "check",
           id: "verify",
-          repo: "main",
+          runtime: { repo: "main" },
           check_kind: "deterministic",
           command: "npm",
           args: ["test"]
@@ -642,7 +642,7 @@ const templates = {
         {
           type: "agent",
           id: "implement",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`. The current docs fixture is {{environment.docs_url}}. Use it when the task says local repo docs may be stale or missing. Run `npm test` and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
             acceptance_criteria: [
@@ -659,12 +659,12 @@ const templates = {
             "Read the docs fixture URL directly when possible; if the URL is unavailable, record the exact probe and fallback evidence in `Docs evidence:`."
           ]
           },
-          context: [
-            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 30 },
-            { name: "repo_docs", from: "workspace_glob", path: "docs/**", max_files: 20 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 }
-          ],
+          support: { context: [
+            { name: "task", kind: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 30 },
+            { name: "repo_docs", kind: "workspace_glob", path: "docs/**", max_files: 20 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 }
+          ] },
           artifacts: {
             handoff: {
               from: "output_dir",
@@ -673,7 +673,7 @@ const templates = {
             }
           }
         },
-        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+        { type: "check", id: "verify", runtime: { repo: "main" }, check_kind: "deterministic", command: "npm", args: ["test"] }
       ]
     }
   },
@@ -686,7 +686,7 @@ const templates = {
         {
           type: "agent",
           id: "implement",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Complete `AGENTFLOW_EVAL_TASK.md`. The local tool directory is on PATH; run `fixture-lookup --case tool-guided-discovery` to discover the required value, then run `npm test` and write `handoff.md`.",
             acceptance_criteria: [
@@ -700,11 +700,11 @@ const templates = {
             "Use `fixture-lookup --case tool-guided-discovery` directly; do not bypass the PATH tool unless direct execution fails, and document any fallback in `Tool command:`."
           ]
           },
-          context: [
-            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 }
-          ],
+          support: { context: [
+            { name: "task", kind: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 }
+          ] },
           artifacts: {
             handoff: {
               from: "output_dir",
@@ -713,7 +713,7 @@ const templates = {
             }
           }
         },
-        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+        { type: "check", id: "verify", runtime: { repo: "main" }, check_kind: "deterministic", command: "npm", args: ["test"] }
       ]
     }
   },
@@ -726,7 +726,7 @@ const templates = {
         {
           type: "agent",
           id: "audit",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Audit the repository using `AGENTFLOW_EVAL_TASK.md`. Do not modify the repo. Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with findings and validation evidence.",
             acceptance_criteria: [
@@ -735,11 +735,11 @@ const templates = {
           ],
             constraints: ["Do not change repository files; write only the declared output artifact."]
           },
-          context: [
-            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 }
-          ],
+          support: { context: [
+            { name: "task", kind: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 }
+          ] },
           artifacts: {
             handoff: {
               from: "output_dir",
@@ -748,7 +748,7 @@ const templates = {
             }
           }
         },
-        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+        { type: "check", id: "verify", runtime: { repo: "main" }, check_kind: "deterministic", command: "npm", args: ["test"] }
       ]
     }
   },
@@ -761,16 +761,16 @@ const templates = {
         {
           type: "agent",
           id: "research",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Read `AGENTFLOW_EVAL_TASK.md` and `docs/billing-rules.md`. Write `research.md` in `$AGENTFLOW_OUTPUT_DIR` explaining the exact rounding rule the implementation node should apply.",
             acceptance_criteria: ["The node satisfies its acceptance criteria."],
             constraints: []
           },
-          context: [
-            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
-            { name: "billing_rules", from: "workspace_file", path: "docs/billing-rules.md" }
-          ],
+          support: { context: [
+            { name: "task", kind: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "billing_rules", kind: "workspace_file", path: "docs/billing-rules.md" }
+          ] },
           artifacts: {
             research: { from: "output_dir", path: "research.md", description: "Rounding rule research note." }
           }
@@ -778,7 +778,7 @@ const templates = {
         {
           type: "agent",
           id: "implement",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Use the research artifact to update `src/rounding.js`, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
             acceptance_criteria: [
@@ -792,11 +792,11 @@ const templates = {
             "Do not leave blank fields, placeholder text, or unresolved template values in the handoff artifact."
           ]
           },
-          context: [
+          support: { context: [
             { ref: "research.research", name: "rounding_research" },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 }
-          ],
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 }
+          ] },
           artifacts: {
             handoff: {
               from: "output_dir",
@@ -805,7 +805,7 @@ const templates = {
             }
           }
         },
-        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+        { type: "check", id: "verify", runtime: { repo: "main" }, check_kind: "deterministic", command: "npm", args: ["test"] }
       ]
     }
   },
@@ -818,7 +818,7 @@ const templates = {
         {
           type: "pattern_deep_research",
           id: "repo_research",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Investigate `AGENTFLOW_EVAL_TASK.md` and the local repository, then publish a research package about whether the job pipeline is ready for a retry/backoff change.",
             acceptance_criteria: [
@@ -832,13 +832,13 @@ const templates = {
             "Do not use public network sources in this eval scenario."
           ]
           },
-          context: [
-            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
-            { name: "readme", from: "workspace_file", path: "README.md" },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 },
-            { name: "docs", from: "workspace_glob", path: "docs/**", max_files: 20 }
-          ],
+          support: { context: [
+            { name: "task", kind: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "readme", kind: "workspace_file", path: "README.md" },
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 },
+            { name: "docs", kind: "workspace_glob", path: "docs/**", max_files: 20 }
+          ] },
           research: {
             angles: [
               "Investigate the current job pipeline architecture and phase responsibilities.",
@@ -855,7 +855,7 @@ const templates = {
             ]
           }
         },
-        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+        { type: "check", id: "verify", runtime: { repo: "main" }, check_kind: "deterministic", command: "npm", args: ["test"] }
       ]
     }
   },
@@ -868,7 +868,7 @@ const templates = {
         {
           type: "pattern_deep_work",
           id: "repo_fix",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Complete the repository task in `AGENTFLOW_EVAL_TASK.md`, validate it, and publish a handoff.",
             acceptance_criteria: [
@@ -882,12 +882,12 @@ const templates = {
             "Use local repo files and tests as primary authority."
           ]
           },
-          context: [
-            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 },
-            { name: "package", from: "workspace_file", path: "package.json" }
-          ],
+          support: { context: [
+            { name: "task", kind: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 },
+            { name: "package", kind: "workspace_file", path: "package.json" }
+          ] },
           artifacts: {
             handoff: {
               from: "output_dir",
@@ -923,7 +923,7 @@ const templates = {
             ]
           }
         },
-        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+        { type: "check", id: "verify", runtime: { repo: "main" }, check_kind: "deterministic", command: "npm", args: ["test"] }
       ]
     }
   },
@@ -941,7 +941,7 @@ const templates = {
         {
           type: "exec",
           id: "retry_gate",
-          repo: "main",
+          runtime: { repo: "main" },
           command: "node",
           args: ["scripts/retry-gate.js"],
           artifacts: {
@@ -957,7 +957,7 @@ const templates = {
       type: "sequence",
       id: "root",
       steps: [
-        { type: "exec", id: "always_fail", repo: "main", command: "node", args: ["scripts/always-fail.js"] }
+        { type: "exec", id: "always_fail", runtime: { repo: "main" }, command: "node", args: ["scripts/always-fail.js"] }
       ]
     }
   },
@@ -970,7 +970,7 @@ const templates = {
         {
           type: "exec",
           id: "validation_gate",
-          repo: "main",
+          runtime: { repo: "main" },
           command: "node",
           args: ["scripts/validation-gate.js"],
           artifacts: {
@@ -993,7 +993,7 @@ const templates = {
         {
           type: "exec",
           id: "workspace_gate",
-          repo: "main",
+          runtime: { repo: "main" },
           command: "node",
           args: ["scripts/workspace-gate.js"],
           artifacts: {
@@ -1013,18 +1013,12 @@ const templates = {
       type: "sequence",
       id: "root",
       steps: [
-        { type: "exec", id: "no_delta", repo: "main", command: "node", args: ["scripts/no-delta.js"] }
+        { type: "exec", id: "no_delta", runtime: { repo: "main" }, command: "node", args: ["scripts/no-delta.js"] }
       ]
     }
   },
-  "agent-context-overflow": {
-    supervision: { profile: "supervisor", max_total_interventions: 1 },
-    profile: {
-      input_rules: {
-        max_total_tokens: 700,
-        max_tokens_per_item: 160
-      }
-    },
+  "agent-context-pointer-provenance": {
+    supervision: { profile: "supervisor", max_total_interventions: 0 },
     graph: {
       type: "sequence",
       id: "root",
@@ -1032,46 +1026,39 @@ const templates = {
         {
           type: "agent",
           id: "implement",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
-            goal: "Fix `src/router.js` for the context-overflow-repair scenario: normalize duplicate slashes, preserve one leading slash, drop trailing slash except root, preserve query strings, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
+            goal: "Fix `src/router.js` for the context-pointer-provenance scenario: normalize duplicate slashes, preserve one leading slash, drop trailing slash except root, preserve query strings, run `npm test`, and write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR`.",
             acceptance_criteria: [
-            "The first attempt may fail before harness execution because authored markdown context is too large.",
-            "The retry uses the supervisor context repair overlay without changing the task contract.",
+            "The node uses context pointers and live workspace paths as evidence instead of expecting copied inline context.",
             "`npm test` passes.",
-            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, `Supervisor context:`, and `Risks:` fields."
+            "The handoff artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, `Pointer context:`, and `Risks:` fields."
           ],
             constraints: [
             "Do not edit noise files under `notes/**`.",
             "Do not add dependencies.",
-            "If a supervisor context repair packet is present, use it as the index and open live workspace paths only as needed."
+            "Use the context packet as an index and open live workspace paths only as needed."
           ]
           },
-          context: [
-            { name: "all_markdown", from: "workspace_glob", path: "**/*.md" },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 }
-          ],
+          support: { context: [
+            { name: "all_markdown", kind: "workspace_glob", path: "**/*.md" },
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 }
+          ] },
           artifacts: {
             handoff: {
               from: "output_dir",
               path: "handoff.md",
-              description: "Context-repair handoff with validation and supervisor context evidence."
+              description: "Pointer-context handoff with validation and provenance evidence."
             }
           }
         },
-        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+        { type: "check", id: "verify", runtime: { repo: "main" }, check_kind: "deterministic", command: "npm", args: ["test"] }
       ]
     }
   },
   "agent-noisy-context": {
     supervision: { profile: "supervisor", max_total_interventions: 0 },
-    profile: {
-      input_rules: {
-        max_total_tokens: 1600,
-        max_tokens_per_item: 220
-      }
-    },
     graph: {
       type: "sequence",
       id: "root",
@@ -1079,7 +1066,7 @@ const templates = {
         {
           type: "agent",
           id: "implement",
-          repo: "main",
+          runtime: { repo: "main" },
           intent: {
             goal: "Complete the noisy-generated-tree scenario in `AGENTFLOW_EVAL_TASK.md`. Use source and tests, ignore generated context noise unless explicitly needed, run `npm test`, and write `handoff.md`.",
             acceptance_criteria: [
@@ -1094,12 +1081,12 @@ const templates = {
             "Prefer specific source and test files over broad generated context."
           ]
           },
-          context: [
-            { name: "task", from: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
-            { name: "broad_markdown", from: "workspace_glob", path: "**/*.md", max_files: 80 },
-            { name: "source", from: "workspace_glob", path: "src/**", max_files: 20 },
-            { name: "tests", from: "workspace_glob", path: "tests/**", max_files: 20 }
-          ],
+          support: { context: [
+            { name: "task", kind: "workspace_file", path: "AGENTFLOW_EVAL_TASK.md" },
+            { name: "broad_markdown", kind: "workspace_glob", path: "**/*.md", max_files: 80 },
+            { name: "source", kind: "workspace_glob", path: "src/**", max_files: 20 },
+            { name: "tests", kind: "workspace_glob", path: "tests/**", max_files: 20 }
+          ] },
           artifacts: {
             handoff: {
               from: "output_dir",
@@ -1108,13 +1095,77 @@ const templates = {
             }
           }
         },
-        { type: "check", id: "verify", repo: "main", check_kind: "deterministic", command: "npm", args: ["test"] }
+        { type: "check", id: "verify", runtime: { repo: "main" }, check_kind: "deterministic", command: "npm", args: ["test"] }
       ]
     }
   }
 };
 
 templates["agent-worktree"].graph = templates["agent-change"].graph;
+
+function describeGeneratedContextWhat(item) {
+  if (item.ref) return `Artifact ${item.ref} from an upstream node.`;
+  if (item.kind === "workspace_glob") return `Workspace files matching ${item.path}.`;
+  if (item.kind === "workspace_file") return `Workspace file ${item.path}.`;
+  if (item.kind === "plugin_file") return `Plugin file ${item.path}.`;
+  return `Context pointer ${item.name}.`;
+}
+
+function describeGeneratedContextWhy(item) {
+  if (item.ref) return "It carries upstream evidence required by this node.";
+  if (item.name === "task") return "It defines the fixture task and acceptance surface.";
+  if (String(item.name).includes("test")) return "It provides deterministic validation evidence.";
+  if (String(item.name).includes("doc")) return "It provides local documentation authority or conflict evidence.";
+  if (String(item.name).includes("source")) return "It provides the scoped implementation surface.";
+  return "It provides node-local evidence required by this eval scenario.";
+}
+
+function prepareGeneratedContextItem(item) {
+  const prepared = { ...item };
+  if (prepared.ref && !prepared.kind) {
+    prepared.kind = "artifact";
+  }
+  if (!prepared.kind) {
+    throw new Error(`Generated eval context ${prepared.name ?? prepared.ref ?? "(unnamed)"} is missing "kind".`);
+  }
+
+  prepared.what ??= describeGeneratedContextWhat(prepared);
+  prepared.why ??= describeGeneratedContextWhy(prepared);
+  return prepared;
+}
+
+function prepareGeneratedGraphNode(node) {
+  if (!node || typeof node !== "object" || Array.isArray(node)) {
+    return node;
+  }
+
+  const prepared = { ...node };
+  if (prepared.support?.context) {
+    prepared.support = {
+      ...prepared.support,
+      context: prepared.support.context.map(prepareGeneratedContextItem)
+    };
+  }
+  if (["agent", "exec", "check", "checkpoint", "pattern_deep_research", "pattern_deep_work"].includes(prepared.type) && !prepared.intent) {
+    prepared.intent = {
+      goal: `Run ${prepared.id}.`,
+      acceptance_criteria: ["The node satisfies its local eval contract."],
+      constraints: []
+    };
+  }
+
+  if (Array.isArray(prepared.steps)) {
+    prepared.steps = prepared.steps.map(prepareGeneratedGraphNode);
+  }
+  if (Array.isArray(prepared.cleanup)) {
+    prepared.cleanup = prepared.cleanup.map(prepareGeneratedGraphNode);
+  }
+  if (prepared.body) {
+    prepared.body = prepareGeneratedGraphNode(prepared.body);
+  }
+
+  return prepared;
+}
 
 function graphDocument(templateName) {
   const template = templates[templateName];
@@ -1146,23 +1197,20 @@ function graphDocument(templateName) {
         harness: "{{workflow.harness}}",
         model: "gpt-5.4-mini",
         reasoning_effort: "low",
-        sandbox: "workspace-write",
-        timeout_sec: 900,
-        ...(template.profile?.input_rules ? { input_rules: template.profile.input_rules } : {})
+        sandbox: "workspace-write"
       },
       supervisor: {
         harness: "{{workflow.harness}}",
         model: "gpt-5.4-mini",
         reasoning_effort: "low",
-        sandbox: "read-only",
-        timeout_sec: 900
+        sandbox: "read-only"
       }
     },
     supervision: {
       profile: "supervisor",
       ...template.supervision
     },
-    graph: template.graph
+    graph: prepareGeneratedGraphNode(template.graph)
   };
 }
 
@@ -1186,14 +1234,6 @@ function scenarioJson([id, template, bucket, difficulty, description]) {
   if (id === "16-terminal-repeated-failure") {
     Object.assign(supervisor, {
       apply_actions: ["retry_with_guidance"]
-    });
-  }
-
-  if (id === "17-context-overflow-repair") {
-    Object.assign(supervisor, {
-      classifications: ["context_contract_failure"],
-      gatherers: ["local_context", "pattern_mining"],
-      apply_actions: ["repair_context"]
     });
   }
 
@@ -1345,11 +1385,8 @@ if (scenarioId === "16-terminal-repeated-failure") {
   assert("failure_attempts", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
 }
 
-if (scenarioId === "17-context-overflow-repair") {
-  assert("context_repair_classified", packet.supervisor?.classifications?.includes("context_contract_failure"), "context_contract_failure classification");
-  assert("context_repair_applied", packet.supervisor?.apply_actions?.includes("repair_context"), "repair_context apply action");
-  assert("context_repair_attempts", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
-  assert("handoff_mentions_supervisor_context", /Supervisor context:|context repair|recovery envelope/i.test(handoffText), "handoff supervisor-context evidence");
+if (scenarioId === "17-context-pointer-provenance") {
+  assert("pointer_context_handoff", /Pointer context:/i.test(handoffText), "handoff pointer-context evidence");
 }
 
 if (scenarioId === "18-noisy-generated-tree") {
@@ -1397,7 +1434,7 @@ const judgeFocus = {
   "evidence-use": "Focus on whether the workflow used the right evidence from repo files, docs fixtures, tool outputs, tests, supervisor case files, and delivery metadata.",
   "context-handling": "Focus on whether the workflow found relevant local context, ignored noisy or stale context, and surfaced enough context to downstream nodes.",
   "tool-discipline": "Focus on whether tools were used only when appropriate, tool output changed behavior when required, and no tool result was invented.",
-  "supervisor-recovery": "Focus on whether supervisor classification, evidence gathering, recovery plan, retry envelope, pause/fail decision, and budget behavior were appropriate.",
+  "supervisor-recovery": "Focus on whether supervisor classification, evidence gathering, recovery plan, recovery case, pause/fail decision, and budget behavior were appropriate.",
   "noise-efficiency": "Focus on whether the workflow avoided bloated prompts, redundant artifacts, repeated generic guidance, and irrelevant evidence while keeping necessary context.",
   "delivery-auditability": "Focus on whether delivery evidence lets a reviewer reconstruct what happened, what changed, what was validated, and what risks remain."
 };
@@ -1409,7 +1446,7 @@ function judgeRubric(id) {
     "Rate this Agentflow workflow trial on the named dimension.",
     judgeFocus[id],
     "",
-    "Use only the scenario expectations, trace packet, artifacts, decision logs, supervisor evidence, and delivery metadata in the packet.",
+    "Use only the scenario expectations, trace packet, artifacts, milestone evidence, supervisor evidence, and delivery metadata in the packet.",
     "Do not reward a run for facts that are not present in the packet.",
     "Return strict JSON matching the requested schema.",
     "",
@@ -1448,7 +1485,7 @@ async function writeSuite() {
     "| --- | --- | --- |",
     ...scenarios.map(([id, , bucket, , description]) => `| \`${id}\` | \`${bucket}\` | ${description} |`),
     "",
-    "The suite intentionally includes expected-pass workflows, a no-repo-edit audit, tool-required discovery, local HTTP docs, stale/noisy context, sequence handoff, worktree backend behavior, supervisor retry envelope behavior, and expected terminal failure.",
+    "The suite intentionally includes expected-pass workflows, a no-repo-edit audit, tool-required discovery, local HTTP docs, stale/noisy context, sequence handoff, worktree backend behavior, supervisor recovery case behavior, and expected terminal failure.",
     "",
     "Do not commit generated eval repos or eval output roots."
   ].join("\n"));

@@ -6,7 +6,6 @@ import type {
   CursorSandboxMode,
   FailureBehavior,
   HarnessName,
-  PrerequisiteKind,
   ReasoningEffort,
   SandboxMode,
   WorkspaceBackend
@@ -15,11 +14,6 @@ import type {
 export interface RepoDefinition {
   path: string;
   default_branch?: string;
-}
-
-export interface InputRules {
-  max_total_tokens?: number;
-  max_tokens_per_item?: number;
 }
 
 export interface DeterministicPassIfExitCode {
@@ -81,13 +75,51 @@ export interface HarnessConfig {
 }
 
 export interface PluginToolReference {
-  from_plugin: string;
-  tool: string;
+  ref: string;
   alias?: string;
   config?: Record<string, string>;
 }
 
-export type ToolDeclaration = PluginToolReference;
+export type ManagedToolDefinition = PluginToolReference;
+
+export interface SupportReference {
+  ref: string;
+}
+
+export interface CliHint {
+  cmd: string;
+  description?: string;
+}
+
+export interface NodeSupport {
+  capabilities?: SupportReference[];
+  skills?: string[];
+  tools?: SupportReference[];
+  cli?: CliHint[];
+  context?: ContextItem[];
+}
+
+export interface CapabilityDefinition {
+  skills?: string[];
+  tools?: SupportReference[];
+  cli?: CliHint[];
+}
+
+export type SkillSourceDeclaration = GitSkillSourceDeclaration | LocalSkillSourceDeclaration;
+
+export interface GitSkillSourceDeclaration {
+  source: string;
+  ref: string;
+}
+
+export interface LocalSkillSourceDeclaration {
+  path: string;
+}
+
+export interface NodeRuntimeSelection {
+  repo?: string;
+  profile?: string;
+}
 
 export interface GraphProfile {
   harness?: HarnessName;
@@ -96,8 +128,6 @@ export interface GraphProfile {
   sandbox?: SandboxMode;
   skip_git_repo_check?: boolean;
   env_files?: string[];
-  timeout_sec?: number;
-  input_rules?: InputRules;
   deterministic_check_defaults?: DeterministicCheckDefaults;
   ai_check_defaults?: AiCheckDefaults;
   artifact_repair?: ArtifactRepairPolicy;
@@ -130,6 +160,8 @@ export interface FileInput {
   name: string;
   from: "workspace_file";
   path: string;
+  what: string;
+  why: string;
 }
 
 export interface GlobInput {
@@ -137,12 +169,16 @@ export interface GlobInput {
   from: "workspace_glob";
   path: string;
   max_files?: number;
+  what: string;
+  why: string;
 }
 
-export interface TextInput {
+export interface PluginFileInput {
   name: string;
-  from: "text";
-  text: string;
+  from: "plugin_file";
+  path: string;
+  what: string;
+  why: string;
 }
 
 export interface ArtifactContextRef {
@@ -151,6 +187,8 @@ export interface ArtifactContextRef {
   iteration?: ContextSelector;
   attempt?: ContextSelector;
   if_available?: boolean;
+  what: string;
+  why: string;
 }
 
 export interface ResolvedArtifactContextRef extends ArtifactContextRef {
@@ -158,7 +196,7 @@ export interface ResolvedArtifactContextRef extends ArtifactContextRef {
   artifact: string;
 }
 
-export type ContextItem = FileInput | GlobInput | TextInput | ResolvedArtifactContextRef;
+export type ContextItem = FileInput | GlobInput | PluginFileInput | ResolvedArtifactContextRef;
 
 export interface ArtifactReference {
   node: string;
@@ -178,53 +216,17 @@ export interface ManagedArtifactForward {
   artifact: string;
 }
 
-export interface FilePrerequisite {
-  kind: Extract<PrerequisiteKind, "file">;
-  path: string;
-  required?: boolean;
-}
-
-export interface CommandPrerequisite {
-  kind: Extract<PrerequisiteKind, "command">;
-  command: string;
-  required?: boolean;
-}
-
-export interface EnvPrerequisite {
-  kind: Extract<PrerequisiteKind, "env">;
-  name: string;
-  required?: boolean;
-}
-
-export interface RepoPrerequisite {
-  kind: Extract<PrerequisiteKind, "repo">;
-  repo: string;
-  required?: boolean;
-}
-
-export type GraphPrerequisiteCheck =
-  | FilePrerequisite
-  | CommandPrerequisite
-  | EnvPrerequisite
-  | RepoPrerequisite;
-
-export interface GraphPrerequisites {
-  checks: GraphPrerequisiteCheck[];
-}
-
 export interface BaseNode {
   id: string;
   label?: string;
 }
 
 export interface BaseExecutableNode extends BaseNode {
-  repo?: string;
-  profile?: string;
+  runtime?: NodeRuntimeSelection;
   intent: ExecutableNodeIntent;
-  context?: ContextItem[];
+  support?: NodeSupport;
   artifacts?: Record<string, ArtifactDefinition>;
   managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
-  timeout_sec?: number;
 }
 
 export interface AgentNode extends BaseExecutableNode {
@@ -233,7 +235,6 @@ export interface AgentNode extends BaseExecutableNode {
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
   artifact_repair?: ArtifactRepairPolicy;
-  tools?: ToolDeclaration[];
 }
 
 export interface ExecNode extends BaseExecutableNode {
@@ -299,10 +300,11 @@ export interface AuthoredGraphDocument {
   repos: Record<string, RepoDefinition>;
   defaults?: GraphDefaults;
   profiles?: Record<string, GraphProfile>;
-  prerequisites?: GraphPrerequisites;
   config?: Record<string, unknown>;
   config_schema?: Record<string, unknown>;
-  tools?: ToolDeclaration[];
+  skill_sources?: Record<string, SkillSourceDeclaration>;
+  capabilities?: Record<string, CapabilityDefinition>;
+  tools?: Record<string, ManagedToolDefinition>;
   graph: ContainerGraphNode;
 }
 

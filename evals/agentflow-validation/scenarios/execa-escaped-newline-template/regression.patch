@@ -1,0 +1,79 @@
+diff --git a/AGENTFLOW_EVAL_TASK.md b/AGENTFLOW_EVAL_TASK.md
+new file mode 100644
+index 0000000000..2df9bf6939
+--- /dev/null
++++ b/AGENTFLOW_EVAL_TASK.md
+@@ -0,0 +1,31 @@
++# Scenario: execa-escaped-newline-template
++
++## Source Issue
++
++Escaped newlines in execa template strings can drop the first character after the newline.
++
++Example:
++
++```js
++await $`echo.js foo\
++  bar`;
++```
++
++Expected stdout: `foo\nbar`. Actual behavior loses part of the second argument.
++
++## Constraints
++
++- Fix production source, not the regression test.
++- Do not use the upstream PR patch, oracle commit, or live GitHub.
++- Do not edit package manifests, lockfiles, generated files, or this task file.
++- Preserve existing behavior for normal newlines, escaped tabs, unicode escapes, and expression interpolation.
++
++## Validation
++
++Run:
++
++```bash
++npx ava --config agentflow-realworld-ava.config.cjs test/methods/agentflow-realworld-template.js
++```
++
++Write `handoff.md` in `$AGENTFLOW_OUTPUT_DIR` with:
++- the scenario id `execa-escaped-newline-template`
++- a one-sentence issue summary
++- the exact files changed
++- the exact validation command and result
++- remaining risks or `none`
+diff --git a/agentflow-realworld-ava.config.cjs b/agentflow-realworld-ava.config.cjs
+new file mode 100644
+index 0000000000..eaf87c93d2
+--- /dev/null
++++ b/agentflow-realworld-ava.config.cjs
+@@ -0,0 +1,3 @@
++module.exports = {
++  cache: false
++};
+diff --git a/test/methods/agentflow-realworld-template.js b/test/methods/agentflow-realworld-template.js
+new file mode 100644
+index 0000000000..6b9c650729
+--- /dev/null
++++ b/test/methods/agentflow-realworld-template.js
+@@ -0,0 +1,22 @@
++import test from 'ava';
++import {$} from '../../index.js';
++import {setFixtureDirectory} from '../helpers/fixtures-directory.js';
++
++setFixtureDirectory();
++
++const testScriptStdout = async (t, getSubprocess, expectedStdout) => {
++  const {stdout} = await getSubprocess();
++  t.is(stdout, expectedStdout);
++};
++
++test('$ can use escaped newlines and space indentation', testScriptStdout, () => $`echo.js foo\
++  bar`, 'foo\nbar');
++
++test('$ can use escaped newlines and tab indentation', testScriptStdout, () => $`echo.js foo\
++	bar`, 'foo\nbar');
++
++test('$ can use escaped newlines with escaped tab characters after the newline', testScriptStdout, () => $`echo.js foo\
++\tbar`, 'foo\tbar');
++
++test('$ can use escaped newlines with escaped newline characters after the newline', testScriptStdout, () => $`echo.js foo\
++\n\nbar`, 'foo\n\nbar');

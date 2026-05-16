@@ -38,6 +38,19 @@ evals/<suite-id>/
 
 `eval validate` accepts either the suite directory or the `eval.json` file.
 
+Validation renders every scenario x variant graph template with a representative trial context and validates the rendered graph against the current graph contract. Stale graph fields fail during `eval validate`, not later during a trial.
+
+## Evaluation Strategy
+
+Agentflow keeps a layered eval system:
+
+- `evals/agentflow-validation`: five broad sentinel scenarios that prove the full product mission end to end.
+- Focused suites such as prompt regression, workflow quality, capability workflows, and real-world issues: smaller regression and capability coverage.
+- Repeated trials: stochastic reliability measurement before releases.
+- Human QA runs: periodic checks that scenarios remain fair, solvable, and hard to game.
+
+The sentinel suite intentionally has exactly five scenarios: three pinned real-world repository fixtures and two simulated controls. It covers managed patterns, primitive nodes, plugin workflow lowering, support capabilities, selected skills, managed tools, CLI hints, context pointers with `what`/`why`, checkpoint feedback, supervisor resume, deterministic graders, quality judges, hidden-oracle canaries, and delivery artifacts.
+
 ## Suite Schema
 
 ```json
@@ -214,6 +227,8 @@ Environment behavior:
 - `docs` starts a local HTTP docs server and exposes `{{environment.docs_url}}`.
 - `tools` is copied, chmodded, and placed on `PATH`.
 - `environment.simulation` creates proxy binaries before tools on `PATH` and records calls in `simulation-events.jsonl`.
+- `environment.scripted_checkpoints.decisions` supplies deterministic checkpoint decisions for automated repeat/checkpoint evals. A `deny` decision must include feedback.
+- `environment.scripted_resume` supplies structured human input for paused supervisor runs with `human_action`, optional `human_note`, and optional `reset_supervisor_budget`.
 
 Template variables:
 
@@ -237,7 +252,7 @@ Exact matching is intentionally opt-in because full trajectories can change when
 
 Completion-contract evals should prefer trajectory checks for runtime discipline:
 
-- require `{ "kind": "af_tool_call", "af_command": "complete check" }` when a scenario expects a normal agent to preview completion before finishing,
+- require `{ "kind": "af_tool_call", "af_command": "orient" }` and `{ "kind": "af_tool_call", "af_command": "complete check" }` when a scenario expects a normal agent to orient and preview completion before finishing,
 - forbid debug/orchestration calls such as `{ "kind": "af_tool_call", "af_command": "diagnose failure" }` or `{ "kind": "af_tool_call", "af_command": "spawn" }` in normal-agent scenarios,
 - require `{ "kind": "completion_packet", "completion_status": "ready_for_verification" }` for clean passes,
 - require `{ "kind": "completion_packet", "completion_status": "incomplete" }` or `"blocked"` for negative scenarios such as missing artifacts, skipped validation, stale artifacts, live blocking observations, or sandbox blockers.
@@ -322,11 +337,13 @@ Run behavior:
 2. Expand scenario x variant x trial.
 3. Prepare an isolated environment.
 4. Render the graph template.
-5. Run normal `agentflow run`.
-6. Build trace and trace packet when a run root exists.
-7. Evaluate criteria.
-8. Build scorecards and aggregate the benchmark.
-9. Exit nonzero for infrastructure failures or failing benchmark thresholds.
+5. Validate the rendered graph contract.
+6. Run normal `agentflow run`.
+7. If the run pauses and `environment.scripted_resume` is authored, resume with structured human input.
+8. Build trace and trace packet when a run root exists.
+9. Evaluate criteria.
+10. Build scorecards and aggregate the benchmark.
+11. Exit nonzero for infrastructure failures or failing benchmark thresholds.
 
 ## Artifacts
 
@@ -363,6 +380,7 @@ Review `report.md` first, then failing `scorecard.json`, `criteria-results.json`
 
 ## Built-In Suites
 
+- `evals/agentflow-validation`: flagship five-scenario sentinel suite for full Agentflow mission validation. Run `agentflow eval validate evals/agentflow-validation` before broad eval changes and run the two simulated sentinel scenarios as fast regression gates when practical.
 - `evals/agentflow-prompt-regression`: strict release gate for solved prompt behavior; use `npm run validate:prompts` before shipping prompt changes. Prompt-regression gates use default isolated harness config; profiles with `harness_config.isolation: "inherit_user"` are intentionally non-reproducible and do not belong in this release gate.
 - `evals/agentflow-workflow-quality`: lightweight dogfood capability suite.
 - `evals/agentflow-capability-workflows`: harder local-repo prompt/context suite generated with `npm run setup:eval-repos`.

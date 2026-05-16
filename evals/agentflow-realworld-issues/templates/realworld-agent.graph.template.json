@@ -29,8 +29,7 @@
       "harness": "{{workflow.harness}}",
       "model": "gpt-5.4-mini",
       "reasoning_effort": "medium",
-      "sandbox": "workspace-write",
-      "timeout_sec": 900
+      "sandbox": "workspace-write"
     },
     "supervisor": {
       "harness": "codex-cli",
@@ -48,14 +47,6 @@
       {
         "type": "agent",
         "id": "fix_issue",
-        "repo": "main",
-        "context": [
-          {
-            "name": "task",
-            "from": "workspace_file",
-            "path": "AGENTFLOW_EVAL_TASK.md"
-          }
-        ],
         "artifacts": {
           "handoff": {
             "from": "output_dir",
@@ -80,12 +71,25 @@
             "Do not read broad source directories when repository search can first narrow relevant implementation and nearby tests.",
             "Do not choose broad rewrites over repository-local patterns and focused tests."
           ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task",
+              "path": "AGENTFLOW_EVAL_TASK.md",
+              "kind": "workspace_file",
+              "what": "Workspace file AGENTFLOW_EVAL_TASK.md.",
+              "why": "It defines the scenario task and acceptance surface for this node."
+            }
+          ]
         }
       },
       {
         "type": "check",
         "id": "focused_regression",
-        "repo": "main",
         "check_kind": "deterministic",
         "command": "sh",
         "args": [
@@ -99,6 +103,9 @@
             "The validation evidence is produced without editing regression tests, lockfiles, or forbidden source."
           ],
           "constraints": []
+        },
+        "runtime": {
+          "repo": "main"
         }
       }
     ]

@@ -3,6 +3,8 @@ export {
   evidenceKinds,
   findingKinds,
   helperPurposes,
+  milestoneLogKinds,
+  milestoneStatuses,
   runtimeLogTypes,
 } from "./types.js";
 export {
@@ -21,6 +23,7 @@ export type {
   CompletionHelperSummary,
   CompletionManagedSummary,
   CompletionOperatorObservationSummary,
+  CompletionOrientationSummary,
   CompletionPacket,
   CompletionProjection,
   CompletionStatus,
@@ -31,5 +34,10 @@ export type {
   ObservationKind,
   OperatorObservation,
   RuntimeLogEntry,
-  RuntimeLogType
+  RuntimeLogType,
+  RuntimeMilestone,
+  RuntimeMilestoneLogEntry,
+  RuntimeMilestoneLogKind,
+  RuntimeMilestoneState,
+  RuntimeMilestoneStatus
 } from "./types.js";

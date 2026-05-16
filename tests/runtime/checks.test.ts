@@ -47,6 +47,21 @@ describe("runtime checks", () => {
       context_packet_path: "/tmp/context/packet.json",
       context_manifest_path: "/tmp/context/manifest.md",
       output_dir: "/tmp",
+      skills: [
+        {
+          ref: "team/evaluator",
+          source_alias: "team",
+          name: "evaluator",
+          description: "Evaluate evidence strictly.",
+          path: "/tmp/.agentflow/skills/team/sha/evaluator/SKILL.md"
+        }
+      ],
+      cli: [
+        {
+          cmd: "jq",
+          description: "Inspect structured JSON evidence."
+        }
+      ],
       timeout_sec: 30,
       signal: undefined
     });
@@ -57,12 +72,26 @@ describe("runtime checks", () => {
         contextPacketPath: "/tmp/context/packet.json",
         contextManifestPath: "/tmp/context/manifest.md",
         outputDir: "/tmp",
-        artifacts: {}
+        artifacts: {},
+        skills: expect.arrayContaining([
+          expect.objectContaining({
+            ref: "team/evaluator"
+          })
+        ]),
+        cli: expect.arrayContaining([
+          expect.objectContaining({
+            cmd: "jq"
+          })
+        ])
       })
     );
     const renderedPrompt = renderHarnessPrompt(capturedInvocation!);
     expect(renderedPrompt).toContain("Evaluate the patch.");
     expect(renderedPrompt).toContain("Be strict.");
+    expect(renderedPrompt).toContain("## Optional Skills");
+    expect(renderedPrompt).toContain("| `team/evaluator` | evaluator | Evaluate evidence strictly.");
+    expect(renderedPrompt).toContain("## Ambient CLI Hints");
+    expect(renderedPrompt).toContain("| `jq` | Inspect structured JSON evidence. |");
     expect(result.evaluation).toEqual(
       expect.objectContaining({
         passed: false,
@@ -83,7 +112,7 @@ describe("runtime checks", () => {
       nodeGoal: "Evaluate the change.",
       contextPacketPath: "/tmp/context/packet.json",
       contextManifestPath: "/tmp/context/manifest.md",
-      contextManifest: "# Context Manifest\n\n- Materialized items: `2`\n",
+      contextManifest: "# Context Manifest\n\n- Pointer items: `2`\n",
       outputDir: "/tmp",
       artifacts: {},
       timeoutSec: 30,

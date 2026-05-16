@@ -1,0 +1,14 @@
+{
+  "schema": "agentflow.workflow/1",
+  "id": "prepare-parser",
+  "config_schema": "./config.schema.json",
+  "graph": "./workflow.graph.json",
+  "publish_node": "publish",
+  "published_artifacts": {
+    "packet": {
+      "from": "output_dir",
+      "path": "parser-packet.json",
+      "description": "Public parser preparation packet for downstream repair."
+    }
+  }
+}
