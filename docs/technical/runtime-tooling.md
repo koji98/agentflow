@@ -25,10 +25,10 @@ The harness prompt includes:
 
 - role and node task
 - graph goal, acceptance criteria, and constraints when present
-- workspace path, output directory, and sandbox expectations
+- workspace path and sandbox expectations
 - context pointer table from `agent/context.md`
 - `af` runtime CLI instructions
-- declared artifact contract
+- declared artifact contract through `af artifact write <name>`
 - optional skills table
 - managed plugin tools table for node-granted tools
 - ambient CLI hints table for normal shell commands
@@ -37,11 +37,12 @@ The harness prompt includes:
 The harness environment includes:
 
 - `AGENTFLOW_WORKSPACE`
-- `AGENTFLOW_OUTPUT_DIR`
+- `AGENTFLOW_OUTPUT_DIR` for runtime-owned artifact publishing
 - `AGENTFLOW_CONTEXT_PACKET`
 - `AGENTFLOW_CONTEXT_MANIFEST`
 - `AGENTFLOW_RUNTIME_METADATA`
 - `AGENTFLOW_TOOL_STATE`
+- `AGENTFLOW_AF_BROKER_DIR` for parent-owned `af` command execution
 - run/node identity values such as `AGENTFLOW_RUN_ID`, `AGENTFLOW_AGENT_ID`, and `AGENTFLOW_NODE_ID`
 - a `PATH` with the generated tool directory prepended
 
@@ -178,7 +179,7 @@ flowchart LR
 
 ## Runtime CLI `af`
 
-`af` is injected beside plugin tools because it is part of the same per-attempt runtime contract. It reads `$AGENTFLOW_RUNTIME_METADATA`, which points at `runtime.json`.
+`af` is injected beside plugin tools because it is part of the same per-attempt runtime contract. It reads `$AGENTFLOW_RUNTIME_METADATA`, which points at `runtime.json`. In sandboxed harnesses, the generated wrapper sends `af` commands through a parent-owned broker under `/tmp`; the parent process performs run-root writes for milestones, artifacts, and completion packets. Agents still use the simple `af ...` command surface, and no prompt needs transient artifact destinations or debug paths.
 
 Common commands:
 
@@ -189,11 +190,11 @@ Common commands:
 - `af artifact write <name>`: publish declared artifact content from stdin to its declared destination.
 - `af complete check`: build the runtime completion packet and report whether the current attempt is `ready_for_verification`, `incomplete`, or `blocked`.
 
-`af --help` is intentionally narrow for normal agents. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` are explicit supervisor or managed-pattern tools, but they are not part of the ordinary worker completion loop. There is no standalone `af wait`; `af spawn --role <evidence_mapper|causal_investigator|verification_auditor|repair_planner> ... --wait` is the read-only supervisor-helper form, and `af spawn --purpose <investigation|implementation|verification|repair> ... --wait` remains the managed-pattern helper form when orchestration authority is granted.
+`af --help` is intentionally narrow for normal agents. The runtime metadata carries an `af` command policy, and the generated wrapper plus parent broker enforce the same policy. Normal workers can use only `orient`, `milestone`, `artifact write`, and `complete check`. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` require diagnostic or orchestrator authority; forged broker requests do not expand the policy. There is no standalone `af wait`; `af spawn ... --wait` is available only to runtime-authorized supervisor or managed-pattern orchestration.
 
 Supervisor diagnostics include `af diagnose evidence-map --node <id> [--attempt latest|N] --json` and `af diagnose recovery-delta --case <case-file> --json`. Evidence maps connect failed requirements to available, missing, or conflicting evidence. Recovery deltas are advisory diagnostics; retries still require the engine to record a valid material delta in the recovery plan.
 
-The runtime CLI is file-backed. It coordinates through the run root and runtime directory, not through a live in-memory service exposed to the model.
+The runtime CLI is file-backed from Agentflow's point of view. The broker is an execution detail that prevents harness filesystem sandboxes from breaking runtime-owned writes; it validates `af` argv, ignores agent-supplied working-directory expansion, constrains stdin sidecar paths, and does not expose a general service or extra authority to the model.
 
 `af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include orientation state, milestone summaries, validation evidence, blocked milestones, declared artifact state, placeholder/empty/stale artifact findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, helper session evidence, and typed authority requests when a trusted runtime component produced one. Outcome verification only judges semantic correctness after this mechanical packet is ready. A `blocked` packet is valid only with a typed authority request; other blockers remain `incomplete`.
 

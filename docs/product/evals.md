@@ -258,7 +258,7 @@ Completion-contract evals should prefer trajectory checks for runtime discipline
 - require `{ "kind": "completion_packet", "completion_status": "incomplete" }` for negative scenarios such as missing artifacts, skipped validation, stale artifacts, live blocking observations, or sandbox blockers.
 - require `{ "kind": "completion_packet", "completion_status": "blocked" }` only when the packet also carries trusted typed `authority_requests`.
 
-Managed-pattern scenarios may assert `af spawn --purpose ... --wait` only when the graph grants orchestration authority and the helper artifact appears before the parent completion packet becomes ready. Supervisor recovery scenarios may assert fixed read-only helper roles such as `af spawn --role evidence_mapper ... --wait` only inside supervisor/managed recovery traces, never as ordinary worker behavior.
+Managed-pattern scenarios may assert `af spawn --purpose ... --wait` only when runtime orchestration authority is present and the helper artifact appears before the parent completion packet becomes ready. Supervisor recovery scenarios may assert fixed read-only helper roles such as `af spawn --role evidence_mapper ... --wait` only inside supervisor/managed recovery traces, never as ordinary worker behavior.
 
 ## Custom Script Criteria
 

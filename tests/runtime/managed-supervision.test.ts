@@ -63,7 +63,7 @@ function buildHarness(): HarnessAdapter {
                     "```"
                 ].join("\n"));
             }
-            if (invocation.nodeGoal.includes("cycle-plan.md")) {
+            if (invocation.nodeGoal.includes("cycle_plan")) {
                 await writeFile(join(invocation.outputDir, "cycle-plan.md"), [
                     "Objective",
                     "Plan another managed work cycle.",
@@ -81,7 +81,7 @@ function buildHarness(): HarnessAdapter {
                     "Stay inside the authored graph contract."
                 ].join("\n"), "utf8");
             }
-            if (invocation.nodeGoal.includes("work-notes.md")) {
+            if (invocation.nodeGoal.includes("work_notes")) {
                 await writeFile(join(invocation.outputDir, "work-notes.md"), "Changed nothing useful.\n", "utf8");
                 await writeFile(join(invocation.outputDir, "draft-summary.md"), "Draft summary.\n", "utf8");
                 await writeFile(join(invocation.outputDir, "draft-packet.json"), "{\"status\":\"draft\"}\n", "utf8");

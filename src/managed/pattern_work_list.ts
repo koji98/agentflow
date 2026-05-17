@@ -100,7 +100,7 @@ function listOrFallback(title: string, values: string[] | undefined, fallback: s
 
 function formatPublicArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
   return Object.entries(artifacts).flatMap(([name, artifact]) => [
-    `- ${name}: ${artifact.from}:${artifact.path}`,
+    `- ${name}: publish this declared artifact; the Declared Artifacts table shows the exact command.`,
     `  ${artifact.description}`
   ]);
 }
@@ -138,8 +138,8 @@ function buildPlannerPrompt(config: PatternWorkListConfig): string {
       "The runtime will freeze this list before execution; later workers cannot add, remove, split, merge, or reorder items."
     ]),
     section("Output Contract", [
-      "Write `work-list.md` as a human-readable explanation of the planned item order and why it satisfies the node contract.",
-      "Write `work-list.json` with this exact shape:",
+      "Publish the `work_list_md` artifact as a human-readable explanation of the planned item order and why it satisfies the node contract.",
+      "Publish the `work_list_json` artifact using this exact JSON shape:",
       '{"items":[{"id":"w1","title":"short label","goal":"item outcome","acceptance_criteria":["concrete success condition"],"constraints":["item boundary"],"validation_expectations":["validation or evidence expected"],"handoff_focus":["what later items or reviewers need"]}]}',
       "Use sequential ids starting at `w1` with no gaps."
     ])
@@ -183,11 +183,11 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
     ]),
     section("Item Worker", workerLines),
     section("Output Contract", [
-      "Write `item-handoffs.md` with one section per frozen item id. Each section must include item goal, result, evidence, validation, risks, and downstream implications.",
-      "Write `item-results.json` with this exact shape:",
+      "Publish the `item_handoffs` artifact; include one section per frozen item id with item goal, result, evidence, validation, risks, and downstream implications.",
+      "Publish the `item_results` artifact using this exact JSON shape:",
       '{"items":[{"id":"w1","status":"completed","summary":"what changed or was produced","validation":[{"summary":"validation evidence","result":"pass"}],"risks":[],"downstream_implications":[]}]}',
       "The final runtime step will fail unless every frozen item is marked completed.",
-      "Write `item-validation.md` with validation commands, checks, manual evidence, unavailable validation, and any reruns.",
+      "Publish the `item_validation` artifact; include validation commands, checks, manual evidence, unavailable validation, and any reruns.",
       "For deep_work mode, include frozen-list cycle and scorecard evidence in `item-results.json` when useful."
     ])
   ]);

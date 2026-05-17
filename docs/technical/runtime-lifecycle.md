@@ -142,6 +142,8 @@ Resume is contract-aware. It does not blindly continue old state.
 5. Invalidate affected nodes and dependent work when contracts changed.
 6. Continue the scheduler loop from the reconstructed session.
 
+Node compatibility includes prompt-affecting support and execution contract fields: repo, dependencies, intent, effective policy, context pointers, selected skills, CLI hints, managed tool grants/config, declared artifacts, commands/checks, and managed lowering metadata. Raw pointed file contents, glob matches, instruction files, and debug/provenance files do not by themselves invalidate completed nodes unless the compiled graph contract changes.
+
 `agentflow resume --dry-run` stops after reconstruction and reports what would be preserved, restarted, and initially startable without reconciling artifacts or creating workspaces. `--reset-supervisor-budget` keeps compatible completed work but restores the supervisor budget from the current graph, which is useful after fixing an exhausted run's graph or environment.
 
 Paused supervisor runs additionally require explicit `--human-action` and optional `--human-note` when execution actually resumes; dry-run previews do not require human input. Planned checkpoint decisions are different: they happen during the original TTY run and are represented as checkpoint outcomes and operator feedback artifacts.

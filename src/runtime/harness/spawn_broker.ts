@@ -1,8 +1,13 @@
 import { spawn } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import type { AgentInvocation } from "./types.js";
+import {
+  decideAfCommand,
+  normalizeAfCommandPolicy,
+  type AfCommandPolicy
+} from "../af_command_policy.js";
 
 interface HelperSession {
   agent_id: string;
@@ -10,6 +15,17 @@ interface HelperSession {
   started_at?: string;
   parent_metadata_path?: string;
   artifacts?: Record<string, string>;
+}
+
+interface AfBrokerRequest {
+  id: string;
+  argv: string[];
+  cwd?: string;
+  stdin_path?: string;
+}
+
+interface RuntimeMetadataForPolicy {
+  af_command_policy?: AfCommandPolicy;
 }
 
 function helperArtifactName(session: HelperSession): string {
@@ -24,10 +40,31 @@ async function readHelperSession(path: string): Promise<HelperSession | undefine
   }
 }
 
+function pathIsInside(parent: string, candidate: string): boolean {
+  const resolvedParent = resolve(parent);
+  const resolvedCandidate = resolve(candidate);
+  const relativePath = relative(resolvedParent, resolvedCandidate);
+  return relativePath.length === 0 || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
+async function readAfPolicy(metadataPath: string | undefined): Promise<AfCommandPolicy> {
+  if (!metadataPath) {
+    return "worker";
+  }
+
+  try {
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as RuntimeMetadataForPolicy;
+    return normalizeAfCommandPolicy(metadata.af_command_policy);
+  } catch {
+    return "worker";
+  }
+}
+
 export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } {
   const runtimeDir = invocation.runtimeDir;
   const afRunner = invocation.toolEnv?.AGENTFLOW_AF_RUNNER;
   const afCli = invocation.toolEnv?.AGENTFLOW_AF_CLI;
+  const afBrokerDir = invocation.toolEnv?.AGENTFLOW_AF_BROKER_DIR;
 
   if (!runtimeDir || !afRunner || !afCli) {
     return { stop() {} };
@@ -35,14 +72,135 @@ export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } 
   const runtimeDirValue = runtimeDir;
   const afRunnerValue = afRunner;
   const afCliValue = afCli;
+  const afBrokerDirValue = afBrokerDir;
 
   const launched = new Set<string>();
+  const handledAfRequests = new Set<string>();
   let stopped = false;
+
+  async function runAfBrokerRequest(request: AfBrokerRequest): Promise<void> {
+    if (!afBrokerDirValue || handledAfRequests.has(request.id)) {
+      return;
+    }
+
+    handledAfRequests.add(request.id);
+    const responsePath = join(afBrokerDirValue, "responses", `${request.id}.json`);
+    const policy = await readAfPolicy(invocation.toolEnv?.AGENTFLOW_RUNTIME_METADATA);
+    const commandDecision = decideAfCommand(request.argv, policy);
+    if (!commandDecision.allowed) {
+      await mkdir(join(afBrokerDirValue, "responses"), { recursive: true });
+      await writeFile(responsePath, `${JSON.stringify({
+        exit_code: 2,
+        stdout: `${JSON.stringify({
+          command: "af",
+          status: "failed",
+          message: commandDecision.reason ?? "af command is not allowed by this runtime policy."
+        }, null, 2)}\n`,
+        stderr: ""
+      }, null, 2)}\n`, "utf8");
+      return;
+    }
+
+    let stdin = "";
+    if (request.stdin_path) {
+      const requestsRoot = join(afBrokerDirValue, "requests");
+      if (!pathIsInside(requestsRoot, request.stdin_path)) {
+        await mkdir(join(afBrokerDirValue, "responses"), { recursive: true });
+        await writeFile(responsePath, `${JSON.stringify({
+          exit_code: 2,
+          stdout: `${JSON.stringify({
+            command: "af",
+            status: "failed",
+            message: "af broker stdin_path must stay inside the broker requests directory."
+          }, null, 2)}\n`,
+          stderr: ""
+        }, null, 2)}\n`, "utf8");
+        return;
+      }
+      stdin = await readFile(request.stdin_path, "utf8").catch(() => "");
+    }
+
+    const result = await new Promise<{
+      exit_code: number;
+      stdout: string;
+      stderr: string;
+      error?: string;
+    }>((resolveResult) => {
+      const child = spawn(
+        afRunnerValue,
+        [afCliValue, ...request.argv],
+        {
+          cwd: invocation.repoPath,
+          env: {
+            ...process.env,
+            ...invocation.toolEnv,
+            AGENTFLOW_AF_BROKER_CHILD: "1"
+          },
+          stdio: ["pipe", "pipe", "pipe"]
+        }
+      );
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+      child.on("error", (error) => {
+        resolveResult({
+          exit_code: 127,
+          stdout: "",
+          stderr: "",
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
+      child.on("close", (code) => {
+        resolveResult({
+          exit_code: typeof code === "number" ? code : 1,
+          stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+          stderr: Buffer.concat(stderrChunks).toString("utf8")
+        });
+      });
+      child.stdin.end(stdin);
+    });
+
+    await mkdir(join(afBrokerDirValue, "responses"), { recursive: true });
+    await writeFile(responsePath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  }
+
+  async function pollAfBroker(): Promise<void> {
+    if (!afBrokerDirValue || stopped) {
+      return;
+    }
+
+    const requestsDir = join(afBrokerDirValue, "requests");
+    let entries: string[];
+    try {
+      entries = await readdir(requestsDir);
+    } catch {
+      return;
+    }
+
+    await Promise.all(entries
+      .filter((entry) => entry.endsWith(".json"))
+      .map(async (entry) => {
+        const requestId = entry.replace(/\.json$/u, "");
+        if (handledAfRequests.has(requestId)) {
+          return;
+        }
+        const request = await readFile(join(requestsDir, entry), "utf8")
+          .then((content) => JSON.parse(content) as AfBrokerRequest)
+          .catch(() => undefined);
+        if (!request || request.id !== requestId || !Array.isArray(request.argv)) {
+          return;
+        }
+        await runAfBrokerRequest(request);
+      }));
+  }
 
   async function poll(): Promise<void> {
     if (stopped) {
       return;
     }
+
+    await pollAfBroker();
 
     const helpersDir = join(runtimeDirValue, "helpers");
     let entries: string[];
@@ -82,7 +240,8 @@ export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } 
           stdio: "ignore",
           env: {
             ...process.env,
-            AGENTFLOW_RUNTIME_METADATA: session.parent_metadata_path
+            AGENTFLOW_RUNTIME_METADATA: session.parent_metadata_path,
+            AGENTFLOW_INTERNAL_HELPER_RUN: "1"
           }
         }
       );
@@ -99,6 +258,9 @@ export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } 
     stop() {
       stopped = true;
       clearInterval(timer);
+      if (afBrokerDirValue) {
+        void rm(afBrokerDirValue, { recursive: true, force: true });
+      }
     }
   };
 }

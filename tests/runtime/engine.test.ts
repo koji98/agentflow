@@ -1003,7 +1003,7 @@ describe("runtime engine", () => {
             nodeGoal: "Produce the review handoff.",
             nodeAcceptanceCriteria: ["The handoff explains validation."]
         }));
-        expect(renderHarnessPrompt(invocations[0]!)).toContain(invocations[0]?.outputDir);
+        expect(renderHarnessPrompt(invocations[0]!)).not.toContain(invocations[0]?.outputDir);
         expect(attempt?.metadata).toEqual(expect.objectContaining({
             session_id: "agent-1"
         }));
@@ -1311,7 +1311,7 @@ describe("runtime engine", () => {
         expect(capturedInvocation?.promptKind).toBe("agent");
         expect(capturedInvocation).toEqual(expect.objectContaining({
             repoPath: repoDir,
-            outputDir: expect.stringContaining(join(repoDir, ".agentflow-runtime")),
+            outputDir: resolveExecutionArtifactsDirectory(attempt.execution_dir),
             artifacts: {
                 handoff: {
                     from: "output_dir",
@@ -1320,8 +1320,7 @@ describe("runtime engine", () => {
                 }
             }
         }));
-        expect(capturedInvocation?.outputDir).not.toBe(resolveExecutionArtifactsDirectory(attempt.execution_dir));
-        expect(await pathExists(capturedInvocation!.outputDir)).toBe(false);
+        expect(await pathExists(capturedInvocation!.outputDir)).toBe(true);
         expect(attempt.artifacts.handoff).toBe(join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "handoff.md"));
         expect(await readFile(attempt.artifacts.handoff!, "utf8")).toBe("handoff\n");
         expect(attempt.artifacts.agent_response).toBe(join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md"));
@@ -1500,7 +1499,7 @@ describe("runtime engine", () => {
         expect(repairPrompt).toContain("## Repair Task");
         expect(repairPrompt).toContain("## Missing Artifacts");
         expect(repairPrompt).toContain("Write a handoff after inspecting the repo.");
-        expect(repairPrompt).toContain("expected absolute path");
+        expect(repairPrompt).not.toContain("expected absolute path");
         expect(attempt.artifacts.handoff).toBe(join(artifactsRoot, "handoff.md"));
         expect(await readFile(attempt.artifacts.handoff!, "utf8")).toBe("repaired handoff\n");
         expect(attempt.metadata.artifact_repair).toEqual({

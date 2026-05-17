@@ -11,12 +11,6 @@ import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { HarnessName } from "../graph/schema.js";
 import { listAttemptsForCompiledNode, type RuntimeNodeAttempt } from "../runtime/attempts.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../runtime/harness/types.js";
-import {
-  createHarnessWorkspaceWriteMirror,
-  mapOutputArtifactPathToMirror,
-  prepareHarnessWorkspaceWriteMirror,
-  syncAndRemoveHarnessWorkspaceWriteMirror
-} from "../runtime/harness/workspace_mirror.js";
 import type { RuntimeSession } from "../runtime/session.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
 import type { SupervisorInterventionRecord } from "./types.js";
@@ -194,10 +188,10 @@ function renderArtifactRepairBrief(options: {
     "This brief is runtime-authored for the repair agent. Raw harness logs and debug files remain audit-only.",
     "",
     "## Missing Artifacts",
-    "| Name | Declared Path | Expected Path | Description |",
-    "| --- | --- | --- | --- |",
+    "| Name | Declared Path | Description |",
+    "| --- | --- | --- |",
     ...options.missing_artifacts.map((artifact) =>
-      `| \`${artifact.name}\` | \`${artifact.path}\` | \`${artifact.expected_path}\` | ${artifact.description.replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|")} |`
+      `| \`${artifact.name}\` | \`${artifact.path}\` | ${artifact.description.replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|")} |`
     ),
     "",
     "## Evidence Pointers",
@@ -340,23 +334,9 @@ export async function runRepairArtifactIntervention(options: {
     };
   }
 
-  const workspaceWriteMirror = createHarnessWorkspaceWriteMirror({
-    harness: harnessName,
-    sandbox,
-    workspace_path: options.workspace_path,
-    run_id: options.session.run_id,
-    execution_id: `${options.attempt.execution_id}__${interventionId}`,
-    execution_dir: options.attempt.execution_dir,
-    output_dir: artifactsRoot,
-    runtime_dir: runtimeDir
-  });
-  await prepareHarnessWorkspaceWriteMirror(workspaceWriteMirror);
-  const repairArtifactsRoot = workspaceWriteMirror?.output_dir ?? artifactsRoot;
-  const repairRuntimeDir = workspaceWriteMirror?.runtime_dir ?? runtimeDir;
-  const repairMissingArtifacts = options.missing_artifacts.map((artifact) => ({
-    ...artifact,
-    expected_path: mapOutputArtifactPathToMirror(workspaceWriteMirror, artifact.expected_path)
-  }));
+  const repairArtifactsRoot = artifactsRoot;
+  const repairRuntimeDir = runtimeDir;
+  const repairMissingArtifacts = options.missing_artifacts;
   await writeFile(
     repairBriefPath,
     `${renderArtifactRepairBrief({
@@ -376,7 +356,6 @@ export async function runRepairArtifactIntervention(options: {
     artifacts_root: repairArtifactsRoot,
     run_root: options.session.run_root,
     runtime_dir: repairRuntimeDir,
-    ...(workspaceWriteMirror ? { writable_runtime_dir: workspaceWriteMirror.tool_runtime_dir } : {}),
     run_id: options.session.run_id,
     graph_id: options.session.graph.graph_id,
     execution_id: options.attempt.execution_id,
@@ -424,14 +403,7 @@ export async function runRepairArtifactIntervention(options: {
     ...(options.signal ? { signal: options.signal } : {})
   });
   await writeFile(promptPath, `${renderHarnessPrompt(invocation)}\n`, "utf8");
-  let result: Awaited<ReturnType<HarnessAdapter["run"]>>;
-  try {
-    result = await harness.run(invocation);
-    await syncAndRemoveHarnessWorkspaceWriteMirror(workspaceWriteMirror);
-  } catch (error) {
-    await syncAndRemoveHarnessWorkspaceWriteMirror(workspaceWriteMirror).catch(() => undefined);
-    throw error;
-  }
+  const result = await harness.run(invocation);
   const stillMissing = await collectStillMissing(options.missing_artifacts);
   const status =
     result.status === "canceled"

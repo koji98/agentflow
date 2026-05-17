@@ -696,7 +696,7 @@ async function readLatestExecutionFailure(runRoot) {
         continue;
       }
 
-      const executionPath = join(executionsRoot, executionEntry.name, "execution.json");
+      const executionPath = join(executionsRoot, executionEntry.name, "runtime", "execution.json");
 
       try {
         const executionRecord = expectRecord(
@@ -760,7 +760,7 @@ async function readExecutionRecords(runRoot) {
       }
 
       const executionDir = join(executionsRoot, executionEntry.name);
-      const executionPath = join(executionDir, "execution.json");
+      const executionPath = join(executionDir, "runtime", "execution.json");
 
       try {
         const record = expectRecord(

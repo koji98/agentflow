@@ -143,15 +143,6 @@ process.stdin.on("end", () => {
     return;
   }
 
-  if (prompt.includes("Helper Task") || prompt.includes("Write helper report for golden spawn")) {
-    const milestone = beginNode("Write helper report", "Publish the helper report artifact.");
-    writeArtifact("helper-report.md", "helper ok\\n");
-    logValidation(milestone, "af artifact write helper-report.md", "Helper produced golden spawn report");
-    completeNode(milestone, "Helper report artifact was written.");
-    finish("helper completed\\n");
-    return;
-  }
-
   if (prompt.includes("Research Package Golden")) {
     const milestone = beginNode("Publish research package", "Write all declared research artifacts.");
     writeArtifact("research_report", "# Research Report\\n\\nGolden research package.\\n");
@@ -177,27 +168,6 @@ process.stdin.on("end", () => {
     logValidation(milestone, "fixture-inspect --subject golden", "Plugin tool output captured");
     completeNode(milestone, "Plugin tool output was captured in the declared artifact.");
     finish("plugin tool complete\\n");
-    return;
-  }
-
-  if (prompt.includes("Spawn Helper Golden")) {
-    const milestone = beginNode("Run helper spawn", "Spawn the helper and publish the parent summary.");
-    const spawned = runAf([
-      "spawn",
-      "--purpose",
-      "verification",
-      "--brief",
-      "Write helper report for golden spawn.",
-      "--artifact",
-      "helper-report.md",
-      "--wait",
-      "--timeout-sec",
-      "10"
-    ]);
-    writeArtifact("spawn_summary", spawned);
-    logValidation(milestone, "af spawn --wait", "Helper spawn completed");
-    completeNode(milestone, "Helper spawn completed and returned a result.");
-    finish("spawn complete\\n");
     return;
   }
 
@@ -469,43 +439,6 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         expect(inspectPayload.run_status).toBe("passed");
         expect(milestoneAudit).toContain("Plugin tool output captured");
         await expect(readFile(attempts[0]!.artifacts.tool_report!, "utf8")).resolves.toContain('"subject":"golden"');
-    });
-    it("runs af spawn --wait inside an agent and preserves helper evidence", async () => {
-        const repoDir = join(tempRoot, "repo");
-        const graphPath = join(tempRoot, "spawn.graph.json");
-        await mkdir(repoDir, { recursive: true });
-        await initGitRepo(repoDir);
-        process.env.AGENTFLOW_CODEX_CLI_BIN = await writeGoldenCodex(tempRoot);
-        await writeGraph(graphPath, baseGraph("golden-af-spawn", [
-            {
-                type: "agent",
-                id: "spawn_helper",
-                runtime: { repo: "main" },
-                intent: {
-                    goal: "Spawn Helper Golden: use af spawn and wait for helper output.",
-                    acceptance_criteria: ["The parent summary names the completed helper."],
-                    constraints: []
-                },
-                artifacts: {
-                    spawn_summary: {
-                        from: "output_dir",
-                        path: "spawn-summary.md",
-                        description: "Summary of helper spawn output."
-                    }
-                }
-            }
-        ]));
-        const result = await executeCli(["run", "--graph", graphPath], tempRoot);
-        const payload = JSON.parse(result.stdout);
-        const attempts = await readRunExecutionAttempts(payload.run_root);
-        const runtimeLog = await readFile(join(payload.run_root, "runtime", "log.jsonl"), "utf8");
-        const milestoneAudit = await readMilestoneAudit(payload.run_root);
-        const { inspectPayload } = await assertDeliveryAndInspect(payload.run_root);
-        expect(result.exitCode).toBe(0);
-        await expect(readFile(attempts[0]!.artifacts.spawn_summary!, "utf8")).resolves.toContain('"status": "passed"');
-        expect(runtimeLog).toContain("Spawned helper");
-        expect(milestoneAudit).toContain("Helper produced golden spawn report");
-        expect(inspectPayload.runtime_log_count).toBeGreaterThanOrEqual(2);
     });
     it("repairs a missing agent artifact and records supervisor intervention evidence", async () => {
         const repoDir = join(tempRoot, "repo");

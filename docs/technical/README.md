@@ -42,6 +42,6 @@ That separation is the reason validation can explain graph shape before launch, 
 
 ## What Is Intentionally Not Hidden
 
-Agentflow does not rely on invisible harness memory or live background coordination. A node receives an explicit prompt, an agent-facing context brief, output directory, runtime CLI, declared artifact contract, and granted tool wrappers. Future nodes consume named artifacts and recorded state, not chat history.
+Agentflow does not rely on invisible harness memory or live background coordination. A node receives an explicit prompt, an agent-facing context brief, runtime CLI, declared artifact publishing commands, and granted tool wrappers. Future nodes consume named artifacts and recorded state, not chat history.
 
 Agentflow also does not pass plugin credentials through the model environment. The harness sees tool names and credential scope names; generated launchers resolve secret values only when a plugin tool subprocess actually runs.

@@ -122,7 +122,7 @@ Manual files worth opening:
 Runtime coordination files are under `<run-root>/runtime/`. They are useful when debugging worker evidence and helper sub-nodes:
 
 - `milestones/<execution>.json`: worker milestones and attached finding, decision, and validation evidence.
-- `helpers/<helper-id>/session.json`: helper lifecycle, logs, output directory, and artifact paths.
+- `helpers/<helper-id>/session.json`: helper lifecycle, logs, and artifact paths.
 - `observations.jsonl`: live human observations added without pausing the run.
 - `human-resume-input.jsonl`: structured human input used when resuming paused runs.
 
@@ -151,7 +151,7 @@ agentflow resume --graph agentflow.graph.json --latest
 
 Resume revalidates the current graph, recompiles it, and compares the new contract with the prior run.
 
-Completed work is preserved only when the node contract and graph-level `intent` and `supervision` contracts remain compatible. If the human contract or supervision contract changes, affected completed work restarts so the final evidence matches the current graph.
+Completed work is preserved only when the node contract and graph-level `intent` and `supervision` contracts remain compatible. Node contracts include prompt-affecting support such as context pointers, skills, CLI hints, managed tool grants/config, declared artifacts, policy, commands/checks, and managed lowering metadata. If the human contract or supervision contract changes, affected completed work restarts so the final evidence matches the current graph.
 
 Use `--dry-run` before resuming a complicated run. It reports preserved nodes, restarted nodes, initially startable nodes, supervisor status, and remaining budget without reconciling artifacts, creating workspaces, or executing nodes. Use `--reset-supervisor-budget` when the previous run exhausted recovery actions and the operator has changed the graph, environment, credentials, or other blocking condition enough to justify a fresh recovery budget.
 

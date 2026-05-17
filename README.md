@@ -92,10 +92,10 @@ flowchart TD
   delta --> rerun["Rerun failed gate"]
   rerun -- healthy --> continue["Continue graph"]
   rerun -- new symptom --> cone
-  rank -- authority boundary --> pause["Pause for human authority"]
+  rank -- typed authority request --> pause["Pause for human authority"]
 ```
 
-Human pause is reserved for authority, credentials, security or compliance judgment, product intent ambiguity, explicit checkpoints, or graph-contract changes. Ordinary context, validation, artifact, workspace, and local environment failures should attempt machine recovery first.
+Human pause is reserved for trusted typed `AuthorityRequest` records from runtime-owned producers: missing credentials, missing harness authentication, planned checkpoints, external side-effect approval, or explicit operator pause. Product ambiguity, graph-contract gaps, repo/sandbox/scope expansion, context, validation, artifact, workspace, and local environment failures recover autonomously or fail contractually with evidence.
 
 ## Setup
 
@@ -332,7 +332,7 @@ Executable nodes are `agent`, `exec`, `check`, and `checkpoint`; all require `in
 
 Executable nodes choose repo/profile in `runtime` and receive non-authoritative help in `support`. `support.context` entries require `what` and `why`; skills and managed tools are selected directly or through `support.capabilities`; CLI hints are plain shell commands validated as callable and rendered in the prompt without wrappers, config, credentials, or ledgers.
 
-Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime pauses chosen only when recovery needs credentials, scope, product intent, security/compliance judgment, or graph-contract authority that the runtime must not infer.
+Use `checkpoint` for authored human gates, usually inside a `repeat` body. Supervisor authority pauses are different: they are runtime pauses chosen only from trusted typed `AuthorityRequest` records. Free text from agents, verifiers, stderr, helper artifacts, or debug logs cannot pause a run.
 
 ## Runtime Surfaces
 

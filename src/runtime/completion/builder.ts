@@ -137,6 +137,14 @@ const backtickedTermPattern = /`([^`\n]+)`/gu;
 const requiredArtifactTermContextPattern = /\b(?:includes?|including|contains?|copy|say|with|literal labels?|exact phrases?|discovered risk that|risk that|finding that)\b/iu;
 const forbiddenBeforeTermPattern = /\b(?:do not|don't|must not|should not|never)\b[^`\n]*$/iu;
 
+function isRuntimeInstructionTerm(term: string): boolean {
+  return (
+    /^af\s+/iu.test(term) ||
+    /\bAGENTFLOW_[A-Z0-9_]+\b/u.test(term) ||
+    /^\$AGENTFLOW_[A-Z0-9_]+/u.test(term)
+  );
+}
+
 function extractForbiddenArtifactContent(texts: string[]): ForbiddenArtifactContent[] {
   const terms = new Map<string, ForbiddenArtifactContent>();
   for (const text of texts) {
@@ -162,7 +170,7 @@ function extractRequiredArtifactContent(texts: string[]): RequiredArtifactConten
   for (const text of texts) {
     for (const match of text.matchAll(backtickedTermPattern)) {
       const term = match[1]?.trim();
-      if (!term || terms.has(term) || match.index === undefined) {
+      if (!term || isRuntimeInstructionTerm(term) || terms.has(term) || match.index === undefined) {
         continue;
       }
       const before = text.slice(Math.max(0, match.index - 140), match.index);

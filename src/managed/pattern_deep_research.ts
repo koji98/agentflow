@@ -48,7 +48,7 @@ function formatList(title: string, values: string[] | undefined, fallback: strin
 
 function formatArtifactContract(artifacts: Record<string, ArtifactDefinition>): string[] {
   return Object.entries(artifacts).flatMap(([name, artifact]) => [
-    `- ${name}: ${artifact.from}:${artifact.path}`,
+    `- ${name}: publish this declared artifact; the Declared Artifacts table shows the exact command.`,
     `  ${artifact.description}`
   ]);
 }
@@ -125,7 +125,7 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
       "Do not change graph intent, node intent, repo authority, sandbox, or declared artifacts."
     ]),
     section("Output Contract", [
-      "Write `angle-report.md` to the output directory.",
+      `Publish the \`angle_report_${zeroPad(index + 1)}\` artifact; the Declared Artifacts table shows the exact command.`,
       "This is a private research artifact for synthesis, not the final public handoff.",
       `The assigned angle id is ${angle.id}. Use that value in the report heading or metadata.`,
       "The report should be readable by a human researcher and focused on the assigned angle.",
@@ -163,7 +163,7 @@ function buildSynthesisPrompt(
       "Do not discard a unique major finding just because it appears in only one report."
     ]),
     section("Output Contract", [
-      `Write \`synthesis-${zeroPad(layer)}-${zeroPad(group)}.md\` to the output directory.`,
+      `Publish the \`synthesis_report_${zeroPad(layer)}_${zeroPad(group)}\` artifact; the Declared Artifacts table shows the exact command.`,
       "This is a private synthesis artifact for the final publisher, not the final public handoff.",
       "Include findings, evidence, sources, conflicts, uncertainty, confidence, and collapsed duplicates in Markdown."
     ])
