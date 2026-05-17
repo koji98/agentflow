@@ -20,13 +20,16 @@ If the brief is missing or vague, use `agentflow-intake` first. If a graph is al
 ## Core Workflow
 
 1. Read the workflow brief and preserve the requested assurance profile.
-2. Choose a composition from `references/composition-model.md`.
-3. Size nodes around outcomes, not tiny edit steps.
-4. Define authority: repos, profiles, workspace backend, sandbox, tools, credentials, and human approval boundaries.
-5. Define durable artifacts for every downstream or review handoff.
-6. Add checks only for stable facts. Deterministic checks validate outcomes, not guessed implementation tactics. See `references/deterministic-vs-rubric.md`.
-7. Use managed patterns when the lifecycle is standard; see `references/managed-patterns.md`.
-8. Include validation commands and route the draft to `agentflow-plan-review`.
+2. Write graph and node intent for the agents that will execute the graph; see `references/intent-writing.md`.
+3. Check how authored graph inputs will compile into AI prompts; see `references/prompt-translation.md`.
+4. Choose a composition from `references/composition-model.md`.
+5. Size nodes around outcomes, not tiny edit steps.
+6. Define authority: repos, profiles, workspace backend, sandbox, credentials, tools, planned checkpoints, and typed authority boundaries.
+7. Define support surfaces: skill sources, capabilities, CLI hints, managed tools, and node-local context; see `references/support-surfaces.md`.
+8. Define durable artifacts for every downstream or review handoff.
+9. Add checks only for stable facts. Deterministic checks validate outcomes, not guessed implementation tactics. See `references/deterministic-vs-rubric.md`.
+10. Use managed patterns when the lifecycle is standard; see `references/managed-patterns.md`.
+11. Include validation commands and route the draft to `agentflow-plan-review`.
 
 ## Decision Rules
 
@@ -35,8 +38,10 @@ If the brief is missing or vague, use `agentflow-intake` first. If a graph is al
 - Use `pattern_work_list` when the bounded outcome is known, but discovery must determine the finite ordered list of reviewable work items before execution.
 - Use deterministic `check` nodes for existing tests, builds, typechecks, smoke scripts, schema checks, or stable commands.
 - Use rubrics, artifacts, or review nodes for semantic correctness or open implementation paths.
-- Use checkpoints for planned human decisions; leave runtime authority pauses to supervisor behavior.
+- Use checkpoints for planned human decisions; leave runtime authority pauses to trusted typed `AuthorityRequest` producers. Do not design graphs that rely on free-text failures, ambiguity, graph contract gaps, sandbox expansion, or repo/scope gaps to ask a human.
 - Use plugins only for reusable workflow/tool capability, auth isolation, stable I/O, policy, or auditability.
+- Use capabilities for reusable support bundles. Keep context node-local because every pointer needs node-specific `what` and `why`.
+- Use CLI hints for ordinary local commands; use managed plugin tools only when reuse, credentials, policy, stable I/O, or auditability matter.
 
 ## Red Flags
 
@@ -52,8 +57,11 @@ If the brief is missing or vague, use `agentflow-intake` first. If a graph is al
 Before handing off:
 
 - [ ] The graph follows `references/graph-quality-bar.md`.
+- [ ] Graph intent is useful to every downstream node and does not narrate graph topology.
 - [ ] Every executable node has meaningful intent and non-empty acceptance criteria.
+- [ ] Authored inputs translate into the intended AI prompt surfaces for `agent`, AI `check`, plugin-lowered, `pattern_deep_research`, `pattern_deep_work`, and `pattern_work_list` nodes.
 - [ ] Every graph-level and node-level constraint is a prohibition-style boundary that starts with `Do not`; positive requirements are in acceptance criteria.
+- [ ] Support is expressed through capabilities, selected skills, CLI hints, managed tools, and node-local context pointers.
 - [ ] Artifacts exist for durable handoffs.
 - [ ] Deterministic checks validate stable outcomes.
 - [ ] Agent freedom is preserved inside clear authority boundaries.

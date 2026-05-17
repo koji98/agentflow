@@ -2,6 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
+  resolveExecutionHumanDebugToolDirectory,
+  resolveExecutionRuntimeCompletionPacketPath
+} from "../artifacts/paths.js";
+import {
   readCompiledGraph,
   readExecutionManifest,
   readRunEvents,
@@ -89,7 +93,7 @@ async function readAttemptToolInvocations(attempts: Array<{
     if (!attempt.execution_dir) {
       return [];
     }
-    const records = await readJsonLines(join(attempt.execution_dir, "tool-invocations.jsonl"));
+    const records = await readJsonLines(join(resolveExecutionHumanDebugToolDirectory(attempt.execution_dir), "index.jsonl"));
     return records.map((record) => ({ attempt, record }));
   }));
   return invocationGroups.flat();
@@ -111,7 +115,7 @@ async function readAttemptCompletionPackets(attempts: Array<{
     const packetPath = typeof metadataCompletion?.packet_path === "string"
       ? metadataCompletion.packet_path
       : attempt.execution_dir
-        ? join(attempt.execution_dir, "completion-packet.json")
+        ? resolveExecutionRuntimeCompletionPacketPath(attempt.execution_dir)
         : undefined;
     if (!packetPath) {
       return [];

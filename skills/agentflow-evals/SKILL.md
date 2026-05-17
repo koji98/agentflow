@@ -48,7 +48,7 @@ Use this skill for `agentflow eval`. Use `agentflow-authoring` for graph authori
 
 - Eval suites use version `"1"` and are separate from graph version `"1"`. Do not add eval concerns to the graph contract.
 - A trial is scenario x variant x run number. Use repeated trials when model variance matters.
-- Expected `paused` and `failed` outcomes can be correct behavior when authority, credentials, policy, or underspecified intent should stop the workflow.
+- Expected `paused` outcomes require a typed runtime authority request, such as a missing credential or planned checkpoint. Graph-contract, policy, scope, or underspecified-intent gaps should normally be expected `failed` outcomes with evidence.
 - Required deterministic criteria override quality scores.
 - Capability suites should include difficult tasks and may start below 100%. Regression suites should target near-100% pass rates for behavior that must not drift.
 - If a scenario has 0% pass rate across many trials, first check whether the task is ambiguous, impossible, or overfit to brittle grader assumptions.

@@ -206,8 +206,11 @@ function classifyCurrentNodeOperation(classification: FailureClassification): Su
   if (classification.evidence.environment_repair_candidate === true) {
     return "repair_environment";
   }
-  if (classification.class === "policy_or_scope_risk" || classification.class === "operator_pause") {
+  if (classification.class === "authority_required") {
     return "pause_for_authority";
+  }
+  if (classification.class === "policy_or_scope_risk") {
+    return "fail_contract_gap";
   }
   return "repair_current_node";
 }

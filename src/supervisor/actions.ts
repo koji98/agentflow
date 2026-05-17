@@ -1,7 +1,11 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
-import { resolveExecutionArtifactsDirectory, resolveInterventionDirectory } from "../artifacts/paths.js";
+import {
+  resolveExecutionAgentArtifactRepairBriefPath,
+  resolveExecutionArtifactsDirectory,
+  resolveInterventionDirectory
+} from "../artifacts/paths.js";
 import type { CompiledAgentNode } from "../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { HarnessName } from "../graph/schema.js";
@@ -91,10 +95,7 @@ async function collectPreviousAttemptEvidencePaths(
       .map((artifact) => join(outputDir, artifact.path));
     return [
       ...Object.values(candidate.artifacts),
-      ...priorOutputArtifacts,
-      ...(candidate.result_path ? [candidate.result_path] : []),
-      ...(candidate.stdout_log_path ? [candidate.stdout_log_path] : []),
-      ...(candidate.stderr_log_path ? [candidate.stderr_log_path] : [])
+      ...priorOutputArtifacts
     ];
   });
 
@@ -114,6 +115,7 @@ function buildRepairInvocation(options: {
   context_manifest_path: string;
   context_manifest: string;
   artifacts_root: string;
+  repair_brief_path: string;
   runtime_dir: string;
   repair_attempt: number;
   max_attempts: number;
@@ -165,9 +167,8 @@ function buildRepairInvocation(options: {
     repair: {
       repairAttempt: options.repair_attempt,
       maxAttempts: options.max_attempts,
+      repairBriefPath: options.repair_brief_path,
       priorResponsePath,
-      stdoutLogPath: options.attempt.stdout_log_path ?? join(options.attempt.execution_dir, "logs", "stdout.log"),
-      stderrLogPath: options.attempt.stderr_log_path ?? join(options.attempt.execution_dir, "logs", "stderr.log"),
       previousAttemptEvidencePaths: options.previous_attempt_evidence_paths,
       missingArtifacts: options.missing_artifacts.map((artifact) => ({
         name: artifact.name,
@@ -178,6 +179,39 @@ function buildRepairInvocation(options: {
       }))
     }
   };
+}
+
+function renderArtifactRepairBrief(options: {
+  repair_attempt: number;
+  max_attempts: number;
+  missing_artifacts: MissingDeclaredArtifact[];
+  prior_response_path: string;
+  previous_attempt_evidence_paths: string[];
+}): string {
+  return [
+    "# Artifact Repair Brief",
+    "",
+    "This brief is runtime-authored for the repair agent. Raw harness logs and debug files remain audit-only.",
+    "",
+    "## Missing Artifacts",
+    "| Name | Declared Path | Expected Path | Description |",
+    "| --- | --- | --- | --- |",
+    ...options.missing_artifacts.map((artifact) =>
+      `| \`${artifact.name}\` | \`${artifact.path}\` | \`${artifact.expected_path}\` | ${artifact.description.replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|")} |`
+    ),
+    "",
+    "## Evidence Pointers",
+    `- Prior final response artifact, if present: ${options.prior_response_path}`,
+    ...(options.previous_attempt_evidence_paths.length > 0
+      ? options.previous_attempt_evidence_paths.map((path) => `- Prior attempt artifact: ${path}`)
+      : ["- No prior attempt artifacts were found for this node."]),
+    "",
+    "## Repair Attempt",
+    `- Attempt: ${options.repair_attempt} of ${options.max_attempts}`,
+    "- Preserve the original node goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts.",
+    "- Inspect only the evidence needed to produce the missing declared artifacts.",
+    "- Publish each missing artifact with `af artifact write <name>` and finish with `af complete check`."
+  ].join("\n");
 }
 
 export async function runRepairArtifactIntervention(options: {
@@ -203,6 +237,7 @@ export async function runRepairArtifactIntervention(options: {
   const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, interventionId);
   const startedAt = new Date().toISOString();
   const artifactsRoot = resolveExecutionArtifactsDirectory(options.attempt.execution_dir);
+  const repairBriefPath = resolveExecutionAgentArtifactRepairBriefPath(options.attempt.execution_dir);
   const runtimeDir = join(options.session.run_root, "runtime");
   const previousAttemptEvidencePaths = await collectPreviousAttemptEvidencePaths(
     options.session,
@@ -218,7 +253,19 @@ export async function runRepairArtifactIntervention(options: {
   const resultPath = join(interventionDir, "result.json");
 
   await mkdir(interventionDir, { recursive: true });
+  await mkdir(dirname(repairBriefPath), { recursive: true });
   const contextManifest = await readContextManifestContent(options.context_manifest_path);
+  await writeFile(
+    repairBriefPath,
+    `${renderArtifactRepairBrief({
+      repair_attempt: repairAttempt,
+      max_attempts: maxAttempts,
+      missing_artifacts: options.missing_artifacts,
+      prior_response_path: join(artifactsRoot, "agent-response.md"),
+      previous_attempt_evidence_paths: previousAttemptEvidencePaths
+    })}\n`,
+    "utf8"
+  );
 
   const harnessName = options.supervisor_policy?.harness ?? options.node.effective_policy.harness;
   const harness = harnessName ? options.harnesses[harnessName] : undefined;
@@ -240,6 +287,7 @@ export async function runRepairArtifactIntervention(options: {
       context_manifest_path: options.context_manifest_path,
       context_manifest: contextManifest,
       artifacts_root: artifactsRoot,
+      repair_brief_path: repairBriefPath,
       runtime_dir: runtimeDir,
       repair_attempt: repairAttempt,
       max_attempts: maxAttempts,
@@ -309,6 +357,17 @@ export async function runRepairArtifactIntervention(options: {
     ...artifact,
     expected_path: mapOutputArtifactPathToMirror(workspaceWriteMirror, artifact.expected_path)
   }));
+  await writeFile(
+    repairBriefPath,
+    `${renderArtifactRepairBrief({
+      repair_attempt: repairAttempt,
+      max_attempts: maxAttempts,
+      missing_artifacts: repairMissingArtifacts,
+      prior_response_path: join(repairArtifactsRoot, "agent-response.md"),
+      previous_attempt_evidence_paths: previousAttemptEvidencePaths
+    })}\n`,
+    "utf8"
+  );
 
   const repairToolSetup = await prepareAgentTools({
     node: options.node,
@@ -352,6 +411,7 @@ export async function runRepairArtifactIntervention(options: {
     context_manifest_path: options.context_manifest_path,
     context_manifest: contextManifest,
     artifacts_root: repairArtifactsRoot,
+    repair_brief_path: repairBriefPath,
     runtime_dir: repairRuntimeDir,
     repair_attempt: repairAttempt,
     max_attempts: maxAttempts,

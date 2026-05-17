@@ -117,8 +117,8 @@ function invocationForPrompt(overrides: Partial<AgentInvocation>): AgentInvocati
         sandbox: "workspace-write",
         model: "gpt-5.2",
         reasoningEffort: "medium",
-        contextPacketPath: "/tmp/run/context/packet.json",
-        contextManifestPath: "/tmp/run/context/manifest.md",
+        contextPacketPath: "/tmp/run/runtime/context.json",
+        contextManifestPath: "/tmp/run/agent/context.md",
         contextManifest: [
             "# Context Manifest",
             "",
@@ -189,10 +189,11 @@ describe("V1 support authoring", () => {
                 cli: node!.cli
             }));
             expect(prompt).toContain("## Optional Skills");
-            expect(prompt).toContain("| Ref | Name | Description | Path |");
-            expect(prompt).toContain("| `team/pr-review` | pr-review | Review PR evidence.");
-            expect(prompt).toContain("| `team/release-handoff` | release-handoff | Produce release handoffs.");
-            expect(prompt).toContain("| `team/issue-triage` | issue-triage | Triage issue evidence.");
+            expect(prompt).toContain("| Skill | Description | Open |");
+            expect(prompt).toContain("| pr-review | Review PR evidence.");
+            expect(prompt).toContain("| release-handoff | Produce release handoffs.");
+            expect(prompt).toContain("| issue-triage | Triage issue evidence.");
+            expect(prompt).not.toContain("team/pr-review");
             expect(prompt).not.toContain("team/unused");
             expect(prompt).not.toContain("Should not be prompted.");
             expect(prompt).toContain("## Ambient CLI Hints");

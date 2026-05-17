@@ -55,6 +55,7 @@ export function buildCompletionProjection(
     authored_id: packet.authored_id,
     completion_status: packet.completion_status,
     ready_for_verification: packet.ready_for_verification,
+    authority_requests: packet.authority_requests,
     blocking_reasons: blockingReasons.values,
     missing_artifacts: packet.missing_artifacts.slice(0, maxItems),
     artifact_findings: artifactFindings.values,

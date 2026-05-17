@@ -52,7 +52,7 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 - Tool launchers expose graph config to the plugin subprocess as `AGENTFLOW_TOOL_<CALLABLE_NAME>_<KEY>` environment variables.
 - Tool `config_schema` validates those graph config defaults; it is not the tool's CLI argument schema.
 - Plugin manifests do not declare default CLI arguments; agents pass CLI arguments when invoking the generated callable tool.
-- Secret credential values are resolved only by generated tool launchers and are not exported into Codex or Cursor harness environments.
+- Required credential availability is checked by runtime-owned preflight; secret credential values are resolved only for plugin subprocesses and are not exported into Codex or Cursor harness environments.
 - Tool `--help` is the detailed API contract agents should read before first use.
 - Shell tools are good for thin orchestration; language-backed tools are better for parsing, validation, structured output, and nontrivial logic.
 - Downstream graph nodes consume only public plugin node artifacts.

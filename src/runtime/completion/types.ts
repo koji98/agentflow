@@ -1,6 +1,7 @@
 import type { ArtifactDefinition } from "../../graph/authored.js";
 import type { CompiledExecutableNode } from "../../graph/compiled.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
+import type { AuthorityRequest } from "../authority.js";
 import type { SupervisorRecoveryEnvelope } from "../../supervisor/types.js";
 
 export const completionStatuses = ["ready_for_verification", "incomplete", "blocked"] as const;
@@ -254,6 +255,7 @@ export interface CompletionPacket {
   helpers: CompletionHelperSummary;
   completion_status: CompletionStatus;
   ready_for_verification: boolean;
+  authority_requests: AuthorityRequest[];
   blocking_reasons: string[];
 }
 
@@ -265,6 +267,7 @@ export interface CompletionProjection {
   authored_id: string;
   completion_status: CompletionStatus;
   ready_for_verification: boolean;
+  authority_requests: AuthorityRequest[];
   blocking_reasons: string[];
   missing_artifacts: string[];
   artifact_findings: CompletionArtifactFinding[];
@@ -297,6 +300,7 @@ export interface BuildCompletionPacketOptions {
   priorAttempts?: RuntimeNodeAttempt[];
   supervisorRecoveryEnvelope?: SupervisorRecoveryEnvelope;
   supervisorRecoveryEnvelopePath?: string;
+  authorityRequests?: AuthorityRequest[];
   managed?: CompletionManagedSummary;
   observations?: OperatorObservation[];
   now?: () => Date;

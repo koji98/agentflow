@@ -3,7 +3,7 @@ export const supervisorActionKinds = [
   "repair_artifact",
   "rebuild_context",
   "run_diagnostic",
-  "pause_for_human",
+  "pause_for_authority",
   "semantic_evaluation",
   "fail"
 ] as const;
@@ -24,7 +24,6 @@ export type FailureClass =
   | "authority_required"
   | "policy_or_scope_risk"
   | "harness_unavailable"
-  | "operator_pause"
   | "repeated_failure"
   | "unknown"
   | "non_recoverable";
@@ -173,10 +172,24 @@ export interface SupervisorEvidencePatch {
   confidence: "low" | "medium" | "high";
   conflicts: string[];
   retry_guidance: string[];
-  scope_or_authority_changed: boolean;
+  authority_findings: SupervisorAuthorityFinding[];
   created_at: string;
   artifact_paths: Record<string, string>;
   metadata?: Record<string, unknown>;
+}
+
+export type SupervisorAuthorityFindingKind =
+  | "graph_contract_change"
+  | "sandbox_expansion"
+  | "repo_scope_expansion"
+  | "external_side_effect"
+  | "credential_or_auth_mention"
+  | "operator_input_mention";
+
+export interface SupervisorAuthorityFinding {
+  kind: SupervisorAuthorityFindingKind;
+  summary: string;
+  evidence?: string[];
 }
 
 export type SupervisorApplyAction =
@@ -197,7 +210,6 @@ export type SupervisorRequirementEvidenceStatus =
   | "available"
   | "missing"
   | "conflicting"
-  | "outside_authority"
   | "unknown";
 
 export interface SupervisorEvidenceReference {

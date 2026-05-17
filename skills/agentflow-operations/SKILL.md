@@ -30,7 +30,7 @@ Use `agentflow-authoring` for graph creation and `agentflow-run-review` for post
 ## Decision Rules
 
 - Validate before expensive harness work.
-- Start delivery review from `delivery/manifest.json` and `delivery/reviewer-guide.md`.
+- Start delivery review from `delivery/01-review-brief.md`, then `delivery/02-run-learnings.md`, `delivery/03-audit-index.md`, and `delivery/manifest.json`.
 - Use raw `events.jsonl`, attempts, and runtime logs only for debug, audit, or resume.
 - Treat missing or weak delivery as a run-quality failure even when code changed.
 - Use `agentflow-run-review` after completion when the goal is learning or extraction.
@@ -41,13 +41,13 @@ Use `agentflow-authoring` for graph creation and `agentflow-run-review` for post
 - Ignoring plugin lockfile or tool `--help` failures.
 - Reviewing raw logs before delivery files.
 - Resuming a changed graph without dry-run when preservation matters.
-- Treating supervisor `pause_for_human` as a planned checkpoint.
+- Treating a supervisor authority pause as a planned checkpoint, or assuming free-text failures can pause a run.
 - Expecting a completed agent node to be a live collaborator.
 
 ## Verification
 
 - [ ] Plugin resolution was run when plugins are declared.
 - [ ] Validation output is recorded or summarized.
-- [ ] Run root, status, delivery manifest, reviewer guide, and interventions are known.
+- [ ] Run root, status, review brief, run learnings, audit index, delivery manifest, and interventions are known.
 - [ ] Resume decisions are based on dry-run when compatibility matters.
 - [ ] Delivery files were reviewed before debug-only artifacts.

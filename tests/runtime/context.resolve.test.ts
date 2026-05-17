@@ -176,7 +176,7 @@ describe("context resolution", () => {
             repeated_fingerprint_count: 1,
             retry_directive: {
                 summary: "The retry needs recovered local context before the authored material.",
-                must_do: ["Read the rebuilt local context manifest first."],
+                must_do: ["Read the rebuilt local agent context brief first."],
                 must_not_do: ["Do not change the node contract."],
                 evidence_to_read: [join(tempRoot, "evidence-patch.md")],
                 validation_focus: ["Confirm the source file is used."],
@@ -214,7 +214,7 @@ describe("context resolution", () => {
         await expect(readFile(resolved.packet.materials[0]!.pointer_path, "utf8")).resolves.toContain("The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.");
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("materializes workspace context and upstream artifacts into a context packet", async () => {
+    it("materializes workspace context and upstream artifacts into runtime context state", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-"));
         const repoDir = join(tempRoot, "repo");
         const upstreamDir = join(tempRoot, "upstream");
@@ -999,7 +999,8 @@ describe("context resolution", () => {
         expect(pointerContents).toContain("Line three should remain available because context is pointer-only.");
         expect(summary).toContain("Agentflow does not copy or truncate source context");
         expect(summary).not.toContain("Truncated");
-        await expect(readdir(join(executionDir, "context"))).resolves.not.toContain("materialized");
+        expect(summary).not.toContain("provenance");
+        await expect(readdir(executionDir)).resolves.not.toContain("context");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("omits a missing live file instead of failing resolution", async () => {
@@ -1068,7 +1069,9 @@ describe("context resolution", () => {
                 if_available: false
             })
         ]);
-        expect(await readFile(resolved.manifest_path, "utf8")).toContain('Requested context workspace file "watched.txt" was not found');
+        const summary = await readFile(resolved.manifest_path, "utf8");
+        expect(summary).toContain('Requested context workspace file "watched.txt" was not found');
+        expect(summary).not.toContain("provenance");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("keeps non-UTF-8 file inputs as pointers with digests", async () => {
@@ -1517,7 +1520,7 @@ describe("context resolution", () => {
             join(repoDir, "first.txt"),
             join(repoDir, "second.txt")
         ]);
-        await expect(readdir(join(executionDir, "context"))).resolves.not.toContain("materialized");
+        await expect(readdir(executionDir)).resolves.not.toContain("context");
         await rm(tempRoot, { recursive: true, force: true });
     });
 });

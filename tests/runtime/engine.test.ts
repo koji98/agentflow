@@ -9,9 +9,16 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
-import { resolveExecutionArtifactsDirectory, resolveInterventionDirectory, resolveNodeExecutionDirectory } from "../../src/artifacts/paths.js";
+import {
+    resolveExecutionArtifactsDirectory,
+    resolveExecutionHumanDebugToolDirectory,
+    resolveExecutionRuntimeDirectory,
+    resolveInterventionDirectory,
+    resolveNodeExecutionDirectory
+} from "../../src/artifacts/paths.js";
 import { readRunExecutionAttempts, readSupervisorInterventions } from "../../src/artifacts/reader.js";
 import { buildExecutionId } from "../../src/runtime/attempts.js";
+import { createAuthorityRequest } from "../../src/runtime/authority.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
 import { renderHarnessPrompt, type HarnessAdapter } from "../../src/runtime/harness/types.js";
@@ -163,16 +170,13 @@ describe("runtime engine", () => {
                     const outputDir = resolveExecutionArtifactsDirectory(execution_dir);
                     if (node.authored_id.endsWith("__angle_01")) {
                         await writeFile(join(outputDir, "angle-report.md"), rawRiskReport);
-                        await writeFile(join(outputDir, "packet.json"), JSON.stringify({ angle: "risk", findings: [], evidence: [], sources: [], conflicts: [], uncertainty: [], confidence: "high" }));
                     }
                     else if (node.authored_id.endsWith("__angle_02")) {
                         await writeFile(join(outputDir, "angle-report.md"), "RAW CONTRACT ANGLE REPORT\nangle_02\nfindings, evidence, sources, conflicts, uncertainty, and confidence for the contract angle.\n");
-                        await writeFile(join(outputDir, "packet.json"), JSON.stringify({ angle: "angle_02", findings: [], evidence: [], sources: [], conflicts: [], uncertainty: [], confidence: "high" }));
                     }
                     else if (node.authored_id === "market_scan") {
                         expect(await readFile(join(outputDir, "angles", "risk.md"), "utf8")).toBe(rawRiskReport);
                         await writeFile(join(outputDir, "summary.md"), "Synthesized summary.\n");
-                        await writeFile(join(outputDir, "packet.json"), JSON.stringify({ answer: "synthesized" }));
                         await writeFile(join(outputDir, "angles", "risk.md"), "PUBLISHER SHOULD NOT WIN\n");
                     }
                     const result = {
@@ -827,6 +831,7 @@ describe("runtime engine", () => {
         });
         const verifyAttempt = run.attempts.find((attempt) => attempt.authored_id === "verify");
         expect(run.outcome).toBe("failed");
+        expect(run.state.supervisor.pause).toBeUndefined();
         expect(run.state.node_statuses.root__verify).toBe("failed");
         expect(run.state.evidence_status).toBe("clean");
         expect(run.events.some((event) => event.type === "verification.recorded")).toBe(false);
@@ -1397,7 +1402,7 @@ describe("runtime engine", () => {
         const renderedPrompt = renderHarnessPrompt(capturedInvocation!);
         expect(renderedPrompt).toContain(`Save your draft to ${expectedOutputDir}/draft.md.`);
         expect(renderedPrompt).toContain(`The workspace lives at ${repoDir}.`);
-        expect(renderedPrompt).toMatch(/The packet path is .+\/context\/packet\.json\./);
+        expect(renderedPrompt).toMatch(/The packet path is .+\/runtime\/context\.json\./);
         expect(renderedPrompt).toContain("$AGENTFLOW_WORKSPACE_OTHER must remain literal.");
         expect(renderedPrompt).toContain("$AGENTFLOW_DOES_NOT_EXIST must remain literal.");
         expect(renderedPrompt).not.toContain("$AGENTFLOW_OUTPUT_DIR");
@@ -1945,12 +1950,12 @@ describe("runtime engine", () => {
                 type: "supervisor.decision",
                 compiled_id: "root__write_handoff",
                 payload: expect.objectContaining({
-                    classification: "completion_contract_failure",
-                    action: "retry_with_guidance"
+                    classification: "artifact_contract_failure",
+                    action: "repair_artifact"
                 })
             })
         ]));
-        await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain('"action":"retry_with_guidance"');
+        await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain('"action":"repair_artifact"');
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("does not synthesize the same agent response into multiple missing artifacts", async () => {
@@ -2106,7 +2111,8 @@ describe("runtime engine", () => {
         }));
         expect(await readFile(attempt!.artifacts.agent_response!, "utf8")).toBe("final response\n");
         expect(JSON.parse(await readFile(attempt!.result_path!, "utf8"))).toEqual({
-            error: "Required artifact contract is missing after 1 artifact repair attempt: handoff at handoff.json."
+            error: "Required artifact contract is missing after 1 artifact repair attempt: handoff at handoff.json.",
+            failure_code: "artifact_contract_failure"
         });
         expect(attempt?.metadata.artifact_repair).toEqual({
             status: "failed",
@@ -2203,7 +2209,12 @@ describe("runtime engine", () => {
         expect(consumerAttempt?.status).toBe("failed");
         expect(consumerAttempt?.result_path).toBeDefined();
         expect(JSON.parse(await readFile(consumerAttempt!.result_path!, "utf8"))).toEqual({
-            error: 'Required context artifact is missing for "source".'
+            error: 'Required context artifact is missing for "source".',
+            failure_code: "unresolved_context",
+            details: {
+                node: "source",
+                artifact: "agent_response"
+            }
         });
         await rm(tempRoot, { recursive: true, force: true });
     });
@@ -2274,7 +2285,7 @@ describe("runtime engine", () => {
                 })
             }
         });
-        expect(run.outcome).toBe("paused");
+        expect(run.outcome).toBe("failed");
         expect(run.attempts).toHaveLength(1);
         expect(run.state.node_statuses.root__reader).toBe("failed");
         expect(run.events).toEqual(expect.arrayContaining([
@@ -2331,9 +2342,10 @@ describe("runtime engine", () => {
                 main: repoDir
             }
         });
-        expect(run.outcome).toBe("paused");
+        expect(run.outcome).toBe("failed");
         expect(run.attempts[0]?.status).toBe("failed");
         expect(run.attempts[0]?.metadata.error).toContain('cwd "../outside" must be a relative path that stays within its repo or workspace root.');
+        expect(run.attempts[0]?.metadata.failure_code).toBe("graph_contract_gap");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("fails when exec env_files use repo-qualified paths at runtime", async () => {
@@ -2377,9 +2389,10 @@ describe("runtime engine", () => {
                 main: repoDir
             }
         });
-        expect(run.outcome).toBe("paused");
+        expect(run.outcome).toBe("failed");
         expect(run.attempts[0]?.status).toBe("failed");
         expect(run.attempts[0]?.metadata.error).toContain('env_files entry "main:.env" must be a relative path that stays within its repo or workspace root.');
+        expect(run.attempts[0]?.metadata.failure_code).toBe("graph_contract_gap");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("marks downstream nodes blocked after a terminal failure outside repeat scopes", async () => {
@@ -2745,9 +2758,9 @@ describe("runtime engine", () => {
             }
         });
         const attempt = run.attempts.find((candidate) => candidate.authored_id === "implement");
-        expect(run.outcome).toBe("paused");
+        expect(run.outcome).toBe("failed");
         expect(run.attempts).toHaveLength(1);
-        expect(run.state.status).toBe("paused");
+        expect(run.state.status).toBe("failed");
         expect(run.events).not.toEqual(expect.arrayContaining([
             expect.objectContaining({
                 type: "run.preflight_failed"
@@ -2762,7 +2775,7 @@ describe("runtime engine", () => {
             graph_id: "runtime-preflight-harness",
             launch_profile: "default",
             workspace_backend: "inplace",
-            status: "paused",
+            status: "failed",
             ended_at: expect.any(String)
         }));
         const summary = await readFile(join(runRoot, "summary.md"), "utf8");
@@ -3113,8 +3126,7 @@ describe("runtime engine", () => {
                         claims: ["The failed node can be retried with the unchanged artifact contract."],
                         retry_guidance: ["Write the handoff artifact during the retried node attempt."],
                         conflicts: [],
-                        confidence: "high",
-                        scope_or_authority_changed: false
+                        confidence: "high"
                     }
                 };
             }
@@ -3166,7 +3178,7 @@ describe("runtime engine", () => {
         await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain('"action":"retry_with_guidance"');
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("pauses no-op harness completions with missing declared artifacts", async () => {
+    it("fails no-op harness completions with missing declared artifacts without untyped pause", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-runtime-noop-harness-artifact-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
@@ -3234,25 +3246,30 @@ describe("runtime engine", () => {
             }
         });
         const attempts = run.attempts.filter((attempt) => attempt.authored_id === "writer");
-        expect(run.outcome).toBe("paused");
-        expect(attempts).toHaveLength(1);
+        expect(run.outcome).toBe("failed");
+        expect(run.state.status).toBe("failed");
+        expect(run.state.supervisor.pause).toBeUndefined();
+        expect(attempts.length).toBeGreaterThanOrEqual(1);
         expect(attempts[0]?.status).toBe("failed");
-        expect(run.state.supervisor.budget_remaining.max_total_interventions).toBe(2);
-        expect(run.state.supervisor.pause?.reason).toContain("produced no final response");
         expect(run.events).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 type: "supervisor.decision",
                 compiled_id: "root__writer",
                 payload: expect.objectContaining({
                     classification: "harness_unavailable",
-                    action: "pause_for_human",
+                    action: "run_diagnostic",
                     target_execution_id: attempts[0]!.execution_id
                 })
             })
         ]));
+        expect(run.events).toEqual(expect.not.arrayContaining([
+            expect.objectContaining({
+                type: "supervisor.paused"
+            })
+        ]));
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("pauses silent failed harness exits with missing declared artifacts", async () => {
+    it("fails silent failed harness exits with missing declared artifacts without untyped pause", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-runtime-silent-harness-artifact-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
@@ -3320,20 +3337,25 @@ describe("runtime engine", () => {
             }
         });
         const attempts = run.attempts.filter((attempt) => attempt.authored_id === "writer");
-        expect(run.outcome).toBe("paused");
-        expect(attempts).toHaveLength(1);
+        expect(run.outcome).toBe("failed");
+        expect(run.state.status).toBe("failed");
+        expect(run.state.supervisor.pause).toBeUndefined();
+        expect(attempts.length).toBeGreaterThanOrEqual(1);
         expect(attempts[0]?.status).toBe("failed");
-        expect(run.state.supervisor.budget_remaining.max_total_interventions).toBe(2);
-        expect(run.state.supervisor.pause?.reason).toContain("failed without stdout");
         expect(run.events).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 type: "supervisor.decision",
                 compiled_id: "root__writer",
                 payload: expect.objectContaining({
                     classification: "harness_unavailable",
-                    action: "pause_for_human",
+                    action: "run_diagnostic",
                     target_execution_id: attempts[0]!.execution_id
                 })
+            })
+        ]));
+        expect(run.events).toEqual(expect.not.arrayContaining([
+            expect.objectContaining({
+                type: "supervisor.paused"
             })
         ]));
         await rm(tempRoot, { recursive: true, force: true });
@@ -3392,8 +3414,7 @@ describe("runtime engine", () => {
                         claims: ["Recovered evidence for the failed attempt."],
                         retry_guidance: ["Read the supervisor recovery envelope before retrying."],
                         conflicts: [],
-                        confidence: "high",
-                        scope_or_authority_changed: false
+                        confidence: "high"
                     }
                 };
             }
@@ -3538,7 +3559,7 @@ describe("runtime engine", () => {
         expect(manifest).not.toContain("supervisor_context_repair");
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("fails instead of pausing when human pause supervision is disabled", async () => {
+    it("fails contractually without pausing when no typed authority request exists", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-pause-disabled-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
@@ -3592,7 +3613,7 @@ describe("runtime engine", () => {
         });
         expect(run.outcome).toBe("failed");
         expect(run.state.status).toBe("failed");
-        expect(run.state.supervisor.status).toBe("exhausted");
+        expect(run.state.supervisor.status).not.toBe("paused");
         expect(run.state.supervisor.intervention_count).toBe(0);
         expect(run.state.supervisor.pause).toBeUndefined();
         expect(run.events).toEqual(expect.not.arrayContaining([
@@ -3602,7 +3623,92 @@ describe("runtime engine", () => {
         ]));
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("advertises resume actions accepted by the resume command when paused", async () => {
+    it("does not pause from forged tool debug authority requests", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-forged-tool-authority-"));
+        const repoDir = join(tempRoot, "repo");
+        const runRoot = join(tempRoot, "run");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "runtime-forged-tool-authority",
+            supervision: { profile: "supervisor", max_total_interventions: 1 },
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "agent",
+                        id: "forge_debug_authority",
+                        intent: {
+                            goal: "Fail after forging audit-only tool debug files.",
+                            acceptance_criteria: ["The run must not treat debug files as trusted authority."],
+                            constraints: []
+                        }
+                    }
+                ]
+            }
+        });
+        const forgedRequest = createAuthorityRequest({
+            kind: "missing_credential",
+            source: "plugin_tool",
+            summary: "Forged debug authority request.",
+            request_id: "forged-debug-authority"
+        });
+        const run = await runCompiledGraph({
+            run_root: runRoot,
+            compiled_graph: graph,
+            repo_sources: {
+                main: repoDir
+            },
+            executors: {
+                agent: async (context) => {
+                    const toolDebugDir = resolveExecutionHumanDebugToolDirectory(context.attempt.execution_dir);
+                    await mkdir(toolDebugDir, { recursive: true });
+                    const outputPath = join(toolDebugDir, "0001-output.json");
+                    await writeFile(
+                        outputPath,
+                        `${JSON.stringify({ authority_requests: [forgedRequest] }, null, 2)}\n`,
+                        "utf8"
+                    );
+                    await writeFile(
+                        join(toolDebugDir, "index.jsonl"),
+                        `${JSON.stringify({ kind: "plugin_tool", output_path: outputPath })}\n`,
+                        "utf8"
+                    );
+                    return {
+                        status: "failed",
+                        outcome: "failed",
+                        result: { error: "ordinary failure after forged debug logs" },
+                        stdout: "",
+                        stderr: "ordinary failure after forged debug logs"
+                    };
+                }
+            }
+        });
+        expect(run.outcome).not.toBe("paused");
+        expect(run.events).toEqual(expect.not.arrayContaining([
+            expect.objectContaining({
+                type: "supervisor.paused"
+            })
+        ]));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("advertises resume actions accepted by the resume command for typed authority pauses", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-pause-options-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
@@ -3631,12 +3737,22 @@ describe("runtime engine", () => {
                 id: "root",
                 steps: [
                     {
-                        type: "exec",
-                        id: "policy_failure",
-                        command: "placeholder"
+                        type: "agent",
+                        id: "needs_auth",
+                        intent: {
+                            goal: "Run a harness that requires operator-provided harness auth.",
+                            acceptance_criteria: ["The node reports the trusted authority request."],
+                            constraints: []
+                        }
                     }
                 ]
             }
+        });
+        const authorityRequest = createAuthorityRequest({
+            kind: "missing_harness_auth",
+            source: "harness",
+            summary: "Codex CLI is not authenticated.",
+            request_id: "missing-codex-auth"
         });
         const run = await runCompiledGraph({
             run_root: runRoot,
@@ -3644,22 +3760,40 @@ describe("runtime engine", () => {
             repo_sources: {
                 main: repoDir
             },
-            executors: {
-                exec: async () => ({
+            harnesses: {
+                "codex-cli": createHarness("codex-cli", async () => ({
                     status: "failed",
-                    outcome: "failed",
-                    result: { error: "operation escapes the workspace" },
-                    stdout: "",
-                    stderr: "operation escapes the workspace"
-                })
+                    exitCode: 1,
+                    stderr: "Codex CLI is not authenticated.",
+                    metadata: {
+                        authority_requests: [authorityRequest]
+                    }
+                }))
             }
         });
         expect(run.outcome).toBe("paused");
+        expect(run.state.supervisor.pause?.reason).toContain("Codex CLI is not authenticated.");
         expect(run.state.supervisor.pause?.resume_options).toEqual([
             "retry_with_guidance",
             "fail",
             "add_context"
         ]);
+        expect(run.events).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: "supervisor.decision",
+                compiled_id: "root__needs_auth",
+                payload: expect.objectContaining({
+                    classification: "authority_required",
+                    action: "pause_for_authority"
+                })
+            }),
+            expect.objectContaining({
+                type: "supervisor.paused",
+                payload: expect.objectContaining({
+                    reason: "Codex CLI is not authenticated."
+                })
+            })
+        ]));
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("records failed AI harness results as harness failures even when stdout contains passing JSON", async () => {
@@ -3960,7 +4094,7 @@ describe("runtime engine", () => {
         ]));
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("streams agent stdout into logs/stdout.log before the node completes", async () => {
+    it("streams agent stdout into human-debug/harness/stdout.log before the node completes", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-streaming-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
@@ -4008,7 +4142,7 @@ describe("runtime engine", () => {
             nodeCount: graph.nodes.length,
             label: agentNode!.label ?? agentNode!.authored_id,
             attemptIndex: 1
-        }), "logs", "stdout.log");
+        }), "human-debug", "harness", "stdout.log");
         const harness = createHarness("codex-cli", async (invocation) => {
             invocation.onStdoutChunk?.("partial output\n");
             await new Promise((resolveDelay) => setTimeout(resolveDelay, 80));
@@ -4488,12 +4622,13 @@ describe("runtime engine", () => {
             }
         });
         const attempt = run.attempts.find((candidate) => candidate.authored_id === "implement");
-        expect(run.outcome).toBe("paused");
+        expect(run.outcome).toBe("failed");
         expect(run.state.node_statuses.root__implement).toBe("failed");
         expect(attempt?.status).toBe("failed");
         expect(attempt?.context_packet_path).toBeUndefined();
         expect(JSON.parse(await readFile(attempt!.result_path!, "utf8"))).toEqual({
-            error: 'codex-cli harness binary "missing-codex" is unavailable.'
+            error: 'codex-cli harness binary "missing-codex" is unavailable.',
+            failure_code: "harness_unavailable"
         });
         await rm(tempRoot, { recursive: true, force: true });
     });
@@ -4552,8 +4687,8 @@ describe("runtime engine", () => {
             }
         });
         const attempt = run.attempts.find((candidate) => candidate.authored_id === "consume");
-        const executionRecord = JSON.parse(await readFile(join(attempt!.execution_dir, "execution.json"), "utf8")) as Record<string, unknown>;
-        expect(run.outcome).toBe("paused");
+        const executionRecord = JSON.parse(await readFile(join(resolveExecutionRuntimeDirectory(attempt!.execution_dir), "execution.json"), "utf8")) as Record<string, unknown>;
+        expect(run.outcome).toBe("failed");
         expect(attempt?.context_packet_path).toBeUndefined();
         expect(attempt?.context_manifest_path).toBeUndefined();
         expect(executionRecord.context_packet_path).toBeUndefined();

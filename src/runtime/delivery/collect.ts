@@ -1,7 +1,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { resolveRunArtifactPaths } from "../../artifacts/paths.js";
+import {
+  resolveExecutionHumanDebugToolDirectory,
+  resolveExecutionHumanDebugVerifierDirectory,
+  resolveExecutionRuntimeVerifierPath,
+  resolveRunArtifactPaths
+} from "../../artifacts/paths.js";
 import type { CompiledGraph } from "../../graph/compiled.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { RuntimeEventEnvelope, VerificationRecordedPayload } from "../events.js";
@@ -266,7 +271,7 @@ export async function collectDeliveryEvidence(options: {
   const toolInvocations = (
     await Promise.all(
       options.attempts.map(async (attempt) => {
-        const invocationPath = `${attempt.execution_dir}/tool-invocations.jsonl`;
+        const invocationPath = join(resolveExecutionHumanDebugToolDirectory(attempt.execution_dir), "index.jsonl");
         const records = await readJsonlRecords(invocationPath);
 
         return records.length > 0
@@ -301,8 +306,8 @@ export async function collectDeliveryEvidence(options: {
       summary: verification.summary,
       findings_count: verification.findings.length,
       blockers_count: verification.blockers.length,
-      verify_outcome_json_path: `${attempt.execution_dir}/verify-outcome.json`,
-      verify_outcome_markdown_path: `${attempt.execution_dir}/verify-outcome.md`,
+      verify_outcome_json_path: resolveExecutionRuntimeVerifierPath(attempt.execution_dir),
+      verify_outcome_markdown_path: join(resolveExecutionHumanDebugVerifierDirectory(attempt.execution_dir), "verdict.md"),
       verifier_metadata: verification.verifier_metadata
     }];
   });

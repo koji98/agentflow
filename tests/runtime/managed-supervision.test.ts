@@ -9,6 +9,7 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
+import { resolveExecutionRuntimeCompletionPacketPath } from "../../src/artifacts/paths.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
@@ -48,8 +49,7 @@ function buildHarness(): HarnessAdapter {
                     claims: ["Managed completion failed because the required criterion still fails."],
                     retry_guidance: ["Change the managed work cycle before retrying the gate."],
                     conflicts: [],
-                    confidence: "high",
-                    scope_or_authority_changed: false
+                    confidence: "high"
                 }));
             }
             if (invocation.promptKind === "outcome_verification") {
@@ -268,7 +268,7 @@ describe("managed supervision monitoring", () => {
             attempt.metadata?.completion &&
             attempt.metadata.completion.completion_status === "incomplete");
         expect(gateAttempt).toBeDefined();
-        const packet = JSON.parse(await readFile(join(gateAttempt!.execution_dir, "completion-packet.json"), "utf8")) as {
+        const packet = JSON.parse(await readFile(resolveExecutionRuntimeCompletionPacketPath(gateAttempt!.execution_dir), "utf8")) as {
             managed: {
                 blocking_criteria?: string[];
             };

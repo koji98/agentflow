@@ -6,6 +6,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+    resolveExecutionAgentContextPath,
+    resolveExecutionHumanDebugHarnessDirectory,
+    resolveExecutionRuntimeContextPath
+} from "../../src/artifacts/paths.js";
 import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
 import { executeCli as executeCliRaw, renderCliStdout } from "../../src/cli/index.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
@@ -895,10 +900,10 @@ process.exit(0);
         const attempts = await readRunExecutionAttempts(payload.run_root);
         const writeAttempt = attempts.find((attempt) => attempt.authored_id === "write_marker");
         expect(writeAttempt?.execution_dir).toMatch(/\/nodes\/001-write-marker-[0-9a-f]{12}\/executions\/001-exec-[0-9a-f]{16}$/);
-        expect(writeAttempt?.context_packet_path).toBe(join(writeAttempt!.execution_dir, "context", "packet.json"));
-        expect(writeAttempt?.context_manifest_path).toBe(join(writeAttempt!.execution_dir, "context", "manifest.md"));
-        await expect(access(join(writeAttempt!.execution_dir, "logs", "stdout.log"), constants.F_OK)).resolves.toBeUndefined();
-        await expect(access(join(writeAttempt!.execution_dir, "logs", "stderr.log"), constants.F_OK)).resolves.toBeUndefined();
+        expect(writeAttempt?.context_packet_path).toBe(resolveExecutionRuntimeContextPath(writeAttempt!.execution_dir));
+        expect(writeAttempt?.context_manifest_path).toBe(resolveExecutionAgentContextPath(writeAttempt!.execution_dir));
+        await expect(access(join(resolveExecutionHumanDebugHarnessDirectory(writeAttempt!.execution_dir), "stdout.log"), constants.F_OK)).resolves.toBeUndefined();
+        await expect(access(join(resolveExecutionHumanDebugHarnessDirectory(writeAttempt!.execution_dir), "stderr.log"), constants.F_OK)).resolves.toBeUndefined();
         expect(await readFile(join(repoDir, "marker.txt"), "utf8")).toBe("ok\n");
         expect(progressOutput).toContain('agentflow: compiled graph "cli-run-graph" with 2 executable nodes');
         expect(progressOutput).toContain("agentflow: started run · workspace=inplace");

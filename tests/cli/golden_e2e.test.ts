@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readRunExecutionAttempts, readSupervisorTimeline } from "../../src/artifacts/reader.js";
+import { resolveExecutionHumanDebugToolDirectory } from "../../src/artifacts/paths.js";
 import { executeCli } from "../../src/cli/index.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
@@ -217,15 +218,15 @@ process.stdin.on("end", () => {
     return;
   }
 
-  if (prompt.includes("Pause Human Golden approved")) {
-    const milestone = beginNode("Complete approved retry", "Complete after human review.");
-    logValidation(milestone, "human resume", "Human-approved retry completed");
-    completeNode(milestone, "Policy-sensitive step completed after human review.");
-    finish("pause retry approved\\n");
+  if (prompt.includes("Contract Gap Golden approved")) {
+    const milestone = beginNode("Complete reviewed retry", "Complete after graph review.");
+    logValidation(milestone, "graph review", "Graph-reviewed retry completed");
+    completeNode(milestone, "Policy-sensitive step completed after graph review.");
+    finish("contract retry approved\\n");
     return;
   }
 
-  if (prompt.includes("Pause Human Golden")) {
+  if (prompt.includes("Contract Gap Golden")) {
     process.stderr.write("operation escapes the workspace\\n");
     process.exit(1);
   }
@@ -459,7 +460,7 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         const result = await executeCli(["run", "--graph", graphPath], tempRoot);
         const payload = JSON.parse(result.stdout);
         const attempts = await readRunExecutionAttempts(payload.run_root);
-        const toolLedger = await readFile(join(attempts[0]!.execution_dir, "tool-invocations.jsonl"), "utf8");
+        const toolLedger = await readFile(join(resolveExecutionHumanDebugToolDirectory(attempts[0]!.execution_dir), "index.jsonl"), "utf8");
         const milestoneAudit = await readMilestoneAudit(payload.run_root);
         const { inspectPayload } = await assertDeliveryAndInspect(payload.run_root);
         expect(result.exitCode).toBe(0);
@@ -553,7 +554,7 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
         expect(inspectPayload.supervisor_timeline_count).toBeGreaterThan(0);
         expect(inspectPayload.intervention_count).toBe(1);
     });
-    it("pauses for human input and resumes after the graph changes", async () => {
+    it("fails contractually and resumes after the graph changes", async () => {
         const repoDir = join(tempRoot, "repo");
         const graphPath = join(tempRoot, "pause.graph.json");
         await mkdir(repoDir, { recursive: true });
@@ -566,36 +567,30 @@ process.stdout.write(JSON.stringify({ subject, ok: true }) + "\\n");
                 runtime: { repo: "main" },
                 intent: {
                     goal,
-                    acceptance_criteria: ["The policy-sensitive step either pauses for authority or completes after human review."],
+                    acceptance_criteria: ["The policy-sensitive step either fails contractually or completes after graph review."],
                     constraints: []
                 }
             }
         ], {
             supervision: { profile: "supervisor", max_total_interventions: 1 }
         });
-        await writeGraph(graphPath, graph("Pause Human Golden: trigger a policy pause."));
-        const paused = await executeCli(["run", "--graph", graphPath], tempRoot);
-        const pausedPayload = JSON.parse(paused.stdout);
-        await writeGraph(graphPath, graph("Pause Human Golden approved: complete after human review."));
+        await writeGraph(graphPath, graph("Contract Gap Golden: trigger a policy failure."));
+        const failed = await executeCli(["run", "--graph", graphPath], tempRoot);
+        const failedPayload = JSON.parse(failed.stdout);
+        await writeGraph(graphPath, graph("Contract Gap Golden approved: complete after graph review."));
         const resumed = await executeCli([
             "resume",
             "--run-root",
-            pausedPayload.run_root,
-            "--human-action",
-            "retry_with_guidance",
-            "--human-note",
-            "Retry after reviewing the policy-sensitive step."
+            failedPayload.run_root
         ], tempRoot);
         const resumedPayload = JSON.parse(resumed.stdout);
-        const humanInput = await readFile(join(pausedPayload.run_root, "runtime", "human-resume-input.jsonl"), "utf8");
-        const { inspectPayload } = await assertDeliveryAndInspect(pausedPayload.run_root);
-        expect(paused.exitCode).toBe(1);
-        expect(pausedPayload.status).toBe("paused");
+        const { inspectPayload } = await assertDeliveryAndInspect(failedPayload.run_root);
+        expect(failed.exitCode).toBe(1);
+        expect(failedPayload.status).toBe("failed");
         expect(resumed.exitCode).toBe(0);
         expect(resumedPayload.status).toBe("passed");
-        expect(resumedPayload.resumed_from_status).toBe("paused");
+        expect(resumedPayload.resumed_from_status).toBe("failed");
         expect(resumedPayload.restarted_node_count).toBe(1);
-        expect(humanInput).toContain("retry_with_guidance");
         expect(inspectPayload.run_status).toBe("passed");
     });
 });

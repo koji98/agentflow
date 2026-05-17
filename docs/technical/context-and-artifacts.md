@@ -49,13 +49,13 @@ Compile-time validation checks that artifact refs point to known executable node
 
 ## Pointer Resolution
 
-At execution time, `resolveExecutionContext` writes three files under the attempt directory:
+At execution time, `resolveExecutionContext` writes audience-specific files under the attempt directory:
 
-- `context/packet.json`: structured list of context pointers, omitted items, sources, descriptions, digests, and byte sizes.
-- `context/manifest.md`: human-readable pointer index the harness prompt tells the agent to read first.
-- `context/provenance.json`: source provenance and digest metadata used by resume and debugging.
+- `agent/context.md`: prompt-facing pointer index. This is what normal agents see.
+- `runtime/context.json`: compact machine state for resume, completion, verification, and recovery.
+- `human-debug/context-provenance.json`: source provenance and digest metadata for audit/debug review.
 
-Agentflow does not copy authored context text into attempt-local source clones and does not truncate source context. The prompt includes the manifest table and points to `packet.json` and `provenance.json`. Each packet item points back to the source workspace file, artifact file, plugin file, or runtime-generated file.
+Agentflow does not copy authored context text into attempt-local source clones and does not truncate source context. The prompt includes the pointer table and omits digests, byte sizes, packet paths, and provenance paths. Each runtime context item points back to the source workspace file, artifact file, plugin file, or runtime-generated file.
 
 ```mermaid
 flowchart TD
@@ -72,7 +72,7 @@ flowchart TD
   file --> pointer
   plugin --> pointer
   sort --> pointer
-  pointer --> write["Write packet, manifest, provenance"]
+  pointer --> write["Write agent context, runtime context, debug provenance"]
 ```
 
 ## Validate Context Analysis
@@ -100,11 +100,11 @@ Inside repeat bodies, Agentflow can also add repeat history pointers for the cur
 
 When a retry uses a supervisor runtime overlay, the overlay context is resolved before authored context:
 
-- `supervisor_recovery_envelope` summarizes the failure, case file, recovery plan, must-do guidance, and unchanged contract.
+- `supervisor_recovery_envelope` points to `agent/supervisor-recovery.md`, which summarizes the failure symptom, selected recovery action, required material delta, must-do guidance, evidence pointers, validation focus, and unchanged contract.
 - `supervisor_context_repair` appears when context pointer resolution failed. It provides a compact context index, omitted-entry provenance, largest-file warnings, default ignored roots, and live paths the worker can inspect manually.
 - Workspace and environment repairs are recorded in `runtime-overlay.json` and `material-delta.json`. Workspace repair also writes `workspace-repair-patch.json` and `workspace-repair-result.json` so reviewers can see which failed-attempt edits were restored before retry.
 
-The overlay is not a graph contract change. It is an auditable runtime repair attached to the failed attempt's `interventions/<intervention-id>/` directory.
+The overlay is not a graph contract change. It is an auditable runtime repair attached to machine state under `runtime/supervisor/` and raw debug evidence under `human-debug/interventions/`.
 
 ## Artifact Production
 
@@ -116,16 +116,16 @@ Nodes declare durable handoffs under `artifacts`. An artifact definition says wh
 Agent nodes also produce reserved automatic artifacts regardless of whether declared artifact projection succeeds:
 
 - `agent_response`: final harness response.
-- `stdout`: captured stdout log.
-- `stderr`: captured stderr log.
+- `stdout`: captured stdout log for human audit/debug.
+- `stderr`: captured stderr log for human audit/debug.
 
-Check nodes can produce `verification_json`; local exec/check nodes capture `stdout` and `stderr`. Passing agent attempts that project declared artifacts also receive `verify-outcome.json` and `verify-outcome.md` from outcome verification. Those verifier files are audit artifacts, not declared handoffs.
+Check nodes can produce `verification_json`; local exec/check nodes capture `stdout` and `stderr`. Passing agent attempts that project declared artifacts also receive `runtime/verifier.json` and `human-debug/verifier/verdict.md` from outcome verification. Raw logs and verifier internals are audit artifacts, not declared handoffs or default agent-facing context.
 
 ## Missing Artifacts
 
 A missing declared artifact is a runtime failure, not a graph validation failure. Validation proves the contract is well formed; execution proves the worker honored it.
 
-When an agent attempt reports success but required declared artifacts are missing, the supervisor may run `repair_artifact` if policy and budget allow. The repair worker receives the same node task, graph intent, context contract, artifact contract, sandbox boundary, and available evidence. The repair is accepted only if the missing files now exist at the declared paths.
+When an agent attempt reports success but required declared artifacts are missing, the supervisor may run `repair_artifact` if policy and budget allow. The runtime writes an agent-facing repair brief under `agent/` with missing artifacts, concise evidence pointers, and retry instructions. Raw harness logs stay under `human-debug/` for audit and diagnostic helpers. The repair is accepted only if the missing files now exist at the declared paths.
 
 When an agent harness fails, the runtime preserves the harness failure as the primary diagnostic and does not convert the attempt into a missing-artifact failure. Files written before the failure are not registered as declared artifacts for downstream refs. Later repair or retry prompts may still list those existing paths as prior-attempt evidence so the next worker can inspect useful partial work without treating it as a completed handoff.
 

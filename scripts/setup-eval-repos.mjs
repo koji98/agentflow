@@ -1037,7 +1037,7 @@ const templates = {
             constraints: [
             "Do not edit noise files under `notes/**`.",
             "Do not add dependencies.",
-            "Use the context packet as an index and open live workspace paths only as needed."
+            "Use the agent context brief as an index and open live workspace paths only as needed."
           ]
           },
           support: { context: [

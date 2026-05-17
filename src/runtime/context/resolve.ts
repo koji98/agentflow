@@ -2,6 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
+import {
+  resolveExecutionAgentContextPath,
+  resolveExecutionAgentRecoveryBriefPath,
+  resolveExecutionHumanDebugDirectory,
+  resolveExecutionRuntimeContextPath
+} from "../../artifacts/paths.js";
 import type { ContextItem } from "../../graph/authored.js";
 import type { CompiledExecutableNode, CompiledGraph } from "../../graph/compiled.js";
 import type { AttemptRegistry, AttemptSelector, RuntimeNodeAttempt } from "../attempts.js";
@@ -27,6 +33,7 @@ import {
   computeHarnessInstructionProvenance,
   type ContextDiscoveryCache
 } from "./provenance.js";
+import { RuntimeFailureError } from "../failure.js";
 import {
   globPatternToRegExp,
   normalizeRelativePath,
@@ -159,6 +166,23 @@ function explicitIgnoredRootOptIn(pattern: string): string | undefined {
     : undefined;
 }
 
+function contextFailure(
+  failureCode: "context_path_escape" | "graph_contract_gap" | "unresolved_context" | "context_contract_failure",
+  message: string,
+  details?: Record<string, unknown>
+): RuntimeFailureError {
+  return new RuntimeFailureError(failureCode, message, details);
+}
+
+function resolveContextSubpathWithinRoot(root: string, subpath: string, label: string): string {
+  try {
+    return resolveSubpathWithinRoot(root, subpath, label);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw contextFailure("context_path_escape", message, { label, subpath });
+  }
+}
+
 function appendPointerItem(
   accumulator: MaterializationAccumulator,
   item: ContextPacketMaterializedItem
@@ -225,8 +249,6 @@ function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope):
     `- Prior execution: \`${envelope.prior_execution_id}\``,
     `- Classification: \`${envelope.classification}\``,
     `- Repeated matching symptom count: \`${envelope.repeated_fingerprint_count}\``,
-    `- Case file: \`${envelope.case_file_path}\``,
-    `- Recovery plan: \`${envelope.recovery_plan_path}\``,
     "",
     "## Recovery Summary",
     directive.summary,
@@ -276,13 +298,7 @@ async function materializeSupervisorRecoveryEnvelopeContext(
   const description = "Supervisor recovery envelope, merged evidence, and retry directive for this retry attempt.";
 
   const pointer = await writeRuntimeContextFile(
-    join(
-      options.execution_dir,
-      "context",
-      "runtime",
-      source.name,
-      "recovery-envelope.md"
-    ),
+    resolveExecutionAgentRecoveryBriefPath(options.execution_dir),
     renderSupervisorRecoveryEnvelope(envelope)
   );
 
@@ -464,11 +480,14 @@ async function materializeWorkspaceFileContext(
   const repoRoot = options.repo_workspaces[repo_alias];
 
   if (!repoRoot) {
-    throw new Error(`Unknown repo alias "${repo_alias}" while resolving ${descriptor}.`);
+    throw contextFailure("graph_contract_gap", `Unknown repo alias "${repo_alias}" while resolving ${descriptor}.`, {
+      repo_alias,
+      descriptor
+    });
   }
 
   const normalizedPath = normalizeRelativePath(repo_relative_path);
-  const sourcePath = resolveSubpathWithinRoot(
+  const sourcePath = resolveContextSubpathWithinRoot(
     repoRoot,
     repo_relative_path,
     `Context path "${item.path}"`
@@ -534,7 +553,10 @@ async function materializeWorkspaceGlobContext(
   const repoRoot = options.repo_workspaces[repo_alias];
 
   if (!repoRoot) {
-    throw new Error(`Unknown repo alias "${repo_alias}" while resolving ${descriptor}.`);
+    throw contextFailure("graph_contract_gap", `Unknown repo alias "${repo_alias}" while resolving ${descriptor}.`, {
+      repo_alias,
+      descriptor
+    });
   }
 
   const normalizedPattern = normalizeRelativePath(repo_relative_path);
@@ -560,7 +582,7 @@ async function materializeWorkspaceGlobContext(
   const files: WorkspaceGlobContextProvenance["files"] = [];
 
   for (const [matchIndex, relativePath] of matchedPaths.entries()) {
-    const sourcePath = resolveSubpathWithinRoot(
+    const sourcePath = resolveContextSubpathWithinRoot(
       repoRoot,
       relativePath,
       `Glob match "${relativePath}" from "${item.path}"`
@@ -729,13 +751,19 @@ async function materializeArtifactContext(
       return;
     }
 
-    throw new Error(`No execution matched required context reference "${reference.node}".`);
+    throw contextFailure("unresolved_context", `No execution matched required context reference "${reference.node}".`, {
+      node: reference.node,
+      artifact: reference.artifact
+    });
   }
 
   const selected = attempts[0];
 
   if (!selected) {
-    throw new Error(`No execution matched required context reference "${reference.node}".`);
+    throw contextFailure("unresolved_context", `No execution matched required context reference "${reference.node}".`, {
+      node: reference.node,
+      artifact: reference.artifact
+    });
   }
 
   const sourcePath = selected.artifacts[reference.artifact];
@@ -752,7 +780,10 @@ async function materializeArtifactContext(
       return;
     }
 
-    throw new Error(`Required context artifact is missing for "${reference.node}".`);
+    throw contextFailure("unresolved_context", `Required context artifact is missing for "${reference.node}".`, {
+      node: reference.node,
+      artifact: reference.artifact
+    });
   }
 
   const contents = await readFile(sourcePath);
@@ -814,8 +845,8 @@ function renderContextManifest(packet: ContextPacket): string {
 
   if (packet.materials.length > 0) {
     lines.push("## Pointers", "");
-    lines.push("| Name | Kind | Pointer | What / Why | Digest | Size |");
-    lines.push("| --- | --- | --- | --- | --- | --- |");
+    lines.push("| Name | Kind | Pointer | What / Why |");
+    lines.push("| --- | --- | --- | --- |");
 
     for (const item of packet.materials) {
       const bindingSuffix =
@@ -823,7 +854,7 @@ function renderContextManifest(packet: ContextPacket): string {
           ? `; source ${item.binding.requested_path ?? "inline text"}`
           : "";
       const from = "ref" in item.source ? "artifact" : item.source.from;
-      lines.push(`| \`${item.key}\` | \`${from}\` | \`${formatManifestPointerPath(item.pointer_path)}\`${bindingSuffix} | ${item.description ?? ""} | ${item.digest ?? ""} | ${item.size_bytes ?? ""} |`);
+      lines.push(`| \`${item.key}\` | \`${from}\` | \`${formatManifestPointerPath(item.pointer_path)}\`${bindingSuffix} | ${item.description ?? ""} |`);
     }
 
     lines.push("");
@@ -831,7 +862,7 @@ function renderContextManifest(packet: ContextPacket): string {
 
   if (packet.omitted.length > 0) {
     lines.push("## Omitted", "");
-    lines.push("Omitted entries may indicate optional missing context or supervisor-provided replacement context. Inspect provenance or report uncertainty when it matters.");
+    lines.push("Omitted entries may indicate optional missing context or supervisor-provided replacement context. Use available pointers and report uncertainty when it matters.");
     lines.push("");
 
     for (const item of packet.omitted) {
@@ -926,10 +957,12 @@ export async function resolveExecutionContext(
     }
   };
 
-  const packet_path = join(options.execution_dir, "context", "packet.json");
-  const manifest_path = join(options.execution_dir, "context", "manifest.md");
-  const provenance_path = join(options.execution_dir, "context", "provenance.json");
+  const packet_path = resolveExecutionRuntimeContextPath(options.execution_dir);
+  const manifest_path = resolveExecutionAgentContextPath(options.execution_dir);
+  const provenance_path = join(resolveExecutionHumanDebugDirectory(options.execution_dir), "context-provenance.json");
   await mkdir(dirname(packet_path), { recursive: true });
+  await mkdir(dirname(manifest_path), { recursive: true });
+  await mkdir(dirname(provenance_path), { recursive: true });
   await writeFile(packet_path, `${JSON.stringify(packet, null, 2)}\n`);
   await writeFile(manifest_path, renderContextManifest(packet));
   await writeFile(provenance_path, `${JSON.stringify(provenance, null, 2)}\n`);

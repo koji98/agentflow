@@ -9,9 +9,9 @@ import type {
 import {
   artifactContext,
   body,
-  defaultManagedPublicArtifacts,
   managedId,
   mergeSupportContext,
+  outputDirArtifact,
   renderPrompt,
   section,
   sharedAgentBase,
@@ -56,15 +56,13 @@ function formatArtifactContract(artifacts: Record<string, ArtifactDefinition>): 
 interface ResearchMaterial {
   nodeId: string;
   reportArtifact: string;
-  packetArtifact: string;
   contextPrefix: string;
 }
 
 function materialContexts(materials: ResearchMaterial[]): ContextItem[] {
-  return materials.flatMap((material) => [
-    artifactContext(`${material.contextPrefix}_report`, material.nodeId, material.reportArtifact),
-    artifactContext(`${material.contextPrefix}_packet`, material.nodeId, material.packetArtifact)
-  ]);
+  return materials.map((material) =>
+    artifactContext(`${material.contextPrefix}_report`, material.nodeId, material.reportArtifact)
+  );
 }
 
 function balancedGroups<T>(items: T[], maxGroupSize = 3): T[][] {
@@ -127,12 +125,12 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
       "Do not change graph intent, node intent, repo authority, sandbox, or declared artifacts."
     ]),
     section("Output Contract", [
-      "Write `angle-report.md` and `packet.json` to the output directory.",
-      "These are private research artifacts for synthesis, not the final public handoff.",
-      `The assigned angle id is ${angle.id}. Use that value in the report metadata and set the top-level packet angle field to the same value.`,
+      "Write `angle-report.md` to the output directory.",
+      "This is a private research artifact for synthesis, not the final public handoff.",
+      `The assigned angle id is ${angle.id}. Use that value in the report heading or metadata.`,
       "The report should be readable by a human researcher and focused on the assigned angle.",
-      "The packet must be JSON with `angle`, `findings`, `evidence`, `sources`, `conflicts`, `uncertainty`, and `confidence` fields.",
-      "Before finishing, re-open both artifacts and verify the report heading/metadata and packet `angle` field match the assigned angle id exactly."
+      "Include findings, evidence, sources, conflicts, uncertainty, and confidence in Markdown.",
+      "Before finishing, re-open the report and verify the heading or metadata matches the assigned angle id exactly."
     ]),
     section("Quality Bar", [
       "Do not produce a shallow summary. Produce the most useful evidence-backed answer for this angle.",
@@ -149,7 +147,7 @@ function buildSynthesisPrompt(
   group: number
 ): string {
   return renderPrompt([
-    body(`You are a research synthesis worker combining ${inputCount} research packets into one higher-signal research packet.`),
+    body(`You are a research synthesis worker combining ${inputCount} research reports into one higher-signal synthesis report.`),
     section("Final Managed Workflow Contract", [
       "This is a private synthesis step inside a larger managed research workflow. The final public result will be published later.",
       "Use the final contract to preserve relevant evidence, but do not format this private synthesis as the final public artifact unless the private output contract below says so.",
@@ -162,12 +160,12 @@ function buildSynthesisPrompt(
       "Collapse redundant claims while keeping the strongest provenance.",
       "Keep evidence attached to claims; do not detach conclusions from sources.",
       "Surface conflicts, weak evidence, missing coverage, and uncertainty.",
-      "Do not discard a unique major finding just because it appears in only one packet."
+      "Do not discard a unique major finding just because it appears in only one report."
     ]),
     section("Output Contract", [
-      `Write \`synthesis-${zeroPad(layer)}-${zeroPad(group)}.md\` and \`synthesis-${zeroPad(layer)}-${zeroPad(group)}.json\` to the output directory.`,
-      "These are private synthesis artifacts for the final publisher, not the final public handoff.",
-      "The JSON packet must include `findings`, `evidence`, `sources`, `conflicts`, `uncertainty`, `confidence`, and `collapsed_duplicates`."
+      `Write \`synthesis-${zeroPad(layer)}-${zeroPad(group)}.md\` to the output directory.`,
+      "This is a private synthesis artifact for the final publisher, not the final public handoff.",
+      "Include findings, evidence, sources, conflicts, uncertainty, confidence, and collapsed duplicates in Markdown."
     ])
   ]);
 }
@@ -179,7 +177,7 @@ function buildFinalPrompt(
 ): string {
   const exposedAngleArtifacts = config.research.angles.filter((angle) => angle.as_artifact);
   return renderPrompt([
-    body(`You are the final research publisher for a managed deep research result from ${inputCount} research packet${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
+    body(`You are the final research publisher for a managed deep research result from ${inputCount} research report${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
     section("Managed Workflow Contract", [
       "This final publisher owns the managed workflow's public artifact contract. Internal helper reports are only evidence.",
       `Goal: ${config.intent.goal}`,
@@ -188,7 +186,7 @@ function buildFinalPrompt(
     ]),
     section("Research Angles", config.research.angles.map((angle) => `- ${formatAngleLabel(angle)}`)),
     section("Current Context", [
-      "Use the research reports and packets in context as authority.",
+      "Use the research reports in context as authority.",
       "Resolve disagreements explicitly. Preserve uncertainty and cite the evidence behind important claims.",
       "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
     ]),
@@ -201,8 +199,7 @@ function buildFinalPrompt(
       : []),
     section("Declared Public Artifacts", [
       "Publish the declared public artifacts.",
-      ...formatArtifactContract(publicArtifacts),
-      "The `packet` artifact must include answer, findings, evidence, sources, uncertainties, confidence, recommended next actions, and an angle index with each angle id, exposed raw artifact when selected, source refs, confidence, conflicts, and private evidence paths."
+      ...formatArtifactContract(publicArtifacts)
     ]),
     section("Quality Bar", [
       "The final package should be useful for a downstream design, implementation, review, or decision node without making the reader inspect private internal artifacts.",
@@ -219,11 +216,6 @@ function buildAngleArtifacts(index: number): Record<string, ArtifactDefinition> 
       from: "output_dir",
       path: "angle-report.md",
       description: `Markdown findings for research angle ${suffix}.`
-    },
-    [`angle_packet_${suffix}`]: {
-      from: "output_dir",
-      path: "packet.json",
-      description: `Structured findings, evidence, sources, conflicts, and uncertainty for research angle ${suffix}.`
     }
   };
 }
@@ -236,17 +228,12 @@ function buildSynthesisArtifacts(layer: number, group: number): Record<string, A
       from: "output_dir",
       path: `synthesis-${zeroPad(layer)}-${zeroPad(group)}.md`,
       description: `Markdown synthesis report for research layer ${zeroPad(layer)} group ${zeroPad(group)}.`
-    },
-    [`synthesis_packet_${suffix}`]: {
-      from: "output_dir",
-      path: `synthesis-${zeroPad(layer)}-${zeroPad(group)}.json`,
-      description: `Structured synthesis packet for research layer ${zeroPad(layer)} group ${zeroPad(group)}.`
     }
   };
 }
 
 function buildPublicArtifacts(angles: PatternDeepResearchAngle[]): Record<string, ArtifactDefinition> {
-  const artifacts = defaultManagedPublicArtifacts();
+  const artifacts = outputDirArtifact("summary", "summary.md", "Human-readable final summary for the managed deep research result.");
 
   for (const angle of angles) {
     if (!angle.as_artifact) {
@@ -302,7 +289,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         goal: buildAnglePrompt(config, angle, index),
         acceptance_criteria: [
           "The angle report answers the assigned angle with sourced evidence.",
-          "The packet preserves enough provenance, uncertainty, and confidence for final synthesis."
+          "The angle report preserves enough provenance, uncertainty, and confidence for final synthesis."
         ],
         constraints: config.intent.constraints
       }
@@ -315,7 +302,6 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
     return {
       nodeId: workflowNodeId(config.id, `angle_${suffix}`),
       reportArtifact: `angle_report_${suffix}`,
-      packetArtifact: `angle_packet_${suffix}`,
       contextPrefix: `angle_${suffix}`
     };
   });
@@ -346,7 +332,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         intent: {
           goal: buildSynthesisPrompt(config, groupMaterials.length, layer, group),
           acceptance_criteria: [
-            "The synthesis preserves all major findings from its input research packets.",
+            "The synthesis preserves all major findings from its input research reports.",
             "The synthesis collapses redundant claims without dropping provenance, uncertainty, or conflicts."
           ],
           constraints: config.intent.constraints
@@ -368,7 +354,6 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       return {
         nodeId: node.id,
         reportArtifact: `synthesis_report_${suffix}`,
-        packetArtifact: `synthesis_packet_${suffix}`,
         contextPrefix: `synthesis_${suffix}`
       };
     });

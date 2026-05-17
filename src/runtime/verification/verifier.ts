@@ -4,6 +4,10 @@ import { dirname, join } from "node:path";
 import type { CompiledAgentNode, CompiledGraph } from "../../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../../graph/profiles.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
+import {
+  resolveExecutionHumanDebugVerifierDirectory,
+  resolveExecutionRuntimeVerifierPath
+} from "../../artifacts/paths.js";
 import type { AgentInvocation, HarnessAdapter } from "../harness/types.js";
 import type { CompletionPacket } from "../completion/index.js";
 import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
@@ -352,9 +356,8 @@ async function persistResult(options: {
   result: OutcomeVerificationResult;
   node: CompiledAgentNode;
 }): Promise<{ jsonPath: string; markdownPath: string }> {
-  const baseDir = options.attempt.execution_dir;
-  const jsonPath = join(baseDir, "verify-outcome.json");
-  const markdownPath = join(baseDir, "verify-outcome.md");
+  const jsonPath = resolveExecutionRuntimeVerifierPath(options.attempt.execution_dir);
+  const markdownPath = join(resolveExecutionHumanDebugVerifierDirectory(options.attempt.execution_dir), "verdict.md");
   await mkdir(dirname(jsonPath), { recursive: true });
   await writeFile(jsonPath, `${JSON.stringify(options.result, null, 2)}\n`, "utf8");
   await writeFile(markdownPath, `${renderResultMarkdown(options.result, options.node)}\n`, "utf8");
@@ -362,11 +365,11 @@ async function persistResult(options: {
 }
 
 function buildPromptPath(attempt: RuntimeNodeAttempt): string {
-  return join(attempt.execution_dir, "verify-outcome.prompt.md");
+  return join(resolveExecutionHumanDebugVerifierDirectory(attempt.execution_dir), "prompt.md");
 }
 
 function buildResponsePath(attempt: RuntimeNodeAttempt): string {
-  return join(attempt.execution_dir, "verify-outcome.raw-response.md");
+  return join(resolveExecutionHumanDebugVerifierDirectory(attempt.execution_dir), "raw-response.md");
 }
 
 function buildVerifierExecutionId(attempt: RuntimeNodeAttempt): string {
@@ -374,7 +377,7 @@ function buildVerifierExecutionId(attempt: RuntimeNodeAttempt): string {
 }
 
 function buildVerifierOutputDir(attempt: RuntimeNodeAttempt): string {
-  return join(attempt.execution_dir, "verifier-session");
+  return join(resolveExecutionHumanDebugVerifierDirectory(attempt.execution_dir), "session");
 }
 
 function buildVerifierInvocation(options: {
@@ -501,6 +504,11 @@ function buildPromptCompletionPacket(packet: CompletionPacket): OutcomeVerificat
   return {
     completion_status: packet.completion_status,
     ready_for_verification: packet.ready_for_verification,
+    authority_requests: packet.authority_requests.map((request) => ({
+      kind: request.kind,
+      source: request.source,
+      summary: request.summary
+    })),
     blocking_reasons: packet.blocking_reasons,
     missing_artifacts: packet.missing_artifacts,
     declared_artifacts: packet.declared_artifacts.map((artifact) => ({

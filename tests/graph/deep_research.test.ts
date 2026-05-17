@@ -45,7 +45,7 @@ function buildDocument(stepOverrides = {}) {
                         goal: "Produce a grounded recommendation for Agentflow managed pattern design.",
                         acceptance_criteria: [
                             "The research summary answers all authored angles.",
-                            "The packet preserves evidence, uncertainty, confidence, and next actions."
+                            "The summary preserves evidence, uncertainty, confidence, and next actions."
                         ],
                         constraints: ["Do not change the graph contract."]
                     },
@@ -114,17 +114,16 @@ describe("deep research managed pattern", () => {
             }));
         }
         expect(fanout.steps[0].intent.goal).toContain("The assigned angle id is angle_01.");
-        expect(fanout.steps[0].intent.goal).toContain("verify the report heading/metadata and packet `angle` field match");
+        expect(fanout.steps[0].intent.goal).toContain("verify the heading or metadata matches");
         expect(JSON.stringify(fanout.steps[0])).not.toContain("expert");
         expect(finalNode).toEqual(expect.objectContaining({
             id: "market_scan",
             type: "agent",
             artifacts: expect.objectContaining({
-                summary: expect.objectContaining({ path: "summary.md" }),
-                packet: expect.objectContaining({ path: "packet.json" })
+                summary: expect.objectContaining({ path: "summary.md" })
             })
         }));
-        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["packet", "summary"]);
+        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["summary"]);
         expect(JSON.stringify(finalNode)).toContain("final research publisher");
         expect(JSON.stringify(finalNode)).not.toContain("expert");
     });
@@ -169,9 +168,9 @@ describe("deep research managed pattern", () => {
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("research synthesis worker");
         expect(JSON.stringify(synthesisLayer.steps[0])).not.toContain("expert");
         expect(synthesisLayer.steps.map((step) => ("support" in step ? step.support?.context?.length ?? 0 : 0))).toEqual([
-            4,
-            4,
-            6
+            2,
+            2,
+            3
         ]);
     });
     it("keeps deep research collapsed by default and exposes selected raw angle reports", () => {
@@ -205,7 +204,6 @@ describe("deep research managed pattern", () => {
             type: "agent",
             artifacts: expect.objectContaining({
                 summary: expect.objectContaining({ path: "summary.md" }),
-                packet: expect.objectContaining({ path: "packet.json" }),
                 architecture: expect.objectContaining({
                     path: "angles/architecture.md",
                     description: 'Raw Markdown report for deep research angle "architecture".'
@@ -221,7 +219,7 @@ describe("deep research managed pattern", () => {
         if (!finalNode || finalNode.type !== "agent") {
             throw new Error("Expected final managed node to be an agent.");
         }
-        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["architecture", "packet", "summary"]);
+        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["architecture", "summary"]);
         expect(JSON.stringify(finalNode)).toContain("risk");
     });
     it("compiles pattern_deep_research so downstream nodes depend on the final public artifacts", () => {
@@ -249,7 +247,7 @@ describe("deep research managed pattern", () => {
                         intent: {
                             goal: "Summarize the research recommendation.",
                             acceptance_criteria: [
-                                "The handoff uses the final managed summary and packet artifacts.",
+                                "The handoff uses the final managed summary and exposed raw angle artifacts.",
                                 "The handoff preserves the recommendation and key uncertainty."
                             ],
                             constraints: []
@@ -267,13 +265,6 @@ describe("deep research managed pattern", () => {
                                     kind: "artifact",
                                     ref: "market_scan.summary",
                                     name: "research_summary",
-                                    what: "Pointer evidence used by the node under test.",
-                                    why: "This context is required by the test scenario."
-                                },
-                                {
-                                    kind: "artifact",
-                                    ref: "market_scan.packet",
-                                    name: "research_packet",
                                     what: "Pointer evidence used by the node under test.",
                                     why: "This context is required by the test scenario."
                                 },

@@ -2,7 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import type { ArtifactDefinition } from "../graph/authored.js";
-import { resolveInterventionDirectory } from "../artifacts/paths.js";
+import {
+  resolveExecutionRuntimeSupervisorDirectory,
+  resolveInterventionDirectory
+} from "../artifacts/paths.js";
 import type { CompiledExecutableNode, CompiledGraph } from "../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
@@ -21,7 +24,6 @@ import type { FailureClassification } from "./classifier.js";
 import {
   buildRequirementEvidenceMap,
   evidenceMapHasActionableEvidence,
-  evidenceMapRequiresAuthority,
   renderRequirementEvidenceMapMarkdown,
   selectEvidenceMapDelta
 } from "./evidence_map.js";
@@ -29,6 +31,7 @@ import type {
   SupervisorCaseFile,
   SupervisorContextRepairPatch,
   SupervisorActionKind,
+  SupervisorAuthorityFinding,
   SupervisorEvidenceGatherKind,
   SupervisorEvidenceGatherRequest,
   SupervisorEvidencePatch,
@@ -219,8 +222,8 @@ function patchClaims(kind: SupervisorEvidenceGatherKind, caseFile: SupervisorCas
   switch (kind) {
     case "local_context":
       return [
-        "Recovered the failed attempt prompt, context manifest/provenance, declared artifacts, logs, and result metadata from the local run tree.",
-        "The retry should read the case file before making scope-affecting decisions."
+        "Recovered the failed attempt prompt, agent context/provenance, declared artifacts, logs, and result metadata from the local run tree.",
+        "The retry should read the supervisor recovery brief before making scope-affecting decisions."
       ];
     case "pattern_mining":
       return [
@@ -284,7 +287,7 @@ function patchGuidance(kind: SupervisorEvidenceGatherKind, caseFile: SupervisorC
       ];
     default:
       return [
-        "Read the supervisor case file and evidence patches before retrying.",
+        "Read the supervisor recovery brief and cited evidence patches before retrying.",
         "Preserve the original node intent, sandbox, repo authority, and declared artifacts.",
         ...promptGuidance
       ];
@@ -338,6 +341,27 @@ function parseHarnessPatch(
     value.confidence === "low" || value.confidence === "medium" || value.confidence === "high"
       ? value.confidence
       : fallback.confidence;
+  const authorityFindings = Array.isArray(value.authority_findings)
+    ? value.authority_findings.filter((item): item is SupervisorAuthorityFinding =>
+        isRecord(item) &&
+        (
+          item.kind === "graph_contract_change" ||
+          item.kind === "sandbox_expansion" ||
+          item.kind === "repo_scope_expansion" ||
+          item.kind === "external_side_effect" ||
+          item.kind === "credential_or_auth_mention" ||
+          item.kind === "operator_input_mention"
+        ) &&
+        typeof item.summary === "string" &&
+        (item.evidence === undefined || Array.isArray(item.evidence))
+      ).map((item) => ({
+        kind: item.kind,
+        summary: item.summary,
+        ...(Array.isArray(item.evidence)
+          ? { evidence: item.evidence.filter((evidence): evidence is string => typeof evidence === "string") }
+          : {})
+      }))
+    : fallback.authority_findings;
 
   return {
     ...fallback,
@@ -345,10 +369,7 @@ function parseHarnessPatch(
     retry_guidance: retryGuidance,
     conflicts,
     confidence,
-    scope_or_authority_changed:
-      typeof value.scope_or_authority_changed === "boolean"
-        ? value.scope_or_authority_changed
-        : fallback.scope_or_authority_changed,
+    authority_findings: authorityFindings,
     metadata: {
       ...(fallback.metadata ?? {}),
       harness_output_json: value
@@ -516,7 +537,7 @@ async function writeEvidencePatch(options: {
     confidence: options.gather.kind === "external_context" ? "medium" : "high",
     conflicts: [],
     retry_guidance: patchGuidance(options.gather.kind, options.caseFile),
-    scope_or_authority_changed: false,
+    authority_findings: [],
     created_at: nowIso(),
     artifact_paths: {
       prompt: promptPath,
@@ -632,16 +653,15 @@ function selectApplyAction(options: {
     return "pause_for_authority";
   }
 
-  if (!options.classification.retryable && options.classification.recommended_action === "pause_for_human") {
-    return "pause_for_authority";
-  }
-
-  if (options.requirementEvidenceMap && evidenceMapRequiresAuthority(options.requirementEvidenceMap)) {
-    return "pause_for_authority";
-  }
-
-  if (options.patches.some((patch) => patch.scope_or_authority_changed)) {
-    return "pause_for_authority";
+  const contractAuthorityFinding = options.patches.some((patch) =>
+    patch.authority_findings.some((finding) =>
+      finding.kind === "graph_contract_change" ||
+      finding.kind === "sandbox_expansion" ||
+      finding.kind === "repo_scope_expansion"
+    )
+  );
+  if (contractAuthorityFinding) {
+    return "fail_contract_gap";
   }
 
   const operation = options.causalContext?.selected_target.operation;
@@ -678,7 +698,6 @@ function selectApplyAction(options: {
     : false;
   const hasMaterialEvidencePatch = options.patches.some((patch) =>
     patch.status === "passed" &&
-    !patch.scope_or_authority_changed &&
     patch.sources.some((source) =>
       Boolean(source.url) ||
       (
@@ -957,7 +976,7 @@ function buildRetryDirective(options: {
   const evidenceMapGuidance = options.runtimeOverlay?.material_delta.some((delta) => delta.kind === "requirement_evidence_mapped")
     ? [
         "Use the requirement evidence map to address each failed or missing requirement before retry completion.",
-        "Do not retry by only rereading the case file; cite the concrete evidence paths or produce new valid evidence."
+        "Do not retry by only rereading the recovery brief; cite concrete evidence paths or produce new valid evidence."
       ]
     : [];
   const evidenceToRead = [
@@ -980,7 +999,7 @@ function buildRetryDirective(options: {
     summary: options.classification.summary,
     must_do: dedupedGuidance.length > 0
       ? dedupedGuidance
-      : ["Read the supervisor case file, evidence patches, and failed attempt artifacts before retrying."],
+      : ["Read the supervisor recovery brief, cited evidence patches, and failed attempt artifacts before retrying."],
     must_not_do: [
       "Do not change the original goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts.",
       "Do not repeat the exact failed tactic without new evidence.",
@@ -1084,11 +1103,11 @@ function buildRecoveryPlan(options: {
       : {}),
     ...(applyAction === "pause_for_authority"
       ? {
-          pause_request: {
-            reason: options.classification.summary,
-            unblock_request: "Provide authority, credentials, scope clarification, or graph-contract changes that the supervisor cannot infer safely."
-          }
-        }
+	          pause_request: {
+	            reason: options.classification.summary,
+	            unblock_request: "Provide the specific credential, harness authentication, planned checkpoint decision, external side-effect approval, or operator-authored input requested by the typed authority request."
+	          }
+	        }
       : {}),
     ...(applyAction === "fail_terminal" || applyAction === "fail_contract_gap"
       ? { terminal_reason: options.caseFile.retry_blocked_reason ?? options.classification.summary }
@@ -1114,8 +1133,9 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     "",
     `- Prior execution: \`${envelope.prior_execution_id}\``,
     `- Classification: \`${envelope.classification}\``,
-    `- Case file: \`${envelope.case_file_path}\``,
-    `- Recovery plan: \`${envelope.recovery_plan_path}\``,
+    `- Selected action: \`${envelope.action}\``,
+    `- Failure fingerprint: \`${envelope.failure_fingerprint}\``,
+    `- Repeated fingerprint count: \`${envelope.repeated_fingerprint_count}\``,
     "",
     "## Summary",
     directive.summary,
@@ -1124,7 +1144,17 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     ...directive.must_do.map((item) => `- ${item}`),
     "",
     "## Must Not Do",
-    ...directive.must_not_do.map((item) => `- ${item}`)
+    ...directive.must_not_do.map((item) => `- ${item}`),
+    "",
+    "## Evidence To Inspect",
+    ...(directive.evidence_to_read.length > 0
+      ? directive.evidence_to_read.map((item) => `- ${item}`)
+      : ["- None beyond the active context pointers and prior attempt artifacts."]),
+    "",
+    "## Validation Focus",
+    ...(directive.validation_focus.length > 0
+      ? directive.validation_focus.map((item) => `- ${item}`)
+      : ["- Re-run the validation named by the original task when feasible."])
   ].join("\n");
 }
 
@@ -1198,27 +1228,32 @@ export async function runSupervisorRecoveryCycle(options: {
 }> {
   const startedAt = nowIso();
   const interventionDir = resolveInterventionDirectory(options.attempt.execution_dir, options.intervention_id);
+  const supervisorRuntimeDir = join(
+    resolveExecutionRuntimeSupervisorDirectory(options.attempt.execution_dir),
+    basename(interventionDir)
+  );
   await mkdir(interventionDir, { recursive: true });
-  const caseFileJsonPath = join(interventionDir, "case-file.json");
+  await mkdir(supervisorRuntimeDir, { recursive: true });
+  const caseFileJsonPath = join(supervisorRuntimeDir, "case-file.json");
   const caseFileMarkdownPath = join(interventionDir, "case-file.md");
-  const requirementEvidenceMapJsonPath = join(interventionDir, "requirement-evidence-map.json");
+  const requirementEvidenceMapJsonPath = join(supervisorRuntimeDir, "requirement-evidence-map.json");
   const requirementEvidenceMapMarkdownPath = join(interventionDir, "requirement-evidence-map.md");
-  const causalCaseFileJsonPath = join(interventionDir, "causal-case-file.json");
+  const causalCaseFileJsonPath = join(supervisorRuntimeDir, "causal-case-file.json");
   const causalCaseFileMarkdownPath = join(interventionDir, "causal-case-file.md");
-  const causalTargetsJsonPath = join(interventionDir, "causal-targets.json");
+  const causalTargetsJsonPath = join(supervisorRuntimeDir, "causal-targets.json");
   const causalTargetsMarkdownPath = join(interventionDir, "causal-targets.md");
-  const contextAnalysisJsonPath = join(interventionDir, "context-analysis.json");
+  const contextAnalysisJsonPath = join(supervisorRuntimeDir, "context-analysis.json");
   const contextAnalysisMarkdownPath = join(interventionDir, "context-analysis.md");
-  const contextRepairPatchPath = join(interventionDir, "context-repair-patch.json");
-  const workspaceRepairPatchPath = join(interventionDir, "workspace-repair-patch.json");
-  const workspaceRepairResultPath = join(interventionDir, "workspace-repair-result.json");
-  const runtimeOverlayPath = join(interventionDir, "runtime-overlay.json");
-  const materialDeltaPath = join(interventionDir, "material-delta.json");
-  const recoveryPlanJsonPath = join(interventionDir, "recovery-plan.json");
+  const contextRepairPatchPath = join(supervisorRuntimeDir, "context-repair-patch.json");
+  const workspaceRepairPatchPath = join(supervisorRuntimeDir, "workspace-repair-patch.json");
+  const workspaceRepairResultPath = join(supervisorRuntimeDir, "workspace-repair-result.json");
+  const runtimeOverlayPath = join(supervisorRuntimeDir, "runtime-overlay.json");
+  const materialDeltaPath = join(supervisorRuntimeDir, "material-delta.json");
+  const recoveryPlanJsonPath = join(supervisorRuntimeDir, "recovery-plan.json");
   const recoveryPlanMarkdownPath = join(interventionDir, "recovery-plan.md");
-  const recoveryChainJsonPath = join(interventionDir, "recovery-chain.json");
+  const recoveryChainJsonPath = join(supervisorRuntimeDir, "recovery-chain.json");
   const recoveryChainMarkdownPath = join(interventionDir, "recovery-chain.md");
-  const recoveryEnvelopeJsonPath = join(interventionDir, "recovery-envelope.json");
+  const recoveryEnvelopeJsonPath = join(supervisorRuntimeDir, "recovery-envelope.json");
   const recoveryEnvelopeMarkdownPath = join(interventionDir, "recovery-envelope.md");
   const renderedPrompt = options.attempt.prompt_path
     ? await readFile(options.attempt.prompt_path, "utf8").catch(() => undefined)

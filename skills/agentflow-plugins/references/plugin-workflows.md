@@ -276,9 +276,9 @@ Examples:
 
 Policy:
 
-- declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent
+- declaring a managed tool in the top-level registry only makes it reusable; granting it through node support or a capability is the operator approval to expose that CLI to that agent
 - tools share the node sandbox and timeout
-- credential values are configured through `agentflow auth`, stored in macOS Keychain for secret fields, and injected only into the plugin tool subprocess
+- credential values are configured through `agentflow auth`, stored in macOS Keychain for secret fields, checked by runtime-owned preflight, and injected only into the plugin tool subprocess
 - managed tool `config` values are not exported into the agent harness environment; the generated launcher resolves them only for the plugin tool subprocess
 - managed tool `config` accepts non-secret graph-provided defaults only; secret-looking keys such as `token`, `secret`, `password`, or `api_key` belong in plugin `credentials`
 - `config_schema` validates graph config defaults; it is not the tool's CLI argument schema

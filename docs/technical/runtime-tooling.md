@@ -10,9 +10,9 @@ Before launching a Codex CLI or Cursor CLI agent node, Agentflow builds one `Age
 flowchart TD
   compiled["Compiled agent node"] --> setup["prepareAgentTools"]
   compiled --> context["resolveExecutionContext"]
-  setup --> bin["agentflow-tools/bin"]
+  setup --> bin["runtime/tools/bin"]
   setup --> metadata["runtime.json and credential-config.json"]
-  context --> packet["context packet and manifest"]
+  context --> packet["agent/context.md and runtime/context.json"]
   bin --> env["Harness env and PATH"]
   metadata --> env
   packet --> prompt["Rendered harness prompt"]
@@ -26,7 +26,7 @@ The harness prompt includes:
 - role and node task
 - graph goal, acceptance criteria, and constraints when present
 - workspace path, output directory, and sandbox expectations
-- context manifest table plus paths to `packet.json`, `provenance.json`, and source pointers
+- context pointer table from `agent/context.md`
 - `af` runtime CLI instructions
 - declared artifact contract
 - optional skills table
@@ -89,7 +89,7 @@ Verifier, AI-check, and supervisor-evidence invocations always force isolated no
 For each agent execution, Agentflow creates:
 
 ```text
-<execution-dir>/agentflow-tools/
+<execution-dir>/runtime/tools/
   bin/
     af
     <plugin-callable-name>
@@ -107,13 +107,13 @@ The generated `bin/` directory is prepended to `PATH` only for that node attempt
 
 Skills, managed tools, and CLI hints are selected per prompt-backed node directly or through capabilities. They are support metadata, not authority; required usage belongs in the node `intent` or acceptance criteria. Managed plugin tools are granted only to `agent` nodes; `ai` check nodes may receive skills and CLI hints but not managed tools. `exec`, deterministic `check`, and `checkpoint` nodes use `support.context` only.
 
-The skills table includes skill ref, name, description, and local `SKILL.md` path. The prompt tells agents to open `SKILL.md` only when relevant.
+The skills table includes skill name, description, and local `SKILL.md` path. The prompt tells agents to open `SKILL.md` only when relevant. Skill refs stay in compiled/runtime state, not in the default prompt.
 
 Ambient CLI hints are normal shell commands already available in the environment. They are validated as callable and rendered as command plus description; Agentflow does not generate wrappers, inject config, attach credentials, or write ledgers for them.
 
 ## Prompt Tool Contract
 
-Plugin tools are described to the agent as short selectable CLIs, not as fully inlined API docs. The prompt includes each callable name, plugin origin, description, credential scope names, and configured default keys. It tells the agent to run:
+Plugin tools are described to the agent as short selectable CLIs, not as fully inlined API docs. The prompt includes each callable name, description with plugin origin, and usage reminder. It tells the agent to run:
 
 ```bash
 <tool> --help
@@ -133,7 +133,7 @@ sequenceDiagram
   participant Index as credential index
   participant Keychain
   participant Tool as plugin executable
-  participant Ledger as tool-invocations.jsonl
+  participant Ledger as human-debug/tools/index.jsonl
 
   Agent->>Wrapper: babysit-poll --pr 42
   Wrapper->>Launcher: node launcher.mjs babysit-poll --pr 42
@@ -149,7 +149,7 @@ sequenceDiagram
 The generated launcher has two paths:
 
 - Help path: if args include `--help` or `-h`, it runs the tool without resolving credentials, injects only non-secret config defaults, appends an `Agentflow configured defaults` section, and records a redacted invocation.
-- Invocation path: it reads non-secret config, resolves declared credential scopes, injects `AGENTFLOW_TOOL_<CALLABLE>_<KEY>` and `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into the plugin subprocess, writes stdout/stderr sidecar logs, and appends a redacted ledger entry.
+- Invocation path: it reads non-secret config, resolves declared credential scopes, injects `AGENTFLOW_TOOL_<CALLABLE>_<KEY>` and `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into the plugin subprocess, writes paired input/output debug payloads, and appends a redacted ledger entry. Missing required credentials are checked by runtime-owned preflight before the agent runs; launcher credential failures are audit evidence only and cannot create a pause.
 
 The agent sees tool stdout/stderr and exit code. It does not see secret values unless the plugin executable itself prints them, which plugin authors must avoid.
 
@@ -160,8 +160,9 @@ Secret values are configured with `agentflow auth` and stored in macOS Keychain.
 1. The compiled graph records which credential scopes a granted tool requires.
 2. `prepareAgentTools` writes `credential-config.json` with credential specs and tool metadata, but not secret values.
 3. `buildHarnessSpawnEnv` removes any inherited `AGENTFLOW_CREDENTIAL_*` and `AGENTFLOW_TOOL_*` values before launching the harness.
-4. The generated launcher resolves credentials only when a plugin tool subprocess runs.
-5. Invocation ledgers redact secret-looking argv values and omit credential env values.
+4. Runtime-owned preflight resolves required credential metadata before the agent runs and emits trusted typed authority if credentials are missing.
+5. The generated launcher resolves credentials only when a plugin tool subprocess runs; launcher failures are audit evidence, not control-plane authority.
+6. Invocation ledgers redact secret-looking argv values and omit credential env values.
 
 ```mermaid
 flowchart LR
@@ -190,22 +191,31 @@ Common commands:
 
 `af --help` is intentionally narrow for normal agents. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` are explicit supervisor or managed-pattern tools, but they are not part of the ordinary worker completion loop. There is no standalone `af wait`; `af spawn --role <evidence_mapper|causal_investigator|verification_auditor|repair_planner> ... --wait` is the read-only supervisor-helper form, and `af spawn --purpose <investigation|implementation|verification|repair> ... --wait` remains the managed-pattern helper form when orchestration authority is granted.
 
-Supervisor diagnostics include `af diagnose evidence-map --node <id> [--attempt latest|N] --json` and `af diagnose recovery-delta --case <case-file> --json`. Evidence maps connect failed requirements to available, missing, conflicting, or authority-bound evidence. Recovery deltas are advisory diagnostics; retries still require the engine to record a valid material delta in the recovery plan.
+Supervisor diagnostics include `af diagnose evidence-map --node <id> [--attempt latest|N] --json` and `af diagnose recovery-delta --case <case-file> --json`. Evidence maps connect failed requirements to available, missing, or conflicting evidence. Recovery deltas are advisory diagnostics; retries still require the engine to record a valid material delta in the recovery plan.
 
 The runtime CLI is file-backed. It coordinates through the run root and runtime directory, not through a live in-memory service exposed to the model.
 
-`af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include orientation state, milestone summaries, validation evidence, blocked milestones, declared artifact state, placeholder/empty/stale artifact findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, and helper session evidence. Outcome verification only judges semantic correctness after this mechanical packet is ready, or after the packet reports a supported blocked state.
+`af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include orientation state, milestone summaries, validation evidence, blocked milestones, declared artifact state, placeholder/empty/stale artifact findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, helper session evidence, and typed authority requests when a trusted runtime component produced one. Outcome verification only judges semantic correctness after this mechanical packet is ready. A `blocked` packet is valid only with a typed authority request; other blockers remain `incomplete`.
 
 ## Tool Invocation Evidence
 
-Generated wrappers write `tool-invocations.jsonl` under the node execution directory. Invocation records include:
+Generated wrappers write paired invocation files under `human-debug/tools/`:
+
+```text
+human-debug/tools/
+  index.jsonl
+  0001-input.json
+  0001-output.json
+```
+
+`index.jsonl` records include:
 
 - run, graph, agent, execution, node, and compiled ids
 - tool callable name and source
 - redacted argv
 - cwd
 - exit code and duration
-- stdout/stderr sidecar paths for normal invocations
+- input/output payload paths
 - redaction note
 
 Those records feed debugging and delivery evidence. They are not the main handoff; durable handoffs still belong in declared artifacts.
@@ -217,4 +227,4 @@ Those records feed debugging and delivery evidence. They are not the main handof
 - Local CLI commands such as `git`, `npm`, `rg`, `jq`, or `gh` are ambient shell usage. Add them as CLI hints when the prompt should name them, and wrap them as plugin tools only when reuse, credentials, config policy, or audit ledgers are needed.
 - Config values are graph-provided defaults for the tool subprocess, not agent prompt variables.
 - Credentials stay out of the harness context window and environment.
-- Tool behavior is auditable through wrapper ledgers and sidecar logs.
+- Tool behavior is auditable through wrapper ledgers and paired input/output payloads.

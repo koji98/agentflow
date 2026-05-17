@@ -10,7 +10,7 @@ flowchart LR
   validate --> compile["Compile primitive contract"]
   compile --> run["Runtime scheduler"]
   run --> attempt["Node attempt"]
-  attempt --> context["Pointer context packet"]
+  attempt --> context["Pointer context brief"]
   attempt --> tools["Generated af and tool wrappers"]
   context --> harness["Codex CLI or Cursor CLI"]
   tools --> harness
@@ -28,6 +28,7 @@ flowchart LR
 5. `outcome-verification.md`: how every passing `agent` attempt is graded by a fresh-context verifier, what the verifier prompt and output schema look like, and how rejection routes through the supervisor.
 6. `prompt-surfaces.md`: canonical prompt renderer inventory, section model, authority boundaries, and prompt coverage.
 7. `prompt-cruft-rubric.md`: rejection rubric for prompt text that does not map to a real contract or eval.
+8. `harness-readiness-auth-ticket.md`: future work for a unified Cursor/Codex harness authentication readiness contract.
 
 ## Medium-Level Model
 
@@ -35,12 +36,12 @@ Agentflow keeps three contracts separate:
 
 - The authored graph is the human contract: intent, repos, profiles, graph shape, constraints, context, artifacts, tools, checks, and supervision contract.
 - The compiled graph is the runtime contract: primitive nodes, stable compiled ids, dependency edges, scopes, resolved profiles, resolved tools, credential specs, and artifact refs.
-- The run root is the audit contract: compiled graph snapshot, state, events, attempts, context packets, logs, tool invocations, intervention records, workspace changes, and delivery files.
+- The run root is the audit contract: compiled graph snapshot, state, events, attempts, pointer context state, logs, tool invocations, intervention records, workspace changes, and delivery files.
 
 That separation is the reason validation can explain graph shape before launch, execution can resume from durable state, and review can start from the delivery package instead of raw logs.
 
 ## What Is Intentionally Not Hidden
 
-Agentflow does not rely on invisible harness memory or live background coordination. A node receives an explicit prompt, context packet paths, output directory, runtime CLI, declared artifact contract, and granted tool wrappers. Future nodes consume named artifacts and recorded state, not chat history.
+Agentflow does not rely on invisible harness memory or live background coordination. A node receives an explicit prompt, an agent-facing context brief, output directory, runtime CLI, declared artifact contract, and granted tool wrappers. Future nodes consume named artifacts and recorded state, not chat history.
 
 Agentflow also does not pass plugin credentials through the model environment. The harness sees tool names and credential scope names; generated launchers resolve secret values only when a plugin tool subprocess actually runs.

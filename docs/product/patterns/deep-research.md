@@ -25,23 +25,24 @@ Common fields:
 Fixed public artifacts:
 
 - `summary`: human-readable research answer.
-- `packet`: machine-readable answer, findings, evidence, sources, uncertainty, confidence, and next actions.
 
 Authors cannot add arbitrary `artifacts` to `pattern_deep_research`. Use a downstream `agent` node when a workflow needs a custom synthesized deliverable.
 
-Deep research collapses graph-addressable output by default into `summary` and `packet`. Angle and synthesis artifacts remain readable in the run tree as evidence packets; use `as_artifact: true` when a downstream graph node needs to reference a raw angle report directly. Downstream nodes should reference the authored pattern id, for example `storage_research.summary` or `storage_research.storage_options`, not generated internal angle ids.
+Deep research collapses graph-addressable output by default into `summary`. Angle and synthesis artifacts remain readable in the run tree as Markdown evidence; use `as_artifact: true` when a downstream graph node needs to reference a raw angle report directly. Downstream nodes should reference the authored pattern id, for example `storage_research.summary` or `storage_research.storage_options`, not generated internal angle ids.
+
+Each angle is controlling for its worker. Write angles as specific lenses with evidence boundaries, not broad restatements of the parent goal. The parent goal gives context; the assigned angle decides what the worker optimizes for.
 
 ## Runtime Shape
 
 The pattern lowers into:
 
 1. Parallel research angle workers.
-2. Balanced synthesis layers when there are more than three research packets.
+2. Balanced synthesis layers when there are more than three research reports.
 3. Final public artifact publisher.
 
-Each synthesis node consumes at most three research packets. Groups are split as evenly as possible, so seven angles become synthesis groups of `2`, `2`, and `3`, not `3`, `3`, and `1`. Synthesis preserves major findings, collapses duplicate claims, keeps provenance, and carries conflicts or uncertainty forward.
+Each synthesis node consumes at most three research reports. Groups are split as evenly as possible, so seven angles become synthesis groups of `2`, `2`, and `3`, not `3`, `3`, and `1`. Synthesis preserves major findings, collapses duplicate claims, keeps provenance, and carries conflicts or uncertainty forward.
 
-Angle and synthesis artifacts are internal evidence packets in the run tree. They support the final contract but do not need to match final graph-addressable formatting. The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes `summary` and `packet`. Exposed angle artifacts are raw angle reports forwarded by the runtime, not rewritten final-publisher output.
+Angle and synthesis artifacts are internal Markdown evidence in the run tree. They support the final contract but do not need to match final graph-addressable formatting. The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes `summary`. Exposed angle artifacts are raw angle reports forwarded by the runtime, not rewritten final-publisher output.
 
 Angles can be authored as strings or objects. Object angles support:
 
@@ -49,7 +50,7 @@ Angles can be authored as strings or objects. Object angles support:
 - `prompt`: sentence-style research prompt
 - `as_artifact`: optional `true` value that exposes the raw angle report as `<pattern_id>.<angle_id>`
 
-If `as_artifact` is omitted, the angle remains run-tree evidence only and is not addressable by downstream graph nodes. The `packet` includes an angle index with evidence refs and artifact paths for selective inspection.
+If `as_artifact` is omitted, the angle remains run-tree evidence only and is not addressable by downstream graph nodes. Runtime audit indexes link the internal reports for selective inspection.
 
 ## Example
 
@@ -65,7 +66,7 @@ If `as_artifact` is omitted, the angle remains run-tree evidence only and is not
     "goal": "Recommend the storage design that best supports resumable supervised runs.",
     "acceptance_criteria": [
       "The recommendation compares viable alternatives.",
-      "The packet preserves evidence, uncertainty, and next actions."
+      "The summary preserves evidence, uncertainty, and next actions."
     ],
     "constraints": [
       "Do not treat sources outside repository conventions as primary authority."

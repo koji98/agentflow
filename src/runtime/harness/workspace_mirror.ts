@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { appendFile, copyFile, cp, mkdir, readFile, rm, rmdir } from "node:fs/promises";
+import { appendFile, cp, mkdir, readFile, rm, rmdir } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 import type { HarnessName } from "../../graph/schema.js";
+import { resolveExecutionHumanDebugToolDirectory } from "../../artifacts/paths.js";
 import type { AgentInvocation } from "./types.js";
 
 export interface HarnessWorkspaceWriteMirror {
@@ -97,15 +98,6 @@ async function appendFileIfPresent(source: string, destination: string): Promise
   }
 }
 
-async function copyFileIfPresent(source: string, destination: string): Promise<void> {
-  if (!await pathExists(source)) {
-    return;
-  }
-
-  await mkdir(dirname(destination), { recursive: true });
-  await copyFile(source, destination);
-}
-
 export function mapOutputArtifactPathToMirror(
   mirror: HarnessWorkspaceWriteMirror | undefined,
   expectedPath: string
@@ -151,13 +143,9 @@ export async function syncAndRemoveHarnessWorkspaceWriteMirror(
       join(mirror.runtime_dir, "milestones"),
       join(mirror.actual_runtime_dir, "milestones")
     );
-    await copyFileIfPresent(
-      join(mirror.tool_runtime_dir, "tool-invocations.jsonl"),
-      join(mirror.execution_dir, "tool-invocations.jsonl")
-    );
     await copyDirectoryIfPresent(
-      join(mirror.tool_runtime_dir, "tool-invocation-logs"),
-      join(mirror.execution_dir, "tool-invocation-logs")
+      join(mirror.tool_runtime_dir, "tools"),
+      resolveExecutionHumanDebugToolDirectory(mirror.execution_dir)
     );
   } finally {
     await rm(mirror.root_dir, { recursive: true, force: true });

@@ -46,8 +46,8 @@ function buildInput(overrides: Partial<OutcomeVerificationPromptInput> = {}): Ou
       }
     ],
     execution_evidence: {
-      stdout_path: "/run/widget/logs/stdout.log",
-      stderr_path: "/run/widget/logs/stderr.log",
+      stdout_path: "/run/widget/human-debug/harness/stdout.log",
+      stderr_path: "/run/widget/human-debug/harness/stderr.log",
       excerpt: "/bin/zsh -lc 'npm test' succeeded in 1s:\nwidget tests passed\n",
       truncated: false
     },
@@ -87,21 +87,35 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("Do not refactor unrelated modules.");
   });
 
-  it("includes the agent response snippet, declared artifacts, runtime decision evidence, and workspace diff paths", () => {
-    const prompt = renderOutcomeVerificationPrompt(buildInput());
-    expect(prompt).toContain("Done.");
-    expect(prompt).toContain("Added widget module.");
+    it("includes the agent response snippet, declared artifacts, runtime decision evidence, and workspace diff paths", () => {
+        const prompt = renderOutcomeVerificationPrompt(buildInput());
+        expect(prompt).toContain("Done.");
+        expect(prompt).toContain("Added widget module.");
     expect(prompt).toContain("Use the existing widget module path");
     expect(prompt).toContain("The node contract asks for the focused widget module");
     expect(prompt).toContain("The implementation remains limited to the widget module.");
     expect(prompt).toContain("Context manifest listed widget.ts as the relevant source file.");
-    expect(prompt).toContain("## Captured Execution Evidence");
-    expect(prompt).toContain("/bin/zsh -lc 'npm test' succeeded in 1s");
-    expect(prompt).toContain("Prefer it over rerunning commands");
-    expect(prompt).toContain("/run/widget/workspace-changes/diff.patch");
-    expect(prompt).toContain("Diff excerpt: (not inlined by default");
-    expect(prompt).not.toContain("export const widget = 1;");
-  });
+        expect(prompt).toContain("## Captured Execution Evidence");
+        expect(prompt).toContain("/bin/zsh -lc 'npm test' succeeded in 1s");
+        expect(prompt).toContain("Prefer it over rerunning commands");
+        expect(prompt).not.toContain("stdout log:");
+        expect(prompt).not.toContain("stderr log:");
+        expect(prompt).not.toContain("/run/widget/human-debug/harness/stdout.log");
+        expect(prompt).not.toContain("/run/widget/human-debug/harness/stderr.log");
+        expect(prompt).toContain("/run/widget/workspace-changes/diff.patch");
+        expect(prompt).toContain("Diff excerpt: (not inlined by default");
+        expect(prompt).not.toContain("export const widget = 1;");
+    });
+    it("does not expose compiled ids or raw execution ids in the verifier prompt", () => {
+        const prompt = renderOutcomeVerificationPrompt(buildInput());
+
+        expect(prompt).toContain("Node: implement_widget");
+        expect(prompt).toContain("Attempt: 1");
+        expect(prompt).not.toContain("Compiled id:");
+        expect(prompt).not.toContain("Execution id:");
+        expect(prompt).not.toContain("root__implement_widget");
+        expect(prompt).not.toContain("exec__implement_widget__attempt_1");
+    });
 
   it("treats inlined declared artifacts as authoritative presence evidence", () => {
     const prompt = renderOutcomeVerificationPrompt(buildInput());

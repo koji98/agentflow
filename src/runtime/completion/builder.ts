@@ -3,8 +3,13 @@ import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promi
 import { dirname, join } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
-import { resolveExecutionArtifactsDirectory } from "../../artifacts/paths.js";
+import {
+  resolveExecutionArtifactsDirectory,
+  resolveExecutionHumanDebugToolDirectory,
+  resolveExecutionRuntimeCompletionPacketPath
+} from "../../artifacts/paths.js";
 import type { ArtifactDefinition } from "../../graph/authored.js";
+import { normalizeAuthorityRequests } from "../authority.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import {
   evidenceKinds,
@@ -427,7 +432,7 @@ async function inspectArtifact(options: {
 }
 
 function completionPacketPath(executionDir: string): string {
-  return join(executionDir, "completion-packet.json");
+  return resolveExecutionRuntimeCompletionPacketPath(executionDir);
 }
 
 function runtimeLogPath(runRoot: string, runtimeDir?: string): string {
@@ -455,7 +460,7 @@ function helpersRootPath(options: BuildCompletionPacketOptions): string {
 }
 
 function toolInvocationsPath(options: BuildCompletionPacketOptions): string {
-  return options.toolInvocationsPath ?? join(options.attempt.execution_dir, "tool-invocations.jsonl");
+  return options.toolInvocationsPath ?? join(resolveExecutionHumanDebugToolDirectory(options.attempt.execution_dir), "index.jsonl");
 }
 
 function hasMilestoneStatus(value: string | undefined): RuntimeMilestone["status"] | undefined {
@@ -1046,12 +1051,13 @@ function decideCompletionStatus(options: {
   milestones: CompletionMilestoneSummary;
   activeBlockers: RuntimeLogEntry[];
   observations: OperatorObservation[];
+  authorityRequests: BuildCompletionPacketOptions["authorityRequests"];
   managed: CompletionManagedSummary;
   helpers: CompletionHelperSummary;
 }): { status: CompletionStatus; reasons: string[] } {
   const reasons: string[] = [];
-  let blocked = false;
   let incomplete = false;
+  const authorityRequests = normalizeAuthorityRequests(options.authorityRequests ?? []);
 
   if (options.nodeKind === "agent") {
     if (!options.orientation.orient_called) {
@@ -1067,7 +1073,7 @@ function decideCompletionStatus(options: {
       reasons.push(`${options.milestones.active} milestone(s) are still active.`);
     }
     if (options.milestones.blocked > 0) {
-      blocked = true;
+      incomplete = true;
       reasons.push(`${options.milestones.blocked} milestone(s) are blocked.`);
     }
   }
@@ -1075,7 +1081,7 @@ function decideCompletionStatus(options: {
   for (const finding of options.artifactFindings) {
     reasons.push(finding.summary);
     if (finding.kind === "blocked") {
-      blocked = true;
+      incomplete = true;
     } else {
       incomplete = true;
     }
@@ -1087,19 +1093,19 @@ function decideCompletionStatus(options: {
       reasons.push(`No evidence found for required validation: ${evidence.requirement}`);
     }
     if (evidence.status === "blocked") {
-      blocked = true;
+      incomplete = true;
       reasons.push(`Validation blocked: ${evidence.requirement}`);
     }
   }
 
   for (const blocker of options.activeBlockers) {
-    blocked = true;
+    incomplete = true;
     reasons.push(blocker.summary);
   }
 
   for (const observation of options.observations) {
     if (observation.kind === "blocker" || observation.blocking === true) {
-      blocked = true;
+      incomplete = true;
       reasons.push(observation.summary);
     }
   }
@@ -1130,8 +1136,14 @@ function decideCompletionStatus(options: {
     reasons.push(`Helper required artifact is missing: ${missing}`);
   }
 
-  if (blocked) {
-    return { status: "blocked", reasons };
+  if (authorityRequests.length > 0) {
+    return {
+      status: "blocked",
+      reasons: [
+        ...authorityRequests.map((request) => `Authority required (${request.kind}): ${request.summary}`),
+        ...reasons
+      ]
+    };
   }
   if (incomplete) {
     return { status: "incomplete", reasons };
@@ -1213,9 +1225,11 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
     milestones,
     activeBlockers,
     observations: activeObservations,
+    authorityRequests: options.authorityRequests ?? [],
     managed,
     helpers
   });
+  const authorityRequests = normalizeAuthorityRequests(options.authorityRequests ?? []);
 
   return {
     version: "1",
@@ -1252,6 +1266,7 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
     helpers,
     completion_status: status.status,
     ready_for_verification: status.status === "ready_for_verification",
+    authority_requests: authorityRequests,
     blocking_reasons: [...new Set(status.reasons)]
   };
 }

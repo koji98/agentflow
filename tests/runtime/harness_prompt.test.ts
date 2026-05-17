@@ -13,8 +13,8 @@ function baseInvocation(overrides: Partial<AgentInvocation> = {}): AgentInvocati
     sandbox: "workspace-write",
     model: undefined,
     nodeGoal: "Implement the focused node task.",
-    contextPacketPath: "/tmp/run/context/packet.json",
-    contextManifestPath: "/tmp/run/context/manifest.md",
+    contextPacketPath: "/tmp/run/runtime/context.json",
+    contextManifestPath: "/tmp/run/agent/context.md",
     contextManifest: "# Context Manifest\n\n- Pointer items: `1`\n",
     outputDir: "/tmp/run/output",
     artifacts: {},
@@ -71,12 +71,14 @@ describe("harness prompt rendering", () => {
     expect(prompt).not.toContain("## Diagnostics");
   });
 
-  it("keeps context metadata just-in-time through packet and provenance paths", () => {
+  it("keeps context agent-facing and omits runtime/debug metadata", () => {
     const prompt = renderHarnessPrompt(baseInvocation());
 
-    expect(prompt).toContain("Read the manifest, then open only the source pointers relevant to this task.");
-    expect(prompt).toContain("Context packet: /tmp/run/context/packet.json");
-    expect(prompt).toContain("Context provenance: /tmp/run/context/provenance.json");
+    expect(prompt).toContain("Open only the source pointers relevant to this task.");
+    expect(prompt).not.toContain("Context packet:");
+    expect(prompt).not.toContain("Context provenance:");
+    expect(prompt).not.toContain("provenance.json");
+    expect(prompt).not.toContain("context.json");
     expect(prompt).not.toContain("Run ID:");
     expect(prompt).not.toContain("Execution ID:");
   });
@@ -114,7 +116,8 @@ describe("harness prompt rendering", () => {
 
     expect(prompt).toContain("## Declared Artifacts");
     expect(prompt).toContain("Publish content with `af artifact write <name>` using stdin.");
-    expect(prompt).toContain("| `handoff` | `/tmp/run/output/handoff.md` | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
+    expect(prompt).toContain("| `handoff` | `af artifact write handoff` | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
+    expect(prompt).not.toContain("| `handoff` | `/tmp/run/output/handoff.md` |");
     expect(prompt).not.toContain("If the node task, authored goal, acceptance criteria, or artifact description names required labels");
     expect(prompt).not.toContain("Do not use `/tmp`");
     expect(prompt).not.toContain("--file <path>");
@@ -127,7 +130,7 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("Drive the node to completion within its boundary");
     expect(prompt).toContain("Run `af orient` before material work.");
     expect(prompt).toContain("Understand the plan before committing to execution milestones");
-    expect(prompt).toContain("read any relevant plan, research, context pointer, or supervisor case");
+    expect(prompt).toContain("read any relevant plan, research, context pointer, or supervisor recovery brief");
     expect(prompt).toContain("If no adequate plan exists, do the necessary discovery and planning required to choose a defensible execution path.");
     expect(prompt).toContain("There is no discovery quota or ceiling");
     expect(prompt).toContain("create a planning/research milestone first");
@@ -186,13 +189,12 @@ describe("harness prompt rendering", () => {
             description: "Markdown handoff."
           }
         },
-        repair: {
-          repairAttempt: 1,
-          maxAttempts: 2,
-          priorResponsePath: "/tmp/run/output/agent-response.md",
-          stdoutLogPath: "/tmp/run/logs/stdout.log",
-          stderrLogPath: "/tmp/run/logs/stderr.log",
-          previousAttemptEvidencePaths: [],
+	        repair: {
+	          repairAttempt: 1,
+	          maxAttempts: 2,
+	          repairBriefPath: "/tmp/run/agent/artifact-repair.md",
+	          priorResponsePath: "/tmp/run/output/agent-response.md",
+	          previousAttemptEvidencePaths: [],
           missingArtifacts: [
             {
               name: "handoff",
@@ -231,12 +233,11 @@ describe("harness prompt rendering", () => {
         }
       },
       repair: {
-        repairAttempt: 1,
-        maxAttempts: 2,
-        priorResponsePath: "/tmp/run/output/agent-response.md",
-        stdoutLogPath: "/tmp/run/logs/stdout.log",
-        stderrLogPath: "/tmp/run/logs/stderr.log",
-        previousAttemptEvidencePaths: [],
+	        repairAttempt: 1,
+	        maxAttempts: 2,
+	        repairBriefPath: "/tmp/run/agent/artifact-repair.md",
+	        priorResponsePath: "/tmp/run/output/agent-response.md",
+	        previousAttemptEvidencePaths: [],
         missingArtifacts: [{
           name: "handoff",
           from: "output_dir",
@@ -247,11 +248,15 @@ describe("harness prompt rendering", () => {
       }
     }));
 
-    expect(prompt).toContain("## Repair Task");
-    expect(prompt).toContain("## Missing Artifacts");
-    expect(prompt).toContain("expected absolute path: `/tmp/run/output/handoff.md`");
-    expect(prompt).toContain("create a repair milestone");
-    expect(prompt).toContain("publish each missing artifact with `af artifact write <name>`");
+	    expect(prompt).toContain("## Repair Task");
+	    expect(prompt).toContain("## Missing Artifacts");
+	    expect(prompt).toContain("Repair brief: /tmp/run/agent/artifact-repair.md");
+	    expect(prompt).toContain("expected absolute path: `/tmp/run/output/handoff.md`");
+	    expect(prompt).toContain("create a repair milestone");
+	    expect(prompt).toContain("publish each missing artifact with `af artifact write <name>`");
+	    expect(prompt).not.toContain("human-debug");
+	    expect(prompt).not.toContain("stdout.log");
+	    expect(prompt).not.toContain("stderr.log");
     expect(prompt).not.toContain("Keep artifact drafts inside the output directory");
     expect(prompt).not.toContain("Do not use `/tmp`, `/private/tmp`, or another external temp directory");
     expect(prompt).not.toContain("## Diagnostics");
@@ -297,10 +302,29 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("## Supervisor Recovery Case");
     expect(prompt).toContain("Retry with a changed tactic while preserving the original node contract.");
     expect(prompt).toContain("Read the cited zod v4 docs fixture before editing.");
+    expect(prompt).not.toContain("case-file.json");
+    expect(prompt).not.toContain("recovery-plan.json");
     expect(prompt.indexOf("## Success Contract (Original Authored Node Task)")).toBeLessThan(
       prompt.indexOf("## Supervisor Recovery Case")
     );
     expect(prompt).toContain("## Success Contract (Original Authored Node Task)");
     expect(prompt).not.toContain("## Supervisor Revised Task");
+  });
+  it("labels supervisor evidence prompts as diagnostic audit prompts", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      promptKind: "supervisor_evidence",
+      sandbox: "read-only",
+      supervisorEvidence: {
+        gatherKind: "local_context",
+        caseFilePath: "/tmp/run/runtime/supervisor/case-file.json",
+        evidencePatchPath: "/tmp/run/human-debug/interventions/evidence-patch.json",
+        instructions: ["Inspect the failed attempt evidence."]
+      }
+    }));
+
+    expect(prompt).toContain("diagnostic/audit helper");
+    expect(prompt).toContain("audit/debug evidence");
+    expect(prompt).toContain("not normal worker context");
+    expect(prompt).toContain("Case file:");
   });
 });

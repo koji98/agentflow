@@ -4,7 +4,23 @@ import { describe, expect, it } from "vitest";
 
 import {
   createRunRootPath,
-  resolveExecutionArtifactsDirectory,
+	  resolveExecutionArtifactsDirectory,
+	  resolveExecutionAgentArtifactRepairBriefPath,
+	  resolveExecutionAgentContextPath,
+  resolveExecutionAgentDirectory,
+  resolveExecutionAgentPromptPath,
+  resolveExecutionAgentRecoveryBriefPath,
+  resolveExecutionAgentResponsePath,
+  resolveExecutionHumanDebugDirectory,
+  resolveExecutionHumanDebugHarnessDirectory,
+  resolveExecutionHumanDebugToolDirectory,
+  resolveExecutionRuntimeCompletionPacketPath,
+  resolveExecutionRuntimeContextPath,
+  resolveExecutionRuntimeDirectory,
+  resolveExecutionRuntimeResultPath,
+  resolveExecutionRuntimeSupervisorDirectory,
+  resolveExecutionRuntimeToolDirectory,
+  resolveExecutionRuntimeVerifierPath,
   resolveInterventionDirectory,
   resolveNodeExecutionDirectory,
   resolveRunsRoot,
@@ -174,5 +190,27 @@ describe("runs root resolution", () => {
     expect(resolveExecutionArtifactsDirectory("/tmp/agentflow/run/node/execution")).toBe(
       "/tmp/agentflow/run/node/execution/artifacts"
     );
+  });
+
+  it("preserves the execution directory anchor while segmenting execution internals by audience", () => {
+    const executionDir = "/tmp/agentflow/run/nodes/001-work/executions/001-exec";
+
+    expect(resolveExecutionArtifactsDirectory(executionDir)).toBe(`${executionDir}/artifacts`);
+    expect(resolveExecutionAgentDirectory(executionDir)).toBe(`${executionDir}/agent`);
+    expect(resolveExecutionAgentPromptPath(executionDir)).toBe(`${executionDir}/agent/prompt.md`);
+    expect(resolveExecutionAgentContextPath(executionDir)).toBe(`${executionDir}/agent/context.md`);
+	    expect(resolveExecutionAgentResponsePath(executionDir)).toBe(`${executionDir}/agent/response.md`);
+	    expect(resolveExecutionAgentRecoveryBriefPath(executionDir)).toBe(`${executionDir}/agent/supervisor-recovery.md`);
+	    expect(resolveExecutionAgentArtifactRepairBriefPath(executionDir)).toBe(`${executionDir}/agent/artifact-repair.md`);
+    expect(resolveExecutionRuntimeDirectory(executionDir)).toBe(`${executionDir}/runtime`);
+    expect(resolveExecutionRuntimeResultPath(executionDir)).toBe(`${executionDir}/runtime/result.json`);
+    expect(resolveExecutionRuntimeCompletionPacketPath(executionDir)).toBe(`${executionDir}/runtime/completion-packet.json`);
+    expect(resolveExecutionRuntimeContextPath(executionDir)).toBe(`${executionDir}/runtime/context.json`);
+    expect(resolveExecutionRuntimeVerifierPath(executionDir)).toBe(`${executionDir}/runtime/verifier.json`);
+    expect(resolveExecutionRuntimeSupervisorDirectory(executionDir)).toBe(`${executionDir}/runtime/supervisor`);
+    expect(resolveExecutionRuntimeToolDirectory(executionDir)).toBe(`${executionDir}/runtime/tools`);
+    expect(resolveExecutionHumanDebugDirectory(executionDir)).toBe(`${executionDir}/human-debug`);
+    expect(resolveExecutionHumanDebugHarnessDirectory(executionDir)).toBe(`${executionDir}/human-debug/harness`);
+    expect(resolveExecutionHumanDebugToolDirectory(executionDir)).toBe(`${executionDir}/human-debug/tools`);
   });
 });

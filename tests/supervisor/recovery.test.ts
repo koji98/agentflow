@@ -65,15 +65,44 @@ function result(): RuntimeNodeExecutionResult {
         stderr: "Build failed because the zod v4 API changed; missing dependency docs for package zod."
     };
 }
+function dependencyDocsVerifierResult(): RuntimeNodeExecutionResult {
+    return {
+        status: "passed",
+        outcome: "failed",
+        result: {
+            outcome_verification: {
+                passed: false,
+                summary: "Verifier rejected the attempt because dependency documentation is missing.",
+                findings: [
+                    {
+                        severity: "blocker",
+                        category: "missing_dependency_docs",
+                        evidence: "The failed attempt used an unverified dependency API.",
+                        recommendation: "Gather version-matched dependency docs before retrying."
+                    }
+                ],
+                blockers: [
+                    {
+                        severity: "blocker",
+                        category: "missing_dependency_docs",
+                        evidence: "The failed attempt used an unverified dependency API.",
+                        recommendation: "Gather version-matched dependency docs before retrying."
+                    }
+                ]
+            }
+        }
+    };
+}
 describe("supervisor recovery cycle", () => {
     it("writes a case file, parallel evidence patches, a recovery plan, and retry envelope", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-cycle-"));
         const runtimeAttempt = attempt(tempRoot);
+        const runtimeResult = dependencyDocsVerifierResult();
         await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
         const classification = classifyNodeFailure({
             node: node(),
             attempt: runtimeAttempt,
-            result: result()
+            result: runtimeResult
         });
         const recovery = await runSupervisorRecoveryCycle({
             action: "rebuild_context",
@@ -85,7 +114,7 @@ describe("supervisor recovery cycle", () => {
             },
             node: node(),
             attempt: runtimeAttempt,
-            result: result(),
+            result: runtimeResult,
             decision_id: "decision-1",
             intervention_id: "intervention-1",
             classification,
@@ -95,7 +124,7 @@ describe("supervisor recovery cycle", () => {
             workspace_path: tempRoot
         });
         expect(recovery.recovery_plan.apply_action).toBe("retry_with_evidence");
-        expect(recovery.evidence_patches.map((patch) => patch.kind)).toEqual(["dependency_metadata", "external_context"]);
+        expect(recovery.evidence_patches.map((patch) => patch.kind)).toEqual(["dependency_metadata", "external_context", "semantic_rejudge"]);
         expect(recovery.recovery_plan.runtime_overlay?.material_delta).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 kind: "requirement_evidence_mapped"
@@ -114,7 +143,7 @@ describe("supervisor recovery cycle", () => {
         await expect(readFile(recovery.intervention.artifact_paths.recovery_plan_markdown, "utf8")).resolves.toContain("Apply action: `retry_with_evidence`");
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("pauses when gathered evidence says recovery requires changed authority", async () => {
+    it("does not pause when helper output uses the old authority boolean", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-conflict-"));
         const runtimeAttempt = attempt(tempRoot);
         await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
@@ -137,8 +166,7 @@ describe("supervisor recovery cycle", () => {
                         claims: ["The requested fix requires changing the graph contract."],
                         retry_guidance: ["Do not retry without graph authority."],
                         conflicts: ["Graph contract change required."],
-                        confidence: "high",
-                        scope_or_authority_changed: true
+                        confidence: "high"
                     }
                 };
             },
@@ -164,9 +192,141 @@ describe("supervisor recovery cycle", () => {
             workspace_path: tempRoot,
             harness
         });
-        expect(recovery.recovery_plan.apply_action).toBe("pause_for_authority");
-        expect(recovery.recovery_plan.pause_request?.unblock_request).toContain("authority");
+        expect(recovery.recovery_plan.apply_action).toBe("retry_with_evidence");
+        expect(recovery.recovery_plan.pause_request).toBeUndefined();
+        expect(recovery.recovery_envelope).toBeDefined();
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("fails contractually when helper authority findings require graph changes", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-contract-gap-"));
+        const runtimeAttempt = attempt(tempRoot);
+        await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+        const classification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: result()
+        });
+        const harness: HarnessAdapter = {
+            kind: "codex-cli",
+            capabilities: {
+                supports_agent: true,
+                supports_ai_check: true
+            },
+            async run() {
+                return {
+                    status: "passed",
+                    exitCode: 0,
+                    outputJson: {
+                        claims: ["The requested fix requires changing the graph contract."],
+                        retry_guidance: ["Fail the contract gap instead of asking a human from helper prose."],
+                        conflicts: ["Graph contract change required."],
+                        confidence: "high",
+                        authority_findings: [
+                            {
+                                kind: "graph_contract_change",
+                                summary: "The requested fix would require changing the graph contract.",
+                                evidence: ["helper evidence"]
+                            }
+                        ]
+                    }
+                };
+            },
+            async cancel() { }
+        };
+        const recovery = await runSupervisorRecoveryCycle({
+            action: "rebuild_context",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: result(),
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification,
+            failure_fingerprint: "fingerprint-1",
+            repeated_fingerprint_count: 1,
+            prior_interventions: [],
+            workspace_path: tempRoot,
+            harness
+        });
+        expect(recovery.recovery_plan.apply_action).toBe("fail_contract_gap");
+        expect(recovery.recovery_plan.pause_request).toBeUndefined();
         expect(recovery.recovery_envelope).toBeUndefined();
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("does not pause from helper credential, operator, or side-effect authority findings", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-helper-authority-mentions-"));
+        const runtimeAttempt = attempt(tempRoot);
+        await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+        const classification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: result()
+        });
+        const harness: HarnessAdapter = {
+            kind: "codex-cli",
+            capabilities: {
+                supports_agent: true,
+                supports_ai_check: true
+            },
+            async run() {
+                return {
+                    status: "passed",
+                    exitCode: 0,
+                    outputJson: {
+                        claims: ["The helper mentioned credentials, operator input, and side effects as possible concerns."],
+                        retry_guidance: ["Recover using available local evidence instead of pausing from helper prose."],
+                        conflicts: [],
+                        confidence: "medium",
+                        authority_findings: [
+                            {
+                                kind: "credential_or_auth_mention",
+                                summary: "The failed output mentioned auth text.",
+                                evidence: ["helper evidence"]
+                            },
+                            {
+                                kind: "operator_input_mention",
+                                summary: "The failed output suggested asking an operator.",
+                                evidence: ["helper evidence"]
+                            },
+                            {
+                                kind: "external_side_effect",
+                                summary: "The helper mentioned a possible external action.",
+                                evidence: ["helper evidence"]
+                            }
+                        ]
+                    }
+                };
+            },
+            async cancel() { }
+        };
+        const recovery = await runSupervisorRecoveryCycle({
+            action: "semantic_evaluation",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: result(),
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification,
+            failure_fingerprint: "fingerprint-1",
+            repeated_fingerprint_count: 1,
+            prior_interventions: [],
+            workspace_path: tempRoot,
+            harness
+        });
+        expect(recovery.recovery_plan.apply_action).not.toBe("pause_for_authority");
+        expect(recovery.recovery_plan.pause_request).toBeUndefined();
+        expect(recovery.recovery_envelope).toBeDefined();
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("writes a validation strategy overlay for diagnostic failures", async () => {
@@ -354,9 +514,12 @@ describe("supervisor recovery cycle", () => {
         const failedResult: RuntimeNodeExecutionResult = {
             status: "failed",
             outcome: "failed",
-            result: { exit_code: 1 },
+            result: { exit_code: 1, failure_code: "workspace_pollution" },
             stdout: "",
-            stderr: "Forbidden edit: unexpected workspace change in generated/noise.md"
+            stderr: "Workspace pollution detected in generated/noise.md",
+            metadata: {
+                failure_code: "workspace_pollution"
+            }
         };
         const classification = classifyNodeFailure({
             node: node(),

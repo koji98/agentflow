@@ -2,7 +2,7 @@
   "id": "missing-authority-credential",
   "bucket": "invalid-graph-boundary",
   "difficulty": "hard",
-  "description": "Supervisor should pause or fail when credentials or authority are missing instead of retrying forever.",
+  "description": "Supervisor should pause only when a trusted runtime component emits a typed missing-credential authority request.",
   "workflow": {
     "graph_template": "../../shared/graph.exec.template.json",
     "harness": "codex-cli",
@@ -26,7 +26,7 @@
     },
     "supervisor": {
       "apply_actions": [
-        "pause_for_human"
+        "pause_for_authority"
       ]
     },
     "delivery": {

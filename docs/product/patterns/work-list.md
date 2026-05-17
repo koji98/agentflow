@@ -33,6 +33,8 @@ Common fields:
 - `sandbox`
 - `artifact_repair`
 
+The author does not provide the item schema. The runtime owns item ids, status, and ledger shape. Authors provide the planning goal plus domain-specific item guidance so the planner can decide a finite reviewable list.
+
 ## Public Artifacts
 
 Default public artifacts:
@@ -122,3 +124,5 @@ For higher-risk work lists, use `deep_work` when the frozen list needs rubric or
 ```
 
 Work-list rubric criteria support `target: "workspace"` for the current workspace candidate, `target: "item_handoff"` for the item handoff evidence, and `target: "work_list_ledger"` for the frozen-list ledger.
+
+Make `what_counts_as_one_item` and `done_when` concrete to the domain. For branch stacks, mention branch/base and PR readiness. For migrations, mention batch boundary, rollback, and data validation. For documentation, mention reader outcome, source evidence, and review path.

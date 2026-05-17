@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CompiledCheckNode, CompiledExecutableNode } from "../../src/graph/compiled.js";
+import type { AuthorityRequest } from "../../src/runtime/authority.js";
 import type { RuntimeNodeAttempt } from "../../src/runtime/attempts.js";
 import type { RuntimeNodeExecutionResult } from "../../src/runtime/core/engine.js";
 import { classifyNodeFailure } from "../../src/supervisor/classifier.js";
@@ -54,16 +55,26 @@ function classify(overrides: {
         ...(overrides.error_message ? { error_message: overrides.error_message } : {})
     });
 }
+const missingHarnessAuthRequest: AuthorityRequest = {
+    request_id: "auth-1",
+    kind: "missing_harness_auth",
+    source: "harness",
+    summary: "Cursor CLI requires login before it can run.",
+    created_at: "2026-05-17T00:00:00.000Z"
+};
 describe("supervisor failure classifier", () => {
-    it("classifies context packet failures as context contract failures", () => {
+    it("classifies structured runtime context failures as context contract failures", () => {
         expect(classify({
             result: {
                 status: "failed",
                 outcome: "failed",
                 result: {
-                    error: 'Context packet could not be written because context provenance for "requirements" was missing.'
+                    error: 'Runtime context could not be written because context provenance for "requirements" was missing.'
                 },
-                stderr: 'Context packet could not be written because context provenance for "requirements" was missing.'
+                stderr: 'Runtime context could not be written because context provenance for "requirements" was missing.',
+                metadata: {
+                    failure_code: "context_contract_failure"
+                }
             }
         })).toEqual(expect.objectContaining({
             class: "context_contract_failure",
@@ -71,8 +82,19 @@ describe("supervisor failure classifier", () => {
             recommended_action: "rebuild_context"
         }));
     });
-    it("classifies missing declared artifacts as artifact failures", () => {
-        expect(classify({ error_message: "Required artifact contract is missing: summary at summary.md" })).toEqual(expect.objectContaining({
+    it("classifies structured missing declared artifacts as artifact failures", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: "Required artifact contract is missing: summary at summary.md"
+                },
+                metadata: {
+                    failure_code: "artifact_contract_failure"
+                }
+            }
+        })).toEqual(expect.objectContaining({
             class: "artifact_contract_failure",
             retryable: true,
             recommended_action: "repair_artifact",
@@ -84,10 +106,28 @@ describe("supervisor failure classifier", () => {
                 ])
             })
         }));
-        expect(classify({ error_message: 'Required output_dir artifact "implementation_summary" is missing at agent-implementation-summary.md.' })).toEqual(expect.objectContaining({
-            class: "artifact_contract_failure",
+    });
+    it("classifies runtime failure codes carried in the result payload", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: "Runtime tool wrapper setup failed.",
+                    failure_code: "tool_wrapper_unavailable"
+                }
+            }
+        })).toEqual(expect.objectContaining({
+            class: "harness_unavailable",
             retryable: true,
-            recommended_action: "repair_artifact"
+            recommended_action: "run_diagnostic"
+        }));
+    });
+    it("keeps old artifact failure text generic without structured metadata", () => {
+        expect(classify({ error_message: 'Required output_dir artifact "implementation_summary" is missing at agent-implementation-summary.md.' })).toEqual(expect.objectContaining({
+            class: "unknown",
+            retryable: true,
+            recommended_action: "retry_with_guidance"
         }));
     });
     it("classifies incomplete completion packets as current-node retry failures", () => {
@@ -116,7 +156,7 @@ describe("supervisor failure classifier", () => {
             })
         }));
     });
-    it("classifies blocked completion packets as human-authority pauses", () => {
+    it("treats blocked completion packets without trusted authority as completion failures", () => {
         expect(classify({
             result: {
                 status: "failed",
@@ -130,22 +170,74 @@ describe("supervisor failure classifier", () => {
                 }
             }
         })).toEqual(expect.objectContaining({
-            class: "operator_pause",
-            retryable: false,
-            recommended_action: "pause_for_human",
+            class: "completion_contract_failure",
+            retryable: true,
+            recommended_action: "retry_with_guidance",
             summary: "Export proof requires operator-managed backend worker."
         }));
     });
-    it("classifies harness no-op artifact misses as harness failures", () => {
+    it("classifies trusted authority requests as authority-required pauses", () => {
         expect(classify({
-            error_message: "Agent harness produced no final response while required declared artifacts are missing: implementation_summary at agent-implementation-summary.md. This is a harness/no-op failure, not an artifact repair candidate."
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    completion: {
+                        completion_status: "blocked",
+                        blocking_reasons: ["Cursor CLI requires login before it can run."],
+                        authority_requests: [missingHarnessAuthRequest],
+                        packet_path: "/tmp/execution/completion-packet.json"
+                    }
+                }
+            }
         })).toEqual(expect.objectContaining({
-            class: "harness_unavailable",
+            class: "authority_required",
             retryable: false,
-            recommended_action: "pause_for_human"
+            recommended_action: "pause_for_authority",
+            evidence: expect.objectContaining({
+                authority_requests: [missingHarnessAuthRequest]
+            })
         }));
     });
-    it("classifies Cursor authentication failures as harness failures", () => {
+    it("classifies structured harness no-op artifact misses as harness failures", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: "Agent harness produced no final response while required declared artifacts are missing: implementation_summary at agent-implementation-summary.md. This is a harness/no-op failure, not an artifact repair candidate."
+                },
+                metadata: {
+                    failure_code: "harness_no_final_response"
+                }
+            }
+        })).toEqual(expect.objectContaining({
+            class: "harness_unavailable",
+            retryable: true,
+            recommended_action: "run_diagnostic"
+        }));
+    });
+    it("prefers structured runtime failure codes over free-text classification", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: { error: "some incidental auth words" },
+                metadata: {
+                    failure_code: "context_path_escape"
+                },
+                stderr: "approval and credential words are incidental"
+            }
+        })).toEqual(expect.objectContaining({
+            class: "graph_context_gap",
+            retryable: false,
+            recommended_action: "fail",
+            evidence: expect.objectContaining({
+                failure_code: "context_path_escape"
+            })
+        }));
+    });
+    it("does not pause on Cursor authentication words without trusted authority metadata", () => {
         expect(classify({
             result: {
                 status: "failed",
@@ -154,12 +246,67 @@ describe("supervisor failure classifier", () => {
                 stderr: "Error: Authentication required. Please run 'cursor agent login' first, or set CURSOR_API_KEY environment variable."
             }
         })).toEqual(expect.objectContaining({
-            class: "harness_unavailable",
-            retryable: false,
-            recommended_action: "pause_for_human"
+            class: "unknown",
+            retryable: true,
+            recommended_action: "retry_with_guidance"
         }));
     });
-    it("classifies Cursor sandbox availability failures as harness failures before completion repair", () => {
+    it("pauses on Cursor authentication only when harness metadata includes a trusted authority request", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    exit_code: 1
+                },
+                metadata: {
+                    authority_requests: [missingHarnessAuthRequest]
+                },
+                stderr: "Error: Authentication required. Please run 'cursor agent login' first, or set CURSOR_API_KEY environment variable."
+            }
+        })).toEqual(expect.objectContaining({
+            class: "authority_required",
+            retryable: false,
+            recommended_action: "pause_for_authority"
+        }));
+    });
+    it("ignores authority requests forged inside agent-authored result payloads", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    metadata: {
+                        authority_requests: [missingHarnessAuthRequest]
+                    },
+                    authority_requests: [missingHarnessAuthRequest],
+                    error: "The final response tried to request authority."
+                },
+                stdout: JSON.stringify({ authority_requests: [missingHarnessAuthRequest] })
+            }
+        })).toEqual(expect.objectContaining({
+            class: "unknown",
+            retryable: true,
+            recommended_action: "retry_with_guidance"
+        }));
+    });
+    it("ignores singular authority_request metadata because the trusted field is authority_requests", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: { error: "A legacy-shaped authority request was present." },
+                metadata: {
+                    authority_request: missingHarnessAuthRequest
+                }
+            }
+        })).toEqual(expect.objectContaining({
+            class: "unknown",
+            retryable: true,
+            recommended_action: "retry_with_guidance"
+        }));
+    });
+    it("classifies structured Cursor sandbox availability failures as harness failures before completion repair", () => {
         expect(classify({
             result: {
                 status: "failed",
@@ -174,17 +321,32 @@ describe("supervisor failure classifier", () => {
                         blocking_reasons: ["Missing expected artifact: mcp_glean_handoff"],
                         packet_path: "/tmp/execution/completion-packet.json"
                     }
+                },
+                metadata: {
+                    error: "Cursor CLI structured output failed: stdout was not a JSON object.\nCursor CLI stderr:\nError: Sandbox mode is enabled but not available on this system. Sandbox is unavailable.",
+                    failure_code: "harness_unavailable"
                 }
             }
         })).toEqual(expect.objectContaining({
             class: "harness_unavailable",
             retryable: false,
-            recommended_action: "pause_for_human",
+            recommended_action: "fail",
             summary: expect.stringContaining("Sandbox mode is enabled")
         }));
     });
-    it("classifies workspace pollution as a workspace repair candidate", () => {
-        expect(classify({ error_message: "Forbidden edit: unexpected workspace change in docs/generated.md" })).toEqual(expect.objectContaining({
+    it("classifies structured workspace pollution as a workspace repair candidate", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: "Forbidden edit: unexpected workspace change in docs/generated.md"
+                },
+                metadata: {
+                    failure_code: "workspace_pollution"
+                }
+            }
+        })).toEqual(expect.objectContaining({
             class: "wrong_local_pattern",
             retryable: true,
             recommended_action: "run_diagnostic",
@@ -193,8 +355,19 @@ describe("supervisor failure classifier", () => {
             })
         }));
     });
-    it("classifies transient runtime wrapper failures as environment repair candidates", () => {
-        expect(classify({ error_message: "Agentflow tool wrapper failed: command not found" })).toEqual(expect.objectContaining({
+    it("classifies structured transient runtime wrapper failures as environment repair candidates", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: "Agentflow tool wrapper failed: command not found"
+                },
+                metadata: {
+                    failure_code: "tool_wrapper_unavailable"
+                }
+            }
+        })).toEqual(expect.objectContaining({
             class: "harness_unavailable",
             retryable: true,
             recommended_action: "run_diagnostic",
@@ -203,8 +376,33 @@ describe("supervisor failure classifier", () => {
             })
         }));
     });
-    it("classifies context resolution errors as context failures", () => {
-        expect(classify({ error_message: "Required context item could not be resolved." })).toEqual(expect.objectContaining({
+    it("keeps generic command-not-found text as generic retry evidence", () => {
+        expect(classify({ error_message: "bash: prompt-validate: command not found" })).toEqual(expect.objectContaining({
+            class: "unknown",
+            retryable: true,
+            recommended_action: "retry_with_guidance"
+        }));
+    });
+    it("keeps generic harness wording as generic retry evidence", () => {
+        expect(classify({ error_message: "The prior harness output mentioned a missing artifact, but no structured failure code was recorded." })).toEqual(expect.objectContaining({
+            class: "unknown",
+            retryable: true,
+            recommended_action: "retry_with_guidance"
+        }));
+    });
+    it("classifies structured context resolution errors as context failures", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: "Required context item could not be resolved."
+                },
+                metadata: {
+                    failure_code: "unresolved_context"
+                }
+            }
+        })).toEqual(expect.objectContaining({
             class: "missing_context",
             recommended_action: "rebuild_context",
             gather_plan: expect.objectContaining({
@@ -216,14 +414,55 @@ describe("supervisor failure classifier", () => {
             })
         }));
     });
-    it("classifies workspace path escapes as policy breaches instead of retryable context failures", () => {
+    it("classifies structured workspace path escapes as policy breaches instead of retryable context failures", () => {
         expect(classify({
-            error_message: 'Context path "../secret.txt" must be a relative path that stays within its repo or workspace root.'
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: 'Context path "../secret.txt" must be a relative path that stays within its repo or workspace root.'
+                },
+                metadata: {
+                    failure_code: "context_path_escape"
+                }
+            }
         })).toEqual(expect.objectContaining({
-            class: "policy_or_scope_risk",
+            class: "graph_context_gap",
             retryable: false,
-            recommended_action: "pause_for_human"
+            recommended_action: "fail"
         }));
+    });
+    it("does not pause on free-text authority lexicon", () => {
+        for (const message of [
+            "Approval is required to continue, but the agent can instead gather local evidence.",
+            "Credential docs mention auth scope, but no trusted runtime authority request exists.",
+            "Human review would be useful, but the node can retry with validation evidence.",
+            "Blocked by ambiguous scope wording in the README."
+        ]) {
+            expect(classify({ error_message: message })).toEqual(expect.objectContaining({
+                retryable: true,
+                recommended_action: "retry_with_guidance"
+            }));
+        }
+    });
+    it("keeps old specialized recovery trigger phrases generic without structured metadata", () => {
+        for (const message of [
+            "Graph context gap: required graph context is missing.",
+            "Unprovable requirement: no available evidence can prove the claim.",
+            "Non-recoverable graph contract violation.",
+            "Agent harness produced no final response.",
+            "Agentflow tool wrapper failed.",
+            "Forbidden edit: unexpected workspace change.",
+            "Required context item could not be resolved.",
+            'codex-cli harness binary "codex" is unavailable.',
+            "Required artifact contract is missing: summary at summary.md"
+        ]) {
+            expect(classify({ error_message: message })).toEqual(expect.objectContaining({
+                class: "unknown",
+                retryable: true,
+                recommended_action: "retry_with_guidance"
+            }));
+        }
     });
     it("does not classify incidental context mentions as context-resolution failures", () => {
         expect(classify({ error_message: "Model failed because the context window was exhausted." })).toEqual(expect.objectContaining({
@@ -231,7 +470,7 @@ describe("supervisor failure classifier", () => {
             recommended_action: "retry_with_guidance"
         }));
     });
-    it("uses failed harness stderr when no structured error is available", () => {
+    it("keeps path-escape stderr generic when no structured error is available", () => {
         expect(classify({
             result: {
                 status: "failed",
@@ -243,15 +482,27 @@ describe("supervisor failure classifier", () => {
                 stderr: "operation escapes the workspace\n"
             }
         })).toEqual(expect.objectContaining({
-            class: "policy_or_scope_risk",
-            retryable: false,
-            recommended_action: "pause_for_human"
+            class: "unknown",
+            retryable: true,
+            recommended_action: "retry_with_guidance"
         }));
     });
-    it("classifies harness readiness errors as harness failures", () => {
-        expect(classify({ error_message: 'codex-cli harness binary "codex" is unavailable.' })).toEqual(expect.objectContaining({
+    it("classifies structured harness readiness errors as harness failures", () => {
+        expect(classify({
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: 'codex-cli harness binary "codex" is unavailable.'
+                },
+                metadata: {
+                    failure_code: "harness_unavailable"
+                }
+            }
+        })).toEqual(expect.objectContaining({
             class: "harness_unavailable",
-            recommended_action: "pause_for_human"
+            retryable: false,
+            recommended_action: "fail"
         }));
     });
     it("does not classify generic unavailable resources as harness failures", () => {
@@ -269,6 +520,13 @@ describe("supervisor failure classifier", () => {
                     expect.objectContaining({ kind: "diagnostic_probe" })
                 ])
             })
+        }));
+    });
+    it("keeps timeout words generic without structured timeout metadata", () => {
+        expect(classify({ error_message: "The task timed out while waiting for a server." })).toEqual(expect.objectContaining({
+            class: "unknown",
+            retryable: true,
+            recommended_action: "retry_with_guidance"
         }));
     });
     it("classifies failed deterministic checks as diagnostic-needed failures", () => {
@@ -336,7 +594,8 @@ describe("supervisor failure classifier", () => {
             } as RuntimeNodeExecutionResult
         })).toEqual(expect.objectContaining({
             class: "policy_or_scope_risk",
-            recommended_action: "pause_for_human"
+            retryable: false,
+            recommended_action: "fail"
         }));
     });
     it("classifies outcome verifier failures as semantic misalignment with semantic rejudge evidence", () => {
@@ -447,24 +706,124 @@ describe("supervisor failure classifier", () => {
             node,
             error_message: "Operator denied the checkpoint."
         })).toEqual(expect.objectContaining({
-            class: "operator_pause",
+            class: "authority_required",
             retryable: false,
-            recommended_action: "pause_for_human"
+            recommended_action: "pause_for_authority",
+            evidence: expect.objectContaining({
+                authority_requests: expect.arrayContaining([
+                    expect.objectContaining({
+                        kind: "planned_checkpoint",
+                        source: "checkpoint"
+                    })
+                ])
+            })
         }));
     });
-    it("classifies dependency documentation gaps into external and metadata gathers", () => {
+    it("keeps dependency-doc free text generic without verifier category evidence", () => {
         expect(classify({
             error_message: "Build failed because the zod v4 API changed; missing dependency docs for package zod."
+        })).toEqual(expect.objectContaining({
+            class: "unknown",
+            recommended_action: "retry_with_guidance"
+        }));
+    });
+    it("classifies verifier dependency documentation categories into external and metadata gathers", () => {
+        expect(classify({
+            result: {
+                status: "passed",
+                outcome: "failed",
+                result: {
+                    outcome_verification: {
+                        passed: false,
+                        summary: "Verifier rejected the attempt because dependency documentation is missing.",
+                        findings: [
+                            {
+                                severity: "blocker",
+                                category: "missing_dependency_docs",
+                                evidence: "The handoff cites an unverified zod v4 API.",
+                                recommendation: "Gather version-matched zod v4 docs before retrying."
+                            }
+                        ],
+                        blockers: [
+                            {
+                                severity: "blocker",
+                                category: "missing_dependency_docs",
+                                evidence: "The handoff cites an unverified zod v4 API.",
+                                recommendation: "Gather version-matched zod v4 docs before retrying."
+                            }
+                        ]
+                    }
+                }
+            }
         })).toEqual(expect.objectContaining({
             class: "missing_dependency_docs",
             recommended_action: "rebuild_context",
             gather_plan: expect.objectContaining({
-                max_parallel: 2,
+                max_parallel: 3,
                 gathers: expect.arrayContaining([
                     expect.objectContaining({ kind: "dependency_metadata" }),
                     expect.objectContaining({ kind: "external_context" })
                 ])
             })
+        }));
+    });
+    it("classifies structured verifier terminal and recovery categories without summary text parsing", () => {
+        const classifyVerifierCategory = (category: string) => classify({
+            result: {
+                status: "passed",
+                outcome: "failed",
+                result: {
+                    outcome_verification: {
+                        passed: false,
+                        summary: "Verifier rejected the attempt.",
+                        findings: [
+                            {
+                                severity: "blocker",
+                                category,
+                                evidence: "Structured category evidence.",
+                                recommendation: "Use the category, not the summary text."
+                            }
+                        ],
+                        blockers: [
+                            {
+                                severity: "blocker",
+                                category,
+                                evidence: "Structured category evidence.",
+                                recommendation: "Use the category, not the summary text."
+                            }
+                        ]
+                    }
+                }
+            }
+        });
+
+        expect(classifyVerifierCategory("unprovable_requirement")).toEqual(expect.objectContaining({
+            class: "unprovable_requirement",
+            retryable: false,
+            recommended_action: "fail"
+        }));
+        expect(classifyVerifierCategory("graph_contract_gap")).toEqual(expect.objectContaining({
+            class: "graph_context_gap",
+            retryable: false,
+            recommended_action: "fail"
+        }));
+        expect(classifyVerifierCategory("workspace_pollution")).toEqual(expect.objectContaining({
+            class: "wrong_local_pattern",
+            retryable: true,
+            recommended_action: "run_diagnostic",
+            evidence: expect.objectContaining({
+                workspace_repair_candidate: true
+            })
+        }));
+        expect(classifyVerifierCategory("policy_or_scope_risk")).toEqual(expect.objectContaining({
+            class: "policy_or_scope_risk",
+            retryable: false,
+            recommended_action: "fail"
+        }));
+        expect(classifyVerifierCategory("non_recoverable_contract")).toEqual(expect.objectContaining({
+            class: "non_recoverable",
+            retryable: false,
+            recommended_action: "fail"
         }));
     });
     it("escalates repeated same-fingerprint failures to stronger parallel gathers", () => {
@@ -490,9 +849,18 @@ describe("supervisor failure classifier", () => {
             })
         }));
     });
-    it("classifies explicitly non-recoverable failures without evidence gathers", () => {
+    it("classifies structured non-recoverable failures without evidence gathers", () => {
         expect(classify({
-            error_message: "Non-recoverable graph contract violation: declared artifact target is impossible without changing graph intent."
+            result: {
+                status: "failed",
+                outcome: "failed",
+                result: {
+                    error: "Non-recoverable graph contract violation: declared artifact target is impossible without changing graph intent."
+                },
+                metadata: {
+                    failure_code: "non_recoverable_contract"
+                }
+            }
         })).toEqual(expect.objectContaining({
             class: "non_recoverable",
             retryable: false,

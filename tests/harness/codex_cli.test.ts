@@ -186,8 +186,8 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-codex",
         nodeGoal: "Read from env override.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -258,8 +258,8 @@ describe("codex cli harness", () => {
         reasoningEffort: "xhigh",
         graphGoal: "Ship the larger change safely.",
         nodeGoal: "Implement the change.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "# Context Manifest\n\n- Pointer items: `1`\n",
         outputDir,
         artifacts: {
@@ -317,28 +317,28 @@ describe("codex cli harness", () => {
       expect(prompt.indexOf("## Success Contract")).toBeLessThan(prompt.indexOf("## Graph Context"));
       expect(prompt).toContain("## Context");
       expect(prompt).toContain("# Context Manifest");
-      expect(prompt).toContain("Context packet:");
-      expect(prompt).toContain(join(executionDir, "context", "packet.json"));
-      expect(prompt).toContain("Context provenance:");
+      expect(prompt).not.toContain("Context packet:");
+      expect(prompt).not.toContain(join(executionDir, "runtime", "context.json"));
+      expect(prompt).not.toContain("Context provenance:");
       expect(prompt).toContain("Output directory");
       expect(prompt).toContain("Sandbox: workspace-write - edit files in the workspace");
       expect(prompt).toContain("## Declared Artifacts");
       expect(prompt).toContain("Every declared artifact must exist before you finish");
       expect(prompt).toContain("| `handoff` |");
-      expect(prompt).toContain(`${outputDir}/handoff.md`);
+      expect(prompt).toContain("`af artifact write handoff`");
       expect(prompt).not.toContain("$AGENTFLOW_OUTPUT_DIR/handoff.md");
       expect(prompt).toContain("Markdown handoff for downstream nodes.");
       expect(prompt).toContain("| `junit` |");
-      expect(prompt).toContain(`${repoDir}/reports/junit.xml`);
       expect(prompt).not.toContain("$AGENTFLOW_WORKSPACE/reports/junit.xml");
       expect(prompt).toContain("JUnit XML report written by the workspace validation command.");
+      expect(prompt).not.toContain(`${repoDir}/reports/junit.xml`);
       expect(prompt).toContain("## Completion Gate");
       expect(prompt).toContain("captured as the reserved `agent_response` artifact");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,
-        AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
-        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md"),
+        AGENTFLOW_CONTEXT_PACKET: join(executionDir, "runtime", "context.json"),
+        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "agent", "context.md"),
         AGENTFLOW_RUNTIME_DIR: runtimeDir,
         CODEX_HOME: expect.stringContaining("agentflow-codex-home-")
       });
@@ -402,8 +402,8 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-codex",
         nodeGoal: "Use declared harness-native tools.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -503,8 +503,8 @@ describe("codex cli harness", () => {
           CODEX_CI: "1"
         },
         nodeGoal: "Use the local Codex configuration.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -576,8 +576,8 @@ describe("codex cli harness", () => {
           CODEX_CI: "1"
         },
         nodeGoal: "Complete without ambient Codex session state.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -636,8 +636,8 @@ describe("codex cli harness", () => {
           CODEX_HOME: userCodexHome
         },
         nodeGoal: "Verify the outcome.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -705,8 +705,8 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "auto",
         nodeGoal: "Use the harness default model.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -756,8 +756,8 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-codex",
         nodeGoal: "Hang forever.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -799,8 +799,8 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-codex",
         nodeGoal: "Exit abruptly.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -843,8 +843,8 @@ describe("codex cli harness", () => {
           sandbox: "workspace-write",
           model: "gpt-5-codex",
           nodeGoal: "This should fail fast.",
-          contextPacketPath: join(executionDir, "context", "packet.json"),
-          contextManifestPath: join(executionDir, "context", "manifest.md"),
+          contextPacketPath: join(executionDir, "runtime", "context.json"),
+          contextManifestPath: join(executionDir, "agent", "context.md"),
           contextManifest: "",
           outputDir: executionDir,
           artifacts: {},
@@ -881,8 +881,8 @@ describe("codex cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-codex",
         nodeGoal: "Stream logs.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},

@@ -1,6 +1,6 @@
 # Managed Patterns
 
-Use managed patterns when the lifecycle is standard and the operator wants inspectable lowered nodes with public artifacts.
+Use managed patterns when the lifecycle is standard and the operator wants inspectable lowered nodes with public artifacts. For how parent fields lower into the actual AI prompts, see `prompt-translation.md`.
 
 ## `pattern_deep_research`
 
@@ -14,7 +14,9 @@ Good for:
 - reviewing a work product
 - run postmortems
 
-Angles should be sentence-style prompts. Graph-addressable outputs are `summary`, `packet`, and any angle reports selected with `as_artifact: true`. Downstream nodes should reference artifacts from the authored pattern id.
+Angles should be controlling axes, not generic subtopics. Good angles name the assigned lens and evidence boundary, such as product contract, privacy/access contract, API convention fit, UI workflow rehearsal, correctness findings, code-quality findings, or risk register.
+
+Graph-addressable output is `summary` by default. Use object-form angles with `id`, `prompt`, and `as_artifact: true` to expose selected raw angle reports when downstream nodes need them. There is no public `packet` artifact for deep research.
 
 ## `pattern_deep_work`
 
@@ -28,7 +30,7 @@ Good for:
 - docs plus code changes
 - bounded cleanup
 
-Completion criteria should mix hard commands when stable and rubric criteria when correctness is semantic. Required criteria are blockers. Weights should reflect the evidence that matters, not equal distribution by habit.
+Completion criteria should mix hard commands when stable and rubric criteria when correctness is semantic. Required criteria are blockers. Weights should reflect the evidence that matters, not equal distribution by habit. For code work, include convention fit, no AI slop, validation evidence, and handoff quality when those are material to success.
 
 ## `pattern_work_list`
 
@@ -41,6 +43,8 @@ Good for:
 - documentation passes
 - audit findings
 - cleanup lists with bounded scope
+
+Author `what_counts_as_one_item` and `done_when` in domain terms. If items are PR branches, say branch/base/PR readiness; if migrations, say batch boundary, rollback, and validation; if docs, say reader outcome and review evidence. Do not hard-code the item count when discovery owns it.
 
 The planner writes `work-list.md` and `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Agents do not check off items manually. Runtime records item status in the ledger and publishes stable public artifacts: `summary`, `packet`, and `work_items`.
 

@@ -9,7 +9,13 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
-import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
+import {
+    resolveExecutionArtifactsDirectory,
+    resolveExecutionHumanDebugVerifierDirectory,
+    resolveExecutionRuntimeCompletionPacketPath,
+    resolveExecutionRuntimeSupervisorDirectory,
+    resolveExecutionRuntimeVerifierPath
+} from "../../src/artifacts/paths.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
 import { readExecutionManifest } from "../../src/artifacts/reader.js";
@@ -151,8 +157,8 @@ describe("runtime engine outcome verification", () => {
             verifier_harness: "codex-cli"
         }));
         const attempt = run.attempts[0]!;
-        const verifyJsonPath = join(attempt.execution_dir, "verify-outcome.json");
-        const verifyMdPath = join(attempt.execution_dir, "verify-outcome.md");
+        const verifyJsonPath = resolveExecutionRuntimeVerifierPath(attempt.execution_dir);
+        const verifyMdPath = join(resolveExecutionHumanDebugVerifierDirectory(attempt.execution_dir), "verdict.md");
         const parsed = JSON.parse(await readFile(verifyJsonPath, "utf8")) as {
             passed: boolean;
             verifier_metadata: {
@@ -231,7 +237,7 @@ describe("runtime engine outcome verification", () => {
         const attempt = run.attempts[0]!;
         const expectedArtifact = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "handoff.md");
         await expect(readFile(expectedArtifact, "utf8")).rejects.toThrow();
-        const packet = JSON.parse(await readFile(join(attempt.execution_dir, "completion-packet.json"), "utf8")) as {
+        const packet = JSON.parse(await readFile(resolveExecutionRuntimeCompletionPacketPath(attempt.execution_dir), "utf8")) as {
             completion_status: string;
             missing_artifacts: string[];
         };
@@ -417,7 +423,7 @@ describe("runtime engine outcome verification", () => {
         expect(verifierPrompt).toContain("irreducible_external_blocker");
         const attempt = run.attempts.find((entry) => entry.authored_id === "publish_pr");
         expect(attempt).toBeDefined();
-        const payload = JSON.parse(await readFile(join(attempt!.execution_dir, "verify-outcome.json"), "utf8")) as {
+        const payload = JSON.parse(await readFile(resolveExecutionRuntimeVerifierPath(attempt!.execution_dir), "utf8")) as {
             verifier_metadata: {
                 decision_log_count?: number;
             };
@@ -446,8 +452,7 @@ describe("runtime engine outcome verification", () => {
                     claims: ["Verifier rejection is actionable without changing the graph contract."],
                     retry_guidance: ["Fix the incorrect output before the next handoff."],
                     conflicts: [],
-                    confidence: "high",
-                    scope_or_authority_changed: false
+                    confidence: "high"
                 }));
             }
             agentCalls += 1;
@@ -474,11 +479,11 @@ describe("runtime engine outcome verification", () => {
         const implementAttempts = run.attempts.filter((attempt) => attempt.authored_id === "implement");
         expect(implementAttempts.map((attempt) => attempt.outcome)).toEqual(["failed", "passed"]);
         const failingAttempt = implementAttempts[0]!;
-        const failingPayload = JSON.parse(await readFile(join(failingAttempt.execution_dir, "verify-outcome.json"), "utf8")) as {
+        const failingPayload = JSON.parse(await readFile(resolveExecutionRuntimeVerifierPath(failingAttempt.execution_dir), "utf8")) as {
             passed: boolean;
         };
         expect(failingPayload.passed).toBe(false);
-        const planPath = join(failingAttempt.execution_dir, "interventions", `${failingAttempt.execution_id}__semantic_evaluation`, "recovery-plan.md");
+        const planPath = join(resolveExecutionRuntimeSupervisorDirectory(failingAttempt.execution_dir), `${failingAttempt.execution_id}__semantic_evaluation`, "recovery-plan.json");
         const planText = await readFile(planPath, "utf8").catch(() => undefined);
         if (planText) {
             expect(planText).toContain("Agent claimed success but the work is wrong.");
@@ -540,7 +545,7 @@ describe("runtime engine outcome verification", () => {
         });
         const failedAttempt = run.attempts.find((attempt) => attempt.authored_id === "implement");
         expect(failedAttempt).toBeDefined();
-        const payload = JSON.parse(await readFile(join(failedAttempt!.execution_dir, "verify-outcome.json"), "utf8")) as {
+        const payload = JSON.parse(await readFile(resolveExecutionRuntimeVerifierPath(failedAttempt!.execution_dir), "utf8")) as {
             passed: boolean;
             verifier_metadata: {
                 parse_status: string;
@@ -574,7 +579,7 @@ describe("runtime engine outcome verification", () => {
         });
         const failedAttempt = run.attempts.find((attempt) => attempt.authored_id === "implement");
         expect(failedAttempt).toBeDefined();
-        const payload = JSON.parse(await readFile(join(failedAttempt!.execution_dir, "verify-outcome.json"), "utf8")) as {
+        const payload = JSON.parse(await readFile(resolveExecutionRuntimeVerifierPath(failedAttempt!.execution_dir), "utf8")) as {
             passed: boolean;
             verifier_metadata: {
                 parse_error?: string;
