@@ -11,6 +11,17 @@ describe("validate:confidence contract", () => {
       { name: "smoke gate", script: "validate:smoke" },
       { name: "coverage policy", script: "test:coverage" }
     ]);
+    expect(confidenceModule.releaseConfidenceCommandChecks.map((check: { command: string }) => check.command)).toEqual([
+      "npm run typecheck",
+      "npm test",
+      "npm run build",
+      "npm run validate:smoke",
+      "npm run test:coverage",
+      "npm run validate:prompts",
+      "npm run setup:validation-evals",
+      "node dist/cli/index.js eval validate evals/agentflow-validation",
+      "node dist/cli/index.js eval run evals/agentflow-validation --variant current --scenario all --trials 3 --concurrency 2"
+    ]);
     expect(confidenceModule.confidenceResidualRisks).toEqual([
       "operator artifact inspection remains unproven beyond deterministic file and JSON assertions",
       "real harness behavior stays unproven unless validate:real-harness is also run",
@@ -86,6 +97,7 @@ describe("validate:confidence contract", () => {
     expect(packageJson.scripts["test:coverage"]).toBe("node scripts/test-coverage.mjs");
     expect(packageJson.scripts["validate:smoke"]).toBe("node scripts/validate-smoke.mjs");
     expect(packageJson.scripts["validate:confidence"]).toBe("node scripts/validate-confidence.mjs");
+    expect(packageJson.scripts["validate:release-confidence"]).toBe("node scripts/validate-confidence.mjs --release");
     expect(packageJson.scripts["validate:real-harness"]).toBe("node scripts/validate-real-harness.mjs");
   });
 });

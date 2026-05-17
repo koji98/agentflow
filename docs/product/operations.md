@@ -197,6 +197,14 @@ agentflow eval run evals/agentflow-capability-workflows --variant current --scen
 
 Run `validate` before `run`; it catches missing scenario files, graph templates, variant files, criteria, rubrics, scripts, and environment fixtures before any expensive harness work starts.
 
+Use simulated sentinels as regression gates, not as release proof. Release-confidence claims require:
+
+```bash
+npm run validate:release-confidence
+```
+
+That command runs the standard checks, validates the sentinel suite, and runs all five validation sentinels with three trials. Do not claim production or release confidence from unit tests, build output, smoke validation, prompt validation, or simulated sentinel runs alone.
+
 Review eval output in this order:
 
 1. `<eval-root>/report.md`

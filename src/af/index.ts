@@ -272,8 +272,11 @@ async function readJsonFile<T>(path: string): Promise<T> {
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true });
+  const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(tempPath, path);
 }
 
 async function appendJsonl(path: string, value: unknown): Promise<void> {
@@ -995,85 +998,85 @@ const learnPlaybooks: Record<LearnKind, {
   purpose: string;
   inspect: string[];
   safe_repairs: string[];
-  pause_boundaries: string[];
+  contract_boundaries: string[];
 }> = {
   semantic_rejection: {
     purpose: "Recover when an agent claimed success but semantic verification rejected the outcome.",
     inspect: ["exact failed prompt", "verifier findings", "declared artifacts", "workspace diff", "node acceptance criteria"],
     safe_repairs: ["retry the responsible node with verifier blockers first", "repair missing or weak artifacts", "add focused validation evidence"],
-    pause_boundaries: ["product intent ambiguity", "scope expansion beyond the node contract"]
+    contract_boundaries: ["product intent ambiguity fails contractually unless the graph is intentionally amended", "scope expansion beyond the node contract is outside recovery authority"]
   },
   failed_check: {
     purpose: "Recover when an exec/check gate detects a failed condition.",
     inspect: ["stdout/stderr", "check goal", "upstream cone", "artifact producers", "workspace state"],
     safe_repairs: ["repair nearest upstream producer", "change validation strategy after timeout", "rerun the same gate after material delta"],
-    pause_boundaries: ["credential requirements", "graph contract amendment"]
+    contract_boundaries: ["credential requirements require trusted typed authority metadata", "graph contract amendments are operator-owned changes outside runtime recovery"]
   },
   context_contract_failure: {
     purpose: "Recover when context pointers cannot be resolved within the node contract.",
     inspect: ["agent context brief", "largest matched files", "broad glob samples", "ignored paths", "pointer provenance"],
     safe_repairs: ["replace unresolved context with compact index and live paths", "preserve omitted-file provenance", "retry with repaired pointer context"],
-    pause_boundaries: ["needed context is outside repo/sandbox authority"]
+    contract_boundaries: ["context outside repo or sandbox authority fails as a graph context gap unless trusted authority is already present"]
   },
   missing_artifact: {
     purpose: "Recover when a declared artifact was not produced.",
     inspect: ["artifact declaration", "agent response", "producer logs"],
     safe_repairs: ["repair artifact from existing evidence", "retry producer with artifact contract first", "rerun downstream gate"],
-    pause_boundaries: ["artifact requires new product decision"]
+    contract_boundaries: ["artifact content that requires a new product decision fails contractually instead of inventing intent"]
   },
   bad_artifact: {
     purpose: "Recover when an artifact exists but fails downstream quality or contract checks.",
     inspect: ["artifact content", "downstream failure evidence", "producer prompt", "acceptance criteria"],
     safe_repairs: ["repair producer stage", "repair artifact if source evidence is sufficient", "rerun consumer gate"],
-    pause_boundaries: ["artifact meaning is ambiguous"]
+    contract_boundaries: ["artifact meaning that cannot be proven from graph evidence fails as an unprovable requirement"]
   },
   workspace_pollution: {
     purpose: "Recover from unrelated or forbidden workspace edits.",
     inspect: ["node snapshot diff", "forbidden changed files", "declared scope", "git status"],
     safe_repairs: ["restore failed-attempt-owned unrelated edits", "retry with narrow scope guidance"],
-    pause_boundaries: ["edits may belong to the user or another active branch"]
+    contract_boundaries: ["edits not owned by the failed attempt must not be reverted by runtime repair"]
   },
   dependency_docs: {
     purpose: "Recover when missing dependency/API knowledge caused the failure.",
     inspect: ["package manifests", "lockfiles", "versions", "official docs", "release notes"],
     safe_repairs: ["gather read-only external docs", "cite version-matched source", "retry with docs evidence"],
-    pause_boundaries: ["new dependency adoption", "license/security approval"]
+    contract_boundaries: ["new dependency adoption or license/security approval requires graph-level authority or fails with evidence"]
   },
   tool_or_environment_failure: {
     purpose: "Recover safe local runtime/tool setup issues.",
     inspect: ["PATH", "tool wrapper metadata", "command availability", "runtime dirs"],
     safe_repairs: ["regenerate wrappers", "refresh PATH metadata", "run local non-global diagnostics"],
-    pause_boundaries: ["global installation", "credentials", "network/service authority"]
+    contract_boundaries: ["global installation, credentials, or network/service authority require trusted typed authority metadata or fail with evidence"]
   },
   harness_failure: {
-    purpose: "Recover or pause when the selected agent harness is unavailable.",
+    purpose: "Recover when the selected agent harness is unavailable under the current runtime contract.",
     inspect: ["harness binary", "auth/login state", "harness stderr", "profile selection"],
     safe_repairs: ["retry after transient launch failure", "use configured supervisor profile for diagnostics"],
-    pause_boundaries: ["login/auth required", "harness binary missing"]
+    contract_boundaries: ["login/auth gaps require trusted harness authority metadata", "missing harness binaries fail contractually when no local repair is available"]
   },
   repeat_loop_failure: {
     purpose: "Recover when a repeat loop exhausts or repeats without progress.",
     inspect: ["iteration scorecards", "repeat body outputs", "until check evidence", "material deltas"],
     safe_repairs: ["repair the earliest failing cycle cause", "change tactic before another iteration", "rerun until gate"],
-    pause_boundaries: ["completion criteria are impossible or underspecified"]
+    contract_boundaries: ["impossible or underspecified completion criteria fail as a graph contract gap"]
   },
   managed_pattern_failure: {
     purpose: "Recover failed internal managed-pattern phases while preserving the public node contract.",
     inspect: ["managed phase", "cycle", "public artifacts", "scorecards", "internal logs"],
     safe_repairs: ["repair internal phase under public contract", "rerun completion criterion", "repair final public artifact"],
-    pause_boundaries: ["pattern contract needs graph amendment"]
+    contract_boundaries: ["managed-pattern contract amendments are graph changes, not runtime recovery"]
   },
   external_service_error: {
     purpose: "Distinguish remote service outages from code or workflow failures.",
     inspect: ["HTTP status", "retry-after headers", "local evidence already gathered", "side effects"],
     safe_repairs: ["preserve local evidence", "retry only remote proof later", "avoid modifying code for outage symptoms"],
-    pause_boundaries: ["credentials", "rate-limit policy", "external side-effect approval"]
+    contract_boundaries: ["credentials, rate-limit policy, and external side-effect approval require trusted typed authority metadata"]
   },
   unknown_failure: {
     purpose: "Recover unclassified failures by forming a causal hypothesis before repair.",
     inspect: ["failed attempt", "upstream cone", "context provenance", "artifacts", "workspace diff", "logs"],
     safe_repairs: ["spawn a fixed read-only helper role when evidence is missing", "rank causal targets", "apply the smallest authorized repair with a material delta"],
-    pause_boundaries: ["no safe machine repair remains", "authority or intent is unclear"]
+    contract_boundaries: ["if no safe material delta exists, fail contractually with evidence", "unclear authority or intent cannot be resolved by helper prose or free-text output"]
   }
 };
 

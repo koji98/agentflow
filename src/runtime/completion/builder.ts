@@ -847,7 +847,7 @@ function runtimeLogSummary(logs: RuntimeLogEntry[]) {
 
 function extractLiteralCommands(criteria: string[]): string[] {
   const commands = new Set<string>();
-  const backtickedCommandPattern = /\b(?:npm|pnpm|yarn|bun|node|pytest|cargo|go)\s+[a-zA-Z0-9:_./=-]+(?:\s+[a-zA-Z0-9:_./=-]+)*/u;
+  const backtickedCommandPattern = /^(?:npm|pnpm|yarn|bun|node|pytest|cargo|go)\s+[a-zA-Z0-9:_./=-]+(?:\s+[a-zA-Z0-9:_./=-]+)*$/u;
   const plainValidationPattern = /\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|check|lint|typecheck|build)\b(?:\s+[a-zA-Z0-9:_./=-]+)*|\bgo\s+test\b(?:\s+[a-zA-Z0-9:_./=-]+)*|\bcargo\s+test\b(?:\s+[a-zA-Z0-9:_./=-]+)*|\bpytest\b(?:\s+[a-zA-Z0-9:_./=-]+)*/gu;
 
   for (const criterion of criteria) {

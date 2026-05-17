@@ -638,10 +638,16 @@ describe("af runtime CLI", () => {
             kind: string;
             playbook: {
                 safe_repairs: string[];
+                contract_boundaries: string[];
             };
         }>(await executeAfCli(["learn", "failed_check"]));
+        const removedBoundaryField = ["pause", "boundaries"].join("_");
         expect(playbook.kind).toBe("failed_check");
         expect(playbook.playbook.safe_repairs.join(" ")).toContain("upstream");
+        expect(playbook.playbook.contract_boundaries.join(" ")).toContain("trusted typed authority");
+        expect(playbook.playbook).not.toHaveProperty(removedBoundaryField);
+        expect(JSON.stringify(playbook.playbook)).not.toContain(removedBoundaryField);
+        expect(JSON.stringify(playbook.playbook)).not.toMatch(/human pause|free text.*pause|helper.*pause/iu);
         const cone = outputOf<{
             direction: string;
             nodes: Array<{

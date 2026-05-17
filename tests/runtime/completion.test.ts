@@ -852,7 +852,7 @@ describe("completion packet", () => {
         ]);
         await writeFile(artifactPath, [
             "Scenario: verifier ambiguity.",
-            "Evidence: stale docs are non-authoritative.",
+            "Evidence: captured node evidence passed.",
             "Validation: no command required.",
             "Risks: none identified.",
             "Completion: non-blocker ambiguity does not contradict the authored contract."
@@ -861,7 +861,7 @@ describe("completion packet", () => {
             runRoot,
             node: makeNode({
                 intent: {
-                    goal: "Write the handoff with `non-blocker ambiguity` and explain why it does not contradict the authored contract.",
+                    goal: "Write the handoff with `captured node evidence passed` and explain why it does not contradict the authored contract.",
                     acceptance_criteria: ["The handoff is published."],
                     constraints: []
                 }

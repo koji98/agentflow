@@ -381,7 +381,7 @@ Review `report.md` first, then failing `scorecard.json`, `criteria-results.json`
 
 ## Built-In Suites
 
-- `evals/agentflow-validation`: flagship five-scenario sentinel suite for full Agentflow mission validation. Run `agentflow eval validate evals/agentflow-validation` before broad eval changes and run the two simulated sentinel scenarios as fast regression gates when practical.
+- `evals/agentflow-validation`: flagship five-scenario sentinel suite for full Agentflow mission validation. Run `agentflow eval validate evals/agentflow-validation` before broad eval changes and run the two simulated sentinel scenarios as fast regression gates when practical. Release confidence requires `npm run validate:release-confidence`, which runs all five sentinels with three trials.
 - `evals/agentflow-prompt-regression`: strict release gate for solved prompt behavior; use `npm run validate:prompts` before shipping prompt changes. Prompt-regression gates use default isolated harness config; profiles with `harness_config.isolation: "inherit_user"` are intentionally non-reproducible and do not belong in this release gate.
 - `evals/agentflow-workflow-quality`: lightweight dogfood capability suite.
 - `evals/agentflow-capability-workflows`: harder local-repo prompt/context suite generated with `npm run setup:eval-repos`.
