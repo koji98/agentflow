@@ -33,7 +33,7 @@ A good node owns a meaningful outcome:
 - implement an accountable slice and publish change evidence
 - review a change package and publish calibrated findings
 
-The graph must preserve human control through clear `constraints`, planned repeat-scoped `checkpoint` gates when human input is required, supervisor `pause_for_human` authority pauses for runtime boundaries the system must not infer, and explicit approval before exposing plugin tools to agents. Constraints should be prohibition-style boundaries that start with `Do not`; positive success requirements belong in acceptance criteria.
+The graph must preserve human control through clear `constraints`, planned repeat-scoped `checkpoint` gates when human input is required, typed supervisor authority pauses for runtime authority the system must not infer, and explicit approval before exposing plugin tools to agents. Constraints should be prohibition-style boundaries that start with `Do not`; positive success requirements belong in acceptance criteria. Free text cannot pause a run; unresolvable graph, repo, sandbox, scope, or product-contract gaps fail with evidence so the operator can intentionally edit the graph.
 
 ## Runtime Bar
 
@@ -43,7 +43,7 @@ Required behavior:
 
 - validate authored and compiled contracts before launch, including standard authoring review warnings
 - run only compiled primitive nodes
-- materialize context packets and preserve provenance
+- materialize pointer-only runtime context state and preserve provenance
 - enforce sandbox, timeout, env, workspace, and tool constraints consistently for Codex CLI and Cursor CLI
 - record supervisor decisions and interventions durably
 - preserve run state for inspection and resume
@@ -51,7 +51,7 @@ Required behavior:
 - produce a delivery package for terminal runs
 - evaluate workflow quality offline through local suites, scenario environments, variants, repeated trials, criteria, trajectory checks, deterministic simulation, and benchmark reports
 
-Implementation details for these runtime paths live under `../technical/`. Those docs explain how validation compiles graphs, how context packets are resolved, how artifacts are projected, how generated `af` and plugin tool wrappers enter the harness environment, and how credentials stay out of the agent context window.
+Implementation details for these runtime paths live under `../technical/`. Those docs explain how validation compiles graphs, how pointer context is resolved, how artifacts are projected, how generated `af` and plugin tool wrappers enter the harness environment, and how credentials stay out of the agent context window.
 
 ## Documentation Bar
 

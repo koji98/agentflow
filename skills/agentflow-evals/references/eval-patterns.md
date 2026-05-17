@@ -36,7 +36,7 @@ Use to compare prompt packs, context strategy, graph shape, tool exposure, super
 
 Use to validate machine-first recovery.
 
-- Scenarios: missing docs, context overflow, noisy generated trees, artifact repair, validation timeout, workspace pollution, repeated failure fingerprints, expected authority pauses.
+- Scenarios: missing docs, unsafe or unresolved context pointers, noisy generated trees, artifact repair, validation timeout, workspace pollution, repeated failure fingerprints, expected typed authority pauses.
 - Criteria: `supervisor` classifications/gatherers/apply actions, `trajectory`, recovery artifacts, final status, and delivery.
 - Simulation: useful for deterministic tool or external-service failures.
 - Avoid if the scenario does not force a recoverable failure.

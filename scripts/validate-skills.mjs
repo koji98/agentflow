@@ -12,7 +12,10 @@ const requiredSkillReferences = {
     "composition-model.md",
     "managed-patterns.md",
     "deterministic-vs-rubric.md",
-    "graph-quality-bar.md"
+    "graph-quality-bar.md",
+    "intent-writing.md",
+    "prompt-translation.md",
+    "support-surfaces.md"
   ],
   "agentflow-evals": [
     "eval-patterns.md",
@@ -32,7 +35,8 @@ const requiredSkillReferences = {
   ],
   "agentflow-plan-review": [
     "review-rubric.md",
-    "anti-patterns.md"
+    "anti-patterns.md",
+    "prompt-translation-review.md"
   ],
   "agentflow-plugins": [
     "plugin-workflows.md"
@@ -79,8 +83,8 @@ const staleSkillContractPatterns = [
     reason: "producer artifacts are always required; use if_available on consumer artifact context only when missing material is acceptable"
   },
   {
-    pattern: /context_(summary|packet|provenance)\.json|context_summary\.md/u,
-    reason: "context files now live under context/packet.json, context/manifest.md, and context/provenance.json"
+    pattern: /context_(summary|packet|provenance)\.json|context_summary\.md|context\/(packet|manifest|provenance)\.(json|md)/u,
+    reason: "context files now live under agent/context.md, runtime/context.json, and human-debug/context-provenance.json"
   },
   {
     pattern: /hashed names/u,
@@ -101,6 +105,18 @@ const staleSkillContractPatterns = [
   {
     pattern: /every missing artifact/u,
     reason: "artifact synthesis only handles exactly one human-readable text artifact"
+  },
+  {
+    pattern: /delivery\/(reviewer-guide|task-brief|implementation-summary|risk-notes|follow-up-items|run-map)\.md/u,
+    reason: "delivery review now starts from 01-review-brief.md, 02-run-learnings.md, and 03-audit-index.md"
+  },
+  {
+    pattern: /Graph-addressable outputs are `summary`, `packet`/u,
+    reason: "deep research no longer exposes a public packet artifact"
+  },
+  {
+    pattern: /managed research summary and packet/u,
+    reason: "deep research handoffs should cite summary and selected raw angle artifacts, not a packet"
   }
 ];
 

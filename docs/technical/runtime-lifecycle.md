@@ -83,14 +83,16 @@ Authored ids remain visible for humans. Compiled ids are stable runtime ids that
 
 Each attempt is the unit of execution and audit. A typical agent attempt includes:
 
-- `context/packet.json`, `context/manifest.md`, and `context/provenance.json`
-- `agentflow-tools/runtime.json`, `state.json`, generated `bin/af`, and generated plugin wrappers
-- stdout/stderr logs from the harness or local command
-- `tool-invocations.jsonl` and tool sidecar logs when generated wrappers are used
+- `agent/context.md`, `runtime/context.json`, and `human-debug/context-provenance.json`
+- `runtime/tools/runtime.json`, `state.json`, generated `bin/af`, and generated plugin wrappers
+- stdout/stderr logs from the harness or local command under `human-debug/harness/`
+- `human-debug/tools/index.jsonl` and paired tool input/output payloads when generated wrappers are used
 - declared output artifacts under the attempt artifact directory or workspace paths
 - reserved artifacts such as `agent_response`, `stdout`, `stderr`, and `verification_json`
 - `workspace-changes/` snapshots for agent and exec attempts that reach the execution boundary
-- `verify-outcome.json` and `verify-outcome.md` for passing agent attempts after declared artifacts materialize
+- `runtime/verifier.json` and `human-debug/verifier/verdict.md` for passing agent attempts after declared artifacts materialize
+
+Normal agents read `agent/`, declared `artifacts/`, and explicit context pointers. Files under `human-debug/` are audit-only unless a diagnostic supervisor helper is explicitly asked to inspect them.
 
 The attempt boundary matters because supervisor interventions attach to a specific attempt, downstream refs select from attempts, and resume decides whether completed attempts remain compatible with the current compiled contract.
 
@@ -107,8 +109,8 @@ flowchart TD
   healthy -- no --> caseFile["Write causal case file"]
   caseFile --> cone["Build upstream causal cone"]
   cone --> target["Rank recovery targets"]
-  target --> budget{"Recovery budget and authority available?"}
-  budget -- no --> authority["Request authority or stop on impossible invariant"]
+  target --> budget{"Recovery budget and typed authority state available?"}
+  budget -- no --> authority["Typed authority pause or contractual failure"]
   budget -- yes --> repair["Repair nearest intent-aligned target"]
   repair --> delta{"Material delta recorded?"}
   delta -- no --> investigate["Widen causal search or change tactic"]
@@ -117,15 +119,17 @@ flowchart TD
   rerun --> healthy
 ```
 
-Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, `interventions.jsonl`, and state. Budget-spending recovery chains attach artifacts under the symptom attempt's `interventions/` directory. If the selected recovery target is upstream, the target writes normal attempt folders and the chain links the symptom, target, material delta, and rerun gate.
+Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, `interventions.jsonl`, and state. Budget-spending recovery chains attach machine state under the symptom attempt's `runtime/supervisor/` directory and raw diagnostic evidence under `human-debug/interventions/`. If the selected recovery target is upstream, the target writes normal attempt folders and the chain links the symptom, target, material delta, and rerun gate.
 
-For recovery-oriented actions, the supervisor records a failure fingerprint, writes `requirement-evidence-map.{json,md}`, writes `causal-case-file.{json,md}`, ranks targets in `causal-targets.json`, writes `recovery-chain.{json,md}`, merges evidence into `recovery-plan.{json,md}`, writes `runtime-overlay.json`, records `material-delta.json`, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects the recovery envelope into the selected target's next attempt prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. Generic retry advice and target changes without evidence are not material deltas. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
+Failure routing is structured-control-plane only. The classifier reads trusted typed `AuthorityRequest` records, runtime-owned `failure_code` metadata, structured completion packets, outcome-verifier categories, repeated failure fingerprints, and node kind. Stdout, stderr, agent responses, verifier summaries, helper prose, and debug tool files can explain evidence, but they do not choose recovery class or pause a run.
+
+For recovery-oriented actions, the supervisor records a failure fingerprint, writes requirement evidence maps, causal case files, target rankings, recovery chains, recovery plans, runtime overlays, and material deltas as machine state, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects a compact `agent/supervisor-recovery.md` brief into the selected target's next attempt prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. Generic retry advice and target changes without evidence are not material deltas. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
 
 Context pointer packaging can fail before the harness runs. Those failures are classified as `context_contract_failure`, analyzed with the shared run-ready context analyzer, and retried with a compact `supervisor_context_repair` packet when the supervisor can safely repair the packaging without changing graph authority.
 
 Workspace repair uses the node-level baseline and after snapshots captured around every agent/exec attempt. If a failed attempt is classified as a forbidden or unrelated workspace edit, the overlay restores tracked files from the pre-attempt snapshot and removes untracked files introduced by that failed attempt before the retry is scheduled. Environment repair is intentionally narrower: it refreshes per-execution Agentflow tool wrappers and PATH/runtime metadata on the retry without mutating global machine state.
 
-Authority pauses are last resort. The runtime pauses only for credentials, explicit human checkpoint boundaries, product or intent ambiguity, security or compliance judgment, repo/sandbox/scope expansion, or graph contract amendment. Local context, artifact, workspace, validation strategy, and recoverable environment issues should attempt machine repair first.
+Authority pauses are last resort. The runtime pauses only when a trusted component emits a typed `AuthorityRequest`: missing credentials, missing harness authentication, planned checkpoints, external side-effect approval, or operator-authored pause. Product ambiguity, graph contract gaps, repo/sandbox/scope expansion, local context, artifact, workspace, validation strategy, and recoverable environment issues recover autonomously or fail contractually with evidence.
 
 ## Resume
 

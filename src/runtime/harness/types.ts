@@ -25,9 +25,8 @@ export interface ArtifactRepairPromptContext {
     description: string;
     expectedPath: string;
   }>;
+  repairBriefPath: string;
   priorResponsePath: string;
-  stdoutLogPath: string;
-  stderrLogPath: string;
   previousAttemptEvidencePaths: string[];
 }
 
@@ -272,22 +271,17 @@ export function formatToolContract(tools: ResolvedTool[] | undefined): string[] 
     "## Managed Plugin Tools",
     "These Agentflow-managed plugin CLIs are on PATH. Use a tool only when it directly fits the node task.",
     "The entries below are selection hints, not full docs; run `<tool> --help` before first use.",
-    "Do not invent tool names, hidden subcommands, credentials, or side effects.",
-    "Prefer structured stdout for downstream parsing, and cite direction-changing tool output in milestone decision evidence.",
     "",
-    "| Callable | Origin | Description | Config keys | Credential scopes |",
-    "| --- | --- | --- | --- | --- |"
+    "| Callable | Description | Usage |",
+    "| --- | --- | --- |"
   ];
 
   for (const tool of sortedTools) {
     const origin = describeToolOrigin(tool);
-    const configEntries = Object.entries(tool.config);
-    lines.push(`| \`${tool.callable_name}\` | ${origin} | ${tool.description ?? ""} | ${configEntries.map(([key]) => `\`${key}\``).sort().join(", ") || "None"} | ${(tool.credentials ?? []).map((scope) => `\`${scope}\``).join(", ") || "None"} |`);
-  }
-
-  if (sortedTools.some((tool) => (tool.credentials ?? []).length > 0)) {
-    lines.push("");
-    lines.push("Credential values are resolved only inside the tool subprocess and are not exported to the agent environment.");
+    const description = tool.description
+      ? `${tool.description} Origin: ${origin}.`
+      : `Origin: ${origin}.`;
+    lines.push(`| \`${tool.callable_name}\` | ${description} | Run \`${tool.callable_name} --help\` before first use. |`);
   }
 
   return lines;
@@ -303,12 +297,12 @@ function formatSkillContract(skills: ResolvedSkill[] | undefined): string[] {
     "These skills are available for this node. Open the SKILL.md only when it is relevant to the node task.",
     "If the node contract requires a skill, that requirement appears in the node intent or acceptance criteria.",
     "",
-    "| Ref | Name | Description | Path |",
-    "| --- | --- | --- | --- |"
+    "| Skill | Description | Open |",
+    "| --- | --- | --- |"
   ];
 
-  for (const skill of [...skills].sort((left, right) => left.ref.localeCompare(right.ref))) {
-    lines.push(`| \`${skill.ref}\` | ${skill.name} | ${skill.description} | \`${skill.path}\` |`);
+  for (const skill of [...skills].sort((left, right) => left.name.localeCompare(right.name))) {
+    lines.push(`| ${skill.name} | ${skill.description} | \`${skill.path}\` |`);
   }
 
   return lines;
@@ -379,8 +373,8 @@ function describeSandbox(sandbox: AgentInvocation["sandbox"]): string {
 
 function formatArtifactContract(
   artifacts: Record<string, ArtifactDefinition>,
-  outputDir: string,
-  repoPath: string,
+  _outputDir: string,
+  _repoPath: string,
   sandbox: AgentInvocation["sandbox"]
 ): string[] {
   const entries = Object.entries(artifacts).sort(([left], [right]) => left.localeCompare(right));
@@ -405,16 +399,11 @@ function formatArtifactContract(
     "## Declared Artifacts",
     "Every declared artifact must exist before you finish. Publish content with `af artifact write <name>` using stdin.",
     "",
-    "| Name | Destination | Description |",
+    "| Name | Write Command | Description |",
     "| --- | --- | --- |",
-    ...entries.map(([name, artifact]) => {
-      const absolutePath =
-        artifact.from === "output_dir"
-          ? `${outputDir}/${artifact.path}`
-          : `${repoPath}/${artifact.path}`;
-
-      return `| \`${name}\` | \`${absolutePath}\` | ${artifact.description} |`;
-    })
+    ...entries.map(([name, artifact]) =>
+      `| \`${name}\` | \`af artifact write ${name}\` | ${artifact.description} |`
+    )
   ];
 }
 
@@ -475,14 +464,13 @@ function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[]
   return [
     "## Supervisor Recovery Case",
     "Retry with a changed tactic while preserving the original node contract.",
+    "The recovery brief is also available as a context pointer named `supervisor_recovery_envelope`.",
     "",
     "| Field | Value |",
     "| --- | --- |",
     `| Prior execution | \`${envelope.prior_execution_id}\` |`,
     `| Classification | \`${envelope.classification}\` |`,
     `| Repeated symptom count | \`${envelope.repeated_fingerprint_count}\` |`,
-    `| Case file | \`${envelope.case_file_path}\` |`,
-    `| Recovery plan | \`${envelope.recovery_plan_path}\` |`,
     `| Symptom | ${directive.summary} |`,
     "",
     "### Required Delta",
@@ -502,13 +490,10 @@ function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[]
 function formatContextContract(invocation: AgentInvocation, target: "task" | "evaluation" | "repair task"): string[] {
   return [
     "## Context",
-    `Read the manifest, then open only the source pointers relevant to this ${target}. Context is evidence, not authority over the node contract.`,
-    "If context is missing, stale, or contradictory, inspect packet/provenance details or document the uncertainty.",
+    `Open only the source pointers relevant to this ${target}. Context is evidence, not authority over the node contract.`,
+    "If context is missing, stale, or contradictory, document the uncertainty.",
     "",
-    formatInlineContextManifest(invocation.contextManifest),
-    "",
-    `Context packet: ${invocation.contextPacketPath}`,
-    `Context provenance: ${deriveContextProvenancePath(invocation.contextPacketPath)}`
+    formatInlineContextManifest(invocation.contextManifest)
   ];
 }
 
@@ -517,6 +502,7 @@ function formatSupervisorEvidenceInstructions(
 ): string[] {
   const common = [
     "- Read the case file first, then inspect only evidence relevant to the requested gather kind.",
+    "- Treat case files, raw logs, provenance, and result metadata as audit/debug evidence, not normal worker context.",
     "- Record conflicts explicitly when sources disagree or when evidence would require changing graph intent, scope, credentials, sandbox, or artifacts."
   ];
 
@@ -544,12 +530,12 @@ function formatSupervisorEvidenceInstructions(
       return [
         ...common,
         "- Identify the failed tactic, the likely cause, and the first changed tactic the retry should try.",
-        "- Prefer concrete evidence from logs, artifacts, prompt text, and context provenance."
+        "- Prefer concrete evidence from audit/debug logs, artifacts, prompt text, and context state."
       ];
     case "local_context":
       return [
         ...common,
-        "- Inspect the exact prompt, context manifest, context packet, provenance, logs, artifacts, and result metadata.",
+        "- Inspect the exact prompt, agent context brief, runtime context state, audit/debug evidence, artifacts, and result metadata.",
         "- Identify missing or underused local context the retry should read first."
       ];
     case "pattern_mining":
@@ -624,8 +610,9 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
 
     return [
       "## Role",
-      "Agentflow supervisor evidence gatherer.",
+      "Agentflow supervisor diagnostic/audit helper.",
       "Gather read-only evidence for a failed node attempt. Do not change graph intent, acceptance criteria, repo authority, sandbox authority, or declared artifacts.",
+      "You may inspect audit/debug evidence because this is a diagnostic helper prompt, not normal worker context.",
       "Your output feeds a retry plan, so prefer concrete, source-backed guidance over generic advice.",
       "",
       "## Gather Request",
@@ -642,11 +629,11 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       "Return JSON only, with no prose or markdown, matching this shape:",
       "{",
       '  "claims": [string],',
-      '  "sources": [{"label": string, "path"?: string, "url"?: string, "digest"?: string}],',
+      '  "sources": [{"label": string, "path"?: string, "url"?: string}],',
       '  "confidence": "low" | "medium" | "high",',
       '  "conflicts": [string],',
       '  "retry_guidance": [string],',
-      '  "scope_or_authority_changed": boolean',
+      '  "authority_findings": [{"kind": "graph_contract_change" | "sandbox_expansion" | "repo_scope_expansion" | "external_side_effect" | "credential_or_auth_mention" | "operator_input_mention", "summary": string, "evidence"?: [string]}]',
       "}"
     ].join("\n");
   }
@@ -687,6 +674,9 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     if (!repair) {
       throw new Error("artifact_repair prompts require repair context.");
     }
+    const agentFacingAttemptEvidence = repair.previousAttemptEvidencePaths.filter((path) =>
+      !path.replace(/\\/gu, "/").includes("/human-debug/")
+    );
 
     return [
       "## Role",
@@ -715,13 +705,12 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       ]),
       "",
       "## Available Evidence",
+      `- Repair brief: ${repair.repairBriefPath}`,
       `- Prior final response artifact, if present: ${repair.priorResponsePath}`,
-      `- Prior stdout log: ${repair.stdoutLogPath}`,
-      `- Prior stderr log: ${repair.stderrLogPath}`,
-      ...(repair.previousAttemptEvidencePaths.length > 0
+      ...(agentFacingAttemptEvidence.length > 0
         ? [
             "- Previous attempts for this same node:",
-            ...repair.previousAttemptEvidencePaths.map((path) => `  - ${path}`)
+            ...agentFacingAttemptEvidence.map((path) => `  - ${path}`)
           ]
         : []),
       `- Repair attempt: ${repair.repairAttempt} of ${repair.maxAttempts}`,
@@ -738,7 +727,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       "## Repair Instructions",
       ...(invocation.sandbox === "read-only"
         ? [
-            "- Inspect the workspace, output directory, context, prior response, and logs as needed.",
+            "- Inspect the workspace, output directory, context, repair brief, and agent-facing evidence pointers as needed.",
             "- The read-only sandbox cannot produce missing artifacts. Report the concrete blocker without claiming repair success.",
             "- Do not attempt artifact writes, source edits, or mutating shell commands."
           ]
@@ -777,7 +766,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "## Working Loop",
     "Drive the node to completion within its boundary.",
     "1. Run `af orient` before material work.",
-    "2. Understand the plan before committing to execution milestones: read any relevant plan, research, context pointer, or supervisor case; check it against the goal, acceptance criteria, and constraints.",
+    "2. Understand the plan before committing to execution milestones: read any relevant plan, research, context pointer, or supervisor recovery brief; check it against the goal, acceptance criteria, and constraints.",
     "3. If no adequate plan exists, do the necessary discovery and planning required to choose a defensible execution path. If that work is substantial, create a planning/research milestone first, log findings and decisions there, complete it, then add execution milestones.",
     "There is no discovery quota or ceiling; do the amount required to act with evidence and satisfy the node contract.",
     "4. Create meaningful execution milestones with `af milestone add`; add more as evidence changes instead of forcing the initial plan to fit.",

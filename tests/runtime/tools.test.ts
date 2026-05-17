@@ -15,7 +15,7 @@ import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { buildHarnessSpawnEnv, formatToolContract, renderHarnessPrompt } from "../../src/runtime/harness/types.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
-import { prepareAgentTools } from "../../src/runtime/tools/setup.js";
+import { collectMissingToolCredentialAuthorityRequests, prepareAgentTools } from "../../src/runtime/tools/setup.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
@@ -578,7 +578,7 @@ describe("prepareAgentTools", () => {
     afterEach(async () => {
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("installs plugin tool wrappers, writes node-tool-state.json, and emits env vars", async () => {
+    it("installs plugin tool wrappers, writes runtime tool state, and emits env vars", async () => {
         const executionDir = join(tempRoot, "executions/001");
         const workspacePath = join(tempRoot, "workspace");
         const artifactsRoot = join(tempRoot, "executions/001/output");
@@ -632,8 +632,8 @@ describe("prepareAgentTools", () => {
             context_packet_path: join(executionDir, "context.json"),
             context_manifest_path: join(executionDir, "manifest.md")
         });
-        expect(setup.bin_dir).toBe(join(executionDir, "agentflow-tools/bin"));
-        expect(setup.tool_state_path).toBe(join(executionDir, "agentflow-tools/state.json"));
+        expect(setup.bin_dir).toBe(join(executionDir, "runtime/tools/bin"));
+        expect(setup.tool_state_path).toBe(join(executionDir, "runtime/tools/state.json"));
         const wrapperSource = await readFile(join(setup.bin_dir, "babysit-poll"), "utf8");
         expect(wrapperSource.startsWith("#!/usr/bin/env bash\n")).toBe(true);
         expect(wrapperSource).toContain("launcher.mjs");
@@ -642,7 +642,8 @@ describe("prepareAgentTools", () => {
         expect(afSource).toContain("Agentflow runtime CLI wrapper");
         const wrapperResult = await execFileAsync(join(setup.bin_dir, "babysit-poll"), ["--token", "secret-value"]);
         expect(wrapperResult.stdout.trim()).toBe("plugin");
-        const invocationRecords = (await readFile(join(executionDir, "tool-invocations.jsonl"), "utf8"))
+        const toolDebugDir = join(executionDir, "human-debug/tools");
+        const invocationRecords = (await readFile(join(toolDebugDir, "index.jsonl"), "utf8"))
             .trim()
             .split(/\r?\n/)
             .map((line) => JSON.parse(line) as Record<string, unknown>);
@@ -658,11 +659,13 @@ describe("prepareAgentTools", () => {
                 tool: "babysit-poll",
                 argv: ["--token", "<redacted>"],
                 exit_code: 0,
-                stdout_path: expect.stringMatching(/tool-invocation-logs\/.*babysit-poll\.stdout\.log$/),
-                stderr_path: expect.stringMatching(/tool-invocation-logs\/.*babysit-poll\.stderr\.log$/)
+                input_path: join(toolDebugDir, "0001-input.json"),
+                output_path: join(toolDebugDir, "0001-output.json")
             })
         ]);
-        expect(await readFile(invocationRecords[0]!.stdout_path as string, "utf8")).toBe("plugin\n");
+        const toolOutput = JSON.parse(await readFile(invocationRecords[0]!.output_path as string, "utf8")) as Record<string, unknown>;
+        expect(toolOutput.stdout).toBe("plugin\n");
+        expect(toolOutput.stderr).toBe("");
         const state = JSON.parse(await readFile(setup.tool_state_path, "utf8")) as {
             version: string;
             node_id: string;
@@ -685,8 +688,8 @@ describe("prepareAgentTools", () => {
             description: "Summary written to output dir."
         });
         expect(setup.env.AGENTFLOW_TOOL_STATE).toBe(setup.tool_state_path);
-        expect(setup.env.AGENTFLOW_TOOL_INVOCATIONS).toBe(join(executionDir, "tool-invocations.jsonl"));
-        expect(setup.env.AGENTFLOW_RUNTIME_METADATA).toBe(join(executionDir, "agentflow-tools/runtime.json"));
+        expect(setup.env.AGENTFLOW_TOOL_INVOCATIONS).toBe(join(executionDir, "human-debug/tools/index.jsonl"));
+        expect(setup.env.AGENTFLOW_RUNTIME_METADATA).toBe(join(executionDir, "runtime/tools/runtime.json"));
         expect(setup.env.AGENTFLOW_RUN_ROOT).toBe(tempRoot);
         expect(setup.env.AGENTFLOW_RUNTIME_DIR).toBe(join(tempRoot, "runtime"));
         expect(setup.env.AGENTFLOW_RUN_ID).toBe("run-tools");
@@ -709,7 +712,7 @@ describe("prepareAgentTools", () => {
             run_id: "run-tools",
             runtime_dir: join(tempRoot, "runtime"),
             tool_bin_dir: setup.bin_dir,
-            tool_invocations_path: join(executionDir, "tool-invocations.jsonl"),
+            tool_invocations_path: join(executionDir, "human-debug/tools/index.jsonl"),
             declared_artifacts: {
                 summary: { path: "summary.md" }
             }
@@ -798,6 +801,123 @@ describe("prepareAgentTools", () => {
             env: spawnEnv as NodeJS.ProcessEnv
         });
         expect(result.stdout.trim()).toBe("resolved-at-tool-launch");
+    });
+    it("records plugin tool credential failures as audit-only debug output", async () => {
+        const executionDir = join(tempRoot, "executions/missing-credential");
+        const workspacePath = join(tempRoot, "workspace");
+        const artifactsRoot = join(tempRoot, "executions/missing-credential/output");
+        await mkdir(executionDir, { recursive: true });
+        await mkdir(workspacePath, { recursive: true });
+        await mkdir(artifactsRoot, { recursive: true });
+        const pluginPath = join(tempRoot, "plugins/secure/scripts/needs-token.sh");
+        await writeExecutable(pluginPath, "#!/usr/bin/env bash\necho should-not-run\n");
+        const node = {
+            authored_id: "secure",
+            compiled_id: "main__secure",
+            declared_artifacts: {},
+            tools: [
+                {
+                    callable_name: "secure-token",
+                    description: "Requires a credential.",
+                    executable_path: pluginPath,
+                    config: {},
+                    credentials: ["service"],
+                    source: {
+                        kind: "plugin",
+                        alias: "secure",
+                        tool: "token",
+                        plugin_root: join(tempRoot, "plugins/secure"),
+                        declared_at: "registry",
+                        declaration_path: "$.tools[0]"
+                    }
+                }
+            ]
+        } satisfies Pick<CompiledAgentNode, "authored_id" | "compiled_id" | "declared_artifacts" | "tools">;
+        const setup = await prepareAgentTools({
+            node: node as unknown as CompiledAgentNode,
+            execution_dir: executionDir,
+            workspace_path: workspacePath,
+            artifacts_root: artifactsRoot,
+            credential_specs: {
+                service: {
+                    fields: {
+                        token: {
+                            secret: false,
+                            required: true
+                        }
+                    }
+                }
+            }
+        });
+        const spawnEnv = buildHarnessSpawnEnv({
+            toolBinDir: setup.bin_dir,
+            toolEnv: setup.env,
+            repoPath: workspacePath,
+            outputDir: artifactsRoot,
+            contextPacketPath: join(executionDir, "context.json"),
+            contextManifestPath: join(executionDir, "manifest.md")
+        } as unknown as AgentInvocation, { PATH: "/usr/bin:/bin" });
+
+        await expect(execFileAsync("bash", ["-lc", "secure-token"], {
+            cwd: workspacePath,
+            env: spawnEnv as NodeJS.ProcessEnv
+        })).rejects.toThrow('Missing required credential "service.token".');
+
+        const toolDebugDir = join(executionDir, "human-debug/tools");
+        const invocationRecord = JSON.parse((await readFile(join(toolDebugDir, "index.jsonl"), "utf8")).trim()) as {
+            output_path: string;
+        };
+        const output = JSON.parse(await readFile(invocationRecord.output_path, "utf8")) as {
+            authority_requests?: Array<Record<string, unknown>>;
+            credential_resolution_failed: boolean;
+            stdout: string;
+            stderr: string;
+        };
+        expect(output.stdout).toBe("");
+        expect(output.stderr).toContain('Missing required credential "service.token".');
+        expect(output.credential_resolution_failed).toBe(true);
+        expect(output.authority_requests).toBeUndefined();
+    });
+    it("produces trusted runtime authority requests during managed tool credential preflight", async () => {
+        const pluginPath = join(tempRoot, "plugins/secure/scripts/needs-token.sh");
+        await writeExecutable(pluginPath, "#!/usr/bin/env bash\necho should-not-run\n");
+        const tool: ResolvedTool = {
+            callable_name: "secure-token",
+            description: "Requires a credential.",
+            executable_path: pluginPath,
+            config: {},
+            credentials: ["service"],
+            source: {
+                kind: "plugin",
+                alias: "secure",
+                tool: "token",
+                plugin_root: join(tempRoot, "plugins/secure"),
+                declared_at: "registry",
+                declaration_path: "$.tools[0]"
+            }
+        };
+        const authorityRequests = await collectMissingToolCredentialAuthorityRequests({
+            tools: [tool],
+            credential_specs: {
+                service: {
+                    fields: {
+                        token: {
+                            secret: false,
+                            required: true
+                        }
+                    }
+                }
+            },
+            execution_id: "exec-1",
+            credential_index_path: join(tempRoot, "missing-preflight-credentials.json")
+        });
+        expect(authorityRequests).toEqual([
+            expect.objectContaining({
+                kind: "missing_credential",
+                source: "plugin_tool",
+                summary: "Plugin tool secure-token requires credential service.token."
+            })
+        ]);
     });
     it("renders plugin tool --help through the wrapper without resolving credentials", async () => {
         const executionDir = join(tempRoot, "executions/help");
@@ -917,16 +1037,17 @@ describe("formatToolContract", () => {
         expect(text).toContain("Use a tool only when it directly fits the node task.");
         expect(text).toContain("run `<tool> --help` before first use");
         expect(text.indexOf("| `alpha-cli` |")).toBeLessThan(text.indexOf("| `zeta-poll` |"));
-        expect(text).toContain("| `alpha-cli` | from plugin \"alphaplug\" (tool: alpha) | Alpha tool. | `org` | `alpha` |");
-        expect(text).toContain("| `zeta-poll` | from plugin \"zetaplug\" (tool: poll) | Zeta tool. | `mode` | None |");
+        expect(text).toContain("| `alpha-cli` | Alpha tool. Origin: from plugin \"alphaplug\" (tool: alpha). | Run `alpha-cli --help` before first use. |");
+        expect(text).toContain("| `zeta-poll` | Zeta tool. Origin: from plugin \"zetaplug\" (tool: poll). | Run `zeta-poll --help` before first use. |");
         expect(text).not.toContain("Capability:");
         expect(text).not.toContain("Impact:");
-        expect(text).toContain("| Callable | Origin | Description | Config keys | Credential scopes |");
-        expect(text).toContain("`org`");
-        expect(text).toContain("`mode`");
+        expect(text).toContain("| Callable | Description | Usage |");
+        expect(text).not.toContain("| Callable | Origin | Description | Config keys | Credential scopes |");
+        expect(text).not.toContain("`org`");
+        expect(text).not.toContain("`mode`");
         expect(text).not.toContain("=abc");
         expect(text).not.toContain("=fast");
-        expect(text).toContain("`alpha`");
+        expect(text).not.toContain("`alpha`");
         expect(text).not.toContain("AGENTFLOW_CREDENTIAL_ALPHA");
     });
     it("appends the tool contract section to the agent prompt", () => {
@@ -964,7 +1085,7 @@ describe("formatToolContract", () => {
             ]
         });
         expect(prompt).toContain("## Managed Plugin Tools");
-        expect(prompt).toContain("| `babysit-poll` | from plugin \"babysit\" (tool: poll) | Poll a PR. | None | None |");
+        expect(prompt).toContain("| `babysit-poll` | Poll a PR. Origin: from plugin \"babysit\" (tool: poll). | Run `babysit-poll --help` before first use. |");
         expect(prompt).toContain("run `<tool> --help` before first use");
         expect(prompt).toContain("| `af complete check` | Verify mechanical readiness before final response; fix any reported incompleteness and rerun. |");
         expect(prompt).not.toContain("Use `af --help` only when the options below are insufficient.");
@@ -1082,7 +1203,7 @@ describe("end-to-end runtime tool wiring", () => {
                     }
                     observedInvocation = invocation;
                     // Simulate what a real harness child process would do: spawn a tool
-                    // by name, relying on PATH containing agentflow-tools/bin and the
+                    // by name, relying on PATH containing runtime/tools/bin and the
                     // toolEnv injecting only the launcher state and plugin roots. Tool
                     // config is resolved inside the generated launcher subprocess.
                     const spawnEnv = buildHarnessSpawnEnv(invocation, {
@@ -1135,8 +1256,8 @@ describe("end-to-end runtime tool wiring", () => {
             expect(toolExitCode).toBe(0);
             expect(toolStderr).toBe("");
             expect(toolStdout.trim()).toBe('{"poll_status":"ok"}');
-            // 2. Per-execution agentflow-tools/bin dir was prepared with the symlink.
-            expect(invocation.toolBinDir).toMatch(/agentflow-tools\/bin$/);
+            // 2. Per-execution runtime/tools/bin dir was prepared with the symlink.
+            expect(invocation.toolBinDir).toMatch(/runtime\/tools\/bin$/);
             // 3. tool_state JSON exposes the node identity, declared artifacts, and
             //    workspace/output paths the tool needs to do useful work.
             const toolState = JSON.parse(toolStateContents!) as {
@@ -1164,8 +1285,8 @@ describe("end-to-end runtime tool wiring", () => {
             expect(JSON.parse(await readFile(join(useToolAttempt!.execution_dir, "artifacts/poll-call.json"), "utf8"))).toEqual(toolSentinel);
             // 5. The agent prompt advertises the namespaced callable name, not "poll".
             const renderedPrompt = renderHarnessPrompt(invocation);
-            expect(renderedPrompt).toContain("| `babysit-poll` | from plugin \"babysit\" (tool: poll) | Poll a PR. | `mode` | None |");
-            expect(renderedPrompt).toContain("`mode`");
+            expect(renderedPrompt).toContain("| `babysit-poll` | Poll a PR. Origin: from plugin \"babysit\" (tool: poll). | Run `babysit-poll --help` before first use. |");
+            expect(renderedPrompt).not.toContain("`mode`");
             expect(renderedPrompt).not.toContain("check-pr");
             expect(renderedPrompt).not.toMatch(/^### poll /m);
         }
@@ -1258,16 +1379,150 @@ describe("end-to-end runtime tool wiring", () => {
             expect(run.outcome).toBe("passed");
             expect(observedInvocation).toBeDefined();
             const invocation = observedInvocation!;
-            expect(invocation.toolBinDir).toMatch(/agentflow-tools\/bin$/);
-            expect(invocation.toolEnv?.AGENTFLOW_TOOL_STATE).toMatch(/agentflow-tools\/state\.json$/);
+            expect(invocation.toolBinDir).toMatch(/runtime\/tools\/bin$/);
+            expect(invocation.toolEnv?.AGENTFLOW_TOOL_STATE).toMatch(/runtime\/tools\/state\.json$/);
             expect(invocation.toolEnv?.AGENTFLOW_TOOL_BABYSIT_POLL_MODE).toBeUndefined();
             const toolNames = (invocation.tools ?? []).map((tool) => tool.callable_name).sort();
             expect(toolNames).toEqual(["babysit-poll"]);
             const contract = formatToolContract(invocation.tools);
-            expect(contract.join("\n")).toContain("| `babysit-poll` | from plugin \"babysit\" (tool: poll) | Poll a PR. | `mode` | None |");
+            expect(contract.join("\n")).toContain("| `babysit-poll` | Poll a PR. Origin: from plugin \"babysit\" (tool: poll). | Run `babysit-poll --help` before first use. |");
             const spawnEnv = buildHarnessSpawnEnv(invocation, { PATH: "/usr/local/bin" });
             expect(spawnEnv.PATH?.startsWith(`${invocation.toolBinDir}${delimiter}`)).toBe(true);
             expect(spawnEnv.AGENTFLOW_TOOL_BABYSIT_POLL_MODE).toBeUndefined();
+        }
+        finally {
+            await rm(tempRoot, { recursive: true, force: true });
+        }
+    });
+    it("pauses on trusted plugin-tool missing credential authority requests", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-tools-missing-credential-"));
+        const repoDir = join(tempRoot, "repo");
+        const runRoot = join(tempRoot, "run");
+        const pluginRoot = join(tempRoot, "plugins/babysit");
+        const pluginToolPath = "scripts/poll.sh";
+        const pluginAbsoluteToolPath = join(pluginRoot, pluginToolPath);
+        try {
+            await mkdir(repoDir, { recursive: true });
+            await initGitRepo(repoDir);
+            await writeExecutable(pluginAbsoluteToolPath, "#!/usr/bin/env bash\necho should-not-run\n");
+            const document: AuthoredGraphDocument = {
+                version: "1",
+                graph_id: "tools-missing-credential",
+                supervision: { profile: "supervisor", max_total_interventions: 1 },
+                repos: { main: { path: "." } },
+                defaults: { launch_profile: "default", workspace_backend: "inplace" },
+                profiles: {
+                    default: { harness: "codex-cli" },
+                    supervisor: { harness: "codex-cli" }
+                },
+                tools: {
+                    pr_poll: { ref: "babysit/poll" }
+                },
+                graph: {
+                    type: "sequence",
+                    id: "root",
+                    steps: [
+                        {
+                            type: "agent",
+                            id: "use_tool",
+                            intent: {
+                                goal: "Run babysit-poll.",
+                                acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                                constraints: []
+                            },
+                            support: {
+                                tools: [{ ref: "pr_poll" }]
+                            }
+                        }
+                    ]
+                }
+            };
+            const normalized = normalizeAuthoredGraphDocument({
+                intent: {
+                    goal: "Exercise trusted plugin tool authority requests.",
+                    acceptance_criteria: ["Missing plugin credentials pause through typed authority only."]
+                },
+                ...withNodeIntentDefaults(document)
+            });
+            expect(normalized.diagnostics).toEqual([]);
+            const launch = resolveLaunchConfig(normalized.document!);
+            const compilation = compileAuthoredGraph(normalized.document!, launch, normalized.lowered_managed_nodes, {
+                graph_dir: tempRoot,
+                resolved_plugins: [
+                    buildPluginFixture(pluginRoot, pluginToolPath, { credentials: ["service"] }, {
+                        credentials: {
+                            service: {
+                                fields: {
+                                    token: {
+                                        secret: false,
+                                        required: true
+                                    }
+                                }
+                            }
+                        }
+                    })
+                ]
+            });
+            expect(compilation.diagnostics).toEqual([]);
+            const harness: HarnessAdapter = {
+                kind: "codex-cli",
+                capabilities: getHarnessCapabilities("codex-cli")!,
+                async run(invocation) {
+                    if (invocation.promptKind === "outcome_verification") {
+                        return passingVerifierResponse();
+                    }
+                    const spawnEnv = buildHarnessSpawnEnv(invocation, {
+                        PATH: process.env.PATH ?? "/usr/bin:/bin",
+                        HOME: process.env.HOME ?? "/tmp"
+                    });
+                    const result = await execFileAsync("bash", ["-lc", "babysit-poll"], {
+                        cwd: invocation.repoPath,
+                        env: spawnEnv as NodeJS.ProcessEnv
+                    }).catch((error: NodeJS.ErrnoException & {
+                        stdout?: string;
+                        stderr?: string;
+                        code?: number | string;
+                    }) => ({
+                        stdout: error.stdout ?? "",
+                        stderr: error.stderr ?? error.message,
+                        code: typeof error.code === "number" ? error.code : 1
+                    }));
+                    const harnessResult = {
+                        status: "failed" as const,
+                        exitCode: "code" in result && typeof result.code === "number" ? result.code : 1,
+                        stdout: "stdout" in result ? result.stdout ?? "" : "",
+                        stderr: "stderr" in result ? result.stderr ?? "" : "",
+                        transcript: { last_message: "plugin tool credential failed" }
+                    };
+                    await markInvocationRuntimeReady(invocation, harnessResult);
+                    return harnessResult;
+                },
+                async cancel() { }
+            };
+            const run = await runCompiledGraph({
+                run_root: runRoot,
+                compiled_graph: compilation.compiled_graph!,
+                repo_sources: { main: repoDir },
+                harnesses: { "codex-cli": harness }
+            });
+            expect(run.outcome).toBe("paused");
+            expect(run.events).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    type: "supervisor.decision",
+                    payload: expect.objectContaining({
+                        classification: "authority_required",
+                        action: "pause_for_authority",
+                        evidence: expect.objectContaining({
+                            authority_requests: expect.arrayContaining([
+                                expect.objectContaining({
+                                    kind: "missing_credential",
+                                    source: "plugin_tool"
+                                })
+                            ])
+                        })
+                    })
+                })
+            ]));
         }
         finally {
             await rm(tempRoot, { recursive: true, force: true });

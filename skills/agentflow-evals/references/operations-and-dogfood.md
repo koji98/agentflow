@@ -89,7 +89,7 @@ It contains 20 local fake-workflow scenarios covering:
 - artifact repair without node retry
 - repeated failure fingerprints
 - parallel evidence gathering
-- noisy context manifests
+- noisy agent context briefs
 - pointer context provenance
 - stale local docs
 - machine-resolvable conflicts

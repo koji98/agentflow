@@ -5,7 +5,7 @@ description: Triage Agentflow recovery cases by distinguishing missing context, 
 
 # Recovery Triage
 
-Use this skill only when a node needs to classify recovery evidence. Prefer local trace packets, context manifests, and validation logs over broad guessing.
+Use this skill only when a node needs to classify recovery evidence. Prefer local trace packets, agent context briefs, and validation logs over broad guessing.
 
 Checklist:
 

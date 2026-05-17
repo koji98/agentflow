@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CompiledAgentNode } from "../../src/graph/compiled.js";
-import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
+import {
+    resolveExecutionArtifactsDirectory,
+    resolveExecutionHumanDebugToolDirectory
+} from "../../src/artifacts/paths.js";
 import type { RuntimeNodeAttempt } from "../../src/runtime/attempts.js";
+import { createAuthorityRequest } from "../../src/runtime/authority.js";
 import { buildCompletionPacket, buildCompletionProjection, persistCompletionPacket } from "../../src/runtime/completion/index.js";
 function makeNode(overrides: Partial<CompiledAgentNode> = {}): CompiledAgentNode {
     return {
@@ -54,7 +58,9 @@ function makeAttempt(executionDir: string, overrides: Partial<RuntimeNodeAttempt
     };
 }
 async function writeOrientInvocation(executionDir: string): Promise<void> {
-    await writeFile(join(executionDir, "tool-invocations.jsonl"), `${JSON.stringify({
+    const toolDir = resolveExecutionHumanDebugToolDirectory(executionDir);
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(join(toolDir, "index.jsonl"), `${JSON.stringify({
         ts: "2026-05-03T12:00:10.000Z",
         execution_id: "exec__ship__attempt_1",
         kind: "af",
@@ -124,7 +130,7 @@ describe("completion packet", () => {
         await expect(readFile(packetPath, "utf8")).resolves.toContain('"completion_status": "incomplete"');
     });
     it("requires af orient before agent completion", async () => {
-        await rm(join(executionDir, "tool-invocations.jsonl"), { force: true });
+        await rm(join(resolveExecutionHumanDebugToolDirectory(executionDir), "index.jsonl"), { force: true });
         const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
         await writeFile(artifactPath, "real handoff\n", "utf8");
         const packet = await buildCompletionPacket({
@@ -200,7 +206,7 @@ describe("completion packet", () => {
             workspacePath: workspace,
             sandbox: "workspace-write"
         });
-        expect(packet.completion_status).toBe("blocked");
+        expect(packet.completion_status).toBe("incomplete");
         expect(packet.blocking_reasons).toEqual(expect.arrayContaining([
             "1 milestone(s) are still active.",
             "1 milestone(s) are blocked."
@@ -221,8 +227,32 @@ describe("completion packet", () => {
             workspacePath: workspace,
             sandbox: "read-only"
         });
-        expect(packet.completion_status).toBe("blocked");
+        expect(packet.completion_status).toBe("incomplete");
         expect(packet.blocking_reasons.join("\n")).toContain("read-only sandbox");
+    });
+    it("uses blocked completion status only for typed authority requests", async () => {
+        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+        await writeFile(artifactPath, "real handoff\n", "utf8");
+        const authorityRequest = createAuthorityRequest({
+            kind: "missing_credential",
+            source: "credential",
+            request_id: "credential-1",
+            summary: "GitHub token is required for the approved publish step.",
+            created_at: "2026-05-03T12:00:00.000Z"
+        });
+        const packet = await buildCompletionPacket({
+            runRoot,
+            node: makeNode(),
+            attempt: makeAttempt(executionDir, {
+                artifacts: { implementation_summary: artifactPath }
+            }),
+            workspacePath: workspace,
+            sandbox: "workspace-write",
+            authorityRequests: [authorityRequest]
+        });
+        expect(packet.completion_status).toBe("blocked");
+        expect(packet.authority_requests).toEqual([authorityRequest]);
+        expect(packet.blocking_reasons).toContain("Authority required (missing_credential): GitHub token is required for the approved publish step.");
     });
     it("rejects empty and placeholder declared artifacts before semantic verification", async () => {
         const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
@@ -841,7 +871,7 @@ describe("completion packet", () => {
             workspacePath: workspace,
             sandbox: "workspace-write"
         });
-        expect(packet.completion_status).toBe("blocked");
+        expect(packet.completion_status).toBe("incomplete");
         expect(packet.active_blockers).toHaveLength(1);
         expect(packet.blocking_reasons).toContain("External worker is unavailable.");
     });

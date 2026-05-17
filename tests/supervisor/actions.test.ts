@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveExecutionArtifactsDirectory, resolveInterventionDirectory } from "../../src/artifacts/paths.js";
+import {
+    resolveExecutionAgentContextPath,
+    resolveExecutionArtifactsDirectory,
+    resolveExecutionRuntimeContextPath,
+    resolveExecutionRuntimeToolDirectory,
+    resolveInterventionDirectory
+} from "../../src/artifacts/paths.js";
 import type { CompiledAgentNode } from "../../src/graph/compiled.js";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { runRepairArtifactIntervention } from "../../src/supervisor/actions.js";
@@ -94,8 +100,8 @@ describe("supervisor actions", () => {
                 graph: { graph_id: "graph-1", credential_specs: {} }
             } as RuntimeSession,
             workspace_path: runRoot,
-            context_packet_path: join(executionDir, "context", "packet.json"),
-            context_manifest_path: join(executionDir, "context", "manifest.md"),
+            context_packet_path: resolveExecutionRuntimeContextPath(executionDir),
+            context_manifest_path: resolveExecutionAgentContextPath(executionDir),
             harnesses: {
                 "codex-cli": harness
             },
@@ -119,15 +125,16 @@ describe("supervisor actions", () => {
         await expect(readFile(join(interventionDir, "result.json"), "utf8"))
             .resolves.toContain('"missing_artifacts_after": []');
         await expect(readFile(join(artifactsRoot, "handoff.md"), "utf8")).resolves.toBe("repaired\n");
-        await expect(readFile(join(executionDir, "agentflow-tools", "runtime.json"), "utf8"))
+        const toolRuntimeDir = resolveExecutionRuntimeToolDirectory(executionDir);
+        await expect(readFile(join(toolRuntimeDir, "runtime.json"), "utf8"))
             .resolves.toEqual(expect.stringContaining(`"run_root": "${runRoot}"`));
-        const runtimeMetadata = JSON.parse(await readFile(join(executionDir, "agentflow-tools", "runtime.json"), "utf8")) as Record<string, unknown>;
+        const runtimeMetadata = JSON.parse(await readFile(join(toolRuntimeDir, "runtime.json"), "utf8")) as Record<string, unknown>;
         expect(runtimeMetadata).toMatchObject({
             run_id: "run-1",
             graph_id: "graph-1",
             execution_id: "exec-1",
-            context_packet_path: join(executionDir, "context", "packet.json"),
-            context_manifest_path: join(executionDir, "context", "manifest.md"),
+            context_packet_path: resolveExecutionRuntimeContextPath(executionDir),
+            context_manifest_path: resolveExecutionAgentContextPath(executionDir),
             sandbox: "workspace-write"
         });
         expect(runtimeMetadata.output_dir).toEqual(expect.stringContaining(join(runRoot, ".agentflow-runtime")));
@@ -221,8 +228,8 @@ describe("supervisor actions", () => {
                     graph: { graph_id: "graph-1", credential_specs: {} }
                 } as RuntimeSession,
                 workspace_path: runRoot,
-                context_packet_path: join(executionDir, "context", "packet.json"),
-                context_manifest_path: join(executionDir, "context", "manifest.md"),
+                context_packet_path: resolveExecutionRuntimeContextPath(executionDir),
+                context_manifest_path: resolveExecutionAgentContextPath(executionDir),
                 harnesses: {
                     "codex-cli": harness
                 },

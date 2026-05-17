@@ -302,6 +302,7 @@ Runtime behavior:
 - Credential values are not exported to the Codex CLI or Cursor CLI harness environment.
 - Generated tool launchers resolve credentials just before starting the plugin tool subprocess and inject `AGENTFLOW_CREDENTIAL_<SCOPE>_<FIELD>` only into that child process.
 - Generated tool launchers do not resolve credentials for `--help`; they pass non-secret config defaults and append an `Agentflow configured defaults` section with secret-looking keys redacted.
+- Missing required credentials are emitted as typed runtime authority requests by Agentflow-owned preflight before the agent runs. Generated launcher credential failures are paired audit logs only; agents, verifier text, stderr, helper prose, and debug files cannot turn credential-looking text into a pause by themselves.
 - The harness prompt includes each tool's description, origin, credential scope names, and configured default keys, but never configured values.
 - Tools share the node sandbox.
 

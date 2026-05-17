@@ -1,4 +1,5 @@
 import type { RuntimeNodeAttempt } from "../runtime/attempts.js";
+import { resolveExecutionHumanDebugVerifierDirectory } from "../artifacts/paths.js";
 import {
   collectRunDiagnostics,
   selectPrimaryRunDiagnostic
@@ -95,7 +96,7 @@ function summarizeOutcomeVerifications(attempts: RuntimeNodeAttempt[]): AttemptO
         summary: verification.summary,
         blockers_count: verification.blockers,
         findings_count: verification.findings,
-        verify_outcome_markdown_path: `${attempt.execution_dir}/verify-outcome.md`
+        verify_outcome_markdown_path: `${resolveExecutionHumanDebugVerifierDirectory(attempt.execution_dir)}/verdict.md`
       });
     }
   }

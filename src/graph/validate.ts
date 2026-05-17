@@ -973,7 +973,7 @@ async function validateNormalizedDocument(
           diagnostics.push({
             path: metadata.path,
             message:
-              "checkpoint nodes are planned human gates and are only valid inside a repeat body in this release; use supervisor pause_for_human for runtime safety pauses."
+              "checkpoint nodes are planned human gates and are only valid inside a repeat body in this release; supervisor authority pauses are runtime-owned and require typed AuthorityRequests."
           });
         }
 

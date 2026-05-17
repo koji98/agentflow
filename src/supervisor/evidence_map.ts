@@ -179,8 +179,8 @@ function attemptEvidenceRefs(attempt: RuntimeNodeAttempt | undefined): Superviso
     attempt.result_path ? { label: "attempt result", path: attempt.result_path, kind: "result" } : undefined,
     attempt.stdout_log_path ? { label: "stdout log", path: attempt.stdout_log_path, kind: "stdout" } : undefined,
     attempt.stderr_log_path ? { label: "stderr log", path: attempt.stderr_log_path, kind: "stderr" } : undefined,
-    attempt.context_packet_path ? { label: "context packet", path: attempt.context_packet_path, kind: "context_packet" } : undefined,
-    attempt.context_manifest_path ? { label: "context manifest", path: attempt.context_manifest_path, kind: "context_manifest" } : undefined,
+    attempt.context_packet_path ? { label: "runtime context", path: attempt.context_packet_path, kind: "context_packet" } : undefined,
+    attempt.context_manifest_path ? { label: "agent context brief", path: attempt.context_manifest_path, kind: "context_manifest" } : undefined,
     attempt.context_provenance_path ? { label: "context provenance", path: attempt.context_provenance_path, kind: "context_provenance" } : undefined,
     ...Object.entries(attempt.artifacts).map(([name, path]) => ({
       label: `artifact:${name}`,
@@ -189,10 +189,6 @@ function attemptEvidenceRefs(attempt: RuntimeNodeAttempt | undefined): Superviso
     }))
   ];
   return refs.filter((item): item is SupervisorEvidenceReference => Boolean(item));
-}
-
-function textSuggestsAuthorityGap(text: string): boolean {
-  return /\b(credential|permission|approval|authority|auth|login|token|remote side effect|scope)\b/iu.test(text);
 }
 
 function textSuggestsMissingEvidence(text: string): boolean {
@@ -219,12 +215,6 @@ function classifyRequirementStatus(options: {
     .slice(0, 8);
   const related = words.length === 0 || words.some((word) => haystack.includes(word));
 
-  if (related && textSuggestsAuthorityGap(haystack)) {
-    return {
-      status: "outside_authority",
-      missing_reason: "The failure text indicates the requirement crosses a credential, permission, scope, or remote-side-effect boundary."
-    };
-  }
   if (related && textSuggestsConflict(haystack)) {
     return {
       status: "conflicting",
@@ -279,7 +269,6 @@ export function buildRequirementEvidenceMap(options: {
   const missingEvidence = requirements.filter((requirement) =>
     requirement.status === "missing" ||
     requirement.status === "unknown" ||
-    requirement.status === "outside_authority" ||
     requirement.status === "conflicting"
   );
 
@@ -306,10 +295,6 @@ export function evidenceMapHasActionableEvidence(map: SupervisorRequirementEvide
   );
 }
 
-export function evidenceMapRequiresAuthority(map: SupervisorRequirementEvidenceMap): boolean {
-  return map.requirements.some((requirement) => requirement.status === "outside_authority");
-}
-
 export function evidenceMapHasUnprovableRequirements(map: SupervisorRequirementEvidenceMap): boolean {
   return map.requirements.some((requirement) =>
     requirement.status === "missing" || requirement.status === "unknown" || requirement.status === "conflicting"
@@ -320,12 +305,6 @@ export function selectEvidenceMapDelta(map: SupervisorRequirementEvidenceMap): {
   delta?: SupervisorMaterialDelta;
   blockedReason?: string;
 } {
-  if (evidenceMapRequiresAuthority(map)) {
-    return {
-      blockedReason: "A failed requirement needs authority, credentials, scope, or remote-side-effect approval the supervisor cannot infer."
-    };
-  }
-
   if (evidenceMapHasActionableEvidence(map)) {
     return {
       delta: {

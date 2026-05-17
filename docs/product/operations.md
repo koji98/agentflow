@@ -67,14 +67,14 @@ Important launch behavior:
 - Harness-native config is isolated by default. Declare Codex MCP/plugins or Cursor config/permissions in `profiles.*.harness_config` when they are part of the intended run; use `isolation: "inherit_user"` only when accepting non-reproducible local harness behavior.
 - `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.
 - `checkpoint` nodes are planned human gates inside repeat bodies; they prompt on a TTY when reached and feed pass, deny, or abort back into the graph.
-- Supervisor `pause_for_human` is an authority pause, not a graph node; local context, validation, artifact, workspace, and recoverable environment failures should attempt machine recovery before a pause is considered.
+- Supervisor authority pauses are not graph nodes; they require a typed runtime `AuthorityRequest`. Local context, validation, artifact, workspace, graph-contract, repo/sandbox/scope, and recoverable environment failures recover autonomously or fail with evidence instead of asking a human.
 - Terminal runs write the delivery package after run completion.
 
 For the implementation flow behind launch, node attempts, context pointer resolution, generated runtime tooling, supervision, and delivery, see `../technical/runtime-lifecycle.md`.
 
 ## Progress Events
 
-TTY progress includes node lifecycle, check results, supervisor decisions, supervisor interventions, human pauses, and delivery package completion.
+TTY progress includes node lifecycle, check results, supervisor decisions, supervisor interventions, typed authority pauses, and delivery package completion.
 
 Important event types:
 
@@ -138,7 +138,7 @@ agentflow observe resolve --run <run-root> --observation <id> --resolution "Work
 
 `af orient` and `af complete check` surface active observations relevant to the current node. Observations are evidence, not graph edits; they do not change acceptance criteria, repo authority, sandbox, or declared artifacts.
 
-When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map context packet files, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --graph <path>` reports context analysis before launch when a graph has broad globs, large docs, generated trees, unresolved context pointers, missing CLI hints, or managed tool readiness issues.
+When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map the agent context brief, runtime context state, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --graph <path>` reports context analysis before launch when a graph has broad globs, large docs, generated trees, unresolved context pointers, missing CLI hints, or managed tool readiness issues.
 
 ## Resume
 
@@ -225,7 +225,7 @@ At terminal state, review in this order:
 4. evidence files named by `delivery/manifest.json`
 5. internal runtime artifacts only for resume debugging, failed repair diagnosis, or low-level audit
 
-The review brief is the primary human handoff: outcome, success contract, changed files, final declared artifacts, validation evidence, active risks, recovered issues, and intervention summary. Run learnings capture future improvements for workspace docs, tests, scripts, graph shape, skills, plugins, and evals. The audit index maps raw context packets, tool ledgers, milestones, supervisor timeline, and runtime logs without making them the default review path.
+The review brief is the primary human handoff: outcome, success contract, changed files, final declared artifacts, validation evidence, active risks, recovered issues, and intervention summary. Run learnings capture future improvements for workspace docs, tests, scripts, graph shape, skills, plugins, and evals. The audit index maps runtime context state, tool ledgers, milestones, supervisor timeline, and runtime logs without making them the default review path.
 
 `delivery/manifest.json` keeps semantic machine keys for human entrypoints and evidence files. Generated human-facing Markdown files use numeric prefixes so local file browsers present the review order clearly. Treat missing or low-quality delivery artifacts as a failed run quality signal even if code changes exist.
 

@@ -441,7 +441,7 @@ describe("artifacts projection", () => {
             expect(nodeDetail.artifacts.map((artifact) => artifact.relative_path)).toContain("artifacts/verification.json");
             const nodeLogs = await projectNodeLogs(fixture.runRoot, fixture.compiledVerifyId, nodeDetail.selected_execution_id);
             expect(nodeLogs.stdout?.content).toContain("\"passed\":true");
-            expect(nodeLogs.artifacts.map((artifact) => artifact.relative_path)).toContain("logs/stdout.log");
+            expect(nodeLogs.artifacts.map((artifact) => artifact.relative_path)).toContain("human-debug/harness/stdout.log");
             const artifact = await readProjectedArtifact(fixture.runRoot, fixture.compiledVerifyId, nodeDetail.selected_execution_id!, "artifacts/verification.json");
             expect(JSON.parse(artifact.content)).toMatchObject({
                 currentCounter: 2,
@@ -509,7 +509,7 @@ describe("artifacts projection", () => {
                     result_artifact_path: expect.stringContaining("result.json")
                 })
             ]));
-            expect(nodeDetail.artifacts.map((artifact) => artifact.relative_path)).toContain("result.json");
+            expect(nodeDetail.artifacts.map((artifact) => artifact.relative_path)).toContain("runtime/result.json");
         }
         finally {
             await rm(fixture.tempRoot, { recursive: true, force: true });

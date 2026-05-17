@@ -92,9 +92,9 @@ Terminal runs write stable resume and audit state such as `run.json`, `compiled_
 
 Nodes receive context through a pointer packet under the execution directory:
 
-- `context/packet.json`
-- `context/manifest.md`
-- `context/provenance.json`
+- `agent/context.md`
+- `runtime/context.json`
+- `human-debug/context-provenance.json`
 
 Context sources are:
 
@@ -126,7 +126,7 @@ See `context-and-artifacts.md` for the context resolution lifecycle, repeat sele
 Codex CLI and Cursor CLI are adapters behind one Agentflow harness contract. Both receive:
 
 - the same rendered prompt envelope
-- the same context packet references
+- the same agent-facing context brief
 - the same generated `af` runtime CLI
 - the same artifact contract
 - the same plugin tool contract
@@ -139,9 +139,9 @@ Continuity comes from Agentflow artifacts and resume logic, not from assuming pe
 
 ## Agent Runtime CLI
 
-`af` is Agentflow's in-node runtime CLI. It is generated into the same per-execution `agentflow-tools/bin` directory as plugin tool wrappers, then injected onto the harness `PATH`. The package also exposes `af` as a binary after build, but the primary contract is the generated in-run command.
+`af` is Agentflow's in-node runtime CLI. It is generated into the same per-execution `runtime/tools/bin` directory as plugin tool wrappers, then injected onto the harness `PATH`. The package also exposes `af` as a binary after build, but the primary contract is the generated in-run command.
 
-The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes run id, graph id, agent id, node id, workspace path, output directory, context paths, declared artifacts, granted plugin tool metadata, and non-secret credential metadata. It does not contain credential values. Secret fields stay in macOS Keychain and are resolved only by plugin tool launchers inside the plugin subprocess.
+The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes run id, graph id, agent id, node id, workspace path, output directory, context paths, declared artifacts, granted plugin tool metadata, and non-secret credential metadata. It does not contain credential values. Runtime preflight checks required credential availability before the agent runs; secret fields stay in macOS Keychain and are resolved only for the plugin subprocess.
 
 `af` commands are file-backed against the run root:
 
@@ -154,7 +154,7 @@ The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes r
 
 The default `af --help` surface is intentionally small because it is part of agent correctness. It shows the normal completion loop commands and omits debug/orchestration commands such as `diagnose`, `learn`, `tools list`, and `spawn`. `af <command> --help` remains the authoritative in-node runtime API reference for commands the runtime exposes to the current authority. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.
 
-Agentflow-provided `af` and plugin tool calls append per-execution `tool-invocations.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and stdout/stderr sidecar paths when output is captured.
+Agentflow-provided `af` and plugin tool calls append per-execution `human-debug/tools/index.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and paths to paired input/output payloads.
 
 Agents do not rely on synchronous coordination with other graph nodes. Durable work moves through declared artifacts, worker evidence is recorded in milestone state, helper sub-node coordination stays under the parent node's runtime contract, and completion state moves through `completion-packet.json` rather than final-response claims.
 
@@ -172,15 +172,17 @@ Action kinds:
 - `repair_artifact`
 - `rebuild_context`
 - `run_diagnostic`
-- `pause_for_human`
+- `pause_for_authority`
 - `semantic_evaluation`
 - `fail`
 
 The graph contract exposes one required supervisor profile, `supervision.profile`, plus one recovery budget, `supervision.max_total_interventions`. Evidence gathering, artifact repair, outcome verification, and supervisor helper work use the supervisor profile while still respecting the selected target node's repo, sandbox, credential, and tool authority. This keeps supervisor work explicit even when the failed checkpoint is a deterministic `check`, `exec`, or `checkpoint` with no authored worker profile. Internal recovery can apply a runtime operation such as current-node repair, upstream-node repair, artifact repair, context repair, validation-strategy repair, workspace repair, environment repair, causal-cone investigation, or authority pause without adding graph fields.
 
-Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Budget-spending recovery chains attach artifacts under the symptom attempt's `interventions/` directory, while any repaired upstream target writes normal attempt folders that are linked from the chain. Durable human pauses set run status to `paused` and include resume options plus the recovery plan that explains the precise unblock request.
+Supervisor decisions are stored in `supervisor-timeline.jsonl` and mirrored into `state.json`. Budget-spending recovery chains attach machine state under the symptom attempt's `runtime/supervisor/` directory and raw diagnostic material under `human-debug/interventions/`, while any repaired upstream target writes normal attempt folders that are linked from the chain. Durable authority pauses set run status to `paused` and include resume options plus the recovery plan that explains the precise unblock request.
 
-On a failed or rejected executable attempt, the symptom is not automatically treated as the cause. The runtime persists the exact rendered prompt, builds a causal case file, constructs an upstream cone from graph edges, artifact producers, context provenance, prior attempts, workspace diffs, repeat/managed state, and verification evidence, then ranks likely recovery targets. The supervisor repairs the nearest intent-aligned cause first, reruns the failed gate, and continues only when each retry records a material delta: pointer context changed, a requirement evidence map was produced, a target was reranked with evidence, validation guidance changed, workspace was repaired, environment was repaired, or an artifact was repaired. Generic advice to reread the case file is not a material delta. Budget is spent once per recovery chain, not once per helper, gatherer, target attempt, or rerun gate.
+The supervisor classifier does not parse failure prose to choose control flow. It routes from trusted typed authority requests, runtime-owned `failure_code` metadata, structured completion packets, outcome-verifier categories, repeated-fingerprint state, and node kind. Error strings, stdout/stderr, plugin debug logs, agent responses, verifier summaries, and helper findings are evidence for humans and diagnostic helpers; they cannot select `pause_for_authority` or a specialized recovery class by themselves.
+
+On a failed or rejected executable attempt, the symptom is not automatically treated as the cause. The runtime persists the exact rendered prompt, builds a causal case file, constructs an upstream cone from graph edges, artifact producers, context provenance, prior attempts, workspace diffs, repeat/managed state, and verification evidence, then ranks likely recovery targets. The supervisor repairs the nearest intent-aligned cause first, reruns the failed gate, and continues only when each retry records a material delta: pointer context changed, a requirement evidence map was produced, a target was reranked with evidence, validation guidance changed, workspace was repaired, environment was repaired, or an artifact was repaired. Generic advice to reread the recovery brief is not a material delta. Budget is spent once per recovery chain, not once per helper, gatherer, target attempt, or rerun gate.
 
 Context contract failures are deterministic recovery cases. If authored context cannot be packaged because a pointer is unsafe or unresolved, a required artifact is missing, a source is non-text, or a broad glob needs operator attention, the supervisor writes `context-analysis.{json,md}`, writes `context-repair-patch.json`, and retries with a compact repair packet before the authored context. The repair packet contains a bounded file index, sample matches, largest files, default ignored roots, omitted-entry provenance, and live workspace paths for manual inspection. It does not change graph intent, node intent, repo authority, sandbox, or declared artifacts.
 
@@ -211,9 +213,9 @@ Managed monitoring and supervisor events:
 
 Agentflow has two human-in-the-loop mechanisms, and they are intentionally different.
 
-`checkpoint` is authored workflow structure. It is a planned human gate that reviews a declared artifact at a known point in the graph. In this release, checkpoints are valid only inside `repeat` bodies so a deny decision can feed the next iteration with operator feedback. A checkpoint used as the repeat `until` node behaves like the loop's human approval sensor: pass exits the loop, deny can drive another iteration, and abort cancels the run.
+`checkpoint` is authored workflow structure. It is a planned human gate that reviews a declared artifact at a known point in the graph. In this release, checkpoints are valid only inside `repeat` bodies so a deny decision can feed the next iteration with operator feedback. A checkpoint used as the repeat `until` node behaves like the loop's planned decision sensor: pass exits the loop, deny can drive another iteration, and abort cancels the run.
 
-`pause_for_human` is supervisor authority behavior. It is not an authored node, and internally it is treated as `pause_for_authority`. The supervisor chooses it only when recovery needs authority the runtime must not infer: missing credentials, explicit human checkpoint boundaries, product or intent ambiguity, security or compliance judgment, repo/sandbox/scope expansion, or graph contract amendment. Ordinary local context, validation, artifact, workspace, and recoverable environment failures should attempt machine repair first. A pause writes durable run state, records `supervisor.paused`, sets the run status to `paused`, and waits for `agentflow resume --human-action ...`.
+`pause_for_human` is the persisted run state for a typed authority pause. It is not an authored node, and the supervisor reaches it only through `pause_for_authority` after a trusted runtime component emits an `AuthorityRequest`. Trusted producers are checkpoint execution, credential/readiness preflight, harness adapters, and explicit operator input. The fixed authority categories are missing credentials, missing harness authentication, planned checkpoints, external side-effect approval, and operator-authored pauses. Free text from agents, verifiers, helpers, stderr, plugin tool debug files, and completion blockers cannot create an authority pause. Graph contract changes, repo/sandbox/scope expansion, product ambiguity, local context gaps, validation issues, artifact failures, workspace pollution, and recoverable environment failures recover autonomously or fail contractually with evidence. A pause writes durable run state, records `supervisor.paused`, sets the run status to `paused`, and waits for `agentflow resume --human-action ...`.
 
 This mirrors the durable interrupt/resume shape used by production agent runtimes: the run state is persisted before asking a human, resources are released, and resume input is recorded as part of the audit trail. Agentflow implements that locally through run-root artifacts rather than a remote checkpoint database.
 
@@ -230,7 +232,7 @@ Checks are sensors. They produce evidence for the run, not hidden control-plane 
 Evaluation has five lanes:
 
 - Graph `check` nodes are in-run sensors. They are authored into the graph and can gate flow, repeat loops, or evidence collection.
-- Outcome verification is runtime enforcement for passing `agent` attempts. It runs after declared artifacts materialize, writes `verify-outcome.json` and `verify-outcome.md`, and can turn a claimed pass into an `outcome_verification` failure routed through supervision.
+- Outcome verification is runtime enforcement for passing `agent` attempts. It runs after declared artifacts materialize, writes `runtime/verifier.json` and `human-debug/verifier/verdict.md`, and can turn a claimed pass into an `outcome_verification` failure routed through supervision.
 - Supervisor `semantic_evaluation` is an intervention. It is chosen by the supervisor after a failed AI check or semantic uncertainty, spends intervention budget, and writes supervisor evidence.
 - Managed pattern evaluation is authored workflow structure. `pattern_deep_work.completion` expands into command criteria, targeted rubric criteria, a deterministic scorecard gate, and a bounded repair loop as part of the compiled graph. `pattern_work_list` deterministically freezes a planned item list and verifies the completed item ledger before publishing stable public artifacts.
 - `agentflow eval` is offline workflow evaluation. It runs file-backed suites of scenarios, variants, and repeated trials against Agentflow workflows, grades hard facts with required criteria, rates qualitative behavior with quality criteria, and writes eval artifacts under `.agentflow/evals`; it does not replace in-run checks. Its design follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) and adopts ADK-style criteria, trajectory evaluation, and deterministic environment simulation.
@@ -265,9 +267,9 @@ Plugin-bundled tools are runtime-visible CLI capabilities. Tool exports declare:
 
 Policy rules:
 
-- declaring a tool in the graph or agent node is the operator approval to expose that CLI to the agent
+- declaring a managed tool in top-level `tools` registers it for reuse; granting it through node support or a capability is the operator approval to expose that CLI to that agent
 - tool wrappers run inside the same node sandbox and timeout
-- credential values and non-secret managed tool `config` values are resolved by the generated tool launcher for the plugin subprocess and are not exported into the Codex or Cursor harness environment
+- credential values are checked by runtime-owned preflight, and credential values plus non-secret managed tool `config` values are resolved for the plugin subprocess without exporting them into the Codex or Cursor harness environment
 - plugin manifests do not declare default CLI arguments; exact tool CLI arguments belong in the tool's `--help` and are passed by the agent when invoking the callable tool
 - `config_schema` only validates graph-provided default config values
 - executable `--help` is required for every plugin tool, must run without credentials or side effects, and is checked by `agentflow validate --graph ...`
@@ -278,7 +280,7 @@ Terminal delivery is part of the runtime contract. The package collector reads f
 
 - `01-review-brief.md`: primary human handoff with outcome, contract, changed files, final artifacts, validation evidence, active risks, recovered issues, and intervention summary
 - `02-run-learnings.md`: future-run improvements for workspace docs, tests, scripts, graph shape, skills, plugins, and evals
-- `03-audit-index.md`: map to raw context packets, tool ledgers, milestone files, supervisor timeline, runtime logs, and resume/debug files
+- `03-audit-index.md`: map to runtime context state, tool ledgers, milestone files, supervisor timeline, runtime logs, and resume/debug files
 - `evidence/`: semantic machine files for artifact index, change map, validation ledger, decision log, intervention trace, milestones, and workspace improvements
 - `manifest.json`: semantic file map and taxonomy
 
@@ -288,7 +290,7 @@ The manifest keeps semantic entrypoint maps and an explicit `artifact_taxonomy` 
 - `declared_artifacts`: final accepted graph outcome artifacts grouped by node/artifact name
 - `resume_required`: stable files needed for resume and replay
 - `audit_trail`: events, attempts, tool invocation ledgers, and workspace-change captures
-- `debug_only`: raw logs, context packets/provenance, tool sidecars, and runtime coordination files
+- `debug_only`: raw logs, runtime context/provenance, tool sidecars, and runtime coordination files
 - `empty_or_noop`: empty ledgers/logs or no-change captures that should not look important
 
 Prior failed attempts that were later retried or repaired are reported as recovered issues. They remain audit evidence but are not active follow-up items.

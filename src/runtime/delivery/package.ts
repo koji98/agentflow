@@ -1,7 +1,11 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 
-import { resolveRunArtifactPaths } from "../../artifacts/paths.js";
+import {
+  resolveExecutionHumanDebugHarnessDirectory,
+  resolveExecutionRuntimeResultPath,
+  resolveRunArtifactPaths
+} from "../../artifacts/paths.js";
 import type { CompiledGraph } from "../../graph/compiled.js";
 import { deliverySections, type DeliverySection } from "../../graph/schema.js";
 import type { SupervisorInterventionRecord } from "../../supervisor/types.js";
@@ -730,9 +734,9 @@ function renderAuditIndex(
   model: DeliveryModel,
   deliveryDir: string
 ): string {
-  const contextPacketRows = evidence.attempts.flatMap((attempt) =>
+  const contextRows = evidence.attempts.flatMap((attempt) =>
     attempt.context_packet_path
-      ? [`| \`${attempt.authored_id}\` | \`${attempt.execution_id}\` | ${markdownLink(deliveryDir, "context packet", attempt.context_packet_path)} |`]
+      ? [`| \`${attempt.authored_id}\` | \`${attempt.execution_id}\` | ${markdownLink(deliveryDir, "runtime context", attempt.context_packet_path)} |`]
       : []
   );
   const toolRows = evidence.tool_invocations.map((entry) =>
@@ -767,11 +771,11 @@ function renderAuditIndex(
       "No superseded attempts were recorded."
     ),
     "",
-    "## Context Packets",
+    "## Context Runtime State",
     "",
-    ...(contextPacketRows.length > 0
-      ? ["| Node | Execution | Packet |", "| --- | --- | --- |", ...contextPacketRows]
-      : ["- No context packets were referenced by attempts."]),
+    ...(contextRows.length > 0
+      ? ["| Node | Execution | Runtime Context |", "| --- | --- | --- |", ...contextRows]
+      : ["- No runtime context files were referenced by attempts."]),
     "",
     "## Managed Tool Ledgers",
     "",
@@ -1064,31 +1068,31 @@ async function buildArtifactTaxonomy(options: {
   const debugPaths = [
     ...evidence.attempts.flatMap((attempt) => [
       {
-        path: attempt.stdout_log_path ?? `${attempt.execution_dir}/logs/stdout.log`,
+        path: attempt.stdout_log_path ?? `${resolveExecutionHumanDebugHarnessDirectory(attempt.execution_dir)}/stdout.log`,
         label: `${attempt.authored_id} stdout log`,
         purpose: "Raw harness stdout for this execution."
       },
       {
-        path: attempt.stderr_log_path ?? `${attempt.execution_dir}/logs/stderr.log`,
+        path: attempt.stderr_log_path ?? `${resolveExecutionHumanDebugHarnessDirectory(attempt.execution_dir)}/stderr.log`,
         label: `${attempt.authored_id} stderr log`,
         purpose: "Raw harness stderr for this execution."
       },
       {
-        path: attempt.result_path ?? `${attempt.execution_dir}/result.json`,
+        path: attempt.result_path ?? resolveExecutionRuntimeResultPath(attempt.execution_dir),
         label: `${attempt.authored_id} harness result`,
         purpose: "Raw harness result metadata for this execution."
       },
       ...(attempt.context_packet_path
         ? [{
             path: attempt.context_packet_path,
-            label: `${attempt.authored_id} context packet`,
+            label: `${attempt.authored_id} runtime context`,
             purpose: "Exact pointer-only context contract provided to the node."
           }]
         : []),
       ...(attempt.context_manifest_path
         ? [{
             path: attempt.context_manifest_path,
-            label: `${attempt.authored_id} context manifest`,
+            label: `${attempt.authored_id} agent context brief`,
             purpose: "Prompt-facing index of context pointers and provenance."
           }]
         : []),
@@ -1102,18 +1106,18 @@ async function buildArtifactTaxonomy(options: {
     ]),
     ...evidence.tool_invocations.flatMap((entry) =>
       entry.records.flatMap((record) => [
-        ...(typeof record.stdout_path === "string"
+        ...(typeof record.input_path === "string"
           ? [{
-              path: record.stdout_path,
-              label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} stdout`,
-              purpose: "Raw stdout sidecar for a single Agentflow-provided tool invocation."
+              path: record.input_path,
+              label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} input`,
+              purpose: "Raw invocation input for a single Agentflow-provided tool invocation."
             }]
           : []),
-        ...(typeof record.stderr_path === "string"
+        ...(typeof record.output_path === "string"
           ? [{
-              path: record.stderr_path,
-              label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} stderr`,
-              purpose: "Raw stderr sidecar for a single Agentflow-provided tool invocation."
+              path: record.output_path,
+              label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} output`,
+              purpose: "Raw invocation output for a single Agentflow-provided tool invocation."
             }]
           : [])
       ])
@@ -1174,7 +1178,7 @@ async function buildArtifactTaxonomy(options: {
   }
 
   for (const attempt of evidence.attempts) {
-    const stderrPath = attempt.stderr_log_path ?? `${attempt.execution_dir}/logs/stderr.log`;
+    const stderrPath = attempt.stderr_log_path ?? `${resolveExecutionHumanDebugHarnessDirectory(attempt.execution_dir)}/stderr.log`;
     if ((await readTrimmed(stderrPath)) === "") {
       emptyOrNoop.push(await artifactEntry({
         path: stderrPath,
@@ -1187,16 +1191,14 @@ async function buildArtifactTaxonomy(options: {
 
   for (const entry of evidence.tool_invocations) {
     for (const record of entry.records) {
-      for (const stream of ["stdout_path", "stderr_path"] as const) {
-        const path = record[stream];
-        if (typeof path === "string" && (await readTrimmed(path)) === "") {
-          emptyOrNoop.push(await artifactEntry({
-            path,
-            label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} ${stream === "stdout_path" ? "stdout" : "stderr"}`,
-            purpose: `Tool invocation produced no ${stream === "stdout_path" ? "stdout" : "stderr"} output.`,
-            reason: stream === "stdout_path" ? "empty_tool_stdout" : "empty_tool_stderr"
-          }));
-        }
+      const outputPath = record.output_path;
+      if (typeof outputPath === "string" && (await readTrimmed(outputPath)) === "") {
+        emptyOrNoop.push(await artifactEntry({
+          path: outputPath,
+          label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} output`,
+          purpose: "Tool invocation produced no captured output payload.",
+          reason: "empty_tool_output"
+        }));
       }
     }
   }

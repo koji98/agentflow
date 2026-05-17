@@ -6,9 +6,9 @@ describe("substituteAgentflowTokens", () => {
   const tokens = {
     AGENTFLOW_WORKSPACE: "/abs/repo",
     AGENTFLOW_OUTPUT_DIR: "/abs/runs/exec/artifacts",
-    AGENTFLOW_CONTEXT_PACKET: "/abs/runs/exec/context/packet.json",
-    AGENTFLOW_CONTEXT_MANIFEST: "/abs/runs/exec/context/manifest.md",
-    AGENTFLOW_CONTEXT_SPEC: "/abs/runs/exec/context/items/spec.md"
+    AGENTFLOW_CONTEXT_PACKET: "/abs/runs/exec/runtime/context.json",
+    AGENTFLOW_CONTEXT_MANIFEST: "/abs/runs/exec/agent/context.md",
+    AGENTFLOW_CONTEXT_SPEC: "/abs/repo/spec.md"
   };
 
   it("substitutes the ${NAME} braced form", () => {
@@ -32,7 +32,7 @@ describe("substituteAgentflowTokens", () => {
       "The packet path is AGENTFLOW_CONTEXT_PACKET.",
       tokens
     );
-    expect(result).toBe("The packet path is /abs/runs/exec/context/packet.json.");
+    expect(result).toBe("The packet path is /abs/runs/exec/runtime/context.json.");
   });
 
   it("does not match a token name embedded in a longer identifier", () => {
@@ -59,7 +59,7 @@ describe("substituteAgentflowTokens", () => {
       tokens
     );
     expect(result).toBe(
-      "Use the spec at /abs/runs/exec/context/items/spec.md to seed the change."
+      "Use the spec at /abs/repo/spec.md to seed the change."
     );
   });
 
@@ -88,7 +88,7 @@ describe("substituteAgentflowTokens", () => {
       "Read AGENTFLOW_CONTEXT_MANIFEST, write to ${AGENTFLOW_OUTPUT_DIR}/out.md, and cd $AGENTFLOW_WORKSPACE.";
     const result = substituteAgentflowTokens(input, tokens);
     expect(result).toBe(
-      "Read /abs/runs/exec/context/manifest.md, write to /abs/runs/exec/artifacts/out.md, and cd /abs/repo."
+      "Read /abs/runs/exec/agent/context.md, write to /abs/runs/exec/artifacts/out.md, and cd /abs/repo."
     );
   });
 

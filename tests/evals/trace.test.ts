@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveRunArtifactPaths } from "../../src/artifacts/paths.js";
+import {
+    resolveExecutionHumanDebugToolDirectory,
+    resolveExecutionRuntimeCompletionPacketPath,
+    resolveRunArtifactPaths
+} from "../../src/artifacts/paths.js";
 import { buildEvalTracePacket } from "../../src/evals/trace.js";
 async function writeJson(path: string, value: unknown): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
@@ -21,7 +25,7 @@ describe("eval trace packets", () => {
     it("projects completion packets and af runtime CLI calls into trajectory events", async () => {
         const paths = resolveRunArtifactPaths(runRoot);
         const executionDir = join(paths.nodes_dir, "node-ship", "executions", "001-ship");
-        const completionPacketPath = join(executionDir, "completion-packet.json");
+        const completionPacketPath = resolveExecutionRuntimeCompletionPacketPath(executionDir);
         await writeJson(paths.run_file, {
             run_id: "run-test",
             graph_id: "trace-test",
@@ -70,7 +74,7 @@ describe("eval trace packets", () => {
         await mkdir(dirname(paths.events_file), { recursive: true });
         await writeFile(paths.events_file, "", "utf8");
         await writeFile(paths.interventions_file, "", "utf8");
-        await writeJson(join(executionDir, "execution.json"), {
+        await writeJson(join(executionDir, "runtime/execution.json"), {
             execution_id: "exec__ship__attempt_1",
             compiled_id: "ship",
             authored_id: "ship",
@@ -95,7 +99,9 @@ describe("eval trace packets", () => {
             ready_for_verification: true,
             blocking_reasons: []
         });
-        await writeFile(join(executionDir, "tool-invocations.jsonl"), `${JSON.stringify({
+        const toolDir = resolveExecutionHumanDebugToolDirectory(executionDir);
+        await mkdir(toolDir, { recursive: true });
+        await writeFile(join(toolDir, "index.jsonl"), `${JSON.stringify({
             kind: "af",
             argv: ["complete", "check"],
             exit_code: 0,

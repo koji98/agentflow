@@ -21,7 +21,7 @@ Use `agentflow-authoring` after a workflow brief exists.
 
 1. Establish the top-level outcome: what should be true when the run ends.
 2. Confirm why Agentflow is the right tool: long-running work, durable evidence, supervision, multi-node handoffs, or reusable workflow value.
-3. Clarify scope, non-goals, authority, human approval points, and agent autonomy; use `references/grill-questions.md` when the requirements are still underdeveloped.
+3. Clarify scope, non-goals, authority, planned checkpoints, typed authority boundaries, and agent autonomy; use `references/grill-questions.md` when the requirements are still underdeveloped.
 4. Choose an assurance profile: fast, balanced, high-assurance, exploration, or learning loop. See `references/assurance-profiles.md`.
 5. Clarify evidence: deterministic checks, rubrics, artifacts, delivery review, PRs, reports, or eval outputs.
 6. Produce a workflow brief using `references/workflow-brief.md`.

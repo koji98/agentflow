@@ -28,6 +28,11 @@ export interface OutcomeVerificationPromptExecutionEvidence {
 export interface OutcomeVerificationPromptCompletionPacket {
   completion_status: "ready_for_verification" | "incomplete" | "blocked";
   ready_for_verification: boolean;
+  authority_requests?: Array<{
+    kind: string;
+    source: string;
+    summary: string;
+  }>;
   blocking_reasons: string[];
   missing_artifacts: string[];
   declared_artifacts?: Array<{
@@ -226,12 +231,6 @@ function renderExecutionEvidence(evidence: OutcomeVerificationPromptExecutionEvi
     return lines;
   }
 
-  if (evidence.stdout_path) {
-    lines.push(`- stdout log: ${evidence.stdout_path}`);
-  }
-  if (evidence.stderr_path) {
-    lines.push(`- stderr log: ${evidence.stderr_path}`);
-  }
   if (evidence.read_error) {
     lines.push(`- Read error: ${evidence.read_error}`);
   }
@@ -243,7 +242,7 @@ function renderExecutionEvidence(evidence: OutcomeVerificationPromptExecutionEvi
 
   lines.push("", "```", evidence.excerpt.trimEnd(), "```");
   if (evidence.truncated) {
-    lines.push("This execution excerpt was truncated. Read the full log paths above before judging a point that depends on omitted command output.");
+    lines.push("This execution excerpt was truncated. Treat omitted command output as unavailable unless another structured evidence summary proves it.");
   }
 
   return lines;
@@ -316,6 +315,13 @@ function renderCompletionPacket(packet: OutcomeVerificationPromptCompletionPacke
     }
   }
 
+  if (packet.authority_requests && packet.authority_requests.length > 0) {
+    lines.push("- Authority requests:");
+    for (const request of packet.authority_requests) {
+      lines.push(`  - ${request.kind} from ${request.source}: ${request.summary}`);
+    }
+  }
+
   return lines;
 }
 
@@ -341,7 +347,7 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "",
     "## Decision Rule",
     "- Treat the Completion Packet section as primary structured evidence for mechanical readiness.",
-    "- Do not pass when completion_status is incomplete. Treat blocked as a terminal attempt state only when the blocker is supported by evidence; blocked is not node success.",
+    "- Do not pass when completion_status is incomplete. Treat blocked as a terminal attempt state only when it includes a typed authority request from runtime; blocked is not node success.",
     "- Pass when the declared artifacts, final response, milestone evidence, and available deterministic evidence reasonably satisfy the authored acceptance criteria.",
     "- Treat graph and node acceptance criteria as authoritative over any task text that describes an intentionally failing fallback, blocker report, or retry trigger.",
     "- A final response explicitly marked as an intentional failure, retry request, missing-context fallback, or not-done state is blocker evidence unless the acceptance criteria explicitly say that terminal fallback is acceptable.",
@@ -369,11 +375,10 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     ...bullets(input.graph_constraints, "No graph-level constraints were authored."),
     "",
     "## Node Intent",
-    `Authored id: ${input.node_authored_id}`,
-    `Compiled id: ${input.node_compiled_id}`,
-    `Execution id: ${input.attempt.execution_id} (attempt ${input.attempt.attempt_index}${
+    `Node: ${input.node_authored_id}`,
+    `Attempt: ${input.attempt.attempt_index}${
       input.attempt.iteration_index !== undefined ? `, iteration ${input.attempt.iteration_index}` : ""
-    })`,
+    }`,
     "",
     `Goal: ${input.node_goal.length > 0 ? input.node_goal : "(no node intent goal authored)"}`,
     "",

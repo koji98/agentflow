@@ -249,12 +249,84 @@ export function resolveExecutionArtifactsDirectory(executionDir: string): string
   return join(executionDir, "artifacts");
 }
 
+export function resolveExecutionAgentDirectory(executionDir: string): string {
+  return join(executionDir, "agent");
+}
+
+export function resolveExecutionAgentPromptPath(executionDir: string): string {
+  return join(resolveExecutionAgentDirectory(executionDir), "prompt.md");
+}
+
+export function resolveExecutionAgentContextPath(executionDir: string): string {
+  return join(resolveExecutionAgentDirectory(executionDir), "context.md");
+}
+
+export function resolveExecutionAgentResponsePath(executionDir: string): string {
+  return join(resolveExecutionAgentDirectory(executionDir), "response.md");
+}
+
+export function resolveExecutionAgentRecoveryBriefPath(executionDir: string): string {
+  return join(resolveExecutionAgentDirectory(executionDir), "supervisor-recovery.md");
+}
+
+export function resolveExecutionAgentArtifactRepairBriefPath(executionDir: string): string {
+  return join(resolveExecutionAgentDirectory(executionDir), "artifact-repair.md");
+}
+
+export function resolveExecutionRuntimeDirectory(executionDir: string): string {
+  return join(executionDir, "runtime");
+}
+
+export function resolveExecutionRuntimeResultPath(executionDir: string): string {
+  return join(resolveExecutionRuntimeDirectory(executionDir), "result.json");
+}
+
+export function resolveExecutionRuntimeCompletionPacketPath(executionDir: string): string {
+  return join(resolveExecutionRuntimeDirectory(executionDir), "completion-packet.json");
+}
+
+export function resolveExecutionRuntimeContextPath(executionDir: string): string {
+  return join(resolveExecutionRuntimeDirectory(executionDir), "context.json");
+}
+
+export function resolveExecutionRuntimeVerifierPath(executionDir: string): string {
+  return join(resolveExecutionRuntimeDirectory(executionDir), "verifier.json");
+}
+
+export function resolveExecutionRuntimeSupervisorDirectory(executionDir: string): string {
+  return join(resolveExecutionRuntimeDirectory(executionDir), "supervisor");
+}
+
+export function resolveExecutionRuntimeToolDirectory(executionDir: string): string {
+  return join(resolveExecutionRuntimeDirectory(executionDir), "tools");
+}
+
+export function resolveExecutionHumanDebugDirectory(executionDir: string): string {
+  return join(executionDir, "human-debug");
+}
+
+export function resolveExecutionHumanDebugHarnessDirectory(executionDir: string): string {
+  return join(resolveExecutionHumanDebugDirectory(executionDir), "harness");
+}
+
+export function resolveExecutionHumanDebugToolDirectory(executionDir: string): string {
+  return join(resolveExecutionHumanDebugDirectory(executionDir), "tools");
+}
+
+export function resolveExecutionHumanDebugVerifierDirectory(executionDir: string): string {
+  return join(resolveExecutionHumanDebugDirectory(executionDir), "verifier");
+}
+
+export function resolveExecutionHumanDebugWorkspaceDirectory(executionDir: string): string {
+  return join(resolveExecutionHumanDebugDirectory(executionDir), "workspace");
+}
+
 export function resolveInterventionDirectoryName(interventionId: string): string {
   return hashPathSegment(interventionId, "intervention");
 }
 
 export function resolveInterventionDirectory(executionDir: string, interventionId: string): string {
-  return join(executionDir, "interventions", resolveInterventionDirectoryName(interventionId));
+  return join(resolveExecutionHumanDebugDirectory(executionDir), "interventions", resolveInterventionDirectoryName(interventionId));
 }
 
 export function resolveNodeArtifactDirectory(

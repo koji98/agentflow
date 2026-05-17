@@ -22,7 +22,13 @@ import {
   readRunExecutionAttempts,
   readSupervisorInterventions
 } from "../../artifacts/reader.js";
-import { resolveExecutionArtifactsDirectory, resolveInterventionDirectory } from "../../artifacts/paths.js";
+import {
+  resolveExecutionAgentPromptPath,
+  resolveExecutionAgentResponsePath,
+  resolveExecutionArtifactsDirectory,
+  resolveExecutionRuntimeVerifierPath,
+  resolveInterventionDirectory
+} from "../../artifacts/paths.js";
 import { renderRunSummary } from "../delivery/summary.js";
 import { writeDeliveryPackage, type DeliveryPackageManifest } from "../delivery/package.js";
 import {
@@ -40,7 +46,7 @@ import { runDeterministicCheck, runLocalProcess } from "../checks/deterministic.
 import { resolveExecutionContext } from "../context/resolve.js";
 import type { ContextPacketMaterializedItem } from "../context/packet.js";
 import { evaluateGraphReadiness } from "../readiness.js";
-import { prepareAgentTools } from "../tools/setup.js";
+import { collectMissingToolCredentialAuthorityRequests, prepareAgentTools } from "../tools/setup.js";
 import {
   createRuntimeEvent,
   type CheckEvaluatedPayload,
@@ -80,6 +86,12 @@ import {
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
 import { runOutcomeVerification } from "../verification/verifier.js";
 import type { OutcomeVerificationResult } from "../verification/types.js";
+import {
+  RuntimeFailureError,
+  runtimeFailureMetadata,
+  runtimeFailurePayload,
+  type RuntimeFailureCode
+} from "../failure.js";
 import {
   buildCompletionPacket,
   persistCompletionPacket,
@@ -238,12 +250,47 @@ const missingAgentResponseMessage = "No final response was captured from the age
 
 class ArtifactMaterializationError extends Error {
   readonly repair_metadata: ArtifactRepairMetadata | undefined;
+  readonly failure_code: RuntimeFailureCode;
 
-  constructor(message: string, repairMetadata?: ArtifactRepairMetadata) {
+  constructor(
+    message: string,
+    repairMetadata?: ArtifactRepairMetadata,
+    failureCode: RuntimeFailureCode = "artifact_contract_failure"
+  ) {
     super(message);
     this.name = "ArtifactMaterializationError";
     this.repair_metadata = repairMetadata;
+    this.failure_code = failureCode;
   }
+}
+
+function runtimeFailureCodeForError(error: unknown, contextResolved: boolean): RuntimeFailureCode | undefined {
+  if (error instanceof RuntimeFailureError) {
+    return error.failure_code;
+  }
+  if (!contextResolved) {
+    return "unresolved_context";
+  }
+  return undefined;
+}
+
+function runtimeFailureDetailsForError(error: unknown): Record<string, unknown> | undefined {
+  return error instanceof RuntimeFailureError ? error.details : undefined;
+}
+
+function runtimeFailedNodeResult(
+  failureCode: RuntimeFailureCode,
+  message: string,
+  details?: Record<string, unknown>
+): RuntimeNodeExecutionResult {
+  return {
+    status: "failed",
+    outcome: "failed",
+    result: runtimeFailurePayload(failureCode, message, details),
+    stdout: undefined,
+    stderr: message,
+    metadata: runtimeFailureMetadata(failureCode, message, details)
+  };
 }
 
 function deriveRunId(runRoot: string): string {
@@ -354,7 +401,10 @@ async function ensureNodeReadiness(
     const harnessName = node.effective_policy.harness;
 
     if (!harnessName) {
-      throw new Error(`Agent "${node.compiled_id}" requires a resolved harness.`);
+      throw new RuntimeFailureError(
+        "harness_unavailable",
+        `Agent "${node.compiled_id}" requires a resolved harness.`
+      );
     }
 
     const diagnostics = await collectHarnessReadinessDiagnostics(
@@ -364,7 +414,7 @@ async function ensureNodeReadiness(
     );
 
     if (diagnostics.length > 0) {
-      throw new Error(diagnostics.join(" | "));
+      throw new RuntimeFailureError("harness_unavailable", diagnostics.join(" | "));
     }
 
     return;
@@ -374,7 +424,10 @@ async function ensureNodeReadiness(
     const harnessName = node.effective_policy.harness;
 
     if (!harnessName) {
-      throw new Error(`AI check "${node.compiled_id}" requires a resolved harness.`);
+      throw new RuntimeFailureError(
+        "harness_unavailable",
+        `AI check "${node.compiled_id}" requires a resolved harness.`
+      );
     }
 
     const diagnostics = await collectHarnessReadinessDiagnostics(
@@ -384,7 +437,7 @@ async function ensureNodeReadiness(
     );
 
     if (diagnostics.length > 0) {
-      throw new Error(diagnostics.join(" | "));
+      throw new RuntimeFailureError("harness_unavailable", diagnostics.join(" | "));
     }
 
     return;
@@ -1186,8 +1239,8 @@ function interventionTitle(action: SupervisorActionKind): string {
       return "Supervisor context brief for retry.";
     case "semantic_evaluation":
       return "Supervisor semantic-evaluation intervention brief.";
-    case "pause_for_human":
-      return "Supervisor escalation brief for human input.";
+    case "pause_for_authority":
+      return "Supervisor authority pause brief.";
     default:
       return actionRetrySummary(action);
   }
@@ -1392,7 +1445,7 @@ async function handleFailedNodeWithSupervisor(options: {
     const decisionId = createSupervisorDecisionId(options.attempt, requestedAction);
     const decision: SupervisorDecision = {
       decision_id: decisionId,
-      kind: requestedAction === "pause_for_human" ? "pause_for_human" : "fail_run",
+      kind: requestedAction === "pause_for_authority" ? "pause_for_human" : "fail_run",
       classification: classification.class,
       health_state: classification.class === "policy_or_scope_risk" ? "drifting" : "unhealthy",
       confidence: "medium",
@@ -1409,22 +1462,22 @@ async function handleFailedNodeWithSupervisor(options: {
         recovery_target: causalContext.selected_target
       },
       budget_cost: {},
-      requires_human: requestedAction === "pause_for_human",
+      requires_human: requestedAction === "pause_for_authority",
       created_at: new Date().toISOString()
     };
     options.session.supervisor.last_decision_id = decisionId;
     options.session.supervisor.timeline.push(decision);
-    if (requestedAction === "pause_for_human") {
-      if (!canSpendRuntimeSupervisorAction(options.session, "pause_for_human")) {
+    if (requestedAction === "pause_for_authority") {
+      if (!canSpendRuntimeSupervisorAction(options.session, "pause_for_authority")) {
         options.session.supervisor.status = "exhausted";
         decision.kind = "fail_run";
         decision.action = "fail";
         decision.requires_human = false;
-        decision.reason = 'Supervisor cannot run action "pause_for_human" because its budget is exhausted or the action is disabled.';
+        decision.reason = 'Supervisor cannot run action "pause_for_authority" because its budget is exhausted or the action is disabled.';
       } else {
-        spendRuntimeSupervisorAction(options.session, "pause_for_human");
+        spendRuntimeSupervisorAction(options.session, "pause_for_authority");
         options.session.supervisor.intervention_count += 1;
-        decision.budget_cost = { total: 1, pause_for_human: 1 };
+        decision.budget_cost = { total: 1, pause_for_authority: 1 };
         options.session.supervisor.status = "paused";
         options.session.supervisor.pause = {
           decision_id: decisionId,
@@ -1453,8 +1506,8 @@ async function handleFailedNodeWithSupervisor(options: {
         attempt_index: options.attempt.attempt_index
       }
     );
-    if (requestedAction === "pause_for_human" && decision.kind === "pause_for_human") {
-      const interventionId = createSupervisorInterventionId(options.attempt, "pause_for_human");
+    if (requestedAction === "pause_for_authority" && decision.kind === "pause_for_human") {
+      const interventionId = createSupervisorInterventionId(options.attempt, "pause_for_authority");
       await emitEvent(
         options.session,
         options.writer,
@@ -1465,9 +1518,9 @@ async function handleFailedNodeWithSupervisor(options: {
         {
           intervention_id: interventionId,
           decision_id: decisionId,
-          action: "pause_for_human",
+          action: "pause_for_authority",
           target_compiled_id: recoveryTargetNode.compiled_id,
-          summary: interventionTitle("pause_for_human")
+          summary: interventionTitle("pause_for_authority")
         },
         {
           compiled_id: options.node.compiled_id,
@@ -1479,7 +1532,7 @@ async function handleFailedNodeWithSupervisor(options: {
       );
       const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.runOptions.harnesses);
       const recovery = await runSupervisorRecoveryCycle({
-        action: "pause_for_human",
+        action: "pause_for_authority",
         run_id: options.session.run_id,
         graph_intent: options.session.graph.intent,
         node: options.node,
@@ -2068,14 +2121,23 @@ function resolveNodeWorkingDirectory(
   }
 
   if (cwd.includes(":")) {
-    throw new Error(`cwd "${cwd}" must be a relative path that stays within its repo or workspace root.`);
+    throw new RuntimeFailureError(
+      "graph_contract_gap",
+      `cwd "${cwd}" must be a relative path that stays within its repo or workspace root.`,
+      { field: "cwd", value: cwd }
+    );
   }
 
-  return resolveSubpathWithinRoot(
-    workspacePath,
-    cwd,
-    `cwd "${cwd}"`
-  );
+  try {
+    return resolveSubpathWithinRoot(
+      workspacePath,
+      cwd,
+      `cwd "${cwd}"`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new RuntimeFailureError("graph_contract_gap", message, { field: "cwd", value: cwd });
+  }
 }
 
 function resolveNodeEnvFiles(
@@ -2088,14 +2150,23 @@ function resolveNodeEnvFiles(
 
   return envFiles.map((envFile) => {
     if (envFile.includes(":")) {
-      throw new Error(`env_files entry "${envFile}" must be a relative path that stays within its repo or workspace root.`);
+      throw new RuntimeFailureError(
+        "graph_contract_gap",
+        `env_files entry "${envFile}" must be a relative path that stays within its repo or workspace root.`,
+        { field: "env_files", value: envFile }
+      );
     }
 
-    return resolveSubpathWithinRoot(
-      workspacePath,
-      envFile,
-      `env_files entry "${envFile}"`
-    );
+    try {
+      return resolveSubpathWithinRoot(
+        workspacePath,
+        envFile,
+        `env_files entry "${envFile}"`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new RuntimeFailureError("graph_contract_gap", message, { field: "env_files", value: envFile });
+    }
   });
 }
 
@@ -2236,7 +2307,8 @@ async function defaultExecExecutor(
       status: "canceled",
       result: processResult,
       stdout: processResult.stdout,
-      stderr: processResult.stderr
+      stderr: processResult.stderr,
+      ...(processResult.timed_out ? { metadata: { failure_code: "timeout" } } : {})
     };
   }
 
@@ -2266,7 +2338,8 @@ async function defaultExecExecutor(
     outcome: processResult.exit_code === 0 && !processResult.timed_out ? "passed" : "failed",
     result: processResult,
     stdout: processResult.stdout,
-    stderr: processResult.stderr
+    stderr: processResult.stderr,
+    ...(processResult.timed_out ? { metadata: { failure_code: "timeout" } } : {})
   };
 }
 
@@ -2296,7 +2369,8 @@ async function defaultCheckExecutor(
         status: "canceled",
         result,
         stdout: result.stdout,
-        stderr: result.stderr
+        stderr: result.stderr,
+        ...(result.timed_out ? { metadata: { failure_code: "timeout" } } : {})
       };
     }
 
@@ -2334,6 +2408,7 @@ async function defaultCheckExecutor(
       result,
       stdout: result.stdout,
       stderr: result.stderr,
+      ...(result.timed_out ? { metadata: { failure_code: "timeout" } } : {}),
       check: {
         check_kind: "deterministic",
         passed: result.passed,
@@ -2346,7 +2421,8 @@ async function defaultCheckExecutor(
   const harnessName = context.node.effective_policy.harness;
 
   if (!harnessName || !harnesses[harnessName]) {
-    throw new Error(`AI check "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`);
+    const message = `AI check "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`;
+    return runtimeFailedNodeResult("harness_unavailable", message);
   }
 
   const aiCheckPromptTokens = buildNodeRuntimeEnv(context);
@@ -2519,11 +2595,13 @@ function withSilentAgentHarnessFailureDiagnostic(
     ...result,
     result: {
       ...(isRecord(result.result) ? result.result : {}),
-      error
+      error,
+      failure_code: "harness_no_final_response"
     },
     metadata: {
       ...(result.metadata ?? {}),
-      error
+      error,
+      failure_code: "harness_no_final_response"
     }
   };
 }
@@ -2535,12 +2613,36 @@ async function defaultAgentExecutor(
   const harnessName = context.node.effective_policy.harness;
 
   if (!harnessName || !harnesses[harnessName]) {
-    throw new Error(`Agent "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`);
+    const message = `Agent "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`;
+    return runtimeFailedNodeResult("harness_unavailable", message);
   }
 
   const outputDir = resolveExecutionArtifactsDirectory(context.execution_dir);
   const runtimeDir = join(context.run_root, "runtime");
   const sandbox = context.node.effective_policy.sandbox ?? "workspace-write";
+  const missingToolCredentials = await collectMissingToolCredentialAuthorityRequests({
+    tools: context.node.tools,
+    credential_specs: context.credential_specs ?? {},
+    execution_id: context.attempt.execution_id
+  });
+  if (missingToolCredentials.length > 0) {
+    const summary = missingToolCredentials[0]?.summary ?? "A managed plugin tool requires credentials before this node can run.";
+    return {
+      status: "failed",
+      outcome: "failed",
+      result: runtimeFailurePayload("missing_plugin_credential", summary, {
+        authority_request_count: missingToolCredentials.length
+      }),
+      stdout: undefined,
+      stderr: summary,
+      metadata: {
+        ...runtimeFailureMetadata("missing_plugin_credential", summary, {
+          authority_request_count: missingToolCredentials.length
+        }),
+        authority_requests: missingToolCredentials
+      },
+    };
+  }
   const workspaceWriteMirror = createHarnessWorkspaceWriteMirror({
     harness: harnessName,
     sandbox,
@@ -2554,32 +2656,42 @@ async function defaultAgentExecutor(
   await prepareHarnessWorkspaceWriteMirror(workspaceWriteMirror);
   const invocationOutputDir = workspaceWriteMirror?.output_dir ?? outputDir;
   const invocationRuntimeDir = workspaceWriteMirror?.runtime_dir ?? runtimeDir;
-  const toolSetup = await prepareAgentTools({
-    node: context.node,
-    execution_dir: context.execution_dir,
-    workspace_path: context.workspace_path,
-    artifacts_root: invocationOutputDir,
-    run_root: context.run_root,
-    runtime_dir: invocationRuntimeDir,
-    ...(workspaceWriteMirror ? { writable_runtime_dir: workspaceWriteMirror.tool_runtime_dir } : {}),
-    run_id: context.run_id,
-    graph_id: context.graph_id,
-    execution_id: context.attempt.execution_id,
-    repo_alias: context.node.repo,
-    ...(context.node.effective_policy.harness ? { harness: context.node.effective_policy.harness } : {}),
-    ...(context.node.effective_policy.model ? { model: context.node.effective_policy.model } : {}),
-    ...(context.node.effective_policy.reasoning_effort
-      ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
-      : {}),
-    sandbox,
-    timeout_sec: context.node.effective_policy.timeout_sec,
-    context_packet_path: context.context_packet_path,
-    context_manifest_path: context.context_manifest_path,
-    ...(context.supervisor_recovery_envelope
-      ? { supervisor_recovery_envelope: context.supervisor_recovery_envelope }
-      : {}),
-    credential_specs: context.credential_specs ?? {}
-  });
+  const toolSetup = await (async () => {
+    try {
+      return await prepareAgentTools({
+        node: context.node,
+        execution_dir: context.execution_dir,
+        workspace_path: context.workspace_path,
+        artifacts_root: invocationOutputDir,
+        run_root: context.run_root,
+        runtime_dir: invocationRuntimeDir,
+        ...(workspaceWriteMirror ? { writable_runtime_dir: workspaceWriteMirror.tool_runtime_dir } : {}),
+        run_id: context.run_id,
+        graph_id: context.graph_id,
+        execution_id: context.attempt.execution_id,
+        repo_alias: context.node.repo,
+        ...(context.node.effective_policy.harness ? { harness: context.node.effective_policy.harness } : {}),
+        ...(context.node.effective_policy.model ? { model: context.node.effective_policy.model } : {}),
+        ...(context.node.effective_policy.reasoning_effort
+          ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
+          : {}),
+        sandbox,
+        timeout_sec: context.node.effective_policy.timeout_sec,
+        context_packet_path: context.context_packet_path,
+        context_manifest_path: context.context_manifest_path,
+        ...(context.supervisor_recovery_envelope
+          ? { supervisor_recovery_envelope: context.supervisor_recovery_envelope }
+          : {}),
+        credential_specs: context.credential_specs ?? {}
+      });
+    } catch (error) {
+      if (error instanceof RuntimeFailureError) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new RuntimeFailureError("tool_wrapper_unavailable", message);
+    }
+  })();
   const contextManifest = await readContextManifestContent(context.context_manifest_path);
   const promptTokens = buildNodeRuntimeEnv(context);
   const agentGraphAcceptanceCriteria = substituteOptionalTextArray(
@@ -2589,7 +2701,7 @@ async function defaultAgentExecutor(
   const agentGraphConstraints = substituteOptionalTextArray(context.graph_intent.constraints, promptTokens);
   const agentNodeAcceptanceCriteria = substituteOptionalTextArray(context.node.intent.acceptance_criteria, promptTokens);
   const agentNodeConstraints = substituteOptionalTextArray(context.node.intent.constraints, promptTokens);
-  const promptPath = join(context.execution_dir, "prompt.md");
+  const promptPath = resolveExecutionAgentPromptPath(context.execution_dir);
   context.attempt.prompt_path = promptPath;
   const agentInvocation: AgentInvocation = {
     promptKind: "agent",
@@ -2711,12 +2823,16 @@ async function writeAutomaticArtifacts(
   }
 
   const responsePath = join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md");
+  const agentResponsePath = resolveExecutionAgentResponsePath(attempt.execution_dir);
   const response =
     typeof result.agent_response === "string" && result.agent_response.trim().length > 0
       ? result.agent_response
       : `${missingAgentResponseMessage}\n`;
 
-  await writeFile(responsePath, response.endsWith("\n") ? response : `${response}\n`, "utf8");
+  const responseText = response.endsWith("\n") ? response : `${response}\n`;
+  await mkdir(dirname(agentResponsePath), { recursive: true });
+  await writeFile(responsePath, responseText, "utf8");
+  await writeFile(agentResponsePath, responseText, "utf8");
   artifacts.agent_response = responsePath;
   return artifacts;
 }
@@ -2941,7 +3057,8 @@ async function materializeDeclaredArtifactsWithRepair(options: {
           max_attempts: 0,
           attempt_count: 0,
           missing_artifacts: missingArtifacts.map((artifact) => artifact.name)
-        }
+        },
+        "harness_no_final_response"
       );
     }
 
@@ -3290,7 +3407,11 @@ async function executeNode(
   const runtimeEnv = options.runtime_env;
 
   if (!workspace) {
-    throw new Error(`Missing workspace binding for repo "${node.repo}".`);
+    throw new RuntimeFailureError(
+      "graph_contract_gap",
+      `Missing workspace binding for repo "${node.repo}".`,
+      { repo: node.repo }
+    );
   }
   let context:
     | Awaited<ReturnType<typeof resolveExecutionContext>>
@@ -3697,7 +3818,7 @@ async function executeNode(
           passed: outcomeVerification.passed,
           findings_count: outcomeVerification.findings.length,
           blockers_count: outcomeVerification.blockers.length,
-          verify_outcome_path: join(attempt.execution_dir, "verify-outcome.json"),
+          verify_outcome_path: resolveExecutionRuntimeVerifierPath(attempt.execution_dir),
           verifier_harness: outcomeVerification.verifier_metadata.harness,
           parse_status: outcomeVerification.verifier_metadata.parse_status,
           duration_ms: outcomeVerification.verifier_metadata.duration_ms
@@ -3712,6 +3833,11 @@ async function executeNode(
       );
 
       if (!outcomeVerification.passed) {
+        const verifierFailureCode: RuntimeFailureCode | undefined = outcomeVerification.blockers.some((blocker) =>
+          blocker.category === "verifier_unavailable"
+        )
+          ? "verifier_unavailable"
+          : undefined;
         const verifierPayload = {
           passed: false,
           summary: outcomeVerification.summary,
@@ -3724,8 +3850,13 @@ async function executeNode(
           ...result,
           status: "failed",
           outcome: "failed",
+          metadata: {
+            ...(result.metadata ?? {}),
+            ...(verifierFailureCode ? { failure_code: verifierFailureCode } : {})
+          },
           result: {
             ...previousResult,
+            ...(verifierFailureCode ? { failure_code: verifierFailureCode } : {}),
             outcome_verification: verifierPayload
           }
         };
@@ -3786,6 +3917,11 @@ async function executeNode(
       error instanceof ArtifactMaterializationError
         ? error.repair_metadata
         : artifactRepairMetadata;
+    const failureCode: RuntimeFailureCode | undefined =
+      error instanceof ArtifactMaterializationError
+        ? error.failure_code
+        : runtimeFailureCodeForError(error, context !== undefined);
+    const failureDetails = runtimeFailureDetailsForError(error);
     const failureArtifacts: Record<string, string> | undefined = executionPaths
       ? {
           ...(await writeFailureAutomaticArtifacts(node, attempt, message)),
@@ -3863,6 +3999,8 @@ async function executeNode(
         : {}),
       metadata: {
         error: message,
+        ...(failureCode ? { failure_code: failureCode } : {}),
+        ...(failureDetails ? { failure_details: failureDetails } : {}),
         context_status: context ? "resolved" : "failed",
         ...(failureCompletionPacket
           ? {
@@ -3882,7 +4020,9 @@ async function executeNode(
     if (executionPaths) {
       await writer.writeExecutionCompletion(completedAttempt, {
         result: {
-          error: message
+          ...(failureCode
+            ? runtimeFailurePayload(failureCode, message, failureDetails)
+            : { error: message })
         },
         stderr: message
       });
@@ -3895,12 +4035,16 @@ async function executeNode(
         status: "failed",
         outcome: "failed",
         result: {
-          error: message
+          ...(failureCode
+            ? runtimeFailurePayload(failureCode, message, failureDetails)
+            : { error: message })
         },
         stdout: undefined,
         stderr: message,
         metadata: {
           error: message,
+          ...(failureCode ? { failure_code: failureCode } : {}),
+          ...(failureDetails ? { failure_details: failureDetails } : {}),
           context_status: context ? "resolved" : "failed"
         }
       }

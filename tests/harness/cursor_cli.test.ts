@@ -114,8 +114,8 @@ describe("cursor cli harness", () => {
         sandbox: "read-only",
         model: "gpt-5-cursor",
         nodeGoal: "Return malformed.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -153,8 +153,8 @@ describe("cursor cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-cursor",
         nodeGoal: "Fail with stderr.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -165,6 +165,51 @@ describe("cursor cli harness", () => {
       expect(result.status).toBe("failed");
       expect(result.metadata?.error).toContain("stdout was not a JSON object");
       expect(result.metadata?.error).toContain("Sandbox mode is enabled but not available");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("emits a typed authority request for cursor harness authentication failures", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-auth-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+    const binary_path = join(tempRoot, "auth-agent.mjs");
+    await writeFile(
+      binary_path,
+      "#!/usr/bin/env node\nprocess.stderr.write('Authentication required: run cursor agent login or set CURSOR_API_KEY.\\n'); process.exit(1);\n"
+    );
+    await chmod(binary_path, 0o755);
+
+    try {
+      const result = await createCursorCliHarness({ binary: binary_path }).run({
+        runId: "run-auth",
+        executionId: "exec-auth",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        nodeGoal: "Fail with auth.",
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.metadata?.authority_requests).toEqual([
+        expect.objectContaining({
+          kind: "missing_harness_auth",
+          source: "harness",
+          request_id: "exec-auth__missing_harness_auth",
+          summary: "Cursor CLI requires login or CURSOR_API_KEY before this harness can run."
+        })
+      ]);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -211,8 +256,8 @@ describe("cursor cli harness", () => {
           sandbox: "read-only",
           model: "gpt-5-cursor",
           nodeGoal: "Return envelope.",
-          contextPacketPath: join(executionDir, "context", "packet.json"),
-          contextManifestPath: join(executionDir, "context", "manifest.md"),
+          contextPacketPath: join(executionDir, "runtime", "context.json"),
+          contextManifestPath: join(executionDir, "agent", "context.md"),
           contextManifest: "",
           outputDir: executionDir,
           artifacts: {},
@@ -251,8 +296,8 @@ describe("cursor cli harness", () => {
         sandbox: "read-only",
         model: "gpt-5-cursor",
         nodeGoal: "Read from env override.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -310,8 +355,8 @@ describe("cursor cli harness", () => {
         sandbox: "read-only",
         model: "gpt-5-cursor",
         nodeGoal: "Review the change.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "# Context Manifest\n\n- Pointer items: `1`\n",
         outputDir,
         artifacts: {
@@ -351,9 +396,9 @@ describe("cursor cli harness", () => {
       expect(prompt).toContain("Review the change.");
       expect(prompt).toContain("## Context");
       expect(prompt).toContain("# Context Manifest");
-      expect(prompt).toContain("Context packet:");
-      expect(prompt).toContain(join(executionDir, "context", "packet.json"));
-      expect(prompt).toContain("Context provenance:");
+      expect(prompt).not.toContain("Context packet:");
+      expect(prompt).not.toContain(join(executionDir, "runtime", "context.json"));
+      expect(prompt).not.toContain("Context provenance:");
       expect(prompt).toContain("Sandbox: read-only - cannot modify the workspace");
       expect(prompt).toContain("## Declared Artifacts");
       expect(prompt).toContain("read-only sandbox prevents file writes");
@@ -364,8 +409,8 @@ describe("cursor cli harness", () => {
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,
-        AGENTFLOW_CONTEXT_PACKET: join(executionDir, "context", "packet.json"),
-        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "context", "manifest.md"),
+        AGENTFLOW_CONTEXT_PACKET: join(executionDir, "runtime", "context.json"),
+        AGENTFLOW_CONTEXT_MANIFEST: join(executionDir, "agent", "context.md"),
         CURSOR_CONFIG_DIR: join(outputDir, ".cursor-config")
       });
       expect(result.outputJson).toEqual({
@@ -391,8 +436,8 @@ describe("cursor cli harness", () => {
       expect(cursorConfig.permissions.allow).toEqual(
         expect.arrayContaining([
           `Read(${repoDir}/**)`,
-          `Read(${join(executionDir, "context", "packet.json")})`,
-          `Read(${join(executionDir, "context", "manifest.md")})`,
+          `Read(${join(executionDir, "runtime", "context.json")})`,
+          `Read(${join(executionDir, "agent", "context.md")})`,
           `Read(${executionDir}/**)`
         ])
       );
@@ -440,8 +485,8 @@ describe("cursor cli harness", () => {
         sandbox: "read-only",
         model: "auto",
         nodeGoal: "Use the harness default model.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -488,8 +533,8 @@ describe("cursor cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-cursor",
         nodeGoal: "Apply the change.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -540,8 +585,8 @@ describe("cursor cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-cursor",
         nodeGoal: "Apply the change.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -587,8 +632,8 @@ describe("cursor cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-cursor",
         nodeGoal: "Use declared Cursor config.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -666,8 +711,8 @@ describe("cursor cli harness", () => {
           CURSOR_CONFIG_DIR: userCursorConfigDir
         },
         nodeGoal: "Use local Cursor configuration.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -724,8 +769,8 @@ describe("cursor cli harness", () => {
           CURSOR_CONFIG_DIR: userCursorConfigDir
         },
         nodeGoal: "Judge the result.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -788,8 +833,8 @@ describe("cursor cli harness", () => {
         sandbox: "workspace-write",
         model: "gpt-5-cursor",
         nodeGoal: "Use MCP.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},
@@ -845,8 +890,8 @@ describe("cursor cli harness", () => {
         sandbox: "read-only",
         model: "gpt-5-cursor",
         nodeGoal: "Stream logs.",
-        contextPacketPath: join(executionDir, "context", "packet.json"),
-        contextManifestPath: join(executionDir, "context", "manifest.md"),
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
         contextManifest: "",
         outputDir: executionDir,
         artifacts: {},

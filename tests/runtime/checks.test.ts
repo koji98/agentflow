@@ -44,8 +44,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context/packet.json",
-      context_manifest_path: "/tmp/context/manifest.md",
+      context_packet_path: "/tmp/runtime/context.json",
+      context_manifest_path: "/tmp/agent/context.md",
       output_dir: "/tmp",
       skills: [
         {
@@ -69,8 +69,8 @@ describe("runtime checks", () => {
     expect(capturedInvocation).toEqual(
       expect.objectContaining({
         promptKind: "ai_check",
-        contextPacketPath: "/tmp/context/packet.json",
-        contextManifestPath: "/tmp/context/manifest.md",
+        contextPacketPath: "/tmp/runtime/context.json",
+        contextManifestPath: "/tmp/agent/context.md",
         outputDir: "/tmp",
         artifacts: {},
         skills: expect.arrayContaining([
@@ -89,7 +89,7 @@ describe("runtime checks", () => {
     expect(renderedPrompt).toContain("Evaluate the patch.");
     expect(renderedPrompt).toContain("Be strict.");
     expect(renderedPrompt).toContain("## Optional Skills");
-    expect(renderedPrompt).toContain("| `team/evaluator` | evaluator | Evaluate evidence strictly.");
+    expect(renderedPrompt).toContain("| evaluator | Evaluate evidence strictly. | `/tmp/.agentflow/skills/team/sha/evaluator/SKILL.md` |");
     expect(renderedPrompt).toContain("## Ambient CLI Hints");
     expect(renderedPrompt).toContain("| `jq` | Inspect structured JSON evidence. |");
     expect(result.evaluation).toEqual(
@@ -110,8 +110,8 @@ describe("runtime checks", () => {
       sandbox: "read-only",
       model: "gpt-5-judge",
       nodeGoal: "Evaluate the change.",
-      contextPacketPath: "/tmp/context/packet.json",
-      contextManifestPath: "/tmp/context/manifest.md",
+      contextPacketPath: "/tmp/runtime/context.json",
+      contextManifestPath: "/tmp/agent/context.md",
       contextManifest: "# Context Manifest\n\n- Pointer items: `2`\n",
       outputDir: "/tmp",
       artifacts: {},
@@ -123,8 +123,8 @@ describe("runtime checks", () => {
     expect(rendered).toContain("You are an AI evaluator executing one read-only check node");
     expect(rendered).toContain("Sandbox: read-only - cannot modify the workspace");
     expect(rendered).toContain("# Context Manifest");
-    expect(rendered).toContain("Context packet: /tmp/context/packet.json");
-    expect(rendered).toContain("Context provenance: /tmp/context/provenance.json");
+    expect(rendered).not.toContain("Context packet:");
+    expect(rendered).not.toContain("Context provenance:");
     expect(rendered).toContain("## Output");
     expect(rendered).toContain("Return JSON only with this exact shape:");
     expect(rendered).toContain('{"passed":true,"score":0.0,"summary":"short summary","issues":[]}');
@@ -153,8 +153,8 @@ describe("runtime checks", () => {
       node_goal: "Judge the trial.",
       rubric: "Use the eval judge schema.",
       output_schema: outputSchema,
-      context_packet_path: "/tmp/context/packet.json",
-      context_manifest_path: "/tmp/context/manifest.md",
+      context_packet_path: "/tmp/runtime/context.json",
+      context_manifest_path: "/tmp/agent/context.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -197,8 +197,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context/packet.json",
-      context_manifest_path: "/tmp/context/manifest.md",
+      context_packet_path: "/tmp/runtime/context.json",
+      context_manifest_path: "/tmp/agent/context.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -228,8 +228,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context/packet.json",
-      context_manifest_path: "/tmp/context/manifest.md",
+      context_packet_path: "/tmp/runtime/context.json",
+      context_manifest_path: "/tmp/agent/context.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -268,8 +268,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context/packet.json",
-      context_manifest_path: "/tmp/context/manifest.md",
+      context_packet_path: "/tmp/runtime/context.json",
+      context_manifest_path: "/tmp/agent/context.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -305,8 +305,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       node_goal: "Evaluate the patch.",
       rubric: "Be strict.",
-      context_packet_path: "/tmp/context/packet.json",
-      context_manifest_path: "/tmp/context/manifest.md",
+      context_packet_path: "/tmp/runtime/context.json",
+      context_manifest_path: "/tmp/agent/context.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined
@@ -338,8 +338,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       node_goal: "Evaluate the patch.",
       rubric: undefined,
-      context_packet_path: "/tmp/context/packet.json",
-      context_manifest_path: "/tmp/context/manifest.md",
+      context_packet_path: "/tmp/runtime/context.json",
+      context_manifest_path: "/tmp/agent/context.md",
       output_dir: "/tmp",
       timeout_sec: 30,
       signal: undefined

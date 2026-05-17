@@ -335,7 +335,7 @@ export function createInteractiveCheckpointExecutor(
 
     if (!reviewMaterial) {
       throw new Error(
-        `Checkpoint "${context.node.compiled_id}" could not resolve its review artifact from the context packet.`
+        `Checkpoint "${context.node.compiled_id}" could not resolve its review artifact from runtime context.`
       );
     }
 

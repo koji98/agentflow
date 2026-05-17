@@ -17,6 +17,12 @@ Over-specific nodes, brittle checks, missing context, artifact gaps, authority i
 ## Graph Lessons
 What should change in future graphs.
 
+## Workspace Improvements
+Docs, comments, tests, scripts, setup, examples, module boundaries, or local development affordances that would make future agent runs easier and safer.
+
+## Graph / Prompt / Support Lessons
+Context pointers, skills, capabilities, CLI hints, managed tools, checks, node boundaries, prompts, or artifacts that should change because agents struggled or succeeded.
+
 ## Extraction Candidates
 Plugins, evals, docs, skills, templates, or no extraction.
 
@@ -24,4 +30,4 @@ Plugins, evals, docs, skills, templates, or no extraction.
 Concrete follow-ups with the owning surface.
 ```
 
-Start from delivery files. Use raw attempts, events, interventions, and tool logs only when they explain a lesson.
+Start from delivery files. Use raw attempts, events, interventions, and tool logs only when they explain a lesson. Link evidence for every recommendation and include priority, confidence, and done-when when the output is meant to guide future work.

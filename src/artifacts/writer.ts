@@ -9,6 +9,9 @@ import {
   type ExecutionDirectoryOptions,
   type NodeArtifactDirectoryOptions,
   resolveExecutionArtifactsDirectory,
+  resolveExecutionHumanDebugHarnessDirectory,
+  resolveExecutionRuntimeDirectory,
+  resolveExecutionRuntimeResultPath,
   resolveNodeExecutionDirectory,
   resolveRunArtifactPaths
 } from "./paths.js";
@@ -39,10 +42,10 @@ function executionRuntimePaths(executionDir: string): {
   result_path: string;
 } {
   return {
-    execution_json_path: join(executionDir, "execution.json"),
-    stdout_log_path: join(executionDir, "logs", "stdout.log"),
-    stderr_log_path: join(executionDir, "logs", "stderr.log"),
-    result_path: join(executionDir, "result.json")
+    execution_json_path: join(resolveExecutionRuntimeDirectory(executionDir), "execution.json"),
+    stdout_log_path: join(resolveExecutionHumanDebugHarnessDirectory(executionDir), "stdout.log"),
+    stderr_log_path: join(resolveExecutionHumanDebugHarnessDirectory(executionDir), "stderr.log"),
+    result_path: resolveExecutionRuntimeResultPath(executionDir)
   };
 }
 

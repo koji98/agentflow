@@ -32,6 +32,8 @@ Supported criteria:
 
 Criteria weights must sum to `1`. Required criteria are hard blockers. Passing requires no required blockers and `total_score >= pass_threshold`.
 
+For code work, use criteria that reflect the real review bar: correctness, existing repo conventions, privacy/security when relevant, no AI slop, validation evidence, and handoff quality. Do not spread weights evenly by habit; higher-risk criteria should carry higher weight.
+
 ## Public Artifacts
 
 Default public artifacts:

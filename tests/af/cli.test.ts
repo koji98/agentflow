@@ -51,16 +51,20 @@ async function createRuntime(tempRoot: string, artifacts: Record<string, Artifac
     const root = join(tempRoot, "run");
     const runtimeDir = join(root, "runtime");
     const workspace = join(tempRoot, "workspace");
-    const output = join(root, "executions/main/output");
-    const contextPacket = join(root, "executions/main/context.json");
-    const contextManifest = join(root, "executions/main/manifest.md");
-    const toolInvocations = join(root, "executions/main/tool-invocations.jsonl");
-    const toolsDir = join(root, "executions/main/agentflow-tools");
+    const executionDir = join(root, "executions/main");
+    const output = join(executionDir, "artifacts");
+    const contextPacket = join(executionDir, "runtime/context.json");
+    const contextManifest = join(executionDir, "agent/context.md");
+    const toolInvocations = join(executionDir, "human-debug/tools/index.jsonl");
+    const toolsDir = join(executionDir, "runtime/tools");
     const metadata = join(toolsDir, "runtime.json");
     await mkdir(workspace, { recursive: true });
     await mkdir(runtimeDir, { recursive: true });
     await mkdir(output, { recursive: true });
     await mkdir(toolsDir, { recursive: true });
+    await mkdir(dirname(toolInvocations), { recursive: true });
+    await mkdir(dirname(contextPacket), { recursive: true });
+    await mkdir(dirname(contextManifest), { recursive: true });
     await writeFile(contextPacket, JSON.stringify({ version: "1", materials: [] }), "utf8");
     await writeFile(contextManifest, "# Context\n\nNo context.\n", "utf8");
     await writeFile(metadata, `${JSON.stringify({
@@ -232,7 +236,7 @@ describe("af runtime CLI", () => {
         const blockedComplete = await executeAfCli(["complete", "check"]);
         expect(blockedComplete.exitCode).toBe(1);
         expect(blockedComplete.output).toEqual(expect.objectContaining({
-            completion_status: "blocked",
+            completion_status: "incomplete",
             operator_observations: expect.objectContaining({
                 active: 1,
                 blocking: 1
@@ -442,16 +446,16 @@ describe("af runtime CLI", () => {
             .map((line) => JSON.parse(line) as {
             kind: string;
             argv: string[];
-            stdout_path?: string;
+            output_path?: string;
         });
         expect(records).toEqual([
             expect.objectContaining({
                 kind: "af",
                 argv: ["orient"],
-                stdout_path: expect.stringContaining("tool-invocation-logs")
+                output_path: expect.stringContaining("human-debug/tools/0001-output.json")
             })
         ]);
-        await expect(readFile(records[0]!.stdout_path!, "utf8")).resolves.toContain("# Agentflow Orientation");
+        await expect(readFile(records[0]!.output_path!, "utf8")).resolves.toContain("# Agentflow Orientation");
     });
     it("spawns a helper with its own metadata and waits for the helper artifact", async () => {
         const runtime = await createRuntime(tempRoot);

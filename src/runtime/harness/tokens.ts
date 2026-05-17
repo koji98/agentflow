@@ -2,10 +2,10 @@
  * Substitution helper for AGENTFLOW_* tokens that may appear in user-authored
  * prompts and rubrics.
  *
- * Agentflow already inlines context, lists declared artifacts with absolute
- * paths, and sets every AGENTFLOW_* env var in the harness spawn environment,
+ * Agentflow already renders prompt-facing context pointers, artifact write
+ * commands, and sets every AGENTFLOW_* env var in the harness spawn environment,
  * so prompts almost never need to reference these tokens directly. This helper
- * exists as a forgiveness layer: if a user pastes a token like
+ * exists as a convenience layer: if a user pastes a token like
  * `$AGENTFLOW_OUTPUT_DIR` or `AGENTFLOW_CONTEXT_PACKET` into a prompt, we
  * substitute it with the absolute path before the model sees the prompt.
  *

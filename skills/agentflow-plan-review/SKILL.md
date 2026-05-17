@@ -22,11 +22,12 @@ Use `agentflow-authoring` when no graph exists yet. Use `agentflow-operations` f
 
 1. Read the graph and intended workflow brief if available.
 2. Review contract shape: top-level intent, node intent, constraints, acceptance criteria, repos, profiles, supervision, and delivery; see `references/review-rubric.md`.
-3. Review composition fit against the assurance profile.
-4. Review deterministic checks for stable-outcome discipline; use `references/anti-patterns.md` to identify brittle graph designs.
-5. Review artifacts, context, and downstream refs.
-6. Review authority: sandbox, tools, credentials, profile isolation, and human gates.
-7. Report findings first, ordered by severity, then list validation commands to run.
+3. Review whether authored fields will compile into strong AI prompts for each prompt-backed node type; use `references/prompt-translation-review.md`.
+4. Review composition fit against the assurance profile.
+5. Review deterministic checks for stable-outcome discipline; use `references/anti-patterns.md` to identify brittle graph designs.
+6. Review artifacts, context, and downstream refs.
+7. Review authority: sandbox, tools, credentials, profile isolation, and human gates.
+8. Report findings first, ordered by severity, then list validation commands to run.
 
 ## Decision Rules
 
@@ -51,6 +52,7 @@ Before approving the plan:
 
 - [ ] Findings are actionable and tied to graph text.
 - [ ] Every graph-level and node-level constraint starts with `Do not`; positive requirements are acceptance criteria, not constraints.
+- [ ] Prompt-backed nodes receive the intended role, success contract, support tables, artifact contract, and evaluation contract after lowering.
 - [ ] The graph preserves agent autonomy inside explicit authority boundaries.
 - [ ] Checks, artifacts, and context all serve the stated outcome.
 - [ ] Required validation commands are listed.

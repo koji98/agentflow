@@ -793,29 +793,24 @@ function buildRunDiagnostics(context: RunProjectionContext): ProjectedRunDiagnos
 }
 
 function classifyArtifactKind(relativePath: string): ProjectedArtifactItem["kind"] {
-  if (relativePath === "logs/stdout.log" || relativePath === "stdout.log") {
+  if (relativePath === "human-debug/harness/stdout.log") {
     return "stdout";
   }
 
-  if (relativePath === "logs/stderr.log" || relativePath === "stderr.log") {
+  if (relativePath === "human-debug/harness/stderr.log") {
     return "stderr";
   }
 
   if (
-    relativePath === "context/packet.json" ||
-    relativePath === "context/manifest.md" ||
-    relativePath === "context/provenance.json" ||
-    relativePath === "context_packet.json" ||
-    relativePath === "context-manifest.md" ||
-    relativePath === "context_provenance.json"
+    relativePath === "runtime/context.json" ||
+    relativePath === "agent/context.md" ||
+    relativePath === "human-debug/context-provenance.json"
   ) {
     return "context";
   }
 
   if (
-    relativePath === "result.json"
-    || relativePath === "artifacts/verification.json"
-    || relativePath === "verification.json"
+    relativePath === "runtime/result.json"
   ) {
     return "result";
   }
@@ -1237,10 +1232,10 @@ export async function projectNodeLogs(
     selectedExecution ? indexExecutionArtifacts(selectedExecution) : Promise.resolve([])
   ]);
   const stdoutArtifact = artifacts.find((artifact) =>
-    artifact.relative_path === "logs/stdout.log" || artifact.relative_path === "stdout.log"
+    artifact.relative_path === "human-debug/harness/stdout.log"
   );
   const stderrArtifact = artifacts.find((artifact) =>
-    artifact.relative_path === "logs/stderr.log" || artifact.relative_path === "stderr.log"
+    artifact.relative_path === "human-debug/harness/stderr.log"
   );
 
   return {

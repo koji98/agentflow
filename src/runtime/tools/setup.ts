@@ -3,11 +3,17 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defaultCredentialIndexPath } from "../../auth/store.js";
+import { MissingCredentialError } from "../../auth/errors.js";
+import { createCredentialStore, defaultCredentialIndexPath } from "../../auth/store.js";
 import type { CredentialSpecMap } from "../../auth/types.js";
 import type { ArtifactDefinition } from "../../graph/authored.js";
 import type { CompiledAgentNode, ResolvedTool } from "../../graph/compiled.js";
 import type { SupervisorRecoveryEnvelope } from "../../supervisor/types.js";
+import {
+  resolveExecutionHumanDebugToolDirectory,
+  resolveExecutionRuntimeToolDirectory
+} from "../../artifacts/paths.js";
+import { createAuthorityRequest, type AuthorityRequest } from "../authority.js";
 
 export interface AgentToolSetupResult {
   bin_dir: string;
@@ -176,7 +182,19 @@ function buildToolLauncher(): string {
     "  if (!config.tool_invocations_path) {",
     "    return;",
     "  }",
+    "  mkdirSync(dirname(config.tool_invocations_path), { recursive: true });",
     "  appendFileSync(config.tool_invocations_path, `${JSON.stringify(record)}\\n`, 'utf8');",
+    "}",
+    "",
+    "function nextInvocationPrefix() {",
+    "  const dir = dirname(config.tool_invocations_path);",
+    "  mkdirSync(dir, { recursive: true });",
+    "  let count = 0;",
+    "  try {",
+    "    const contents = readFileSync(config.tool_invocations_path, 'utf8');",
+    "    count = contents.split(/\\r?\\n/u).filter((line) => line.trim().length > 0).length;",
+    "  } catch {}",
+    "  return join(dir, String(count + 1).padStart(4, '0'));",
     "}",
     "",
     "const swiftGetGenericPasswordScript = `",
@@ -268,6 +286,8 @@ function buildToolLauncher(): string {
     "  }",
     "  const helpArgs = passthroughArgs;",
     "  const startedAt = Date.now();",
+    "  const helpLogBase = nextInvocationPrefix();",
+    "  writeFileSync(`${helpLogBase}-input.json`, `${JSON.stringify({ kind: 'plugin_tool', tool: toolName, argv: redactArgv(helpArgs), cwd: process.cwd(), help: true }, null, 2)}\\n`, 'utf8');",
     "  const result = spawnSync(tool.executable_path, helpArgs, {",
     "    encoding: 'utf8',",
     "    maxBuffer: 64 * 1024 * 1024,",
@@ -304,8 +324,11 @@ function buildToolLauncher(): string {
     "    cwd: process.cwd(),",
     "    exit_code: result.status ?? (result.error ? 127 : 1),",
     "    duration_ms: Date.now() - startedAt,",
+    "    input_path: `${helpLogBase}-input.json`,",
+    "    output_path: `${helpLogBase}-output.json`,",
     "    redaction: 'secret-looking argv values redacted; credential env omitted for help'",
     "  });",
+    "  writeFileSync(`${helpLogBase}-output.json`, `${JSON.stringify({ exit_code: result.status ?? (result.error ? 127 : 1), stdout: result.stdout || '', stderr: result.stderr || '', error: result.error ? result.error.message : undefined }, null, 2)}\\n`, 'utf8');",
     "  if (result.error) {",
     "    console.error(result.error.message);",
     "    process.exit(127);",
@@ -329,16 +352,38 @@ function buildToolLauncher(): string {
     "    }",
     "  }",
     "} catch (error) {",
-    "  console.error(error instanceof Error ? error.message : String(error));",
+    "  const errorMessage = error instanceof Error ? error.message : String(error);",
+    "  const failureLogBase = nextInvocationPrefix();",
+    "  const failureOutputPath = `${failureLogBase}-output.json`;",
+    "  writeFileSync(`${failureLogBase}-input.json`, `${JSON.stringify({ kind: 'plugin_tool', tool: toolName, argv: redactArgv(passthroughArgs), cwd: process.cwd(), credential_resolution: true }, null, 2)}\\n`, 'utf8');",
+    "  writeFileSync(failureOutputPath, `${JSON.stringify({ exit_code: 1, stdout: '', stderr: `${errorMessage}\\n`, error: errorMessage, credential_resolution_failed: true }, null, 2)}\\n`, 'utf8');",
+    "  appendInvocation({",
+    "    ts: new Date().toISOString(),",
+    "    run_id: config.run_id,",
+    "    graph_id: config.graph_id,",
+    "    agent_id: config.agent_id,",
+    "    execution_id: config.execution_id,",
+    "    node_id: config.node_id,",
+    "    compiled_id: config.compiled_id,",
+    "    kind: 'plugin_tool',",
+    "    tool: toolName,",
+    "    source: tool.source,",
+    "    argv: redactArgv(passthroughArgs),",
+    "    cwd: process.cwd(),",
+    "    exit_code: 1,",
+    "    duration_ms: 0,",
+    "    input_path: `${failureLogBase}-input.json`,",
+    "    output_path: failureOutputPath,",
+    "    redaction: 'secret-looking argv values redacted; credential env omitted'",
+    "  });",
+    "  console.error(errorMessage);",
     "  process.exit(1);",
     "}",
     "",
     "const invocationArgs = passthroughArgs;",
     "const startedAt = Date.now();",
-    "if (config.tool_invocation_log_dir) {",
-    "  mkdirSync(config.tool_invocation_log_dir, { recursive: true });",
-    "}",
-    "const logBase = config.tool_invocation_log_dir ? join(config.tool_invocation_log_dir, `${Date.now()}-${toolName}`) : undefined;",
+    "const logBase = nextInvocationPrefix();",
+    "writeFileSync(`${logBase}-input.json`, `${JSON.stringify({ kind: 'plugin_tool', tool: toolName, argv: redactArgv(invocationArgs), cwd: process.cwd() }, null, 2)}\\n`, 'utf8');",
     "const result = spawnSync(tool.executable_path, invocationArgs, {",
     "  encoding: 'utf8',",
     "  maxBuffer: 64 * 1024 * 1024,",
@@ -351,14 +396,8 @@ function buildToolLauncher(): string {
     "if (result.stderr) {",
     "  process.stderr.write(result.stderr);",
     "}",
-    "const stdoutPath = logBase ? `${logBase}.stdout.log` : undefined;",
-    "const stderrPath = logBase ? `${logBase}.stderr.log` : undefined;",
-    "if (stdoutPath) {",
-    "  writeFileSync(stdoutPath, result.stdout || '', 'utf8');",
-    "}",
-    "if (stderrPath) {",
-    "  writeFileSync(stderrPath, result.stderr || '', 'utf8');",
-    "}",
+    "const outputPath = `${logBase}-output.json`;",
+    "writeFileSync(outputPath, `${JSON.stringify({ exit_code: result.status ?? (result.error ? 127 : 1), stdout: result.stdout || '', stderr: result.stderr || '', error: result.error ? result.error.message : undefined }, null, 2)}\\n`, 'utf8');",
     "appendInvocation({",
     "  ts: new Date().toISOString(),",
     "  run_id: config.run_id,",
@@ -374,8 +413,8 @@ function buildToolLauncher(): string {
     "  cwd: process.cwd(),",
     "  exit_code: result.status ?? (result.error ? 127 : 1),",
     "  duration_ms: Date.now() - startedAt,",
-    "  ...(stdoutPath ? { stdout_path: stdoutPath } : {}),",
-    "  ...(stderrPath ? { stderr_path: stderrPath } : {}),",
+    "  input_path: `${logBase}-input.json`,",
+    "  output_path: outputPath,",
     "  redaction: 'secret-looking argv values redacted; credential env omitted'",
     "});",
     "",
@@ -391,6 +430,58 @@ function buildToolLauncher(): string {
     "process.exit(result.status ?? 0);",
     ""
   ].join("\n");
+}
+
+export async function collectMissingToolCredentialAuthorityRequests(options: {
+  tools: ResolvedTool[];
+  credential_specs?: CredentialSpecMap;
+  execution_id: string;
+  credential_index_path?: string;
+}): Promise<AuthorityRequest[]> {
+  const specs = options.credential_specs ?? {};
+  const store = createCredentialStore(options.credential_index_path
+    ? { index_path: options.credential_index_path }
+    : {});
+  const requests: AuthorityRequest[] = [];
+  const checked = new Set<string>();
+
+  for (const tool of options.tools) {
+    for (const scope of tool.credentials ?? []) {
+      const checkedKey = `${tool.callable_name}:${scope}`;
+      if (checked.has(checkedKey)) {
+        continue;
+      }
+      checked.add(checkedKey);
+
+      const spec = specs[scope];
+      if (!spec) {
+        continue;
+      }
+
+      try {
+        await store.resolveScope(spec, scope);
+      } catch (error) {
+        if (!(error instanceof MissingCredentialError)) {
+          throw error;
+        }
+        const credential = `${error.scope}.${error.key}`;
+        const safeCredential = credential.replace(/[^a-zA-Z0-9_.-]/g, "_");
+        requests.push(createAuthorityRequest({
+          request_id: `${options.execution_id}__${tool.callable_name}__missing_credential__${safeCredential}`,
+          kind: "missing_credential",
+          source: "plugin_tool",
+          summary: `Plugin tool ${tool.callable_name} requires credential ${credential}.`,
+          evidence: {
+            tool: tool.callable_name,
+            credential,
+            ...(tool.source.kind === "plugin" ? { plugin: tool.source.alias } : {})
+          }
+        }));
+      }
+    }
+  }
+
+  return [...new Map(requests.map((request) => [request.request_id, request])).values()];
 }
 
 function serializeDeclaredArtifacts(
@@ -410,15 +501,16 @@ function serializeDeclaredArtifacts(
 export async function prepareAgentTools(
   options: PrepareAgentToolsOptions
 ): Promise<AgentToolSetupResult> {
-  const tools_dir = join(options.execution_dir, "agentflow-tools");
+  const tools_dir = resolveExecutionRuntimeToolDirectory(options.execution_dir);
   const bin_dir = join(tools_dir, "bin");
   const tool_state_path = join(tools_dir, "state.json");
   const launcher_path = join(tools_dir, "launcher.mjs");
   const credential_config_path = join(tools_dir, "credential-config.json");
   const runtime_metadata_path = join(tools_dir, "runtime.json");
-  const toolRuntimeDir = options.writable_runtime_dir ?? options.execution_dir;
-  const tool_invocations_path = join(toolRuntimeDir, "tool-invocations.jsonl");
-  const tool_invocation_log_dir = join(toolRuntimeDir, "tool-invocation-logs");
+  const toolInvocationDir = options.writable_runtime_dir
+    ? join(options.writable_runtime_dir, "tools")
+    : resolveExecutionHumanDebugToolDirectory(options.execution_dir);
+  const tool_invocations_path = join(toolInvocationDir, "index.jsonl");
 
   await rm(tools_dir, { recursive: true, force: true });
   const runRoot = options.run_root ?? options.execution_dir;
@@ -514,8 +606,7 @@ export async function prepareAgentTools(
       execution_id: executionId,
       node_id: options.node.authored_id,
       compiled_id: options.node.compiled_id,
-      tool_invocations_path,
-      tool_invocation_log_dir
+      tool_invocations_path
     }, null, 2)}\n`,
     { encoding: "utf8", mode: 0o600 }
   );

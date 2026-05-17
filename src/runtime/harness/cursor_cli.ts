@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
+import { createAuthorityRequest } from "../authority.js";
 import { createProcessTerminationController } from "../process_control.js";
 import { startSpawnBroker } from "./spawn_broker.js";
 import {
@@ -352,6 +353,20 @@ export function createCursorCliHarness(
             structuredOutputError && stderrTail
               ? `${structuredOutputError}\nCursor CLI stderr:\n${stderrTail}`
               : structuredOutputError;
+          const authorityRequests =
+            structuredOutputMessage && /authentication required|cursor agent login|cursor_api_key/iu.test(structuredOutputMessage)
+              ? [
+                  createAuthorityRequest({
+                    kind: "missing_harness_auth",
+                    source: "harness",
+                    request_id: `${invocation.executionId}__missing_harness_auth`,
+                    summary: "Cursor CLI requires login or CURSOR_API_KEY before this harness can run.",
+                    evidence: {
+                      harness: "cursor-cli"
+                    }
+                  })
+                ]
+              : [];
           resolve({
             status:
               termination.state.canceled
@@ -373,6 +388,7 @@ export function createCursorCliHarness(
                 : {}),
               timed_out: termination.state.timed_out,
               force_killed: termination.state.force_killed,
+              ...(authorityRequests.length > 0 ? { authority_requests: authorityRequests } : {}),
               ...(structuredOutputMessage ? { error: createCursorOutputFailure(structuredOutputMessage).message } : {})
             },
             ...(cursorOutput.last_message

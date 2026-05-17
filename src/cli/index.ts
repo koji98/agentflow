@@ -218,7 +218,7 @@ function renderGraphHelp(): string {
     "- pattern_deep_research, pattern_deep_work, and pattern_work_list are implemented as managed patterns that lower into generated primitive subgraphs.",
     "- plugin workflow nodes use type = plugin, uses = plugin_alias/workflow_id, and config = workflow-specific settings; run agentflow plugin resolve --graph first.",
     "- repeat.until.node must target a descendant check or checkpoint node.",
-    "- checkpoint nodes are planned human gates inside repeat bodies; supervisor pause_for_human is a runtime safety pause resumed with structured human input.",
+    "- checkpoint nodes are planned human gates inside repeat bodies; supervisor authority pauses require typed runtime AuthorityRequests and resume with structured human input.",
     "- repeat context selectors support latest, latest_passed, latest_failed, previous, or a positive integer ordinal.",
     "- launch profile and workspace backend come from graph defaults.",
     "- executable nodes select repo/profile in runtime.",

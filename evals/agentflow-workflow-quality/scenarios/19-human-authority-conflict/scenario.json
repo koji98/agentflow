@@ -2,7 +2,7 @@
   "id": "human-authority-conflict",
   "bucket": "invalid-graph-boundary",
   "difficulty": "hard",
-  "description": "Supervisor should pause when product intent conflicts and no machine evidence can decide.",
+  "description": "Supervisor should fail contractually when product intent conflicts and no machine evidence can decide.",
   "workflow": {
     "graph_template": "../../shared/graph.exec.template.json",
     "harness": "codex-cli",
@@ -14,7 +14,7 @@
   },
   "criteria": {
     "outcome": {
-      "status": "paused"
+      "status": "failed"
     },
     "artifact": {
       "required": []
@@ -26,7 +26,7 @@
     },
     "supervisor": {
       "apply_actions": [
-        "pause_for_human"
+        "fail_contract_gap"
       ]
     },
     "delivery": {

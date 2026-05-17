@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { CompiledExecutableNode } from "../../src/graph/compiled.js";
+import { resolveExecutionHumanDebugToolDirectory } from "../../src/artifacts/paths.js";
 import type { RuntimeNodeAttempt } from "../../src/runtime/attempts.js";
 import type { RuntimeNodeExecutorContext } from "../../src/runtime/core/engine.js";
 import type { AgentInvocation, HarnessResult } from "../../src/runtime/harness/types.js";
@@ -38,7 +39,7 @@ function safeRuntimeStateSegment(value: string): string {
 }
 
 async function writeOrientInvocation(target: RuntimeReadyTarget): Promise<void> {
-  const toolInvocationsPath = target.toolInvocationsPath ?? join(target.executionDir, "tool-invocations.jsonl");
+  const toolInvocationsPath = target.toolInvocationsPath ?? join(resolveExecutionHumanDebugToolDirectory(target.executionDir), "index.jsonl");
   await mkdir(dirname(toolInvocationsPath), { recursive: true });
   await appendFile(toolInvocationsPath, `${JSON.stringify({
     ts: nowIso(),

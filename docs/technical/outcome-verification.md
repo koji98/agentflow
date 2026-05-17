@@ -86,26 +86,26 @@ When the parser rejects a response, the verifier is invoked again up to a bounde
 
 ## Persistence
 
-Per-attempt artifacts live under `<attempt_dir>`:
+Per-attempt artifacts are split by audience under `<attempt_dir>`:
 
-- `verify-outcome.prompt.md` — exact prompt sent to the verifier.
-- `verify-outcome.raw-response.md` — last raw verifier response received.
-- `verify-outcome.json` — final verdict, summary, findings, blockers, and verifier metadata.
-- `verify-outcome.md` — human-readable rendering of the verdict and findings.
+- `human-debug/verifier/prompt.md` — exact prompt sent to the verifier.
+- `human-debug/verifier/raw-response.md` — last raw verifier response received.
+- `runtime/verifier.json` — final verdict, summary, findings, blockers, and verifier metadata.
+- `human-debug/verifier/verdict.md` — human-readable rendering of the verdict and findings.
 
 The attempt's metadata records the verifier result as `outcome_verification` so the supervisor classifier and downstream consumers can read it without re-parsing the disk artifacts.
 
 ## Engine Wiring
 
-After an `agent` attempt's harness exits clean, the engine builds and persists `completion-packet.json`. If the packet is `incomplete` or `blocked`, the engine records the packet on attempt metadata and routes the attempt through supervisor recovery without invoking the semantic verifier. If the packet is `ready_for_verification`, the engine calls `runOutcomeVerification` and emits an `outcome.verified` event with `passed`, `findings_count`, `blockers_count`, `verifier_harness`, `parse_status`, `duration_ms`, and the on-disk `verify_outcome_path`.
+After an `agent` attempt's harness exits clean, the engine builds and persists `runtime/completion-packet.json`. If the packet is `incomplete` or `blocked`, the engine records the packet on attempt metadata and routes the attempt through supervisor recovery without invoking the semantic verifier. If the packet is `ready_for_verification`, the engine calls `runOutcomeVerification` and emits an `outcome.verified` event with `passed`, `findings_count`, `blockers_count`, `verifier_harness`, `parse_status`, `duration_ms`, and the on-disk `verify_outcome_path`.
 
-If completion is incomplete, the classifier treats it as `completion_contract_failure` and retries the responsible node with concrete missing evidence. If completion is blocked, the classifier treats it as an operator pause unless recovery evidence proves a runtime repair can safely proceed. If the verifier rejects a mechanically ready packet, the engine sets `result.outcome = "failed"`, attaches the verifier payload to `result.result.outcome_verification`, and falls through to the supervisor recovery path. The classifier treats ordinary verifier rejections as `semantic_misalignment`; if the verdict points to missing package/API documentation, it uses `missing_dependency_docs`. The recovery loop writes a case file, gathers semantic/local/external evidence as needed, merges a recovery plan, and injects a `SupervisorRecoveryEnvelope` into the next attempt while preserving the original node contract.
+If completion is incomplete, the classifier treats it as `completion_contract_failure` and retries the responsible node with concrete missing evidence. A `blocked` completion packet is valid only when it carries trusted typed `AuthorityRequest` entries; otherwise blockers remain `incomplete` and recover or fail contractually. If the verifier rejects a mechanically ready packet, the engine sets `result.outcome = "failed"`, attaches the verifier payload to `result.result.outcome_verification`, and falls through to the supervisor recovery path. The classifier treats ordinary verifier rejections as `semantic_misalignment`; structured verifier categories can route specific cases such as `missing_dependency_docs`, `unprovable_requirement`, `graph_contract_gap`, `workspace_pollution`, `policy_or_scope_risk`, and `non_recoverable_contract`. Verifier summaries and prose remain evidence only. The recovery loop writes a case file, gathers semantic/local/external evidence as needed, merges a recovery plan, and injects a `SupervisorRecoveryEnvelope` into the next attempt while preserving the original node contract.
 
 If the relevant supervisor action budget is exhausted, the run fails with the recovery classification and the failed verifier verdict in the delivery package.
 
 ## Resume Safety
 
-Verifier verdicts are file-backed under the attempt directory. Resumed runs reuse a previously verified attempt's verdict directly; the verifier is not re-invoked for an attempt that already produced `verify-outcome.json`.
+Verifier verdicts are file-backed under the attempt directory. Resumed runs reuse a previously verified attempt's verdict directly; the verifier is not re-invoked for an attempt that already produced `runtime/verifier.json`.
 
 ## What This Replaces
 

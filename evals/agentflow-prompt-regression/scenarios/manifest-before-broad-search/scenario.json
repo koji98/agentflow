@@ -2,7 +2,7 @@
   "id": "manifest-before-broad-search",
   "bucket": "context-authority",
   "difficulty": "medium",
-  "description": "Agent should use the context manifest before broad repository search.",
+  "description": "Agent should use the agent context brief before broad repository search.",
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
