@@ -108,7 +108,7 @@ function createHarness(kind: HarnessAdapter["kind"], run: HarnessAdapter["run"],
     };
 }
 describe("runtime engine", () => {
-    it("publishes exposed deep research angle reports as raw public artifacts", async () => {
+    it("publishes selected deep research angle artifacts from the final publisher", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-research-angle-artifact-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
@@ -175,9 +175,9 @@ describe("runtime engine", () => {
                         await writeFile(join(outputDir, "angle-report.md"), "RAW CONTRACT ANGLE REPORT\nangle_02\nfindings, evidence, sources, conflicts, uncertainty, and confidence for the contract angle.\n");
                     }
                     else if (node.authored_id === "market_scan") {
-                        expect(await readFile(join(outputDir, "angles", "risk.md"), "utf8")).toBe(rawRiskReport);
                         await writeFile(join(outputDir, "summary.md"), "Synthesized summary.\n");
-                        await writeFile(join(outputDir, "angles", "risk.md"), "PUBLISHER SHOULD NOT WIN\n");
+                        await mkdir(join(outputDir, "angles"), { recursive: true });
+                        await writeFile(join(outputDir, "angles", "risk.md"), "Curated risk report.\n");
                     }
                     const result = {
                         status: "passed",
@@ -194,7 +194,10 @@ describe("runtime engine", () => {
         const finalAttempt = run.attempts.find((attempt) => attempt.authored_id === "market_scan");
         expect(run.outcome).toBe("passed");
         expect(finalAttempt?.artifacts.risk).toBeDefined();
-        await expect(readFile(finalAttempt!.artifacts.risk!, "utf8")).resolves.toBe(rawRiskReport);
+        await expect(readFile(finalAttempt!.artifacts.risk!, "utf8")).resolves.toBe("Curated risk report.\n");
+        const rawAngleAttempt = run.attempts.find((attempt) => attempt.authored_id.endsWith("__angle_01"));
+        expect(rawAngleAttempt?.artifacts.angle_report_01).toBeDefined();
+        await expect(readFile(rawAngleAttempt!.artifacts.angle_report_01!, "utf8")).resolves.toBe(rawRiskReport);
         const manifest = JSON.parse(await readFile(join(runRoot, "delivery", "manifest.json"), "utf8")) as {
             artifact_taxonomy: {
                 declared_artifacts: Array<{
@@ -1003,7 +1006,7 @@ describe("runtime engine", () => {
             nodeGoal: "Produce the review handoff.",
             nodeAcceptanceCriteria: ["The handoff explains validation."]
         }));
-        expect(renderHarnessPrompt(invocations[0]!)).toContain(invocations[0]?.outputDir);
+        expect(renderHarnessPrompt(invocations[0]!)).not.toContain(invocations[0]?.outputDir);
         expect(attempt?.metadata).toEqual(expect.objectContaining({
             session_id: "agent-1"
         }));
@@ -1311,7 +1314,7 @@ describe("runtime engine", () => {
         expect(capturedInvocation?.promptKind).toBe("agent");
         expect(capturedInvocation).toEqual(expect.objectContaining({
             repoPath: repoDir,
-            outputDir: expect.stringContaining(join(repoDir, ".agentflow-runtime")),
+            outputDir: resolveExecutionArtifactsDirectory(attempt.execution_dir),
             artifacts: {
                 handoff: {
                     from: "output_dir",
@@ -1320,8 +1323,7 @@ describe("runtime engine", () => {
                 }
             }
         }));
-        expect(capturedInvocation?.outputDir).not.toBe(resolveExecutionArtifactsDirectory(attempt.execution_dir));
-        expect(await pathExists(capturedInvocation!.outputDir)).toBe(false);
+        expect(await pathExists(capturedInvocation!.outputDir)).toBe(true);
         expect(attempt.artifacts.handoff).toBe(join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "handoff.md"));
         expect(await readFile(attempt.artifacts.handoff!, "utf8")).toBe("handoff\n");
         expect(attempt.artifacts.agent_response).toBe(join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md"));
@@ -1500,7 +1502,7 @@ describe("runtime engine", () => {
         expect(repairPrompt).toContain("## Repair Task");
         expect(repairPrompt).toContain("## Missing Artifacts");
         expect(repairPrompt).toContain("Write a handoff after inspecting the repo.");
-        expect(repairPrompt).toContain("expected absolute path");
+        expect(repairPrompt).not.toContain("expected absolute path");
         expect(attempt.artifacts.handoff).toBe(join(artifactsRoot, "handoff.md"));
         expect(await readFile(attempt.artifacts.handoff!, "utf8")).toBe("repaired handoff\n");
         expect(attempt.metadata.artifact_repair).toEqual({
@@ -3265,6 +3267,102 @@ describe("runtime engine", () => {
         expect(run.events).toEqual(expect.not.arrayContaining([
             expect.objectContaining({
                 type: "supervisor.paused"
+            })
+        ]));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("does not retry unsupported Cursor sandbox launch configuration", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-runtime-cursor-sandbox-unsupported-"));
+        const repoDir = join(tempRoot, "repo");
+        const runRoot = join(tempRoot, "run");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "runtime-cursor-sandbox-unsupported",
+            supervision: { profile: "supervisor", max_total_interventions: 3 },
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "cursor-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "agent",
+                        id: "writer",
+                        intent: {
+                            goal: "Write the handoff artifact.",
+                            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                            constraints: []
+                        },
+                        artifacts: {
+                            handoff: {
+                                from: "output_dir",
+                                path: "handoff.md",
+                                description: "Required handoff."
+                            }
+                        },
+                        runtime: {
+                            repo: "main"
+                        }
+                    }
+                ]
+            }
+        });
+        let launches = 0;
+        const harness = createHarness("cursor-cli", async () => {
+            launches += 1;
+            return {
+                status: "failed",
+                exitCode: 1,
+                stderr: "Sandbox mode is enabled but not available on this system. Run with sandbox disabled.",
+                metadata: {
+                    error: "Cursor CLI structured output failed: stdout was not a JSON object.\nCursor CLI stderr:\nSandbox mode is enabled but not available on this system. Run with sandbox disabled.",
+                    failure_code: "harness_configuration_unsupported"
+                }
+            };
+        });
+        const run = await runCompiledGraph({
+            run_root: runRoot,
+            compiled_graph: graph,
+            repo_sources: {
+                main: repoDir
+            },
+            harnesses: {
+                "cursor-cli": harness
+            }
+        });
+        const attempts = run.attempts.filter((attempt) => attempt.authored_id === "writer");
+        expect(run.outcome).toBe("failed");
+        expect(launches).toBe(1);
+        expect(attempts).toHaveLength(1);
+        expect(run.state.supervisor.pause).toBeUndefined();
+        expect(run.events).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: "supervisor.decision",
+                compiled_id: "root__writer",
+                payload: expect.objectContaining({
+                    classification: "harness_unavailable",
+                    action: "fail",
+                    target_execution_id: attempts[0]!.execution_id
+                })
+            })
+        ]));
+        expect(run.events).toEqual(expect.not.arrayContaining([
+            expect.objectContaining({
+                type: "supervisor.intervention.started"
             })
         ]));
         await rm(tempRoot, { recursive: true, force: true });

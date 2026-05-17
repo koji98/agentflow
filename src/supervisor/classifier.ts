@@ -317,6 +317,7 @@ function classifyRuntimeFailureCode(input: {
       });
     case "harness_unavailable":
     case "verifier_unavailable":
+    case "harness_configuration_unsupported":
       return classifyResult({
         class: "harness_unavailable",
         summary: input.message || "Required harness is unavailable.",

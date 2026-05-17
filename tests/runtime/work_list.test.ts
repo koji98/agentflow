@@ -55,7 +55,7 @@ function buildHarness(): HarnessAdapter {
         };
       }
 
-      if (invocation.nodeGoal?.includes("work-list.json")) {
+      if (invocation.nodeGoal?.includes("work_list_json")) {
         await writeFile(join(invocation.outputDir, "work-list.md"), "# Work List\n\n- w1: Produce evidence.\n", "utf8");
         await writeFile(join(invocation.outputDir, "work-list.json"), `${JSON.stringify({
           items: [
@@ -70,7 +70,7 @@ function buildHarness(): HarnessAdapter {
             }
           ]
         }, null, 2)}\n`, "utf8");
-      } else if (invocation.nodeGoal?.includes("item-results.json")) {
+      } else if (invocation.nodeGoal?.includes("item_results")) {
         await writeFile(join(invocation.outputDir, "item-handoffs.md"), "# Item Handoffs\n\n## w1\n\nCompleted with evidence.\n", "utf8");
         await writeFile(join(invocation.outputDir, "item-results.json"), `${JSON.stringify({
           items: [
@@ -123,7 +123,7 @@ function buildDeepWorkHarness(state: { runItemsCalls: number }): HarnessAdapter 
         };
       }
 
-      if (invocation.nodeGoal?.includes("work-list.json")) {
+      if (invocation.nodeGoal?.includes("work_list_json")) {
         await writeFile(join(invocation.outputDir, "work-list.md"), "# Work List\n\n- w1: Produce evidence.\n", "utf8");
         await writeFile(join(invocation.outputDir, "work-list.json"), `${JSON.stringify({
           items: [
@@ -138,7 +138,7 @@ function buildDeepWorkHarness(state: { runItemsCalls: number }): HarnessAdapter 
             }
           ]
         }, null, 2)}\n`, "utf8");
-      } else if (invocation.nodeGoal?.includes("item-results.json")) {
+      } else if (invocation.nodeGoal?.includes("item_results")) {
         state.runItemsCalls += 1;
         const completed = state.runItemsCalls > 1;
         await writeFile(

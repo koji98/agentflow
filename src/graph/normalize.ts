@@ -2419,7 +2419,7 @@ function normalizePatternDeepResearchNode(
 
   const base = normalizeExecutableBase(record, path, diagnostics, {
     allow_artifacts: false,
-    artifacts_disallowed_message: "pattern_deep_research publishes only summary, packet, and angle reports selected with as_artifact.",
+    artifacts_disallowed_message: "pattern_deep_research publishes only summary and curated angle reports selected with as_artifact.",
     runtime_extra_keys: ["max_concurrency"]
   });
   const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);

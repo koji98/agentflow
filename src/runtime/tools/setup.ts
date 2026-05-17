@@ -1,5 +1,6 @@
-import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -618,6 +619,7 @@ export async function prepareAgentTools(
     AGENTFLOW_RUNTIME_METADATA: runtime_metadata_path,
     AGENTFLOW_AF_CLI: currentAfCliPath(),
     AGENTFLOW_AF_RUNNER: currentAfRunnerPath(),
+    AGENTFLOW_AF_BROKER_DIR: await mkdtemp(join(tmpdir(), "agentflow-af-broker-")),
     AGENTFLOW_SPAWN_MODE: "broker",
     AGENTFLOW_RUN_ROOT: runRoot,
     AGENTFLOW_RUNTIME_DIR: runtimeDir,

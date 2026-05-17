@@ -324,7 +324,7 @@ describe("supervisor failure classifier", () => {
                 },
                 metadata: {
                     error: "Cursor CLI structured output failed: stdout was not a JSON object.\nCursor CLI stderr:\nError: Sandbox mode is enabled but not available on this system. Sandbox is unavailable.",
-                    failure_code: "harness_unavailable"
+                    failure_code: "harness_configuration_unsupported"
                 }
             }
         })).toEqual(expect.objectContaining({

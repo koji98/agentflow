@@ -141,15 +141,15 @@ Continuity comes from Agentflow artifacts and resume logic, not from assuming pe
 
 `af` is Agentflow's in-node runtime CLI. It is generated into the same per-execution `runtime/tools/bin` directory as plugin tool wrappers, then injected onto the harness `PATH`. The package also exposes `af` as a binary after build, but the primary contract is the generated in-run command.
 
-The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes run id, graph id, agent id, node id, workspace path, output directory, context paths, declared artifacts, granted plugin tool metadata, and non-secret credential metadata. It does not contain credential values. Runtime preflight checks required credential availability before the agent runs; secret fields stay in macOS Keychain and are resolved only for the plugin subprocess.
+The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes run id, graph id, agent id, node id, workspace path, runtime artifact destination, context paths, declared artifacts, granted plugin tool metadata, and non-secret credential metadata. It does not contain credential values. Runtime preflight checks required credential availability before the agent runs; secret fields stay in macOS Keychain and are resolved only for the plugin subprocess. Default agent-facing prompts and `af orient` do not expose transient artifact destination paths; agents publish declared artifacts with `af artifact write <name>`.
 
-`af` commands are file-backed against the run root:
+`af` commands are runtime-owned and file-backed against the run root. In sandboxed harnesses, the generated wrapper sends the command to the parent Agentflow broker through an ephemeral `/tmp` request channel; the parent performs the canonical run-root write and returns stdout/stderr to the agent. This keeps the agent command surface simple while preventing harness writable-root differences from causing artifact, milestone, or completion-packet failures.
 
 - `af orient` orients the node against the current runtime contract and context pointers.
 - `af milestone add/log/complete/block` records macro work state and audit evidence.
 - `af artifact write <name>` publishes declared artifact content from stdin.
 - `af complete check` builds the mechanical completion packet for the current attempt.
-- `af spawn --role <evidence_mapper|causal_investigator|verification_auditor|repair_planner>` creates a read-only supervisor helper with its own runtime metadata, case-file pointers, output directory, logs, artifact contract, and optional `--wait` behavior.
+- `af spawn --role <evidence_mapper|causal_investigator|verification_auditor|repair_planner>` creates a read-only supervisor helper with its own runtime metadata, case-file pointers, logs, artifact contract, and optional `--wait` behavior.
 - `af spawn --purpose <investigation|implementation|verification|repair>` remains the managed-pattern helper form for bounded helper work with selected plugin tools when that authority is explicitly available.
 
 The default `af --help` surface is intentionally small because it is part of agent correctness. It shows the normal completion loop commands and omits debug/orchestration commands such as `diagnose`, `learn`, `tools list`, and `spawn`. `af <command> --help` remains the authoritative in-node runtime API reference for commands the runtime exposes to the current authority. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.

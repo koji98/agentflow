@@ -75,6 +75,8 @@ describe("harness prompt rendering", () => {
     const prompt = renderHarnessPrompt(baseInvocation());
 
     expect(prompt).toContain("Open only the source pointers relevant to this task.");
+    expect(prompt).not.toContain("/tmp/run/output");
+    expect(prompt).not.toContain("Output directory");
     expect(prompt).not.toContain("Context packet:");
     expect(prompt).not.toContain("Context provenance:");
     expect(prompt).not.toContain("provenance.json");
@@ -251,7 +253,8 @@ describe("harness prompt rendering", () => {
 	    expect(prompt).toContain("## Repair Task");
 	    expect(prompt).toContain("## Missing Artifacts");
 	    expect(prompt).toContain("Repair brief: /tmp/run/agent/artifact-repair.md");
-	    expect(prompt).toContain("expected absolute path: `/tmp/run/output/handoff.md`");
+	    expect(prompt).not.toContain("expected absolute path");
+	    expect(prompt).not.toContain("/tmp/run/output/handoff.md");
 	    expect(prompt).toContain("create a repair milestone");
 	    expect(prompt).toContain("publish each missing artifact with `af artifact write <name>`");
 	    expect(prompt).not.toContain("human-debug");

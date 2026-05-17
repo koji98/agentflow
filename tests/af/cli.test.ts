@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeAfCli, runAfCli } from "../../src/af/index.js";
 import type { ArtifactDefinition } from "../../src/graph/authored.js";
+import { startSpawnBroker } from "../../src/runtime/harness/spawn_broker.js";
 import { appendOperatorObservation, createOperatorObservation } from "../../src/runtime/observations/index.js";
 interface TestRuntimePaths {
     root: string;
@@ -100,11 +101,19 @@ describe("af runtime CLI", () => {
     let originalMetadata: string | undefined;
     let originalCodexBin: string | undefined;
     let originalSpawnMode: string | undefined;
+    let originalAfBrokerDir: string | undefined;
+    let originalAfBrokerChild: string | undefined;
+    let originalAfRunner: string | undefined;
+    let originalAfCli: string | undefined;
     beforeEach(async () => {
         tempRoot = await mkdtemp(join(tmpdir(), "agentflow-af-cli-"));
         originalMetadata = process.env.AGENTFLOW_RUNTIME_METADATA;
         originalCodexBin = process.env.AGENTFLOW_CODEX_CLI_BIN;
         originalSpawnMode = process.env.AGENTFLOW_SPAWN_MODE;
+        originalAfBrokerDir = process.env.AGENTFLOW_AF_BROKER_DIR;
+        originalAfBrokerChild = process.env.AGENTFLOW_AF_BROKER_CHILD;
+        originalAfRunner = process.env.AGENTFLOW_AF_RUNNER;
+        originalAfCli = process.env.AGENTFLOW_AF_CLI;
     });
     afterEach(async () => {
         if (originalMetadata === undefined) {
@@ -124,6 +133,30 @@ describe("af runtime CLI", () => {
         }
         else {
             process.env.AGENTFLOW_SPAWN_MODE = originalSpawnMode;
+        }
+        if (originalAfBrokerDir === undefined) {
+            delete process.env.AGENTFLOW_AF_BROKER_DIR;
+        }
+        else {
+            process.env.AGENTFLOW_AF_BROKER_DIR = originalAfBrokerDir;
+        }
+        if (originalAfBrokerChild === undefined) {
+            delete process.env.AGENTFLOW_AF_BROKER_CHILD;
+        }
+        else {
+            process.env.AGENTFLOW_AF_BROKER_CHILD = originalAfBrokerChild;
+        }
+        if (originalAfRunner === undefined) {
+            delete process.env.AGENTFLOW_AF_RUNNER;
+        }
+        else {
+            process.env.AGENTFLOW_AF_RUNNER = originalAfRunner;
+        }
+        if (originalAfCli === undefined) {
+            delete process.env.AGENTFLOW_AF_CLI;
+        }
+        else {
+            process.env.AGENTFLOW_AF_CLI = originalAfCli;
         }
         await rm(tempRoot, { recursive: true, force: true });
     });
@@ -164,6 +197,9 @@ describe("af runtime CLI", () => {
         expect(orient.exitCode).toBe(0);
         expect(orient.stdout).toContain("# Agentflow Orientation");
         expect(orient.stdout).toContain("## Success Contract");
+        expect(orient.stdout).toContain("| `handoff` | `af artifact write handoff` | Durable handoff. |");
+        expect(orient.stdout).not.toContain(runtime.output);
+        expect(orient.stdout).not.toContain("Destination");
         expect(orient.stdout).toContain("## Milestones");
         const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
         try {
@@ -179,6 +215,9 @@ describe("af runtime CLI", () => {
             completion_status: "incomplete",
             missing_artifacts: ["handoff"]
         }));
+        expect(JSON.stringify(incomplete.output)).not.toContain("expected_path");
+        expect(JSON.stringify(incomplete.output)).not.toContain("packet_path");
+        expect(JSON.stringify(incomplete.output)).not.toContain("size_bytes");
         const added = outputOf<{ milestone: { id: string } }>(await executeAfCli([
             "milestone",
             "add",
@@ -290,6 +329,56 @@ describe("af runtime CLI", () => {
             "--tools",
             "not-granted"
         ])).rejects.toThrow("read-only and cannot request plugin tools");
+    });
+    it("routes af mutations through the parent broker so sandboxed agents do not write run state directly", async () => {
+        const runtime = await createRuntime(tempRoot);
+        const brokerDir = await mkdtemp(join(tmpdir(), "agentflow-af-cli-broker-"));
+        const afRunner = join(process.cwd(), "node_modules/.bin/tsx");
+        const afCli = join(process.cwd(), "src/af/index.ts");
+        const toolEnv = {
+            AGENTFLOW_RUNTIME_METADATA: runtime.metadata,
+            AGENTFLOW_AF_BROKER_DIR: brokerDir,
+            AGENTFLOW_AF_RUNNER: afRunner,
+            AGENTFLOW_AF_CLI: afCli
+        };
+        const broker = startSpawnBroker({
+            executionId: "agent-main",
+            repoPath: runtime.workspace,
+            outputDir: runtime.output,
+            runtimeDir: join(runtime.root, "runtime"),
+            prompt: "test",
+            sandbox: "workspace-write",
+            timeoutSec: 10,
+            toolEnv,
+            signal: undefined
+        } as any);
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        process.env.AGENTFLOW_AF_BROKER_DIR = brokerDir;
+        process.env.AGENTFLOW_AF_RUNNER = afRunner;
+        process.env.AGENTFLOW_AF_CLI = afCli;
+        const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+        const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+        try {
+            await expect(runAfCli([
+                "milestone",
+                "add",
+                "--title",
+                "Brokered milestone",
+                "--goal",
+                "Prove the broker owns run-state writes."
+            ])).resolves.toBe(0);
+            await expect(withStdin("brokered artifact\n", () => runAfCli(["artifact", "write", "handoff"])))
+                .resolves.toBe(0);
+        }
+        finally {
+            stdoutSpy.mockRestore();
+            stderrSpy.mockRestore();
+            broker.stop();
+        }
+        await expect(readFile(join(runtime.output, "handoff.md"), "utf8")).resolves.toBe("brokered artifact\n");
+        await expect(readFile(join(runtime.root, "runtime", "milestones", "agent-main.json"), "utf8"))
+            .resolves.toContain("Brokered milestone");
+        await rm(brokerDir, { recursive: true, force: true });
     });
     it("exposes supervisor learn and diagnose helpers", async () => {
         const runtime = await createRuntime(tempRoot);

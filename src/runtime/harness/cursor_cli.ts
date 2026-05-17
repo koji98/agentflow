@@ -84,6 +84,10 @@ function createCursorOutputFailure(message: string): Error {
   return new Error(`Cursor CLI structured output failed: ${message}`);
 }
 
+function isCursorSandboxUnavailable(message: string | undefined): boolean {
+  return /sandbox mode is enabled but not available on this system/iu.test(message ?? "");
+}
+
 function normalizeCursorOutput(stdout: string, exitCode: number): {
   output_json?: Record<string, unknown>;
   last_message?: string;
@@ -367,6 +371,7 @@ export function createCursorCliHarness(
                   })
                 ]
               : [];
+          const sandboxUnavailable = isCursorSandboxUnavailable(structuredOutputMessage);
           resolve({
             status:
               termination.state.canceled
@@ -389,6 +394,16 @@ export function createCursorCliHarness(
               timed_out: termination.state.timed_out,
               force_killed: termination.state.force_killed,
               ...(authorityRequests.length > 0 ? { authority_requests: authorityRequests } : {}),
+              ...(sandboxUnavailable
+                ? {
+                    failure_code: "harness_configuration_unsupported",
+                    failure_details: {
+                      harness: "cursor-cli",
+                      reason: "sandbox_mode_unavailable",
+                      requested_sandbox: harnessConfig.cursor?.sandbox_mode ?? mapCursorSandbox(invocation.sandbox)
+                    }
+                  }
+                : {}),
               ...(structuredOutputMessage ? { error: createCursorOutputFailure(structuredOutputMessage).message } : {})
             },
             ...(cursorOutput.last_message

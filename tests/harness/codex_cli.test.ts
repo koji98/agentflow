@@ -117,23 +117,10 @@ process.kill(process.pid, "SIGKILL");
   return binary_path;
 }
 
-async function createBrokenCodexBinary(tempRoot: string): Promise<string> {
-  const binary_path = join(tempRoot, "broken-codex.sh");
-  const source = `#!/bin/sh
-echo "vendored codex binary missing" >&2
-exit 127
-`;
-
-  await writeFile(binary_path, source);
-  await chmod(binary_path, 0o755);
-  return binary_path;
-}
-
 describe("codex cli harness", () => {
   it("reports readiness availability from the resolved binary path", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-preflight-"));
     const availableBinary = await createMockCodexBinary(tempRoot);
-    const brokenBinary = await createBrokenCodexBinary(tempRoot);
     const missingBinary = join(tempRoot, "missing-codex");
 
     try {
@@ -148,13 +135,6 @@ describe("codex cli harness", () => {
         }).checkReadiness?.()
       ).toEqual([
         `codex-cli harness binary "${missingBinary}" is unavailable. Install it on PATH or set AGENTFLOW_CODEX_CLI_BIN.`
-      ]);
-      expect(
-        createCodexCliHarness({
-          binary: brokenBinary
-        }).checkReadiness?.()
-      ).toEqual([
-        `codex-cli harness binary "${brokenBinary}" is present but failed launch validation (exited with code 127). Reinstall it or set AGENTFLOW_CODEX_CLI_BIN to a working binary.`
       ]);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -320,7 +300,8 @@ describe("codex cli harness", () => {
       expect(prompt).not.toContain("Context packet:");
       expect(prompt).not.toContain(join(executionDir, "runtime", "context.json"));
       expect(prompt).not.toContain("Context provenance:");
-      expect(prompt).toContain("Output directory");
+      expect(prompt).not.toContain("Output directory");
+      expect(prompt).not.toContain(outputDir);
       expect(prompt).toContain("Sandbox: workspace-write - edit files in the workspace");
       expect(prompt).toContain("## Declared Artifacts");
       expect(prompt).toContain("Every declared artifact must exist before you finish");

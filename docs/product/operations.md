@@ -122,7 +122,7 @@ Manual files worth opening:
 Runtime coordination files are under `<run-root>/runtime/`. They are useful when debugging worker evidence and helper sub-nodes:
 
 - `milestones/<execution>.json`: worker milestones and attached finding, decision, and validation evidence.
-- `helpers/<helper-id>/session.json`: helper lifecycle, logs, output directory, and artifact paths.
+- `helpers/<helper-id>/session.json`: helper lifecycle, logs, and artifact paths.
 - `observations.jsonl`: live human observations added without pausing the run.
 - `human-resume-input.jsonl`: structured human input used when resuming paused runs.
 
