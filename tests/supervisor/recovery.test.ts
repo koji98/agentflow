@@ -258,6 +258,128 @@ describe("supervisor recovery cycle", () => {
         expect(recovery.recovery_envelope).toBeUndefined();
         await rm(tempRoot, { recursive: true, force: true });
     });
+    it("retries semantic artifact-set conflicts when the current contract can be repaired", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-artifact-consistency-"));
+        const runtimeAttempt = attempt(tempRoot);
+        await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+        const semanticResult: RuntimeNodeExecutionResult = {
+            status: "passed",
+            outcome: "failed",
+            result: {
+                outcome_verification: {
+                    passed: false,
+                    summary: "The public artifact set does not provide a single resolved plan.",
+                    findings: [
+                        {
+                            severity: "blocker",
+                            category: "incorrect_output",
+                            evidence: "summary.md and plan.md contradict each other.",
+                            recommendation: "Republish the declared artifacts with one controlling resolution."
+                        }
+                    ],
+                    blockers: [
+                        {
+                            severity: "blocker",
+                            category: "incorrect_output",
+                            evidence: "summary.md and plan.md contradict each other.",
+                            recommendation: "Republish the declared artifacts with one controlling resolution."
+                        }
+                    ]
+                }
+            }
+        };
+        const classification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: semanticResult
+        });
+        const causalContext: SupervisorCausalContext = {
+            symptom: {
+                compiled_id: "root__node",
+                authored_id: "node",
+                kind: "agent",
+                execution_id: runtimeAttempt.execution_id,
+                failure_class: classification.class,
+                summary: classification.summary
+            },
+            upstream_cone: [],
+            target_candidates: [],
+            selected_target: {
+                operation: "repair_current_node",
+                target_compiled_id: "root__node",
+                target_authored_id: "node",
+                target_kind: "agent",
+                confidence: "medium",
+                reason: "The current node owns the inconsistent public artifact set.",
+                evidence: ["Verifier identified contradictions across declared artifacts."],
+                resume_compiled_id: "root__node",
+                resume_authored_id: "node",
+                target_prior_execution_id: runtimeAttempt.execution_id,
+                symptom_compiled_id: "root__node",
+                symptom_authored_id: "node",
+                symptom_execution_id: runtimeAttempt.execution_id,
+                requires_investigation: false
+            }
+        };
+        const harness: HarnessAdapter = {
+            kind: "codex-cli",
+            capabilities: {
+                supports_agent: true,
+                supports_ai_check: true
+            },
+            async run() {
+                return {
+                    status: "passed",
+                    exitCode: 0,
+                    outputJson: {
+                        claims: ["The declared public artifacts contradict each other."],
+                        retry_guidance: ["Republish the existing declared artifacts with one controlling resolution."],
+                        conflicts: ["summary.md and plan.md disagree."],
+                        confidence: "high",
+                        authority_findings: [
+                            {
+                                kind: "graph_contract_change",
+                                summary: "Adding a new artifact would change the graph contract, but rewriting existing artifacts is in-contract.",
+                                evidence: ["The declared artifact names remain unchanged."]
+                            }
+                        ]
+                    }
+                };
+            },
+            async cancel() { }
+        };
+        const recovery = await runSupervisorRecoveryCycle({
+            action: "semantic_evaluation",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: semanticResult,
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification,
+            failure_fingerprint: "fingerprint-1",
+            repeated_fingerprint_count: 1,
+            prior_interventions: [],
+            workspace_path: tempRoot,
+            harness,
+            causal_context: causalContext
+        });
+        expect(classification.class).toBe("semantic_misalignment");
+        expect(recovery.recovery_plan.apply_action).toBe("retry_with_evidence");
+        expect(recovery.recovery_plan.runtime_overlay?.material_delta).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: "public_artifact_consistency_repair"
+            })
+        ]));
+        expect(recovery.recovery_plan.pause_request).toBeUndefined();
+        expect(recovery.recovery_envelope).toBeDefined();
+        await rm(tempRoot, { recursive: true, force: true });
+    });
     it("does not pause from helper credential, operator, or side-effect authority findings", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-helper-authority-mentions-"));
         const runtimeAttempt = attempt(tempRoot);

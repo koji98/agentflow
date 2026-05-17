@@ -653,18 +653,35 @@ function selectApplyAction(options: {
     return "pause_for_authority";
   }
 
-  const contractAuthorityFinding = options.patches.some((patch) =>
+  const operation = options.causalContext?.selected_target.operation;
+  const graphContractFinding = options.patches.some((patch) =>
+    patch.authority_findings.some((finding) => finding.kind === "graph_contract_change")
+  );
+  const hardAuthorityFinding = options.patches.some((patch) =>
     patch.authority_findings.some((finding) =>
-      finding.kind === "graph_contract_change" ||
       finding.kind === "sandbox_expansion" ||
       finding.kind === "repo_scope_expansion"
     )
   );
-  if (contractAuthorityFinding) {
+  if (hardAuthorityFinding) {
     return "fail_contract_gap";
   }
 
-  const operation = options.causalContext?.selected_target.operation;
+  const retryableCurrentContractOperation =
+    operation === "repair_current_node" ||
+    operation === "repair_upstream_node" ||
+    operation === "investigate_causal_cone";
+  const retryableCurrentContractFailure =
+    options.classification.class === "semantic_misalignment" ||
+    options.classification.class === "completion_contract_failure" ||
+    options.classification.class === "artifact_contract_failure" ||
+    options.classification.class === "missing_dependency_docs" ||
+    options.classification.class === "wrong_local_pattern" ||
+    options.classification.class === "unknown";
+  if (graphContractFinding && !(retryableCurrentContractOperation && retryableCurrentContractFailure)) {
+    return "fail_contract_gap";
+  }
+
   if (operation === "pause_for_authority") {
     return "pause_for_authority";
   }
@@ -868,6 +885,18 @@ function buildRuntimeOverlay(options: {
     deltas.push({
       kind: "requirement_evidence_mapped",
       summary: "Mapped failed requirements to current run evidence so the retry has a concrete evidence target."
+    });
+  }
+
+  if (
+    options.applyAction === "retry_with_evidence" &&
+    options.classification.class === "semantic_misalignment" &&
+    options.evidencePatches.some((patch) => patch.conflicts.length > 0) &&
+    !deltas.some((delta) => delta.kind === "public_artifact_consistency_repair")
+  ) {
+    deltas.push({
+      kind: "public_artifact_consistency_repair",
+      summary: "Mapped public artifact conflicts so the retry can republish a mutually consistent artifact set."
     });
   }
 

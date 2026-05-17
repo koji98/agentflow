@@ -24,7 +24,7 @@ Use `agentflow-authoring` for graph creation and `agentflow-run-review` for post
 3. Launch with `agentflow run --graph <path>` only after validation.
 4. Inspect terminal or failed runs with `agentflow inspect <run-root>`.
 5. Review delivery files before raw runtime files; see `references/delivery-review.md`.
-6. Use resume dry-runs before continuing complicated or paused runs; use `references/failure-triage.md` when status, failure class, or next action is unclear.
+6. Use resume dry-runs before continuing complicated or paused runs; check which compiled nodes restart and why before launching real work. Use `references/failure-triage.md` when status, failure class, or next action is unclear.
 7. Apply captured changes only when the operator wants worktree output moved into another checkout.
 
 ## Decision Rules
@@ -41,6 +41,7 @@ Use `agentflow-authoring` for graph creation and `agentflow-run-review` for post
 - Ignoring plugin lockfile or tool `--help` failures.
 - Reviewing raw logs before delivery files.
 - Resuming a changed graph without dry-run when preservation matters.
+- Assuming changed support/tools/skills/CLI hints are safe to preserve; they are prompt-affecting node contract changes.
 - Treating a supervisor authority pause as a planned checkpoint, or assuming free-text failures can pause a run.
 - Expecting a completed agent node to be a live collaborator.
 

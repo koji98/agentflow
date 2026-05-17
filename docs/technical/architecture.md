@@ -141,18 +141,19 @@ Continuity comes from Agentflow artifacts and resume logic, not from assuming pe
 
 `af` is Agentflow's in-node runtime CLI. It is generated into the same per-execution `runtime/tools/bin` directory as plugin tool wrappers, then injected onto the harness `PATH`. The package also exposes `af` as a binary after build, but the primary contract is the generated in-run command.
 
-The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes run id, graph id, agent id, node id, workspace path, output directory, context paths, declared artifacts, granted plugin tool metadata, and non-secret credential metadata. It does not contain credential values. Runtime preflight checks required credential availability before the agent runs; secret fields stay in macOS Keychain and are resolved only for the plugin subprocess.
+The runtime metadata file referenced by `$AGENTFLOW_RUNTIME_METADATA` includes run id, graph id, agent id, node id, workspace path, runtime artifact destination, context paths, declared artifacts, granted plugin tool metadata, and non-secret credential metadata. It does not contain credential values. Runtime preflight checks required credential availability before the agent runs; secret fields stay in macOS Keychain and are resolved only for the plugin subprocess. Default agent-facing prompts and `af orient` do not expose transient artifact destination paths; agents publish declared artifacts with `af artifact write <name>`.
 
-`af` commands are file-backed against the run root:
+`af` commands are runtime-owned and file-backed against the run root. In sandboxed harnesses, the generated wrapper sends the command to the parent Agentflow broker through an ephemeral `/tmp` request channel; the parent performs the canonical run-root write and returns stdout/stderr to the agent. This keeps the agent command surface simple while preventing harness writable-root differences from causing artifact, milestone, or completion-packet failures.
 
 - `af orient` orients the node against the current runtime contract and context pointers.
 - `af milestone add/log/complete/block` records macro work state and audit evidence.
 - `af artifact write <name>` publishes declared artifact content from stdin.
 - `af complete check` builds the mechanical completion packet for the current attempt.
-- `af spawn --role <evidence_mapper|causal_investigator|verification_auditor|repair_planner>` creates a read-only supervisor helper with its own runtime metadata, case-file pointers, output directory, logs, artifact contract, and optional `--wait` behavior.
+- `af` runtime command policy allows normal workers to use only orientation, milestones, artifact writes, and completion checks.
+- `af spawn --role <evidence_mapper|causal_investigator|verification_auditor|repair_planner>` creates a read-only supervisor helper only when runtime orchestration authority is explicitly present.
 - `af spawn --purpose <investigation|implementation|verification|repair>` remains the managed-pattern helper form for bounded helper work with selected plugin tools when that authority is explicitly available.
 
-The default `af --help` surface is intentionally small because it is part of agent correctness. It shows the normal completion loop commands and omits debug/orchestration commands such as `diagnose`, `learn`, `tools list`, and `spawn`. `af <command> --help` remains the authoritative in-node runtime API reference for commands the runtime exposes to the current authority. Help output is credential-free and includes usage, arguments/options, defaults, output shape, examples, exit codes, and safety notes.
+The default `af --help` surface is intentionally small because it is part of agent correctness. It shows the normal completion loop commands and omits debug/orchestration commands such as `diagnose`, `learn`, `tools list`, and `spawn`. `af <command> --help` is credential-free reference text; executing the command still requires the current runtime command policy to allow it.
 
 Agentflow-provided `af` and plugin tool calls append per-execution `human-debug/tools/index.jsonl` records when invoked through the generated wrappers. The records include command identity, redacted argv, exit code, duration, and paths to paired input/output payloads.
 
@@ -196,7 +197,7 @@ Failed harness attempts do not publish declared artifacts, even if they wrote fi
 
 `retry_with_guidance`, `rebuild_context`, `run_diagnostic`, and `semantic_evaluation` all feed the same causal recovery loop. A retried or repaired target receives a supervisor recovery case before the original authored task, and the same case is resolved into runtime context as `supervisor_recovery_envelope`. When context repair is active, `af orient` surfaces the active recovery and context pointers. The case names the symptom node, selected recovery target, requirement evidence map, material delta, forbidden actions, and unchanged graph/node authority. Retry attempts are scheduled with an exponential delay: 10 seconds by default, capped at 2 minutes, and overridable with `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS`.
 
-Supervisor helpers can use read-only diagnostics through `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, `af diagnose validation`, `af diagnose evidence-map`, and `af diagnose recovery-delta`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. Fixed helper roles are spawned dynamically only when a case proves the need: `evidence_mapper`, `causal_investigator`, `verification_auditor`, and `repair_planner`. They are read-only and cannot request plugin tools. Managed patterns may still use purpose-based implementation helpers for bounded internal work. There is no standalone `af wait`; use `af spawn ... --wait` when the parent needs a terminal helper result before continuing.
+Supervisor diagnostics use runtime-authorized `af diagnose failure`, `af diagnose graph-cone`, `af diagnose attempt`, `af diagnose context`, `af diagnose artifacts`, `af diagnose workspace`, `af diagnose validation`, `af diagnose evidence-map`, and `af diagnose recovery-delta`. `af learn <failure-kind>` returns focused recovery playbooks for common failure classes. Fixed helper roles are available to supervisor or managed orchestration when a case proves the need: `evidence_mapper`, `causal_investigator`, `verification_auditor`, and `repair_planner`. They are read-only, cannot request plugin tools, and cannot request or decide human pause. Managed patterns may still use purpose-based implementation helpers for bounded internal work. There is no standalone `af wait`; use `af spawn ... --wait` only when runtime orchestration authority exists and the parent needs a terminal helper result before continuing.
 
 Managed monitoring and supervisor events:
 
@@ -299,6 +300,6 @@ If delivery package creation fails, the run is marked failed with a `delivery_pa
 
 ## Resume
 
-Resume compares the prior compiled contract with the current compiled contract. Changes to `intent` or `supervision` invalidate completed work because they change the human contract or policy contract.
+Resume compares the prior compiled contract with the current compiled contract. Changes to `intent` or `supervision` invalidate completed work because they change the human contract or policy contract. Node compatibility also includes prompt-affecting support such as context pointers, selected skills, CLI hints, managed tool grants/config, declared artifacts, policy, commands/checks, and managed lowering metadata.
 
 When the contract is compatible, resume preserves completed attempts and continues from the durable run state. When it is not compatible, affected nodes restart under the new compiled contract.

@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 
@@ -157,15 +156,6 @@ export function formatMissingHarnessBinaryMessage(
   return `${kind} harness binary "${binary}" is unavailable. Install it on PATH or set ${envVarName}.`;
 }
 
-export function formatInvalidHarnessBinaryMessage(
-  kind: HarnessKind,
-  binary: string,
-  envVarName: string,
-  reason: string
-): string {
-  return `${kind} harness binary "${binary}" is present but failed launch validation (${reason}). Reinstall it or set ${envVarName} to a working binary.`;
-}
-
 export function collectMissingHarnessBinaryDiagnostics(
   kind: HarnessKind,
   binary: string,
@@ -176,22 +166,7 @@ export function collectMissingHarnessBinaryDiagnostics(
     return [formatMissingHarnessBinaryMessage(kind, binary, envVarName)];
   }
 
-  const probe = spawnSync(binary, ["--version"], {
-    encoding: "utf8",
-    stdio: "pipe",
-    timeout: 5_000
-  });
-  if (probe.status === 0) {
-    return [];
-  }
-
-  const reason =
-    probe.error
-      ? probe.error.message
-      : probe.signal
-        ? `terminated by ${probe.signal}`
-        : `exited with code ${probe.status ?? "unknown"}`;
-  return [formatInvalidHarnessBinaryMessage(kind, binary, envVarName, reason)];
+  return [];
 }
 
 export function normalizeHarnessLaunchError(
@@ -365,7 +340,7 @@ function describeSandbox(sandbox: AgentInvocation["sandbox"]): string {
     case "read-only":
       return "cannot modify the workspace or write any files; only read repo contents.";
     case "workspace-write":
-      return "edit files in the workspace and write artifacts to the output directory; cannot reach beyond this scope.";
+      return "edit files in the workspace and publish declared artifacts through Agentflow; cannot reach beyond this scope.";
     case "danger-full-access":
       return "full filesystem and command access; use carefully.";
   }
@@ -411,7 +386,6 @@ function formatWorkspaceContract(invocation: AgentInvocation): string[] {
   const lines = [
     "## Workspace",
     `- Workspace path: ${invocation.repoPath}`,
-    `- Output directory (artifacts): ${invocation.outputDir}`,
     `- Sandbox: ${invocation.sandbox} - ${describeSandbox(invocation.sandbox)}`
   ];
 
@@ -682,7 +656,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       "## Role",
       "Agentflow is a local graph runner for long-running engineering work.",
       "You are repairing one previously executed Agentflow node. Do not redo unrelated work.",
-      "Your only job is to produce the missing declared artifacts at the exact expected paths.",
+      "Your only job is to produce the missing declared artifacts through Agentflow.",
       "",
       ...formatNodeTask(invocation, {
         title: "Repair Task",
@@ -700,7 +674,6 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
         `- \`${artifact.name}\``,
         `  - from: \`${artifact.from}\``,
         `  - declared path: \`${artifact.path}\``,
-        `  - expected absolute path: \`${artifact.expectedPath}\``,
         `  - expected content: ${artifact.description}`
       ]),
       "",
@@ -727,7 +700,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       "## Repair Instructions",
       ...(invocation.sandbox === "read-only"
         ? [
-            "- Inspect the workspace, output directory, context, repair brief, and agent-facing evidence pointers as needed.",
+            "- Inspect the workspace, context, repair brief, and agent-facing evidence pointers as needed.",
             "- The read-only sandbox cannot produce missing artifacts. Report the concrete blocker without claiming repair success.",
             "- Do not attempt artifact writes, source edits, or mutating shell commands."
           ]
@@ -794,7 +767,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     ...formatArtifactContract(invocation.artifacts, invocation.outputDir, invocation.repoPath, invocation.sandbox),
     ...(hasSupervisorRecoveryEnvelope
       ? [
-          "- Prior attempt artifacts are evidence only. This retry must write every current-attempt declared artifact at the current output directory/workspace paths before finishing."
+          "- Prior attempt artifacts are evidence only. This retry must publish every current-attempt declared artifact before finishing."
         ]
       : []),
     "",

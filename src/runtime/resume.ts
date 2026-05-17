@@ -71,12 +71,17 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     intent: node.intent,
     effective_policy: node.effective_policy,
     context: node.context,
+    skills: node.skills,
+    cli: node.cli,
     declared_artifacts: node.declared_artifacts,
     ...(node.lowered_from ? { lowered_from: node.lowered_from } : {})
   };
 
   if (node.kind === "agent") {
-    return JSON.stringify(sortJson(shared));
+    return JSON.stringify(sortJson({
+      ...shared,
+      tools: node.tools
+    }));
   }
 
   if (node.kind === "exec") {

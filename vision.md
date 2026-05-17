@@ -105,9 +105,10 @@ The supervisor:
 - retries nodes with guidance when policy allows
 - detects drift from scope or acceptance criteria
 - enforces action, time, and intervention budgets
-- pauses for human input when policy or ambiguity thresholds are crossed
+- pauses for human input only when a trusted runtime component emits a typed authority request
 
 The supervisor does not silently change the user’s objective or widen authority.
+Ambiguity, graph contract gaps, repo/sandbox/scope expansion, and product uncertainty recover when the existing contract allows it, or fail contractually with evidence when they do not.
 
 ### Delivery package
 
@@ -126,7 +127,7 @@ It may:
 - inject typed diagnostic or repair steps where policy allows
 - request additional evaluation
 - stop unhealthy loops
-- pause for a human with evidence
+- pause for a human with evidence only through trusted typed authority
 
 It may not:
 

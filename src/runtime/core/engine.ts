@@ -55,11 +55,6 @@ import {
   type VerificationRecordedPayload
 } from "../events.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter, type HarnessResult } from "../harness/types.js";
-import {
-  createHarnessWorkspaceWriteMirror,
-  prepareHarnessWorkspaceWriteMirror,
-  syncAndRemoveHarnessWorkspaceWriteMirror
-} from "../harness/workspace_mirror.js";
 import { substituteAgentflowTokens } from "../harness/tokens.js";
 import {
   buildRuntimeStateSnapshot,
@@ -2643,19 +2638,8 @@ async function defaultAgentExecutor(
       },
     };
   }
-  const workspaceWriteMirror = createHarnessWorkspaceWriteMirror({
-    harness: harnessName,
-    sandbox,
-    workspace_path: context.workspace_path,
-    run_id: context.run_id,
-    execution_id: context.attempt.execution_id,
-    execution_dir: context.execution_dir,
-    output_dir: outputDir,
-    runtime_dir: runtimeDir
-  });
-  await prepareHarnessWorkspaceWriteMirror(workspaceWriteMirror);
-  const invocationOutputDir = workspaceWriteMirror?.output_dir ?? outputDir;
-  const invocationRuntimeDir = workspaceWriteMirror?.runtime_dir ?? runtimeDir;
+  const invocationOutputDir = outputDir;
+  const invocationRuntimeDir = runtimeDir;
   const toolSetup = await (async () => {
     try {
       return await prepareAgentTools({
@@ -2665,7 +2649,6 @@ async function defaultAgentExecutor(
         artifacts_root: invocationOutputDir,
         run_root: context.run_root,
         runtime_dir: invocationRuntimeDir,
-        ...(workspaceWriteMirror ? { writable_runtime_dir: workspaceWriteMirror.tool_runtime_dir } : {}),
         run_id: context.run_id,
         graph_id: context.graph_id,
         execution_id: context.attempt.execution_id,
@@ -2749,13 +2732,7 @@ async function defaultAgentExecutor(
   context.attempt.prompt_sha256 = createHash("sha256").update(`${renderedPrompt}\n`).digest("hex");
 
   let harnessResult: HarnessResult;
-  try {
-    harnessResult = await harnesses[harnessName]!.run(agentInvocation);
-    await syncAndRemoveHarnessWorkspaceWriteMirror(workspaceWriteMirror);
-  } catch (error) {
-    await syncAndRemoveHarnessWorkspaceWriteMirror(workspaceWriteMirror).catch(() => undefined);
-    throw error;
-  }
+  harnessResult = await harnesses[harnessName]!.run(agentInvocation);
 
   return {
     status: harnessResult.status,

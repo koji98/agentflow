@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, realpathSync, readFileSync } from "node:fs";
-import { access, appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -20,7 +20,13 @@ import type { ArtifactDefinition } from "../graph/authored.js";
 import type { CompiledExecutableNode, CompiledGraph, ResolvedTool } from "../graph/compiled.js";
 import type { ReasoningEffort } from "../graph/schema.js";
 import type { CredentialSpecMap } from "../auth/types.js";
+import {
+  decideAfCommand,
+  normalizeAfCommandPolicy,
+  type AfCommandPolicy
+} from "../runtime/af_command_policy.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
+import { startSpawnBroker } from "../runtime/harness/spawn_broker.js";
 import { buildHarnessSpawnEnv, formatToolContract } from "../runtime/harness/types.js";
 import type { AgentInvocation } from "../runtime/harness/types.js";
 import { buildRequirementEvidenceMap, selectEvidenceMapDelta } from "../supervisor/evidence_map.js";
@@ -72,6 +78,7 @@ interface RuntimeMetadata {
   reasoning_effort?: string;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   timeout_sec: number;
+  af_command_policy?: AfCommandPolicy;
 }
 
 interface HelperSession {
@@ -106,6 +113,13 @@ interface AfResult {
   exitCode: number;
   stdout?: string;
   output?: unknown;
+}
+
+interface AfBrokerResponse {
+  exit_code: number;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
 }
 
 const helperRoles = [
@@ -258,8 +272,11 @@ async function readJsonFile<T>(path: string): Promise<T> {
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true });
+  const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(tempPath, path);
 }
 
 async function appendJsonl(path: string, value: unknown): Promise<void> {
@@ -376,6 +393,21 @@ function requireRuntimeMetadata(): RuntimeMetadata {
   }
 
   return JSON.parse(readFileSync(metadataPath, "utf8")) as RuntimeMetadata;
+}
+
+function afCommandPolicyFailure(metadata: RuntimeMetadata, argv: string[]): AfResult | undefined {
+  const policy = normalizeAfCommandPolicy(metadata.af_command_policy);
+  const decision = decideAfCommand(argv, policy);
+  if (!decision.allowed) {
+    return {
+      exitCode: 2,
+      stdout: `${JSON.stringify({
+        command: "af",
+        status: "failed",
+        message: decision.reason ?? "af command is not allowed by this runtime policy."
+      }, null, 2)}\n`
+    };
+  }
 }
 
 function parseArgs(argv: string[]): {
@@ -587,7 +619,7 @@ function commandHelp(commandPath: string): string | undefined {
       "  --help  Show this help and exit. Default: false",
       "",
       "Output:",
-      "  JSON object with command, status, artifact, and destination path.",
+      "  JSON object with command, status, and artifact name.",
       "",
       "Exit codes:",
       "  0 success",
@@ -610,7 +642,7 @@ function commandHelp(commandPath: string): string | undefined {
       "  af complete check --help",
       "",
       "Output:",
-      "  JSON object containing completion_status, ready_for_verification, expected_artifacts, missing_artifacts, validation_evidence, active blockers, and packet_path.",
+      "  JSON object containing completion_status, ready_for_verification, expected_artifacts, missing_artifacts, validation_evidence, and active blockers.",
       "",
       "Exit codes:",
       "  0 ready_for_verification",
@@ -682,7 +714,7 @@ function commandHelp(commandPath: string): string | undefined {
       "  --help               Show this help and exit. Default: false",
       "",
       "Output:",
-      "  JSON object with helper ID, status, output directory, and artifact name.",
+      "  JSON object with helper ID, status, and artifact name.",
       "",
       "Exit codes:",
       "  0 success",
@@ -718,22 +750,16 @@ function markdownCell(value: string | undefined): string {
   return (value ?? "").replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|").trim();
 }
 
-function artifactDestination(metadata: RuntimeMetadata, name: string, definition: ArtifactDefinition): string {
-  return definition.from === "output_dir"
-    ? resolveSubpathWithinRoot(metadata.output_dir, definition.path, `Artifact "${name}" path`)
-    : resolveSubpathWithinRoot(metadata.workspace_path, definition.path, `Artifact "${name}" path`);
-}
-
 function renderArtifactTable(metadata: RuntimeMetadata): string[] {
   const entries = Object.entries(metadata.declared_artifacts).sort(([left], [right]) => left.localeCompare(right));
   if (entries.length === 0) {
     return ["No declared artifacts."];
   }
   return [
-    "| Name | Destination | Description |",
+    "| Name | Write Command | Description |",
     "| --- | --- | --- |",
     ...entries.map(([name, definition]) =>
-      `| \`${name}\` | \`${artifactDestination(metadata, name, definition)}\` | ${markdownCell(definition.description)} |`
+      `| \`${name}\` | \`${metadata.sandbox === "read-only" ? "write disabled (read-only)" : `af artifact write ${name}`}\` | ${markdownCell(definition.description)} |`
     )
   ];
 }
@@ -863,6 +889,33 @@ function createFallbackNodeFromMetadata(metadata: RuntimeMetadata): CompiledExec
   };
 }
 
+function agentFacingArtifactSummary(
+  artifacts: Array<{
+    name: string;
+    required: true;
+    path: string;
+    description: string;
+    status: string;
+    current_attempt: boolean;
+  }>
+): Array<{
+  name: string;
+  required: true;
+  path: string;
+  description: string;
+  status: string;
+  current_attempt: boolean;
+}> {
+  return artifacts.map((artifact) => ({
+    name: artifact.name,
+    required: artifact.required,
+    path: artifact.path,
+    description: artifact.description,
+    status: artifact.status,
+    current_attempt: artifact.current_attempt
+  }));
+}
+
 async function commandCompleteCheck(metadata: RuntimeMetadata): Promise<AfResult> {
   const graph = await readCompiledGraph(metadata.run_root).catch(() => undefined);
   const graphNode = graph?.nodes.find((node) =>
@@ -900,7 +953,7 @@ async function commandCompleteCheck(metadata: RuntimeMetadata): Promise<AfResult
     ...(metadata.supervisor_recovery_envelope ? { supervisorRecoveryEnvelope: metadata.supervisor_recovery_envelope } : {}),
     ...(metadata.supervisor_recovery_envelope_path ? { supervisorRecoveryEnvelopePath: metadata.supervisor_recovery_envelope_path } : {})
   });
-  const packetPath = await persistCompletionPacket(packet);
+  await persistCompletionPacket(packet);
 
   return {
     exitCode: packet.ready_for_verification ? 0 : 1,
@@ -911,15 +964,14 @@ async function commandCompleteCheck(metadata: RuntimeMetadata): Promise<AfResult
       completion_status: packet.completion_status,
       authority_requests: packet.authority_requests,
       blocking_reasons: packet.blocking_reasons,
-      expected_artifacts: packet.declared_artifacts,
+      expected_artifacts: agentFacingArtifactSummary(packet.declared_artifacts),
       missing_artifacts: packet.missing_artifacts,
       artifact_findings: packet.artifact_findings,
       validation_evidence: packet.validation_evidence,
       operator_observations: packet.operator_observations,
       active_blockers: packet.active_blockers,
       supervisor_recovery: packet.supervisor_recovery,
-      managed: packet.managed,
-      packet_path: packetPath
+      managed: packet.managed
     }
   };
 }
@@ -946,85 +998,85 @@ const learnPlaybooks: Record<LearnKind, {
   purpose: string;
   inspect: string[];
   safe_repairs: string[];
-  pause_boundaries: string[];
+  contract_boundaries: string[];
 }> = {
   semantic_rejection: {
     purpose: "Recover when an agent claimed success but semantic verification rejected the outcome.",
     inspect: ["exact failed prompt", "verifier findings", "declared artifacts", "workspace diff", "node acceptance criteria"],
     safe_repairs: ["retry the responsible node with verifier blockers first", "repair missing or weak artifacts", "add focused validation evidence"],
-    pause_boundaries: ["product intent ambiguity", "scope expansion beyond the node contract"]
+    contract_boundaries: ["product intent ambiguity fails contractually unless the graph is intentionally amended", "scope expansion beyond the node contract is outside recovery authority"]
   },
   failed_check: {
     purpose: "Recover when an exec/check gate detects a failed condition.",
     inspect: ["stdout/stderr", "check goal", "upstream cone", "artifact producers", "workspace state"],
     safe_repairs: ["repair nearest upstream producer", "change validation strategy after timeout", "rerun the same gate after material delta"],
-    pause_boundaries: ["credential requirements", "graph contract amendment"]
+    contract_boundaries: ["credential requirements require trusted typed authority metadata", "graph contract amendments are operator-owned changes outside runtime recovery"]
   },
   context_contract_failure: {
     purpose: "Recover when context pointers cannot be resolved within the node contract.",
     inspect: ["agent context brief", "largest matched files", "broad glob samples", "ignored paths", "pointer provenance"],
     safe_repairs: ["replace unresolved context with compact index and live paths", "preserve omitted-file provenance", "retry with repaired pointer context"],
-    pause_boundaries: ["needed context is outside repo/sandbox authority"]
+    contract_boundaries: ["context outside repo or sandbox authority fails as a graph context gap unless trusted authority is already present"]
   },
   missing_artifact: {
     purpose: "Recover when a declared artifact was not produced.",
-    inspect: ["artifact declaration", "attempt output directory", "agent response", "producer logs"],
+    inspect: ["artifact declaration", "agent response", "producer logs"],
     safe_repairs: ["repair artifact from existing evidence", "retry producer with artifact contract first", "rerun downstream gate"],
-    pause_boundaries: ["artifact requires new product decision"]
+    contract_boundaries: ["artifact content that requires a new product decision fails contractually instead of inventing intent"]
   },
   bad_artifact: {
     purpose: "Recover when an artifact exists but fails downstream quality or contract checks.",
     inspect: ["artifact content", "downstream failure evidence", "producer prompt", "acceptance criteria"],
     safe_repairs: ["repair producer stage", "repair artifact if source evidence is sufficient", "rerun consumer gate"],
-    pause_boundaries: ["artifact meaning is ambiguous"]
+    contract_boundaries: ["artifact meaning that cannot be proven from graph evidence fails as an unprovable requirement"]
   },
   workspace_pollution: {
     purpose: "Recover from unrelated or forbidden workspace edits.",
     inspect: ["node snapshot diff", "forbidden changed files", "declared scope", "git status"],
     safe_repairs: ["restore failed-attempt-owned unrelated edits", "retry with narrow scope guidance"],
-    pause_boundaries: ["edits may belong to the user or another active branch"]
+    contract_boundaries: ["edits not owned by the failed attempt must not be reverted by runtime repair"]
   },
   dependency_docs: {
     purpose: "Recover when missing dependency/API knowledge caused the failure.",
     inspect: ["package manifests", "lockfiles", "versions", "official docs", "release notes"],
     safe_repairs: ["gather read-only external docs", "cite version-matched source", "retry with docs evidence"],
-    pause_boundaries: ["new dependency adoption", "license/security approval"]
+    contract_boundaries: ["new dependency adoption or license/security approval requires graph-level authority or fails with evidence"]
   },
   tool_or_environment_failure: {
     purpose: "Recover safe local runtime/tool setup issues.",
     inspect: ["PATH", "tool wrapper metadata", "command availability", "runtime dirs"],
     safe_repairs: ["regenerate wrappers", "refresh PATH metadata", "run local non-global diagnostics"],
-    pause_boundaries: ["global installation", "credentials", "network/service authority"]
+    contract_boundaries: ["global installation, credentials, or network/service authority require trusted typed authority metadata or fail with evidence"]
   },
   harness_failure: {
-    purpose: "Recover or pause when the selected agent harness is unavailable.",
+    purpose: "Recover when the selected agent harness is unavailable under the current runtime contract.",
     inspect: ["harness binary", "auth/login state", "harness stderr", "profile selection"],
     safe_repairs: ["retry after transient launch failure", "use configured supervisor profile for diagnostics"],
-    pause_boundaries: ["login/auth required", "harness binary missing"]
+    contract_boundaries: ["login/auth gaps require trusted harness authority metadata", "missing harness binaries fail contractually when no local repair is available"]
   },
   repeat_loop_failure: {
     purpose: "Recover when a repeat loop exhausts or repeats without progress.",
     inspect: ["iteration scorecards", "repeat body outputs", "until check evidence", "material deltas"],
     safe_repairs: ["repair the earliest failing cycle cause", "change tactic before another iteration", "rerun until gate"],
-    pause_boundaries: ["completion criteria are impossible or underspecified"]
+    contract_boundaries: ["impossible or underspecified completion criteria fail as a graph contract gap"]
   },
   managed_pattern_failure: {
     purpose: "Recover failed internal managed-pattern phases while preserving the public node contract.",
     inspect: ["managed phase", "cycle", "public artifacts", "scorecards", "internal logs"],
     safe_repairs: ["repair internal phase under public contract", "rerun completion criterion", "repair final public artifact"],
-    pause_boundaries: ["pattern contract needs graph amendment"]
+    contract_boundaries: ["managed-pattern contract amendments are graph changes, not runtime recovery"]
   },
   external_service_error: {
     purpose: "Distinguish remote service outages from code or workflow failures.",
     inspect: ["HTTP status", "retry-after headers", "local evidence already gathered", "side effects"],
     safe_repairs: ["preserve local evidence", "retry only remote proof later", "avoid modifying code for outage symptoms"],
-    pause_boundaries: ["credentials", "rate-limit policy", "external side-effect approval"]
+    contract_boundaries: ["credentials, rate-limit policy, and external side-effect approval require trusted typed authority metadata"]
   },
   unknown_failure: {
     purpose: "Recover unclassified failures by forming a causal hypothesis before repair.",
     inspect: ["failed attempt", "upstream cone", "context provenance", "artifacts", "workspace diff", "logs"],
     safe_repairs: ["spawn a fixed read-only helper role when evidence is missing", "rank causal targets", "apply the smallest authorized repair with a material delta"],
-    pause_boundaries: ["no safe machine repair remains", "authority or intent is unclear"]
+    contract_boundaries: ["if no safe material delta exists, fail contractually with evidence", "unclear authority or intent cannot be resolved by helper prose or free-text output"]
   }
 };
 
@@ -1335,8 +1387,7 @@ async function commandArtifactWrite(
     output: {
       command: "af artifact write",
       status: "passed",
-      artifact: name,
-      path: destination
+      artifact: name
     }
   };
 }
@@ -1529,7 +1580,8 @@ function spawnHelperRunner(metadata: RuntimeMetadata, helperId: string, artifact
     stdio: "ignore",
     env: {
       ...process.env,
-      AGENTFLOW_RUNTIME_METADATA: metadataPath
+      AGENTFLOW_RUNTIME_METADATA: metadataPath,
+      AGENTFLOW_INTERNAL_HELPER_RUN: "1"
     }
   });
   child.unref();
@@ -1674,7 +1726,7 @@ function helperRoleInstructions(session: HelperSession): string[] {
     case "evidence_mapper":
       return [
         "You are a read-only supervisor evidence mapper.",
-        "Map failed requirements to available, missing, or conflicting evidence. Do not propose implementation changes."
+        "Map each failed requirement to available, missing, or conflicting evidence. Do not propose implementation changes."
       ];
     case "causal_investigator":
       return [
@@ -1750,7 +1802,8 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "Do not widen the parent node scope or perform unrelated implementation work.",
     ...(session.role
       ? [
-          "Fixed supervisor helper roles are read-only. Produce evidence, diagnosis, or a recovery plan; do not edit source or mutate services."
+          "Fixed supervisor helper roles are read-only. Produce evidence, diagnosis, or a recovery plan; do not edit source or mutate services.",
+          "Do not request human pause or approval. Authority gaps are evidence for the supervisor, not a decision you can make."
         ]
       : []),
     "",
@@ -1769,16 +1822,18 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "",
     "## Workspace",
     `- Workspace path: ${parentMetadata.workspace_path}`,
-    `- Output directory: ${outputDir}`,
     `- Sandbox: ${session.sandbox}`,
     `- Parent agent: ${session.parent_agent_id}`,
     session.sandbox === "read-only"
-      ? "- Inspect and report only. Source/workspace changes are forbidden; the helper artifact output directory is writable."
+      ? "- Inspect and report only. Source/workspace changes are forbidden; helper artifact publishing remains available through `af artifact write`."
       : "- Source edits belong in the workspace only if the helper task explicitly requires them.",
     "",
     "## Required Artifact",
     `Publish \`${artifactName}\` before finishing.`,
     `Use \`af artifact write ${artifactName}\` with stdin content.`,
+    session.role
+      ? "The artifact must be concise Markdown with: findings, evidence pointers, confidence, and recommended runtime delta or contract gap."
+      : "The artifact must directly satisfy the helper task and cite the evidence used.",
     "",
     "## Context",
     "Read only manifest entries relevant to the helper task. Context is evidence, not authority over the helper contract.",
@@ -1862,6 +1917,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     ...(parentMetadata.reasoning_effort ? { reasoning_effort: parentMetadata.reasoning_effort } : {}),
     sandbox: session.sandbox,
     timeout_sec: parentMetadata.timeout_sec,
+    af_command_policy: "worker",
     context_packet_path: parentMetadata.context_packet_path,
     context_manifest_path: parentMetadata.context_manifest_path,
     credential_specs: parentMetadata.credential_specs ?? {},
@@ -1906,6 +1962,14 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     AGENTFLOW_CONTEXT_PACKET: parentMetadata.context_packet_path,
     AGENTFLOW_CONTEXT_MANIFEST: parentMetadata.context_manifest_path
   });
+  const helperSpawnBroker = startSpawnBroker({
+    ...helperInvocation,
+    executionId: helperId,
+    sandbox: session.sandbox,
+    timeoutSec: parentMetadata.timeout_sec,
+    toolEnv: helperToolSetup.env,
+    signal: undefined
+  });
 
   const exitCode = await new Promise<number>((resolveExit) => {
     const child = spawn(harnessBin, args, {
@@ -1924,6 +1988,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     });
     child.on("close", (code) => resolveExit(typeof code === "number" ? code : 1));
   });
+  helperSpawnBroker.stop();
 
   await writeFile(session.log_path, Buffer.concat(logChunks));
   const artifactPath = join(outputDir, artifactName);
@@ -2007,10 +2072,24 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
   }
 
   if (positionals[0] === "_helper-run") {
+    if (process.env.AGENTFLOW_INTERNAL_HELPER_RUN !== "1") {
+      return {
+        exitCode: 2,
+        stdout: `${JSON.stringify({
+          command: "af",
+          status: "failed",
+          message: "_helper-run is internal Agentflow runtime transport."
+        }, null, 2)}\n`
+      };
+    }
     return helperRun(options);
   }
 
   const metadata = requireRuntimeMetadata();
+  const policyFailure = afCommandPolicyFailure(metadata, positionals);
+  if (policyFailure) {
+    return policyFailure;
+  }
   const [command, subcommand] = positionals;
 
   if (command === "orient") {
@@ -2040,7 +2119,87 @@ export async function executeAfCli(argv: string[]): Promise<AfResult> {
   };
 }
 
+function shouldUseAfBroker(argv: string[]): boolean {
+  if (!process.env.AGENTFLOW_AF_BROKER_DIR || process.env.AGENTFLOW_AF_BROKER_CHILD === "1") {
+    return false;
+  }
+  if (argv.length === 0 || argv[0] === "_helper-run" || argv.includes("--help")) {
+    return false;
+  }
+  return Boolean(process.env.AGENTFLOW_RUNTIME_METADATA);
+}
+
+function isArtifactWriteCommand(argv: string[]): boolean {
+  return argv[0] === "artifact" && argv[1] === "write";
+}
+
+async function runAfViaBroker(argv: string[]): Promise<number> {
+  const brokerDir = process.env.AGENTFLOW_AF_BROKER_DIR;
+  if (!brokerDir) {
+    return 1;
+  }
+
+  const requestId = `${Date.now()}-${randomUUID()}`;
+  const requestsDir = join(brokerDir, "requests");
+  const responsesDir = join(brokerDir, "responses");
+  await mkdir(requestsDir, { recursive: true });
+  await mkdir(responsesDir, { recursive: true });
+
+  let stdinPath: string | undefined;
+  if (isArtifactWriteCommand(argv)) {
+    stdinPath = join(requestsDir, `${requestId}.stdin`);
+    await writeFile(stdinPath, await readStdin(), "utf8");
+  }
+
+  const requestPath = join(requestsDir, `${requestId}.json`);
+  const temporaryRequestPath = join(requestsDir, `${requestId}.json.tmp`);
+  await writeFile(
+    temporaryRequestPath,
+    `${JSON.stringify({
+      id: requestId,
+      argv,
+      cwd: process.cwd(),
+      ...(stdinPath ? { stdin_path: stdinPath } : {})
+    }, null, 2)}\n`,
+    "utf8"
+  );
+  await rename(temporaryRequestPath, requestPath);
+
+  const responsePath = join(responsesDir, `${requestId}.json`);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 60_000) {
+    const response = await readJsonFile<AfBrokerResponse>(responsePath).catch(() => undefined);
+    if (response) {
+      if (response.stdout) {
+        process.stdout.write(response.stdout);
+      }
+      if (response.stderr) {
+        process.stderr.write(response.stderr);
+      }
+      if (response.error && !response.stderr) {
+        process.stderr.write(`${response.error}\n`);
+      }
+      process.exitCode = response.exit_code;
+      return response.exit_code;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+
+  const output = {
+    command: "af",
+    status: "failed",
+    message: "Agentflow runtime broker did not respond to the af command."
+  };
+  process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+  process.exitCode = 1;
+  return 1;
+}
+
 export async function runAfCli(argv = process.argv.slice(2)): Promise<number> {
+  if (shouldUseAfBroker(argv)) {
+    return runAfViaBroker(argv);
+  }
+
   const startedAt = Date.now();
   try {
     const result = await executeAfCli(argv);

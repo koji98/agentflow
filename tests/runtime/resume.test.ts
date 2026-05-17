@@ -501,4 +501,95 @@ describe("runtime resume", () => {
         expect(resumed.restarted_node_count).toBe(1);
         await rm(fixture.tempRoot, { recursive: true, force: true });
     });
+    it("restarts passed agent nodes and downstream dependents when prompt support changes", async () => {
+        const fixture = await createResumeFixture({
+            document: {
+                version: "1",
+                graph_id: "resume-agent-support-change",
+                repos: {
+                    main: { path: "." }
+                },
+                defaults: {
+                    launch_profile: "default",
+                    workspace_backend: "inplace"
+                },
+                profiles: {
+                    default: {
+                        harness: "codex-cli"
+                    }
+                },
+                graph: {
+                    type: "sequence",
+                    id: "root",
+                    steps: [
+                        {
+                            type: "agent",
+                            id: "producer",
+                            intent: {
+                                goal: "Produce the upstream result.",
+                                acceptance_criteria: ["The producer passes."],
+                                constraints: []
+                            },
+                            runtime: {
+                                repo: "main"
+                            }
+                        },
+                        {
+                            type: "agent",
+                            id: "consumer",
+                            intent: {
+                                goal: "Consume the upstream result.",
+                                acceptance_criteria: ["The consumer passes."],
+                                constraints: []
+                            },
+                            runtime: {
+                                repo: "main"
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+        const changedGraph = structuredClone(fixture.graph);
+        const producer = changedGraph.nodes.find((node) => node.authored_id === "producer");
+        expect(producer?.kind).toBe("agent");
+        if (producer?.kind === "agent") {
+            producer.tools = [
+                {
+                    callable_name: "fixture-tool",
+                    description: "Prompt-visible managed tool.",
+                    executable_path: "/tmp/fixture-tool",
+                    config: { mode: "changed" },
+                    credentials: [],
+                    source: {
+                        kind: "plugin",
+                        alias: "fixture",
+                        tool: "inspect",
+                        plugin_root: "/tmp/fixture-plugin",
+                        declared_at: "registry",
+                        declaration_path: "tools.fixture_tool"
+                    }
+                }
+            ];
+            producer.skills = [
+                {
+                    ref: "team/review",
+                    source_alias: "team",
+                    name: "review",
+                    description: "Prompt-visible skill.",
+                    path: "/tmp/skills/team/review/SKILL.md"
+                }
+            ];
+            producer.cli = [
+                {
+                    cmd: "jq",
+                    description: "Prompt-visible CLI hint."
+                }
+            ];
+        }
+        const resumed = await buildResumedSession(fixture, changedGraph);
+        expect(resumed.preserved_node_count).toBe(0);
+        expect(resumed.restarted_node_count).toBe(2);
+        await rm(fixture.tempRoot, { recursive: true, force: true });
+    });
 });

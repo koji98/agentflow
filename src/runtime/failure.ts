@@ -3,6 +3,7 @@ export const runtimeFailureCodes = [
   "context_contract_failure",
   "context_path_escape",
   "graph_contract_gap",
+  "harness_configuration_unsupported",
   "harness_no_final_response",
   "harness_unavailable",
   "missing_plugin_credential",

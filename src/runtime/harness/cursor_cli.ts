@@ -20,6 +20,8 @@ import {
 
 export interface CursorCliHarnessOptions {
   binary?: string;
+  sandboxUnavailableMaxRetries?: number;
+  sandboxUnavailableRetryDelayMs?: number;
 }
 
 function parseJsonRecord(value: string | undefined): Record<string, unknown> | undefined {
@@ -82,6 +84,53 @@ function mergeConfigRecords(
 
 function createCursorOutputFailure(message: string): Error {
   return new Error(`Cursor CLI structured output failed: ${message}`);
+}
+
+function isCursorSandboxUnavailable(message: string | undefined): boolean {
+  return /sandbox mode is enabled but not available on this system/iu.test(message ?? "");
+}
+
+function normalizeRetryCount(value: number | undefined): number {
+  return value === undefined ? 1 : Math.max(0, Math.floor(value));
+}
+
+function normalizeRetryDelayMs(value: number | undefined): number {
+  return value === undefined ? 7 * 60 * 1000 : Math.max(0, Math.floor(value));
+}
+
+async function waitForRetryDelay(options: {
+  delayMs: number;
+  executionId: string;
+  signal: AbortSignal | undefined;
+  activeProcesses: Map<string, () => void>;
+}): Promise<"ready" | "canceled"> {
+  if (options.signal?.aborted) {
+    return "canceled";
+  }
+
+  if (options.delayMs === 0) {
+    return "ready";
+  }
+
+  return new Promise<"ready" | "canceled">((resolve) => {
+    let settled = false;
+    const finish = (result: "ready" | "canceled") => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", cancel);
+      options.activeProcesses.delete(options.executionId);
+      resolve(result);
+    };
+    const cancel = () => finish("canceled");
+    const timer = setTimeout(() => finish("ready"), options.delayMs);
+
+    options.activeProcesses.set(options.executionId, cancel);
+    options.signal?.addEventListener("abort", cancel, { once: true });
+  });
 }
 
 function normalizeCursorOutput(stdout: string, exitCode: number): {
@@ -279,9 +328,11 @@ export function createCursorCliHarness(
         : undefined;
       const args = buildCursorArgs(invocation, harnessConfig, prompt);
       const metadataArgs = redactPromptArg(args);
-      const spawnBroker = startSpawnBroker(invocation);
+      const sandboxUnavailableMaxRetries = normalizeRetryCount(options.sandboxUnavailableMaxRetries);
+      const sandboxUnavailableRetryDelayMs = normalizeRetryDelayMs(options.sandboxUnavailableRetryDelayMs);
 
-      return new Promise<HarnessResult>((resolve, reject) => {
+      const runOnce = () => new Promise<HarnessResult>((resolve, reject) => {
+        const spawnBroker = startSpawnBroker(invocation);
         const child = spawn(binary, args, {
           cwd: invocation.repoPath,
           env: {
@@ -367,6 +418,7 @@ export function createCursorCliHarness(
                   })
                 ]
               : [];
+          const sandboxUnavailable = isCursorSandboxUnavailable(structuredOutputMessage);
           resolve({
             status:
               termination.state.canceled
@@ -389,6 +441,16 @@ export function createCursorCliHarness(
               timed_out: termination.state.timed_out,
               force_killed: termination.state.force_killed,
               ...(authorityRequests.length > 0 ? { authority_requests: authorityRequests } : {}),
+              ...(sandboxUnavailable
+                ? {
+                    failure_code: "harness_configuration_unsupported",
+                    failure_details: {
+                      harness: "cursor-cli",
+                      reason: "sandbox_mode_unavailable",
+                      requested_sandbox: harnessConfig.cursor?.sandbox_mode ?? mapCursorSandbox(invocation.sandbox)
+                    }
+                  }
+                : {}),
               ...(structuredOutputMessage ? { error: createCursorOutputFailure(structuredOutputMessage).message } : {})
             },
             ...(cursorOutput.last_message
@@ -402,6 +464,63 @@ export function createCursorCliHarness(
           });
         });
       });
+
+      let sandboxUnavailableRetries = 0;
+      while (true) {
+        const result = await runOnce();
+        const sandboxUnavailable =
+          result.metadata?.failure_code === "harness_configuration_unsupported" &&
+          isPlainRecord(result.metadata.failure_details) &&
+          result.metadata.failure_details.reason === "sandbox_mode_unavailable";
+
+        if (
+          sandboxUnavailable &&
+          result.status !== "canceled" &&
+          sandboxUnavailableRetries < sandboxUnavailableMaxRetries
+        ) {
+          sandboxUnavailableRetries += 1;
+          const waitResult = await waitForRetryDelay({
+            delayMs: sandboxUnavailableRetryDelayMs,
+            executionId: invocation.executionId,
+            signal: invocation.signal,
+            activeProcesses: active_processes
+          });
+
+          if (waitResult === "canceled") {
+            return {
+              status: "canceled",
+              exitCode: 1,
+              metadata: {
+                binary,
+                args: metadataArgs,
+                cursor_sandbox_unavailable_retry: {
+                  attempts: sandboxUnavailableRetries,
+                  delay_ms: sandboxUnavailableRetryDelayMs,
+                  canceled: true
+                }
+              }
+            };
+          }
+
+          continue;
+        }
+
+        if (sandboxUnavailableRetries === 0) {
+          return result;
+        }
+
+        return {
+          ...result,
+          metadata: {
+            ...(result.metadata ?? {}),
+            cursor_sandbox_unavailable_retry: {
+              attempts: sandboxUnavailableRetries,
+              delay_ms: sandboxUnavailableRetryDelayMs,
+              exhausted: sandboxUnavailable
+            }
+          }
+        };
+      }
     },
     async cancel(executionId: string): Promise<void> {
       active_processes.get(executionId)?.();

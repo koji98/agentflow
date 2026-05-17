@@ -173,7 +173,7 @@ describe("deep research managed pattern", () => {
             3
         ]);
     });
-    it("keeps deep research collapsed by default and exposes selected raw angle reports", () => {
+    it("keeps deep research collapsed by default and exposes selected curated angle reports", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument({
             research: {
                 angles: [
@@ -206,21 +206,19 @@ describe("deep research managed pattern", () => {
                 summary: expect.objectContaining({ path: "summary.md" }),
                 architecture: expect.objectContaining({
                     path: "angles/architecture.md",
-                    description: 'Raw Markdown report for deep research angle "architecture".'
+                    description: 'Curated public Markdown report for deep research angle "architecture".'
                 })
-            }),
-            managed_artifact_forwards: {
-                architecture: {
-                    node: "market_scan__managed__pattern_deep_research__angle_01",
-                    artifact: "angle_report_01"
-                }
-            }
+            })
         }));
         if (!finalNode || finalNode.type !== "agent") {
             throw new Error("Expected final managed node to be an agent.");
         }
         expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["architecture", "summary"]);
+        expect(finalNode.managed_artifact_forwards).toBeUndefined();
         expect(JSON.stringify(finalNode)).toContain("risk");
+        expect(finalNode.intent.goal).toContain("Selected Public Angle Artifacts");
+        expect(finalNode.intent.goal).not.toContain("Runtime-Forwarded Raw Angle Artifacts");
+        expect(finalNode.intent.goal).not.toContain("do not rewrite or republish");
     });
     it("compiles pattern_deep_research so downstream nodes depend on the final public artifacts", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
@@ -247,7 +245,7 @@ describe("deep research managed pattern", () => {
                         intent: {
                             goal: "Summarize the research recommendation.",
                             acceptance_criteria: [
-                                "The handoff uses the final managed summary and exposed raw angle artifacts.",
+                                "The handoff uses the final managed summary and selected curated angle artifacts.",
                                 "The handoff preserves the recommendation and key uncertainty."
                             ],
                             constraints: []

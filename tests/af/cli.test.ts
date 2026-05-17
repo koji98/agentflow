@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeAfCli, runAfCli } from "../../src/af/index.js";
 import type { ArtifactDefinition } from "../../src/graph/authored.js";
+import { startSpawnBroker } from "../../src/runtime/harness/spawn_broker.js";
 import { appendOperatorObservation, createOperatorObservation } from "../../src/runtime/observations/index.js";
 interface TestRuntimePaths {
     root: string;
@@ -47,7 +48,7 @@ async function createRuntime(tempRoot: string, artifacts: Record<string, Artifac
         path: "handoff.md",
         description: "Durable handoff."
     }
-}): Promise<TestRuntimePaths> {
+}, metadataOverrides: Record<string, unknown> = {}): Promise<TestRuntimePaths> {
     const root = join(tempRoot, "run");
     const runtimeDir = join(root, "runtime");
     const workspace = join(tempRoot, "workspace");
@@ -91,7 +92,9 @@ async function createRuntime(tempRoot: string, artifacts: Record<string, Artifac
         harness: "codex-cli",
         model: "auto",
         sandbox: "workspace-write",
-        timeout_sec: 10
+        timeout_sec: 10,
+        af_command_policy: "worker",
+        ...metadataOverrides
     }, null, 2)}\n`, "utf8");
     return { root, workspace, output, metadata, contextPacket, contextManifest, toolInvocations };
 }
@@ -100,11 +103,21 @@ describe("af runtime CLI", () => {
     let originalMetadata: string | undefined;
     let originalCodexBin: string | undefined;
     let originalSpawnMode: string | undefined;
+    let originalAfBrokerDir: string | undefined;
+    let originalAfBrokerChild: string | undefined;
+    let originalAfRunner: string | undefined;
+    let originalAfCli: string | undefined;
+    let originalInternalHelperRun: string | undefined;
     beforeEach(async () => {
         tempRoot = await mkdtemp(join(tmpdir(), "agentflow-af-cli-"));
         originalMetadata = process.env.AGENTFLOW_RUNTIME_METADATA;
         originalCodexBin = process.env.AGENTFLOW_CODEX_CLI_BIN;
         originalSpawnMode = process.env.AGENTFLOW_SPAWN_MODE;
+        originalAfBrokerDir = process.env.AGENTFLOW_AF_BROKER_DIR;
+        originalAfBrokerChild = process.env.AGENTFLOW_AF_BROKER_CHILD;
+        originalAfRunner = process.env.AGENTFLOW_AF_RUNNER;
+        originalAfCli = process.env.AGENTFLOW_AF_CLI;
+        originalInternalHelperRun = process.env.AGENTFLOW_INTERNAL_HELPER_RUN;
     });
     afterEach(async () => {
         if (originalMetadata === undefined) {
@@ -124,6 +137,36 @@ describe("af runtime CLI", () => {
         }
         else {
             process.env.AGENTFLOW_SPAWN_MODE = originalSpawnMode;
+        }
+        if (originalAfBrokerDir === undefined) {
+            delete process.env.AGENTFLOW_AF_BROKER_DIR;
+        }
+        else {
+            process.env.AGENTFLOW_AF_BROKER_DIR = originalAfBrokerDir;
+        }
+        if (originalAfBrokerChild === undefined) {
+            delete process.env.AGENTFLOW_AF_BROKER_CHILD;
+        }
+        else {
+            process.env.AGENTFLOW_AF_BROKER_CHILD = originalAfBrokerChild;
+        }
+        if (originalAfRunner === undefined) {
+            delete process.env.AGENTFLOW_AF_RUNNER;
+        }
+        else {
+            process.env.AGENTFLOW_AF_RUNNER = originalAfRunner;
+        }
+        if (originalAfCli === undefined) {
+            delete process.env.AGENTFLOW_AF_CLI;
+        }
+        else {
+            process.env.AGENTFLOW_AF_CLI = originalAfCli;
+        }
+        if (originalInternalHelperRun === undefined) {
+            delete process.env.AGENTFLOW_INTERNAL_HELPER_RUN;
+        }
+        else {
+            process.env.AGENTFLOW_INTERNAL_HELPER_RUN = originalInternalHelperRun;
         }
         await rm(tempRoot, { recursive: true, force: true });
     });
@@ -164,6 +207,9 @@ describe("af runtime CLI", () => {
         expect(orient.exitCode).toBe(0);
         expect(orient.stdout).toContain("# Agentflow Orientation");
         expect(orient.stdout).toContain("## Success Contract");
+        expect(orient.stdout).toContain("| `handoff` | `af artifact write handoff` | Durable handoff. |");
+        expect(orient.stdout).not.toContain(runtime.output);
+        expect(orient.stdout).not.toContain("Destination");
         expect(orient.stdout).toContain("## Milestones");
         const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
         try {
@@ -179,6 +225,9 @@ describe("af runtime CLI", () => {
             completion_status: "incomplete",
             missing_artifacts: ["handoff"]
         }));
+        expect(JSON.stringify(incomplete.output)).not.toContain("expected_path");
+        expect(JSON.stringify(incomplete.output)).not.toContain("packet_path");
+        expect(JSON.stringify(incomplete.output)).not.toContain("size_bytes");
         const added = outputOf<{ milestone: { id: string } }>(await executeAfCli([
             "milestone",
             "add",
@@ -272,27 +321,287 @@ describe("af runtime CLI", () => {
             "--purpose",
             "repair",
             "--brief",
-            "Try an ungranted tool.",
-            "--tools",
-            "not-granted"
-        ])).rejects.toThrow("not granted");
+            "Normal workers cannot spawn helpers."
+        ])).resolves.toMatchObject({
+            exitCode: 2,
+            stdout: expect.stringContaining("not allowed by the worker command policy")
+        });
+        await expect(executeAfCli(["diagnose", "failure", "--json"]))
+            .resolves.toMatchObject({
+                exitCode: 2,
+                stdout: expect.stringContaining("not allowed by the worker command policy")
+            });
+        await expect(executeAfCli(["learn", "failed_check"]))
+            .resolves.toMatchObject({
+                exitCode: 2,
+                stdout: expect.stringContaining("not allowed by the worker command policy")
+            });
         await expect(executeAfCli([
-            "spawn",
-            "--brief",
-            "Missing explicit purpose."
-        ])).rejects.toThrow("af spawn requires --purpose.");
-        await expect(executeAfCli([
-            "spawn",
-            "--role",
-            "evidence_mapper",
-            "--brief",
-            "Read-only helpers cannot request tools.",
-            "--tools",
-            "not-granted"
-        ])).rejects.toThrow("read-only and cannot request plugin tools");
+            "_helper-run",
+            "--metadata",
+            runtime.metadata,
+            "--helper",
+            "helper_test"
+        ])).resolves.toMatchObject({
+            exitCode: 2,
+            stdout: expect.stringContaining("_helper-run is internal Agentflow runtime transport")
+        });
+    });
+    it("routes af mutations through the parent broker so sandboxed agents do not write run state directly", async () => {
+        const runtime = await createRuntime(tempRoot);
+        const brokerDir = await mkdtemp(join(tmpdir(), "agentflow-af-cli-broker-"));
+        const afRunner = join(process.cwd(), "node_modules/.bin/tsx");
+        const afCli = join(process.cwd(), "src/af/index.ts");
+        const toolEnv = {
+            AGENTFLOW_RUNTIME_METADATA: runtime.metadata,
+            AGENTFLOW_AF_BROKER_DIR: brokerDir,
+            AGENTFLOW_AF_RUNNER: afRunner,
+            AGENTFLOW_AF_CLI: afCli
+        };
+        const broker = startSpawnBroker({
+            executionId: "agent-main",
+            repoPath: runtime.workspace,
+            outputDir: runtime.output,
+            runtimeDir: join(runtime.root, "runtime"),
+            prompt: "test",
+            sandbox: "workspace-write",
+            timeoutSec: 10,
+            toolEnv,
+            signal: undefined
+        } as any);
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        process.env.AGENTFLOW_AF_BROKER_DIR = brokerDir;
+        process.env.AGENTFLOW_AF_RUNNER = afRunner;
+        process.env.AGENTFLOW_AF_CLI = afCli;
+        const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+        const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+        try {
+            await expect(runAfCli([
+                "milestone",
+                "add",
+                "--title",
+                "Brokered milestone",
+                "--goal",
+                "Prove the broker owns run-state writes."
+            ])).resolves.toBe(0);
+            await expect(withStdin("brokered artifact\n", () => runAfCli(["artifact", "write", "handoff"])))
+                .resolves.toBe(0);
+        }
+        finally {
+            stdoutSpy.mockRestore();
+            stderrSpy.mockRestore();
+            broker.stop();
+        }
+        await expect(readFile(join(runtime.output, "handoff.md"), "utf8")).resolves.toBe("brokered artifact\n");
+        await expect(readFile(join(runtime.root, "runtime", "milestones", "agent-main.json"), "utf8"))
+            .resolves.toContain("Brokered milestone");
+        await rm(brokerDir, { recursive: true, force: true });
+    });
+    it("rejects forged broker requests that exceed the runtime af command policy", async () => {
+        const runtime = await createRuntime(tempRoot);
+        const brokerDir = await mkdtemp(join(tmpdir(), "agentflow-af-cli-broker-forged-"));
+        const afRunner = join(process.cwd(), "node_modules/.bin/tsx");
+        const afCli = join(process.cwd(), "src/af/index.ts");
+        const toolEnv = {
+            AGENTFLOW_RUNTIME_METADATA: runtime.metadata,
+            AGENTFLOW_AF_BROKER_DIR: brokerDir,
+            AGENTFLOW_AF_RUNNER: afRunner,
+            AGENTFLOW_AF_CLI: afCli
+        };
+        const broker = startSpawnBroker({
+            executionId: "agent-main",
+            repoPath: runtime.workspace,
+            outputDir: runtime.output,
+            runtimeDir: join(runtime.root, "runtime"),
+            prompt: "test",
+            sandbox: "workspace-write",
+            timeoutSec: 10,
+            toolEnv,
+            signal: undefined
+        } as any);
+        const requestId = "forged-diagnose";
+        await mkdir(join(brokerDir, "requests"), { recursive: true });
+        await writeFile(join(brokerDir, "requests", `${requestId}.json`), `${JSON.stringify({
+            id: requestId,
+            argv: ["diagnose", "failure", "--json"],
+            cwd: "/"
+        }, null, 2)}\n`, "utf8");
+        try {
+            const responsePath = join(brokerDir, "responses", `${requestId}.json`);
+            let response: { exit_code: number; stdout: string } | undefined;
+            for (let index = 0; index < 50; index += 1) {
+                response = await readFile(responsePath, "utf8")
+                    .then((value) => JSON.parse(value) as { exit_code: number; stdout: string })
+                    .catch(() => undefined);
+                if (response) {
+                    break;
+                }
+                await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+            }
+            expect(response).toEqual(expect.objectContaining({ exit_code: 2 }));
+            expect(response?.stdout).toContain("not allowed by the worker command policy");
+        }
+        finally {
+            broker.stop();
+            await rm(brokerDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects broker artifact stdin paths outside the broker request directory", async () => {
+        const runtime = await createRuntime(tempRoot);
+        const brokerDir = await mkdtemp(join(tmpdir(), "agentflow-af-cli-broker-stdin-"));
+        const afRunner = join(process.cwd(), "node_modules/.bin/tsx");
+        const afCli = join(process.cwd(), "src/af/index.ts");
+        const toolEnv = {
+            AGENTFLOW_RUNTIME_METADATA: runtime.metadata,
+            AGENTFLOW_AF_BROKER_DIR: brokerDir,
+            AGENTFLOW_AF_RUNNER: afRunner,
+            AGENTFLOW_AF_CLI: afCli
+        };
+        const broker = startSpawnBroker({
+            executionId: "agent-main",
+            repoPath: runtime.workspace,
+            outputDir: runtime.output,
+            runtimeDir: join(runtime.root, "runtime"),
+            prompt: "test",
+            sandbox: "workspace-write",
+            timeoutSec: 10,
+            toolEnv,
+            signal: undefined
+        } as any);
+        const requestId = "forged-stdin";
+        await mkdir(join(brokerDir, "requests"), { recursive: true });
+        await writeFile(join(brokerDir, "requests", `${requestId}.json`), `${JSON.stringify({
+            id: requestId,
+            argv: ["artifact", "write", "handoff"],
+            stdin_path: join(tempRoot, "outside-stdin.txt")
+        }, null, 2)}\n`, "utf8");
+        try {
+            const responsePath = join(brokerDir, "responses", `${requestId}.json`);
+            let response: { exit_code: number; stdout: string } | undefined;
+            for (let index = 0; index < 50; index += 1) {
+                response = await readFile(responsePath, "utf8")
+                    .then((value) => JSON.parse(value) as { exit_code: number; stdout: string })
+                    .catch(() => undefined);
+                if (response) {
+                    break;
+                }
+                await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+            }
+            expect(response).toEqual(expect.objectContaining({ exit_code: 2 }));
+            expect(response?.stdout).toContain("stdin_path must stay inside");
+            await expect(readFile(join(runtime.output, "handoff.md"), "utf8")).rejects.toThrow();
+        }
+        finally {
+            broker.stop();
+            await rm(brokerDir, { recursive: true, force: true });
+        }
+    });
+    it("ignores forged broker cwd on allowed worker commands", async () => {
+        const runtime = await createRuntime(tempRoot);
+        const brokerDir = await mkdtemp(join(tmpdir(), "agentflow-af-cli-broker-cwd-"));
+        const afRunner = join(process.cwd(), "node_modules/.bin/tsx");
+        const afCli = join(process.cwd(), "src/af/index.ts");
+        const toolEnv = {
+            AGENTFLOW_RUNTIME_METADATA: runtime.metadata,
+            AGENTFLOW_AF_BROKER_DIR: brokerDir,
+            AGENTFLOW_AF_RUNNER: afRunner,
+            AGENTFLOW_AF_CLI: afCli
+        };
+        const broker = startSpawnBroker({
+            executionId: "agent-main",
+            repoPath: runtime.workspace,
+            outputDir: runtime.output,
+            runtimeDir: join(runtime.root, "runtime"),
+            prompt: "test",
+            sandbox: "workspace-write",
+            timeoutSec: 10,
+            toolEnv,
+            signal: undefined
+        } as any);
+        const requestId = "forged-cwd";
+        const requestsDir = join(brokerDir, "requests");
+        const stdinPath = join(requestsDir, `${requestId}.stdin`);
+        await mkdir(requestsDir, { recursive: true });
+        await writeFile(stdinPath, "broker cwd constrained\n", "utf8");
+        await writeFile(join(requestsDir, `${requestId}.json`), `${JSON.stringify({
+            id: requestId,
+            argv: ["artifact", "write", "handoff"],
+            cwd: "/",
+            stdin_path: stdinPath
+        }, null, 2)}\n`, "utf8");
+        try {
+            const responsePath = join(brokerDir, "responses", `${requestId}.json`);
+            let response: { exit_code: number; stdout: string } | undefined;
+            for (let index = 0; index < 50; index += 1) {
+                response = await readFile(responsePath, "utf8")
+                    .then((value) => JSON.parse(value) as { exit_code: number; stdout: string })
+                    .catch(() => undefined);
+                if (response) {
+                    break;
+                }
+                await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+            }
+            expect(response).toEqual(expect.objectContaining({ exit_code: 0 }));
+            await expect(readFile(join(runtime.output, "handoff.md"), "utf8"))
+                .resolves.toBe("broker cwd constrained\n");
+        }
+        finally {
+            broker.stop();
+            await rm(brokerDir, { recursive: true, force: true });
+        }
+    });
+    it("routes af mutations through the parent broker so sandboxed agents do not write run state directly", async () => {
+        const runtime = await createRuntime(tempRoot);
+        const brokerDir = await mkdtemp(join(tmpdir(), "agentflow-af-cli-broker-"));
+        const afRunner = join(process.cwd(), "node_modules/.bin/tsx");
+        const afCli = join(process.cwd(), "src/af/index.ts");
+        const toolEnv = {
+            AGENTFLOW_RUNTIME_METADATA: runtime.metadata,
+            AGENTFLOW_AF_BROKER_DIR: brokerDir,
+            AGENTFLOW_AF_RUNNER: afRunner,
+            AGENTFLOW_AF_CLI: afCli
+        };
+        const broker = startSpawnBroker({
+            executionId: "agent-main",
+            repoPath: runtime.workspace,
+            outputDir: runtime.output,
+            runtimeDir: join(runtime.root, "runtime"),
+            prompt: "test",
+            sandbox: "workspace-write",
+            timeoutSec: 10,
+            toolEnv,
+            signal: undefined
+        } as any);
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        process.env.AGENTFLOW_AF_BROKER_DIR = brokerDir;
+        process.env.AGENTFLOW_AF_RUNNER = afRunner;
+        process.env.AGENTFLOW_AF_CLI = afCli;
+        const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+        const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+        try {
+            await expect(runAfCli([
+                "milestone",
+                "add",
+                "--title",
+                "Brokered milestone",
+                "--goal",
+                "Prove the broker owns run-state writes."
+            ])).resolves.toBe(0);
+            await expect(withStdin("brokered artifact\n", () => runAfCli(["artifact", "write", "handoff"])))
+                .resolves.toBe(0);
+        }
+        finally {
+            stdoutSpy.mockRestore();
+            stderrSpy.mockRestore();
+            broker.stop();
+        }
+        await expect(readFile(join(runtime.output, "handoff.md"), "utf8")).resolves.toBe("brokered artifact\n");
+        await expect(readFile(join(runtime.root, "runtime", "milestones", "agent-main.json"), "utf8"))
+            .resolves.toContain("Brokered milestone");
+        await rm(brokerDir, { recursive: true, force: true });
     });
     it("exposes supervisor learn and diagnose helpers", async () => {
-        const runtime = await createRuntime(tempRoot);
+        const runtime = await createRuntime(tempRoot, undefined, { af_command_policy: "diagnostic" });
         process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
         await writeFile(join(runtime.root, "compiled_graph.json"), `${JSON.stringify({
             graph_id: "af-cli-test",
@@ -379,10 +688,16 @@ describe("af runtime CLI", () => {
             kind: string;
             playbook: {
                 safe_repairs: string[];
+                contract_boundaries: string[];
             };
         }>(await executeAfCli(["learn", "failed_check"]));
+        const removedBoundaryField = ["pause", "boundaries"].join("_");
         expect(playbook.kind).toBe("failed_check");
         expect(playbook.playbook.safe_repairs.join(" ")).toContain("upstream");
+        expect(playbook.playbook.contract_boundaries.join(" ")).toContain("trusted typed authority");
+        expect(playbook.playbook).not.toHaveProperty(removedBoundaryField);
+        expect(JSON.stringify(playbook.playbook)).not.toContain(removedBoundaryField);
+        expect(JSON.stringify(playbook.playbook)).not.toMatch(/human pause|free text.*pause|helper.*pause/iu);
         const cone = outputOf<{
             direction: string;
             nodes: Array<{
@@ -458,7 +773,7 @@ describe("af runtime CLI", () => {
         await expect(readFile(records[0]!.output_path!, "utf8")).resolves.toContain("# Agentflow Orientation");
     });
     it("spawns a helper with its own metadata and waits for the helper artifact", async () => {
-        const runtime = await createRuntime(tempRoot);
+        const runtime = await createRuntime(tempRoot, undefined, { af_command_policy: "orchestrator" });
         const codexBin = join(tempRoot, "mock-codex.mjs");
         await writeExecutable(codexBin, [
             "#!/usr/bin/env node",
@@ -503,9 +818,15 @@ describe("af runtime CLI", () => {
         expect(spawned.agent.input_case_file).toBe(join(runtime.root, "case-file.json"));
         await expect(readFile(spawned.artifact, "utf8")).resolves.toContain("helper ok");
         await expect(readFile(spawned.agent.prompt_path!, "utf8")).resolves.toContain("evidence mapper");
+        await expect(readFile(spawned.agent.prompt_path!, "utf8")).resolves.toContain("Do not request human pause or approval");
     });
-    it("records fixed read-only helper role metadata without launching a standing team", async () => {
-        const runtime = await createRuntime(tempRoot);
+    it.each([
+        ["evidence_mapper", "investigation", "evidence mapper"],
+        ["causal_investigator", "investigation", "causal investigator"],
+        ["verification_auditor", "verification", "verification auditor"],
+        ["repair_planner", "repair", "repair planner"]
+    ])("records fixed read-only helper role metadata for %s without launching a standing team", async (role, purpose, promptText) => {
+        const runtime = await createRuntime(tempRoot, undefined, { af_command_policy: "orchestrator" });
         process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
         process.env.AGENTFLOW_SPAWN_MODE = "broker";
         const spawned = outputOf<{
@@ -515,19 +836,19 @@ describe("af runtime CLI", () => {
         }>(await executeAfCli([
             "spawn",
             "--role",
-            "repair_planner",
+            role,
             "--brief",
-            "Plan the smallest material delta.",
+            "Inspect the recovery case.",
             "--case",
             join(runtime.root, "case-file.json"),
             "--output-schema",
-            "repair_planner.v1",
+            `${role}.v1`,
             "--evidence-map",
             join(runtime.root, "evidence-map.json"),
             "--material-delta",
             join(runtime.root, "material-delta.json")
         ]));
-        expect(spawned.role).toBe("repair_planner");
+        expect(spawned.role).toBe(role);
         const sessionPath = join(runtime.root, "runtime", "helpers", spawned.agent_id, "session.json");
         const session = JSON.parse(await readFile(sessionPath, "utf8")) as {
             status: string;
@@ -541,39 +862,65 @@ describe("af runtime CLI", () => {
         };
         expect(session).toEqual(expect.objectContaining({
             status: "starting",
-            purpose: "repair",
-            role: "repair_planner",
+            purpose,
+            role,
             sandbox: "read-only",
             input_case_file: join(runtime.root, "case-file.json"),
-            output_schema: "repair_planner.v1",
+            output_schema: `${role}.v1`,
             evidence_map_path: join(runtime.root, "evidence-map.json"),
             material_delta_path: join(runtime.root, "material-delta.json")
         }));
+        const codexBin = join(tempRoot, `mock-codex-${role}.mjs`);
+        await writeExecutable(codexBin, [
+            "#!/usr/bin/env node",
+            "process.stdout.write('helper prompt captured\\n');",
+            ""
+        ].join("\n"));
+        process.env.AGENTFLOW_CODEX_CLI_BIN = codexBin;
+        process.env.AGENTFLOW_INTERNAL_HELPER_RUN = "1";
+        try {
+            const result = await executeAfCli([
+                "_helper-run",
+                "--metadata",
+                runtime.metadata,
+                "--helper",
+                spawned.agent_id,
+                "--artifact",
+                "helper-report.md"
+            ]);
+            expect(result.exitCode).toBe(1);
+        }
+        finally {
+            delete process.env.AGENTFLOW_INTERNAL_HELPER_RUN;
+        }
+        const promptPath = join(runtime.root, "runtime", "helpers", spawned.agent_id, "prompt.md");
+        await expect(readFile(promptPath, "utf8")).resolves.toContain(promptText);
+        await expect(readFile(promptPath, "utf8")).resolves.toContain("Do not request human pause or approval");
     });
     it("does not expose a standalone af wait command", async () => {
         const runtime = await createRuntime(tempRoot);
         process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
         const result = await executeAfCli(["wait", "--agent", "helper_missing"]);
         expect(result.exitCode).toBe(2);
-        expect(result.stdout).toContain("Unknown af command: wait");
+        expect(result.stdout).toContain("not allowed by the worker command policy");
         const artifactList = await executeAfCli(["artifact", "list"]);
         expect(artifactList.exitCode).toBe(2);
-        expect(artifactList.stdout).toContain("Unknown af command: artifact list");
+        expect(artifactList.stdout).toContain("not allowed by the worker command policy");
         const toolsList = await executeAfCli(["tools", "list"]);
         expect(toolsList.exitCode).toBe(2);
-        expect(toolsList.stdout).toContain("Unknown af command: tools list");
+        expect(toolsList.stdout).toContain("not allowed by the worker command policy");
         const supervisionShow = await executeAfCli(["supervision", "show"]);
         expect(supervisionShow.exitCode).toBe(2);
-        expect(supervisionShow.stdout).toContain("Unknown af command: supervision show");
+        expect(supervisionShow.stdout).toContain("not allowed by the worker command policy");
         const status = await executeAfCli(["status"]);
         expect(status.exitCode).toBe(2);
-        expect(status.stdout).toContain("Unknown af command: status");
+        expect(status.stdout).toContain("not allowed by the worker command policy");
         const contextShow = await executeAfCli(["context", "show"]);
         expect(contextShow.exitCode).toBe(2);
-        expect(contextShow.stdout).toContain("Unknown af command: context show");
+        expect(contextShow.stdout).toContain("not allowed by the worker command policy");
     });
     it("fails af spawn --wait when the helper exits without its required artifact", async () => {
-        const runtime = await createRuntime(tempRoot);
+        const runtime = await createRuntime(tempRoot, undefined, { af_command_policy: "orchestrator" });
         const codexBin = join(tempRoot, "mock-codex-no-artifact.mjs");
         await writeExecutable(codexBin, [
             "#!/usr/bin/env node",

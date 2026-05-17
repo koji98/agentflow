@@ -137,8 +137,8 @@ describe("supervisor actions", () => {
             context_manifest_path: resolveExecutionAgentContextPath(executionDir),
             sandbox: "workspace-write"
         });
-        expect(runtimeMetadata.output_dir).toEqual(expect.stringContaining(join(runRoot, ".agentflow-runtime")));
-        expect(runtimeMetadata.runtime_dir).toEqual(expect.stringContaining(join(runRoot, ".agentflow-runtime")));
+        expect(runtimeMetadata.output_dir).toBe(artifactsRoot);
+        expect(runtimeMetadata.runtime_dir).toBe(join(runRoot, "runtime"));
     });
     it("keeps artifact repair writable even when the supervisor profile is read-only", async () => {
         const runRoot = await mkdtemp(join(tmpdir(), "agentflow-supervisor-action-writable-repair-"));

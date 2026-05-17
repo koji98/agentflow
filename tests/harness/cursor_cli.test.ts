@@ -106,7 +106,10 @@ describe("cursor cli harness", () => {
     await chmod(binary_path, 0o755);
 
     try {
-      const result = await createCursorCliHarness({ binary: binary_path }).run({
+      const result = await createCursorCliHarness({
+        binary: binary_path,
+        sandboxUnavailableMaxRetries: 0
+      }).run({
         runId: "run-malformed",
         executionId: "exec-malformed",
         repoAlias: "main",
@@ -145,7 +148,10 @@ describe("cursor cli harness", () => {
     await chmod(binary_path, 0o755);
 
     try {
-      const result = await createCursorCliHarness({ binary: binary_path }).run({
+      const result = await createCursorCliHarness({
+        binary: binary_path,
+        sandboxUnavailableMaxRetries: 0
+      }).run({
         runId: "run-stderr",
         executionId: "exec-stderr",
         repoAlias: "main",
@@ -165,7 +171,91 @@ describe("cursor cli harness", () => {
       expect(result.status).toBe("failed");
       expect(result.metadata?.error).toContain("stdout was not a JSON object");
       expect(result.metadata?.error).toContain("Sandbox mode is enabled but not available");
+      expect(result.metadata?.failure_code).toBe("harness_configuration_unsupported");
+      expect(result.metadata?.failure_details).toEqual(expect.objectContaining({
+        harness: "cursor-cli",
+        reason: "sandbox_mode_unavailable",
+        requested_sandbox: "enabled"
+      }));
     } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("retries transient cursor sandbox availability failures before failing the node", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-sandbox-retry-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    const countPath = join(tempRoot, "attempt-count.txt");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+    const binary_path = join(tempRoot, "sandbox-retry-agent.mjs");
+    await writeFile(
+      binary_path,
+      `#!/usr/bin/env node
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+
+const countPath = process.env.MOCK_CURSOR_ATTEMPT_COUNT_PATH;
+const prior = countPath && existsSync(countPath) ? Number.parseInt(readFileSync(countPath, "utf8"), 10) : 0;
+const next = Number.isFinite(prior) ? prior + 1 : 1;
+if (countPath) {
+  writeFileSync(countPath, String(next));
+}
+
+if (next === 1) {
+  process.stderr.write("Sandbox mode is enabled but not available on this system.\\n");
+  process.exit(1);
+}
+
+process.stdout.write(JSON.stringify({
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  result: "cursor succeeded after retry"
+}));
+`
+    );
+    await chmod(binary_path, 0o755);
+
+    const previousCountPath = process.env.MOCK_CURSOR_ATTEMPT_COUNT_PATH;
+    process.env.MOCK_CURSOR_ATTEMPT_COUNT_PATH = countPath;
+
+    try {
+      const result = await createCursorCliHarness({
+        binary: binary_path,
+        sandboxUnavailableRetryDelayMs: 0
+      }).run({
+        runId: "run-sandbox-retry",
+        executionId: "exec-sandbox-retry",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        nodeGoal: "Retry transient sandbox launch failure.",
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      expect(result.status).toBe("passed");
+      expect(result.transcript?.last_message).toBe("cursor succeeded after retry");
+      expect(result.metadata?.cursor_sandbox_unavailable_retry).toEqual({
+        attempts: 1,
+        delay_ms: 0,
+        exhausted: false
+      });
+      await expect(readFile(countPath, "utf8")).resolves.toBe("2");
+    } finally {
+      if (previousCountPath === undefined) {
+        delete process.env.MOCK_CURSOR_ATTEMPT_COUNT_PATH;
+      } else {
+        process.env.MOCK_CURSOR_ATTEMPT_COUNT_PATH = previousCountPath;
+      }
+
       await rm(tempRoot, { recursive: true, force: true });
     }
   });

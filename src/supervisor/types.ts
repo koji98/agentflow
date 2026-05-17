@@ -302,6 +302,7 @@ export interface SupervisorMaterialDelta {
     | "validation_strategy_changed"
     | "environment_repaired"
     | "requirement_evidence_mapped"
+    | "public_artifact_consistency_repair"
     | "target_reranked_with_evidence";
   summary: string;
   artifact_paths?: Record<string, string>;

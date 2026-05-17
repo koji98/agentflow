@@ -83,14 +83,14 @@ function formatList(title: string, values: string[] | undefined, fallback: strin
 
 function formatPublicArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
   return Object.entries(artifacts).flatMap(([name, artifact]) => [
-    `- ${name}: ${artifact.from}:${artifact.path}`,
+    `- ${name}: publish this declared artifact; the Declared Artifacts table shows the exact command.`,
     `  ${artifact.description}`
   ]);
 }
 
 function formatDraftArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
-  return Object.entries(artifacts).flatMap(([name, artifact]) => [
-    `- ${draftArtifactName(name)}: write ${draftArtifactPath(name, artifact)} in the output directory as the draft for public artifact \`${name}\`.`
+  return Object.keys(artifacts).flatMap((name) => [
+    `- ${draftArtifactName(name)}: publish this declared artifact as the draft for public artifact \`${name}\`.`
   ]);
 }
 
@@ -133,7 +133,7 @@ function buildPlanPrompt(
       "Do not edit repository or workspace files in this planning phase. Only write the planning artifact requested below."
     ]),
     section("Output Contract", [
-      "Write `cycle-plan.md` to the output directory.",
+      "Publish the `cycle_plan` artifact.",
       "Include sections: `Objective`, `Relevant evidence`, `Planned changes`, `Validation plan`, and `Risks or constraints`."
     ])
   ]);
@@ -166,7 +166,7 @@ function buildGenerateValidatePrompt(
       "Do rely on runtime supervisor recovery for broken context, missing tools, malformed evaluator output, harness failure, artifact materialization failure, or other runtime substrate issues."
     ]),
     section("Output Contract", [
-      "Write `work-notes.md` with what changed, validation attempted, and remaining risks.",
+      "Publish the `work_notes` artifact with what changed, validation attempted, and remaining risks.",
       "Also write draft versions of every public artifact so completion criteria can grade them before final publication.",
       "Draft handoffs and summaries should include enough evidence citations for an evaluator to see why the change, validation, and risk claims are supported.",
       ...formatDraftArtifacts(publicArtifacts)

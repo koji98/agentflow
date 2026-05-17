@@ -258,7 +258,7 @@ Completion-contract evals should prefer trajectory checks for runtime discipline
 - require `{ "kind": "completion_packet", "completion_status": "incomplete" }` for negative scenarios such as missing artifacts, skipped validation, stale artifacts, live blocking observations, or sandbox blockers.
 - require `{ "kind": "completion_packet", "completion_status": "blocked" }` only when the packet also carries trusted typed `authority_requests`.
 
-Managed-pattern scenarios may assert `af spawn --purpose ... --wait` only when the graph grants orchestration authority and the helper artifact appears before the parent completion packet becomes ready. Supervisor recovery scenarios may assert fixed read-only helper roles such as `af spawn --role evidence_mapper ... --wait` only inside supervisor/managed recovery traces, never as ordinary worker behavior.
+Managed-pattern scenarios may assert `af spawn --purpose ... --wait` only when runtime orchestration authority is present and the helper artifact appears before the parent completion packet becomes ready. Supervisor recovery scenarios may assert fixed read-only helper roles such as `af spawn --role evidence_mapper ... --wait` only inside supervisor/managed recovery traces, never as ordinary worker behavior.
 
 ## Custom Script Criteria
 
@@ -381,7 +381,7 @@ Review `report.md` first, then failing `scorecard.json`, `criteria-results.json`
 
 ## Built-In Suites
 
-- `evals/agentflow-validation`: flagship five-scenario sentinel suite for full Agentflow mission validation. Run `agentflow eval validate evals/agentflow-validation` before broad eval changes and run the two simulated sentinel scenarios as fast regression gates when practical.
+- `evals/agentflow-validation`: flagship five-scenario sentinel suite for full Agentflow mission validation. Run `agentflow eval validate evals/agentflow-validation` before broad eval changes and run the two simulated sentinel scenarios as fast regression gates when practical. Release confidence requires `npm run validate:release-confidence`, which runs all five sentinels with three trials.
 - `evals/agentflow-prompt-regression`: strict release gate for solved prompt behavior; use `npm run validate:prompts` before shipping prompt changes. Prompt-regression gates use default isolated harness config; profiles with `harness_config.isolation: "inherit_user"` are intentionally non-reproducible and do not belong in this release gate.
 - `evals/agentflow-workflow-quality`: lightweight dogfood capability suite.
 - `evals/agentflow-capability-workflows`: harder local-repo prompt/context suite generated with `npm run setup:eval-repos`.

@@ -410,6 +410,33 @@ describe("completion packet", () => {
             status: "missing_required_content"
         }));
     });
+    it("does not treat runtime command references as required artifact content", async () => {
+        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+        await writeFile(artifactPath, [
+            "Scenario: runtime artifact publishing.",
+            "Evidence: the declared artifact was published.",
+            "Validation: completion packet was built.",
+            "Risks: none identified.",
+            "Completion: handoff written."
+        ].join("\n"), "utf8");
+        const packet = await buildCompletionPacket({
+            runRoot,
+            node: makeNode({
+                intent: {
+                    goal: "Publish the handoff with `af artifact write implementation_summary` and then run `af complete check`.",
+                    acceptance_criteria: ["The handoff is published."],
+                    constraints: []
+                }
+            }),
+            attempt: makeAttempt(executionDir, {
+                artifacts: { implementation_summary: artifactPath }
+            }),
+            workspacePath: workspace,
+            sandbox: "workspace-write"
+        });
+        expect(packet.completion_status).toBe("ready_for_verification");
+        expect(packet.artifact_findings).toEqual([]);
+    });
     it("requires exact artifact content with punctuation without requiring the artifact path literal", async () => {
         const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "handoff.md");
         await writeFile(artifactPath, [
@@ -701,7 +728,7 @@ describe("completion packet", () => {
         ]);
     });
     it("uses the active runtime dir for completion evidence when it differs from the run root", async () => {
-        const runtimeDir = join(workspace, ".agentflow-runtime", "run-1", "exec-1", "runtime");
+        const runtimeDir = join(workspace, "runtime-overlay", "run-1", "exec-1", "runtime");
         await mkdir(runtimeDir, { recursive: true });
         await writeCompletedMilestone(runRoot, runtimeDir);
         await writeFile(join(runtimeDir, "log.jsonl"), `${JSON.stringify({
@@ -825,7 +852,7 @@ describe("completion packet", () => {
         ]);
         await writeFile(artifactPath, [
             "Scenario: verifier ambiguity.",
-            "Evidence: stale docs are non-authoritative.",
+            "Evidence: captured node evidence passed.",
             "Validation: no command required.",
             "Risks: none identified.",
             "Completion: non-blocker ambiguity does not contradict the authored contract."
@@ -834,7 +861,7 @@ describe("completion packet", () => {
             runRoot,
             node: makeNode({
                 intent: {
-                    goal: "Write the handoff with `non-blocker ambiguity` and explain why it does not contradict the authored contract.",
+                    goal: "Write the handoff with `captured node evidence passed` and explain why it does not contradict the authored contract.",
                     acceptance_criteria: ["The handoff is published."],
                     constraints: []
                 }

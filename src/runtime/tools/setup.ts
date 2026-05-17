@@ -1,5 +1,6 @@
-import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +15,7 @@ import {
   resolveExecutionRuntimeToolDirectory
 } from "../../artifacts/paths.js";
 import { createAuthorityRequest, type AuthorityRequest } from "../authority.js";
+import type { AfCommandPolicy } from "../af_command_policy.js";
 
 export interface AgentToolSetupResult {
   bin_dir: string;
@@ -40,6 +42,7 @@ interface PrepareAgentToolsOptions {
   reasoning_effort?: string;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   timeout_sec?: number;
+  af_command_policy?: AfCommandPolicy;
   context_packet_path?: string;
   context_manifest_path?: string;
   supervisor_recovery_envelope?: SupervisorRecoveryEnvelope;
@@ -575,7 +578,8 @@ export async function prepareAgentTools(
     ...(options.model ? { model: options.model } : {}),
     ...(options.reasoning_effort ? { reasoning_effort: options.reasoning_effort } : {}),
     sandbox,
-    timeout_sec: timeoutSec
+    timeout_sec: timeoutSec,
+    af_command_policy: options.af_command_policy ?? "worker"
   };
   await writeFile(runtime_metadata_path, `${JSON.stringify(runtimeMetadata, null, 2)}\n`, {
     encoding: "utf8",
@@ -618,6 +622,7 @@ export async function prepareAgentTools(
     AGENTFLOW_RUNTIME_METADATA: runtime_metadata_path,
     AGENTFLOW_AF_CLI: currentAfCliPath(),
     AGENTFLOW_AF_RUNNER: currentAfRunnerPath(),
+    AGENTFLOW_AF_BROKER_DIR: await mkdtemp(join(tmpdir(), "agentflow-af-broker-")),
     AGENTFLOW_SPAWN_MODE: "broker",
     AGENTFLOW_RUN_ROOT: runRoot,
     AGENTFLOW_RUNTIME_DIR: runtimeDir,

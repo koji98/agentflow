@@ -18,3 +18,11 @@ Run one scenario:
 ```sh
 agentflow eval run evals/agentflow-validation --scenario all-primitives-checkpoint-loop --variant current --trials 1
 ```
+
+Run the full release-confidence sweep:
+
+```sh
+npm run validate:release-confidence
+```
+
+This is intentionally expensive. It runs the standard checks, validates the sentinel suite, then runs all five sentinel scenarios with `--trials 3`. Do not claim release confidence from unit tests, build output, or the two simulated sentinels alone.
