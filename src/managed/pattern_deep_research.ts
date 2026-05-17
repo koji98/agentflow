@@ -89,7 +89,7 @@ function balancedGroups<T>(items: T[], maxGroupSize = 3): T[][] {
 
 function formatAngleLabel(angle: PatternDeepResearchAngle): string {
   return angle.as_artifact
-    ? `${angle.id}: ${angle.prompt} (exposed raw angle artifact)`
+    ? `${angle.id}: ${angle.prompt} (selected public angle artifact)`
     : `${angle.id}: ${angle.prompt}`;
 }
 
@@ -111,9 +111,9 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
     ]),
     ...(angle.as_artifact
       ? [
-          section("Exposed Raw Angle Report", [
-            `This angle's Markdown report will be exposed as public artifact \`${angle.id}\` after the whole managed research node passes.`,
-            "Write the report as raw angle evidence. It will not be rewritten by the final publisher."
+          section("Selected Public Angle Artifact", [
+            `The final publisher will write a curated public artifact named \`${angle.id}\` from this angle's evidence after the managed research node passes.`,
+            "Write this report as raw angle evidence for synthesis. Preserve conflicts and uncertainty so the publisher can resolve them."
           ])
         ]
       : []),
@@ -175,7 +175,7 @@ function buildFinalPrompt(
   publicArtifacts: Record<string, ArtifactDefinition>,
   inputCount: number
 ): string {
-  const exposedAngleArtifacts = config.research.angles.filter((angle) => angle.as_artifact);
+  const selectedAngleArtifacts = config.research.angles.filter((angle) => angle.as_artifact);
   return renderPrompt([
     body(`You are the final research publisher for a managed deep research result from ${inputCount} research report${inputCount === 1 ? "" : "s"}. Create a complete answer that downstream work can use without inspecting private helper reports.`),
     section("Managed Workflow Contract", [
@@ -190,11 +190,14 @@ function buildFinalPrompt(
       "Resolve disagreements explicitly. Preserve uncertainty and cite the evidence behind important claims.",
       "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
     ]),
-    ...(exposedAngleArtifacts.length > 0
+    ...(selectedAngleArtifacts.length > 0
       ? [
-          section("Runtime-Forwarded Raw Angle Artifacts", exposedAngleArtifacts.map((angle) =>
-            `- ${angle.id}: Agentflow forwards the raw Markdown report for angle \`${angle.id}\`; do not rewrite or republish it.`
-          ))
+          section("Selected Public Angle Artifacts", [
+            "The declared angle artifacts below are public downstream artifacts owned by this publisher.",
+            "Do not copy raw reports through unchanged when they contain unresolved conflicts, superseded claims, or private-helper framing.",
+            "For each selected artifact, publish a curated Markdown report that preserves the angle's useful evidence while aligning with the final controlling synthesis.",
+            ...selectedAngleArtifacts.map((angle) => `- ${angle.id}: curate this angle's evidence for downstream use and mark any superseded raw-angle claims explicitly.`)
+          ])
         ]
       : []),
     section("Declared Public Artifacts", [
@@ -202,6 +205,8 @@ function buildFinalPrompt(
       ...formatArtifactContract(publicArtifacts)
     ]),
     section("Quality Bar", [
+      "All public artifacts must agree on controlling decisions, names, routes, states, risks, and downstream instructions.",
+      "When raw reports disagree, decide what controls, explain what was superseded, and make every public artifact consistent with that decision.",
       "The final package should be useful for a downstream design, implementation, review, or decision node without making the reader inspect private internal artifacts.",
       "Do not bury uncertainty or present one angle's evidence as the whole answer."
     ])
@@ -242,38 +247,17 @@ function buildPublicArtifacts(angles: PatternDeepResearchAngle[]): Record<string
     artifacts[angle.id] = {
       from: "output_dir",
       path: `angles/${angle.id}.md`,
-      description: `Raw Markdown report for deep research angle "${angle.id}".`
+      description: `Curated public Markdown report for deep research angle "${angle.id}".`
     };
   }
 
   return artifacts;
 }
 
-function buildManagedArtifactForwards(
-  rootId: string,
-  angles: PatternDeepResearchAngle[]
-): AgentNode["managed_artifact_forwards"] {
-  const forwards: NonNullable<AgentNode["managed_artifact_forwards"]> = {};
-
-  angles.forEach((angle, index) => {
-    if (!angle.as_artifact) {
-      return;
-    }
-    const suffix = zeroPad(index + 1);
-    forwards[angle.id] = {
-      node: workflowNodeId(rootId, `angle_${suffix}`),
-      artifact: `angle_report_${suffix}`
-    };
-  });
-
-  return Object.keys(forwards).length > 0 ? forwards : undefined;
-}
-
 export function buildPatternDeepResearch(config: PatternDeepResearchConfig): SequenceNode {
   const workflowId = workflowNodeId(config.id, "workflow");
   const fanoutId = workflowNodeId(config.id, "angle_fanout");
   const publicArtifacts = buildPublicArtifacts(config.research.angles);
-  const managedArtifactForwards = buildManagedArtifactForwards(config.id, config.research.angles);
   const agentShared = sharedAgentBase(config);
 
   const angleNodes: AgentNode[] = config.research.angles.map((angle, index) => {
@@ -374,7 +358,6 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         ...agentShared,
         support: mergeSupportContext(agentShared.support, materialContexts(materials)),
         artifacts: publicArtifacts,
-        ...(managedArtifactForwards ? { managed_artifact_forwards: managedArtifactForwards } : {}),
         intent: {
           goal: buildFinalPrompt(config, publicArtifacts, materials.length),
           acceptance_criteria: config.intent.acceptance_criteria,

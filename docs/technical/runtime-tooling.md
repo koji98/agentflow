@@ -81,6 +81,8 @@ In Codex isolated mode, Agentflow creates a temporary `CODEX_HOME`, links auth w
 
 In Cursor isolated mode, Agentflow creates a generated `CURSOR_CONFIG_DIR`, writes the Agentflow workspace and sandbox permissions, then merges declared `cursor.config` and `cursor.permissions`. Cursor `inherit_user` cannot combine with declared `cursor.config` or `cursor.permissions` because Agentflow would have no generated config file to merge into.
 
+If Cursor reports that sandbox mode is enabled but unavailable on the host, Agentflow treats that as a trusted harness configuration failure, not an agent-recoverable task failure. The supervisor must not keep retrying the same node or silently disable sandboxing. Disable Cursor sandboxing only through the authored launch profile, for example by choosing a profile whose authority intentionally maps to disabled sandbox behavior.
+
 `isolation: "inherit_user"` is an explicit reproducibility tradeoff. Codex runs keep the user's `CODEX_HOME`; Cursor runs keep the user's `CURSOR_CONFIG_DIR` and ambient CLI config. Agentflow still supplies required workspace, sandbox, output, context, runtime CLI, and plugin-tool environment. Use this only when the local harness-native setup is part of the intended run, and exclude those profiles from prompt-regression release gates.
 
 Verifier, AI-check, and supervisor-evidence invocations always force isolated no-external-tool harness config, even if their profile asks to inherit user config. Those prompts are runtime trust checks, not worker capability nodes.

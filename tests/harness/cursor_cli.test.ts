@@ -165,6 +165,12 @@ describe("cursor cli harness", () => {
       expect(result.status).toBe("failed");
       expect(result.metadata?.error).toContain("stdout was not a JSON object");
       expect(result.metadata?.error).toContain("Sandbox mode is enabled but not available");
+      expect(result.metadata?.failure_code).toBe("harness_configuration_unsupported");
+      expect(result.metadata?.failure_details).toEqual(expect.objectContaining({
+        harness: "cursor-cli",
+        reason: "sandbox_mode_unavailable",
+        requested_sandbox: "enabled"
+      }));
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

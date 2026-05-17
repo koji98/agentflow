@@ -550,6 +550,56 @@ describe("af runtime CLI", () => {
             await rm(brokerDir, { recursive: true, force: true });
         }
     });
+    it("routes af mutations through the parent broker so sandboxed agents do not write run state directly", async () => {
+        const runtime = await createRuntime(tempRoot);
+        const brokerDir = await mkdtemp(join(tmpdir(), "agentflow-af-cli-broker-"));
+        const afRunner = join(process.cwd(), "node_modules/.bin/tsx");
+        const afCli = join(process.cwd(), "src/af/index.ts");
+        const toolEnv = {
+            AGENTFLOW_RUNTIME_METADATA: runtime.metadata,
+            AGENTFLOW_AF_BROKER_DIR: brokerDir,
+            AGENTFLOW_AF_RUNNER: afRunner,
+            AGENTFLOW_AF_CLI: afCli
+        };
+        const broker = startSpawnBroker({
+            executionId: "agent-main",
+            repoPath: runtime.workspace,
+            outputDir: runtime.output,
+            runtimeDir: join(runtime.root, "runtime"),
+            prompt: "test",
+            sandbox: "workspace-write",
+            timeoutSec: 10,
+            toolEnv,
+            signal: undefined
+        } as any);
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        process.env.AGENTFLOW_AF_BROKER_DIR = brokerDir;
+        process.env.AGENTFLOW_AF_RUNNER = afRunner;
+        process.env.AGENTFLOW_AF_CLI = afCli;
+        const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+        const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+        try {
+            await expect(runAfCli([
+                "milestone",
+                "add",
+                "--title",
+                "Brokered milestone",
+                "--goal",
+                "Prove the broker owns run-state writes."
+            ])).resolves.toBe(0);
+            await expect(withStdin("brokered artifact\n", () => runAfCli(["artifact", "write", "handoff"])))
+                .resolves.toBe(0);
+        }
+        finally {
+            stdoutSpy.mockRestore();
+            stderrSpy.mockRestore();
+            broker.stop();
+        }
+        await expect(readFile(join(runtime.output, "handoff.md"), "utf8")).resolves.toBe("brokered artifact\n");
+        await expect(readFile(join(runtime.root, "runtime", "milestones", "agent-main.json"), "utf8"))
+            .resolves.toContain("Brokered milestone");
+        await rm(brokerDir, { recursive: true, force: true });
+    });
     it("exposes supervisor learn and diagnose helpers", async () => {
         const runtime = await createRuntime(tempRoot, undefined, { af_command_policy: "diagnostic" });
         process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;

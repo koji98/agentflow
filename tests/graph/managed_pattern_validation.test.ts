@@ -103,7 +103,7 @@ describe("managed pattern normalization edges", () => {
         expect(normalized.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 path: "$.graph.steps[0].artifacts",
-                message: "pattern_deep_research publishes only summary, packet, and angle reports selected with as_artifact."
+                message: "pattern_deep_research publishes only summary and curated angle reports selected with as_artifact."
             })
         ]));
     });

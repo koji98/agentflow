@@ -16,7 +16,7 @@ Good for:
 
 Angles should be controlling axes, not generic subtopics. Good angles name the assigned lens and evidence boundary, such as product contract, privacy/access contract, API convention fit, UI workflow rehearsal, correctness findings, code-quality findings, or risk register.
 
-Graph-addressable output is `summary` by default. Use object-form angles with `id`, `prompt`, and `as_artifact: true` to expose selected raw angle reports when downstream nodes need them. There is no public `packet` artifact for deep research.
+Graph-addressable output is `summary` by default. Use object-form angles with `id`, `prompt`, and `as_artifact: true` when downstream nodes need a selected, publisher-curated public artifact for that angle. Raw angle reports remain run-tree evidence and may conflict; the final publisher owns the graph-addressable contract. There is no public `packet` artifact for deep research.
 
 ## `pattern_deep_work`
 
