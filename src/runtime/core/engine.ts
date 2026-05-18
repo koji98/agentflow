@@ -2610,64 +2610,6 @@ function failDeepResearchWorkspacePollution(
   };
 }
 
-function deepResearchAngleEvidenceRows(
-  materials: ContextPacketMaterializedItem[]
-): Array<{ angle: string; focus: string; path: string }> {
-  return materials
-    .filter((material) => /^angle_\d+_report$/u.test(material.key))
-    .sort((left, right) => left.key.localeCompare(right.key))
-    .map((material) => {
-      const what =
-        isRecord(material.source) && typeof material.source["what"] === "string" ? material.source["what"] : "";
-      const match = /^Raw report for deep research angle `([^`]+)`: (.+)$/u.exec(what);
-
-      return {
-        angle: match?.[1] ?? material.key,
-        focus: match?.[2] ?? (what || (material.description ?? material.key)),
-        path: material.pointer_path
-      };
-    });
-}
-
-async function ensureDeepResearchSummaryEvidenceIndex(options: {
-  node: CompiledExecutableNode;
-  contextMaterials: ContextPacketMaterializedItem[];
-  artifacts: Record<string, string>;
-}): Promise<void> {
-  if (options.node.lowered_from !== "pattern_deep_research") {
-    return;
-  }
-
-  const summaryPath = options.artifacts.summary;
-  if (!summaryPath) {
-    return;
-  }
-
-  const rows = deepResearchAngleEvidenceRows(options.contextMaterials);
-  if (rows.length === 0) {
-    return;
-  }
-
-  const existing = await readFile(summaryPath, "utf8");
-  const evidenceBlock = [
-    "<!-- agentflow:research-evidence-index -->",
-    "## Research Evidence",
-    "",
-    "| Angle | Assigned Focus | Report Path |",
-    "| --- | --- | --- |",
-    ...rows.map((row) => `| \`${row.angle}\` | ${row.focus.replace(/\n/gu, " ")} | \`${row.path}\` |`),
-    "<!-- /agentflow:research-evidence-index -->",
-    ""
-  ].join("\n");
-
-  const withoutExistingBlock = existing.replace(
-    /<!-- agentflow:research-evidence-index -->[\s\S]*?<!-- \/agentflow:research-evidence-index -->\n*/u,
-    ""
-  );
-
-  await writeFile(summaryPath, `${evidenceBlock}${withoutExistingBlock.replace(/^\n+/u, "")}`, "utf8");
-}
-
 async function defaultAgentExecutor(
   context: RuntimeNodeExecutorContext<CompiledAgentNode>,
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>
@@ -3735,11 +3677,6 @@ async function executeNode(
       session,
       attempt,
       workspacePath: workspace.workspace_path
-    });
-    await ensureDeepResearchSummaryEvidenceIndex({
-      node,
-      contextMaterials: context.packet.materials,
-      artifacts
     });
     artifactRepairMetadata = materialized.repair_metadata;
 

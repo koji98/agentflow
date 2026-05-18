@@ -54,7 +54,7 @@
           "acceptance_criteria": [
             "The research covers all authored angles.",
             "No repository files are modified.",
-            "The summary includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
+            "The research artifact includes literal `Scenario:`, `Changed files:`, `Validation:`, and `Risks:` fields."
           ],
           "constraints": [
             "Do not edit repository files.",

@@ -24,11 +24,11 @@ Common fields:
 
 Fixed public artifact:
 
-- `summary`: complete, human-readable research handoff.
+- `research`: complete, human-readable research report at `research.md`.
 
 Authors cannot add arbitrary `artifacts` to `pattern_deep_research`. Use a downstream `agent` node when a workflow needs a custom synthesized deliverable.
 
-Deep research always collapses graph-addressable output into `summary`. This is not a shallow abstract; it is the canonical, holistic research handoff that downstream work should be able to use first. Angle and synthesis artifacts remain readable in the run tree as raw Markdown evidence, and Agentflow prepends raw angle report links to the summary so downstream readers can progressively disclose detail when needed. Downstream nodes should reference the authored pattern id, for example `storage_research.summary`, not generated internal angle ids.
+Deep research always collapses graph-addressable output into `research`. This is not a shallow abstract; it is the canonical, holistic research report that downstream work should be able to use directly. Angle and synthesis artifacts are internal run evidence for the managed pattern, not downstream context contracts. Downstream nodes should reference the authored pattern id, for example `storage_research.research`, not generated internal angle or synthesis ids.
 
 Each angle is controlling for its worker. Write angles as specific lenses with evidence boundaries, not broad restatements of the parent goal. The parent goal gives context; the assigned angle decides what the worker optimizes for.
 
@@ -44,16 +44,16 @@ Each synthesis node consumes at most three research reports. Groups are split as
 
 Angle and synthesis artifacts are internal Markdown evidence in the run tree. They support the final contract but do not need to match final graph-addressable formatting. Research helpers treat the repo workspace as read-only evidence: they may inspect files and run local validation, but they must not create scratch report files or source edits in the repo. The runtime treats workspace mutations from deep-research helpers as workspace pollution.
 
-The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes `summary`. The summary is the public front door and the full research handoff: after the publisher writes it, Agentflow deterministically prepends an evidence table mapping every authored angle to its raw report path. The publisher's content should rewrite the angle findings into one coherent, sufficiently detailed, conflict-resolved answer.
+The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes exactly one public file: `research.md`. That file is the full research report. It should rewrite the angle and synthesis findings into one coherent, sufficiently detailed, conflict-resolved answer without relying on linked raw reports.
 
-Angle and synthesis workers may reference related angle findings in prose, but they should not create links to other angle reports. The runtime-owned summary evidence table is the only raw angle link surface.
+Angle and synthesis workers may reference related angle findings in prose, but they should not create links to other angle reports or produce companion public files.
 
 Angles can be authored as strings or objects. Object angles support:
 
 - `id`: stable axis id matching `/^[a-z][a-z0-9_]*$/`
 - `prompt`: sentence-style research prompt
 
-Every angle is always included in the summary evidence table. If a downstream node needs raw angle detail, it follows the linked path from `summary`; the stable graph contract remains the summary artifact.
+Every angle should be represented in the final `research.md` content. If detail is important for downstream work, include it in `research.md`; do not rely on internal angle artifacts as the handoff.
 
 ## Example
 
@@ -69,7 +69,7 @@ Every angle is always included in the summary evidence table. If a downstream no
     "goal": "Recommend the storage design that best supports resumable supervised runs.",
     "acceptance_criteria": [
       "The recommendation compares viable alternatives.",
-      "The summary preserves evidence, uncertainty, and next actions."
+      "The research report preserves evidence, uncertainty, and next actions."
     ],
     "constraints": [
       "Do not treat sources outside repository conventions as primary authority."

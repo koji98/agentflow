@@ -129,7 +129,7 @@ describe("managed pattern normalization edges", () => {
         expect(normalized.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 path: "$.graph.steps[0].artifacts",
-                message: "pattern_deep_research publishes only the summary artifact; raw angle reports are linked from the summary, and synthesis reports remain internal run evidence."
+                message: "pattern_deep_research publishes only the research artifact; raw angle and synthesis reports remain internal run evidence."
             })
         ]));
     });
