@@ -119,7 +119,7 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
       `Publish the \`angle_report_${zeroPad(index + 1)}\` artifact; the Declared Artifacts table shows the exact command.`,
       "This is a private research artifact for synthesis, not the final public handoff.",
       "Do not create a report file in the repo workspace; stream the final Markdown directly to `af artifact write`.",
-      "Do not create links to other angle reports; you may reference related findings in prose, and the final summary will provide raw evidence links.",
+      "Do not create links to other angle reports; you may reference related findings in prose.",
       `The assigned angle id is ${angle.id}. Use that value in the report heading or metadata.`,
       "The report should be readable by a human researcher and focused on the assigned angle.",
       "Include findings, evidence, sources, conflicts, uncertainty, and confidence in Markdown."
@@ -148,12 +148,13 @@ function buildSynthesisPrompt(
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Synthesis Task", [
+      "Produce a complete synthesis for the assigned input reports, not a high-level abstract.",
       "Preserve every major finding from the input material.",
       "Collapse redundant claims while keeping the strongest provenance.",
       "Keep evidence attached to claims; do not detach conclusions from sources.",
       "Surface conflicts, weak evidence, missing coverage, and uncertainty.",
       "Do not discard a unique major finding just because it appears in only one report.",
-      "Do not create links to individual angle reports; preserve references in prose and let the runtime-owned summary evidence table own raw report links."
+      "Do not reduce the synthesis to a thin summary. Preserve enough detail for the final publisher to write the complete research artifact without reopening every input report."
     ]),
     section("Output Contract", [
       `Publish the \`synthesis_report_${zeroPad(layer)}_${zeroPad(group)}\` artifact; the Declared Artifacts table shows the exact command.`,
@@ -169,37 +170,34 @@ function buildFinalPrompt(
   inputCount: number
 ): string {
   return renderPrompt([
-    body(`You are the final research publisher for a managed deep research result from ${inputCount} research report${inputCount === 1 ? "" : "s"}. Create the complete, coherent research handoff that downstream work can rely on, with links to raw research evidence for progressive disclosure.`),
+    body(`You are the final research publisher for a managed deep research result from ${inputCount} research report${inputCount === 1 ? "" : "s"}. Create the complete, coherent research artifact that downstream work can rely on.`),
     section("Managed Workflow Contract", [
-      "This final publisher owns the managed workflow's single public artifact contract. Raw angle reports are the public evidence pointers; synthesis reports are internal working notes.",
+      "This final publisher owns the managed workflow's single public artifact contract.",
+      "Raw angle reports and synthesis reports are internal working inputs only. Do not expose them as separate deliverables.",
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
-    ]),
-    section("Evidence Link Ownership", [
-      "Raw angle reports are part of the research evidence packet, but Agentflow owns the raw report link table.",
-      "After you publish the summary, the runtime prepends the table of authored angles, assigned focus, and exact report file paths.",
-      "Do not author raw angle links yourself. Reference related angle findings in prose without extra links.",
-      "Synthesis reports are intermediate working notes for this publisher only; use them to resolve conflicts, but do not expose them as downstream evidence links."
     ]),
     section("Current Context", [
       "Use the research reports in context as evidence.",
       "Resolve disagreements explicitly. Preserve uncertainty and cite the evidence behind important claims.",
       "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
     ]),
-    section("Summary Shape", [
-      "Write `summary.md` as the canonical research handoff, not a high-level abstract.",
+    section("Research Artifact Shape", [
+      "Write `research.md` as the only final file and canonical research handoff, not a high-level abstract.",
       "Write a holistic, sufficiently detailed, conflict-resolved answer that covers every angle. Do not merely copy raw reports through.",
-      "End with the integrated conclusion, controlling decisions, unresolved uncertainty, risks, and downstream implications."
+      "Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file.",
+      "End with the integrated conclusion, controlling decisions, unresolved uncertainty, risks, and downstream implications.",
+      "Do not create angle-specific public artifacts, evidence-link tables, packets, or companion files."
     ]),
     section("Declared Public Artifacts", [
       "Publish the declared public artifact.",
       ...formatArtifactContract(publicArtifacts)
     ]),
     section("Quality Bar", [
-      "The summary must be internally consistent on controlling decisions, names, routes, states, risks, and downstream instructions.",
-      "When raw reports disagree, decide what controls, explain what was superseded, and make the summary consistent with that decision.",
-      "The summary should be useful for a downstream design, implementation, review, or decision node without requiring the reader to inspect raw evidence first.",
+      "The research artifact must be internally consistent on controlling decisions, names, routes, states, risks, and downstream instructions.",
+      "When raw reports disagree, decide what controls, explain what was superseded, and make the research artifact consistent with that decision.",
+      "The research artifact should be useful for a downstream design, implementation, review, or decision node without requiring the reader to inspect raw evidence first.",
       "Do not bury uncertainty or present one angle's evidence as the whole answer."
     ])
   ]);
@@ -230,7 +228,7 @@ function buildSynthesisArtifacts(layer: number, group: number): Record<string, A
 }
 
 function buildPublicArtifacts(): Record<string, ArtifactDefinition> {
-  return outputDirArtifact("summary", "summary.md", "Human-readable final summary for the managed deep research result.");
+  return outputDirArtifact("research", "research.md", "Complete human-readable research artifact for the managed deep research result.");
 }
 
 export function buildPatternDeepResearch(config: PatternDeepResearchConfig): SequenceNode {
@@ -267,7 +265,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       reportArtifact: `angle_report_${suffix}`,
       contextPrefix: `angle_${suffix}`,
       what: `Raw report for deep research angle \`${angle.id}\`: ${angle.prompt}`,
-      why: "The final summary must link this raw angle evidence and rewrite it into the conflict-resolved synthesis."
+      why: "The final research artifact must use this raw angle evidence and rewrite it into the conflict-resolved synthesis."
     };
   });
   let materials: ResearchMaterial[] = angleMaterials;
@@ -322,7 +320,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         reportArtifact: `synthesis_report_${suffix}`,
         contextPrefix: `synthesis_${suffix}`,
         what: `Synthesis report ${suffix} from the managed deep research workflow.`,
-        why: "The final summary uses synthesis evidence to resolve conflicts and preserve major findings."
+        why: "The final research artifact uses synthesis evidence to resolve conflicts and preserve major findings."
       };
     });
     layer += 1;

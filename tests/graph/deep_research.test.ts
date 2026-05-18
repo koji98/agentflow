@@ -44,8 +44,8 @@ function buildDocument(stepOverrides = {}) {
                     intent: {
                         goal: "Produce a grounded recommendation for Agentflow managed pattern design.",
                         acceptance_criteria: [
-                            "The research summary answers all authored angles.",
-                            "The summary preserves evidence, uncertainty, confidence, and next actions."
+                            "The research artifact answers all authored angles.",
+                            "The research artifact preserves evidence, uncertainty, confidence, and next actions."
                         ],
                         constraints: ["Do not change the graph contract."]
                     },
@@ -121,10 +121,10 @@ describe("deep research managed pattern", () => {
             id: "market_scan",
             type: "agent",
             artifacts: expect.objectContaining({
-                summary: expect.objectContaining({ path: "summary.md" })
+                research: expect.objectContaining({ path: "research.md" })
             })
         }));
-        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["summary"]);
+        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["research"]);
         expect(JSON.stringify(finalNode)).toContain("final research publisher");
         expect(JSON.stringify(finalNode)).not.toContain("expert");
     });
@@ -167,6 +167,7 @@ describe("deep research managed pattern", () => {
             "market_scan__managed__pattern_deep_research__synthesis_01_03"
         ]);
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("research synthesis worker");
+        expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Produce a complete synthesis for the assigned input reports");
         expect(JSON.stringify(synthesisLayer.steps[0])).not.toContain("expert");
         expect(synthesisLayer.steps.map((step) => ("support" in step ? step.support?.context?.length ?? 0 : 0))).toEqual([
             2,
@@ -174,7 +175,7 @@ describe("deep research managed pattern", () => {
             3
         ]);
     });
-    it("keeps deep research graph-addressable output collapsed to summary while linking every angle report", () => {
+    it("keeps deep research graph-addressable output collapsed to one complete research artifact", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument({
             research: {
                 angles: [
@@ -203,28 +204,32 @@ describe("deep research managed pattern", () => {
             id: "market_scan",
             type: "agent",
             artifacts: expect.objectContaining({
-                summary: expect.objectContaining({ path: "summary.md" })
+                research: expect.objectContaining({ path: "research.md" })
             })
         }));
         if (!finalNode || finalNode.type !== "agent") {
             throw new Error("Expected final managed node to be an agent.");
         }
-        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["summary"]);
+        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["research"]);
         expect(finalNode.managed_artifact_forwards).toBeUndefined();
         expect(finalNode.support?.context?.map((item) => item.name)).toEqual([
             "angle_01_report",
             "angle_02_report"
         ]);
-        expect(finalNode.intent.goal).toContain("Evidence Link Ownership");
-        expect(finalNode.intent.goal).toContain("Agentflow owns the raw report link table");
-        expect(finalNode.intent.goal).toContain("runtime prepends the table");
+        expect(finalNode.intent.goal).toContain("Write `research.md` as the only final file");
+        expect(finalNode.intent.goal).toContain("Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file");
+        expect(finalNode.intent.goal).toContain("Do not create angle-specific public artifacts, evidence-link tables, packets, or companion files");
+        expect(finalNode.intent.goal).not.toContain("Evidence Link Ownership");
+        expect(finalNode.intent.goal).not.toContain("Research Evidence");
+        expect(finalNode.intent.goal).not.toContain("runtime prepends");
+        expect(finalNode.intent.goal).not.toContain("Write `summary.md`");
         expect(finalNode.intent.goal).not.toContain("Report Pointer Path");
         expect(finalNode.intent.goal).not.toContain("`Pointer` value");
         expect(finalNode.intent.goal).not.toContain("angle_01_report");
-        expect(finalNode.intent.goal).toContain("do not expose them as downstream evidence links");
+        expect(finalNode.intent.goal).toContain("Do not expose them as separate deliverables");
         expect(finalNode.intent.goal).toContain("not a high-level abstract");
         expect(finalNode.intent.goal).toContain("holistic, sufficiently detailed, conflict-resolved answer");
-        expect(finalNode.intent.goal).toContain("Do not author raw angle links yourself");
+        expect(finalNode.intent.goal).not.toContain("Do not author raw angle links yourself");
         expect(finalNode.intent.goal).not.toContain("Selected Public Angle");
         expect(finalNode.intent.goal).not.toContain("as_artifact");
         expect(finalNode.intent.goal).not.toContain("Context Pointer Name");
@@ -255,7 +260,7 @@ describe("deep research managed pattern", () => {
                         intent: {
                             goal: "Summarize the research recommendation.",
                             acceptance_criteria: [
-                                "The handoff uses the final managed summary and follows linked angle evidence when needed.",
+                                "The handoff uses the final managed research artifact.",
                                 "The handoff preserves the recommendation and key uncertainty."
                             ],
                             constraints: []
@@ -271,8 +276,8 @@ describe("deep research managed pattern", () => {
                                 },
                                 {
                                     kind: "artifact",
-                                    ref: "market_scan.summary",
-                                    name: "research_summary",
+                                    ref: "market_scan.research",
+                                    name: "research_artifact",
                                     what: "Pointer evidence used by the node under test.",
                                     why: "This context is required by the test scenario."
                                 }

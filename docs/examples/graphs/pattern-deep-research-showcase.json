@@ -43,8 +43,8 @@
         "intent": {
           "goal": "Recommend how Agentflow managed patterns should be used for research, review, and implementation work.",
           "acceptance_criteria": [
-            "The summary explains when to use deep research versus deep work.",
-            "The summary preserves findings, evidence, uncertainty, confidence, and next actions."
+            "The research artifact explains when to use deep research versus deep work.",
+            "The research artifact preserves findings, evidence, uncertainty, confidence, and next actions."
           ],
           "constraints": [
             "Do not change files during this research showcase.",
@@ -81,13 +81,13 @@
           "handoff": {
             "from": "output_dir",
             "path": "handoff.md",
-            "description": "Operator-facing summary of the managed deep research result."
+            "description": "Operator-facing handoff of the managed deep research result."
           }
         },
         "intent": {
           "goal": "Summarize the deep research result for a human operator and mention the command to inspect the compiled graph.",
           "acceptance_criteria": [
-            "The handoff cites the managed research summary and its linked angle evidence table.",
+            "The handoff cites the managed research artifact.",
             "The handoff includes concrete validation or inspection guidance."
           ],
           "constraints": []
@@ -99,9 +99,9 @@
         "support": {
           "context": [
             {
-              "ref": "managed_patterns_research.summary",
-              "name": "research_summary",
-              "what": "Artifact reference managed_patterns_research.summary.",
+              "ref": "managed_patterns_research.research",
+              "name": "managed_research",
+              "what": "Artifact reference managed_patterns_research.research.",
               "why": "Needed to complete this node intent.",
               "kind": "artifact"
             }

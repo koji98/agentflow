@@ -16,9 +16,9 @@ Good for:
 
 Angles should be controlling axes, not generic subtopics. Good angles name the assigned lens and evidence boundary, such as product contract, privacy/access contract, API convention fit, UI workflow rehearsal, correctness findings, code-quality findings, or risk register.
 
-Graph-addressable output is always `summary`. That summary is the complete research handoff, not a high-level abstract. Raw angle reports remain run-tree evidence and may conflict; the final publisher owns the graph-addressable contract by rewriting them into one coherent, sufficiently detailed answer. After the publisher writes it, Agentflow deterministically prepends a table of every raw angle report path so downstream nodes can progressively disclose source evidence when needed. Synthesis reports are internal working notes for the publisher, not downstream evidence links. There is no public `packet` artifact for deep research.
+Graph-addressable output is always `research`, written at `research.md`. That report is the complete research handoff, not a high-level abstract. Raw angle reports remain internal run evidence and may conflict; the final publisher owns the graph-addressable contract by rewriting them into one coherent, sufficiently detailed answer. Synthesis reports are internal working notes for the publisher, not downstream evidence links. There is no public `packet` artifact for deep research.
 
-Angle and synthesis workers may reference related findings in prose, but they should not create cross-angle links. The runtime-owned summary evidence table is the only raw angle link surface.
+Angle and synthesis workers may reference related findings in prose, but they should not create cross-angle links or companion public files. If a detail matters downstream, it belongs in `research.md`.
 
 Deep-research helpers should be authored as evidence gatherers, not workspace mutators. They may inspect repo files and run local checks, but they should not create scratch report files or source edits in the repo; the runtime treats workspace mutations from deep-research helpers as workspace pollution.
 

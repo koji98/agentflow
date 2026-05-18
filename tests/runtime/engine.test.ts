@@ -108,8 +108,8 @@ function createHarness(kind: HarnessAdapter["kind"], run: HarnessAdapter["run"],
     };
 }
 describe("runtime engine", () => {
-    it("publishes deep research summary while keeping raw angle reports as linked run evidence", async () => {
-        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-research-summary-evidence-"));
+    it("publishes one deep research artifact while keeping raw angle reports internal", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-research-artifact-evidence-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
         await mkdir(repoDir, { recursive: true });
@@ -174,7 +174,7 @@ describe("runtime engine", () => {
                         await writeFile(join(outputDir, "angle-report.md"), "RAW CONTRACT ANGLE REPORT\nangle_02\nfindings, evidence, sources, conflicts, uncertainty, and confidence for the contract angle.\n");
                     }
                     else if (node.authored_id === "market_scan") {
-                        await writeFile(join(outputDir, "summary.md"), "Synthesized summary.\n");
+                        await writeFile(join(outputDir, "research.md"), "Complete synthesized research.\n");
                     }
                     const result = {
                         status: "passed",
@@ -190,16 +190,15 @@ describe("runtime engine", () => {
         });
         const finalAttempt = run.attempts.find((attempt) => attempt.authored_id === "market_scan");
         expect(run.outcome).toBe("passed");
-        expect(Object.keys(finalAttempt?.artifacts ?? {}).sort()).toEqual(["agent_response", "summary"]);
-        const summary = await readFile(finalAttempt!.artifacts.summary!, "utf8");
-        expect(summary).toContain("## Research Evidence");
-        expect(summary).toContain("| `risk` | Identify correctness, maintainability, and rollout risks in the managed pattern design.");
-        expect(summary).toContain("Synthesized summary.");
+        expect(Object.keys(finalAttempt?.artifacts ?? {}).sort()).toEqual(["agent_response", "research"]);
+        const research = await readFile(finalAttempt!.artifacts.research!, "utf8");
+        expect(research).toContain("Complete synthesized research.");
         const rawAngleAttempt = run.attempts.find((attempt) => attempt.authored_id.endsWith("__angle_01"));
         expect(rawAngleAttempt?.artifacts.angle_report_01).toBeDefined();
         await expect(readFile(rawAngleAttempt!.artifacts.angle_report_01!, "utf8")).resolves.toBe(rawRiskReport);
-        expect(summary).toContain(rawAngleAttempt!.artifacts.angle_report_01!);
-        expect(summary).not.toContain("synthesis_report");
+        expect(research).not.toContain("## Research Evidence");
+        expect(research).not.toContain(rawAngleAttempt!.artifacts.angle_report_01!);
+        expect(research).not.toContain("synthesis_report");
         const finalContext = await readFile(join(finalAttempt!.execution_dir, "agent", "context.md"), "utf8");
         expect(finalContext).toContain("angle_01_report");
         expect(finalContext).toContain(rawAngleAttempt!.artifacts.angle_report_01!);
@@ -213,8 +212,8 @@ describe("runtime engine", () => {
         };
         expect(manifest.artifact_taxonomy.declared_artifacts).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                label: "market_scan.summary",
-                path: finalAttempt!.artifacts.summary
+                label: "market_scan.research",
+                path: finalAttempt!.artifacts.research
             })
         ]));
         expect(manifest.artifact_taxonomy.declared_artifacts).not.toEqual(expect.arrayContaining([
@@ -281,7 +280,7 @@ describe("runtime engine", () => {
                         await writeFile(join(outputDir, "angle-report.md"), "real report\n");
                     }
                     else if (node.authored_id === "polluting_research") {
-                        await writeFile(join(outputDir, "summary.md"), "summary\n");
+                        await writeFile(join(outputDir, "research.md"), "research\n");
                     }
                     const result = {
                         status: "passed",

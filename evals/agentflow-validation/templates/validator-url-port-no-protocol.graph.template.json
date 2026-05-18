@@ -94,7 +94,7 @@
           "goal": "Research the local validator.js fixture and determine the smallest source change for protocol-less hostnames with ports.",
           "acceptance_criteria": [
             "The research names the target function, edge cases, local tests, and implementation constraints.",
-            "The summary preserves evidence paths and uncertainty."
+            "The research artifact preserves evidence paths and uncertainty."
           ],
           "constraints": [
             "Use only local fixture files and provided context.",
@@ -174,10 +174,10 @@
               "why": "It defines the implementation contract."
             },
             {
-              "name": "research_summary",
+              "name": "research_artifact",
               "kind": "artifact",
-              "ref": "url_research.summary",
-              "what": "Deep research summary from the prior node.",
+              "ref": "url_research.research",
+              "what": "Deep research artifact from the prior node.",
               "why": "It narrows the implementation surface and validation plan."
             },
             {

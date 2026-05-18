@@ -2399,7 +2399,7 @@ function normalizePatternDeepResearchNode(
 
   const base = normalizeExecutableBase(record, path, diagnostics, {
     allow_artifacts: false,
-    artifacts_disallowed_message: "pattern_deep_research publishes only the summary artifact; raw angle reports are linked from the summary, and synthesis reports remain internal run evidence.",
+    artifacts_disallowed_message: "pattern_deep_research publishes only the research artifact; raw angle and synthesis reports remain internal run evidence.",
     runtime_extra_keys: ["max_concurrency"]
   });
   const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
