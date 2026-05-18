@@ -171,6 +171,20 @@ const classification: FailureClassification = {
         deterministic_check_failed: true
     }
 };
+const verificationSubstrateClassification: FailureClassification = {
+    class: "diagnostic_needed",
+    summary: "AI check harness crashed before producing a verdict.",
+    retryable: true,
+    recommended_action: "run_diagnostic",
+    gather_plan: {
+        max_parallel: 1,
+        gathers: []
+    },
+    evidence: {
+        failure_code: "verification_substrate_failure",
+        verification_substrate_failure: true
+    }
+};
 const semanticClassification: FailureClassification = {
     class: "semantic_misalignment",
     summary: "Outcome verification rejected the shipping node because validation evidence was incomplete.",
@@ -200,6 +214,36 @@ const completionClassification: FailureClassification = {
     }
 };
 describe("supervisor causal context", () => {
+    it("keeps verification substrate failures local to the failed check", () => {
+        const attempts = createAttemptRegistry();
+        attempts.by_compiled_id.set("validate", [failedCheckAttempt]);
+        const topology = buildSchedulerTopology(graph);
+        const context = buildSupervisorCausalContext({
+            graph,
+            topology,
+            attempts,
+            nodeStatuses: new Map([
+                ["implement", "passed"],
+                ["validate", "failed"]
+            ]),
+            symptomNode: validateNode,
+            symptomAttempt: failedCheckAttempt,
+            classification: verificationSubstrateClassification,
+            repeatedFingerprintCount: 1
+        });
+        expect(context.selected_target).toEqual(expect.objectContaining({
+            operation: "rerun_verification",
+            target_compiled_id: "validate",
+            symptom_compiled_id: "validate",
+            confidence: "high"
+        }));
+        expect(context.target_candidates).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                operation: "repair_upstream_node",
+                target_compiled_id: "implement"
+            })
+        ]));
+    });
     it("treats a failed check as a symptom and targets the nearest upstream worker", () => {
         const attempts = createAttemptRegistry();
         attempts.by_compiled_id.set("validate", [failedCheckAttempt]);

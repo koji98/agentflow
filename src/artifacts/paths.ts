@@ -265,6 +265,10 @@ export function resolveExecutionAgentResponsePath(executionDir: string): string 
   return join(resolveExecutionAgentDirectory(executionDir), "response.md");
 }
 
+export function resolveExecutionAgentAttemptMemoryPath(executionDir: string): string {
+  return join(resolveExecutionAgentDirectory(executionDir), "attempt-memory.md");
+}
+
 export function resolveExecutionAgentRecoveryBriefPath(executionDir: string): string {
   return join(resolveExecutionAgentDirectory(executionDir), "supervisor-recovery.md");
 }
@@ -283,6 +287,10 @@ export function resolveExecutionRuntimeResultPath(executionDir: string): string 
 
 export function resolveExecutionRuntimeCompletionPacketPath(executionDir: string): string {
   return join(resolveExecutionRuntimeDirectory(executionDir), "completion-packet.json");
+}
+
+export function resolveExecutionRuntimeAttemptMemoryPath(executionDir: string): string {
+  return join(resolveExecutionRuntimeDirectory(executionDir), "attempt-memory.json");
 }
 
 export function resolveExecutionRuntimeContextPath(executionDir: string): string {

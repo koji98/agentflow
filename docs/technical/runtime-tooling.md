@@ -33,6 +33,7 @@ The harness prompt includes:
 - managed plugin tools table for node-granted tools
 - ambient CLI hints table for normal shell commands
 - validation and final handoff expectations
+- retry orientation and attempt memory when the node is a supervisor-scheduled retry
 
 The harness environment includes:
 
@@ -185,7 +186,7 @@ flowchart LR
 
 Common commands:
 
-- `af orient`: print the compact current-node operating picture, including success contract, workspace boundary, context pointers, runtime state, declared artifacts, support summary, and current milestones.
+- `af orient`: print the compact current-node operating picture, including success contract, workspace boundary, context pointers, runtime state, declared artifacts, support summary, and current milestones. On retries it starts with retry orientation and runtime-authored attempt memory: prior symptom, resume point, workspace decision, preserved progress, required next action, and do-not-redo guidance.
 - `af milestone add --title <text> --goal <text>`: declare a meaningful phase of work after orientation, including a planning/research milestone when discovery is substantial.
 - `af milestone log <id> --kind finding|decision|validation --summary <text>`: attach audit evidence to a milestone. Validation logs also include `--command` and `--result pass|fail|blocked`.
 - `af milestone complete <id> --evidence <text>` or `af milestone block <id> --blocked-on <text> --recoverable-by <text> --evidence <text>`: close the milestone with evidence or record a true external blocker.

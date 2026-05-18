@@ -56,6 +56,7 @@ interface ResearchMaterial {
   nodeId: string;
   reportArtifact: string;
   contextPrefix: string;
+  sourceAngles: string[];
   what?: string;
   why?: string;
 }
@@ -89,6 +90,10 @@ function balancedGroups<T>(items: T[], maxGroupSize = 3): T[][] {
   }
 
   return groups;
+}
+
+function sourceAngleSummary(materials: ResearchMaterial[]): string {
+  return [...new Set(materials.flatMap((material) => material.sourceAngles))].join("; ");
 }
 
 function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepResearchAngle, index: number): string {
@@ -264,6 +269,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       nodeId: workflowNodeId(config.id, `angle_${suffix}`),
       reportArtifact: `angle_report_${suffix}`,
       contextPrefix: `angle_${suffix}`,
+      sourceAngles: [`${angle.id}: ${angle.prompt}`],
       what: `Raw report for deep research angle \`${angle.id}\`: ${angle.prompt}`,
       why: "The final research artifact must use this raw angle evidence and rewrite it into the conflict-resolved synthesis."
     };
@@ -314,12 +320,14 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
 
     materials = synthesisNodes.map((node, index) => {
       const suffix = `${zeroPad(layer)}_${zeroPad(index + 1)}`;
+      const groupMaterials = groups[index] ?? [];
 
       return {
         nodeId: node.id,
         reportArtifact: `synthesis_report_${suffix}`,
         contextPrefix: `synthesis_${suffix}`,
-        what: `Synthesis report ${suffix} from the managed deep research workflow.`,
+        sourceAngles: [...new Set(groupMaterials.flatMap((material) => material.sourceAngles))],
+        what: `Synthesis report ${suffix} synthesized ${sourceAngleSummary(groupMaterials)}.`,
         why: "The final research artifact uses synthesis evidence to resolve conflicts and preserve major findings."
       };
     });

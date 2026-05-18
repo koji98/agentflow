@@ -379,6 +379,21 @@ function classifyRuntimeFailureCode(input: {
         ]),
         evidence
       });
+    case "verification_substrate_failure":
+      return classifyResult({
+        class: "diagnostic_needed",
+        summary: input.message || "Verification failed before it could produce a trusted verdict.",
+        retryable: true,
+        recommended_action: "run_diagnostic",
+        gather_plan: gatherPlan([
+          gather("diagnostic_probe", "Inspect the verification substrate failure and rerun only the failed verification when possible.", 1),
+          gather("local_context", "Collect the verifier/check contract and current artifact state without rerunning completed worker progress.", 2)
+        ]),
+        evidence: {
+          ...evidence,
+          verification_substrate_failure: true
+        }
+      });
     case "missing_plugin_credential":
       return classifyResult({
         class: "harness_unavailable",

@@ -521,6 +521,26 @@ function buildEventSummary(
           ? String(payload.summary ?? "Soft verification passed.")
           : String(payload.summary ?? "Soft verification failed.")
       };
+    case "verification.started":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Verification started (${String(payload.check_kind ?? payload.verifier_kind ?? "verification")}).`
+      };
+    case "verification.retry":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Verification retry${payload.attempt !== undefined ? ` ${String(payload.attempt)}` : ""}: ${String(payload.summary ?? payload.check_kind ?? payload.verifier_kind ?? "verification")}.`
+      };
+    case "verification.completed":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: payload.passed === false
+          ? String(payload.summary ?? "Verification failed.")
+          : String(payload.summary ?? "Verification completed.")
+      };
     case "outcome.verified":
       return {
         ...(authored_id ? { authored_id } : {}),

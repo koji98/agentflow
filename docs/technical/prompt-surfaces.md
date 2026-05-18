@@ -8,18 +8,19 @@ Prompt sections should appear in this order when applicable:
 
 1. `Role`
 2. `Success Contract`
-3. `Contract Priority`
-4. `Workspace`
-5. `Working Loop`
-6. `Supervisor Recovery Case`
-7. `Graph Context`
-8. `Context`
-9. `Optional Skills`
-10. `Ambient CLI Hints`
-11. `Managed Plugin Tools`
-12. `Agentflow Runtime CLI`
-13. `Declared Artifacts`
-14. `Completion Gate`
+3. `Supervisor Recovery Case` on retries
+4. `Attempt Memory` on retries
+5. `Contract Priority`
+6. `Workspace`
+7. `Working Loop`
+8. `Graph Context`
+9. `Context`
+10. `Optional Skills`
+11. `Ambient CLI Hints`
+12. `Managed Plugin Tools`
+13. `Agentflow Runtime CLI`
+14. `Declared Artifacts`
+15. `Completion Gate`
 
 Role text is useful only when it changes authority, scope, output contract, or evaluation responsibility. Avoid generic persona adjectives unless a prompt-regression eval proves the wording is load-bearing.
 
@@ -32,7 +33,8 @@ Role text is useful only when it changes authority, scope, output contract, or e
 | AI check | `src/runtime/harness/types.ts` | `ai_check` | Read-only check node; no workspace mutation. | check intent, graph context, agent context brief, output schema | JSON only | `tests/runtime/harness_prompt.test.ts`, runtime check tests |
 | Supervisor evidence gatherer | `src/runtime/harness/types.ts` | `supervisor_evidence` | Read-only evidence for a failed attempt; cannot rewrite graph intent. | case file, gather kind, evidence output path, instructions | JSON evidence patch | supervisor recovery tests |
 | Fixed supervisor helper | `src/af/index.ts` | `_helper-run` | Read-only bounded helper; no source edits, service mutation, plugin tools, or human-pause decisions. | helper role, brief, case/evidence pointers, parent context manifest, required artifact | Markdown helper artifact | `tests/af/cli.test.ts` |
-| Supervisor recovery brief | `src/runtime/harness/types.ts` | agent block | Additive retry evidence; original node contract remains binding. | failure symptom, selected action, material delta, retry directive, evidence pointers, validation focus | changed tactics inside unchanged task | `tests/runtime/harness_prompt.test.ts`, supervisor tests |
+| Supervisor recovery brief | `src/runtime/harness/types.ts` | agent block | Additive retry evidence; original node contract remains binding. | failure symptom, resume point, workspace decision, material delta, required next action, evidence pointers, validation focus | changed tactics inside unchanged task | `tests/runtime/harness_prompt.test.ts`, supervisor tests |
+| Attempt memory | `src/runtime/attempt_memory.ts` + `src/runtime/harness/types.ts` | retry prompt block | Runtime-authored memory only; evidence for continuation, not new authority. | prior outcome, completed milestones, unfinished work, artifact state, validation evidence, workspace changes, do-not-redo | continue from selected resume point without redoing safe prior progress | `tests/runtime/engine.test.ts`, `tests/af/cli.test.ts` |
 | Outcome verifier | `src/runtime/verification/prompt.ts` | verifier | Fresh read-only audit after mechanical completion. | graph/node intent, completion packet, artifacts, milestone evidence, command evidence, diff metadata | one fenced JSON verdict | `tests/runtime/verification/prompt.test.ts`, verifier eval scenarios |
 | Runtime CLI block | `src/runtime/harness/types.ts` | prompt block | Normal worker correctness loop only. | granted runtime metadata and current command contract | correct `af` usage, milestone evidence, completion packet | harness prompt tests, prompt-regression trajectory checks |
 | Plugin tool block | `src/runtime/harness/types.ts` | prompt block | Select granted plugin CLIs only when useful. | resolved plugin tools, descriptions, usage reminder | tool calls with `--help` just in time | tool tests, prompt-regression tool discipline |
@@ -58,6 +60,8 @@ Role text is useful only when it changes authority, scope, output contract, or e
 - Agent claims validation without command/tool evidence.
 - Agent records milestone evidence before verifying the claim.
 - Agent uses recovery commands as a normal worker.
+- Retry prompt causes a fresh rerun instead of continuing from attempt memory.
+- Verification substrate failure reruns a completed worker instead of retrying verification locally.
 - Agent follows stale context over authored contract or provenance.
 - Verifier marks an inlined artifact missing because a side-channel search is incomplete.
 - Managed publisher claims beyond passing scorecard evidence.

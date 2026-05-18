@@ -266,6 +266,16 @@ describe("af runtime CLI", () => {
             completion_status: "ready_for_verification",
             ready_for_verification: true
         }));
+        await expect(withStdin("late rewrite\n", () => executeAfCli(["artifact", "write", "handoff"])))
+            .rejects.toThrow("cannot run after af complete check reported ready_for_verification");
+        await expect(executeAfCli([
+            "milestone",
+            "add",
+            "--title",
+            "Late milestone",
+            "--goal",
+            "This should not mutate state after completion is ready."
+        ])).rejects.toThrow("cannot run after af complete check reported ready_for_verification");
         await appendOperatorObservation(runtime.root, createOperatorObservation({
             runId: "run-test",
             author: "human",
@@ -446,6 +456,97 @@ describe("af runtime CLI", () => {
             await rm(brokerDir, { recursive: true, force: true });
         }
     });
+    it("renders retry orientation from structured attempt memory without debug leakage", async () => {
+        const executionDir = join(tempRoot, "run", "executions/main");
+        const attemptMemoryPath = join(executionDir, "runtime/attempt-memory.json");
+        const attemptMemoryMarkdownPath = join(executionDir, "agent/attempt-memory.md");
+        const runtime = await createRuntime(tempRoot, undefined, {
+            supervisor_recovery_envelope: {
+                envelope_id: "recovery-1",
+                compiled_id: "main",
+                authored_id: "main",
+                prior_execution_id: "exec-previous",
+                recovery_plan_path: join(executionDir, "runtime/supervisor/recovery-plan.json"),
+                case_file_path: join(executionDir, "runtime/supervisor/case-file.json"),
+                action: "retry_node",
+                classification: "artifact_contract_failure",
+                failure_fingerprint: "fingerprint",
+                repeated_fingerprint_count: 1,
+                resume_point: "repair_artifacts",
+                workspace_decision: "preserve",
+                preserve_progress: ["Prior implementation edits are in scope and should be preserved."],
+                do_not_redo: ["Do not rerun the entire implementation from scratch."],
+                required_next_action: "Repair the missing handoff artifact, then rerun completion.",
+                retry_directive: {
+                    summary: "The prior attempt completed the implementation but missed the handoff artifact.",
+                    must_do: ["Write the missing handoff artifact."],
+                    must_not_do: ["Do not rewrite validated source files."],
+                    evidence_to_read: ["agent/attempt-memory.md"],
+                    validation_focus: ["af complete check must pass."],
+                    unchanged_contract: {
+                        goal: true,
+                        acceptance_criteria: true,
+                        constraints: true,
+                        repo_authority: true,
+                        sandbox: true,
+                        declared_artifacts: true
+                    }
+                },
+                created_at: "2026-05-18T00:00:00.000Z"
+            },
+            attempt_memory_path: attemptMemoryPath,
+            attempt_memory_markdown_path: attemptMemoryMarkdownPath
+        });
+        await writeFile(attemptMemoryPath, `${JSON.stringify({
+            version: "1",
+            prior_execution_id: "exec-previous",
+            prior_outcome: "failed",
+            failure_summary: "Missing declared handoff artifact.",
+            resume_point: "repair_artifacts",
+            workspace_decision: "preserve",
+            required_next_action: "Repair the missing handoff artifact, then rerun completion.",
+            preserve_progress: ["Prior implementation edits are in scope and should be preserved."],
+            do_not_redo: ["Do not rerun the entire implementation from scratch."],
+            completed_milestones: ["m1: Implemented feature"],
+            unfinished_work: ["Publish handoff artifact"],
+            declared_artifact_state: [{
+                name: "handoff",
+                status: "missing",
+                description: "Durable handoff."
+            }],
+            validation_evidence: [{
+                command: "npm test",
+                result: "pass",
+                summary: "Tests passed before artifact publication failed."
+            }],
+            workspace_changes: {
+                decision: "preserve",
+                changed_files: ["src/feature.ts"],
+                preserved_files: ["src/feature.ts"],
+                reset_files: []
+            },
+            evidence_to_read: ["agent/attempt-memory.md"]
+        }, null, 2)}\n`, "utf8");
+        await writeFile(attemptMemoryMarkdownPath, "# Attempt Memory\n\nPrior implementation edits are in scope and should be preserved.\n", "utf8");
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        const orient = await executeAfCli(["orient"]);
+        expect(orient.exitCode).toBe(0);
+        expect(orient.stdout).toContain("## Retry Orientation");
+        expect(orient.stdout).toContain("Missing declared handoff artifact.");
+        expect(orient.stdout).toContain("repair_artifacts");
+        expect(orient.stdout).toContain("preserve");
+        expect(orient.stdout).toContain("Repair the missing handoff artifact, then rerun completion.");
+        expect(orient.stdout).toContain("Do not rerun the entire implementation from scratch.");
+        expect(orient.stdout).toContain("## Prior Attempt Memory");
+        expect(orient.stdout).toContain("m1: Implemented feature");
+        expect(orient.stdout).toContain("npm test");
+        expect(orient.stdout).not.toContain("human-debug");
+        expect(orient.stdout).not.toContain("provenance");
+        expect(orient.stdout).not.toContain("context.json");
+        expect(orient.stdout).not.toContain("case-file.json");
+        expect(orient.stdout).not.toContain("recovery-plan.json");
+        expect(orient.stdout).not.toContain("fingerprint");
+    });
     it("rejects broker artifact stdin paths outside the broker request directory", async () => {
         const runtime = await createRuntime(tempRoot);
         const brokerDir = await mkdtemp(join(tmpdir(), "agentflow-af-cli-broker-stdin-"));
@@ -599,6 +700,65 @@ describe("af runtime CLI", () => {
         await expect(readFile(join(runtime.root, "runtime", "milestones", "agent-main.json"), "utf8"))
             .resolves.toContain("Brokered milestone");
         await rm(brokerDir, { recursive: true, force: true });
+    });
+    it("preserves concurrent milestone logs and paired af tool logs", async () => {
+        const runtime = await createRuntime(tempRoot);
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        await expect(executeAfCli([
+            "milestone",
+            "add",
+            "--title",
+            "Concurrent evidence",
+            "--goal",
+            "Record adjacent finding and validation evidence without losing either log."
+        ])).resolves.toMatchObject({ exitCode: 0 });
+        const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+        try {
+            await Promise.all([
+                runAfCli([
+                    "milestone",
+                    "log",
+                    "m1",
+                    "--kind",
+                    "finding",
+                    "--summary",
+                    "The stale source is not authoritative."
+                ]),
+                runAfCli([
+                    "milestone",
+                    "log",
+                    "m1",
+                    "--kind",
+                    "validation",
+                    "--command",
+                    "node scripts/check.mjs",
+                    "--result",
+                    "pass",
+                    "--summary",
+                    "Validation passed."
+                ])
+            ]).then((results) => {
+                expect(results).toEqual([
+                    0,
+                    0
+                ]);
+            });
+        }
+        finally {
+            stdoutSpy.mockRestore();
+        }
+        const milestoneState = JSON.parse(await readFile(join(runtime.root, "runtime", "milestones", "agent-main.json"), "utf8")) as {
+            milestones: Array<{ logs: Array<{ log_id: string; kind: string }> }>;
+        };
+        expect(milestoneState.milestones[0]?.logs).toEqual([
+            expect.objectContaining({ log_id: "m1.l1" }),
+            expect.objectContaining({ log_id: "m1.l2" })
+        ]);
+        expect(milestoneState.milestones[0]?.logs.map((log) => log.kind).sort()).toEqual(["finding", "validation"]);
+        const toolIndex = (await readFile(runtime.toolInvocations, "utf8")).trim().split(/\r?\n/u);
+        const sidecarPaths = toolIndex.map((line) => JSON.parse(line) as { input_path: string; output_path: string });
+        expect(new Set(sidecarPaths.map((entry) => entry.input_path)).size).toBe(sidecarPaths.length);
+        expect(new Set(sidecarPaths.map((entry) => entry.output_path)).size).toBe(sidecarPaths.length);
     });
     it("exposes supervisor learn and diagnose helpers", async () => {
         const runtime = await createRuntime(tempRoot, undefined, { af_command_policy: "diagnostic" });

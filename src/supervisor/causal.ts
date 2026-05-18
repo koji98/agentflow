@@ -191,6 +191,9 @@ function makeTarget(options: {
 }
 
 function classifyCurrentNodeOperation(classification: FailureClassification): SupervisorRecoveryOperation {
+  if (classification.evidence.verification_substrate_failure === true) {
+    return "rerun_verification";
+  }
   if (classification.class === "graph_context_gap" || classification.class === "unprovable_requirement") {
     return "fail_contract_gap";
   }
@@ -220,7 +223,7 @@ function shouldConsiderArtifactProducer(options: {
   classification: FailureClassification;
 }): boolean {
   if (options.symptomNode.kind === "check") {
-    return true;
+    return options.classification.evidence.verification_substrate_failure !== true;
   }
 
   return options.classification.class === "artifact_contract_failure"
@@ -254,7 +257,7 @@ export function buildSupervisorCausalContext(options: {
     symptom: options.symptomNode,
     attempt: options.symptomAttempt,
     attempts: options.attempts,
-    confidence: currentOperation === "pause_for_authority" ? "high" : "medium",
+    confidence: currentOperation === "pause_for_authority" || currentOperation === "rerun_verification" ? "high" : "medium",
     reason: "The failed node remains a valid recovery target because it owns the immediate failed attempt.",
     evidence: [
       `Failure class: ${options.classification.class}`,
@@ -290,6 +293,7 @@ export function buildSupervisorCausalContext(options: {
   if (
     options.symptomNode.kind === "check"
     && !resultTimedOut(options.result)
+    && options.classification.evidence.verification_substrate_failure !== true
     && options.classification.class !== "policy_or_scope_risk"
   ) {
     const upstreamWorker = nearestUpstreamWorker(upstreamCone, options.topology);

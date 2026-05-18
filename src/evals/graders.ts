@@ -214,6 +214,7 @@ export async function runQualityCriterion(options: {
   scenario: EvalScenario;
   anonymized_variant_label: string;
   trial_id: string;
+  trial_root: string;
   run_root: string;
   trace_packet: EvalTracePacket;
   trace_packet_file: string;
@@ -283,15 +284,17 @@ export async function runQualityCriterion(options: {
     writeFile(
       contextManifestPath,
       [
-        "# Eval Quality Criterion Context",
-        "",
-        `- Criterion: ${options.criterion.id}`,
-        `- Scenario: ${options.scenario.id}`,
-        `- Variant label: ${options.anonymized_variant_label}`,
-        `- Trial: ${options.trial_id}`,
-        `- Run root: ${options.run_root}`,
-        `- Trace packet: ${options.trace_packet_file}`
-      ].join("\n"),
+      "# Eval Quality Criterion Context",
+      "",
+      `- Criterion: ${options.criterion.id}`,
+      `- Scenario: ${options.scenario.id}`,
+      `- Variant label: ${options.anonymized_variant_label}`,
+      `- Trial: ${options.trial_id}`,
+      `- Run root: ${options.run_root}`,
+      `- Trace packet: ${options.trace_packet_file}`,
+      "",
+      "The full trace packet is embedded in the context packet and the trial root is mounted read-only for local evidence inspection."
+    ].join("\n"),
       "utf8"
     )
   ]);
@@ -308,6 +311,7 @@ export async function runQualityCriterion(options: {
     node_goal: [
       "Grade this Agentflow workflow trial using only the referenced local files.",
       "Return strict JSON with passed_quality_bar, score, dimension_scores, blockers, rationale, and prompt_feedback.",
+      "The trace packet is embedded in the context packet and the trial root is available for inspecting run-root artifacts.",
       `Criterion: ${options.criterion.id}`,
       `Scenario: ${options.scenario.id}`,
       `Variant label: ${options.anonymized_variant_label}`,
@@ -330,6 +334,7 @@ export async function runQualityCriterion(options: {
     }),
     context_packet_path: contextPacketPath,
     context_manifest_path: contextManifestPath,
+    runtime_dir: options.trial_root,
     output_dir: options.output_dir,
     timeout_sec: options.criterion.timeout_sec ?? 900,
     signal: options.signal

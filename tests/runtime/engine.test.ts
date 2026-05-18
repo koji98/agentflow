@@ -10,6 +10,7 @@ import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js"
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import {
+    resolveExecutionAgentPromptPath,
     resolveExecutionArtifactsDirectory,
     resolveExecutionHumanDebugToolDirectory,
     resolveExecutionRuntimeDirectory,
@@ -3046,7 +3047,13 @@ describe("runtime engine", () => {
         expect(judgeAttempt?.result_path).toBeDefined();
         expect(JSON.parse(await readFile(judgeAttempt!.result_path!, "utf8"))).toEqual(expect.objectContaining({
             passed: false,
-            summary: expect.stringContaining("spawnSync codex ETIMEDOUT")
+            summary: expect.stringContaining("spawnSync codex ETIMEDOUT"),
+            metadata: expect.objectContaining({
+                failure_code: "verification_substrate_failure"
+            })
+        }));
+        expect(judgeAttempt?.metadata).toEqual(expect.objectContaining({
+            failure_code: "verification_substrate_failure"
         }));
         expect(run.events).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -3643,6 +3650,12 @@ describe("runtime engine", () => {
         expect(evidenceInvocations.length).toBeGreaterThan(0);
         const secondPrompt = renderHarnessPrompt(nodeInvocations[1]!);
         expect(secondPrompt).toContain("## Supervisor Recovery Case");
+        expect(secondPrompt).toContain("## Attempt Memory");
+        expect(nodeInvocations[1]!.attemptMemoryMarkdown).toContain("# Attempt Memory");
+        expect(nodeInvocations[1]!.attemptMemoryPath).toContain("attempt-memory.json");
+        expect(nodeInvocations[1]!.attemptMemoryMarkdownPath).toContain("attempt-memory.md");
+        await expect(readFile(nodeInvocations[1]!.attemptMemoryPath!, "utf8")).resolves.toContain("prior_execution_id");
+        await expect(readFile(nodeInvocations[1]!.attemptMemoryMarkdownPath!, "utf8")).resolves.toContain("Resume point");
         expect(secondPrompt).toContain("## Success Contract (Original Authored Node Task)");
         expect(secondPrompt.indexOf("## Supervisor Recovery Case")).toBeLessThan(secondPrompt.indexOf("## Graph Context"));
         expect(secondPrompt).toContain("Preserve the original node intent, sandbox, repo authority, and declared artifacts.");
@@ -4184,6 +4197,9 @@ describe("runtime engine", () => {
         const aiPrompt = renderHarnessPrompt(invocations[0]!);
         expect(aiPrompt).toContain("Rubric:");
         expect(aiPrompt).toContain("Return JSON with pass/fail and issues.");
+        expect(judgeAttempt?.prompt_path).toBe(resolveExecutionAgentPromptPath(judgeAttempt!.execution_dir));
+        expect(judgeAttempt?.prompt_sha256).toMatch(/^[a-f0-9]{64}$/u);
+        await expect(readFile(judgeAttempt!.prompt_path!, "utf8")).resolves.toContain("You are an AI evaluator executing one read-only check node");
         expect(JSON.parse(await readFile(judgeAttempt!.result_path!, "utf8"))).toEqual(expect.objectContaining({
             soft_verification: true,
             verifier_kind: "check",

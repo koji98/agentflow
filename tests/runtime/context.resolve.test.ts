@@ -174,11 +174,21 @@ describe("context resolution", () => {
             classification: "missing_context",
             failure_fingerprint: "fingerprint-1",
             repeated_fingerprint_count: 1,
+            resume_point: "continue_from_prior_progress",
+            workspace_decision: "preserve",
+            preserve_progress: ["The prior context discovery remains useful evidence."],
+            do_not_redo: ["Do not change the node contract."],
+            required_next_action: "Read the rebuilt local agent context brief first.",
             retry_directive: {
                 summary: "The retry needs recovered local context before the authored material.",
                 must_do: ["Read the rebuilt local agent context brief first."],
                 must_not_do: ["Do not change the node contract."],
-                evidence_to_read: [join(tempRoot, "evidence-patch.md")],
+                evidence_to_read: [
+                    join(tempRoot, "human-debug", "interventions", "evidence-patch.md"),
+                    join(tempRoot, "runtime", "context.json"),
+                    join(tempRoot, "agent", "context.md"),
+                    join(tempRoot, "artifacts", "prior-handoff.md")
+                ],
                 validation_focus: ["Confirm the source file is used."],
                 unchanged_contract: {
                     goal: true,
@@ -211,7 +221,13 @@ describe("context resolution", () => {
             name: "supervisor_recovery_envelope",
             from: "runtime_supervisor_recovery"
         }));
-        await expect(readFile(resolved.packet.materials[0]!.pointer_path, "utf8")).resolves.toContain("The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.");
+        const recoveryBrief = await readFile(resolved.packet.materials[0]!.pointer_path, "utf8");
+        expect(recoveryBrief).toContain("The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.");
+        expect(recoveryBrief).toContain(join(tempRoot, "artifacts", "prior-handoff.md"));
+        expect(recoveryBrief).not.toContain("human-debug");
+        expect(recoveryBrief).not.toContain("runtime/context.json");
+        expect(recoveryBrief).not.toContain("agent/context.md");
+        expect(recoveryBrief).not.toContain("evidence-patch.md");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("materializes workspace context and upstream artifacts into runtime context state", async () => {

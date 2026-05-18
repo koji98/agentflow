@@ -124,6 +124,8 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("treat that artifact as present; do not claim it is missing");
     expect(prompt).toContain("Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section");
     expect(prompt).toContain("defer to the Completion Packet artifact findings");
+    expect(prompt).toContain("judge the material observed values");
+    expect(prompt).toContain("different line breaks, bullets, punctuation, or prose wrapping");
   });
 
   it("renders completion packet facts before artifact snippets", () => {

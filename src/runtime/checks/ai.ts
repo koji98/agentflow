@@ -1,10 +1,17 @@
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 import type { CliHint } from "../../graph/authored.js";
 import type { ResolvedSkill } from "../../graph/compiled.js";
 import type { EffectiveHarnessConfig } from "../../graph/profiles.js";
 import type { ReasoningEffort } from "../../graph/schema.js";
-import type { HarnessAdapter, HarnessResult } from "../harness/types.js";
+import {
+  renderHarnessPrompt,
+  type AgentInvocation,
+  type HarnessAdapter,
+  type HarnessResult
+} from "../harness/types.js";
 
 export interface AiCheckResult {
   passed: boolean;
@@ -35,6 +42,9 @@ export interface RunAiCheckInvocation {
   output_schema?: string;
   context_packet_path: string;
   context_manifest_path: string;
+  context_manifest?: string;
+  prompt_path?: string;
+  runtime_dir?: string;
   output_dir: string;
   skills?: ResolvedSkill[];
   cli?: CliHint[];
@@ -47,6 +57,7 @@ export interface RunAiCheckInvocation {
 export interface RunAiCheckResult {
   harness_result: HarnessResult;
   evaluation: AiCheckResult;
+  prompt_sha256?: string;
 }
 
 function errorMessage(error: unknown): string {
@@ -200,7 +211,8 @@ export async function runAiCheck(
         exitCode: 1,
         stderr: message,
         metadata: {
-          error: message
+          error: message,
+          failure_code: "verification_substrate_failure"
         }
       },
       evaluation: createHarnessFailureResult(message)
@@ -208,10 +220,11 @@ export async function runAiCheck(
   }
 
   let harness_result: HarnessResult;
-  const contextManifest = await readContextManifest(invocation.context_manifest_path);
+  const contextManifest = invocation.context_manifest ?? await readContextManifest(invocation.context_manifest_path);
+  let promptSha256: string | undefined;
 
   try {
-    harness_result = await invocation.harness.run({
+    const harnessInvocation: AgentInvocation = {
       promptKind: "ai_check",
       runId: invocation.run_id,
       executionId: invocation.execution_id,
@@ -238,6 +251,7 @@ export async function runAiCheck(
       contextPacketPath: invocation.context_packet_path,
       contextManifestPath: invocation.context_manifest_path,
       contextManifest,
+      ...(invocation.runtime_dir ? { runtimeDir: invocation.runtime_dir } : {}),
       outputDir: invocation.output_dir,
       artifacts: {},
       ...(invocation.skills ? { skills: invocation.skills } : {}),
@@ -245,8 +259,18 @@ export async function runAiCheck(
       timeoutSec: invocation.timeout_sec,
       signal: invocation.signal,
       ...(invocation.on_stdout_chunk ? { onStdoutChunk: invocation.on_stdout_chunk } : {}),
-      ...(invocation.on_stderr_chunk ? { onStderrChunk: invocation.on_stderr_chunk } : {})
-    });
+      ...(invocation.on_stderr_chunk ? { onStderrChunk: invocation.on_stderr_chunk } : {}),
+      ...(invocation.prompt_path ? { promptPath: invocation.prompt_path } : {})
+    };
+
+    if (invocation.prompt_path) {
+      const renderedPrompt = renderHarnessPrompt(harnessInvocation);
+      await mkdir(dirname(invocation.prompt_path), { recursive: true });
+      await writeFile(invocation.prompt_path, `${renderedPrompt}\n`, "utf8");
+      promptSha256 = createHash("sha256").update(`${renderedPrompt}\n`).digest("hex");
+    }
+
+    harness_result = await invocation.harness.run(harnessInvocation);
   } catch (error) {
     const message = errorMessage(error);
     const canceled = invocation.signal?.aborted ?? false;
@@ -257,14 +281,16 @@ export async function runAiCheck(
         exitCode: 1,
         ...(canceled ? {} : { stderr: message }),
         metadata: {
-          error: message
+          error: message,
+          failure_code: "verification_substrate_failure"
         }
       },
       evaluation: createHarnessFailureResult(
         canceled
           ? "AI check canceled before completion."
           : `AI check harness failed: ${message}`
-      )
+      ),
+      ...(promptSha256 ? { prompt_sha256: promptSha256 } : {})
     };
   }
 
@@ -281,6 +307,7 @@ export async function runAiCheck(
 
   return {
     harness_result,
-    evaluation
+    evaluation,
+    ...(promptSha256 ? { prompt_sha256: promptSha256 } : {})
   };
 }

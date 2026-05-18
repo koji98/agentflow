@@ -16,6 +16,9 @@ export const runtimeEventTypes = [
   "supervisor.gate_rerun_scheduled",
   "supervisor.paused",
   "check.evaluated",
+  "verification.started",
+  "verification.retry",
+  "verification.completed",
   "verification.recorded",
   "outcome.verified",
   "node.completed",
@@ -79,6 +82,14 @@ export interface VerificationRecordedPayload {
   summary: string;
   check_kind?: "deterministic" | "ai";
   exit_code?: number;
+}
+
+export interface VerificationPhasePayload {
+  verifier_kind: "exec" | "check" | "outcome";
+  passed?: boolean;
+  summary?: string;
+  check_kind?: "deterministic" | "ai";
+  attempt?: number;
 }
 
 export interface OutcomeVerifiedPayload {

@@ -58,7 +58,7 @@ export type SupervisorRecoveryOperation =
   | "repair_validation_strategy"
   | "repair_workspace"
   | "repair_environment"
-  | "rerun_check"
+  | "rerun_verification"
   | "investigate_causal_cone"
   | "pause_for_authority"
   | "fail_contract_gap";
@@ -200,11 +200,26 @@ export type SupervisorApplyAction =
   | "repair_validation_strategy"
   | "repair_workspace"
   | "repair_environment"
-  | "rerun_check"
+  | "rerun_verification"
   | "retry_with_evidence"
   | "pause_for_authority"
   | "fail_terminal"
   | "fail_contract_gap";
+
+export type SupervisorResumePoint =
+  | "continue_from_prior_progress"
+  | "continue_from_milestone"
+  | "repair_artifacts"
+  | "rerun_verification"
+  | "repair_validation_strategy"
+  | "repair_workspace"
+  | "fresh_retry"
+  | "fail_contract_gap";
+
+export type SupervisorWorkspaceDecision =
+  | "preserve"
+  | "reset"
+  | "partial_cleanup";
 
 export type SupervisorRequirementEvidenceStatus =
   | "available"
@@ -362,6 +377,11 @@ export interface SupervisorRecoveryEnvelope {
   classification: FailureClass;
   failure_fingerprint: string;
   repeated_fingerprint_count: number;
+  resume_point: SupervisorResumePoint;
+  workspace_decision: SupervisorWorkspaceDecision;
+  preserve_progress: string[];
+  do_not_redo: string[];
+  required_next_action: string;
   retry_directive: {
     summary: string;
     must_do: string[];

@@ -287,7 +287,7 @@ function patchGuidance(kind: SupervisorEvidenceGatherKind, caseFile: SupervisorC
       ];
     default:
       return [
-        "Read the supervisor recovery brief and cited evidence patches before retrying.",
+        "Read the supervisor recovery brief and current artifact state before retrying.",
         "Preserve the original node intent, sandbox, repo authority, and declared artifacts.",
         ...promptGuidance
       ];
@@ -703,11 +703,14 @@ function selectApplyAction(options: {
   if (operation === "repair_environment") {
     return "repair_environment";
   }
-  if (operation === "rerun_check") {
-    return "rerun_check";
+  if (operation === "rerun_verification") {
+    return "rerun_verification";
   }
   if (operation === "fail_contract_gap") {
     return "fail_contract_gap";
+  }
+  if (options.classification.evidence.verification_substrate_failure === true) {
+    return "rerun_verification";
   }
   const repeated = options.caseFile ? options.caseFile.repeated_fingerprint_count >= 2 : false;
   const hasActionableEvidenceMap = options.requirementEvidenceMap
@@ -765,9 +768,72 @@ function retryableApplyAction(action: SupervisorRecoveryPlan["apply_action"]): b
     "repair_validation_strategy",
     "repair_workspace",
     "repair_environment",
-    "rerun_check",
+    "rerun_verification",
     "retry_with_evidence"
   ].includes(action);
+}
+
+function resumePointForRecoveryPlan(plan: SupervisorRecoveryPlan): SupervisorRecoveryEnvelope["resume_point"] {
+  switch (plan.apply_action) {
+    case "repair_artifact":
+      return "repair_artifacts";
+    case "repair_validation_strategy":
+      return "repair_validation_strategy";
+    case "repair_workspace":
+      return "repair_workspace";
+    case "rerun_verification":
+      return "rerun_verification";
+    case "fail_contract_gap":
+    case "fail_terminal":
+      return "fail_contract_gap";
+    case "retry_with_evidence":
+    case "retry_node":
+    case "repair_context":
+    case "repair_evidence_context":
+    case "repair_environment":
+      return plan.recovery_target?.target_prior_execution_id
+        ? "continue_from_prior_progress"
+        : "fresh_retry";
+    case "pause_for_authority":
+      return "fail_contract_gap";
+  }
+}
+
+function workspaceDecisionForRecoveryPlan(plan: SupervisorRecoveryPlan): SupervisorRecoveryEnvelope["workspace_decision"] {
+  if (plan.apply_action === "repair_workspace") {
+    return "partial_cleanup";
+  }
+
+  return "preserve";
+}
+
+function preserveProgressForRecoveryPlan(plan: SupervisorRecoveryPlan): string[] {
+  const items = [
+    plan.recovery_target?.target_prior_execution_id
+      ? `Preserve in-scope progress and declared artifacts from prior execution ${plan.recovery_target.target_prior_execution_id} unless the recovery brief identifies them as unsafe.`
+      : "No useful prior execution progress was identified for this target.",
+    ...(plan.runtime_overlay?.material_delta ?? []).map((delta) => `Runtime delta: ${delta.summary}`)
+  ];
+
+  return [...new Set(items.filter((item) => item.trim().length > 0))].slice(0, 8);
+}
+
+function requiredNextActionForRecoveryPlan(plan: SupervisorRecoveryPlan): string {
+  return plan.retry_directive?.must_do[0]
+    ?? plan.repair_directive?.summary
+    ?? plan.terminal_reason
+    ?? "Use the recovery brief to continue from the selected resume point.";
+}
+
+function doNotRedoForRecoveryPlan(plan: SupervisorRecoveryPlan): string[] {
+  const items = [
+    ...(plan.retry_directive?.must_not_do ?? []),
+    plan.apply_action === "rerun_verification"
+      ? "Do not rerun or rewrite completed worker output unless verification produces a structured work-defect finding."
+      : "Do not restart from scratch when prior in-scope progress can be preserved."
+  ];
+
+  return [...new Set(items.filter((item) => item.trim().length > 0))].slice(0, 8);
 }
 
 function buildContextRepairPatch(options: {
@@ -953,6 +1019,13 @@ function buildRuntimeOverlay(options: {
     });
   }
 
+  if (options.applyAction === "rerun_verification") {
+    deltas.push({
+      kind: "validation_strategy_changed",
+      summary: "Retry is limited to the verification substrate; do not rerun completed worker output unless verification produces a structured work-defect finding."
+    });
+  }
+
   if (!retryableApplyAction(options.applyAction) && options.applyAction !== "repair_artifact") {
     return undefined;
   }
@@ -969,6 +1042,20 @@ function buildRuntimeOverlay(options: {
   };
 }
 
+function isAgentFacingEvidencePath(value: string): boolean {
+  if (value.trim().length === 0) {
+    return false;
+  }
+  return !/(^|[/\\])(human-debug|runtime)([/\\]|$)/u.test(value)
+    && !/(^|[/\\])agent[/\\](prompt|context|attempt-memory|supervisor-recovery|response)\.md$/u.test(value)
+    && !/(^|[/\\])(case-file|recovery-plan|recovery-envelope)\.json$/u.test(value);
+}
+
+function isAgentFacingGuidance(value: string): boolean {
+  const lower = value.toLowerCase();
+  return !/(human-debug|evidence-patch|case-file|recovery-plan|recovery-envelope|runtime[/\\]supervisor|intervention bundle|exact failed prompt|[/\\]agent[/\\](prompt|context|attempt-memory|supervisor-recovery|response)\.md|[/\\]runtime[/\\])/u.test(lower);
+}
+
 function buildRetryDirective(options: {
   classification: FailureClassification;
   caseFile: SupervisorCaseFile;
@@ -976,7 +1063,7 @@ function buildRetryDirective(options: {
   runtimeOverlay?: SupervisorRuntimeOverlay;
   requirementEvidenceMapPath?: string;
 }): SupervisorRecoveryEnvelope["retry_directive"] {
-  const retryGuidance = options.patches.flatMap((patch) => patch.retry_guidance);
+  const retryGuidance = options.patches.flatMap((patch) => patch.retry_guidance).filter(isAgentFacingGuidance);
   const overlayGuidance = options.runtimeOverlay?.context_repair
     ? [
         "Use the supervisor context repair package as the active context index.",
@@ -1004,15 +1091,13 @@ function buildRetryDirective(options: {
     : [];
   const evidenceMapGuidance = options.runtimeOverlay?.material_delta.some((delta) => delta.kind === "requirement_evidence_mapped")
     ? [
-        "Use the requirement evidence map to address each failed or missing requirement before retry completion.",
-        "Do not retry by only rereading the recovery brief; cite concrete evidence paths or produce new valid evidence."
+        "Use the recovery summary and artifact evidence pointers to address each failed or missing requirement before retry completion.",
+        "Do not retry by only rereading the recovery brief; cite current artifacts or produce new valid evidence."
       ]
     : [];
-  const evidenceToRead = [
-    options.caseFile.prompt_path ?? "",
-    options.requirementEvidenceMapPath ?? "",
-    ...options.patches.flatMap((patch) => Object.values(patch.artifact_paths).filter((path) => basename(path) === "evidence-patch.md"))
-  ].filter(Boolean);
+  const evidenceToRead = (options.runtimeOverlay?.material_delta ?? [])
+    .flatMap((delta) => Object.values(delta.artifact_paths ?? {}))
+    .filter(isAgentFacingEvidencePath);
   const dedupedGuidance = [
     ...new Set([
       ...overlayGuidance,
@@ -1028,7 +1113,7 @@ function buildRetryDirective(options: {
     summary: options.classification.summary,
     must_do: dedupedGuidance.length > 0
       ? dedupedGuidance
-      : ["Read the supervisor recovery brief, cited evidence patches, and failed attempt artifacts before retrying."],
+      : ["Read the supervisor recovery brief and current artifact state before retrying."],
     must_not_do: [
       "Do not change the original goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts.",
       "Do not repeat the exact failed tactic without new evidence.",
@@ -1163,6 +1248,8 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     `- Prior execution: \`${envelope.prior_execution_id}\``,
     `- Classification: \`${envelope.classification}\``,
     `- Selected action: \`${envelope.action}\``,
+    `- Resume point: \`${envelope.resume_point}\``,
+    `- Workspace decision: \`${envelope.workspace_decision}\``,
     `- Failure fingerprint: \`${envelope.failure_fingerprint}\``,
     `- Repeated fingerprint count: \`${envelope.repeated_fingerprint_count}\``,
     "",
@@ -1172,8 +1259,17 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     "## Must Do",
     ...directive.must_do.map((item) => `- ${item}`),
     "",
+    "## Preserve Progress",
+    ...(envelope.preserve_progress.length > 0
+      ? envelope.preserve_progress.map((item) => `- ${item}`)
+      : ["- Preserve in-scope prior progress unless the recovery evidence says it is unsafe."]),
+    "",
     "## Must Not Do",
-    ...directive.must_not_do.map((item) => `- ${item}`),
+    ...[...new Set([...directive.must_not_do, ...envelope.do_not_redo])].map((item) => `- ${item}`),
+    "",
+    "## Required Next Action",
+    envelope.required_next_action,
+    "",
     "",
     "## Evidence To Inspect",
     ...(directive.evidence_to_read.length > 0
@@ -1481,6 +1577,11 @@ export async function runSupervisorRecoveryCycle(options: {
           classification: options.classification.class,
           failure_fingerprint: options.failure_fingerprint,
           repeated_fingerprint_count: options.repeated_fingerprint_count,
+          resume_point: resumePointForRecoveryPlan(recoveryPlan),
+          workspace_decision: workspaceDecisionForRecoveryPlan(recoveryPlan),
+          preserve_progress: preserveProgressForRecoveryPlan(recoveryPlan),
+          do_not_redo: doNotRedoForRecoveryPlan(recoveryPlan),
+          required_next_action: requiredNextActionForRecoveryPlan(recoveryPlan),
           retry_directive: recoveryPlan.retry_directive,
           ...(recoveryPlan.runtime_overlay ? { runtime_overlay: recoveryPlan.runtime_overlay } : {}),
           created_at: nowIso()

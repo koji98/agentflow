@@ -66,6 +66,9 @@ export interface AgentInvocation {
   cli?: CliHint[];
   repair?: ArtifactRepairPromptContext;
   supervisorRecoveryEnvelope?: SupervisorRecoveryEnvelope;
+  attemptMemoryPath?: string;
+  attemptMemoryMarkdownPath?: string;
+  attemptMemoryMarkdown?: string;
   supervisorEvidence?: {
     gatherKind: SupervisorEvidenceGatherKind;
     caseFilePath: string;
@@ -375,6 +378,8 @@ function formatArtifactContract(
     "Every declared artifact must exist before you finish. Publish content with `af artifact write <name>` using stdin.",
     "Declared artifacts are the durable handoff. When a required command or tool provides validation evidence, include the exact command and observed result/output in the relevant artifact unless the artifact contract says otherwise.",
     "If the node task names required words, labels, titles, classifications, or output phrases for an artifact, include that exact wording in the artifact instead of only paraphrasing it.",
+    "If the node task or artifact description asks for named sections, render them as Markdown headings such as `## Scenario`, `## Changed files`, and `## Validation` unless a different format is explicitly required.",
+    "If the node task asks for a named deliverable such as a profile, summary, report, plan, or handoff, make that deliverable name visible in the artifact title or primary label.",
     "Do not write stale completion language such as `af complete check has not yet run`. If a completion/status section becomes stale after `af complete check`, rewrite the artifact and rerun `af complete check`.",
     "",
     "| Name | Write Command | Description |",
@@ -438,29 +443,67 @@ function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[]
   }
 
   const directive = envelope.retry_directive;
+  const evidencePointers = directive.evidence_to_read.filter(isAgentFacingEvidencePath);
   return [
     "## Supervisor Recovery Case",
-    "Retry with a changed tactic while preserving the original node contract.",
+    "Retry from the selected resume point while preserving the original node contract and useful prior progress.",
     "The recovery brief is also available as a context pointer named `supervisor_recovery_envelope`.",
     "",
     "| Field | Value |",
     "| --- | --- |",
     `| Prior execution | \`${envelope.prior_execution_id}\` |`,
     `| Classification | \`${envelope.classification}\` |`,
+    `| Resume point | \`${envelope.resume_point}\` |`,
+    `| Workspace decision | \`${envelope.workspace_decision}\` |`,
     `| Repeated symptom count | \`${envelope.repeated_fingerprint_count}\` |`,
     `| Symptom | ${directive.summary} |`,
+    `| Required next action | ${envelope.required_next_action} |`,
+    "",
+    "### Preserve Progress",
+    ...formatBullets(envelope.preserve_progress, "Preserve in-scope prior progress unless evidence says it is unsafe."),
     "",
     "### Required Delta",
     ...formatBullets(directive.must_do, "Read the recovery evidence and change tactic before material work."),
     "",
     "### Forbidden Actions",
-    ...formatBullets(directive.must_not_do, "Do not change the original goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts."),
+    ...formatBullets(
+      [...new Set([...directive.must_not_do, ...envelope.do_not_redo])],
+      "Do not change the original goal, acceptance criteria, constraints, repo authority, sandbox, or declared artifacts."
+    ),
     "",
     "### Evidence Pointers",
-    ...formatBullets(directive.evidence_to_read, "Read the supervisor recovery context pointer and prior attempt artifacts."),
+    ...formatBullets(evidencePointers, "Read the supervisor recovery context pointer and prior attempt artifacts."),
     "",
     "### Validation Focus",
     ...formatBullets(directive.validation_focus, "Run the validation named by the original task or context.")
+  ];
+}
+
+function isAgentFacingEvidencePath(value: string): boolean {
+  if (value.trim().length === 0) {
+    return false;
+  }
+  return !/(^|[/\\])(human-debug|runtime)([/\\]|$)/u.test(value)
+    && !/(^|[/\\])agent[/\\](prompt|context|attempt-memory|supervisor-recovery|response)\.md$/u.test(value)
+    && !/(^|[/\\])(case-file|recovery-plan|recovery-envelope)\.json$/u.test(value);
+}
+
+function formatAttemptMemory(invocation: AgentInvocation): string[] {
+  const memory = invocation.attemptMemoryMarkdown?.trim();
+  if (!memory) {
+    return invocation.supervisorRecoveryEnvelope
+      ? [
+          "## Attempt Memory",
+          "Structured attempt memory was unavailable. Use the supervisor recovery case and current artifact status before editing; do not restart from scratch unless prior progress is unsafe or irrelevant."
+        ]
+      : [];
+  }
+
+  return [
+    "## Attempt Memory",
+    "Runtime-authored memory from the prior attempt. Treat it as evidence for where to continue, not as a new task.",
+    "",
+    memory
   ];
 }
 
@@ -717,6 +760,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
 
   const hasSupervisorRecoveryEnvelope = Boolean(invocation.supervisorRecoveryEnvelope);
   const supervisorRecoveryEnvelope = formatSupervisorRecoveryEnvelope(invocation);
+  const attemptMemory = formatAttemptMemory(invocation);
   const nodeTask = formatNodeTask(invocation, {
     title: hasSupervisorRecoveryEnvelope ? "Success Contract (Original Authored Node Task)" : "Success Contract",
     emptyGoal: "Complete the authored node intent goal.",
@@ -735,12 +779,19 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "",
     ...nodeTask,
     "",
+    ...supervisorRecoveryEnvelope,
+    ...(supervisorRecoveryEnvelope.length > 0 ? [""] : []),
+    ...attemptMemory,
+    ...(attemptMemory.length > 0 ? [""] : []),
     ...formatContractPriority(hasSupervisorRecoveryEnvelope),
     "",
     ...formatWorkspaceContract(invocation),
     "",
     "## Working Loop",
     "Drive the node to completion within its boundary.",
+    hasSupervisorRecoveryEnvelope
+      ? "This is a retry. Run `af orient`, read the retry orientation and attempt memory, inspect preserved progress, then continue from the selected resume point."
+      : "This is a first attempt. Run `af orient` before material work.",
     "1. Run `af orient` before material work.",
     "2. Understand the plan before committing to execution milestones: read any relevant plan, research, context pointer, or supervisor recovery brief; check it against the goal, acceptance criteria, and constraints.",
     "3. If no adequate plan exists, do the necessary discovery and planning required to choose a defensible execution path. If that work is substantial, create a planning/research milestone first, log findings and decisions there, complete it, then add execution milestones.",
@@ -752,6 +803,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "   Do not create temporary artifact draft files in the repo workspace; stream final artifact content directly to `af artifact write`.",
     "8. Run `af complete check`; if it reports incomplete, treat that output as repair feedback, fix it, and rerun.",
     "When the node task names an exact command, attempt that command exactly at least once; do not substitute a nearby validation command unless the exact command fails as unavailable and you record that failure before falling back.",
+    "When the node task says to write or select a value from a command/tool, the observed command/tool output is the source of truth for that artifact field; do not replace it with a nearby context value.",
     "When the node task asks for a decision, log it with `af milestone log <id> --kind decision`; validation logs are not a substitute for required decision evidence.",
     "When logging validation for a command with arguments, quote the full command as one `--command \"...\"` value so completion checks can match the evidence.",
     "Investigate ambiguity instead of guessing. If the same tactic fails twice with the same symptom, change strategy or surface a concrete blocker.",
@@ -759,8 +811,6 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "Stop early only when a concrete blocker prevents progress; block the active milestone with evidence before the final response.",
     "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected.",
     "",
-    ...supervisorRecoveryEnvelope,
-    ...(supervisorRecoveryEnvelope.length > 0 ? [""] : []),
     ...graphContext,
     ...(graphContext.length > 0 ? [""] : []),
     ...formatContextContract(invocation, "task"),

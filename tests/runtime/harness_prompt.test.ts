@@ -122,6 +122,7 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("Publish content with `af artifact write <name>` using stdin.");
     expect(prompt).toContain("include the exact command and observed result/output");
     expect(prompt).toContain("include that exact wording in the artifact instead of only paraphrasing it");
+    expect(prompt).toContain("render them as Markdown headings such as `## Scenario`, `## Changed files`, and `## Validation`");
     expect(prompt).toContain("Do not write stale completion language");
     expect(prompt).toContain("| `handoff` | `af artifact write handoff` | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
     expect(prompt).not.toContain("| `handoff` | `/tmp/run/output/handoff.md` |");
@@ -284,11 +285,21 @@ describe("harness prompt rendering", () => {
       classification: "missing_dependency_docs",
       failure_fingerprint: "abc123",
       repeated_fingerprint_count: 1,
+      resume_point: "continue_from_prior_progress",
+      workspace_decision: "preserve",
+      preserve_progress: ["Existing artifact content from the prior attempt is still usable evidence."],
+      do_not_redo: ["Do not repeat the failed v3 API assumption."],
+      required_next_action: "Read the cited zod v4 docs fixture, then repair the API usage.",
       retry_directive: {
         summary: "The first attempt used the wrong v4 API.",
         must_do: ["Read the cited zod v4 docs fixture before editing."],
         must_not_do: ["Do not change acceptance criteria."],
-        evidence_to_read: ["/tmp/run/exec-0/interventions/recovery-1/evidence/external_context/evidence-patch.md"],
+        evidence_to_read: [
+          "/tmp/run/exec-0/human-debug/interventions/recovery-1/evidence/external_context/evidence-patch.md",
+          "/tmp/run/exec-0/runtime/context.json",
+          "/tmp/run/exec-0/agent/context.md",
+          "/tmp/run/exec-0/artifacts/prior-handoff.md"
+        ],
         validation_focus: ["Run the existing failing test."],
         unchanged_contract: {
           goal: true,
@@ -310,8 +321,18 @@ describe("harness prompt rendering", () => {
     }));
 
     expect(prompt).toContain("## Supervisor Recovery Case");
-    expect(prompt).toContain("Retry with a changed tactic while preserving the original node contract.");
+    expect(prompt).toContain("Resume point");
+    expect(prompt).toContain("continue_from_prior_progress");
+    expect(prompt).toContain("Workspace decision");
+    expect(prompt).toContain("preserve");
+    expect(prompt).toContain("Read the cited zod v4 docs fixture, then repair the API usage.");
+    expect(prompt).toContain("Retry from the selected resume point while preserving the original node contract and useful prior progress.");
     expect(prompt).toContain("Read the cited zod v4 docs fixture before editing.");
+    expect(prompt).toContain("/tmp/run/exec-0/artifacts/prior-handoff.md");
+    expect(prompt).not.toContain("human-debug");
+    expect(prompt).not.toContain("runtime/context.json");
+    expect(prompt).not.toContain("agent/context.md");
+    expect(prompt).not.toContain("evidence-patch.md");
     expect(prompt).not.toContain("case-file.json");
     expect(prompt).not.toContain("recovery-plan.json");
     expect(prompt.indexOf("## Success Contract (Original Authored Node Task)")).toBeLessThan(

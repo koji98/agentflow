@@ -174,6 +174,18 @@ describe("deep research managed pattern", () => {
             2,
             3
         ]);
+        const finalNode = workflow.steps.at(-1);
+        if (!finalNode || finalNode.type !== "agent") {
+            throw new Error("Expected final managed node to be an agent.");
+        }
+        const synthesisContext = finalNode.support?.context?.find((item) => item.name === "synthesis_01_01_report");
+        expect(synthesisContext).toEqual(expect.objectContaining({
+            what: expect.stringContaining("synthesized")
+        }));
+        expect(synthesisContext?.what).toContain("angle_01");
+        expect(synthesisContext?.what).toContain("Investigate the local architecture");
+        expect(synthesisContext?.what).toContain("angle_02");
+        expect(synthesisContext?.what).toContain("Compare managed pattern behavior");
     });
     it("keeps deep research graph-addressable output collapsed to one complete research artifact", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument({

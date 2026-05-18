@@ -176,6 +176,28 @@ describe("runtime progress reporter", () => {
             seq: 7,
             ts: new Date().toISOString(),
             run_id: "run-1",
+            type: "verification.started",
+            compiled_id: "root__verify",
+            payload: {
+                verifier_kind: "check"
+            }
+        });
+        emit({
+            seq: 8,
+            ts: new Date().toISOString(),
+            run_id: "run-1",
+            type: "verification.completed",
+            compiled_id: "root__verify",
+            payload: {
+                verifier_kind: "check",
+                passed: false,
+                summary: "Spec is not implementation-ready."
+            }
+        });
+        emit({
+            seq: 9,
+            ts: new Date().toISOString(),
+            run_id: "run-1",
             type: "node.blocked",
             compiled_id: "root__verify",
             payload: {
@@ -183,7 +205,7 @@ describe("runtime progress reporter", () => {
             }
         });
         emit({
-            seq: 8,
+            seq: 10,
             ts: new Date().toISOString(),
             run_id: "run-1",
             type: "run.completed",
@@ -200,6 +222,8 @@ describe("runtime progress reporter", () => {
         expect(rendered).toContain("[1/2] passed agent Inspect Repo · 1s");
         expect(rendered).toContain("agentflow: repeat retry iteration 2/3");
         expect(rendered).toContain("agentflow: check failed Quality Check · score=0.62");
+        expect(rendered).toContain("agentflow: verification started Quality Check · check");
+        expect(rendered).toContain("agentflow: verification failed Quality Check · Spec is not implementation-ready.");
         expect(rendered).toContain("[2/2] blocked check Quality Check · terminal_failure");
         expect(rendered).toContain("agentflow: run failed · 2/2 terminal nodes");
     });
