@@ -73,7 +73,7 @@ describe("managed pattern normalization edges", () => {
             })
         ]));
     });
-    it("rejects authored artifacts on deep research managed patterns", () => {
+    it("rejects selected public angle artifacts on deep research managed patterns", () => {
         const normalized = normalizeAuthoredGraphDocument(buildEnvelope({
             type: "pattern_deep_research",
             id: "market_scan",
@@ -90,6 +90,32 @@ describe("managed pattern normalization edges", () => {
                         as_artifact: true
                     }
                 ]
+            }
+        }));
+        expect(normalized.document).toBeUndefined();
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].research.angles[0].as_artifact",
+                message: "Unknown field \"as_artifact\" is not part of the graph contract."
+            })
+        ]));
+    });
+    it("rejects authored artifacts on deep research managed patterns", () => {
+        const normalized = normalizeAuthoredGraphDocument(buildEnvelope({
+            type: "pattern_deep_research",
+            id: "market_scan",
+            intent: {
+                goal: "Research a managed pattern change.",
+                acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                constraints: []
+            },
+            research: {
+                angles: [
+                    {
+                        id: "architecture",
+                        prompt: "Assess whether the implementation follows the local architecture."
+                    }
+                ]
             },
             artifacts: {
                 custom: {
@@ -103,7 +129,7 @@ describe("managed pattern normalization edges", () => {
         expect(normalized.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 path: "$.graph.steps[0].artifacts",
-                message: "pattern_deep_research publishes only summary and curated angle reports selected with as_artifact."
+                message: "pattern_deep_research publishes only the summary artifact; raw angle reports are linked from the summary, and synthesis reports remain internal run evidence."
             })
         ]));
     });

@@ -108,8 +108,8 @@ function createHarness(kind: HarnessAdapter["kind"], run: HarnessAdapter["run"],
     };
 }
 describe("runtime engine", () => {
-    it("publishes selected deep research angle artifacts from the final publisher", async () => {
-        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-research-angle-artifact-"));
+    it("publishes deep research summary while keeping raw angle reports as linked run evidence", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-research-summary-evidence-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
         await mkdir(repoDir, { recursive: true });
@@ -117,7 +117,7 @@ describe("runtime engine", () => {
         await writeFile(join(repoDir, "operator-note.txt"), "done\n", "utf8");
         const graph = compileGraph({
             version: "1",
-            graph_id: "runtime-deep-research-angle-artifact",
+            graph_id: "runtime-deep-research-summary-evidence",
             repos: {
                 main: {
                     path: "."
@@ -143,8 +143,7 @@ describe("runtime engine", () => {
                             angles: [
                                 {
                                     id: "risk",
-                                    prompt: "Identify correctness, maintainability, and rollout risks in the managed pattern design.",
-                                    as_artifact: true
+                                    prompt: "Identify correctness, maintainability, and rollout risks in the managed pattern design."
                                 },
                                 "Compare whether the public artifact contract is easy for downstream nodes to consume."
                             ]
@@ -176,8 +175,6 @@ describe("runtime engine", () => {
                     }
                     else if (node.authored_id === "market_scan") {
                         await writeFile(join(outputDir, "summary.md"), "Synthesized summary.\n");
-                        await mkdir(join(outputDir, "angles"), { recursive: true });
-                        await writeFile(join(outputDir, "angles", "risk.md"), "Curated risk report.\n");
                     }
                     const result = {
                         status: "passed",
@@ -193,11 +190,19 @@ describe("runtime engine", () => {
         });
         const finalAttempt = run.attempts.find((attempt) => attempt.authored_id === "market_scan");
         expect(run.outcome).toBe("passed");
-        expect(finalAttempt?.artifacts.risk).toBeDefined();
-        await expect(readFile(finalAttempt!.artifacts.risk!, "utf8")).resolves.toBe("Curated risk report.\n");
+        expect(Object.keys(finalAttempt?.artifacts ?? {}).sort()).toEqual(["agent_response", "summary"]);
+        const summary = await readFile(finalAttempt!.artifacts.summary!, "utf8");
+        expect(summary).toContain("## Research Evidence");
+        expect(summary).toContain("| `risk` | Identify correctness, maintainability, and rollout risks in the managed pattern design.");
+        expect(summary).toContain("Synthesized summary.");
         const rawAngleAttempt = run.attempts.find((attempt) => attempt.authored_id.endsWith("__angle_01"));
         expect(rawAngleAttempt?.artifacts.angle_report_01).toBeDefined();
         await expect(readFile(rawAngleAttempt!.artifacts.angle_report_01!, "utf8")).resolves.toBe(rawRiskReport);
+        expect(summary).toContain(rawAngleAttempt!.artifacts.angle_report_01!);
+        expect(summary).not.toContain("synthesis_report");
+        const finalContext = await readFile(join(finalAttempt!.execution_dir, "agent", "context.md"), "utf8");
+        expect(finalContext).toContain("angle_01_report");
+        expect(finalContext).toContain(rawAngleAttempt!.artifacts.angle_report_01!);
         const manifest = JSON.parse(await readFile(join(runRoot, "delivery", "manifest.json"), "utf8")) as {
             artifact_taxonomy: {
                 declared_artifacts: Array<{
@@ -208,10 +213,95 @@ describe("runtime engine", () => {
         };
         expect(manifest.artifact_taxonomy.declared_artifacts).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                label: "market_scan.risk",
-                path: finalAttempt!.artifacts.risk
+                label: "market_scan.summary",
+                path: finalAttempt!.artifacts.summary
             })
         ]));
+        expect(manifest.artifact_taxonomy.declared_artifacts).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                label: "market_scan.risk"
+            })
+        ]));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("fails deep research helpers that mutate the repo workspace", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-research-workspace-pollution-"));
+        const repoDir = join(tempRoot, "repo");
+        const runRoot = join(tempRoot, "run");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "runtime-deep-research-workspace-pollution",
+            supervision: { profile: "supervisor", max_total_interventions: 0 },
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "pattern_deep_research",
+                        id: "polluting_research",
+                        research: {
+                            angles: ["Inspect the repo without changing it."]
+                        },
+                        runtime: {
+                            repo: "main",
+                            profile: "default"
+                        }
+                    }
+                ]
+            }
+        });
+        const run = await runCompiledGraph({
+            run_root: runRoot,
+            compiled_graph: graph,
+            repo_sources: {
+                main: repoDir
+            },
+            executors: {
+                agent: async (context) => {
+                    const { node, workspace_path, execution_dir } = context;
+                    const outputDir = resolveExecutionArtifactsDirectory(execution_dir);
+                    if (node.authored_id.endsWith("__angle_01")) {
+                        await writeFile(join(workspace_path, "angle_report_01.md"), "scratch report in the repo\n");
+                        await writeFile(join(outputDir, "angle-report.md"), "real report\n");
+                    }
+                    else if (node.authored_id === "polluting_research") {
+                        await writeFile(join(outputDir, "summary.md"), "summary\n");
+                    }
+                    const result = {
+                        status: "passed",
+                        outcome: "passed",
+                        result: { node: node.authored_id },
+                        stdout: "",
+                        stderr: ""
+                    };
+                    await markExecutorRuntimeReady(context, result);
+                    return result;
+                }
+            }
+        });
+        const angleAttempt = run.attempts.find((attempt) => attempt.authored_id.endsWith("__angle_01"));
+        expect(run.outcome).toBe("failed");
+        expect(angleAttempt?.status).toBe("failed");
+        expect(angleAttempt?.metadata.failure_code).toBe("workspace_pollution");
+        expect(angleAttempt?.metadata.node_workspace_changes).toEqual(expect.objectContaining({
+            changed_file_count: 1
+        }));
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("repairs an upstream worker when a downstream check is the failed symptom", async () => {
@@ -357,6 +447,7 @@ describe("runtime engine", () => {
         const runRoot = join(tempRoot, "run");
         await mkdir(repoDir, { recursive: true });
         await initGitRepo(repoDir);
+        await writeFile(join(repoDir, "operator-note.txt"), "operator note\n", "utf8");
         const graph = compileGraph({
             version: "1",
             graph_id: "runtime-engine",
@@ -523,9 +614,16 @@ describe("runtime engine", () => {
                     await markExecutorRuntimeReady(context, result);
                     return result;
                 },
-                check: async ({ workspace_path }) => {
+                check: async ({ workspace_path, execution_dir }) => {
                     const currentCounter = Number((await readFile(join(workspace_path, "counter.txt"), "utf8")).trim());
                     const passed = currentCounter >= 2;
+                    if (passed) {
+                        await writeFile(
+                            join(resolveExecutionArtifactsDirectory(execution_dir), "verification.json"),
+                            JSON.stringify({ passed, currentCounter }),
+                            "utf8"
+                        );
+                    }
                     return {
                         status: passed ? "passed" : "failed",
                         outcome: passed ? "passed" : "failed",
@@ -4278,7 +4376,7 @@ describe("runtime engine", () => {
             await rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
         }
     });
-    it("does not fail when an upstream node deletes a downstream authored input file", async () => {
+    it("fails when an upstream node deletes a downstream required input file", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-live-input-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
@@ -4352,22 +4450,7 @@ describe("runtime engine", () => {
                             result: { deleted: true }
                         };
                     }
-                    const packet = JSON.parse(await readFile(context_packet_path, "utf8")) as {
-                        materials: unknown[];
-                        omitted: Array<{
-                            key: string;
-                            reason: string;
-                            if_available: boolean;
-                        }>;
-                    };
-                    expect(packet.materials).toEqual([]);
-                    expect(packet.omitted).toEqual(expect.arrayContaining([
-                        expect.objectContaining({
-                            key: "watched",
-                            reason: 'Requested context workspace file "watched.txt" was not found at execution time.',
-                            if_available: false
-                        })
-                    ]));
+                    expect(context_packet_path).toBeDefined();
                     return {
                         status: "passed",
                         outcome: "passed",
@@ -4378,8 +4461,10 @@ describe("runtime engine", () => {
                 }
             }
         });
-        expect(run.outcome).toBe("passed");
-        expect(run.state.node_statuses.root__consume).toBe("passed");
+        expect(run.outcome).toBe("failed");
+        expect(run.state.node_statuses.root__consume).toBe("failed");
+        const consumeAttempt = run.attempts.find((attempt) => attempt.authored_id === "consume");
+        expect(consumeAttempt?.metadata?.failure_code).toBe("unresolved_context");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("does not preflight-fail a blocked node with a bad authored input path", async () => {

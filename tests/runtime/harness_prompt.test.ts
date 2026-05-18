@@ -15,7 +15,7 @@ function baseInvocation(overrides: Partial<AgentInvocation> = {}): AgentInvocati
     nodeGoal: "Implement the focused node task.",
     contextPacketPath: "/tmp/run/runtime/context.json",
     contextManifestPath: "/tmp/run/agent/context.md",
-    contextManifest: "# Context Manifest\n\n- Pointer items: `1`\n",
+    contextManifest: "# Context Manifest\n\n## Pointers\n\n| Name | Kind | Pointer | What | Why |\n| --- | --- | --- | --- | --- |\n| `requirements` | `workspace_file` | `/tmp/requirements.md` | Requirements. | Needed for this node. |\n",
     outputDir: "/tmp/run/output",
     artifacts: {},
     timeoutSec: 1800,
@@ -75,6 +75,8 @@ describe("harness prompt rendering", () => {
     const prompt = renderHarnessPrompt(baseInvocation());
 
     expect(prompt).toContain("Open only the source pointers relevant to this task.");
+    expect(prompt).not.toContain("Pointer items");
+    expect(prompt).not.toContain("Omitted items");
     expect(prompt).not.toContain("/tmp/run/output");
     expect(prompt).not.toContain("Output directory");
     expect(prompt).not.toContain("Context packet:");
@@ -118,6 +120,9 @@ describe("harness prompt rendering", () => {
 
     expect(prompt).toContain("## Declared Artifacts");
     expect(prompt).toContain("Publish content with `af artifact write <name>` using stdin.");
+    expect(prompt).toContain("include the exact command and observed result/output");
+    expect(prompt).toContain("include that exact wording in the artifact instead of only paraphrasing it");
+    expect(prompt).toContain("Do not write stale completion language");
     expect(prompt).toContain("| `handoff` | `af artifact write handoff` | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
     expect(prompt).not.toContain("| `handoff` | `/tmp/run/output/handoff.md` |");
     expect(prompt).not.toContain("If the node task, authored goal, acceptance criteria, or artifact description names required labels");
@@ -139,8 +144,10 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("Create meaningful execution milestones with `af milestone add`");
     expect(prompt).toContain("add more as evidence changes instead of forcing the initial plan to fit");
     expect(prompt).toContain("Attach findings, decisions, and validation evidence with `af milestone log`.");
+    expect(prompt).toContain("validation logs are not a substitute for required decision evidence");
+    expect(prompt).toContain('quote the full command as one `--command "..."` value');
     expect(prompt).toContain("Publish declared artifacts with `af artifact write <name>` using stdin.");
-    expect(prompt).toContain("When the node task names an exact command, run that command exactly");
+    expect(prompt).toContain("When the node task names an exact command, attempt that command exactly at least once");
     expect(prompt).toContain("af complete check");
     expect(prompt).toContain("treat that output as repair feedback");
     expect(prompt).toContain("block the active milestone with evidence before the final response");

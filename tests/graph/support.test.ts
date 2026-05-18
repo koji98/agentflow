@@ -122,9 +122,11 @@ function invocationForPrompt(overrides: Partial<AgentInvocation>): AgentInvocati
         contextManifest: [
             "# Context Manifest",
             "",
-            "| Name | Kind | Pointer | What / Why |",
-            "| --- | --- | --- | --- |",
-            "| `release_notes` | `workspace_file` | `/tmp/workspace/README.md` | Draft release notes from the repository. Why: They are required input for the final handoff. |"
+            "## Pointers",
+            "",
+            "| Name | Kind | Pointer | What | Why |",
+            "| --- | --- | --- | --- | --- |",
+            "| `release_notes` | `workspace_file` | `/tmp/workspace/README.md` | Draft release notes from the repository. | They are required input for the final handoff. |"
         ].join("\n"),
         outputDir: "/tmp/run/artifacts",
         artifacts: {},
@@ -198,7 +200,7 @@ describe("V1 support authoring", () => {
             expect(prompt).not.toContain("Should not be prompted.");
             expect(prompt).toContain("## Ambient CLI Hints");
             expect(prompt).toContain("| `sh` | Run portable shell checks. |");
-            expect(prompt).toContain("| `release_notes` | `workspace_file` | `/tmp/workspace/README.md` | Draft release notes from the repository. Why: They are required input for the final handoff. |");
+            expect(prompt).toContain("| `release_notes` | `workspace_file` | `/tmp/workspace/README.md` | Draft release notes from the repository. | They are required input for the final handoff. |");
         }
         finally {
             await rm(tempRoot, { recursive: true, force: true });

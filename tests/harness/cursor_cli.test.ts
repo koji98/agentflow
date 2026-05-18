@@ -447,7 +447,7 @@ process.stdout.write(JSON.stringify({
         nodeGoal: "Review the change.",
         contextPacketPath: join(executionDir, "runtime", "context.json"),
         contextManifestPath: join(executionDir, "agent", "context.md"),
-        contextManifest: "# Context Manifest\n\n- Pointer items: `1`\n",
+        contextManifest: "# Context Manifest\n\n## Pointers\n\n| Name | Kind | Pointer | What | Why |\n| --- | --- | --- | --- | --- |\n| `requirements` | `workspace_file` | `/tmp/requirements.md` | Requirements. | Needed for this node. |\n",
         outputDir,
         artifacts: {
           review_report: {

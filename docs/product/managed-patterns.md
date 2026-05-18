@@ -17,11 +17,11 @@ Managed nodes use regular node fields:
 
 Every managed pattern publishes public artifacts from the authored node id. Default artifacts depend on the pattern:
 
-- `pattern_deep_research`: `summary` plus selected curated angle reports exposed with `as_artifact: true`.
+- `pattern_deep_research`: `summary`.
 - `pattern_deep_work`: `summary` and `packet`.
 - `pattern_work_list`: `summary`, `packet`, and `work_items`.
 
-Authored artifacts merge with defaults for patterns that support authored artifacts. Internal artifacts remain readable in the run tree as implementation evidence, but downstream nodes should reference only graph-addressable artifacts such as `my_research.summary`, `my_research.security_findings`, `my_work.packet`, or `my_work_list.work_items`.
+Authored artifacts merge with defaults for patterns that support authored artifacts. Internal artifacts remain readable in the run tree as implementation evidence, but downstream nodes should reference only graph-addressable artifacts such as `my_research.summary`, `my_work.packet`, or `my_work_list.work_items`.
 
 ## Canonical Patterns
 
@@ -42,9 +42,11 @@ Add:
 }
 ```
 
-The pattern runs authored angles in parallel, synthesizes Markdown research reports in balanced batches of at most three inputs, then publishes the summary and any selected curated angle reports. Angle and synthesis reports remain readable in the run tree as raw evidence; only publisher-owned public artifacts are addressable by downstream graph nodes. Synthesis preserves major findings, collapses redundancy, keeps provenance attached to claims, and surfaces uncertainty or conflicts. It is useful for product research, architecture research, implementation research, and multi-axis code review.
+The pattern runs authored angles in parallel, synthesizes Markdown research reports in balanced batches of at most three inputs, then publishes one summary. The summary is the complete research handoff, not a high-level abstract. Raw angle reports remain readable in the run tree and are linked from the summary for progressive disclosure. Synthesis reports remain internal run evidence for the publisher; they preserve major findings, collapse redundancy, keep provenance attached to claims, and surface uncertainty or conflicts without becoming downstream evidence links. Deep research is useful for product research, architecture research, implementation research, and multi-axis code review.
 
-Public output is collapsed by default. Authors can request a curated public artifact for an individual angle by using object-form angles with `id`, `prompt`, and `as_artifact: true`; downstream nodes reference it as `my_research.<angle_id>`. The final publisher writes that artifact and must keep it consistent with the summary. The raw angle report remains available as run-tree evidence, not as the graph-addressable contract.
+The final publisher rewrites the angle evidence into a coherent, sufficiently detailed, conflict-resolved summary. After the publisher writes it, Agentflow deterministically prepends raw angle report paths, so downstream nodes reference `my_research.summary`; if they need raw detail, they follow the summary evidence table to the linked raw angle reports.
+
+Angle and synthesis workers may mention related findings from other reports, but they should not create cross-angle links. The runtime-owned summary evidence table is the only raw angle link surface.
 
 ### `pattern_deep_work`
 

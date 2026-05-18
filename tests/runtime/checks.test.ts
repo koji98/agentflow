@@ -112,7 +112,7 @@ describe("runtime checks", () => {
       nodeGoal: "Evaluate the change.",
       contextPacketPath: "/tmp/runtime/context.json",
       contextManifestPath: "/tmp/agent/context.md",
-      contextManifest: "# Context Manifest\n\n- Pointer items: `2`\n",
+      contextManifest: "# Context Manifest\n\n## Pointers\n\n| Name | Kind | Pointer | What | Why |\n| --- | --- | --- | --- | --- |\n| `requirements` | `workspace_file` | `/tmp/requirements.md` | Requirements. | Needed for this check. |\n| `handoff` | `artifact` | `/tmp/handoff.md` | Handoff. | Needed for this check. |\n",
       outputDir: "/tmp",
       artifacts: {},
       timeoutSec: 30,

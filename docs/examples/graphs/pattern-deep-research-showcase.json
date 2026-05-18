@@ -35,8 +35,7 @@
             "Investigate the intended user-facing contract for deep research and deep work.",
             {
               "id": "artifact_contract",
-              "prompt": "Identify how public artifacts should be shaped so downstream nodes can consume them without internal ids.",
-              "as_artifact": true
+              "prompt": "Identify how public artifacts should be shaped so downstream nodes can consume them without internal ids."
             },
             "Assess how supervisor recovery should interact with managed-pattern internal failures and loop feedback."
           ]
@@ -88,7 +87,7 @@
         "intent": {
           "goal": "Summarize the deep research result for a human operator and mention the command to inspect the compiled graph.",
           "acceptance_criteria": [
-            "The handoff cites the managed research summary and exposed artifact contract angle.",
+            "The handoff cites the managed research summary and its linked angle evidence table.",
             "The handoff includes concrete validation or inspection guidance."
           ],
           "constraints": []
@@ -103,13 +102,6 @@
               "ref": "managed_patterns_research.summary",
               "name": "research_summary",
               "what": "Artifact reference managed_patterns_research.summary.",
-              "why": "Needed to complete this node intent.",
-              "kind": "artifact"
-            },
-            {
-              "ref": "managed_patterns_research.artifact_contract",
-              "name": "artifact_contract_angle",
-              "what": "Artifact reference managed_patterns_research.artifact_contract.",
               "why": "Needed to complete this node intent.",
               "kind": "artifact"
             }

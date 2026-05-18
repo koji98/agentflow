@@ -499,13 +499,10 @@ async function materializeWorkspaceFileContext(
     contents = await readFile(sourcePath);
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      accumulator.omitted.push({
+      throw contextFailure("unresolved_context", `Requested context workspace file "${item.path}" was not found at execution time.`, {
         key,
-        source: item,
-        reason: `Requested context workspace file "${item.path}" was not found at execution time.`,
-        if_available: false
+        path: item.path
       });
-      return;
     }
 
     throw error;
@@ -570,13 +567,10 @@ async function materializeWorkspaceGlobContext(
     .slice(0, item.max_files ?? Number.MAX_SAFE_INTEGER);
 
   if (matchedPaths.length === 0) {
-    accumulator.omitted.push({
+    throw contextFailure("unresolved_context", `Requested context workspace glob "${item.path}" matched no files after ignore filtering at execution time.`, {
       key,
-      source: item,
-      reason: `Requested context workspace glob "${item.path}" matched no files after ignore filtering at execution time.`,
-      if_available: false
+      path: item.path
     });
-    return;
   }
 
   const files: WorkspaceGlobContextProvenance["files"] = [];
@@ -638,13 +632,10 @@ async function materializePluginFileContext(
     contents = await readFile(item.path);
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      accumulator.omitted.push({
+      throw contextFailure("unresolved_context", `Requested ${descriptor} was not found at execution time.`, {
         key,
-        source: item,
-        reason: `Requested ${descriptor} was not found at execution time.`,
-        if_available: false
+        path: item.path
       });
-      return;
     }
 
     throw error;
@@ -838,36 +829,28 @@ function renderContextManifest(packet: ContextPacket): string {
     "# Context Manifest",
     "",
     "Context entries are pointers. Agentflow does not copy or truncate source context into this prompt package.",
-    `- Pointer items: \`${packet.totals.pointer_count}\``,
-    `- Omitted items: \`${packet.omitted.length}\``,
     ""
   ];
 
   if (packet.materials.length > 0) {
     lines.push("## Pointers", "");
-    lines.push("| Name | Kind | Pointer | What / Why |");
-    lines.push("| --- | --- | --- | --- |");
+    lines.push("| Name | Kind | Pointer | What | Why |");
+    lines.push("| --- | --- | --- | --- | --- |");
 
     for (const item of packet.materials) {
-      const bindingSuffix =
-        item.binding?.kind === "live_workspace_input"
-          ? `; source ${item.binding.requested_path ?? "inline text"}`
-          : "";
       const from = "ref" in item.source ? "artifact" : item.source.from;
-      lines.push(`| \`${item.key}\` | \`${from}\` | \`${formatManifestPointerPath(item.pointer_path)}\`${bindingSuffix} | ${item.description ?? ""} |`);
+      const what = "what" in item.source && typeof item.source.what === "string"
+        ? item.source.what
+        : item.description ?? "";
+      const why = "why" in item.source && typeof item.source.why === "string"
+        ? item.source.why
+        : "";
+      lines.push(`| \`${item.key}\` | \`${from}\` | \`${formatManifestPointerPath(item.pointer_path)}\` | ${what} | ${why} |`);
     }
 
     lines.push("");
-  }
-
-  if (packet.omitted.length > 0) {
-    lines.push("## Omitted", "");
-    lines.push("Omitted entries may indicate optional missing context or supervisor-provided replacement context. Use available pointers and report uncertainty when it matters.");
-    lines.push("");
-
-    for (const item of packet.omitted) {
-      lines.push(`- \`${item.key}\`: ${item.reason}${item.description ? ` ${item.description}` : ""}`);
-    }
+  } else {
+    lines.push("No context pointers were provided for this node.", "");
   }
 
   return `${lines.join("\n")}\n`;

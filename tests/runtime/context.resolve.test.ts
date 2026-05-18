@@ -324,9 +324,12 @@ describe("context resolution", () => {
         const manifest = await readFile(resolved.manifest_path, "utf8");
         expect(manifest).toContain("Context entries are pointers.");
         expect(manifest).toContain("## Pointers");
-        expect(manifest).toContain("Omitted items");
-        expect(manifest).toContain("source src.txt");
-        expect(manifest).toContain("Structured verification result from the source node.");
+        expect(manifest).toContain("| Name | Kind | Pointer | What | Why |");
+        expect(manifest).not.toContain("Omitted items");
+        expect(manifest).not.toContain("Pointer items");
+        expect(manifest).toContain("src.txt");
+        expect(manifest).toContain("Pointer evidence used by the node under test.");
+        expect(manifest).not.toContain("Producer artifact:");
         expect(manifest).not.toContain("Tokenizer");
         expect(manifest).not.toContain("Compiled node");
         expect(await readFile(resolved.provenance_path, "utf8")).toContain("\"compiled_id\"");
@@ -561,7 +564,7 @@ describe("context resolution", () => {
         expect(await readFile(resolved.manifest_path, "utf8")).toContain("repeat_history");
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("records repeat history as omitted on the first repeat iteration", async () => {
+    it("keeps first-iteration repeat history out of agent-facing context", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-repeat-history-first-"));
         const repoDir = join(tempRoot, "repo");
         await mkdir(repoDir, { recursive: true });
@@ -640,6 +643,9 @@ describe("context resolution", () => {
                 if_available: true
             })
         ]));
+        const manifest = await readFile(resolved.manifest_path, "utf8");
+        expect(manifest).not.toContain("repeat_history");
+        expect(manifest).not.toContain("Omitted");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("resolves context selectors against repeat iteration and attempt filters", async () => {
@@ -1003,7 +1009,7 @@ describe("context resolution", () => {
         await expect(readdir(executionDir)).resolves.not.toContain("context");
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("omits a missing live file instead of failing resolution", async () => {
+    it("fails a missing required live file before rendering agent context", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-missing-file-"));
         const repoDir = join(tempRoot, "repo");
         await mkdir(repoDir, { recursive: true });
@@ -1043,7 +1049,7 @@ describe("context resolution", () => {
             }
         });
         const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
-        const resolved = await resolveExecutionContext({
+        await expect(resolveExecutionContext({
             compiled_graph: graph,
             node: consumerNode,
             execution_id: "exec__consumer__attempt_1",
@@ -1053,25 +1059,10 @@ describe("context resolution", () => {
                 main: repoDir
             },
             attempts: createAttemptRegistry()
+        })).rejects.toMatchObject({
+            failure_code: "unresolved_context",
+            message: 'Requested context workspace file "watched.txt" was not found at execution time.'
         });
-        expect(resolved.packet.materials).toEqual([]);
-        expect(resolved.packet.omitted).toEqual([
-            expect.objectContaining({
-                key: "watched",
-                source: expect.objectContaining({
-                    name: "watched",
-                    from: "workspace_file",
-                    path: "watched.txt",
-                    what: "Pointer evidence used by the node under test.",
-                    why: "This context is required by the test scenario."
-                }),
-                reason: 'Requested context workspace file "watched.txt" was not found at execution time.',
-                if_available: false
-            })
-        ]);
-        const summary = await readFile(resolved.manifest_path, "utf8");
-        expect(summary).toContain('Requested context workspace file "watched.txt" was not found');
-        expect(summary).not.toContain("provenance");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("keeps non-UTF-8 file inputs as pointers with digests", async () => {
@@ -1137,7 +1128,7 @@ describe("context resolution", () => {
         expect(resolved.packet.omitted).toEqual([]);
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("omits a glob when it matches no files instead of failing resolution", async () => {
+    it("fails required glob context when it matches no files", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-empty-glob-"));
         const repoDir = join(tempRoot, "repo");
         await mkdir(repoDir, { recursive: true });
@@ -1177,7 +1168,7 @@ describe("context resolution", () => {
             }
         });
         const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
-        const resolved = await resolveExecutionContext({
+        await expect(resolveExecutionContext({
             compiled_graph: graph,
             node: consumerNode,
             execution_id: "exec__consumer__attempt_1",
@@ -1187,22 +1178,10 @@ describe("context resolution", () => {
                 main: repoDir
             },
             attempts: createAttemptRegistry()
+        })).rejects.toMatchObject({
+            failure_code: "unresolved_context",
+            message: 'Requested context workspace glob "*.md" matched no files after ignore filtering at execution time.'
         });
-        expect(resolved.packet.materials).toEqual([]);
-        expect(resolved.packet.omitted).toEqual([
-            expect.objectContaining({
-                key: "markdown",
-                source: expect.objectContaining({
-                    name: "markdown",
-                    from: "workspace_glob",
-                    path: "*.md",
-                    what: "Pointer evidence used by the node under test.",
-                    why: "This context is required by the test scenario."
-                }),
-                reason: 'Requested context workspace glob "*.md" matched no files after ignore filtering at execution time.',
-                if_available: false
-            })
-        ]);
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("uses sorted filesystem glob resolution and caps matches after sorting", async () => {

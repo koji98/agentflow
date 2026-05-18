@@ -2329,7 +2329,7 @@ function normalizePatternDeepResearchConfig(
       return [];
     }
 
-    pushUnknownKeyDiagnostics(angleRecord, anglePath, ["id", "prompt", "as_artifact"], diagnostics);
+    pushUnknownKeyDiagnostics(angleRecord, anglePath, ["id", "prompt"], diagnostics);
     const id = normalizeManagedLocalId(
       angleRecord.id,
       `${anglePath}.id`,
@@ -2337,7 +2337,6 @@ function normalizePatternDeepResearchConfig(
       diagnostics
     );
     const prompt = readRequiredString(angleRecord.prompt, `${anglePath}.prompt`, diagnostics);
-    const as_artifact = readBoolean(angleRecord.as_artifact, `${anglePath}.as_artifact`, diagnostics);
 
     if (prompt && prompt.trim().split(/\s+/u).length < 3) {
       diagnostics.push({
@@ -2352,8 +2351,7 @@ function normalizePatternDeepResearchConfig(
 
     return [{
       id,
-      prompt,
-      ...(as_artifact ? { as_artifact } : {})
+      prompt
     }];
   });
 
@@ -2366,24 +2364,6 @@ function normalizePatternDeepResearchConfig(
       });
     }
     seenIds.add(angle.id);
-  });
-
-  angles.forEach((angle, index) => {
-    if (!angle.as_artifact) {
-      return;
-    }
-    if (angle.id === "summary" || angle.id === "packet") {
-      diagnostics.push({
-        path: `${path}.angles[${index}].id`,
-        message: `Research angle id "${angle.id}" cannot be exposed as an artifact because that public artifact is reserved by pattern_deep_research.`
-      });
-    }
-    if (reservedArtifactNames.includes(angle.id as (typeof reservedArtifactNames)[number])) {
-      diagnostics.push({
-        path: `${path}.angles[${index}].id`,
-        message: `Research angle id "${angle.id}" cannot be exposed as an artifact because that artifact name is reserved by Agentflow.`
-      });
-    }
   });
 
   return {
@@ -2419,7 +2399,7 @@ function normalizePatternDeepResearchNode(
 
   const base = normalizeExecutableBase(record, path, diagnostics, {
     allow_artifacts: false,
-    artifacts_disallowed_message: "pattern_deep_research publishes only summary and curated angle reports selected with as_artifact.",
+    artifacts_disallowed_message: "pattern_deep_research publishes only the summary artifact; raw angle reports are linked from the summary, and synthesis reports remain internal run evidence.",
     runtime_extra_keys: ["max_concurrency"]
   });
   const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
