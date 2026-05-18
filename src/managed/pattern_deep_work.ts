@@ -217,6 +217,12 @@ function buildFinalPublishPrompt(
       "Use the latest passing completion scorecard, work notes, and draft artifact materials.",
       "Do not claim success beyond the completion evidence."
     ]),
+    section("Required Summary Shape", [
+      "Preserve task-specific identifiers and phrases from the managed workflow goal when they are part of the requested public output.",
+      "Include a clearly labeled `Scorecard Evidence` or `Completion Scorecard` section in the Markdown summary.",
+      "That section must cite the score, threshold, criterion results, validation command/result, and evidence paths available in context.",
+      "Keep claims bounded to the scorecard and validation evidence; do not claim broader success."
+    ]),
     section("Declared Public Artifacts", [
       "Publish the declared public artifacts.",
       ...formatPublicArtifacts(publicArtifacts),

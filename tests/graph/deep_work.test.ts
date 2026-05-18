@@ -229,6 +229,8 @@ describe("pattern deep work", () => {
             })
         }));
         expect(JSON.stringify(finalNode)).toContain("publishing the final public artifacts from the latest passing managed work cycle");
+        expect(JSON.stringify(finalNode)).toContain("Scorecard Evidence");
+        expect(JSON.stringify(finalNode)).toContain("score, threshold, criterion results, validation command/result, and evidence paths");
     });
     it("compiles pattern_deep_work so downstream nodes depend on the final published artifacts", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([

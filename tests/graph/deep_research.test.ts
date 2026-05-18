@@ -114,7 +114,8 @@ describe("deep research managed pattern", () => {
             }));
         }
         expect(fanout.steps[0].intent.goal).toContain("The assigned angle id is angle_01.");
-        expect(fanout.steps[0].intent.goal).toContain("verify the heading or metadata matches");
+        expect(fanout.steps[0].intent.goal).toContain("Treat repository files as read-only evidence.");
+        expect(fanout.steps[0].intent.goal).toContain("Do not create a report file in the repo workspace");
         expect(JSON.stringify(fanout.steps[0])).not.toContain("expert");
         expect(finalNode).toEqual(expect.objectContaining({
             id: "market_scan",
@@ -173,14 +174,13 @@ describe("deep research managed pattern", () => {
             3
         ]);
     });
-    it("keeps deep research collapsed by default and exposes selected curated angle reports", () => {
+    it("keeps deep research graph-addressable output collapsed to summary while linking every angle report", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument({
             research: {
                 angles: [
                     {
                         id: "architecture",
-                        prompt: "Investigate whether the implementation follows established Agentflow architecture.",
-                        as_artifact: true
+                        prompt: "Investigate whether the implementation follows established Agentflow architecture."
                     },
                     {
                         id: "risk",
@@ -203,22 +203,33 @@ describe("deep research managed pattern", () => {
             id: "market_scan",
             type: "agent",
             artifacts: expect.objectContaining({
-                summary: expect.objectContaining({ path: "summary.md" }),
-                architecture: expect.objectContaining({
-                    path: "angles/architecture.md",
-                    description: 'Curated public Markdown report for deep research angle "architecture".'
-                })
+                summary: expect.objectContaining({ path: "summary.md" })
             })
         }));
         if (!finalNode || finalNode.type !== "agent") {
             throw new Error("Expected final managed node to be an agent.");
         }
-        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["architecture", "summary"]);
+        expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["summary"]);
         expect(finalNode.managed_artifact_forwards).toBeUndefined();
-        expect(JSON.stringify(finalNode)).toContain("risk");
-        expect(finalNode.intent.goal).toContain("Selected Public Angle Artifacts");
+        expect(finalNode.support?.context?.map((item) => item.name)).toEqual([
+            "angle_01_report",
+            "angle_02_report"
+        ]);
+        expect(finalNode.intent.goal).toContain("Evidence Link Ownership");
+        expect(finalNode.intent.goal).toContain("Agentflow owns the raw report link table");
+        expect(finalNode.intent.goal).toContain("runtime prepends the table");
+        expect(finalNode.intent.goal).not.toContain("Report Pointer Path");
+        expect(finalNode.intent.goal).not.toContain("`Pointer` value");
+        expect(finalNode.intent.goal).not.toContain("angle_01_report");
+        expect(finalNode.intent.goal).toContain("do not expose them as downstream evidence links");
+        expect(finalNode.intent.goal).toContain("not a high-level abstract");
+        expect(finalNode.intent.goal).toContain("holistic, sufficiently detailed, conflict-resolved answer");
+        expect(finalNode.intent.goal).toContain("Do not author raw angle links yourself");
+        expect(finalNode.intent.goal).not.toContain("Selected Public Angle");
+        expect(finalNode.intent.goal).not.toContain("as_artifact");
+        expect(finalNode.intent.goal).not.toContain("Context Pointer Name");
+        expect(finalNode.intent.goal).not.toContain("Synthesis Report |");
         expect(finalNode.intent.goal).not.toContain("Runtime-Forwarded Raw Angle Artifacts");
-        expect(finalNode.intent.goal).not.toContain("do not rewrite or republish");
     });
     it("compiles pattern_deep_research so downstream nodes depend on the final public artifacts", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
@@ -233,8 +244,7 @@ describe("deep research managed pattern", () => {
                                 "Investigate whether the implementation follows established Agentflow architecture.",
                                 {
                                     id: "risk",
-                                    prompt: "Identify correctness, maintainability, and rollout risks in the managed pattern design.",
-                                    as_artifact: true
+                                    prompt: "Identify correctness, maintainability, and rollout risks in the managed pattern design."
                                 }
                             ]
                         }
@@ -245,7 +255,7 @@ describe("deep research managed pattern", () => {
                         intent: {
                             goal: "Summarize the research recommendation.",
                             acceptance_criteria: [
-                                "The handoff uses the final managed summary and selected curated angle artifacts.",
+                                "The handoff uses the final managed summary and follows linked angle evidence when needed.",
                                 "The handoff preserves the recommendation and key uncertainty."
                             ],
                             constraints: []
@@ -263,13 +273,6 @@ describe("deep research managed pattern", () => {
                                     kind: "artifact",
                                     ref: "market_scan.summary",
                                     name: "research_summary",
-                                    what: "Pointer evidence used by the node under test.",
-                                    why: "This context is required by the test scenario."
-                                },
-                                {
-                                    kind: "artifact",
-                                    ref: "market_scan.risk",
-                                    name: "risk_angle_report",
                                     what: "Pointer evidence used by the node under test.",
                                     why: "This context is required by the test scenario."
                                 }

@@ -69,7 +69,7 @@ import {
   type WorkspaceBinding
 } from "../session.js";
 import { initializeInplaceWorkspace } from "../workspace/inplace.js";
-import type { NodeWorkspaceChangeArtifacts, WorkspaceSetup } from "../workspace/types.js";
+import type { NodeWorkspaceChangeArtifacts, NodeWorkspaceDiff, WorkspaceSetup } from "../workspace/types.js";
 import { captureWorkspaceChanges } from "../workspace/changes.js";
 import {
   diffNodeSnapshots,
@@ -273,29 +273,8 @@ function runtimeFailureDetailsForError(error: unknown): Record<string, unknown> 
   return error instanceof RuntimeFailureError ? error.details : undefined;
 }
 
-function runtimeFailedNodeResult(
-  failureCode: RuntimeFailureCode,
-  message: string,
-  details?: Record<string, unknown>
-): RuntimeNodeExecutionResult {
-  return {
-    status: "failed",
-    outcome: "failed",
-    result: runtimeFailurePayload(failureCode, message, details),
-    stdout: undefined,
-    stderr: message,
-    metadata: runtimeFailureMetadata(failureCode, message, details)
-  };
-}
-
 function deriveRunId(runRoot: string): string {
   return basename(runRoot);
-}
-
-function flattenAttempts(session: RuntimeSession): RuntimeNodeAttempt[] {
-  return [...session.attempts.by_compiled_id.values()]
-    .flat()
-    .sort((left, right) => Date.parse(left.started_at) - Date.parse(right.started_at));
 }
 
 function createStreamingLogSink(
@@ -393,14 +372,7 @@ async function ensureNodeReadiness(
   cache: NodeReadinessCache
 ): Promise<void> {
   if (node.kind === "agent" && !options.executors?.agent) {
-    const harnessName = node.effective_policy.harness;
-
-    if (!harnessName) {
-      throw new RuntimeFailureError(
-        "harness_unavailable",
-        `Agent "${node.compiled_id}" requires a resolved harness.`
-      );
-    }
+    const harnessName = node.effective_policy.harness!;
 
     const diagnostics = await collectHarnessReadinessDiagnostics(
       harnessName,
@@ -416,14 +388,7 @@ async function ensureNodeReadiness(
   }
 
   if (node.kind === "check" && node.check_kind === "ai" && !options.executors?.check) {
-    const harnessName = node.effective_policy.harness;
-
-    if (!harnessName) {
-      throw new RuntimeFailureError(
-        "harness_unavailable",
-        `AI check "${node.compiled_id}" requires a resolved harness.`
-      );
-    }
+    const harnessName = node.effective_policy.harness!;
 
     const diagnostics = await collectHarnessReadinessDiagnostics(
       harnessName,
@@ -2413,12 +2378,8 @@ async function defaultCheckExecutor(
     };
   }
 
-  const harnessName = context.node.effective_policy.harness;
-
-  if (!harnessName || !harnesses[harnessName]) {
-    const message = `AI check "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`;
-    return runtimeFailedNodeResult("harness_unavailable", message);
-  }
+  const harnessName = context.node.effective_policy.harness!;
+  const harness = harnesses[harnessName]!;
 
   const aiCheckPromptTokens = buildNodeRuntimeEnv(context);
   const renderedAiCheckRubric =
@@ -2443,7 +2404,7 @@ async function defaultCheckExecutor(
   );
 
   const aiCheckResult = await runAiCheck({
-    harness: harnesses[harnessName]!,
+    harness,
     run_id: context.run_id,
     execution_id: context.attempt.execution_id,
     repo_alias: context.node.repo,
@@ -2601,16 +2562,118 @@ function withSilentAgentHarnessFailureDiagnostic(
   };
 }
 
+function isManagedDeepResearchNode(node: CompiledExecutableNode): boolean {
+  return (
+    node.lowered_from === "pattern_deep_research" ||
+    node.authored_id.includes("__managed__pattern_deep_research__")
+  );
+}
+
+function failDeepResearchWorkspacePollution(
+  node: CompiledExecutableNode,
+  result: RuntimeNodeExecutionResult,
+  diff: NodeWorkspaceDiff | undefined
+): RuntimeNodeExecutionResult {
+  if (
+    node.kind !== "agent" ||
+    result.status !== "passed" ||
+    result.outcome !== "passed" ||
+    !isManagedDeepResearchNode(node) ||
+    !diff ||
+    diff.changed_files.length === 0
+  ) {
+    return result;
+  }
+
+  const changedFiles = diff.changed_files.map((file) => file.path);
+  const summary = [
+    "Deep research nodes are read-only with respect to the repo workspace.",
+    `Unexpected workspace changes: ${changedFiles.join(", ")}.`
+  ].join(" ");
+  const details = {
+    changed_files: diff.changed_files,
+    status_text_after: diff.status_text_after
+  };
+
+  return {
+    ...result,
+    status: "failed",
+    outcome: "failed",
+    result: {
+      ...(isRecord(result.result) ? result.result : {}),
+      ...runtimeFailurePayload("workspace_pollution", summary, details)
+    },
+    metadata: {
+      ...(result.metadata ?? {}),
+      ...runtimeFailureMetadata("workspace_pollution", summary, details)
+    }
+  };
+}
+
+function deepResearchAngleEvidenceRows(
+  materials: ContextPacketMaterializedItem[]
+): Array<{ angle: string; focus: string; path: string }> {
+  return materials
+    .filter((material) => /^angle_\d+_report$/u.test(material.key))
+    .sort((left, right) => left.key.localeCompare(right.key))
+    .map((material) => {
+      const what =
+        isRecord(material.source) && typeof material.source["what"] === "string" ? material.source["what"] : "";
+      const match = /^Raw report for deep research angle `([^`]+)`: (.+)$/u.exec(what);
+
+      return {
+        angle: match?.[1] ?? material.key,
+        focus: match?.[2] ?? (what || (material.description ?? material.key)),
+        path: material.pointer_path
+      };
+    });
+}
+
+async function ensureDeepResearchSummaryEvidenceIndex(options: {
+  node: CompiledExecutableNode;
+  contextMaterials: ContextPacketMaterializedItem[];
+  artifacts: Record<string, string>;
+}): Promise<void> {
+  if (options.node.lowered_from !== "pattern_deep_research") {
+    return;
+  }
+
+  const summaryPath = options.artifacts.summary;
+  if (!summaryPath) {
+    return;
+  }
+
+  const rows = deepResearchAngleEvidenceRows(options.contextMaterials);
+  if (rows.length === 0) {
+    return;
+  }
+
+  const existing = await readFile(summaryPath, "utf8");
+  const evidenceBlock = [
+    "<!-- agentflow:research-evidence-index -->",
+    "## Research Evidence",
+    "",
+    "| Angle | Assigned Focus | Report Path |",
+    "| --- | --- | --- |",
+    ...rows.map((row) => `| \`${row.angle}\` | ${row.focus.replace(/\n/gu, " ")} | \`${row.path}\` |`),
+    "<!-- /agentflow:research-evidence-index -->",
+    ""
+  ].join("\n");
+
+  const withoutExistingBlock = existing.replace(
+    /<!-- agentflow:research-evidence-index -->[\s\S]*?<!-- \/agentflow:research-evidence-index -->\n*/u,
+    ""
+  );
+
+  await writeFile(summaryPath, `${evidenceBlock}${withoutExistingBlock.replace(/^\n+/u, "")}`, "utf8");
+}
+
 async function defaultAgentExecutor(
   context: RuntimeNodeExecutorContext<CompiledAgentNode>,
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>
 ): Promise<RuntimeNodeExecutionResult> {
-  const harnessName = context.node.effective_policy.harness;
-
-  if (!harnessName || !harnesses[harnessName]) {
-    const message = `Agent "${context.node.compiled_id}" requires harness "${harnessName ?? "unknown"}".`;
-    return runtimeFailedNodeResult("harness_unavailable", message);
-  }
+  const harnessName = context.node.effective_policy.harness!;
+  const harness = harnesses[harnessName]!;
 
   const outputDir = resolveExecutionArtifactsDirectory(context.execution_dir);
   const runtimeDir = join(context.run_root, "runtime");
@@ -2731,8 +2794,7 @@ async function defaultAgentExecutor(
   await writeFile(promptPath, `${renderedPrompt}\n`, "utf8");
   context.attempt.prompt_sha256 = createHash("sha256").update(`${renderedPrompt}\n`).digest("hex");
 
-  let harnessResult: HarnessResult;
-  harnessResult = await harnesses[harnessName]!.run(agentInvocation);
+  const harnessResult = await harness.run(agentInvocation);
 
   return {
     status: harnessResult.status,
@@ -3402,6 +3464,7 @@ async function executeNode(
   const captureSnapshots = node.kind === "agent" || node.kind === "exec";
   let baselineSnapshot: Awaited<ReturnType<typeof snapshotWorkspaceForNode>> | undefined;
   let workspaceChangeArtifacts: NodeWorkspaceChangeArtifacts | undefined;
+  let workspaceDiff: NodeWorkspaceDiff | undefined;
 
   try {
     executionPaths = await writer.writeExecutionStart(attempt);
@@ -3611,6 +3674,7 @@ async function executeNode(
         baselineSnapshot,
         afterSnapshot
       );
+      workspaceDiff = diff;
       try {
         workspaceChangeArtifacts = await persistNodeWorkspaceChanges(
           attempt.execution_dir,
@@ -3622,6 +3686,8 @@ async function executeNode(
         // Persistence is best-effort; failures here must not block node completion.
       }
     }
+
+    result = failDeepResearchWorkspacePollution(node, result, workspaceDiff);
 
     await writer.writeExecutionCompletion(attempt, {
       result: result.result,
@@ -3669,6 +3735,11 @@ async function executeNode(
       session,
       attempt,
       workspacePath: workspace.workspace_path
+    });
+    await ensureDeepResearchSummaryEvidenceIndex({
+      node,
+      contextMaterials: context.packet.materials,
+      artifacts
     });
     artifactRepairMetadata = materialized.repair_metadata;
 

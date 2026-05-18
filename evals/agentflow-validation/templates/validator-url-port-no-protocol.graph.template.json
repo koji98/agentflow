@@ -135,8 +135,7 @@
             "Find the smallest implementation surface that should change without broad rewrites.",
             {
               "id": "validation_plan",
-              "prompt": "Define the focused validation command and upstream-oracle anti-cheat risks.",
-              "as_artifact": true
+              "prompt": "Define the focused validation command and upstream-oracle anti-cheat risks."
             }
           ]
         }

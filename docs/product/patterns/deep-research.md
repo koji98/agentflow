@@ -22,13 +22,13 @@ Common fields:
 
 ## Public Artifacts
 
-Fixed public artifacts:
+Fixed public artifact:
 
-- `summary`: human-readable research answer.
+- `summary`: complete, human-readable research handoff.
 
 Authors cannot add arbitrary `artifacts` to `pattern_deep_research`. Use a downstream `agent` node when a workflow needs a custom synthesized deliverable.
 
-Deep research collapses graph-addressable output by default into `summary`. Angle and synthesis artifacts remain readable in the run tree as raw Markdown evidence. Use `as_artifact: true` when a downstream graph node needs a publisher-curated public artifact for that angle. Downstream nodes should reference the authored pattern id, for example `storage_research.summary` or `storage_research.storage_options`, not generated internal angle ids.
+Deep research always collapses graph-addressable output into `summary`. This is not a shallow abstract; it is the canonical, holistic research handoff that downstream work should be able to use first. Angle and synthesis artifacts remain readable in the run tree as raw Markdown evidence, and Agentflow prepends raw angle report links to the summary so downstream readers can progressively disclose detail when needed. Downstream nodes should reference the authored pattern id, for example `storage_research.summary`, not generated internal angle ids.
 
 Each angle is controlling for its worker. Write angles as specific lenses with evidence boundaries, not broad restatements of the parent goal. The parent goal gives context; the assigned angle decides what the worker optimizes for.
 
@@ -42,15 +42,18 @@ The pattern lowers into:
 
 Each synthesis node consumes at most three research reports. Groups are split as evenly as possible, so seven angles become synthesis groups of `2`, `2`, and `3`, not `3`, `3`, and `1`. Synthesis preserves major findings, collapses duplicate claims, keeps provenance, and carries conflicts or uncertainty forward.
 
-Angle and synthesis artifacts are internal Markdown evidence in the run tree. They support the final contract but do not need to match final graph-addressable formatting. The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes `summary`. Selected angle artifacts are public outputs owned by the final publisher: they preserve the useful angle evidence, mark superseded raw claims when needed, and must agree with the summary on controlling decisions.
+Angle and synthesis artifacts are internal Markdown evidence in the run tree. They support the final contract but do not need to match final graph-addressable formatting. Research helpers treat the repo workspace as read-only evidence: they may inspect files and run local validation, but they must not create scratch report files or source edits in the repo. The runtime treats workspace mutations from deep-research helpers as workspace pollution.
+
+The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes `summary`. The summary is the public front door and the full research handoff: after the publisher writes it, Agentflow deterministically prepends an evidence table mapping every authored angle to its raw report path. The publisher's content should rewrite the angle findings into one coherent, sufficiently detailed, conflict-resolved answer.
+
+Angle and synthesis workers may reference related angle findings in prose, but they should not create links to other angle reports. The runtime-owned summary evidence table is the only raw angle link surface.
 
 Angles can be authored as strings or objects. Object angles support:
 
 - `id`: stable axis id matching `/^[a-z][a-z0-9_]*$/`
 - `prompt`: sentence-style research prompt
-- `as_artifact`: optional `true` value that asks the final publisher to create `<pattern_id>.<angle_id>` as a curated public artifact for that angle
 
-If `as_artifact` is omitted, the angle remains run-tree evidence only and is not addressable by downstream graph nodes. Runtime audit indexes link the internal reports for selective inspection. If a downstream node truly needs raw angle evidence, pass it as explicit `support.context` with `what` and `why` that state it is evidence, not the controlling synthesis.
+Every angle is always included in the summary evidence table. If a downstream node needs raw angle detail, it follows the linked path from `summary`; the stable graph contract remains the summary artifact.
 
 ## Example
 
@@ -89,8 +92,7 @@ If `as_artifact` is omitted, the angle remains run-tree evidence only and is not
       "Investigate how current runtime artifacts support resume and auditability.",
       {
         "id": "storage_options",
-        "prompt": "Compare storage alternatives against local-first operation and repository simplicity.",
-        "as_artifact": true
+        "prompt": "Compare storage alternatives against local-first operation and repository simplicity."
       },
       "Identify migration, validation, and supervisor recovery risks for the recommended direction."
     ]

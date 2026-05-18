@@ -55,7 +55,7 @@ At execution time, `resolveExecutionContext` writes audience-specific files unde
 - `runtime/context.json`: compact machine state for resume, completion, verification, and recovery.
 - `human-debug/context-provenance.json`: source provenance and digest metadata for audit/debug review.
 
-Agentflow does not copy authored context text into attempt-local source clones and does not truncate source context. The prompt includes the pointer table and omits digests, byte sizes, packet paths, and provenance paths. Each runtime context item points back to the source workspace file, artifact file, plugin file, or runtime-generated file.
+Agentflow does not copy authored context text into attempt-local source clones and does not truncate source context. The prompt includes only available actionable pointers and omits optional omissions, digests, byte sizes, packet paths, and provenance paths. Each runtime context item points back to the source workspace file, artifact file, plugin file, or runtime-generated file.
 
 ```mermaid
 flowchart TD
@@ -94,7 +94,9 @@ Artifact refs can select attempts with:
 
 - `iteration`: `latest`, `latest_passed`, `latest_failed`, `previous`, or a positive integer.
 - `attempt`: `latest`, `latest_passed`, `latest_failed`, or a positive integer.
-- `if_available: true`: omit rather than fail when the selected material does not exist.
+- `if_available: true`: record an optional missing artifact reference in runtime/debug state rather than fail when the selected material does not exist. Optional omissions are not rendered into normal agent prompts.
+
+Missing required workspace files, glob matches, plugin files, and artifact references fail context resolution before the node runs.
 
 Inside repeat bodies, Agentflow can also add repeat history pointers for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually. Supervisor retry guidance can also appear as runtime-provided context after `retry_with_guidance`; it contains the guidance brief, prompt revision, failure fingerprint, and prior execution id for the retrying node.
 

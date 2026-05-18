@@ -46,18 +46,21 @@
         "type": "agent",
         "id": "prompt_probe",
         "artifacts": {
-          "handoff": {
-            "from": "output_dir",
-            "path": "handoff.md",
-            "description": "Prompt-regression handoff. Include literal labels `Scenario:`, `Evidence:`, `Validation:`, `Risks:`, and `Completion:`. Also satisfy the scenario-specific task requirements."
-          }
+            "handoff": {
+              "from": "output_dir",
+              "path": "handoff.md",
+              "description": "Prompt-regression handoff. Include literal labels `Scenario:`, `Evidence:`, `Validation:`, `Risks:`, and `Completion:`. Include exact observed output/result text from any required validation or tool command. Also satisfy the scenario-specific task requirements."
+            }
         },
         "intent": {
           "goal": "{{criteria.prompt-regression.task}}",
           "acceptance_criteria": [
             "Write the declared `handoff` artifact.",
             "Include literal labels `Scenario:`, `Evidence:`, `Validation:`, `Risks:`, and `Completion:`.",
-            "Run or cite the local validation/tool command when the scenario asks for one.",
+            "Run the exact local validation/tool command when the scenario names one; do not replace it with a nearby command.",
+            "Include the exact observed output/result from required validation/tool commands in `handoff.md`.",
+            "If the scenario task names required wording for `handoff.md`, include that wording exactly instead of only paraphrasing it.",
+            "If the scenario task asks for a decision, record an `af milestone log` entry with `--kind decision`; validation logs do not count as decision evidence.",
             "Use `af milestone` evidence logs when the scenario asks for a progress, finding, validation, or decision record.",
             "Run `af complete check` before the final response and stop when it reports ready for verification."
           ],

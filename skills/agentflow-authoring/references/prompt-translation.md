@@ -24,7 +24,7 @@ Use this when authoring or reviewing a graph for prompt quality. Agentflow graph
 | `agent` | One worker prompt with role, success contract, work loop, support tables, artifact table, and completion gate. | Use for one bounded outcome. Give outcome-level criteria, context pointers, and declared artifacts. Do not script file-by-file tactics. |
 | `check` with `kind: "ai"` | Read-only evaluator prompt with graph/check intent, context/artifact evidence, rubric, and JSON verdict contract. | Use for semantic gates. Make the rubric judge observable artifacts, not private reasoning or implementation preference. |
 | plugin-lowered agent node | Plugin workflow config/context is interpolated, then lowered to normal prompt-backed nodes with plugin file context and managed tool grants. | Keep plugin config schema-backed. Add `what`/`why` to plugin file context. Do not hide product intent inside plugin files alone. |
-| `pattern_deep_research` | Angle worker prompts, synthesis prompts, then publisher prompt. Each angle sees the parent contract, support, and its assigned angle; synthesis sees accepted reports; publisher writes final public artifacts. | Make angles controlling lenses. Put the assigned angle in direct, specific language. Use `as_artifact` only when downstream nodes need a curated public artifact for that angle. |
+| `pattern_deep_research` | Angle worker prompts, synthesis prompts, then publisher prompt. Each angle sees the parent contract, support, and its assigned angle; synthesis sees accepted reports; publisher writes one summary with links to all angle evidence. | Make angles controlling lenses. Put the assigned angle in direct, specific language. Downstream nodes consume the summary and follow evidence links when they need raw detail. |
 | `pattern_deep_work` | Planner, worker/validator, criterion evaluator, scorecard gate, retry, and publisher prompts. Parent intent/support flow into the work loop; criteria become grading prompts and gate weights. | Use for bounded mutation with feedback. Criteria should cover correctness, convention fit, no AI slop, validation evidence, and handoff quality when relevant. |
 | `pattern_work_list` | Planner prompt discovers a finite ordered list; runtime freezes it; item runner prompts execute each item sequentially; optional deep-work item criteria grade each item; publisher writes stable artifacts. | Use when item count is unknown until discovery. Author `planning_goal`, `what_counts_as_one_item`, and `done_when`; do not pre-bake fake item rows. |
 
@@ -65,15 +65,14 @@ Authoring rules:
 
 ### `pattern_deep_research`
 
-Deep research lowers into angle workers, synthesis workers, and a publisher. Angle prompts put the assigned angle before broader workflow context, so each angle must be a controlling lens. Synthesis prompts only consolidate accepted Markdown reports. The publisher writes final public artifacts, including any selected angle artifacts requested with `as_artifact`.
+Deep research lowers into angle workers, synthesis workers, and a publisher. Angle prompts put the assigned angle before broader workflow context, so each angle must be a controlling lens. Angle and synthesis helpers treat repo files as read-only evidence: they inspect and validate, then stream Markdown to `af artifact write`, without creating scratch report files or source edits in the repo. Synthesis prompts only consolidate accepted Markdown reports. The publisher writes one graph-addressable summary with a table linking every angle to its raw report path, then rewrites the findings into a conflict-resolved answer.
 
 Authoring rules:
 
 - Use the parent `intent.goal` to name the decision the research must unblock.
 - Make each angle specific enough that two workers would not produce the same report.
 - Include evidence authority in the angle or acceptance criteria: repo conventions, current product context, web research, official docs, prior artifacts, or risk register.
-- Use `as_artifact` only when downstream nodes need a graph-addressable, publisher-curated report for that angle; do not expose every angle by habit.
-- Treat raw angle reports as run-tree evidence. They may conflict; the final publisher must resolve contradictions before creating public artifacts.
+- Treat raw angle reports as run-tree evidence linked from the summary. They may conflict; the final publisher must resolve contradictions before publishing the summary.
 - Do not ask the research agent for machine JSON unless JSON is the actual user-facing deliverable.
 
 ### `pattern_deep_work`
