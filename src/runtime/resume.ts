@@ -422,6 +422,8 @@ export async function createResumedRuntimeSession(options: {
           compiledId,
           {
             ...envelope,
+            preserve_progress: [...envelope.preserve_progress],
+            do_not_redo: [...envelope.do_not_redo],
             retry_directive: {
               ...envelope.retry_directive,
               must_do: [...envelope.retry_directive.must_do],

@@ -93,7 +93,7 @@ agentflow plugin resolve --graph agentflow.graph.json
 }
 ```
 
-The plugin node id is the public handoff boundary. Downstream nodes reference `prepare_release.<artifact>`.
+The plugin node id is the graph-addressable handoff boundary. Downstream nodes reference `prepare_release.<artifact>`.
 
 ## Package Layout
 

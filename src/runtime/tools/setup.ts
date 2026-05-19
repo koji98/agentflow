@@ -46,6 +46,8 @@ interface PrepareAgentToolsOptions {
   context_packet_path?: string;
   context_manifest_path?: string;
   supervisor_recovery_envelope?: SupervisorRecoveryEnvelope;
+  attempt_memory_path?: string;
+  attempt_memory_markdown_path?: string;
   credential_specs?: CredentialSpecMap;
   credential_index_path?: string;
   keychain_account?: string;
@@ -566,6 +568,8 @@ export async function prepareAgentTools(
     context_packet_path: options.context_packet_path ?? "",
     context_manifest_path: options.context_manifest_path ?? "",
     ...(options.supervisor_recovery_envelope ? { supervisor_recovery_envelope: options.supervisor_recovery_envelope } : {}),
+    ...(options.attempt_memory_path ? { attempt_memory_path: options.attempt_memory_path } : {}),
+    ...(options.attempt_memory_markdown_path ? { attempt_memory_markdown_path: options.attempt_memory_markdown_path } : {}),
     tool_state_path,
     tool_bin_dir: bin_dir,
     tool_invocations_path,

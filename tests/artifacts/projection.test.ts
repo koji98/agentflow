@@ -434,6 +434,47 @@ describe("artifacts projection", () => {
                 compiled_id: fixture.compiledVerifyId
             });
             expect(events.events.some((event) => event.type === "check.evaluated")).toBe(true);
+            const retryEvent = {
+                seq: fixture.run.events.length + 1,
+                ts: new Date().toISOString(),
+                run_id: fixture.run.run_id,
+                type: "supervisor.intervention.retry",
+                compiled_id: fixture.compiledVerifyId,
+                execution_id: "exec-supervisor-retry",
+                payload: {
+                    attempt: 2,
+                    max_attempts: 4,
+                    summary: "transient supervisor recovery failure"
+                }
+            };
+            await writeFile(join(fixture.runRoot, "events.jsonl"), `${fixture.run.events.map((event) => JSON.stringify(event)).join("\n")}\n${JSON.stringify(retryEvent)}\n`);
+            const retryProjection = await projectRunEvents(fixture.runRoot);
+            expect(retryProjection.events).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    type: "supervisor.intervention.retry",
+                    summary: "Supervisor intervention retry 2/4: transient supervisor recovery failure.",
+                    compiled_id: fixture.compiledVerifyId,
+                    execution_id: "exec-supervisor-retry"
+                })
+            ]));
+            const fallbackRetryEvent = {
+                seq: fixture.run.events.length + 2,
+                ts: new Date().toISOString(),
+                run_id: fixture.run.run_id,
+                type: "supervisor.intervention.retry",
+                payload: {}
+            };
+            await writeFile(
+                join(fixture.runRoot, "events.jsonl"),
+                `${fixture.run.events.map((event) => JSON.stringify(event)).join("\n")}\n${JSON.stringify(retryEvent)}\n${JSON.stringify(fallbackRetryEvent)}\n`
+            );
+            const fallbackRetryProjection = await projectRunEvents(fixture.runRoot);
+            expect(fallbackRetryProjection.events).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    type: "supervisor.intervention.retry",
+                    summary: "Supervisor intervention retry ?/?: retrying recovery cycle."
+                })
+            ]));
             const nodeDetail = await projectNodeDetail(fixture.runRoot, fixture.compiledVerifyId);
             expect(nodeDetail.executions).toHaveLength(2);
             expect(nodeDetail.check_evaluations.at(-1)?.passed).toBe(true);
@@ -455,9 +496,29 @@ describe("artifacts projection", () => {
     it("projects durable run diagnostics for timed-out AI checks", async () => {
         const fixture = await createAiTimeoutRun();
         try {
+            const retryEvent = {
+                seq: fixture.run.events.length + 1,
+                ts: new Date().toISOString(),
+                run_id: fixture.run.run_id,
+                type: "supervisor.intervention.retry",
+                compiled_id: fixture.compiledCheckId,
+                execution_id: "exec-supervisor-retry",
+                payload: {
+                    attempt: 2,
+                    max_attempts: 4,
+                    summary: "transient supervisor recovery failure"
+                }
+            };
+            await writeFile(join(fixture.runRoot, "events.jsonl"), `${fixture.run.events.map((event) => JSON.stringify(event)).join("\n")}\n${JSON.stringify(retryEvent)}\n`);
             const snapshot = await projectRunSnapshot(fixture.runRoot);
             expect(snapshot.run.status).toBe("Failed");
             expect(snapshot.run_diagnostics).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    event_type: "supervisor.intervention.retry",
+                    severity: "warning",
+                    compiled_id: fixture.compiledCheckId,
+                    summary: "Supervisor intervention retry 2/4: transient supervisor recovery failure."
+                }),
                 expect.objectContaining({
                     event_type: "check.evaluated",
                     severity: "warning",

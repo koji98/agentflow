@@ -1,6 +1,6 @@
 # Managed Patterns
 
-Managed patterns are authored shortcuts for common outcome-oriented workflows. They compile into normal Agentflow primitive nodes, preserve one public authored node id, and publish named artifacts through the same `artifacts` contract as agent nodes.
+Managed patterns are authored shortcuts for common outcome-oriented workflows. They compile into normal Agentflow primitive nodes, preserve one graph-addressable authored node id, and publish named artifacts through the same `artifacts` contract as agent nodes.
 
 Use a managed pattern when the operator wants a known lifecycle with inspectable lowered nodes. Use primitive nodes or common authored patterns when the workflow is one-off or needs exact custom control.
 
@@ -15,7 +15,7 @@ Managed nodes use regular node fields:
 - normal agent option fields such as `sandbox`, `model`, `reasoning_effort`, and `artifact_repair`
 - `support` for node-local context, selected skills, managed tools, capabilities, and CLI hints; managed tools are exposed only to the pattern's agent steps
 
-Every managed pattern publishes public artifacts from the authored node id. Default artifacts depend on the pattern:
+Every managed pattern publishes graph-addressable artifacts from the authored node id. Default artifacts depend on the pattern:
 
 - `pattern_deep_research`: `research`.
 - `pattern_deep_work`: `summary` and `packet`.
@@ -46,7 +46,7 @@ The pattern runs authored angles in parallel, synthesizes Markdown research repo
 
 The final publisher rewrites the angle and synthesis evidence into one coherent, sufficiently detailed, conflict-resolved research report. Downstream nodes reference `my_research.research`; if a detail matters downstream, it belongs in that report.
 
-Angle and synthesis workers may mention related findings from other reports, but they should not create cross-angle links or companion public files.
+Angle and synthesis workers may mention related findings from other reports, but they should not create cross-angle links or companion graph-addressable files.
 
 ### `pattern_deep_work`
 
@@ -137,7 +137,7 @@ Inspect:
 
 - `lowered_managed_nodes`
 - generated primitive node kinds
-- public artifact declarations
+- graph-addressable artifact declarations
 - deep work repeat limits
 - deep research balanced synthesis layers
 - completion criteria

@@ -911,6 +911,7 @@ async function evaluateCriteria(options: {
       scenario: options.scenario,
       anonymized_variant_label: anonymizedVariantLabel,
       trial_id: options.trial_id,
+      trial_root: options.trial_root,
       run_root: options.run_root,
       trace_packet: options.tracePacket,
       trace_packet_file: options.trace_packet_file,

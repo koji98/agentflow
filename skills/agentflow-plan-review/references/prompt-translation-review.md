@@ -22,8 +22,8 @@ Use this to review whether a graph will compile into strong AI prompts. Each ski
 | AI `check` | Runs a read-only evaluator with rubric and JSON verdict. | Rubric asks for private reasoning, implementation preference, or a producer task instead of judging evidence. |
 | Plugin-lowered node | Interpolates plugin config/resources, then lowers to ordinary prompt-backed nodes with plugin context/tools. | Product intent is hidden inside plugin files, or plugin tools are granted for plain local CLI work. |
 | `pattern_deep_research` | Runs angle workers, synthesis, and publisher; assigned angle controls each worker. | Angles overlap, are too generic, lack evidence authority, or expose raw artifacts unnecessarily. |
-| `pattern_deep_work` | Runs planner, worker/validator, criteria evaluators, scorecard gate, retries, and publisher. | Criteria are equally weighted by habit, too vague, command-dependent without stable commands, or miss code quality/no-slop evidence. |
-| `pattern_work_list` | Plans a finite list, freezes it, runs items sequentially, grades optional deep-work item evidence, and publishes stable artifacts. | The graph pre-bakes item count, weakly defines item boundaries, or downstream nodes depend on dynamic item ids. |
+| `pattern_deep_work` | Runs planner, worker/validator, criteria evaluators, scorecard gate, retries, and publisher. Retry prompts receive attempt memory when recovery is scheduled. | Criteria are equally weighted by habit, too vague, command-dependent without stable commands, miss code quality/no-slop evidence, or leave no milestone/validation evidence for the supervisor to choose the best retry boundary. |
+| `pattern_work_list` | Plans a finite list, freezes it, runs items sequentially, grades optional deep-work item evidence, and publishes stable artifacts. Retry prompts receive the frozen ledger plus attempt memory for the failed item. | The graph pre-bakes item count, weakly defines item boundaries, downstream nodes depend on dynamic item ids, or item handoffs do not preserve enough evidence to retry the right item without redoing the whole list. |
 
 ## Approval Bar
 
@@ -32,4 +32,4 @@ Use this to review whether a graph will compile into strong AI prompts. Each ski
 - Research nodes should name the decision being unblocked and the evidence authority.
 - Work nodes should preserve agent autonomy while requiring validation, convention fit, no AI slop, and reviewable handoff evidence when relevant.
 - Review/fix nodes should consume prior findings as context artifacts and require closure evidence, not re-litigate broad scope.
-- Runtime-owned prompts such as outcome verification, artifact repair, and supervisor recovery should have enough structured artifacts and criteria to avoid guessing from raw logs.
+- Runtime-owned prompts such as outcome verification, artifact repair, attempt memory, and supervisor recovery should have enough structured artifacts, milestones, validation logs, events, and criteria to avoid guessing from raw logs.

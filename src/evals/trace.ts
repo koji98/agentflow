@@ -246,6 +246,7 @@ export async function buildEvalTracePacket(options: {
   const classifications = new Set<string>();
   const gatherers = new Set<string>();
   const applyActions = new Set<string>();
+  const resumeDecisions: EvalTracePacket["supervisor"]["resume_decisions"] = [];
   const interventionEvents = eventRecords.filter((event) =>
     typeof event.type === "string" && (event.type.includes("intervention") || event.type.includes("supervisor"))
   );
@@ -262,6 +263,19 @@ export async function buildEvalTracePacket(options: {
     "kind",
     gatherers
   );
+  for (const event of eventRecords) {
+    const payload = readRecord(event.payload);
+    const decision = readRecord(payload?.resume_decision);
+    if (!decision) {
+      continue;
+    }
+    resumeDecisions.push({
+      ...(typeof decision.resume_point === "string" ? { resume_point: decision.resume_point } : {}),
+      ...(typeof decision.restart_boundary === "string" ? { restart_boundary: decision.restart_boundary } : {}),
+      ...(typeof decision.workspace_decision === "string" ? { workspace_decision: decision.workspace_decision } : {}),
+      ...(typeof decision.reason_code === "string" ? { reason_code: decision.reason_code } : {})
+    });
+  }
 
   const manifestPath = join(options.run_root, "delivery", "manifest.json");
   const reviewBriefPath = join(options.run_root, "delivery", "01-review-brief.md");
@@ -411,6 +425,7 @@ export async function buildEvalTracePacket(options: {
       classifications: [...classifications],
       gatherers: [...gatherers],
       apply_actions: [...applyActions],
+      resume_decisions: resumeDecisions,
       intervention_count: interventionEvents.length,
       recovery_count: interventionEvents.filter((event) =>
         typeof event.type === "string" && event.type.includes("intervention")

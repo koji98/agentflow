@@ -15,7 +15,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const jsonMode = process.argv.includes("--json");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const commandTimeoutMs = 10 * 60 * 1000;
+const commandTimeoutMs = 60 * 60 * 1000;
 const coverageMetricKeys = ["lines", "statements", "functions", "branches"];
 
 function stripAnsi(text) {
@@ -285,6 +285,7 @@ if (invokedScript === import.meta.url) {
 }
 
 export {
+  commandTimeoutMs,
   coverageInclude,
   coveragePolicy,
   coverageReporters,

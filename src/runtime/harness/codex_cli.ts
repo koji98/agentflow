@@ -160,9 +160,25 @@ async function prepareIsolatedCodexHome(invocation: AgentInvocation): Promise<{
   return {
     path: codexHome,
     cleanup() {
-      return rm(codexHome, { recursive: true, force: true });
+      return rm(codexHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
     }
   };
+}
+
+export async function cleanupIsolatedCodexHome(
+  codexHome: Awaited<ReturnType<typeof prepareIsolatedCodexHome>> | undefined
+): Promise<string | undefined> {
+  if (!codexHome) {
+    return undefined;
+  }
+
+  try {
+    await codexHome.cleanup();
+    return undefined;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `[codex-cli cleanup warning] Could not remove isolated CODEX_HOME ${codexHome.path}: ${message}`;
+  }
 }
 
 function buildCodexArgs(
@@ -283,7 +299,7 @@ export function createCodexCliHarness(
 
           termination.dispose();
           spawnBroker.stop();
-          void codexHome?.cleanup();
+          void cleanupIsolatedCodexHome(codexHome);
           invocation.signal?.removeEventListener("abort", onAbort);
           active_processes.delete(invocation.executionId);
           reject(
@@ -302,11 +318,14 @@ export function createCodexCliHarness(
 
           termination.dispose();
           spawnBroker.stop();
-          await codexHome?.cleanup();
+          const cleanupWarning = await cleanupIsolatedCodexHome(codexHome);
           invocation.signal?.removeEventListener("abort", onAbort);
           active_processes.delete(invocation.executionId);
           const stdout = Buffer.concat(stdoutChunks).toString("utf8");
-          const stderr = Buffer.concat(stderrChunks).toString("utf8");
+          const stderr = [
+            Buffer.concat(stderrChunks).toString("utf8"),
+            cleanupWarning
+          ].filter(Boolean).join("\n");
           let last_message: string | undefined;
 
           try {

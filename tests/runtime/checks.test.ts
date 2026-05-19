@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -171,6 +171,44 @@ describe("runtime checks", () => {
     );
   });
 
+  it("writes AI check prompts to the provided prompt path for audit parity with agent nodes", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-ai-check-prompt-"));
+    const promptPath = join(tempRoot, "agent", "prompt.md");
+    const harness = createHarness("codex-cli", async () => {
+      return {
+        status: "passed",
+        exitCode: 0,
+        stdout: '{"passed":true,"score":1,"summary":"ok"}'
+      };
+    });
+
+    try {
+      const result = await runAiCheck({
+        harness,
+        run_id: "run-1",
+        execution_id: "exec-ai-prompt",
+        repo_alias: "main",
+        repo_path: process.cwd(),
+        model: "gpt-5-judge",
+        node_goal: "Evaluate the patch.",
+        rubric: "Be strict.",
+        context_packet_path: join(tempRoot, "runtime", "context.json"),
+        context_manifest_path: join(tempRoot, "agent", "context.md"),
+        context_manifest: "# Context Manifest\n",
+        prompt_path: promptPath,
+        output_dir: join(tempRoot, "artifacts"),
+        timeout_sec: 30,
+        signal: undefined
+      });
+
+      expect(result.prompt_sha256).toMatch(/^[a-f0-9]{64}$/u);
+      await expect(readFile(promptPath, "utf8")).resolves.toContain("You are an AI evaluator executing one read-only check node");
+      await expect(readFile(promptPath, "utf8")).resolves.toContain("Evaluate the patch.");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("runs Cursor AI checks when the harness provides the strict read-only contract", async () => {
     const harness = createHarness("cursor-cli", async () => {
       return {
@@ -238,7 +276,10 @@ describe("runtime checks", () => {
     expect(result.harness_result).toEqual(
       expect.objectContaining({
         status: "failed",
-        stderr: expect.stringContaining("ETIMEDOUT")
+        stderr: expect.stringContaining("ETIMEDOUT"),
+        metadata: expect.objectContaining({
+          failure_code: "verification_substrate_failure"
+        })
       })
     );
     expect(result.evaluation).toEqual(

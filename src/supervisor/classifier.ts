@@ -259,6 +259,18 @@ function containsOutcomeCategory(value: unknown, categories: string[]): boolean 
   return collectOutcomeFindingCategories(value).some((category) => allowed.has(category));
 }
 
+function unsafePriorProgressCategories(value: unknown): string[] {
+  const unsafe = new Set([
+    "wrong_direction",
+    "bad_plan_premise",
+    "overengineered_solution",
+    "broad_rewrite",
+    "ai_slop",
+    "contaminated_progress"
+  ]);
+  return collectOutcomeFindingCategories(value).filter((category) => unsafe.has(category));
+}
+
 function classifyRuntimeFailureCode(input: {
   code: RuntimeFailureCode;
   message: string;
@@ -378,6 +390,21 @@ function classifyRuntimeFailureCode(input: {
           gather("diagnostic_probe", "Collect timeout-specific diagnostics and identify a smaller retry strategy.", 1)
         ]),
         evidence
+      });
+    case "verification_substrate_failure":
+      return classifyResult({
+        class: "diagnostic_needed",
+        summary: input.message || "Verification failed before it could produce a trusted verdict.",
+        retryable: true,
+        recommended_action: "run_diagnostic",
+        gather_plan: gatherPlan([
+          gather("diagnostic_probe", "Inspect the verification substrate failure and rerun only the failed verification when possible.", 1),
+          gather("local_context", "Collect the verifier/check contract and current artifact state without rerunning completed worker progress.", 2)
+        ]),
+        evidence: {
+          ...evidence,
+          verification_substrate_failure: true
+        }
       });
     case "missing_plugin_credential":
       return classifyResult({
@@ -510,6 +537,27 @@ export function classifyNodeFailure(input: {
       typeof verificationPayload.summary === "string" && verificationPayload.summary.trim().length > 0
         ? verificationPayload.summary.trim()
         : "Outcome verification rejected the agent's work.";
+    const unsafeCategories = unsafePriorProgressCategories(verificationPayload);
+    if (unsafeCategories.length > 0) {
+      return classifyResult({
+        class: "semantic_misalignment",
+        summary,
+        retryable: true,
+        recommended_action: "run_diagnostic",
+        gather_plan: gatherPlan([
+          gather("local_context", "Inspect the failed attempt workspace diff and preserve only trustworthy prior evidence.", 1),
+          gather("investigate_failure", "Determine the earliest safe restart boundary for the unchanged node contract.", 2),
+          gather("semantic_rejudge", "Rejudge the unsafe-progress finding before retrying from a clean boundary.", 3)
+        ]),
+        evidence: {
+          ...evidence,
+          outcome_verification: verificationPayload,
+          prior_progress_unsafe: true,
+          unsafe_progress_categories: unsafeCategories,
+          workspace_repair_candidate: true
+        }
+      });
+    }
     if (containsDependencyDocsGap(verificationPayload)) {
       return classifyResult({
         class: "missing_dependency_docs",

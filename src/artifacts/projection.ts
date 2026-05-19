@@ -475,6 +475,12 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: String(payload.summary ?? `Supervisor intervention ${String(payload.intervention_id ?? "?")} started.`)
       };
+    case "supervisor.intervention.retry":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Supervisor intervention retry ${String(payload.attempt ?? "?")}/${String(payload.max_attempts ?? "?")}: ${String(payload.summary ?? "retrying recovery cycle")}.`
+      };
     case "supervisor.intervention.completed":
       return {
         ...(authored_id ? { authored_id } : {}),
@@ -520,6 +526,26 @@ function buildEventSummary(
         summary: payload.passed === true
           ? String(payload.summary ?? "Soft verification passed.")
           : String(payload.summary ?? "Soft verification failed.")
+      };
+    case "verification.started":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Verification started (${String(payload.check_kind ?? payload.verifier_kind ?? "verification")}).`
+      };
+    case "verification.retry":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Verification retry${payload.attempt !== undefined ? ` ${String(payload.attempt)}` : ""}: ${String(payload.summary ?? payload.check_kind ?? payload.verifier_kind ?? "verification")}.`
+      };
+    case "verification.completed":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: payload.passed === false
+          ? String(payload.summary ?? "Verification failed.")
+          : String(payload.summary ?? "Verification completed.")
       };
     case "outcome.verified":
       return {
@@ -663,6 +689,7 @@ function buildRunDiagnostic(
         : undefined;
     case "node.blocked":
     case "node.canceled":
+    case "supervisor.intervention.retry":
     case "supervisor.intervention.failed":
     case "managed.progress":
       if (event.type === "managed.progress" && payload.status === "healthy_progress") {

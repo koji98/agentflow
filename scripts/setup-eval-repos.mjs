@@ -409,21 +409,32 @@ const repos = {
   },
   "19-validation-timeout-strategy": {
     "package.json": packageJson("validation-timeout-strategy"),
-    "AGENTFLOW_EVAL_TASK.md": "Validation strategy repair fixture.\n",
+    "AGENTFLOW_EVAL_TASK.md": "Verification-only retry fixture.\n",
     "scripts/validation-gate.js": [
       "const fs = require('node:fs');",
       "const path = require('node:path');",
+      "const outputDir = process.env.AGENTFLOW_OUTPUT_DIR;",
+      "fs.mkdirSync(outputDir, { recursive: true });",
       "const envelope = process.env.AGENTFLOW_CONTEXT_SUPERVISOR_RECOVERY_ENVELOPE;",
       "if (!envelope || !fs.existsSync(envelope)) {",
-      "  console.error('npm test timed out after 900s');",
+      "  fs.writeFileSync(path.join(outputDir, 'verification.json'), JSON.stringify({ passed: false, summary: 'Validation substrate timed out before a trusted verdict.', failure_code: 'verification_substrate_failure' }, null, 2) + '\\n');",
+      "  console.error('validation substrate failed before a trusted verdict');",
       "  process.exit(1);",
       "}",
       "const envelopeText = fs.readFileSync(envelope, 'utf8');",
-      "if (!/focused validation command|validation strategy/i.test(envelopeText)) {",
-      "  console.error('missing validation-strategy repair guidance');",
+      "if (!/rerun_verification|verification_substrate_failure|restart boundary: verification|restart_boundary.*verification/i.test(envelopeText)) {",
+      "  fs.writeFileSync(path.join(outputDir, 'verification.json'), JSON.stringify({ passed: false, summary: 'Retry did not include verification-only recovery guidance.', failure_code: 'verification_substrate_failure' }, null, 2) + '\\n');",
+      "  console.error('missing verification-only recovery guidance');",
       "  process.exit(1);",
       "}",
-      "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.md'), 'Scenario: validation-timeout-strategy\\nValidation: focused validation command observed after timeout\\nChanged files: none\\nRisks: broad suite not rerun in fixture\\n');",
+      "fs.writeFileSync(path.join(outputDir, 'verification.json'), JSON.stringify({ passed: true, summary: 'Verification-only retry observed after substrate failure.' }, null, 2) + '\\n');",
+      ""
+    ].join("\n"),
+    "scripts/publish-handoff.js": [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "fs.mkdirSync(process.env.AGENTFLOW_OUTPUT_DIR, { recursive: true });",
+      "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.md'), 'Scenario: validation-timeout-strategy\\nValidation: verification-only retry observed after substrate failure\\nChanged files: none\\nRisks: broad suite not rerun in fixture\\n');",
       ""
     ].join("\n")
   },
@@ -434,17 +445,28 @@ const repos = {
       "const fs = require('node:fs');",
       "const path = require('node:path');",
       "const workspace = process.env.AGENTFLOW_WORKSPACE;",
+      "const outputDir = process.env.AGENTFLOW_OUTPUT_DIR;",
+      "fs.mkdirSync(outputDir, { recursive: true });",
       "const envelope = process.env.AGENTFLOW_CONTEXT_SUPERVISOR_RECOVERY_ENVELOPE;",
       "const pollution = path.join(workspace, 'pollution.txt');",
       "if (!envelope || !fs.existsSync(envelope)) {",
       "  fs.writeFileSync(pollution, 'failed attempt should be cleaned before retry\\n');",
+      "  fs.writeFileSync(path.join(outputDir, 'verification.json'), JSON.stringify({ passed: false, summary: 'Workspace pollution detected in failed attempt.', failure_code: 'workspace_pollution' }, null, 2) + '\\n');",
       "  console.error('Forbidden edit: unexpected workspace change in pollution.txt');",
       "  process.exit(1);",
       "}",
       "if (fs.existsSync(pollution)) {",
+      "  fs.writeFileSync(path.join(outputDir, 'verification.json'), JSON.stringify({ passed: false, summary: 'Workspace repair did not clean pollution.txt.', failure_code: 'workspace_pollution' }, null, 2) + '\\n');",
       "  console.error('workspace repair did not clean pollution.txt');",
       "  process.exit(1);",
       "}",
+      "fs.writeFileSync(path.join(outputDir, 'verification.json'), JSON.stringify({ passed: true, summary: 'pollution.txt absent after supervisor cleanup.' }, null, 2) + '\\n');",
+      ""
+    ].join("\n"),
+    "scripts/publish-handoff.js": [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "fs.mkdirSync(process.env.AGENTFLOW_OUTPUT_DIR, { recursive: true });",
       "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'handoff.md'), 'Scenario: workspace-pollution-cleanup\\nValidation: pollution.txt absent after supervisor cleanup\\nChanged files: none\\nRisks: none\\n');",
       ""
     ].join("\n")
@@ -452,7 +474,15 @@ const repos = {
   "21-no-delta-recovery-stop": {
     "package.json": packageJson("no-delta-recovery-stop"),
     "AGENTFLOW_EVAL_TASK.md": "No-delta recovery fixture.\n",
-    "scripts/no-delta.js": "console.error('Forbidden edit: unexpected workspace change, but no workspace diff exists'); process.exit(1);\n"
+    "scripts/no-delta.js": [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "fs.mkdirSync(process.env.AGENTFLOW_OUTPUT_DIR, { recursive: true });",
+      "fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR, 'verification.json'), JSON.stringify({ passed: false, summary: 'Workspace repair requested but no workspace diff exists.', failure_code: 'workspace_pollution' }, null, 2) + '\\n');",
+      "console.error('structured workspace pollution without a repairable diff');",
+      "process.exit(1);",
+      ""
+    ].join("\n")
   },
   "22-managed-deep-research-repo": {
     "package.json": packageJson("managed-deep-research-repo"),
@@ -538,7 +568,7 @@ const scenarios = [
   ["16-terminal-repeated-failure", "exec-terminal", "supervisor-boundary", "medium", "Confirm repeated unrecoverable failure records terminal supervisor evidence."],
   ["17-context-pointer-provenance", "agent-context-pointer-provenance", "context-pointer-provenance", "hard", "Confirm pointer-only context gives enough provenance for a targeted fix without broad rewrites."],
   ["18-noisy-generated-tree", "agent-noisy-context", "context-noise-control", "hard", "Confirm broad context ignores generated dependency-style trees while preserving useful task context."],
-  ["19-validation-timeout-strategy", "exec-validation-strategy", "validation-repair", "hard", "Confirm timeout-like failures receive changed validation strategy before retry."],
+  ["19-validation-timeout-strategy", "exec-validation-strategy", "validation-repair", "hard", "Confirm verification-substrate failures retry verification without rerunning unrelated work."],
   ["20-workspace-pollution-cleanup", "exec-workspace-repair", "workspace-repair", "hard", "Confirm failed-attempt workspace pollution is cleaned before retry."],
   ["21-no-delta-recovery-stop", "exec-no-delta", "supervisor-boundary", "hard", "Confirm recovery stops when no material delta can be produced."],
   ["22-managed-deep-research-repo", "managed-deep-research", "managed-patterns", "hard", "Use managed deep research on a real local repo fixture with seven balanced research angles."],
@@ -968,16 +998,25 @@ const templates = {
       id: "root",
       steps: [
         {
-          type: "exec",
+          type: "check",
           id: "validation_gate",
           runtime: { repo: "main" },
+          check_kind: "deterministic",
           command: "node",
           args: ["scripts/validation-gate.js"],
+          pass_if: { json_path: "$.passed", equals: true }
+        },
+        {
+          type: "exec",
+          id: "publish_handoff",
+          runtime: { repo: "main" },
+          command: "node",
+          args: ["scripts/publish-handoff.js"],
           artifacts: {
             handoff: {
               from: "output_dir",
               path: "handoff.md",
-              description: "Validation-strategy handoff written after supervisor retry."
+              description: "Verification-retry handoff written after repaired verification passes."
             }
           }
         }
@@ -991,16 +1030,25 @@ const templates = {
       id: "root",
       steps: [
         {
-          type: "exec",
+          type: "check",
           id: "workspace_gate",
           runtime: { repo: "main" },
+          check_kind: "deterministic",
           command: "node",
           args: ["scripts/workspace-gate.js"],
+          pass_if: { json_path: "$.passed", equals: true }
+        },
+        {
+          type: "exec",
+          id: "publish_handoff",
+          runtime: { repo: "main" },
+          command: "node",
+          args: ["scripts/publish-handoff.js"],
           artifacts: {
             handoff: {
               from: "output_dir",
               path: "handoff.md",
-              description: "Workspace-repair handoff written after supervisor cleanup."
+              description: "Workspace-repair handoff written after cleanup verification passes."
             }
           }
         }
@@ -1013,7 +1061,15 @@ const templates = {
       type: "sequence",
       id: "root",
       steps: [
-        { type: "exec", id: "no_delta", runtime: { repo: "main" }, command: "node", args: ["scripts/no-delta.js"] }
+        {
+          type: "check",
+          id: "no_delta",
+          runtime: { repo: "main" },
+          check_kind: "deterministic",
+          command: "node",
+          args: ["scripts/no-delta.js"],
+          pass_if: { json_path: "$.passed", equals: true }
+        }
       ]
     }
   },
@@ -1241,7 +1297,7 @@ function scenarioJson([id, template, bucket, difficulty, description]) {
     Object.assign(supervisor, {
       classifications: ["diagnostic_needed"],
       gatherers: ["diagnostic_probe"],
-      apply_actions: ["repair_validation_strategy"]
+      apply_actions: ["rerun_verification"]
     });
   }
 
@@ -1396,9 +1452,17 @@ if (scenarioId === "18-noisy-generated-tree") {
 
 if (scenarioId === "19-validation-timeout-strategy") {
   assert("validation_strategy_classified", packet.supervisor?.classifications?.includes("diagnostic_needed"), "diagnostic_needed classification");
-  assert("validation_strategy_applied", packet.supervisor?.apply_actions?.includes("repair_validation_strategy"), "repair_validation_strategy apply action");
+  assert("validation_strategy_applied", packet.supervisor?.apply_actions?.includes("rerun_verification"), "rerun_verification apply action");
+  assert(
+    "validation_strategy_resume_boundary",
+    (packet.supervisor?.resume_decisions ?? []).some((decision) =>
+      decision.reason_code === "verification_substrate_failure" &&
+      decision.restart_boundary === "verification"
+    ),
+    "verification_substrate_failure at verification boundary"
+  );
   assert("validation_strategy_retry", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
-  assert("handoff_mentions_focused_validation", /focused validation command|timeout/i.test(handoffText), "handoff focused validation evidence");
+  assert("handoff_mentions_focused_validation", /verification-only retry|substrate failure|timeout/i.test(handoffText), "handoff focused validation evidence");
 }
 
 if (scenarioId === "20-workspace-pollution-cleanup") {

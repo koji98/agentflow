@@ -44,19 +44,24 @@
     "id": "root",
     "steps": [
       {
-        "type": "exec",
+        "type": "check",
         "id": "no_delta",
         "runtime": {
           "repo": "main"
         },
+        "check_kind": "deterministic",
         "command": "node",
         "args": [
           "scripts/no-delta.js"
         ],
+        "pass_if": {
+          "json_path": "$.passed",
+          "equals": true
+        },
         "intent": {
           "goal": "Run no_delta.",
           "acceptance_criteria": [
-            "The node satisfies its local eval contract."
+            "The deterministic gate exposes a structured failure without producing a repairable material delta."
           ],
           "constraints": []
         }

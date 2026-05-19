@@ -178,21 +178,19 @@ export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } 
       return;
     }
 
-    await Promise.all(entries
-      .filter((entry) => entry.endsWith(".json"))
-      .map(async (entry) => {
-        const requestId = entry.replace(/\.json$/u, "");
-        if (handledAfRequests.has(requestId)) {
-          return;
-        }
-        const request = await readFile(join(requestsDir, entry), "utf8")
-          .then((content) => JSON.parse(content) as AfBrokerRequest)
-          .catch(() => undefined);
-        if (!request || request.id !== requestId || !Array.isArray(request.argv)) {
-          return;
-        }
-        await runAfBrokerRequest(request);
-      }));
+    for (const entry of entries.filter((candidate) => candidate.endsWith(".json")).sort()) {
+      const requestId = entry.replace(/\.json$/u, "");
+      if (handledAfRequests.has(requestId)) {
+        continue;
+      }
+      const request = await readFile(join(requestsDir, entry), "utf8")
+        .then((content) => JSON.parse(content) as AfBrokerRequest)
+        .catch(() => undefined);
+      if (!request || request.id !== requestId || !Array.isArray(request.argv)) {
+        continue;
+      }
+      await runAfBrokerRequest(request);
+    }
   }
 
   async function poll(): Promise<void> {

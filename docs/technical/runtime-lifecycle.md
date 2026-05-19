@@ -84,17 +84,20 @@ Authored ids remain visible for humans. Compiled ids are stable runtime ids that
 Each attempt is the unit of execution and audit. A typical agent attempt includes:
 
 - `agent/context.md`, `runtime/context.json`, and `human-debug/context-provenance.json`
+- `agent/attempt-memory.md` and `runtime/attempt-memory.json` on retry attempts
 - `runtime/tools/runtime.json`, `state.json`, generated `bin/af`, and generated plugin wrappers
 - stdout/stderr logs from the harness or local command under `human-debug/harness/`
 - `human-debug/tools/index.jsonl` and paired tool input/output payloads when generated wrappers are used
 - declared output artifacts under the attempt artifact directory or workspace paths
 - reserved artifacts such as `agent_response`, `stdout`, `stderr`, and `verification_json`
-- `workspace-changes/` snapshots for agent and exec attempts that reach the execution boundary
+- `workspace-changes/` snapshots for agent, exec, and check attempts that reach the execution boundary
 - `runtime/verifier.json` and `human-debug/verifier/verdict.md` for passing agent attempts after declared artifacts materialize
 
 Normal agents read `agent/`, declared `artifacts/`, and explicit context pointers. Files under `human-debug/` are audit-only unless a diagnostic supervisor helper is explicitly asked to inspect them.
 
 The attempt boundary matters because supervisor interventions attach to a specific attempt, downstream refs select from attempts, and resume decides whether completed attempts remain compatible with the current compiled contract.
+
+Retries are evidence-based continuations, not blind reruns. When the supervisor schedules a retry, it records a best-resume decision: the resume point, restart boundary, workspace decision, evidence to reuse, evidence to discard, reason code, required next action, and validation gate. The best restart boundary is not always the smallest one; unsafe, contaminated, over-broad, or wrong-direction progress can require a full failed-attempt reset, while transient verifier failures should rerun only verification. Attempt memory is then derived from runtime events, workspace snapshots, milestones, artifacts, completion packets, verifier results, and the recovery decision. `af orient` is the retry front door: it starts with retry orientation and attempt memory, then shows the unchanged success contract, artifacts, milestones, context, and support. Raw logs, provenance, case files, recovery plans, and debug tool payloads stay out of normal retry prompts.
 
 Managed pattern internals also emit `managed.progress` events at meaningful boundaries such as internal node completion, ordinary deep-work completion feedback, repeated no-delta stalls, and managed repeat exhaustion. Ordinary managed feedback stays inside the pattern while the pattern can still make progress. When deep work repeats the same blocker without material delta, or when a managed repeat exhausts its authored cycles, the runtime records managed progress evidence and routes the failed boundary through the normal supervisor path. The supervisor may retry only when it can attach a material delta such as a requirement evidence map, repaired context, changed validation strategy, workspace cleanup, safe environment repair, target rerank with evidence, or accepted artifact repair.
 
@@ -124,6 +127,8 @@ Supervisor decisions are written to event streams, `supervisor-timeline.jsonl`, 
 Failure routing is structured-control-plane only. The classifier reads trusted typed `AuthorityRequest` records, runtime-owned `failure_code` metadata, structured completion packets, outcome-verifier categories, repeated failure fingerprints, and node kind. Stdout, stderr, agent responses, verifier summaries, helper prose, and debug tool files can explain evidence, but they do not choose recovery class or pause a run.
 
 For recovery-oriented actions, the supervisor records a failure fingerprint, writes requirement evidence maps, causal case files, target rankings, recovery chains, recovery plans, runtime overlays, and material deltas as machine state, emits `supervisor.retry_scheduled`, sleeps before re-queueing, and injects a compact `agent/supervisor-recovery.md` brief into the selected target's next attempt prompt and context. A retry without a material delta is blocked so the supervisor does not spend budget repeating the same failed tactic. Generic retry advice and target changes without evidence are not material deltas. The default retry delay is 10 seconds with exponential backoff capped at 2 minutes; `AGENTFLOW_RETRY_BASE_DELAY_MS` and `AGENTFLOW_RETRY_MAX_DELAY_MS` override the values.
+
+Recovery envelopes include a runtime-owned resume decision. Resume points are `continue_from_prior_progress`, `continue_from_milestone`, `repair_artifacts`, `rerun_verification`, `repair_validation_strategy`, `repair_workspace`, `fresh_retry`, or `fail_contract_gap`; restart boundaries identify the actual retry surface: verification, artifact repair, milestone, work-list item, managed-pattern phase, node attempt, or upstream target. `fresh_retry` is reserved for cases where prior progress is absent, unsafe, irrelevant, or explicitly rejected by structured verifier evidence such as wrong-direction or contaminated-progress categories. Verification substrate failures are local: they use `rerun_verification` and do not rerun the worker unless structured verifier findings show an actual work defect.
 
 Context pointer packaging can fail before the harness runs. Those failures are classified as `context_contract_failure`, analyzed with the shared run-ready context analyzer, and retried with a compact `supervisor_context_repair` packet when the supervisor can safely repair the packaging without changing graph authority.
 

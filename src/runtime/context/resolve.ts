@@ -240,6 +240,7 @@ async function materializeRepeatHistoryContext(
 
 function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope): string {
   const directive = envelope.retry_directive;
+  const evidenceToRead = directive.evidence_to_read.filter(isAgentFacingEvidencePath);
   return [
     "# Supervisor Recovery Case",
     "",
@@ -248,6 +249,10 @@ function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope):
     "",
     `- Prior execution: \`${envelope.prior_execution_id}\``,
     `- Classification: \`${envelope.classification}\``,
+    `- Resume point: \`${envelope.resume_point}\``,
+    `- Restart boundary: \`${envelope.resume_decision.restart_boundary}\``,
+    `- Workspace decision: \`${envelope.workspace_decision}\``,
+    `- Resume reason: \`${envelope.resume_decision.reason_code}\``,
     `- Repeated matching symptom count: \`${envelope.repeated_fingerprint_count}\``,
     "",
     "## Recovery Summary",
@@ -256,11 +261,28 @@ function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope):
     "## Must Do",
     ...directive.must_do.map((item) => `- ${item}`),
     "",
+    "## Preserve Progress",
+    ...(envelope.preserve_progress.length > 0
+      ? envelope.preserve_progress.map((item) => `- ${item}`)
+      : ["- Preserve in-scope prior progress unless recovery evidence says it is unsafe."]),
+    "",
+    "## Reuse",
+    ...envelope.resume_decision.reuse.map((item) => `- ${item}`),
+    "",
+    "## Discard",
+    ...envelope.resume_decision.discard.map((item) => `- ${item}`),
+    "",
     "## Must Not Do",
-    ...directive.must_not_do.map((item) => `- ${item}`),
+    ...[...new Set([...directive.must_not_do, ...envelope.do_not_redo])].map((item) => `- ${item}`),
+    "",
+    "## Required Next Action",
+    envelope.required_next_action,
+    "",
     "",
     "## Evidence To Read",
-    ...directive.evidence_to_read.map((item) => `- ${item}`),
+    ...(evidenceToRead.length > 0
+      ? evidenceToRead.map((item) => `- ${item}`)
+      : ["- Use the current context pointers, prior declared artifacts, and artifact status."]),
     "",
     "## Validation Focus",
     ...directive.validation_focus.map((item) => `- ${item}`),
@@ -273,6 +295,15 @@ function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope):
     "- Sandbox: unchanged.",
     "- Declared artifacts: unchanged."
   ].join("\n");
+}
+
+function isAgentFacingEvidencePath(value: string): boolean {
+  if (value.trim().length === 0) {
+    return false;
+  }
+  return !/(^|[/\\])(human-debug|runtime)([/\\]|$)/u.test(value)
+    && !/(^|[/\\])agent[/\\](prompt|context|attempt-memory|supervisor-recovery|response)\.md$/u.test(value)
+    && !/(^|[/\\])(case-file|recovery-plan|recovery-envelope)\.json$/u.test(value);
 }
 
 async function materializeSupervisorRecoveryEnvelopeContext(
@@ -292,6 +323,10 @@ async function materializeSupervisorRecoveryEnvelopeContext(
     classification: envelope.classification,
     failure_fingerprint: envelope.failure_fingerprint,
     repeated_fingerprint_count: envelope.repeated_fingerprint_count,
+    resume_point: envelope.resume_point,
+    restart_boundary: envelope.resume_decision.restart_boundary,
+    workspace_decision: envelope.workspace_decision,
+    reason_code: envelope.resume_decision.reason_code,
     recovery_plan_path: envelope.recovery_plan_path,
     case_file_path: envelope.case_file_path
   };

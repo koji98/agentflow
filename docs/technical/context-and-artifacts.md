@@ -9,8 +9,8 @@ flowchart LR
   authored["Authored support.context"] --> normalize["Normalize refs and selectors"]
   normalize --> compile["Compile dependency edges"]
   compile --> attempt["Node attempt starts"]
-  attempt --> resolve["Resolve packet, manifest, provenance"]
-  resolve --> prompt["Harness prompt references packet and manifest"]
+  attempt --> resolve["Resolve agent, runtime, and debug context files"]
+  resolve --> prompt["Harness prompt uses agent/context.md"]
   prompt --> worker["Agent/check/exec opens source pointers when needed"]
   worker --> artifacts["Declared artifacts and reserved artifacts"]
   artifacts --> downstream["Downstream refs"]
@@ -67,7 +67,7 @@ flowchart TD
   glob --> sort["List repo files, sort, cap by max_files"]
   ref --> attempts["Select producer attempt by iteration/attempt selector"]
   attempts --> artifact{"Artifact path exists?"}
-  artifact -- yes --> pointer["Record pointer, digest, byte size"]
+  artifact -- yes --> pointer["Record pointer and runtime/debug metadata"]
   artifact -- no --> omit["Omit if if_available, otherwise fail context resolution"]
   file --> pointer
   plugin --> pointer
@@ -98,11 +98,11 @@ Artifact refs can select attempts with:
 
 Missing required workspace files, glob matches, plugin files, and artifact references fail context resolution before the node runs.
 
-Inside repeat bodies, Agentflow can also add repeat history pointers for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually. Supervisor retry guidance can also appear as runtime-provided context after `retry_with_guidance`; it contains the guidance brief, prompt revision, failure fingerprint, and prior execution id for the retrying node.
+Inside repeat bodies, Agentflow can also add repeat history pointers for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually. Supervisor retry guidance can also appear as runtime-provided context after recovery; it contains the retry brief and prior execution id for the retrying node. Runtime-authored attempt memory is separate: `agent/attempt-memory.md` and `runtime/attempt-memory.json` summarize the best-resume decision, prior timeline from `events.jsonl`, progress to reuse, progress to discard, artifact state, validation evidence, workspace decision, resume point, restart boundary, and do-not-redo guidance.
 
 When a retry uses a supervisor runtime overlay, the overlay context is resolved before authored context:
 
-- `supervisor_recovery_envelope` points to `agent/supervisor-recovery.md`, which summarizes the failure symptom, selected recovery action, required material delta, must-do guidance, evidence pointers, validation focus, and unchanged contract.
+- `supervisor_recovery_envelope` points to `agent/supervisor-recovery.md`, which summarizes the failure symptom, selected recovery action, best resume point, restart boundary, workspace decision, required material delta, reuse/discard guidance, evidence pointers, validation focus, and unchanged contract.
 - `supervisor_context_repair` appears when context pointer resolution failed. It provides a compact context index, omitted-entry provenance, largest-file warnings, default ignored roots, and live paths the worker can inspect manually.
 - Workspace and environment repairs are recorded in `runtime-overlay.json` and `material-delta.json`. Workspace repair also writes `workspace-repair-patch.json` and `workspace-repair-result.json` so reviewers can see which failed-attempt edits were restored before retry.
 

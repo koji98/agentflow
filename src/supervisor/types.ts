@@ -58,7 +58,7 @@ export type SupervisorRecoveryOperation =
   | "repair_validation_strategy"
   | "repair_workspace"
   | "repair_environment"
-  | "rerun_check"
+  | "rerun_verification"
   | "investigate_causal_cone"
   | "pause_for_authority"
   | "fail_contract_gap";
@@ -200,11 +200,60 @@ export type SupervisorApplyAction =
   | "repair_validation_strategy"
   | "repair_workspace"
   | "repair_environment"
-  | "rerun_check"
+  | "rerun_verification"
   | "retry_with_evidence"
   | "pause_for_authority"
   | "fail_terminal"
   | "fail_contract_gap";
+
+export type SupervisorResumePoint =
+  | "continue_from_prior_progress"
+  | "continue_from_milestone"
+  | "repair_artifacts"
+  | "rerun_verification"
+  | "repair_validation_strategy"
+  | "repair_workspace"
+  | "fresh_retry"
+  | "fail_contract_gap";
+
+export type SupervisorWorkspaceDecision =
+  | "preserve"
+  | "reset"
+  | "partial_cleanup";
+
+export type SupervisorRestartBoundary =
+  | "verification"
+  | "artifact_repair"
+  | "milestone"
+  | "work_list_item"
+  | "managed_pattern_phase"
+  | "node_attempt"
+  | "upstream_target";
+
+export type SupervisorRecoveryResumeReasonCode =
+  | "validated_progress"
+  | "artifact_contract_repair"
+  | "verification_substrate_failure"
+  | "validation_strategy_repair"
+  | "workspace_pollution_cleanup"
+  | "prior_progress_unsafe"
+  | "upstream_target_selected"
+  | "evidence_delta_retry"
+  | "fresh_retry_required"
+  | "contract_gap";
+
+export interface RecoveryResumeDecision {
+  resume_point: SupervisorResumePoint;
+  restart_boundary: SupervisorRestartBoundary;
+  workspace_decision: SupervisorWorkspaceDecision;
+  reuse: string[];
+  discard: string[];
+  reason_code: SupervisorRecoveryResumeReasonCode;
+  confidence: "low" | "medium" | "high";
+  evidence: string[];
+  required_next_action: string;
+  validation_gate: string[];
+}
 
 export type SupervisorRequirementEvidenceStatus =
   | "available"
@@ -362,6 +411,12 @@ export interface SupervisorRecoveryEnvelope {
   classification: FailureClass;
   failure_fingerprint: string;
   repeated_fingerprint_count: number;
+  resume_point: SupervisorResumePoint;
+  workspace_decision: SupervisorWorkspaceDecision;
+  resume_decision: RecoveryResumeDecision;
+  preserve_progress: string[];
+  do_not_redo: string[];
+  required_next_action: string;
   retry_directive: {
     summary: string;
     must_do: string[];

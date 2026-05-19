@@ -12,7 +12,7 @@ Review axes:
 2. Composition: assurance profile, managed patterns, primitive nodes, checkpoints.
 3. Agent freedom: outcome-sized nodes, no unnecessary file-by-file prescription.
 4. Checks: deterministic checks validate stable facts; rubrics handle semantic quality.
-5. Artifacts: durable handoffs exist and downstream refs target public artifacts.
+5. Artifacts: durable handoffs exist and downstream refs target declared graph-addressable artifacts.
 6. Context: focused, high-signal, pointer-based, explained with `what` and `why`, no broad dumps.
 7. Authority: sandbox, tools, credentials, profile isolation, human gates.
 8. Operations: plugin resolve, validate, show-compiled, diagram or output package when useful.

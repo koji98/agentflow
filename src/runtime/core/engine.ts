@@ -44,6 +44,7 @@ import {
 import { runAiCheck } from "../checks/ai.js";
 import { runDeterministicCheck, runLocalProcess } from "../checks/deterministic.js";
 import { resolveExecutionContext } from "../context/resolve.js";
+import { buildAttemptMemory, writeAttemptMemory } from "../attempt_memory.js";
 import type { ContextPacketMaterializedItem } from "../context/packet.js";
 import { evaluateGraphReadiness } from "../readiness.js";
 import { collectMissingToolCredentialAuthorityRequests, prepareAgentTools } from "../tools/setup.js";
@@ -82,6 +83,7 @@ import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
 import { runOutcomeVerification } from "../verification/verifier.js";
 import type { OutcomeVerificationResult } from "../verification/types.js";
 import {
+  isRuntimeFailureCode,
   RuntimeFailureError,
   runtimeFailureMetadata,
   runtimeFailurePayload,
@@ -119,6 +121,10 @@ import {
   type ReadyNode,
   type SchedulerTopology
 } from "./scheduler.js";
+import {
+  runSupervisorRecoveryCycleWithBackoff,
+  type SupervisorRecoveryCycleRetryResult
+} from "./supervisor_recovery_retry.js";
 
 export interface RuntimeNodeExecutionResult {
   status: "passed" | "failed" | "canceled";
@@ -147,6 +153,8 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
   context_manifest_path: string;
   context_materials?: ContextPacketMaterializedItem[];
   supervisor_recovery_envelope?: SupervisorRecoveryEnvelope;
+  attempt_memory_path?: string;
+  attempt_memory_markdown_path?: string;
   environment: NodeJS.ProcessEnv;
   runtime_env?: Record<string, string>;
   signal: AbortSignal | undefined;
@@ -1309,11 +1317,13 @@ async function sleepForRetryDelay(ms: number, signal: AbortSignal | undefined): 
 
   await new Promise<void>((resolveSleep, reject) => {
     const timer = setTimeout(resolveSleep, ms);
+    /* c8 ignore next 4 -- cancellation during retry sleep is exercised at run level; this branch depends on abort timing. */
     const abort = () => {
       clearTimeout(timer);
       reject(new Error("Retry delay canceled."));
     };
 
+    /* c8 ignore next 4 -- same abort-timing path as above. */
     if (signal?.aborted) {
       abort();
       return;
@@ -1321,6 +1331,142 @@ async function sleepForRetryDelay(ms: number, signal: AbortSignal | undefined): 
 
     signal?.addEventListener("abort", abort, { once: true });
   });
+}
+
+type SupervisorRecoveryCycleResult = Awaited<ReturnType<typeof runSupervisorRecoveryCycle>>;
+type FailedSupervisorRecoveryCycleResult = Extract<
+  SupervisorRecoveryCycleRetryResult<SupervisorRecoveryCycleResult>,
+  { status: "failed" }
+>;
+
+function supervisorRecoveryCycleMaxAttempts(): number {
+  const configured = Number.parseInt(process.env.AGENTFLOW_SUPERVISOR_RECOVERY_MAX_ATTEMPTS ?? "", 10);
+  if (Number.isFinite(configured) && configured >= 1) {
+    return configured;
+  }
+  return 3;
+}
+
+async function runSupervisorRecoveryCycleWithRuntimeBackoff(options: {
+  runOptions: RunCompiledGraphOptions;
+  session: RuntimeSession;
+  writer: ArtifactWriter;
+  runOwner: RunOwnerRecord;
+  events: RuntimeEventEnvelope[];
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  action: SupervisorActionKind;
+  interventionId: string;
+  decisionId: string;
+  targetCompiledId: string;
+  run: () => Promise<SupervisorRecoveryCycleResult>;
+}): Promise<SupervisorRecoveryCycleRetryResult<SupervisorRecoveryCycleResult>> {
+  return runSupervisorRecoveryCycleWithBackoff({
+    maxAttempts: supervisorRecoveryCycleMaxAttempts(),
+    run: options.run,
+    delayForAttempt: computeRetryDelayMs,
+    sleep: (delayMs) => sleepForRetryDelay(delayMs, options.runOptions.signal),
+    onRetry: async (retry) => {
+      await emitEvent(
+        options.session,
+        options.writer,
+        options.runOwner,
+        options.events,
+        options.runOptions.on_event,
+        "supervisor.intervention.retry",
+        {
+          intervention_id: options.interventionId,
+          decision_id: options.decisionId,
+          action: options.action,
+          target_compiled_id: options.targetCompiledId,
+          ...retry
+        },
+        {
+          compiled_id: options.node.compiled_id,
+          execution_id: options.attempt.execution_id,
+          repeat_scope_id: options.attempt.repeat_scope_id,
+          iteration_index: options.attempt.iteration_index,
+          attempt_index: options.attempt.attempt_index
+        }
+      );
+    }
+  });
+}
+
+async function appendFailedSupervisorRecoveryCycle(options: {
+  runOptions: RunCompiledGraphOptions;
+  session: RuntimeSession;
+  writer: ArtifactWriter;
+  runOwner: RunOwnerRecord;
+  events: RuntimeEventEnvelope[];
+  node: CompiledExecutableNode;
+  attempt: RuntimeNodeAttempt;
+  action: SupervisorActionKind;
+  decisionId: string;
+  interventionId: string;
+  recoveryTargetNode: CompiledExecutableNode;
+  targetExecutionId: string;
+  failureFingerprint: string;
+  repeatedFingerprintCount: number;
+  classification: FailureClassification;
+  retryResult: FailedSupervisorRecoveryCycleResult;
+  finalSupervisorStatus: "exhausted" | "paused";
+}): Promise<void> {
+  const reason = `Supervisor recovery cycle failed after ${options.retryResult.attempts} attempt(s): ${options.retryResult.summary}`;
+  const now = new Date().toISOString();
+  const intervention: SupervisorInterventionRecord = {
+    intervention_id: options.interventionId,
+    decision_id: options.decisionId,
+    action: options.action,
+    status: "failed",
+    target_compiled_id: options.recoveryTargetNode.compiled_id,
+    target_execution_id: options.targetExecutionId,
+    started_at: now,
+    ended_at: now,
+    reason,
+    evidence: {
+      supervisor_recovery_error: true,
+      attempts: options.retryResult.attempts,
+      errors: options.retryResult.errors,
+      failure_fingerprint: options.failureFingerprint,
+      repeated_fingerprint_count: options.repeatedFingerprintCount,
+      symptom_compiled_id: options.node.compiled_id,
+      symptom_execution_id: options.attempt.execution_id,
+      classification: options.classification.class
+    },
+    artifact_paths: {}
+  };
+
+  options.session.supervisor.status = options.finalSupervisorStatus;
+  if (options.finalSupervisorStatus !== "paused" && options.session.status === "paused") {
+    options.session.status = "failed";
+  }
+
+  await options.writer.appendSupervisorIntervention(intervention);
+  await emitEvent(
+    options.session,
+    options.writer,
+    options.runOwner,
+    options.events,
+    options.runOptions.on_event,
+    "supervisor.intervention.failed",
+    {
+      intervention_id: intervention.intervention_id,
+      decision_id: intervention.decision_id,
+      action: intervention.action,
+      target_compiled_id: intervention.target_compiled_id,
+      summary: intervention.reason,
+      attempts: options.retryResult.attempts,
+      errors: options.retryResult.errors
+    },
+    {
+      compiled_id: options.node.compiled_id,
+      execution_id: options.attempt.execution_id,
+      repeat_scope_id: options.attempt.repeat_scope_id,
+      iteration_index: options.attempt.iteration_index,
+      attempt_index: options.attempt.attempt_index
+    }
+  );
 }
 
 async function applyRuntimeOverlayBeforeRetry(options: {
@@ -1491,32 +1637,93 @@ async function handleFailedNodeWithSupervisor(options: {
         }
       );
       const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.runOptions.harnesses);
-      const recovery = await runSupervisorRecoveryCycle({
-        action: "pause_for_authority",
-        run_id: options.session.run_id,
-        graph_intent: options.session.graph.intent,
+      const recoveryAttempt = await runSupervisorRecoveryCycleWithRuntimeBackoff({
+        runOptions: options.runOptions,
+        session: options.session,
+        writer: options.writer,
+        runOwner: options.runOwner,
+        events: options.events,
         node: options.node,
         attempt: options.attempt,
-        result: options.result,
-        decision_id: decisionId,
-        intervention_id: interventionId,
-        classification,
-        causal_context: causalContext,
-        failure_fingerprint: failureFingerprint,
-        repeated_fingerprint_count: repeatedFingerprintCount,
-        prior_interventions: await readSupervisorInterventions(options.writer.run_root).catch(() => []),
-        workspace_path: options.session.manifest.repo_workspaces[recoveryTargetNode.repo]?.workspace_path ?? options.attempt.execution_dir,
-        repo_workspaces: Object.fromEntries(
-          Object.entries(options.session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
-            repoAlias,
-            binding.workspace_path
-          ])
-        ),
-        supervisor_policy: supervisorHarness.policy,
-        ...(supervisorHarness.harness ? { harness: supervisorHarness.harness } : {}),
-        ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
-        ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
+        action: "pause_for_authority",
+        interventionId,
+        decisionId,
+        targetCompiledId: recoveryTargetNode.compiled_id,
+        run: async () => {
+          const priorInterventions = await readSupervisorInterventions(options.writer.run_root).catch(() => []);
+          return runSupervisorRecoveryCycle({
+            action: "pause_for_authority",
+            run_id: options.session.run_id,
+            graph_intent: options.session.graph.intent,
+            node: options.node,
+            attempt: options.attempt,
+            result: options.result,
+            decision_id: decisionId,
+            intervention_id: interventionId,
+            classification,
+            causal_context: causalContext,
+            failure_fingerprint: failureFingerprint,
+            repeated_fingerprint_count: repeatedFingerprintCount,
+            prior_interventions: priorInterventions,
+            workspace_path: options.session.manifest.repo_workspaces[recoveryTargetNode.repo]?.workspace_path ?? options.attempt.execution_dir,
+            repo_workspaces: Object.fromEntries(
+              Object.entries(options.session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
+                repoAlias,
+                binding.workspace_path
+              ])
+            ),
+            supervisor_policy: supervisorHarness.policy,
+            ...(supervisorHarness.harness ? { harness: supervisorHarness.harness } : {}),
+            ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
+            ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
+          });
+        }
       });
+      if (recoveryAttempt.status === "failed") {
+        await appendFailedSupervisorRecoveryCycle({
+          runOptions: options.runOptions,
+          session: options.session,
+          writer: options.writer,
+          runOwner: options.runOwner,
+          events: options.events,
+          node: options.node,
+          attempt: options.attempt,
+          action: "pause_for_authority",
+          decisionId,
+          interventionId,
+          recoveryTargetNode,
+          targetExecutionId: causalContext.selected_target.target_prior_execution_id ?? options.attempt.execution_id,
+          failureFingerprint,
+          repeatedFingerprintCount,
+          classification,
+          retryResult: recoveryAttempt,
+          finalSupervisorStatus: "paused"
+        });
+        await emitEvent(
+          options.session,
+          options.writer,
+          options.runOwner,
+          options.events,
+          options.runOptions.on_event,
+          "supervisor.paused",
+          {
+            decision_id: decisionId,
+            target_compiled_id: recoveryTargetNode.compiled_id,
+            target_execution_id: causalContext.selected_target.target_prior_execution_id ?? options.attempt.execution_id,
+            reason: options.session.supervisor.pause?.reason ?? classification.summary,
+            resume_options: options.session.supervisor.pause?.resume_options ?? []
+          },
+          {
+            compiled_id: options.node.compiled_id,
+            execution_id: options.attempt.execution_id,
+            repeat_scope_id: options.attempt.repeat_scope_id,
+            iteration_index: options.attempt.iteration_index,
+            attempt_index: options.attempt.attempt_index
+          }
+        );
+        return false;
+      }
+      const recovery = recoveryAttempt.value;
       options.session.supervisor.pause = {
         ...(options.session.supervisor.pause ?? {
           decision_id: decisionId,
@@ -1699,32 +1906,71 @@ async function handleFailedNodeWithSupervisor(options: {
   );
 
   const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.runOptions.harnesses);
-  const recovery = await runSupervisorRecoveryCycle({
-    action,
-    run_id: options.session.run_id,
-    graph_intent: options.session.graph.intent,
+  const recoveryAttempt = await runSupervisorRecoveryCycleWithRuntimeBackoff({
+    runOptions: options.runOptions,
+    session: options.session,
+    writer: options.writer,
+    runOwner: options.runOwner,
+    events: options.events,
     node: options.node,
     attempt: options.attempt,
-    result: options.result,
-    decision_id: decisionId,
-    intervention_id: interventionId,
-    classification,
-    causal_context: causalContext,
-    failure_fingerprint: failureFingerprint,
-    repeated_fingerprint_count: repeatedFingerprintCount,
-    prior_interventions: await readSupervisorInterventions(options.writer.run_root).catch(() => []),
-    workspace_path: options.session.manifest.repo_workspaces[recoveryTargetNode.repo]?.workspace_path ?? options.attempt.execution_dir,
-    repo_workspaces: Object.fromEntries(
-      Object.entries(options.session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
-        repoAlias,
-        binding.workspace_path
-      ])
-    ),
-    supervisor_policy: supervisorHarness.policy,
-    ...(supervisorHarness.harness ? { harness: supervisorHarness.harness } : {}),
-    ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
-    ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
+    action,
+    interventionId,
+    decisionId,
+    targetCompiledId: recoveryTargetNode.compiled_id,
+    run: async () => {
+      const priorInterventions = await readSupervisorInterventions(options.writer.run_root).catch(() => []);
+      return runSupervisorRecoveryCycle({
+        action,
+        run_id: options.session.run_id,
+        graph_intent: options.session.graph.intent,
+        node: options.node,
+        attempt: options.attempt,
+        result: options.result,
+        decision_id: decisionId,
+        intervention_id: interventionId,
+        classification,
+        causal_context: causalContext,
+        failure_fingerprint: failureFingerprint,
+        repeated_fingerprint_count: repeatedFingerprintCount,
+        prior_interventions: priorInterventions,
+        workspace_path: options.session.manifest.repo_workspaces[recoveryTargetNode.repo]?.workspace_path ?? options.attempt.execution_dir,
+        repo_workspaces: Object.fromEntries(
+          Object.entries(options.session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
+            repoAlias,
+            binding.workspace_path
+          ])
+        ),
+        supervisor_policy: supervisorHarness.policy,
+        ...(supervisorHarness.harness ? { harness: supervisorHarness.harness } : {}),
+        ...(options.attempt.context_manifest_path ? { context_manifest_path: options.attempt.context_manifest_path } : {}),
+        ...(options.runOptions.signal ? { signal: options.runOptions.signal } : {})
+      });
+    }
   });
+  if (recoveryAttempt.status === "failed") {
+    await appendFailedSupervisorRecoveryCycle({
+      runOptions: options.runOptions,
+      session: options.session,
+      writer: options.writer,
+      runOwner: options.runOwner,
+      events: options.events,
+      node: options.node,
+      attempt: options.attempt,
+      action,
+      decisionId,
+      interventionId,
+      recoveryTargetNode,
+      targetExecutionId: causalContext.selected_target.target_prior_execution_id ?? options.attempt.execution_id,
+      failureFingerprint,
+      repeatedFingerprintCount,
+      classification,
+      retryResult: recoveryAttempt,
+      finalSupervisorStatus: "exhausted"
+    });
+    return false;
+  }
+  const recovery = recoveryAttempt.value;
 
   await options.writer.appendSupervisorIntervention(recovery.intervention);
   await emitEvent(
@@ -1786,7 +2032,7 @@ async function handleFailedNodeWithSupervisor(options: {
     "repair_validation_strategy",
     "repair_workspace",
     "repair_environment",
-    "rerun_check",
+    "rerun_verification",
     "retry_with_evidence"
   ].includes(recovery.recovery_plan.apply_action);
   const hasMaterialDelta = (recovery.recovery_plan.runtime_overlay?.material_delta.length ?? 0) > 0;
@@ -1822,6 +2068,7 @@ async function handleFailedNodeWithSupervisor(options: {
       action,
       failure_fingerprint: failureFingerprint,
       repeated_fingerprint_count: repeatedFingerprintCount,
+      resume_decision: recovery.recovery_envelope.resume_decision,
       delay_ms: retryDelayMs
     },
     {
@@ -2309,20 +2556,41 @@ async function defaultCheckExecutor(
 ): Promise<RuntimeNodeExecutionResult> {
   if (context.node.check_kind === "deterministic") {
     const env_files = resolveNodeEnvFiles(context.workspace_path, context.node.env_files);
-    const result = await runDeterministicCheck({
-      command: context.node.command ?? "",
-      args: context.node.args ?? [],
-      cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
-      ...(env_files !== undefined ? { env_files } : {}),
-      env: context.node.env,
-      base_env: context.environment,
-      runtime_env: buildNodeRuntimeEnv(context),
-      timeout_sec: context.node.effective_policy.timeout_sec,
-      pass_if: context.node.pass_if,
-      signal: context.signal,
-      ...(context.on_stdout_chunk ? { on_stdout_chunk: context.on_stdout_chunk } : {}),
-      ...(context.on_stderr_chunk ? { on_stderr_chunk: context.on_stderr_chunk } : {})
-    });
+    const result = await (async () => {
+      try {
+        return await runDeterministicCheck({
+          command: context.node.command ?? "",
+          args: context.node.args ?? [],
+          cwd: resolveNodeWorkingDirectory(context.workspace_path, context.node.cwd),
+          ...(env_files !== undefined ? { env_files } : {}),
+          env: context.node.env,
+          base_env: context.environment,
+          runtime_env: buildNodeRuntimeEnv(context),
+          timeout_sec: context.node.effective_policy.timeout_sec,
+          pass_if: context.node.pass_if,
+          signal: context.signal,
+          ...(context.on_stdout_chunk ? { on_stdout_chunk: context.on_stdout_chunk } : {}),
+          ...(context.on_stderr_chunk ? { on_stderr_chunk: context.on_stderr_chunk } : {})
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          passed: false,
+          exit_code: 1,
+          stdout: "",
+          stderr: message,
+          summary: message,
+          verification_json: {
+            passed: false,
+            summary: message,
+            failure_code: "verification_substrate_failure"
+          },
+          canceled: false,
+          timed_out: false,
+          force_killed: false
+        };
+      }
+    })();
 
     if (result.canceled) {
       return {
@@ -2333,6 +2601,11 @@ async function defaultCheckExecutor(
         ...(result.timed_out ? { metadata: { failure_code: "timeout" } } : {})
       };
     }
+
+    const verificationFailureCode =
+      !result.passed && isRuntimeFailureCode(result.verification_json?.failure_code)
+        ? result.verification_json.failure_code
+        : undefined;
 
     if (context.node.on_failure === "continue" && !result.timed_out) {
       const verification: VerificationRecordedPayload = {
@@ -2368,7 +2641,11 @@ async function defaultCheckExecutor(
       result,
       stdout: result.stdout,
       stderr: result.stderr,
-      ...(result.timed_out ? { metadata: { failure_code: "timeout" } } : {}),
+      ...(result.timed_out
+        ? { metadata: { failure_code: "timeout" } }
+        : verificationFailureCode
+          ? { metadata: { failure_code: verificationFailureCode } }
+          : {}),
       check: {
         check_kind: "deterministic",
         passed: result.passed,
@@ -2402,6 +2679,8 @@ async function defaultCheckExecutor(
     context.node.intent.constraints,
     aiCheckPromptTokens
   );
+  const promptPath = resolveExecutionAgentPromptPath(context.execution_dir);
+  context.attempt.prompt_path = promptPath;
 
   const aiCheckResult = await runAiCheck({
     harness,
@@ -2427,6 +2706,7 @@ async function defaultCheckExecutor(
     ...(renderedNodeConstraints ? { node_constraints: renderedNodeConstraints } : {}),
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
+    prompt_path: promptPath,
     output_dir: resolveExecutionArtifactsDirectory(context.execution_dir),
     skills: context.node.skills,
     cli: context.node.cli,
@@ -2435,6 +2715,9 @@ async function defaultCheckExecutor(
     ...(context.on_stdout_chunk ? { on_stdout_chunk: context.on_stdout_chunk } : {}),
     ...(context.on_stderr_chunk ? { on_stderr_chunk: context.on_stderr_chunk } : {})
   });
+  if (aiCheckResult.prompt_sha256) {
+    context.attempt.prompt_sha256 = aiCheckResult.prompt_sha256;
+  }
   const { harness_result, evaluation } = aiCheckResult;
 
   if (harness_result.status === "canceled") {
@@ -2450,6 +2733,13 @@ async function defaultCheckExecutor(
   }
 
   const passed = harness_result.status === "passed" && evaluation.passed;
+  const aiCheckFailureMetadata =
+    harness_result.status !== "passed"
+      ? {
+          ...(harness_result.metadata ?? {}),
+          failure_code: "verification_substrate_failure" as const
+        }
+      : harness_result.metadata ?? {};
 
   if (context.node.on_failure === "continue" && harness_result.status === "passed") {
     const verification: VerificationRecordedPayload = {
@@ -2493,18 +2783,21 @@ async function defaultCheckExecutor(
   return {
     status: passed ? "passed" : "failed",
     outcome: passed ? "passed" : "failed",
-    result: {
-      exit_code: harness_result.exitCode,
-      passed,
-      score: evaluation.score,
-      summary: evaluation.summary,
-      issues: evaluation.issues,
-      raw: evaluation.raw,
-      metadata: harness_result.metadata ?? {}
-    },
-    stdout: harness_result.stdout,
-    stderr: harness_result.stderr,
-    check: {
+	      result: {
+	        exit_code: harness_result.exitCode,
+	        passed,
+	        score: evaluation.score,
+	        summary: evaluation.summary,
+	        issues: evaluation.issues,
+	        raw: evaluation.raw,
+	        metadata: aiCheckFailureMetadata
+	      },
+	      stdout: harness_result.stdout,
+	      stderr: harness_result.stderr,
+	      ...(harness_result.status !== "passed"
+	        ? { metadata: { failure_code: "verification_substrate_failure" as const } }
+	        : {}),
+	      check: {
       check_kind: "ai",
       passed,
       ...(evaluation.score !== undefined ? { score: evaluation.score } : {}),
@@ -2670,6 +2963,8 @@ async function defaultAgentExecutor(
         ...(context.supervisor_recovery_envelope
           ? { supervisor_recovery_envelope: context.supervisor_recovery_envelope }
           : {}),
+        ...(context.attempt_memory_path ? { attempt_memory_path: context.attempt_memory_path } : {}),
+        ...(context.attempt_memory_markdown_path ? { attempt_memory_markdown_path: context.attempt_memory_markdown_path } : {}),
         credential_specs: context.credential_specs ?? {}
       });
     } catch (error) {
@@ -2718,6 +3013,11 @@ async function defaultAgentExecutor(
     contextManifestPath: context.context_manifest_path,
     contextManifest,
     ...(context.supervisor_recovery_envelope ? { supervisorRecoveryEnvelope: context.supervisor_recovery_envelope } : {}),
+    ...(context.attempt_memory_markdown_path
+      ? { attemptMemoryMarkdown: await readFile(context.attempt_memory_markdown_path, "utf8").catch(() => "") }
+      : {}),
+    ...(context.attempt_memory_path ? { attemptMemoryPath: context.attempt_memory_path } : {}),
+    ...(context.attempt_memory_markdown_path ? { attemptMemoryMarkdownPath: context.attempt_memory_markdown_path } : {}),
     promptPath,
     outputDir: invocationOutputDir,
     artifacts: context.node.declared_artifacts,
@@ -3403,10 +3703,11 @@ async function executeNode(
   let logSink: StreamingLogSink | undefined;
   let automaticArtifacts: Record<string, string> | undefined;
   let artifactRepairMetadata: ArtifactRepairMetadata | undefined;
-  const captureSnapshots = node.kind === "agent" || node.kind === "exec";
+  const captureSnapshots = node.kind === "agent" || node.kind === "exec" || node.kind === "check";
   let baselineSnapshot: Awaited<ReturnType<typeof snapshotWorkspaceForNode>> | undefined;
   let workspaceChangeArtifacts: NodeWorkspaceChangeArtifacts | undefined;
   let workspaceDiff: NodeWorkspaceDiff | undefined;
+  let attemptMemoryMetadata: Record<string, string> | undefined;
 
   try {
     executionPaths = await writer.writeExecutionStart(attempt);
@@ -3424,6 +3725,28 @@ async function executeNode(
     }
 
     const activeRecoveryEnvelope = session.supervisor.active_recovery_envelopes[node.compiled_id];
+    if (activeRecoveryEnvelope) {
+      const priorAttempt = listAttemptsForCompiledNode(session.attempts, activeRecoveryEnvelope.compiled_id)
+        .find((candidate) => candidate.execution_id === activeRecoveryEnvelope.prior_execution_id);
+      const attemptMemory = await buildAttemptMemory({
+        runRoot: options.run_root,
+        node,
+        ...(priorAttempt ? { priorAttempt } : {}),
+        recoveryEnvelope: activeRecoveryEnvelope
+      });
+      const attemptMemoryPaths = await writeAttemptMemory({
+        executionDir: attempt.execution_dir,
+        memory: attemptMemory
+      });
+      attemptMemoryMetadata = {
+        attempt_memory_path: attemptMemoryPaths.runtime_path,
+        attempt_memory_markdown_path: attemptMemoryPaths.markdown_path
+      };
+      attempt.metadata = {
+        ...attempt.metadata,
+        ...attemptMemoryMetadata
+      };
+    }
     context = await resolveExecutionContext({
       compiled_graph: session.graph,
       node,
@@ -3467,6 +3790,8 @@ async function executeNode(
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+            ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
+            ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
             environment: runtimeEnvironment,
             ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal,
@@ -3487,6 +3812,8 @@ async function executeNode(
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+            ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
+            ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
             environment: runtimeEnvironment,
             ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal,
@@ -3494,6 +3821,25 @@ async function executeNode(
             on_stderr_chunk: logSink.on_stderr_chunk
           });
     } else if (node.kind === "check") {
+      await emitEvent(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        "verification.started",
+        {
+          verifier_kind: "check",
+          check_kind: node.check_kind
+        },
+        {
+          compiled_id: node.compiled_id,
+          execution_id: attempt.execution_id,
+          repeat_scope_id: attempt.repeat_scope_id,
+          iteration_index: attempt.iteration_index,
+          attempt_index: attempt.attempt_index
+        }
+      );
       result = options.executors?.check
         ? await options.executors.check({
             run_root: options.run_root,
@@ -3509,6 +3855,8 @@ async function executeNode(
             context_manifest_path: context.manifest_path,
             context_materials: context.packet.materials,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+            ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
+            ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
             environment: runtimeEnvironment,
             ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal,
@@ -3530,6 +3878,8 @@ async function executeNode(
               context_manifest_path: context.manifest_path,
               context_materials: context.packet.materials,
               ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+              ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
+              ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
               environment: runtimeEnvironment,
               ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
               signal,
@@ -3556,6 +3906,8 @@ async function executeNode(
         context_packet_path: context.packet_path,
         context_manifest_path: context.manifest_path,
         ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+        ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
+        ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
         environment: runtimeEnvironment,
         ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
         signal,
@@ -3577,6 +3929,8 @@ async function executeNode(
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+            ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
+            ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
             environment: runtimeEnvironment,
             ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal
@@ -3595,6 +3949,8 @@ async function executeNode(
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
               ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
+              ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
+              ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
               environment: runtimeEnvironment,
               ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
               signal,
@@ -3604,6 +3960,33 @@ async function executeNode(
             options.harnesses ?? {}
           );
 
+    }
+
+    if (node.kind === "check") {
+      await emitEvent(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        "verification.completed",
+        {
+          verifier_kind: "check",
+          check_kind: node.check_kind,
+          passed: result.status === "passed" && result.outcome !== "failed",
+          summary: result.check?.summary
+            ?? (typeof result.result === "object" && result.result && "summary" in result.result && typeof result.result.summary === "string"
+              ? result.result.summary
+              : undefined)
+        },
+        {
+          compiled_id: node.compiled_id,
+          execution_id: attempt.execution_id,
+          repeat_scope_id: attempt.repeat_scope_id,
+          iteration_index: attempt.iteration_index,
+          attempt_index: attempt.attempt_index
+        }
+      );
     }
 
     await logSink.flush();
@@ -3731,6 +4114,24 @@ async function executeNode(
       && !materialized.canceled
       && !usedCustomAgentExecutor
     ) {
+      await emitEvent(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        "verification.started",
+        {
+          verifier_kind: "outcome"
+        },
+        {
+          compiled_id: node.compiled_id,
+          execution_id: attempt.execution_id,
+          repeat_scope_id: attempt.repeat_scope_id,
+          iteration_index: attempt.iteration_index,
+          attempt_index: attempt.attempt_index
+        }
+      );
       const supervisorHarness = resolveSupervisorHarness(session, node, options.harnesses);
       const harnessName = supervisorHarness.harnessName;
       const verifierHarness = supervisorHarness.harness;
@@ -3791,6 +4192,27 @@ async function executeNode(
           runtimeDir: join(options.run_root, "runtime")
         });
       }
+
+      await emitEvent(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        "verification.completed",
+        {
+          verifier_kind: "outcome",
+          passed: outcomeVerification.passed,
+          summary: outcomeVerification.summary
+        },
+        {
+          compiled_id: node.compiled_id,
+          execution_id: attempt.execution_id,
+          repeat_scope_id: attempt.repeat_scope_id,
+          iteration_index: attempt.iteration_index,
+          attempt_index: attempt.attempt_index
+        }
+      );
 
       await emitEvent(
         session,
@@ -3861,6 +4283,7 @@ async function executeNode(
       ...((result.metadata || result.verification || artifactRepairMetadata || workspaceChangeArtifacts || outcomeVerification || completionPacket)
         ? {
             metadata: {
+              ...(attemptMemoryMetadata ?? {}),
               ...(result.metadata ?? {}),
               ...(artifactRepairMetadata ? { artifact_repair: artifactRepairMetadata } : {}),
               completion: {
@@ -3984,6 +4407,7 @@ async function executeNode(
         : {}),
       metadata: {
         error: message,
+        ...(attemptMemoryMetadata ?? {}),
         ...(failureCode ? { failure_code: failureCode } : {}),
         ...(failureDetails ? { failure_details: failureDetails } : {}),
         context_status: context ? "resolved" : "failed",

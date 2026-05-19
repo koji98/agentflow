@@ -219,10 +219,11 @@ This is the canonical small graph shape: explicit repo, profiles, supervisor pro
           "goal": "Implement the scoped change and leave reviewer-ready evidence.",
           "acceptance_criteria": [
             "Targeted validation is run or clearly explained.",
+            "The `change_summary` artifact is published with `af artifact write change_summary`.",
             "The handoff names changed files, validation, and residual risks."
           ],
           "constraints": [
-            "Do not finish without writing a concise handoff to $AGENTFLOW_OUTPUT_DIR/change-summary.md."
+            "Do not rely on the final response as the durable handoff."
           ]
         },
         "support": {

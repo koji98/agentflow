@@ -10,6 +10,7 @@ Each trial writes:
 - `trial.json`: scenario, variant, trial id, and environment bindings.
 - `run-root.txt`: underlying Agentflow run root, when launch reached runtime.
 - `simulation-events.jsonl`: deterministic environment simulation calls, when configured.
+- `supervisor.resume_decisions` in trace packets: structured retry locality evidence, including resume point, restart boundary, workspace decision, and reason code. Use this for recovery-locality assertions instead of inferring from free-text summaries.
 - `trace.jsonl`: normalized event trace.
 - `trace-packet.json`: compact grading packet with `trajectory`.
 - `criteria-results.json`: every criterion result.

@@ -15,7 +15,7 @@ flowchart TD
   context --> packet["agent/context.md and runtime/context.json"]
   bin --> env["Harness env and PATH"]
   metadata --> env
-  packet --> prompt["Rendered harness prompt"]
+  packet --> prompt["Rendered harness prompt uses agent/context.md"]
   compiled --> prompt
   env --> harness["Codex CLI or Cursor CLI"]
   prompt --> harness
@@ -33,6 +33,7 @@ The harness prompt includes:
 - managed plugin tools table for node-granted tools
 - ambient CLI hints table for normal shell commands
 - validation and final handoff expectations
+- retry orientation and attempt memory when the node is a supervisor-scheduled retry
 
 The harness environment includes:
 
@@ -185,7 +186,7 @@ flowchart LR
 
 Common commands:
 
-- `af orient`: print the compact current-node operating picture, including success contract, workspace boundary, context pointers, runtime state, declared artifacts, support summary, and current milestones.
+- `af orient`: print the compact current-node operating picture, including success contract, workspace boundary, context pointers, runtime state, declared artifacts, support summary, and current milestones. Agents run it before material work and rerun it whenever the goal, acceptance criteria, context pointers, artifact expectations, retry state, or next action becomes unclear, including after compaction, long pauses, or long-running task drift. On retries it starts with retry orientation and runtime-authored attempt memory: prior symptom, best resume point, restart boundary, workspace decision, preserved progress, discarded progress, required next action, validation gate, and do-not-redo guidance.
 - `af milestone add --title <text> --goal <text>`: declare a meaningful phase of work after orientation, including a planning/research milestone when discovery is substantial.
 - `af milestone log <id> --kind finding|decision|validation --summary <text>`: attach audit evidence to a milestone. Validation logs also include `--command` and `--result pass|fail|blocked`.
 - `af milestone complete <id> --evidence <text>` or `af milestone block <id> --blocked-on <text> --recoverable-by <text> --evidence <text>`: close the milestone with evidence or record a true external blocker.

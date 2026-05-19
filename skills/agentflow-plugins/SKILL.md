@@ -15,12 +15,12 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 - Tool implementation can be shell-native or language-backed; choose based on complexity, parsing needs, tests, dependencies, and portability.
 - Name plugins by domain/capability, and name exports narrowly enough to avoid collisions with native CLIs, reserved runtime commands, and other plugin tools.
 - Secrets belong in plugin credential scopes and `agentflow auth`, never inline graph config.
-- Plugin workflows publish stable public artifacts from one `publish_node`; consumers should not depend on generated internal node ids.
+- Plugin workflows publish stable graph-addressable artifacts from one `publish_node`; consumers should not depend on generated internal node ids.
 - A plugin is not complete until it resolves and validates from a consumer graph.
 
 ## Route By Task
 
-- Need workflow plugin layout, manifests, `plugin_file`, `plugin://`, config, lockfiles, or public artifacts: read [references/plugin-workflows.md](references/plugin-workflows.md).
+- Need workflow plugin layout, manifests, `plugin_file`, `plugin://`, config, lockfiles, or graph-addressable artifacts: read [references/plugin-workflows.md](references/plugin-workflows.md).
 - Need graph primitives or node contracts: use `agentflow-authoring`.
 - Need validation, launch, supervision, delivery, or run behavior: use `agentflow-operations`.
 - Need to decide whether a completed run should become a plugin: use `agentflow-run-review`.
@@ -30,7 +30,7 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 1. Decide native CLI, primitive graph, workflow plugin, tool plugin, or combined package.
 2. Use native CLIs for simple single-command behavior; use plugins for reusable behavior, multi-CLI composition, auth isolation, stable I/O, policy, or auditability.
 3. Keep workflow config small and schema-backed.
-4. Expose public artifacts from one `publish_node`.
+4. Expose graph-addressable artifacts from one `publish_node`.
 5. Declare a clear tool `description`; put detailed CLI usage in the executable's `--help`.
 6. Use plugin `credentials` plus `agentflow auth` for tools that need auth; keep managed tool `config` for non-secret graph-provided defaults only.
 7. Keep tool config schemas string-only and reject secrets such as tokens, passwords, or API keys.
@@ -55,4 +55,4 @@ Plugins package reusable team workflows and CLI tools for supervised Agentflow r
 - Required credential availability is checked by runtime-owned preflight; secret credential values are resolved only for plugin subprocesses and are not exported into Codex or Cursor harness environments.
 - Tool `--help` is the detailed API contract agents should read before first use.
 - Shell tools are good for thin orchestration; language-backed tools are better for parsing, validation, structured output, and nontrivial logic.
-- Downstream graph nodes consume only public plugin node artifacts.
+- Downstream graph nodes consume only declared graph-addressable plugin node artifacts.

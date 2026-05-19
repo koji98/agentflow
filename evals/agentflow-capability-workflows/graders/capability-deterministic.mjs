@@ -153,14 +153,31 @@ if (scenarioId === "18-noisy-generated-tree") {
 
 if (scenarioId === "19-validation-timeout-strategy") {
   assert("validation_strategy_classified", packet.supervisor?.classifications?.includes("diagnostic_needed"), "diagnostic_needed classification");
-  assert("validation_strategy_applied", packet.supervisor?.apply_actions?.includes("repair_validation_strategy"), "repair_validation_strategy apply action");
+  assert("validation_strategy_applied", packet.supervisor?.apply_actions?.includes("rerun_verification"), "rerun_verification apply action");
+  assert(
+    "validation_strategy_resume_boundary",
+    (packet.supervisor?.resume_decisions ?? []).some((decision) =>
+      decision.reason_code === "verification_substrate_failure" &&
+      decision.restart_boundary === "verification"
+    ),
+    "verification_substrate_failure at verification boundary"
+  );
   assert("validation_strategy_retry", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
-  assert("handoff_mentions_focused_validation", /focused validation command|timeout/i.test(handoffText), "handoff focused validation evidence");
+  assert("handoff_mentions_focused_validation", /verification-only retry|substrate failure|timeout/i.test(handoffText), "handoff focused validation evidence");
 }
 
 if (scenarioId === "20-workspace-pollution-cleanup") {
   assert("workspace_repair_classified", packet.supervisor?.classifications?.includes("wrong_local_pattern"), "wrong_local_pattern classification");
   assert("workspace_repair_applied", packet.supervisor?.apply_actions?.includes("repair_workspace"), "repair_workspace apply action");
+  assert(
+    "workspace_repair_resume_boundary",
+    (packet.supervisor?.resume_decisions ?? []).some((decision) =>
+      decision.reason_code === "workspace_pollution_cleanup" &&
+      decision.restart_boundary === "node_attempt" &&
+      decision.workspace_decision === "partial_cleanup"
+    ),
+    "workspace_pollution_cleanup at node_attempt boundary"
+  );
   assert("workspace_repair_retry", (packet.metrics?.attempts ?? 0) >= 2, "attempt count");
   assert("pollution_removed", !existsSync(join(repoRoot, "pollution.txt")), "pollution.txt absent");
 }

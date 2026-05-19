@@ -3,8 +3,9 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, realpathSync, readFileSync } from "node:fs";
-import { access, appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 import { resolveSubpathWithinRoot } from "../path_rules.js";
@@ -16,6 +17,7 @@ import {
   readSupervisorTimeline,
   readTextFileIfPresent
 } from "../artifacts/reader.js";
+import { resolveExecutionRuntimeCompletionPacketPath } from "../artifacts/paths.js";
 import type { ArtifactDefinition } from "../graph/authored.js";
 import type { CompiledExecutableNode, CompiledGraph, ResolvedTool } from "../graph/compiled.js";
 import type { ReasoningEffort } from "../graph/schema.js";
@@ -44,6 +46,7 @@ import {
   type RuntimeMilestoneState
 } from "../runtime/completion/index.js";
 import { readOperatorObservations } from "../runtime/observations/index.js";
+import type { AttemptMemory } from "../runtime/attempt_memory.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -65,6 +68,8 @@ interface RuntimeMetadata {
   context_manifest_path: string;
   supervisor_recovery_envelope?: SupervisorRecoveryEnvelope;
   supervisor_recovery_envelope_path?: string;
+  attempt_memory_path?: string;
+  attempt_memory_markdown_path?: string;
   tool_state_path: string;
   tool_bin_dir: string;
   tool_invocations_path?: string;
@@ -230,32 +235,34 @@ async function appendAfInvocation(options: {
   if (!path) {
     return;
   }
-  const sidecars = await writeAfInvocationPair({
-    invocationPath: path,
-    argv: options.argv,
-    exitCode: options.exitCode,
-    ...(options.stdout ? { stdout: options.stdout } : {}),
-    ...(options.stderr ? { stderr: options.stderr } : {}),
-    ...(options.error ? { error: options.error } : {})
-  });
+  await withFileLock(`${path}.lock`, async () => {
+    const sidecars = await writeAfInvocationPair({
+      invocationPath: path,
+      argv: options.argv,
+      exitCode: options.exitCode,
+      ...(options.stdout ? { stdout: options.stdout } : {}),
+      ...(options.stderr ? { stderr: options.stderr } : {}),
+      ...(options.error ? { error: options.error } : {})
+    });
 
-  await appendJsonl(path, {
-    ts: new Date().toISOString(),
-    run_id: options.metadata.run_id,
-    graph_id: options.metadata.graph_id,
-    agent_id: options.metadata.agent_id,
-    execution_id: options.metadata.execution_id,
-    node_id: options.metadata.node_id,
-    compiled_id: options.metadata.compiled_id,
-    kind: "af",
-    tool: "af",
-    argv: redactArgv(options.argv),
-    cwd: process.cwd(),
-    exit_code: options.exitCode,
-    duration_ms: options.durationMs,
-    ...sidecars,
-    ...(options.error ? { error: options.error } : {}),
-    redaction: "secret-looking argv values redacted"
+    await appendJsonl(path, {
+      ts: new Date().toISOString(),
+      run_id: options.metadata.run_id,
+      graph_id: options.metadata.graph_id,
+      agent_id: options.metadata.agent_id,
+      execution_id: options.metadata.execution_id,
+      node_id: options.metadata.node_id,
+      compiled_id: options.metadata.compiled_id,
+      kind: "af",
+      tool: "af",
+      argv: redactArgv(options.argv),
+      cwd: process.cwd(),
+      exit_code: options.exitCode,
+      duration_ms: options.durationMs,
+      ...sidecars,
+      ...(options.error ? { error: options.error } : {}),
+      redaction: "secret-looking argv values redacted"
+    });
   });
 }
 
@@ -277,6 +284,33 @@ async function writeJsonFile(path: string, value: unknown): Promise<void> {
   const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(tempPath, path);
+}
+
+async function withFileLock<T>(lockPath: string, operation: () => Promise<T>): Promise<T> {
+  await mkdir(dirname(lockPath), { recursive: true });
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      await mkdir(lockPath);
+      break;
+    } catch (error) {
+      const code = isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+      if (code !== "EEXIST") {
+        throw error;
+      }
+      if (Date.now() - startedAt > 30_000) {
+        throw new Error(`Timed out waiting for Agentflow runtime state lock at ${lockPath}.`);
+      }
+      await sleep(25);
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await rm(lockPath, { recursive: true, force: true });
+  }
 }
 
 async function appendJsonl(path: string, value: unknown): Promise<void> {
@@ -574,6 +608,7 @@ function commandHelp(commandPath: string): string | undefined {
       "",
       "Output:",
       "  Markdown containing the success contract, workspace boundary, context pointers, active runtime state, declared artifacts, support summary, and current milestones.",
+      "  Rerun it whenever the goal, acceptance criteria, context, artifacts, retry state, or next action becomes unclear, including after compaction or long-running drift.",
       "",
       "Safety:",
       "  Read-only orientation; no workspace or artifact writes."
@@ -790,6 +825,103 @@ function renderToolSummary(metadata: RuntimeMetadata, node: CompiledExecutableNo
   return lines;
 }
 
+function renderList(values: string[] | undefined, empty: string): string[] {
+  return values && values.length > 0 ? values.map((value) => `- ${value}`) : [`- ${empty}`];
+}
+
+function renderRetryOrientation(
+  metadata: RuntimeMetadata,
+  attemptMemory: AttemptMemory | undefined
+): string[] {
+  const envelope = metadata.supervisor_recovery_envelope;
+  if (!envelope && !attemptMemory) {
+    return [];
+  }
+
+  if (!attemptMemory) {
+    return [
+      "## Retry Orientation",
+      "- Structured attempt memory is unavailable; use the supervisor recovery summary and current artifact status before material work.",
+      `- Supervisor decision: ${envelope?.retry_directive.summary ?? "recovery retry"}`,
+      `- Resume point: \`${envelope?.resume_point ?? "fresh_retry"}\``,
+      `- Restart boundary: \`${envelope?.resume_decision.restart_boundary ?? "node_attempt"}\``,
+      `- Workspace decision: \`${envelope?.workspace_decision ?? "preserve"}\``,
+      `- Resume reason: \`${envelope?.resume_decision.reason_code ?? "fresh_retry_required"}\``,
+      `- Required next action: ${envelope?.required_next_action ?? "Inspect current artifact status and continue within the unchanged contract."}`,
+      "",
+      "### Reuse",
+      ...renderList(envelope?.resume_decision.reuse, "Use current context pointers and artifact status."),
+      "",
+      "### Do Not Redo",
+      ...renderList(envelope?.do_not_redo, "Do not restart from scratch unless prior progress is unsafe or irrelevant.")
+    ];
+  }
+
+  const phaseHistory = attemptMemory.phase_history ?? [];
+  return [
+    "## Retry Orientation",
+    "| Field | Value |",
+    "| --- | --- |",
+    `| Failure symptom | ${markdownCell(attemptMemory.failure_summary)} |`,
+    `| Prior execution | \`${attemptMemory.prior_execution_id}\` |`,
+    `| Supervisor decision | ${markdownCell(envelope?.retry_directive.summary ?? attemptMemory.failure_summary)} |`,
+    `| Resume point | \`${attemptMemory.resume_point}\` |`,
+    `| Restart boundary | \`${attemptMemory.resume_decision.restart_boundary}\` |`,
+    `| Workspace decision | \`${attemptMemory.workspace_decision}\` |`,
+    `| Resume reason | \`${attemptMemory.resume_decision.reason_code}\` |`,
+    `| Required next action | ${markdownCell(attemptMemory.required_next_action)} |`,
+    "",
+    "### Reuse",
+    ...renderList(attemptMemory.resume_decision.reuse, "No prior progress was selected for reuse."),
+    "",
+    "### Discard",
+    ...renderList(attemptMemory.resume_decision.discard, "No prior progress was selected for discard."),
+    "",
+    "### Validation Gate",
+    ...renderList(attemptMemory.resume_decision.validation_gate, "Run the validation named by the original task when feasible."),
+    "",
+    "### Preserved Progress",
+    ...renderList(attemptMemory.preserve_progress, "No preserved prior progress was identified."),
+    "",
+    "### Forbidden Redo",
+    ...renderList(attemptMemory.do_not_redo, "Do not restart from scratch unless prior progress is unsafe or irrelevant."),
+    "",
+    "## Prior Attempt Memory",
+    "Timeline:",
+    ...renderList(
+      phaseHistory.map((event) =>
+        `${event.ts ? `${event.ts} ` : ""}${event.type}: ${event.summary}`
+      ),
+      "No prior runtime events were recorded."
+    ),
+    "",
+    "Completed milestones:",
+    ...renderList(attemptMemory.completed_milestones, "No prior milestones were completed."),
+    "",
+    "Unfinished work:",
+    ...renderList(attemptMemory.unfinished_work, "No unfinished prior milestone state was recorded."),
+    "",
+    "Validation evidence:",
+    ...(attemptMemory.validation_evidence.length > 0
+      ? attemptMemory.validation_evidence.map((entry) => {
+          const command = entry.command ? `\`${entry.command}\`` : "unrecorded command";
+          const result = entry.result ? ` (${entry.result})` : "";
+          return `- ${command}${result}: ${entry.summary}`;
+        })
+      : ["- No prior validation evidence was recorded."]),
+    "",
+    "Declared artifact state:",
+    ...(attemptMemory.declared_artifact_state.length > 0
+      ? attemptMemory.declared_artifact_state.map((artifact) =>
+          `- \`${artifact.name}\`: \`${artifact.status}\` - ${artifact.description}`
+        )
+      : ["- No declared artifacts were tracked."]),
+    "",
+    "Workspace changes:",
+    ...renderList(attemptMemory.workspace_changes.changed_files.map((file) => `Changed: ${file}`), "No prior workspace changes were recorded.")
+  ];
+}
+
 async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
   const [graph, state, observations, milestoneState, manifest] = await Promise.all([
     readCompiledGraph(metadata.run_root).catch(() => undefined),
@@ -798,6 +930,9 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
     readMilestoneState(metadata),
     readFile(metadata.context_manifest_path, "utf8").catch(() => "")
   ]);
+  const attemptMemory = metadata.attempt_memory_path
+    ? await readJsonFile<AttemptMemory>(metadata.attempt_memory_path).catch(() => undefined)
+    : undefined;
   const node = graph?.nodes.find((candidate) =>
     candidate.compiled_id === metadata.compiled_id || candidate.authored_id === metadata.node_id
   );
@@ -812,6 +947,8 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
   const lines = [
     "# Agentflow Orientation",
     "",
+    ...renderRetryOrientation(metadata, attemptMemory),
+    ...(metadata.supervisor_recovery_envelope || attemptMemory ? [""] : []),
     "## Node",
     `- Node: \`${metadata.node_id}\``,
     `- Workspace: \`${metadata.workspace_path}\``,
@@ -916,7 +1053,29 @@ function agentFacingArtifactSummary(
   }));
 }
 
+function completionPacketPathForMetadata(metadata: RuntimeMetadata): string {
+  return resolveExecutionRuntimeCompletionPacketPath(dirname(metadata.output_dir));
+}
+
+function completionMutationLockPath(metadata: RuntimeMetadata): string {
+  return `${completionPacketPathForMetadata(metadata)}.lock`;
+}
+
+async function assertCompletionStillMutable(metadata: RuntimeMetadata, command: string): Promise<void> {
+  const packetPath = completionPacketPathForMetadata(metadata);
+  if (!existsSync(packetPath)) {
+    return;
+  }
+  const packet = await readJsonFile<{ ready_for_verification?: unknown }>(packetPath).catch(() => undefined);
+  if (packet?.ready_for_verification === true) {
+    throw new Error(
+      `${command} cannot run after af complete check reported ready_for_verification; stop and send the final response.`
+    );
+  }
+}
+
 async function commandCompleteCheck(metadata: RuntimeMetadata): Promise<AfResult> {
+  return withFileLock(completionMutationLockPath(metadata), async () => {
   const graph = await readCompiledGraph(metadata.run_root).catch(() => undefined);
   const graphNode = graph?.nodes.find((node) =>
     node.compiled_id === metadata.compiled_id || node.authored_id === metadata.node_id
@@ -974,6 +1133,7 @@ async function commandCompleteCheck(metadata: RuntimeMetadata): Promise<AfResult
       managed: packet.managed
     }
   };
+  });
 }
 
 const learnKinds = [
@@ -1075,7 +1235,7 @@ const learnPlaybooks: Record<LearnKind, {
   unknown_failure: {
     purpose: "Recover unclassified failures by forming a causal hypothesis before repair.",
     inspect: ["failed attempt", "upstream cone", "context provenance", "artifacts", "workspace diff", "logs"],
-    safe_repairs: ["spawn a fixed read-only helper role when evidence is missing", "rank causal targets", "apply the smallest authorized repair with a material delta"],
+    safe_repairs: ["spawn a fixed read-only helper role when evidence is missing", "rank causal targets", "apply the best-scoped authorized repair with a material delta"],
     contract_boundaries: ["if no safe material delta exists, fail contractually with evidence", "unclear authority or intent cannot be resolved by helper prose or free-text output"]
   }
 };
@@ -1360,10 +1520,12 @@ async function commandArtifactWrite(
   positionals: string[],
   options: Record<string, string | boolean | string[]>
 ): Promise<AfResult> {
+  return withFileLock(completionMutationLockPath(metadata), async () => {
   const name = positionals[2];
   if (!name) {
     throw new Error("af artifact write requires an artifact name.");
   }
+  await assertCompletionStillMutable(metadata, "af artifact write");
 
   const destination = currentArtifactPath(metadata, name);
   await mkdir(dirname(destination), { recursive: true });
@@ -1390,6 +1552,7 @@ async function commandArtifactWrite(
       artifact: name
     }
   };
+  });
 }
 
 async function commandMilestone(
@@ -1398,10 +1561,9 @@ async function commandMilestone(
   options: Record<string, string | boolean | string[]>
 ): Promise<AfResult> {
   const subcommand = positionals[1];
-  const now = new Date().toISOString();
-  const state = await readMilestoneState(metadata);
 
   if (subcommand === "list") {
+    const state = await readMilestoneState(metadata);
     return {
       exitCode: 0,
       output: {
@@ -1411,6 +1573,12 @@ async function commandMilestone(
       }
     };
   }
+
+  return withFileLock(completionMutationLockPath(metadata), async () => {
+  await assertCompletionStillMutable(metadata, "af milestone");
+  return withFileLock(`${milestoneStatePath(metadata)}.lock`, async () => {
+    const now = new Date().toISOString();
+    const state = await readMilestoneState(metadata);
 
   if (subcommand === "add") {
     const title = requireMilestoneText(optionString(options, "title"), "af milestone add requires --title.");
@@ -1524,6 +1692,8 @@ async function commandMilestone(
   }
 
   throw new Error(`Unknown af milestone command: ${subcommand ?? ""}.`);
+  });
+  });
 }
 
 async function readHelperSessionForMetadata(metadata: RuntimeMetadata, helperId: string): Promise<HelperSession> {
@@ -1741,7 +1911,7 @@ function helperRoleInstructions(session: HelperSession): string[] {
     case "repair_planner":
       return [
         "You are a read-only supervisor repair planner.",
-        "Propose the smallest runtime-authorized recovery operation and the material delta required before retry."
+        "Propose the best-scoped runtime-authorized recovery operation and the material delta required before retry."
       ];
   }
 }

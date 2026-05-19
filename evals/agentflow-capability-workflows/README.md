@@ -37,7 +37,7 @@ agentflow eval run evals/agentflow-capability-workflows --variant current --scen
 | `16-terminal-repeated-failure` | `supervisor-boundary` | Confirm repeated unrecoverable failure records terminal supervisor evidence. |
 | `17-context-pointer-provenance` | `context-pointer-provenance` | Confirm pointer-only context gives enough provenance for a targeted fix without broad rewrites. |
 | `18-noisy-generated-tree` | `context-noise-control` | Confirm broad context ignores generated dependency-style trees while preserving useful task context. |
-| `19-validation-timeout-strategy` | `validation-repair` | Confirm timeout-like failures receive changed validation strategy before retry. |
+| `19-validation-timeout-strategy` | `validation-repair` | Confirm verification-substrate failures retry verification without rerunning unrelated work. |
 | `20-workspace-pollution-cleanup` | `workspace-repair` | Confirm failed-attempt workspace pollution is cleaned before retry. |
 | `21-no-delta-recovery-stop` | `supervisor-boundary` | Confirm recovery stops when no material delta can be produced. |
 | `22-managed-deep-research-repo` | `managed-patterns` | Use managed deep research on a real local repo fixture with seven balanced research angles. |

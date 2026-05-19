@@ -129,7 +129,7 @@ Workflow node:
 }
 ```
 
-The plugin node id is the public handoff boundary. Downstream nodes consume artifacts from `prepare_release.<artifact>`, not generated internal ids.
+The plugin node id is the graph-addressable handoff boundary. Downstream nodes consume artifacts from `prepare_release.<artifact>`, not generated internal ids.
 
 Recommended workflow package layout:
 
@@ -345,7 +345,7 @@ agentflow validate --graph agentflow.graph.json --show-compiled
 Inspect:
 
 - lockfile commit pins
-- resolved workflow public artifacts
+- resolved workflow graph-addressable artifacts
 - generated managed expansion
 - plugin tool `--help` readiness
 - credential references and config policy diagnostics

@@ -60,6 +60,8 @@
             "Run the exact local validation/tool command when the scenario names one; do not replace it with a nearby command.",
             "Include the exact observed output/result from required validation/tool commands in `handoff.md`.",
             "If the scenario task names required wording for `handoff.md`, include that wording exactly instead of only paraphrasing it.",
+            "If the scenario task asks for a named deliverable such as a profile, summary, report, plan, or handoff, make that deliverable name visible in `handoff.md`.",
+            "If the scenario task says to write or select a value from a command/tool, use the observed command/tool output as the value in `handoff.md` instead of substituting a nearby fixture or context value.",
             "If the scenario task asks for a decision, record an `af milestone log` entry with `--kind decision`; validation logs do not count as decision evidence.",
             "Use `af milestone` evidence logs when the scenario asks for a progress, finding, validation, or decision record.",
             "Run `af complete check` before the final response and stop when it reports ready for verification."

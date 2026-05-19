@@ -12,6 +12,7 @@ export const runtimeFailureCodes = [
   "tool_wrapper_unavailable",
   "unprovable_requirement",
   "unresolved_context",
+  "verification_substrate_failure",
   "verifier_unavailable",
   "workspace_pollution"
 ] as const;

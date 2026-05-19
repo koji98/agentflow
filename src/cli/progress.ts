@@ -150,6 +150,21 @@ export function createRuntimeProgressReporter(
           return;
         }
 
+        case "supervisor.intervention.retry": {
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          const payload = event.payload as {
+            action?: string;
+            attempt?: number;
+            max_attempts?: number;
+            delay_ms?: number;
+            summary?: string;
+          };
+          writeLine(
+            `agentflow: intervention retry ${summarizeNode(node)}${payload.action ? ` · ${payload.action}` : ""} · attempt ${payload.attempt ?? "?"}/${payload.max_attempts ?? "?"} · delay=${formatDuration(payload.delay_ms ?? 0)}${payload.summary ? ` · ${payload.summary}` : ""}`
+          );
+          return;
+        }
+
         case "supervisor.intervention.completed": {
           const node = nodeByCompiledId.get(event.compiled_id ?? "");
           const payload = event.payload as { action?: string; summary?: string };
@@ -219,6 +234,33 @@ export function createRuntimeProgressReporter(
               `agentflow: soft verification failed ${summarizeNode(node)}${payload.summary ? ` · ${payload.summary}` : payload.verifier_kind ? ` · ${payload.verifier_kind}` : ""}`
             );
           }
+          return;
+        }
+
+        case "verification.started": {
+          const payload = event.payload as { verifier_kind?: string; check_kind?: string };
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          writeLine(
+            `agentflow: verification started ${summarizeNode(node)} · ${payload.check_kind ?? payload.verifier_kind ?? "verification"}`
+          );
+          return;
+        }
+
+        case "verification.retry": {
+          const payload = event.payload as { verifier_kind?: string; check_kind?: string; attempt?: number; summary?: string };
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          writeLine(
+            `agentflow: verification retry ${summarizeNode(node)}${payload.attempt !== undefined ? ` · attempt=${payload.attempt}` : ""}${payload.summary ? ` · ${payload.summary}` : payload.check_kind ?? payload.verifier_kind ? ` · ${payload.check_kind ?? payload.verifier_kind}` : ""}`
+          );
+          return;
+        }
+
+        case "verification.completed": {
+          const payload = event.payload as { passed?: boolean; verifier_kind?: string; check_kind?: string; summary?: string };
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          writeLine(
+            `agentflow: verification ${payload.passed === false ? "failed" : "completed"} ${summarizeNode(node)}${payload.summary ? ` · ${payload.summary}` : payload.check_kind ?? payload.verifier_kind ? ` · ${payload.check_kind ?? payload.verifier_kind}` : ""}`
+          );
           return;
         }
 
