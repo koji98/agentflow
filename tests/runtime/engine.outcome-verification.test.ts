@@ -112,6 +112,9 @@ function buildHarness(handler: (invocation: AgentInvocation) => Promise<Awaited<
         kind: "codex-cli",
         capabilities: getHarnessCapabilities("codex-cli")!,
         async run(invocation) {
+            if (invocation.promptKind === "delivery_curator") {
+                return createPassingDeliveryHarness().run(invocation);
+            }
             const result = await handler(invocation);
             await markInvocationRuntimeReady(invocation, result);
             return result;

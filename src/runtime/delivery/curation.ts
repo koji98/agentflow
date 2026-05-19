@@ -104,6 +104,8 @@ export interface DeliveryCurationInput {
   review_brief_path: string;
   run_learnings_path: string;
   delivery_dir: string;
+  curation_attempt?: number;
+  previous_verdict?: DeliveryCurationVerdict;
 }
 
 export interface DeliveryCurationOutput {
@@ -121,6 +123,7 @@ export interface DeliveryCurationFinding {
   kind: string;
   message: string;
   evidence?: string;
+  retryable?: boolean;
 }
 
 export interface DeliveryCurationVerdict {
@@ -138,6 +141,15 @@ export class DeliveryCurationError extends Error {
   ) {
     super(message);
     this.name = "DeliveryCurationError";
+  }
+}
+
+export class DeliveryCurationSetupError extends Error {
+  readonly retryable = false;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "DeliveryCurationSetupError";
   }
 }
 
@@ -554,6 +566,21 @@ export function parseDeliveryCuratorResponse(raw: string): DeliveryCurationOutpu
 }
 
 export function renderDeliveryCuratorPrompt(input: DeliveryCurationInput): string {
+  const retryFeedback = input.previous_verdict
+    ? [
+      "## Previous Curation Verification Findings",
+      "",
+      `This is curation attempt ${input.curation_attempt ?? 2}. The prior attempt failed deterministic delivery verification.`,
+      "Repair the findings below using only the source-of-truth evidence packet. Do not invent facts to satisfy the verifier.",
+      "",
+      ...input.previous_verdict.findings.map((finding) => {
+        const evidence = finding.evidence ? ` Evidence: ${finding.evidence}` : "";
+        return `- ${finding.severity} \`${finding.kind}\`: ${finding.message}${evidence}`;
+      }),
+      ""
+    ]
+    : [];
+
   return [
     "## Role",
     "You are the Agentflow delivery curator. Synthesize the terminal run evidence into a human review package.",
@@ -611,6 +638,7 @@ export function renderDeliveryCuratorPrompt(input: DeliveryCurationInput): strin
     "- `## What Worked`",
     "- `## Evidence Links`",
     "",
+    ...retryFeedback,
     "## Evidence Packet",
     "",
     input.source_markdown,

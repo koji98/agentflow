@@ -16,6 +16,7 @@ import { operatorObservationsPath } from "../observations/index.js";
 import { collectDeliveryEvidence, type DeliveryEvidence } from "./collect.js";
 import {
   DeliveryCurationError,
+  DeliveryCurationSetupError,
   type DeliveryCurator,
   type DeliveryCurationFinding,
   type DeliveryCurationVerdict,
@@ -35,6 +36,8 @@ const sectionFiles: Record<DeliverySection, string> = {
   milestones: "evidence/milestones.json",
   workspace_improvements: "evidence/workspace-improvements.json"
 };
+
+const DEFAULT_DELIVERY_CURATION_RETRY_BACKOFF_MS = 60_000;
 
 export interface DeliveryArtifactEntry {
   path: string;
@@ -183,6 +186,22 @@ function writeJson(filePath: string, payload: unknown): Promise<void> {
 
 function writeText(filePath: string, contents: string): Promise<void> {
   return writeFile(filePath, contents.endsWith("\n") ? contents : `${contents}\n`, "utf8");
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function shouldRetryCuration(verdict: DeliveryCurationVerdict): boolean {
+  if (verdict.passed) {
+    return false;
+  }
+  return verdict.findings.some((finding) => finding.retryable !== false);
 }
 
 async function fileInfo(filePath: string): Promise<Pick<DeliveryArtifactEntry, "bytes" | "empty">> {
@@ -1442,6 +1461,7 @@ export async function writeDeliveryPackage(options: {
   events: RuntimeEventEnvelope[];
   interventions: SupervisorInterventionRecord[];
   curator: DeliveryCurator;
+  curation_retry_backoff_ms?: number;
 }): Promise<DeliveryPackageManifest> {
   const deliveryDir = join(options.run_root, "delivery");
   await mkdir(join(deliveryDir, "evidence"), { recursive: true });
@@ -1511,41 +1531,58 @@ export async function writeDeliveryPackage(options: {
     })
   ]);
 
-  let verdict: DeliveryCurationVerdict;
-  try {
-    const curated = await options.curator.curate({
-      source,
-      source_markdown: sourceMarkdown,
-      source_json_path: manifest.evidence_files.delivery_source,
-      source_markdown_path: manifest.evidence_files.delivery_source_markdown,
-      review_brief_path: manifest.sections.review_brief,
-      run_learnings_path: manifest.sections.run_learnings,
-      delivery_dir: deliveryDir
-    });
-    await Promise.all([
-      writeText(manifest.sections.review_brief, curated.review_brief_markdown),
-      writeText(manifest.sections.run_learnings, curated.run_learnings_markdown)
-    ]);
-    verdict = await verifyCuratedDelivery({
-      source,
-      review_brief_markdown: curated.review_brief_markdown,
-      run_learnings_markdown: curated.run_learnings_markdown,
-      review_brief_path: manifest.sections.review_brief,
-      run_learnings_path: manifest.sections.run_learnings,
-      delivery_dir: deliveryDir,
-      ...(curated.metadata ? { curator_metadata: curated.metadata } : {})
-    });
-  } catch (error) {
-    const finding: DeliveryCurationFinding = {
-      severity: "blocker",
-      kind: "curator_failed",
-      message: error instanceof Error ? error.message : String(error)
-    };
-    verdict = {
-      passed: false,
-      generated_at: new Date().toISOString(),
-      findings: [finding]
-    };
+  let verdict: DeliveryCurationVerdict | undefined;
+  const retryBackoffMs = options.curation_retry_backoff_ms ?? DEFAULT_DELIVERY_CURATION_RETRY_BACKOFF_MS;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const previousVerdict = verdict;
+    try {
+      const curated = await options.curator.curate({
+        source,
+        source_markdown: sourceMarkdown,
+        source_json_path: manifest.evidence_files.delivery_source,
+        source_markdown_path: manifest.evidence_files.delivery_source_markdown,
+        review_brief_path: manifest.sections.review_brief,
+        run_learnings_path: manifest.sections.run_learnings,
+        delivery_dir: deliveryDir,
+        curation_attempt: attempt,
+        ...(previousVerdict ? { previous_verdict: previousVerdict } : {})
+      });
+      await Promise.all([
+        writeText(manifest.sections.review_brief, curated.review_brief_markdown),
+        writeText(manifest.sections.run_learnings, curated.run_learnings_markdown)
+      ]);
+      verdict = await verifyCuratedDelivery({
+        source,
+        review_brief_markdown: curated.review_brief_markdown,
+        run_learnings_markdown: curated.run_learnings_markdown,
+        review_brief_path: manifest.sections.review_brief,
+        run_learnings_path: manifest.sections.run_learnings,
+        delivery_dir: deliveryDir,
+        ...(curated.metadata ? { curator_metadata: curated.metadata } : {})
+      });
+    } catch (error) {
+      const finding: DeliveryCurationFinding = {
+        severity: "blocker",
+        kind: "curator_failed",
+        message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof DeliveryCurationSetupError ? { retryable: false } : {})
+      };
+      verdict = {
+        passed: false,
+        generated_at: new Date().toISOString(),
+        findings: [finding]
+      };
+    }
+
+    await writeJson(manifest.evidence_files.curation_verdict, verdict);
+    if (verdict.passed || attempt === 2 || !shouldRetryCuration(verdict)) {
+      break;
+    }
+    await sleep(retryBackoffMs);
+  }
+
+  if (!verdict) {
+    throw new Error("Delivery curation did not produce a verdict.");
   }
 
   const completedManifest: DeliveryPackageManifest = {

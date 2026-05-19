@@ -1471,12 +1471,16 @@ describe("end-to-end runtime tool wiring", () => {
                 ]
             });
             expect(compilation.diagnostics).toEqual([]);
+            const deliveryHarness = createPassingDeliveryHarness("codex-cli");
             const harness: HarnessAdapter = {
                 kind: "codex-cli",
                 capabilities: getHarnessCapabilities("codex-cli")!,
                 async run(invocation) {
                     if (invocation.promptKind === "outcome_verification") {
                         return passingVerifierResponse();
+                    }
+                    if (invocation.promptKind === "delivery_curator") {
+                        return deliveryHarness.run(invocation);
                     }
                     const spawnEnv = buildHarnessSpawnEnv(invocation, {
                         PATH: process.env.PATH ?? "/usr/bin:/bin",

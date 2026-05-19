@@ -21,6 +21,7 @@ import { readRunExecutionAttempts, readSupervisorInterventions } from "../../src
 import { buildExecutionId } from "../../src/runtime/attempts.js";
 import { createAuthorityRequest } from "../../src/runtime/authority.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
+import type { DeliverySourcePacket } from "../../src/runtime/delivery/curation.js";
 import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
 import { renderHarnessPrompt, type HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { evaluateGraphReadiness } from "../../src/runtime/readiness.js";
@@ -95,12 +96,24 @@ function createHarness(kind: HarnessAdapter["kind"], run: HarnessAdapter["run"],
             };
         }
         if (invocation.promptKind === "delivery_curator") {
-            const source = invocation.contextManifest;
-            const finalArtifacts = [...source.matchAll(/\| `([^`]+\.[^`]+)` \| ([^|]+) \| \[([^\]]+)\]\(([^)]+)\) \|/gu)]
-                .map((match) => `- \`${match[1]}\`: [${match[3]}](${match[4]})`);
-            const recoveredIssues = [...source.matchAll(/^-\s+`([^`]+)`: (.+)$/gmu)]
-                .filter((match) => !String(match[2]).includes("No active failures remain"))
-                .map((match) => `- \`${match[1]}\`: ${match[2]}`);
+            const source = invocation.contextPacketPath
+                ? JSON.parse(await readFile(invocation.contextPacketPath, "utf8")) as DeliverySourcePacket
+                : undefined;
+            const finalArtifacts = source?.final_declared_artifacts.map((artifact) =>
+                `- \`${artifact.id}\`: [${artifact.declared_path}](${artifact.relative_path})`
+            ) ?? ["- [Artifact index](evidence/artifact-index.json)"];
+            const activeFailures = source?.failures.active.map((failure) =>
+                `- \`${failure.node}\`: ${failure.summary}`
+            ) ?? [];
+            const recoveredIssues = source?.failures.recovered.map((failure) =>
+                `- \`${failure.node}\`: ${failure.summary}`
+            ) ?? [];
+            const historicalAttempts = source?.failures.historical.map((attempt) =>
+                `- \`${attempt.node}\`: ${attempt.summary}`
+            ) ?? [];
+            const validationEvidence = source?.validation.milestone_validation_logs.map((log) =>
+                `- \`${log.result ?? "recorded"}\` \`${log.command ?? "validation"}\`: ${log.summary}`
+            ) ?? [];
             return {
                 status: "passed",
                 exitCode: 0,
@@ -119,15 +132,15 @@ function createHarness(kind: HarnessAdapter["kind"], run: HarnessAdapter["run"],
                         "## Changed Files",
                         "- [Change map](evidence/change-map.json)",
                         "## Final Declared Artifacts",
-                        ...(finalArtifacts.length > 0 ? finalArtifacts : ["- [Artifact index](evidence/artifact-index.json)"]),
+                        ...(finalArtifacts.length > 0 ? finalArtifacts : ["- No final declared artifacts were captured."]),
                         "## Validation Evidence",
-                        "- [Validation ledger](evidence/validation-ledger.json)",
+                        ...(validationEvidence.length > 0 ? validationEvidence : ["- [Validation ledger](evidence/validation-ledger.json)"]),
                         "## Active Failures And Risks",
-                        "- No active failures remain.",
+                        ...(activeFailures.length > 0 ? activeFailures : ["- No active failures remain."]),
                         "## Recovered Issues",
                         ...(recoveredIssues.length > 0 ? recoveredIssues : ["- No recovered issues were recorded."]),
                         "## Historical Attempts",
-                        "- No historical attempts require reviewer action.",
+                        ...(historicalAttempts.length > 0 ? historicalAttempts : ["- No historical attempts require reviewer action."]),
                         "## Supervisor And Human Interventions",
                         "- No supervisor or human interventions were recorded.",
                         "## Supporting Evidence",

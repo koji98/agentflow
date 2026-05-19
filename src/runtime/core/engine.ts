@@ -34,6 +34,7 @@ import { writeDeliveryPackage, type DeliveryPackageManifest } from "../delivery/
 import {
   createHarnessDeliveryCurator,
   DeliveryCurationError,
+  DeliveryCurationSetupError,
   type DeliveryCurator
 } from "../delivery/curation.js";
 import {
@@ -1161,6 +1162,7 @@ function resolveSupervisorHarness(
 function resolveDeliveryCurator(options: {
   session: RuntimeSession;
   harnesses: RunCompiledGraphOptions["harnesses"];
+  readinessCache: NodeReadinessCache;
   runRoot: string;
   signal?: AbortSignal;
   environment?: NodeJS.ProcessEnv;
@@ -1169,7 +1171,7 @@ function resolveDeliveryCurator(options: {
   if (!firstNode && !options.session.graph.supervisor_effective_policy) {
     return {
       async curate() {
-        throw new Error("Delivery curation requires a supervisor profile or at least one node policy to choose a harness.");
+        throw new DeliveryCurationSetupError("Delivery curation requires a supervisor profile or at least one node policy to choose a harness.");
       }
     };
   }
@@ -1177,7 +1179,7 @@ function resolveDeliveryCurator(options: {
   if (!policy.harness) {
     return {
       async curate() {
-        throw new Error("Delivery curation requires a supervisor harness.");
+        throw new DeliveryCurationSetupError("Delivery curation requires a supervisor harness.");
       }
     };
   }
@@ -1185,12 +1187,12 @@ function resolveDeliveryCurator(options: {
   if (!harness) {
     return {
       async curate() {
-        throw new Error(`Delivery curation requires configured harness adapter "${policy.harness}".`);
+        throw new DeliveryCurationSetupError(`Delivery curation requires configured harness adapter "${policy.harness}".`);
       }
     };
   }
   const deliveryDir = join(options.runRoot, "delivery");
-  return createHarnessDeliveryCurator({
+  const curator = createHarnessDeliveryCurator({
     harness,
     policy,
     run_id: options.session.run_id,
@@ -1201,6 +1203,15 @@ function resolveDeliveryCurator(options: {
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.environment ? { base_env: options.environment } : {})
   });
+  return {
+    async curate(input) {
+      const diagnostics = await collectHarnessReadinessDiagnostics(policy.harness!, options.harnesses, options.readinessCache);
+      if (diagnostics.length > 0) {
+        throw new DeliveryCurationSetupError(diagnostics.join(" "));
+      }
+      return curator.curate(input);
+    }
+  };
 }
 
 function spendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): void {
@@ -5000,6 +5011,7 @@ async function finalizeRun(
   events: RuntimeEventEnvelope[],
   onEvent: RunCompiledGraphOptions["on_event"],
   deliveryOptions: Pick<RunCompiledGraphOptions, "harnesses" | "environment" | "signal">,
+  readinessCache: NodeReadinessCache,
   outcome: RuntimeRunStatus,
   reason?: string
 ): Promise<RunCompiledGraphResult> {
@@ -5037,6 +5049,7 @@ async function finalizeRun(
       curator: resolveDeliveryCurator({
         session,
         harnesses: deliveryOptions.harnesses,
+        readinessCache,
         runRoot: writer.run_root,
         ...(deliveryOptions.signal ? { signal: deliveryOptions.signal } : {}),
         ...(deliveryOptions.environment ? { environment: deliveryOptions.environment } : {})
@@ -5084,6 +5097,7 @@ async function finalizeRunWithWorkspaceCleanup(
   onEvent: RunCompiledGraphOptions["on_event"],
   deliveryOptions: Pick<RunCompiledGraphOptions, "harnesses" | "environment" | "signal">,
   workspace: WorkspaceSetup | undefined,
+  readinessCache: NodeReadinessCache,
   outcome: RuntimeRunStatus,
   reason?: string
 ): Promise<RunCompiledGraphResult> {
@@ -5107,7 +5121,7 @@ async function finalizeRunWithWorkspaceCleanup(
     }
   }
 
-  return finalizeRun(session, writer, runOwner, events, onEvent, deliveryOptions, finalOutcome, finalReason);
+  return finalizeRun(session, writer, runOwner, events, onEvent, deliveryOptions, readinessCache, finalOutcome, finalReason);
 }
 
 async function finalizeRunAfterCleanup(
@@ -5177,6 +5191,7 @@ async function finalizeRunAfterCleanup(
     options.on_event,
     options,
     workspace,
+    readinessCache,
     finalOutcome,
     finalReason
   );

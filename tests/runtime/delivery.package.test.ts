@@ -599,8 +599,16 @@ describe("delivery package", () => {
                 }
             }
         ];
+        let calls = 0;
         const curator: DeliveryCurator = {
-            async curate() {
+            async curate(input) {
+                calls += 1;
+                if (calls === 2) {
+                    expect(input.previous_verdict?.passed).toBe(false);
+                    expect(input.previous_verdict?.findings).toEqual(expect.arrayContaining([
+                        expect.objectContaining({ kind: "missing_active_failure" })
+                    ]));
+                }
                 return {
                     review_brief_markdown: [
                         "# Review Brief",
@@ -684,8 +692,10 @@ describe("delivery package", () => {
             attempts,
             events: [],
             interventions: [],
-            curator
+            curator,
+            curation_retry_backoff_ms: 0
         })).rejects.toThrow(/curated delivery failed verification/u);
+        expect(calls).toBe(2);
         const verdict = await readJson<{ passed: boolean; findings: Array<{ kind: string }> }>(
             join(runRoot, "delivery", "evidence", "curation-verdict.json")
         );
@@ -693,5 +703,139 @@ describe("delivery package", () => {
         expect(verdict.findings).toEqual(expect.arrayContaining([
             expect.objectContaining({ kind: "missing_active_failure" })
         ]));
+    });
+
+    it("retries curation once with verifier findings before accepting delivery", async () => {
+        const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-curation-retry-"));
+        await writeRunScaffold(runRoot);
+        const attempts: RuntimeNodeAttempt[] = [
+            {
+                execution_id: "exec-check-1",
+                compiled_id: "root__handoff_review",
+                authored_id: "handoff_review",
+                kind: "check",
+                repo_alias: "main",
+                execution_dir: join(runRoot, "nodes", "001-check", "executions", "001-exec"),
+                attempt_index: 1,
+                status: "failed",
+                outcome: "failed",
+                started_at: "2026-04-24T00:00:00.000Z",
+                ended_at: "2026-04-24T00:00:01.000Z",
+                artifacts: {},
+                metadata: {
+                    verification: {
+                        passed: false,
+                        summary: "Check failed because required evidence is still missing."
+                    }
+                }
+            }
+        ];
+        const passingCurator = buildPassingCurator();
+        let calls = 0;
+        const curator: DeliveryCurator = {
+            async curate(input) {
+                calls += 1;
+                if (calls === 1) {
+                    return {
+                        review_brief_markdown: [
+                            "# Review Brief",
+                            "## Outcome",
+                            "Everything passed.",
+                            "## Reviewer Decision",
+                            "Merge.",
+                            "## What To Inspect First",
+                            "- [Audit index](03-audit-index.md)",
+                            "## Success Contract",
+                            "Review the handoff.",
+                            "## Changed Files",
+                            "- [Change map](evidence/change-map.json)",
+                            "## Final Declared Artifacts",
+                            "- None.",
+                            "## Validation Evidence",
+                            "- [Validation ledger](evidence/validation-ledger.json)",
+                            "## Active Failures And Risks",
+                            "- No active failures remain.",
+                            "## Recovered Issues",
+                            "- No recovered issues.",
+                            "## Historical Attempts",
+                            "- None.",
+                            "## Supervisor And Human Interventions",
+                            "- None.",
+                            "## Supporting Evidence",
+                            "- [Run learnings](02-run-learnings.md)"
+                        ].join("\n"),
+                        run_learnings_markdown: [
+                            "# Run Learnings",
+                            "## Where Agents Struggled",
+                            "- None.",
+                            "## Workspace Improvements",
+                            "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+                            "| --- | --- | --- | --- | --- | --- |",
+                            "| none | No action. | none | low | low | done |",
+                            "## Graph Prompt And Support Improvements",
+                            "- None.",
+                            "## Plugin Skill And Eval Opportunities",
+                            "- None.",
+                            "## What Worked",
+                            "- Everything.",
+                            "## Evidence Links",
+                            "- [Validation ledger](evidence/validation-ledger.json)"
+                        ].join("\n")
+                    };
+                }
+                expect(input.curation_attempt).toBe(2);
+                expect(input.previous_verdict?.passed).toBe(false);
+                expect(input.previous_verdict?.findings).toEqual(expect.arrayContaining([
+                    expect.objectContaining({ kind: "missing_active_failure" })
+                ]));
+                return passingCurator.curate(input);
+            }
+        };
+
+        const manifest = await writeDeliveryPackage({
+            run_root: runRoot,
+            graph: checkGraph,
+            state: baseState({
+                status: "failed",
+                evidence_status: "warnings",
+                counts: {
+                    total: 1,
+                    pending: 0,
+                    ready: 0,
+                    running: 0,
+                    passed: 0,
+                    failed: 1,
+                    blocked: 0,
+                    canceled: 0,
+                    skipped: 0
+                },
+                node_statuses: { root__handoff_review: "failed" },
+                latest_execution_by_compiled_id: {
+                    root__handoff_review: {
+                        execution_id: "exec-check-1",
+                        compiled_id: "root__handoff_review",
+                        authored_id: "handoff_review",
+                        kind: "check",
+                        status: "failed",
+                        attempt_index: 1,
+                        started_at: "2026-04-24T00:00:00.000Z",
+                        ended_at: "2026-04-24T00:00:01.000Z"
+                    }
+                }
+            }),
+            attempts,
+            events: [],
+            interventions: [],
+            curator,
+            curation_retry_backoff_ms: 0
+        });
+
+        expect(calls).toBe(2);
+        expect(manifest.curation.status).toBe("passed");
+        const verdict = await readJson<{ passed: boolean; findings: unknown[] }>(
+            join(runRoot, "delivery", "evidence", "curation-verdict.json")
+        );
+        expect(verdict.passed).toBe(true);
+        expect(verdict.findings).toEqual([]);
     });
 });
