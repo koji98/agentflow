@@ -653,8 +653,12 @@ export const resumeCommand = {
       authored_graph: loaded.document,
       compile_diagnostics: compilation.diagnostics,
       harnesses: {
-        "codex-cli": createCodexCliHarness(),
-        "cursor-cli": createCursorCliHarness()
+        "codex-cli": createCodexCliHarness(
+          environment.AGENTFLOW_CODEX_CLI_BIN ? { binary: environment.AGENTFLOW_CODEX_CLI_BIN } : {}
+        ),
+        "cursor-cli": createCursorCliHarness(
+          environment.AGENTFLOW_CURSOR_CLI_BIN ? { binary: environment.AGENTFLOW_CURSOR_CLI_BIN } : {}
+        )
       },
       executors: {
         checkpoint: checkpointExecutor
@@ -669,8 +673,11 @@ export const resumeCommand = {
 
     const artifactPaths = resolveRunArtifactPaths(run_root);
     const terminalFields = createRunTerminalFields(resumed.state, resumed.attempts, resumed.events);
+    const deliveryFailed = resumed.events.some((event) => event.type === "delivery.curation.failed");
     const message =
-      resumed.outcome === "passed"
+      deliveryFailed
+        ? "Run resumed to terminal graph state, but curated delivery failed verification."
+        : resumed.outcome === "passed"
         ? "Run resumed and completed successfully."
         : resumed.outcome === "canceled"
           ? "Run resumed and was canceled."
@@ -679,10 +686,11 @@ export const resumeCommand = {
             : "Run resumed and failed again.";
 
     return {
-      exitCode: resumed.outcome === "passed" ? 0 : 1,
+      exitCode: resumed.outcome === "passed" && !deliveryFailed ? 0 : 1,
       output: {
         command: "resume",
         status: resumed.outcome,
+        delivery_status: deliveryFailed ? "failed" : "ready",
         message,
         run_id: resumed.run_id,
         run_root,

@@ -41,7 +41,8 @@ function isTrustCheckPrompt(invocation: AgentInvocation): boolean {
   return (
     invocation.promptKind === "ai_check" ||
     invocation.promptKind === "outcome_verification" ||
-    invocation.promptKind === "supervisor_evidence"
+    invocation.promptKind === "supervisor_evidence" ||
+    invocation.promptKind === "delivery_curator"
   );
 }
 

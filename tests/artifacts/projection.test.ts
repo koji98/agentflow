@@ -16,6 +16,7 @@ import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js
 import { readRunExecutionAttempts, readRunRecord, readRunState } from "../../src/artifacts/reader.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { markExecutorRuntimeReady } from "../helpers/agentflow-runtime.js";
+import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
 async function initGitRepo(repoDir: string): Promise<void> {
@@ -185,12 +186,16 @@ async function createFixtureRun() {
     await writeFile(graphPath, `${JSON.stringify(document, null, 2)}\n`);
     const { graph } = compileGraph(document);
     let repairAttempts = 0;
+    const deliveryHarness = createPassingDeliveryHarness();
     const run = await runCompiledGraph({
         run_root: runRoot,
         compiled_graph: graph,
         authored_graph: document,
         repo_sources: {
             main: repoDir
+        },
+        harnesses: {
+            "codex-cli": deliveryHarness
         },
         executors: {
             agent: async (context) => {
@@ -321,7 +326,10 @@ async function createAiTimeoutRun() {
     const timedOutHarness: HarnessAdapter = {
         kind: "codex-cli",
         capabilities: getHarnessCapabilities("codex-cli")!,
-        async run() {
+        async run(invocation) {
+            if (invocation.promptKind === "delivery_curator") {
+                return createPassingDeliveryHarness().run(invocation);
+            }
             return {
                 status: "failed",
                 exitCode: 1,
@@ -399,6 +407,9 @@ async function createSoftVerificationRun() {
         authored_graph: document,
         repo_sources: {
             main: repoDir
+        },
+        harnesses: {
+            "codex-cli": createPassingDeliveryHarness()
         }
     });
     return {

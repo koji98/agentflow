@@ -279,7 +279,9 @@ export async function buildEvalTracePacket(options: {
 
   const manifestPath = join(options.run_root, "delivery", "manifest.json");
   const reviewBriefPath = join(options.run_root, "delivery", "01-review-brief.md");
+  const curationVerdictPath = join(options.run_root, "delivery", "evidence", "curation-verdict.json");
   const manifest = await readOptionalJson(manifestPath);
+  const curationVerdict = await readOptionalJson(curationVerdictPath);
   const trajectory: EvalTrajectoryEvent[] = [];
   let order = 1;
 
@@ -434,6 +436,8 @@ export async function buildEvalTracePacket(options: {
     delivery: {
       manifest_path: manifestPath,
       review_brief_path: reviewBriefPath,
+      curation_verdict_path: curationVerdictPath,
+      ...(curationVerdict !== undefined ? { curation_verdict: curationVerdict } : {}),
       ...(manifest !== undefined ? { manifest } : {})
     },
     metrics: {

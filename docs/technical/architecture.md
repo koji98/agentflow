@@ -277,12 +277,12 @@ Policy rules:
 
 ## Delivery Package
 
-Terminal delivery is part of the runtime contract. The package collector reads final run state, events, attempts, checks, interventions, git metadata, milestones, and artifacts, then writes:
+Terminal delivery is part of the runtime contract. The package collector reads final run state, events, attempts, checks, interventions, git metadata, milestones, and artifacts. Deterministic evidence remains the source of truth, and a required read-only delivery curator uses the supervisor profile to synthesize the two human-facing files.
 
-- `01-review-brief.md`: primary human handoff with outcome, contract, changed files, final artifacts, validation evidence, active risks, recovered issues, and intervention summary
-- `02-run-learnings.md`: future-run improvements for workspace docs, tests, scripts, graph shape, skills, plugins, and evals
+- `01-review-brief.md`: curated primary human handoff with outcome, reviewer decision, contract, changed files, final artifacts, validation evidence, active risks, recovered issues, and intervention summary
+- `02-run-learnings.md`: curated future-run improvements for workspace docs, tests, scripts, graph shape, prompts, skills, tools, plugins, and evals
 - `03-audit-index.md`: map to runtime context state, tool ledgers, milestone files, supervisor timeline, runtime logs, and resume/debug files
-- `evidence/`: semantic machine files for artifact index, change map, validation ledger, decision log, intervention trace, milestones, and workspace improvements
+- `evidence/`: semantic machine files for delivery source, curation verdict, artifact index, change map, validation ledger, decision log, intervention trace, milestones, and workspace improvements
 - `manifest.json`: semantic file map and taxonomy
 
 The manifest keeps semantic entrypoint maps and an explicit `artifact_taxonomy` object:
@@ -296,7 +296,7 @@ The manifest keeps semantic entrypoint maps and an explicit `artifact_taxonomy` 
 
 Prior failed attempts that were later retried or repaired are reported as recovered issues. They remain audit evidence but are not active follow-up items.
 
-If delivery package creation fails, the run is marked failed with a `delivery_package_failed` reason. This keeps the promise that a terminal run returns reviewable evidence, not just a raw diff.
+If delivery curation or verification fails, graph control-flow status remains the terminal graph outcome, but the CLI returns delivery as failed and the run is not review-ready. This keeps the promise that a terminal run returns verified human-facing evidence, not just a raw diff.
 
 ## Resume
 

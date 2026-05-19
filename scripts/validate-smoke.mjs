@@ -218,7 +218,7 @@ async function createMockCodexBinary(tempRoot) {
   const binaryPath = join(tempRoot, "mock-codex.mjs");
   const source = `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 function runAf(args, input) {
   return spawnSync("af", args, {
@@ -288,11 +288,86 @@ process.stdin.on("end", () => {
   const lastMessagePath = outputIndex >= 0 ? args[outputIndex + 1] : undefined;
 
   if (lastMessagePath) {
-    writeFileSync(lastMessagePath, JSON.stringify({ passed: true, summary: "codex smoke ok", findings: [] }));
+    writeFileSync(lastMessagePath, renderResponse());
   }
 
-  process.stdout.write('{"passed":true,"summary":"codex smoke ok","findings":[]}');
+  process.stdout.write(renderResponse());
 });
+
+function renderDeliveryCuration() {
+  const sourcePath = process.env.AGENTFLOW_CONTEXT_PACKET;
+  if (!sourcePath) {
+    throw new Error("AGENTFLOW_CONTEXT_PACKET is required for delivery curation.");
+  }
+  const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+  const bullet = (items, empty) => items.length > 0 ? items.map((item) => "- " + item) : ["- " + empty];
+  const artifacts = source.final_declared_artifacts.length > 0
+    ? source.final_declared_artifacts.map((artifact) => "- \\\`" + artifact.id + "\\\`: [" + artifact.declared_path + "](" + artifact.relative_path + ")")
+    : ["- No final declared artifacts were captured."];
+  const validation = [
+    ...source.validation.milestone_validation_logs.map((log) => "- \\\`" + log.milestone_id + "\\\`: " + (log.command ? "\\\`" + log.command + "\\\` " : "") + (log.result || "recorded") + " - " + log.summary),
+    ...source.validation.outcome_verifications.map((entry) => "- \\\`" + entry.node + "\\\`: " + (entry.passed ? "pass" : "fail") + " - " + entry.summary)
+  ];
+  const learningRows = source.workspace_improvements.length > 0
+    ? source.workspace_improvements.map((entry) => "| " + entry.area + " | " + entry.recommendation + " | " + entry.evidence + " | " + entry.priority + " | " + entry.confidence + " | " + entry.done_when + " |")
+    : ["| none | No action. | source packet | low | medium | No action required. |"];
+  return [
+    "\`\`\`review-brief",
+    "# Review Brief",
+    "## Outcome",
+    "Run \\\`" + source.run.run_id + "\\\` ended with status \\\`" + source.run.status + "\\\`.",
+    "## Reviewer Decision",
+    source.failures.active.length > 0 ? "Do not approve until active failures are resolved." : "Review changed files, final artifacts, and validation evidence.",
+    "## What To Inspect First",
+    "- [Change map](" + source.evidence_links.change_map + ")",
+    "- [Validation ledger](" + source.evidence_links.validation_ledger + ")",
+    "## Success Contract",
+    source.intent.goal,
+    "## Changed Files",
+    "- [Change map](" + source.evidence_links.change_map + ")",
+    "## Final Declared Artifacts",
+    ...artifacts,
+    "## Validation Evidence",
+    ...(validation.length > 0 ? validation : ["- [Validation ledger](" + source.evidence_links.validation_ledger + ")"]),
+    "## Active Failures And Risks",
+    ...bullet(source.failures.active.map((failure) => "\\\`" + failure.node + "\\\`: " + failure.summary), "No active failures remain."),
+    "## Recovered Issues",
+    ...bullet(source.failures.recovered.map((failure) => "\\\`" + failure.node + "\\\`: " + failure.summary), "No recovered issues were recorded."),
+    "## Historical Attempts",
+    ...bullet(source.failures.historical.map((failure) => "\\\`" + failure.node + "\\\`: " + failure.summary), "No historical attempts require reviewer action."),
+    "## Supervisor And Human Interventions",
+    ...bullet(source.interventions.map((intervention) => "\\\`" + intervention.action + "\\\`: " + intervention.reason), "No supervisor or human interventions were recorded."),
+    "## Supporting Evidence",
+    "- [Run learnings](02-run-learnings.md)",
+    "- [Audit index](03-audit-index.md)",
+    "\`\`\`",
+    "\`\`\`run-learnings",
+    "# Run Learnings",
+    "## Where Agents Struggled",
+    "- See the review brief for failure and recovery details.",
+    "## Workspace Improvements",
+    "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...learningRows,
+    "## Graph Prompt And Support Improvements",
+    "- No changes identified.",
+    "## Plugin Skill And Eval Opportunities",
+    "- No changes identified.",
+    "## What Worked",
+    "- Runtime produced deterministic evidence for the delivery curator.",
+    "## Evidence Links",
+    "- [Milestones](" + source.evidence_links.milestones + ")",
+    "- [Validation ledger](" + source.evidence_links.validation_ledger + ")",
+    "\`\`\`"
+  ].join("\\n") + "\\n";
+}
+
+function renderResponse() {
+  if (stdin.includes("Agentflow delivery curator")) {
+    return renderDeliveryCuration();
+  }
+  return '{"passed":true,"summary":"codex smoke ok","findings":[]}';
+}
 `;
 
   await writeFile(binaryPath, source);
@@ -304,6 +379,7 @@ async function createMockCursorBinary(tempRoot) {
   const binaryPath = join(tempRoot, "mock-agent.mjs");
   const source = `#!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 function runAf(args) {
   return spawnSync("af", args, {
@@ -359,15 +435,98 @@ function markAgentflowRuntimeReady() {
   runAf(["complete", "check"]);
 }
 
-markAgentflowRuntimeReady();
+let stdin = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  stdin += chunk;
+});
+process.stdin.on("end", () => {
+  markAgentflowRuntimeReady();
 
-process.stdout.write(JSON.stringify({
-  type: "result",
-  subtype: "success",
-  is_error: false,
-  result: JSON.stringify({ passed: true, summary: "cursor smoke ok", findings: [] }),
-  session_id: "validate-smoke"
-}));
+  process.stdout.write(JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: renderResponse(),
+    session_id: "validate-smoke"
+  }));
+});
+
+function renderDeliveryCuration() {
+  const sourcePath = process.env.AGENTFLOW_CONTEXT_PACKET;
+  if (!sourcePath) {
+    throw new Error("AGENTFLOW_CONTEXT_PACKET is required for delivery curation.");
+  }
+  const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+  const bullet = (items, empty) => items.length > 0 ? items.map((item) => "- " + item) : ["- " + empty];
+  const artifacts = source.final_declared_artifacts.length > 0
+    ? source.final_declared_artifacts.map((artifact) => "- \\\`" + artifact.id + "\\\`: [" + artifact.declared_path + "](" + artifact.relative_path + ")")
+    : ["- No final declared artifacts were captured."];
+  const validation = [
+    ...source.validation.milestone_validation_logs.map((log) => "- \\\`" + log.milestone_id + "\\\`: " + (log.command ? "\\\`" + log.command + "\\\` " : "") + (log.result || "recorded") + " - " + log.summary),
+    ...source.validation.outcome_verifications.map((entry) => "- \\\`" + entry.node + "\\\`: " + (entry.passed ? "pass" : "fail") + " - " + entry.summary)
+  ];
+  const learningRows = source.workspace_improvements.length > 0
+    ? source.workspace_improvements.map((entry) => "| " + entry.area + " | " + entry.recommendation + " | " + entry.evidence + " | " + entry.priority + " | " + entry.confidence + " | " + entry.done_when + " |")
+    : ["| none | No action. | source packet | low | medium | No action required. |"];
+  return [
+    "\`\`\`review-brief",
+    "# Review Brief",
+    "## Outcome",
+    "Run \\\`" + source.run.run_id + "\\\` ended with status \\\`" + source.run.status + "\\\`.",
+    "## Reviewer Decision",
+    source.failures.active.length > 0 ? "Do not approve until active failures are resolved." : "Review changed files, final artifacts, and validation evidence.",
+    "## What To Inspect First",
+    "- [Change map](" + source.evidence_links.change_map + ")",
+    "- [Validation ledger](" + source.evidence_links.validation_ledger + ")",
+    "## Success Contract",
+    source.intent.goal,
+    "## Changed Files",
+    "- [Change map](" + source.evidence_links.change_map + ")",
+    "## Final Declared Artifacts",
+    ...artifacts,
+    "## Validation Evidence",
+    ...(validation.length > 0 ? validation : ["- [Validation ledger](" + source.evidence_links.validation_ledger + ")"]),
+    "## Active Failures And Risks",
+    ...bullet(source.failures.active.map((failure) => "\\\`" + failure.node + "\\\`: " + failure.summary), "No active failures remain."),
+    "## Recovered Issues",
+    ...bullet(source.failures.recovered.map((failure) => "\\\`" + failure.node + "\\\`: " + failure.summary), "No recovered issues were recorded."),
+    "## Historical Attempts",
+    ...bullet(source.failures.historical.map((failure) => "\\\`" + failure.node + "\\\`: " + failure.summary), "No historical attempts require reviewer action."),
+    "## Supervisor And Human Interventions",
+    ...bullet(source.interventions.map((intervention) => "\\\`" + intervention.action + "\\\`: " + intervention.reason), "No supervisor or human interventions were recorded."),
+    "## Supporting Evidence",
+    "- [Run learnings](02-run-learnings.md)",
+    "- [Audit index](03-audit-index.md)",
+    "\`\`\`",
+    "\`\`\`run-learnings",
+    "# Run Learnings",
+    "## Where Agents Struggled",
+    "- See the review brief for failure and recovery details.",
+    "## Workspace Improvements",
+    "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...learningRows,
+    "## Graph Prompt And Support Improvements",
+    "- No changes identified.",
+    "## Plugin Skill And Eval Opportunities",
+    "- No changes identified.",
+    "## What Worked",
+    "- Runtime produced deterministic evidence for the delivery curator.",
+    "## Evidence Links",
+    "- [Milestones](" + source.evidence_links.milestones + ")",
+    "- [Validation ledger](" + source.evidence_links.validation_ledger + ")",
+    "\`\`\`"
+  ].join("\\n") + "\\n";
+}
+
+function renderResponse() {
+  const prompt = stdin || process.argv[process.argv.length - 1] || "";
+  if (prompt.includes("Agentflow delivery curator")) {
+    return renderDeliveryCuration();
+  }
+  return JSON.stringify({ passed: true, summary: "cursor smoke ok", findings: [] });
+}
 `;
 
   await writeFile(binaryPath, source);

@@ -21,6 +21,7 @@ import { readRunExecutionAttempts, readSupervisorInterventions } from "../../src
 import { buildExecutionId } from "../../src/runtime/attempts.js";
 import { createAuthorityRequest } from "../../src/runtime/authority.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
+import type { DeliverySourcePacket } from "../../src/runtime/delivery/curation.js";
 import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
 import { renderHarnessPrompt, type HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { evaluateGraphReadiness } from "../../src/runtime/readiness.js";
@@ -92,6 +93,80 @@ function createHarness(kind: HarnessAdapter["kind"], run: HarnessAdapter["run"],
                 status: "passed",
                 exitCode: 0,
                 transcript: { last_message: PASSING_VERIFIER_JSON }
+            };
+        }
+        if (invocation.promptKind === "delivery_curator") {
+            const source = invocation.contextPacketPath
+                ? JSON.parse(await readFile(invocation.contextPacketPath, "utf8")) as DeliverySourcePacket
+                : undefined;
+            const finalArtifacts = source?.final_declared_artifacts.map((artifact) =>
+                `- \`${artifact.id}\`: [${artifact.declared_path}](${artifact.relative_path})`
+            ) ?? ["- [Artifact index](evidence/artifact-index.json)"];
+            const activeFailures = source?.failures.active.map((failure) =>
+                `- \`${failure.node}\`: ${failure.summary}`
+            ) ?? [];
+            const recoveredIssues = source?.failures.recovered.map((failure) =>
+                `- \`${failure.node}\`: ${failure.summary}`
+            ) ?? [];
+            const historicalAttempts = source?.failures.historical.map((attempt) =>
+                `- \`${attempt.node}\`: ${attempt.summary}`
+            ) ?? [];
+            const validationEvidence = source?.validation.milestone_validation_logs.map((log) =>
+                `- \`${log.result ?? "recorded"}\` \`${log.command ?? "validation"}\`: ${log.summary}`
+            ) ?? [];
+            return {
+                status: "passed",
+                exitCode: 0,
+                transcript: {
+                    last_message: [
+                        "```review-brief",
+                        "# Review Brief",
+                        "## Outcome",
+                        "Run completed.",
+                        "## Reviewer Decision",
+                        "Review deterministic evidence.",
+                        "## What To Inspect First",
+                        "- [Change map](evidence/change-map.json)",
+                        "## Success Contract",
+                        "See source packet.",
+                        "## Changed Files",
+                        "- [Change map](evidence/change-map.json)",
+                        "## Final Declared Artifacts",
+                        ...(finalArtifacts.length > 0 ? finalArtifacts : ["- No final declared artifacts were captured."]),
+                        "## Validation Evidence",
+                        ...(validationEvidence.length > 0 ? validationEvidence : ["- [Validation ledger](evidence/validation-ledger.json)"]),
+                        "## Active Failures And Risks",
+                        ...(activeFailures.length > 0 ? activeFailures : ["- No active failures remain."]),
+                        "## Recovered Issues",
+                        ...(recoveredIssues.length > 0 ? recoveredIssues : ["- No recovered issues were recorded."]),
+                        "## Historical Attempts",
+                        ...(historicalAttempts.length > 0 ? historicalAttempts : ["- No historical attempts require reviewer action."]),
+                        "## Supervisor And Human Interventions",
+                        "- No supervisor or human interventions were recorded.",
+                        "## Supporting Evidence",
+                        "- [Run learnings](02-run-learnings.md)",
+                        "- [Audit index](03-audit-index.md)",
+                        "```",
+                        "```run-learnings",
+                        "# Run Learnings",
+                        "## Where Agents Struggled",
+                        "- No concrete agent struggle was inferred.",
+                        "## Workspace Improvements",
+                        "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+                        "| --- | --- | --- | --- | --- | --- |",
+                        "| none | No action. | source packet | low | medium | No action required. |",
+                        "## Graph Prompt And Support Improvements",
+                        "- No changes identified.",
+                        "## Plugin Skill And Eval Opportunities",
+                        "- No changes identified.",
+                        "## What Worked",
+                        "- Deterministic evidence was available.",
+                        "## Evidence Links",
+                        "- [Validation ledger](evidence/validation-ledger.json)",
+                        "- [Milestones](evidence/milestones.json)",
+                        "```"
+                    ].join("\n")
+                }
             };
         }
         const result = await run(invocation);

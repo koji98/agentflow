@@ -17,6 +17,7 @@ import { buildHarnessSpawnEnv, formatToolContract, renderHarnessPrompt } from ".
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { collectMissingToolCredentialAuthorityRequests, prepareAgentTools } from "../../src/runtime/tools/setup.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
+import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
 async function initGitRepo(repoDir: string): Promise<void> {
@@ -1198,6 +1199,9 @@ describe("end-to-end runtime tool wiring", () => {
                 kind: "codex-cli",
                 capabilities: getHarnessCapabilities("codex-cli")!,
                 async run(invocation) {
+                    if (invocation.promptKind === "delivery_curator") {
+                        return createPassingDeliveryHarness().run(invocation);
+                    }
                     if (invocation.promptKind === "outcome_verification") {
                         return passingVerifierResponse();
                     }
@@ -1355,6 +1359,9 @@ describe("end-to-end runtime tool wiring", () => {
                 kind: "codex-cli",
                 capabilities: getHarnessCapabilities("codex-cli")!,
                 async run(invocation) {
+                    if (invocation.promptKind === "delivery_curator") {
+                        return createPassingDeliveryHarness().run(invocation);
+                    }
                     if (invocation.promptKind === "outcome_verification") {
                         return passingVerifierResponse();
                     }
@@ -1464,12 +1471,16 @@ describe("end-to-end runtime tool wiring", () => {
                 ]
             });
             expect(compilation.diagnostics).toEqual([]);
+            const deliveryHarness = createPassingDeliveryHarness("codex-cli");
             const harness: HarnessAdapter = {
                 kind: "codex-cli",
                 capabilities: getHarnessCapabilities("codex-cli")!,
                 async run(invocation) {
                     if (invocation.promptKind === "outcome_verification") {
                         return passingVerifierResponse();
+                    }
+                    if (invocation.promptKind === "delivery_curator") {
+                        return deliveryHarness.run(invocation);
                     }
                     const spawnEnv = buildHarnessSpawnEnv(invocation, {
                         PATH: process.env.PATH ?? "/usr/bin:/bin",

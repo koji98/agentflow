@@ -21,6 +21,7 @@ import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
 import { readExecutionManifest } from "../../src/artifacts/reader.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
+import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
 async function initGitRepo(repoDir: string): Promise<void> {
@@ -111,6 +112,9 @@ function buildHarness(handler: (invocation: AgentInvocation) => Promise<Awaited<
         kind: "codex-cli",
         capabilities: getHarnessCapabilities("codex-cli")!,
         async run(invocation) {
+            if (invocation.promptKind === "delivery_curator") {
+                return createPassingDeliveryHarness().run(invocation);
+            }
             const result = await handler(invocation);
             await markInvocationRuntimeReady(invocation, result);
             return result;
@@ -131,6 +135,9 @@ describe("runtime engine outcome verification", () => {
         let agentCalls = 0;
         let verifierCalls = 0;
         const harness = buildHarness(async (invocation) => {
+            if (invocation.promptKind === "delivery_curator") {
+                return createPassingDeliveryHarness().run(invocation);
+            }
             if (invocation.promptKind === "outcome_verification") {
                 verifierCalls += 1;
                 return harnessOk(invocation, passingVerification("Verifier OK."));
@@ -441,6 +448,9 @@ describe("runtime engine outcome verification", () => {
         let agentCalls = 0;
         let verifierCalls = 0;
         const harness = buildHarness(async (invocation) => {
+            if (invocation.promptKind === "delivery_curator") {
+                return createPassingDeliveryHarness().run(invocation);
+            }
             if (invocation.promptKind === "outcome_verification") {
                 verifierCalls += 1;
                 return harnessOk(invocation, verifierCalls === 1

@@ -219,8 +219,12 @@ export const runCommand = {
       authored_graph: loaded.document,
       compile_diagnostics: compilation.diagnostics,
       harnesses: {
-        "codex-cli": createCodexCliHarness(),
-        "cursor-cli": createCursorCliHarness()
+        "codex-cli": createCodexCliHarness(
+          environment.AGENTFLOW_CODEX_CLI_BIN ? { binary: environment.AGENTFLOW_CODEX_CLI_BIN } : {}
+        ),
+        "cursor-cli": createCursorCliHarness(
+          environment.AGENTFLOW_CURSOR_CLI_BIN ? { binary: environment.AGENTFLOW_CURSOR_CLI_BIN } : {}
+        )
       },
       executors: {
         checkpoint: checkpointExecutor
@@ -238,18 +242,22 @@ export const runCommand = {
       explicitRunsRoot
     );
     const terminalFields = createRunTerminalFields(run.state, run.attempts, run.events);
+    const deliveryFailed = run.events.some((event) => event.type === "delivery.curation.failed");
     const runMessage =
-      run.outcome === "passed"
+      deliveryFailed
+        ? "Run reached terminal graph state, but curated delivery failed verification."
+        : run.outcome === "passed"
         ? "Run completed and durable artifacts are ready."
         : run.outcome === "canceled"
           ? "Run canceled. Durable artifacts captured the terminal Canceled state."
           : "Run failed. Durable artifacts captured the terminal failure state.";
 
     return {
-      exitCode: run.outcome === "passed" ? 0 : 1,
+      exitCode: run.outcome === "passed" && !deliveryFailed ? 0 : 1,
       output: {
         command: "run",
         status: run.outcome,
+        delivery_status: deliveryFailed ? "failed" : "ready",
         message: runMessage,
         graph_path: loaded.absolute_path,
         path_resolution: pathResolution,

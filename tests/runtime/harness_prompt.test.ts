@@ -122,7 +122,8 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("Publish content with `af artifact write <name>` using stdin.");
     expect(prompt).toContain("include the exact command and observed result/output");
     expect(prompt).toContain("include that exact wording in the artifact instead of only paraphrasing it");
-    expect(prompt).toContain("render them as Markdown headings such as `## Scenario`, `## Changed files`, and `## Validation`");
+    expect(prompt).toContain("include those exact labels with punctuation in the artifact text");
+    expect(prompt).toContain("asks for named sections without exact label text");
     expect(prompt).toContain("Do not write stale completion language");
     expect(prompt).toContain("| `handoff` | `af artifact write handoff` | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
     expect(prompt).not.toContain("| `handoff` | `/tmp/run/output/handoff.md` |");
@@ -231,6 +232,17 @@ describe("harness prompt rendering", () => {
     );
     expect(verifierPrompt).toBe("Pre-rendered verifier prompt body.");
     expect(verifierPrompt).not.toContain("## Working Loop");
+
+    const deliveryPrompt = renderHarnessPrompt(
+      baseInvocation({
+        promptKind: "delivery_curator",
+        sandbox: "read-only",
+        artifacts: {},
+        rubric: "Pre-rendered delivery curation prompt body."
+      })
+    );
+    expect(deliveryPrompt).toBe("Pre-rendered delivery curation prompt body.");
+    expect(deliveryPrompt).not.toContain("## Working Loop");
   });
 
   it("renders artifact repair as a dedicated prompt kind", () => {

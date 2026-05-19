@@ -784,8 +784,12 @@ export const validateCommand = {
       repo_source_diagnostics: repoResolution.diagnostics,
       machine_checks: true,
       harnesses: {
-        "codex-cli": createCodexCliHarness(),
-        "cursor-cli": createCursorCliHarness()
+        "codex-cli": createCodexCliHarness(
+          process.env.AGENTFLOW_CODEX_CLI_BIN ? { binary: process.env.AGENTFLOW_CODEX_CLI_BIN } : {}
+        ),
+        "cursor-cli": createCursorCliHarness(
+          process.env.AGENTFLOW_CURSOR_CLI_BIN ? { binary: process.env.AGENTFLOW_CURSOR_CLI_BIN } : {}
+        )
       }
     });
     const contextAnalysis = await analyzeGraphContext({

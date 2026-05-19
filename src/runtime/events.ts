@@ -31,6 +31,9 @@ export const runtimeEventTypes = [
   "sequence.cleanup.step_failed",
   "sequence.cleanup.completed",
   "sequence.cleanup.canceled",
+  "delivery.curation.started",
+  "delivery.curation.completed",
+  "delivery.curation.failed",
   "delivery.package.completed",
   "run.canceled",
   "run.completed"

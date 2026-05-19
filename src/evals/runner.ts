@@ -770,17 +770,33 @@ async function evaluateDeliveryCriterion(options: {
 }): Promise<EvalCriterionResult> {
   const config = readCriterionConfig(options.scenario, options.criterion);
   const required = typeof config.required === "boolean" ? config.required : true;
-  const passed = !required || Boolean(options.tracePacket?.delivery.manifest_path && options.tracePacket.delivery.manifest);
-  const blockers = passed || options.graphStatus !== "passed" ? [] : ["Delivery manifest was missing for a completed run."];
+  const verdict = options.tracePacket?.delivery.curation_verdict as { passed?: unknown } | undefined;
+  const manifestPresent = Boolean(options.tracePacket?.delivery.manifest_path && options.tracePacket.delivery.manifest);
+  const curationPassed = verdict?.passed === true;
+  const passed = !required || (manifestPresent && curationPassed);
+  const blockers = passed || options.graphStatus !== "passed"
+    ? []
+    : [
+        !manifestPresent
+          ? "Delivery manifest was missing for a completed run."
+          : "Curated delivery verdict was missing or failed for a completed run."
+      ];
 
   return criterionResult({
     criterion: options.criterion,
     passed,
-    assertions: [{
-      id: "delivery_manifest",
-      passed,
-      evidence: options.tracePacket?.delivery.manifest_path ?? "missing"
-    }],
+    assertions: [
+      {
+        id: "delivery_manifest",
+        passed: manifestPresent,
+        evidence: options.tracePacket?.delivery.manifest_path ?? "missing"
+      },
+      {
+        id: "delivery_curation",
+        passed: curationPassed,
+        evidence: options.tracePacket?.delivery.curation_verdict_path ?? "missing"
+      }
+    ],
     blockers
   });
 }

@@ -24,6 +24,7 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
     const variantDir = join(suiteDir, "variants");
     const gradersDir = join(suiteDir, "graders");
     const evalRoot = join(tempRoot, "eval-output");
+    const mockCodexPath = join(tempRoot, "mock-codex.mjs");
     await mkdir(repoDir, { recursive: true });
     await mkdir(variantDir, { recursive: true });
     await mkdir(gradersDir, { recursive: true });
@@ -37,16 +38,82 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
         id: "current",
         description: "Current prompts.",
         env: {
-            AGENTFLOW_EVAL_PROMPT_PACK: "current"
+            AGENTFLOW_EVAL_PROMPT_PACK: "current",
+            AGENTFLOW_CODEX_CLI_BIN: mockCodexPath
         }
     }, null, 2)}\n`);
     await writeFile(join(variantDir, "terse.json"), `${JSON.stringify({
         id: "terse",
         description: "Terse prompt pack.",
         env: {
-            AGENTFLOW_EVAL_PROMPT_PACK: "terse"
+            AGENTFLOW_EVAL_PROMPT_PACK: "terse",
+            AGENTFLOW_CODEX_CLI_BIN: mockCodexPath
         }
     }, null, 2)}\n`);
+    await writeFile(mockCodexPath, [
+        "#!/usr/bin/env node",
+        "import { writeFileSync } from 'node:fs';",
+        "let input = '';",
+        "process.stdin.setEncoding('utf8');",
+        "process.stdin.on('data', chunk => { input += chunk; });",
+        "process.stdin.on('end', () => {",
+        "  const lastMessageIndex = process.argv.indexOf('--output-last-message');",
+        "  const lastMessagePath = lastMessageIndex >= 0 ? process.argv[lastMessageIndex + 1] : undefined;",
+        "  const artifacts = [...input.matchAll(/\\| `([^`]+\\.[^`]+)` \\| ([^|]+) \\| \\[([^\\]]+)\\]\\(([^)]+)\\) \\|/g)].map(match => `- \\`${match[1]}\\`: [${match[3]}](${match[4]})`);",
+        "  const artifactLines = artifacts.length > 0 ? artifacts : ['- [Artifact index](evidence/artifact-index.json)'];",
+        "  const response = [",
+        "    '```review-brief',",
+        "    '# Review Brief',",
+        "    '## Outcome',",
+        "    'Run completed.',",
+        "    '## Reviewer Decision',",
+        "    'Review deterministic evidence.',",
+        "    '## What To Inspect First',",
+        "    '- [Change map](evidence/change-map.json)',",
+        "    '## Success Contract',",
+        "    'See source packet.',",
+        "    '## Changed Files',",
+        "    '- [Change map](evidence/change-map.json)',",
+        "    '## Final Declared Artifacts',",
+        "    ...artifactLines,",
+        "    '## Validation Evidence',",
+        "    '- [Validation ledger](evidence/validation-ledger.json)',",
+        "    '## Active Failures And Risks',",
+        "    '- No active failures remain.',",
+        "    '## Recovered Issues',",
+        "    '- No recovered issues were recorded.',",
+        "    '## Historical Attempts',",
+        "    '- No historical attempts require reviewer action.',",
+        "    '## Supervisor And Human Interventions',",
+        "    '- No supervisor or human interventions were recorded.',",
+        "    '## Supporting Evidence',",
+        "    '- [Run learnings](02-run-learnings.md)',",
+        "    '- [Audit index](03-audit-index.md)',",
+        "    '```',",
+        "    '```run-learnings',",
+        "    '# Run Learnings',",
+        "    '## Where Agents Struggled',",
+        "    '- No concrete agent struggle was inferred.',",
+        "    '## Workspace Improvements',",
+        "    '| Area | Recommendation | Evidence | Priority | Confidence | Done When |',",
+        "    '| --- | --- | --- | --- | --- | --- |',",
+        "    '| none | No action. | source packet | low | medium | No action required. |',",
+        "    '## Graph Prompt And Support Improvements',",
+        "    '- No changes identified.',",
+        "    '## Plugin Skill And Eval Opportunities',",
+        "    '- No changes identified.',",
+        "    '## What Worked',",
+        "    '- Deterministic evidence was available.',",
+        "    '## Evidence Links',",
+        "    '- [Validation ledger](evidence/validation-ledger.json)',",
+        "    '- [Milestones](evidence/milestones.json)',",
+        "    '```'",
+        "  ].join('\\n');",
+        "  if (lastMessagePath) writeFileSync(lastMessagePath, response);",
+        "  process.stdout.write(response);",
+        "});"
+    ].join("\n"));
+    await execFileAsync("chmod", ["+x", mockCodexPath]);
     await writeFile(join(gradersDir, "packet.mjs"), [
         "import { readFileSync } from 'node:fs';",
         "const packet = JSON.parse(readFileSync(process.env.AGENTFLOW_EVAL_TRACE_PACKET_FILE, 'utf8'));",

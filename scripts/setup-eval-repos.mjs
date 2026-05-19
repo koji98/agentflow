@@ -879,8 +879,7 @@ const templates = {
               "Assess maintainability risks in the current pipeline design.",
               {
                 id: "recommendation",
-                prompt: "Recommend the smallest safe next change direction based on local evidence.",
-                as_artifact: true
+                prompt: "Recommend the smallest safe next change direction based on local evidence."
               }
             ]
           }

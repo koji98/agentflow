@@ -341,6 +341,25 @@ export function createRuntimeProgressReporter(
           return;
         }
 
+        case "delivery.curation.started": {
+          writeLine("agentflow: delivery curation started");
+          return;
+        }
+
+        case "delivery.curation.completed": {
+          const payload = event.payload as { verdict_path?: string };
+          writeLine(`agentflow: delivery curation passed${payload.verdict_path ? ` · ${payload.verdict_path}` : ""}`);
+          return;
+        }
+
+        case "delivery.curation.failed": {
+          const payload = event.payload as { verdict_path?: string; reason?: string };
+          writeLine(
+            `agentflow: delivery curation failed${payload.verdict_path ? ` · ${payload.verdict_path}` : ""}${payload.reason ? ` · ${payload.reason}` : ""}`
+          );
+          return;
+        }
+
         default:
           return;
       }

@@ -321,6 +321,8 @@ export interface EvalTracePacket {
   delivery: {
     manifest_path?: string;
     review_brief_path?: string;
+    curation_verdict_path?: string;
+    curation_verdict?: unknown;
     manifest?: unknown;
   };
   metrics: {
