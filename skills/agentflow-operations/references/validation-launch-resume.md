@@ -32,9 +32,10 @@ Do not confuse resume contract fingerprints with supervisor failure fingerprints
 For retries inside a run, use attempt memory rather than raw debug files as the operator mental model:
 
 - The next retry writes `runtime/attempt-memory.json` and `agent/attempt-memory.md`.
-- `af orient` starts with retry orientation: failure symptom, prior execution, resume point, workspace decision, preserved progress, required next action, and do-not-redo guidance.
+- `af orient` starts with retry orientation: failure symptom, prior execution, best resume point, restart boundary, workspace decision, progress to reuse, progress to discard, required next action, validation gate, and do-not-redo guidance.
 - Prior milestones and validation logs are read-only evidence. The retry creates fresh milestones for current work.
 - Verification substrate failures should resume at `rerun_verification`; they should not rerun worker output unless structured verifier findings identify an actual work defect.
-- `fresh_retry` is a last resort for absent, unsafe, or irrelevant prior progress.
+- Best resume is evidence-based, not always smallest: preserve validated in-scope progress, but reset failed-attempt changes when structured evidence shows wrong-direction, contaminated, over-broad, or unsafe progress.
+- `fresh_retry` is a last resort for absent, unsafe, irrelevant, or explicitly rejected prior progress.
 
 Use `--reset-supervisor-budget` only after the operator has fixed graph, environment, credentials, or another blocker enough to justify fresh recovery while preserving compatible completed work.

@@ -137,6 +137,8 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("## Working Loop");
     expect(prompt).toContain("Drive the node to completion within its boundary");
     expect(prompt).toContain("Run `af orient` before material work.");
+    expect(prompt).toContain("Rerun `af orient` whenever the goal, acceptance criteria, context pointers, artifact expectations, retry state, or next action becomes unclear.");
+    expect(prompt).toContain("If conversational continuity is lost after compaction, a long pause, or a long-running task drift, rerun `af orient` to re-ground before continuing.");
     expect(prompt).toContain("Understand the plan before committing to execution milestones");
     expect(prompt).toContain("read any relevant plan, research, context pointer, or supervisor recovery brief");
     expect(prompt).toContain("If no adequate plan exists, do the necessary discovery and planning required to choose a defensible execution path.");
@@ -287,6 +289,18 @@ describe("harness prompt rendering", () => {
       repeated_fingerprint_count: 1,
       resume_point: "continue_from_prior_progress",
       workspace_decision: "preserve",
+      resume_decision: {
+        resume_point: "continue_from_prior_progress",
+        restart_boundary: "node_attempt",
+        workspace_decision: "preserve",
+        reuse: ["Existing artifact content from the prior attempt is still usable evidence."],
+        discard: ["Discard the failed v3 API assumption."],
+        reason_code: "evidence_delta_retry",
+        confidence: "high",
+        evidence: ["Supervisor found version-matched docs for the retry."],
+        required_next_action: "Read the cited zod v4 docs fixture, then repair the API usage.",
+        validation_gate: ["Run the existing failing test."]
+      },
       preserve_progress: ["Existing artifact content from the prior attempt is still usable evidence."],
       do_not_redo: ["Do not repeat the failed v3 API assumption."],
       required_next_action: "Read the cited zod v4 docs fixture, then repair the API usage.",

@@ -168,6 +168,9 @@ describe("deep research managed pattern", () => {
         ]);
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("research synthesis worker");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Produce a complete synthesis for the assigned input reports");
+        expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Assigned Input Set");
+        expect(JSON.stringify(synthesisLayer.steps[0])).toContain("angle_01: Investigate the local architecture");
+        expect(JSON.stringify(synthesisLayer.steps[0])).toContain("angle_02: Compare managed pattern behavior");
         expect(JSON.stringify(synthesisLayer.steps[0])).not.toContain("expert");
         expect(synthesisLayer.steps.map((step) => ("support" in step ? step.support?.context?.length ?? 0 : 0))).toEqual([
             2,

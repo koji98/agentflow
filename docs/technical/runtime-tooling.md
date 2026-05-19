@@ -186,7 +186,7 @@ flowchart LR
 
 Common commands:
 
-- `af orient`: print the compact current-node operating picture, including success contract, workspace boundary, context pointers, runtime state, declared artifacts, support summary, and current milestones. On retries it starts with retry orientation and runtime-authored attempt memory: prior symptom, resume point, workspace decision, preserved progress, required next action, and do-not-redo guidance.
+- `af orient`: print the compact current-node operating picture, including success contract, workspace boundary, context pointers, runtime state, declared artifacts, support summary, and current milestones. Agents run it before material work and rerun it whenever the goal, acceptance criteria, context pointers, artifact expectations, retry state, or next action becomes unclear, including after compaction, long pauses, or long-running task drift. On retries it starts with retry orientation and runtime-authored attempt memory: prior symptom, best resume point, restart boundary, workspace decision, preserved progress, discarded progress, required next action, validation gate, and do-not-redo guidance.
 - `af milestone add --title <text> --goal <text>`: declare a meaningful phase of work after orientation, including a planning/research milestone when discovery is substantial.
 - `af milestone log <id> --kind finding|decision|validation --summary <text>`: attach audit evidence to a milestone. Validation logs also include `--command` and `--result pass|fail|blocked`.
 - `af milestone complete <id> --evidence <text>` or `af milestone block <id> --blocked-on <text> --recoverable-by <text> --evidence <text>`: close the milestone with evidence or record a true external blocker.

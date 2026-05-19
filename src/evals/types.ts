@@ -309,6 +309,12 @@ export interface EvalTracePacket {
     classifications: string[];
     gatherers: string[];
     apply_actions: string[];
+    resume_decisions: Array<{
+      resume_point?: string;
+      restart_boundary?: string;
+      workspace_decision?: string;
+      reason_code?: string;
+    }>;
     intervention_count: number;
     recovery_count: number;
   };

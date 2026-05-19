@@ -241,7 +241,7 @@ Template variables:
 
 ## Trajectory Criteria
 
-Trace packets include `trajectory`, a chronological sequence of node attempts, runtime events, completion packets, `af` runtime CLI calls, simulation calls, artifact writes, and delivery events. Trajectory criteria support:
+Trace packets include `trajectory`, a chronological sequence of node attempts, runtime events, completion packets, `af` runtime CLI calls, simulation calls, artifact writes, and delivery events. They also expose supervisor resume decisions under `supervisor.resume_decisions` so custom graders can assert the retry boundary, workspace decision, and reason code directly. Trajectory criteria support:
 
 - `exact_order`: full trajectory must match the listed events.
 - `contains_ordered`: listed events must appear in order.

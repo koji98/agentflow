@@ -98,11 +98,11 @@ Artifact refs can select attempts with:
 
 Missing required workspace files, glob matches, plugin files, and artifact references fail context resolution before the node runs.
 
-Inside repeat bodies, Agentflow can also add repeat history pointers for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually. Supervisor retry guidance can also appear as runtime-provided context after recovery; it contains the retry brief and prior execution id for the retrying node. Runtime-authored attempt memory is separate: `agent/attempt-memory.md` and `runtime/attempt-memory.json` summarize prior progress, artifact state, validation evidence, workspace decision, resume point, and do-not-redo guidance.
+Inside repeat bodies, Agentflow can also add repeat history pointers for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually. Supervisor retry guidance can also appear as runtime-provided context after recovery; it contains the retry brief and prior execution id for the retrying node. Runtime-authored attempt memory is separate: `agent/attempt-memory.md` and `runtime/attempt-memory.json` summarize the best-resume decision, prior timeline from `events.jsonl`, progress to reuse, progress to discard, artifact state, validation evidence, workspace decision, resume point, restart boundary, and do-not-redo guidance.
 
 When a retry uses a supervisor runtime overlay, the overlay context is resolved before authored context:
 
-- `supervisor_recovery_envelope` points to `agent/supervisor-recovery.md`, which summarizes the failure symptom, selected recovery action, resume point, workspace decision, required material delta, must-do guidance, evidence pointers, validation focus, and unchanged contract.
+- `supervisor_recovery_envelope` points to `agent/supervisor-recovery.md`, which summarizes the failure symptom, selected recovery action, best resume point, restart boundary, workspace decision, required material delta, reuse/discard guidance, evidence pointers, validation focus, and unchanged contract.
 - `supervisor_context_repair` appears when context pointer resolution failed. It provides a compact context index, omitted-entry provenance, largest-file warnings, default ignored roots, and live paths the worker can inspect manually.
 - Workspace and environment repairs are recorded in `runtime-overlay.json` and `material-delta.json`. Workspace repair also writes `workspace-repair-patch.json` and `workspace-repair-result.json` so reviewers can see which failed-attempt edits were restored before retry.
 

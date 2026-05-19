@@ -108,7 +108,7 @@ Authors do not write these prompts directly, but graph quality determines whethe
 | --- | --- | --- |
 | Outcome verifier | Graph/node intent, completion packet, declared artifacts, milestone evidence, validation evidence, and workspace-change summaries. | Make acceptance criteria observable and artifacts concrete. Avoid vague criteria that require guessing intent. |
 | Artifact repair | Original node contract, missing artifact names, agent-facing repair brief, prior response/artifact evidence. | Declare only meaningful artifacts with clear descriptions and paths. |
-| Supervisor recovery worker retry | Original contract plus `agent/supervisor-recovery.md` and `agent/attempt-memory.md` with symptom, resume point, workspace decision, preserved progress, material delta, forbidden actions, evidence pointers, and validation focus. | Keep graph/node constraints stable and explicit so recovery can continue from useful prior progress without drifting into a new task. |
+| Supervisor recovery worker retry | Original contract plus `agent/supervisor-recovery.md` and `agent/attempt-memory.md` with symptom, best resume point, restart boundary, workspace decision, progress to reuse/discard, material delta, forbidden actions, evidence pointers, and validation focus. | Keep graph/node constraints stable and explicit so recovery can preserve useful prior progress, reset unsafe progress, and avoid drifting into a new task. |
 | Supervisor diagnostic helper | Read-only case/debug evidence, gather role, required JSON evidence patch. | Prefer structured artifacts and checks so helpers can map failures without reading raw logs as truth. |
 
 ## Prompt Engineering Checks
@@ -121,4 +121,4 @@ Authors do not write these prompts directly, but graph quality determines whethe
 - Capabilities should reduce support noise; select only skills/CLI/tools that fit the node’s job.
 - Managed pattern criteria should be weighted by importance, not evenly by habit.
 - Downstream nodes should consume stable artifacts, not internal prompt/debug files or dynamic item ids.
-- Retry-worthy nodes should leave useful milestone and validation evidence; attempt memory can only preserve progress that the runtime can see.
+- Retry-worthy nodes should leave useful milestone and validation evidence; attempt memory can only preserve or reset progress that the runtime can see through events, artifacts, workspace diffs, and validation logs.

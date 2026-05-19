@@ -2,7 +2,7 @@
   "id": "19-validation-timeout-strategy",
   "bucket": "validation-repair",
   "difficulty": "hard",
-  "description": "Confirm timeout-like failures receive changed validation strategy before retry.",
+  "description": "Confirm verification-substrate failures retry verification without rerunning unrelated work.",
   "workflow": {
     "graph_template": "../../templates/exec-validation-strategy.graph.template.json",
     "harness": "codex-cli",
@@ -38,7 +38,7 @@
         "diagnostic_probe"
       ],
       "apply_actions": [
-        "repair_validation_strategy"
+        "rerun_verification"
       ]
     },
     "delivery": {

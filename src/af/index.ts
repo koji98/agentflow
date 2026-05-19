@@ -608,6 +608,7 @@ function commandHelp(commandPath: string): string | undefined {
       "",
       "Output:",
       "  Markdown containing the success contract, workspace boundary, context pointers, active runtime state, declared artifacts, support summary, and current milestones.",
+      "  Rerun it whenever the goal, acceptance criteria, context, artifacts, retry state, or next action becomes unclear, including after compaction or long-running drift.",
       "",
       "Safety:",
       "  Read-only orientation; no workspace or artifact writes."
@@ -843,14 +844,20 @@ function renderRetryOrientation(
       "- Structured attempt memory is unavailable; use the supervisor recovery summary and current artifact status before material work.",
       `- Supervisor decision: ${envelope?.retry_directive.summary ?? "recovery retry"}`,
       `- Resume point: \`${envelope?.resume_point ?? "fresh_retry"}\``,
+      `- Restart boundary: \`${envelope?.resume_decision.restart_boundary ?? "node_attempt"}\``,
       `- Workspace decision: \`${envelope?.workspace_decision ?? "preserve"}\``,
+      `- Resume reason: \`${envelope?.resume_decision.reason_code ?? "fresh_retry_required"}\``,
       `- Required next action: ${envelope?.required_next_action ?? "Inspect current artifact status and continue within the unchanged contract."}`,
+      "",
+      "### Reuse",
+      ...renderList(envelope?.resume_decision.reuse, "Use current context pointers and artifact status."),
       "",
       "### Do Not Redo",
       ...renderList(envelope?.do_not_redo, "Do not restart from scratch unless prior progress is unsafe or irrelevant.")
     ];
   }
 
+  const phaseHistory = attemptMemory.phase_history ?? [];
   return [
     "## Retry Orientation",
     "| Field | Value |",
@@ -859,8 +866,19 @@ function renderRetryOrientation(
     `| Prior execution | \`${attemptMemory.prior_execution_id}\` |`,
     `| Supervisor decision | ${markdownCell(envelope?.retry_directive.summary ?? attemptMemory.failure_summary)} |`,
     `| Resume point | \`${attemptMemory.resume_point}\` |`,
+    `| Restart boundary | \`${attemptMemory.resume_decision.restart_boundary}\` |`,
     `| Workspace decision | \`${attemptMemory.workspace_decision}\` |`,
+    `| Resume reason | \`${attemptMemory.resume_decision.reason_code}\` |`,
     `| Required next action | ${markdownCell(attemptMemory.required_next_action)} |`,
+    "",
+    "### Reuse",
+    ...renderList(attemptMemory.resume_decision.reuse, "No prior progress was selected for reuse."),
+    "",
+    "### Discard",
+    ...renderList(attemptMemory.resume_decision.discard, "No prior progress was selected for discard."),
+    "",
+    "### Validation Gate",
+    ...renderList(attemptMemory.resume_decision.validation_gate, "Run the validation named by the original task when feasible."),
     "",
     "### Preserved Progress",
     ...renderList(attemptMemory.preserve_progress, "No preserved prior progress was identified."),
@@ -869,6 +887,14 @@ function renderRetryOrientation(
     ...renderList(attemptMemory.do_not_redo, "Do not restart from scratch unless prior progress is unsafe or irrelevant."),
     "",
     "## Prior Attempt Memory",
+    "Timeline:",
+    ...renderList(
+      phaseHistory.map((event) =>
+        `${event.ts ? `${event.ts} ` : ""}${event.type}: ${event.summary}`
+      ),
+      "No prior runtime events were recorded."
+    ),
+    "",
     "Completed milestones:",
     ...renderList(attemptMemory.completed_milestones, "No prior milestones were completed."),
     "",
@@ -1209,7 +1235,7 @@ const learnPlaybooks: Record<LearnKind, {
   unknown_failure: {
     purpose: "Recover unclassified failures by forming a causal hypothesis before repair.",
     inspect: ["failed attempt", "upstream cone", "context provenance", "artifacts", "workspace diff", "logs"],
-    safe_repairs: ["spawn a fixed read-only helper role when evidence is missing", "rank causal targets", "apply the smallest authorized repair with a material delta"],
+    safe_repairs: ["spawn a fixed read-only helper role when evidence is missing", "rank causal targets", "apply the best-scoped authorized repair with a material delta"],
     contract_boundaries: ["if no safe material delta exists, fail contractually with evidence", "unclear authority or intent cannot be resolved by helper prose or free-text output"]
   }
 };
@@ -1885,7 +1911,7 @@ function helperRoleInstructions(session: HelperSession): string[] {
     case "repair_planner":
       return [
         "You are a read-only supervisor repair planner.",
-        "Propose the smallest runtime-authorized recovery operation and the material delta required before retry."
+        "Propose the best-scoped runtime-authorized recovery operation and the material delta required before retry."
       ];
   }
 }

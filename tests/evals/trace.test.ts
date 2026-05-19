@@ -72,7 +72,24 @@ describe("eval trace packets", () => {
             counts: { total: 1, passed: 1 }
         });
         await mkdir(dirname(paths.events_file), { recursive: true });
-        await writeFile(paths.events_file, "", "utf8");
+        await writeFile(paths.events_file, `${JSON.stringify({
+            seq: 1,
+            ts: "2026-05-03T12:00:05.000Z",
+            run_id: "run-test",
+            type: "supervisor.retry_scheduled",
+            compiled_id: "ship",
+            execution_id: "exec__ship__attempt_1",
+            payload: {
+                action: "retry_with_guidance",
+                target_compiled_id: "ship",
+                resume_decision: {
+                    resume_point: "rerun_verification",
+                    restart_boundary: "verification",
+                    workspace_decision: "preserve",
+                    reason_code: "verification_substrate_failure"
+                }
+            }
+        })}\n`, "utf8");
         await writeFile(paths.interventions_file, "", "utf8");
         await writeJson(join(executionDir, "runtime/execution.json"), {
             execution_id: "exec__ship__attempt_1",
@@ -128,6 +145,14 @@ describe("eval trace packets", () => {
             })
         ]));
         expect(JSON.stringify(packet.trajectory)).toContain("af orient");
+        expect(packet.supervisor.resume_decisions).toEqual([
+            {
+                resume_point: "rerun_verification",
+                restart_boundary: "verification",
+                workspace_decision: "preserve",
+                reason_code: "verification_substrate_failure"
+            }
+        ]);
         await expect(readFile(completionPacketPath, "utf8")).resolves.toContain("ready_for_verification");
     });
 });

@@ -176,6 +176,18 @@ describe("context resolution", () => {
             repeated_fingerprint_count: 1,
             resume_point: "continue_from_prior_progress",
             workspace_decision: "preserve",
+            resume_decision: {
+                resume_point: "continue_from_prior_progress",
+                restart_boundary: "node_attempt",
+                workspace_decision: "preserve",
+                reuse: ["The prior context discovery remains useful evidence."],
+                discard: ["Discard the missing-context failure tactic."],
+                reason_code: "evidence_delta_retry",
+                confidence: "high",
+                evidence: ["Supervisor rebuilt local context evidence."],
+                required_next_action: "Read the rebuilt local agent context brief first.",
+                validation_gate: ["Confirm the source file is used."]
+            },
             preserve_progress: ["The prior context discovery remains useful evidence."],
             do_not_redo: ["Do not change the node contract."],
             required_next_action: "Read the rebuilt local agent context brief first.",

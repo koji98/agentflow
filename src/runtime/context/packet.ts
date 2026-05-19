@@ -15,7 +15,9 @@ export interface RuntimeSupervisorRecoveryContext {
   failure_fingerprint: string;
   repeated_fingerprint_count: number;
   resume_point: string;
+  restart_boundary: string;
   workspace_decision: string;
+  reason_code: string;
   recovery_plan_path: string;
   case_file_path: string;
 }

@@ -475,6 +475,12 @@ function buildEventSummary(
         ...(nodeLabel ? { node_label: nodeLabel } : {}),
         summary: String(payload.summary ?? `Supervisor intervention ${String(payload.intervention_id ?? "?")} started.`)
       };
+    case "supervisor.intervention.retry":
+      return {
+        ...(authored_id ? { authored_id } : {}),
+        ...(nodeLabel ? { node_label: nodeLabel } : {}),
+        summary: `Supervisor intervention retry ${String(payload.attempt ?? "?")}/${String(payload.max_attempts ?? "?")}: ${String(payload.summary ?? "retrying recovery cycle")}.`
+      };
     case "supervisor.intervention.completed":
       return {
         ...(authored_id ? { authored_id } : {}),
@@ -683,6 +689,7 @@ function buildRunDiagnostic(
         : undefined;
     case "node.blocked":
     case "node.canceled":
+    case "supervisor.intervention.retry":
     case "supervisor.intervention.failed":
     case "managed.progress":
       if (event.type === "managed.progress" && payload.status === "healthy_progress") {

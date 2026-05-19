@@ -176,6 +176,20 @@ describe("runtime progress reporter", () => {
             seq: 7,
             ts: new Date().toISOString(),
             run_id: "run-1",
+            type: "supervisor.intervention.retry",
+            compiled_id: "root__verify",
+            payload: {
+                action: "retry_with_guidance",
+                attempt: 1,
+                max_attempts: 3,
+                delay_ms: 2500,
+                summary: "Supervisor harness was temporarily unavailable."
+            }
+        });
+        emit({
+            seq: 8,
+            ts: new Date().toISOString(),
+            run_id: "run-1",
             type: "verification.started",
             compiled_id: "root__verify",
             payload: {
@@ -183,7 +197,7 @@ describe("runtime progress reporter", () => {
             }
         });
         emit({
-            seq: 8,
+            seq: 9,
             ts: new Date().toISOString(),
             run_id: "run-1",
             type: "verification.completed",
@@ -195,7 +209,7 @@ describe("runtime progress reporter", () => {
             }
         });
         emit({
-            seq: 9,
+            seq: 10,
             ts: new Date().toISOString(),
             run_id: "run-1",
             type: "node.blocked",
@@ -205,7 +219,7 @@ describe("runtime progress reporter", () => {
             }
         });
         emit({
-            seq: 10,
+            seq: 11,
             ts: new Date().toISOString(),
             run_id: "run-1",
             type: "run.completed",
@@ -222,6 +236,7 @@ describe("runtime progress reporter", () => {
         expect(rendered).toContain("[1/2] passed agent Inspect Repo · 1s");
         expect(rendered).toContain("agentflow: repeat retry iteration 2/3");
         expect(rendered).toContain("agentflow: check failed Quality Check · score=0.62");
+        expect(rendered).toContain("agentflow: intervention retry Quality Check · retry_with_guidance · attempt 1/3 · delay=3s · Supervisor harness was temporarily unavailable.");
         expect(rendered).toContain("agentflow: verification started Quality Check · check");
         expect(rendered).toContain("agentflow: verification failed Quality Check · Spec is not implementation-ready.");
         expect(rendered).toContain("[2/2] blocked check Quality Check · terminal_failure");

@@ -93,6 +93,34 @@ function dependencyDocsVerifierResult(): RuntimeNodeExecutionResult {
         }
     };
 }
+function wrongDirectionVerifierResult(): RuntimeNodeExecutionResult {
+    return {
+        status: "passed",
+        outcome: "failed",
+        result: {
+            outcome_verification: {
+                passed: false,
+                summary: "Verifier rejected the attempt because the implementation went down an over-broad wrong direction.",
+                findings: [
+                    {
+                        severity: "blocker",
+                        category: "wrong_direction",
+                        evidence: "The prior attempt rewrote unrelated surfaces instead of the assigned contract.",
+                        recommendation: "Discard the contaminated attempt and restart inside the original node scope."
+                    }
+                ],
+                blockers: [
+                    {
+                        severity: "blocker",
+                        category: "wrong_direction",
+                        evidence: "The prior attempt rewrote unrelated surfaces instead of the assigned contract.",
+                        recommendation: "Discard the contaminated attempt and restart inside the original node scope."
+                    }
+                ]
+            }
+        }
+    };
+}
 describe("supervisor recovery cycle", () => {
     it("writes a case file, parallel evidence patches, a recovery plan, and retry envelope", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-cycle-"));
@@ -130,6 +158,12 @@ describe("supervisor recovery cycle", () => {
                 kind: "requirement_evidence_mapped"
             })
         ]));
+        expect(recovery.recovery_envelope?.resume_decision).toEqual(expect.objectContaining({
+            resume_point: "fresh_retry",
+            restart_boundary: "node_attempt",
+            workspace_decision: "preserve",
+            reason_code: "fresh_retry_required"
+        }));
         expect(recovery.recovery_envelope?.retry_directive.unchanged_contract).toEqual({
             goal: true,
             acceptance_criteria: true,
@@ -496,7 +530,113 @@ describe("supervisor recovery cycle", () => {
                 kind: "validation_strategy_changed"
             })
         ]));
+        expect(recovery.recovery_envelope?.resume_decision).toEqual(expect.objectContaining({
+            resume_point: "repair_validation_strategy",
+            restart_boundary: "verification",
+            workspace_decision: "preserve",
+            reason_code: "validation_strategy_repair"
+        }));
         expect(recovery.recovery_envelope?.retry_directive.must_do.join("\n")).toContain("focused validation command");
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("uses verification-only resume decisions for verifier substrate failures", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-verifier-substrate-"));
+        const runtimeAttempt = attempt(tempRoot);
+        await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+        const runtimeResult: RuntimeNodeExecutionResult = {
+            status: "failed",
+            outcome: "failed",
+            result: { failure_code: "verification_substrate_failure" },
+            stdout: "",
+            stderr: "verifier transport failed"
+        };
+        const classification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult
+        });
+        const recovery = await runSupervisorRecoveryCycle({
+            action: "run_diagnostic",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult,
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification,
+            failure_fingerprint: "fingerprint-1",
+            repeated_fingerprint_count: 1,
+            prior_interventions: [],
+            workspace_path: tempRoot
+        });
+        expect(recovery.recovery_plan.apply_action).toBe("rerun_verification");
+        expect(recovery.recovery_envelope?.resume_decision).toEqual(expect.objectContaining({
+            resume_point: "rerun_verification",
+            restart_boundary: "verification",
+            workspace_decision: "preserve",
+            reason_code: "verification_substrate_failure"
+        }));
+        expect(recovery.recovery_envelope?.resume_decision.reuse.join("\n")).toContain("completed worker output");
+        expect(recovery.recovery_envelope?.resume_decision.discard.join("\n")).toContain("failed verification");
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("resets a wrong-direction attempt instead of preserving contaminated progress", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-wrong-direction-reset-"));
+        const runtimeAttempt = attempt(tempRoot);
+        await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+        runtimeAttempt.metadata = {
+            node_workspace_changes: {
+                baseline_path: join(tempRoot, "workspace-changes/baseline.json"),
+                changed_files_path: join(tempRoot, "workspace-changes/changed-files.json"),
+                changed_file_count: 4,
+                diff_patch_path: join(tempRoot, "workspace-changes/diff.patch"),
+                status_path: join(tempRoot, "workspace-changes/status.txt")
+            }
+        };
+        const runtimeResult = wrongDirectionVerifierResult();
+        const classification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult
+        });
+        const recovery = await runSupervisorRecoveryCycle({
+            action: "semantic_evaluation",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult,
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification,
+            failure_fingerprint: "fingerprint-1",
+            repeated_fingerprint_count: 1,
+            prior_interventions: [],
+            workspace_path: tempRoot
+        });
+        expect(classification.evidence.prior_progress_unsafe).toBe(true);
+        expect(recovery.recovery_plan.apply_action).toBe("repair_workspace");
+        expect(recovery.recovery_plan.runtime_overlay?.workspace_repair).toEqual(expect.objectContaining({
+            strategy: "restore_failed_attempt_changes",
+            changed_file_count: 4
+        }));
+        expect(recovery.recovery_envelope?.resume_decision).toEqual(expect.objectContaining({
+            resume_point: "fresh_retry",
+            restart_boundary: "node_attempt",
+            workspace_decision: "reset",
+            reason_code: "prior_progress_unsafe"
+        }));
+        expect(recovery.recovery_envelope?.resume_decision.reuse.join("\n")).toContain("original node contract");
+        expect(recovery.recovery_envelope?.resume_decision.discard.join("\n")).toContain("failed attempt workspace changes");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("does not count changing recovery targets as a material delta by itself", async () => {

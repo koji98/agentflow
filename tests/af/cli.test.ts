@@ -474,6 +474,18 @@ describe("af runtime CLI", () => {
                 repeated_fingerprint_count: 1,
                 resume_point: "repair_artifacts",
                 workspace_decision: "preserve",
+                resume_decision: {
+                    resume_point: "repair_artifacts",
+                    restart_boundary: "artifact_repair",
+                    workspace_decision: "preserve",
+                    reuse: ["Preserve source edits and validation from the prior attempt."],
+                    discard: ["Discard the missing handoff artifact state."],
+                    reason_code: "artifact_contract_repair",
+                    confidence: "high",
+                    evidence: ["The prior implementation passed validation before artifact publication failed."],
+                    required_next_action: "Repair the missing handoff artifact, then rerun completion.",
+                    validation_gate: ["af complete check must pass."]
+                },
                 preserve_progress: ["Prior implementation edits are in scope and should be preserved."],
                 do_not_redo: ["Do not rerun the entire implementation from scratch."],
                 required_next_action: "Repair the missing handoff artifact, then rerun completion.",
@@ -504,6 +516,18 @@ describe("af runtime CLI", () => {
             failure_summary: "Missing declared handoff artifact.",
             resume_point: "repair_artifacts",
             workspace_decision: "preserve",
+            resume_decision: {
+                resume_point: "repair_artifacts",
+                restart_boundary: "artifact_repair",
+                workspace_decision: "preserve",
+                reuse: ["Preserve source edits and validation from the prior attempt."],
+                discard: ["Discard the missing handoff artifact state."],
+                reason_code: "artifact_contract_repair",
+                confidence: "high",
+                evidence: ["The prior implementation passed validation before artifact publication failed."],
+                required_next_action: "Repair the missing handoff artifact, then rerun completion.",
+                validation_gate: ["af complete check must pass."]
+            },
             required_next_action: "Repair the missing handoff artifact, then rerun completion.",
             preserve_progress: ["Prior implementation edits are in scope and should be preserved."],
             do_not_redo: ["Do not rerun the entire implementation from scratch."],
@@ -534,6 +558,10 @@ describe("af runtime CLI", () => {
         expect(orient.stdout).toContain("## Retry Orientation");
         expect(orient.stdout).toContain("Missing declared handoff artifact.");
         expect(orient.stdout).toContain("repair_artifacts");
+        expect(orient.stdout).toContain("artifact_repair");
+        expect(orient.stdout).toContain("artifact_contract_repair");
+        expect(orient.stdout).toContain("Preserve source edits and validation from the prior attempt.");
+        expect(orient.stdout).toContain("Discard the missing handoff artifact state.");
         expect(orient.stdout).toContain("preserve");
         expect(orient.stdout).toContain("Repair the missing handoff artifact, then rerun completion.");
         expect(orient.stdout).toContain("Do not rerun the entire implementation from scratch.");

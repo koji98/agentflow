@@ -150,6 +150,21 @@ export function createRuntimeProgressReporter(
           return;
         }
 
+        case "supervisor.intervention.retry": {
+          const node = nodeByCompiledId.get(event.compiled_id ?? "");
+          const payload = event.payload as {
+            action?: string;
+            attempt?: number;
+            max_attempts?: number;
+            delay_ms?: number;
+            summary?: string;
+          };
+          writeLine(
+            `agentflow: intervention retry ${summarizeNode(node)}${payload.action ? ` · ${payload.action}` : ""} · attempt ${payload.attempt ?? "?"}/${payload.max_attempts ?? "?"} · delay=${formatDuration(payload.delay_ms ?? 0)}${payload.summary ? ` · ${payload.summary}` : ""}`
+          );
+          return;
+        }
+
         case "supervisor.intervention.completed": {
           const node = nodeByCompiledId.get(event.compiled_id ?? "");
           const payload = event.payload as { action?: string; summary?: string };

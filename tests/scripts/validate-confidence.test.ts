@@ -30,6 +30,7 @@ describe("validate:confidence contract", () => {
     ]);
     expect(coverageModule.coverageReporters).toEqual(["text-summary", "json-summary", "lcov"]);
     expect(coverageModule.coverageInclude).toEqual(["src/**/*.ts"]);
+    expect(coverageModule.commandTimeoutMs).toBe(60 * 60 * 1000);
     expect(coverageModule.coverageScopeNotes).toEqual({
       measured: ["src/**/*.ts"],
       notMeasured: []

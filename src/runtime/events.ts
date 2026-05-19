@@ -10,6 +10,7 @@ export const runtimeEventTypes = [
   "managed.progress",
   "supervisor.decision",
   "supervisor.intervention.started",
+  "supervisor.intervention.retry",
   "supervisor.intervention.completed",
   "supervisor.intervention.failed",
   "supervisor.retry_scheduled",

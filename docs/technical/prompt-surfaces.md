@@ -24,6 +24,8 @@ Prompt sections should appear in this order when applicable:
 
 Role text is useful only when it changes authority, scope, output contract, or evaluation responsibility. Avoid generic persona adjectives unless a prompt-regression eval proves the wording is load-bearing.
 
+For normal worker prompts, `af orient` is both the first operating-picture command and the refresh command. The prompt should tell agents to rerun it whenever the goal, acceptance criteria, context pointers, artifact expectations, retry state, or next action becomes unclear, especially after compaction, long pauses, or long-running task drift. This keeps recovery and progressive disclosure in the runtime-owned orientation surface instead of bloating the base prompt with debug state.
+
 ## Inventory
 
 | Surface | Renderer | Prompt kind | Authority boundary | Contract inputs | Output contract | Coverage |
@@ -33,8 +35,8 @@ Role text is useful only when it changes authority, scope, output contract, or e
 | AI check | `src/runtime/harness/types.ts` | `ai_check` | Read-only check node; no workspace mutation. | check intent, graph context, agent context brief, output schema | JSON only | `tests/runtime/harness_prompt.test.ts`, runtime check tests |
 | Supervisor evidence gatherer | `src/runtime/harness/types.ts` | `supervisor_evidence` | Read-only evidence for a failed attempt; cannot rewrite graph intent. | case file, gather kind, evidence output path, instructions | JSON evidence patch | supervisor recovery tests |
 | Fixed supervisor helper | `src/af/index.ts` | `_helper-run` | Read-only bounded helper; no source edits, service mutation, plugin tools, or human-pause decisions. | helper role, brief, case/evidence pointers, parent context manifest, required artifact | Markdown helper artifact | `tests/af/cli.test.ts` |
-| Supervisor recovery brief | `src/runtime/harness/types.ts` | agent block | Additive retry evidence; original node contract remains binding. | failure symptom, resume point, workspace decision, material delta, required next action, evidence pointers, validation focus | changed tactics inside unchanged task | `tests/runtime/harness_prompt.test.ts`, supervisor tests |
-| Attempt memory | `src/runtime/attempt_memory.ts` + `src/runtime/harness/types.ts` | retry prompt block | Runtime-authored memory only; evidence for continuation, not new authority. | prior outcome, completed milestones, unfinished work, artifact state, validation evidence, workspace changes, do-not-redo | continue from selected resume point without redoing safe prior progress | `tests/runtime/engine.test.ts`, `tests/af/cli.test.ts` |
+| Supervisor recovery brief | `src/runtime/harness/types.ts` | agent block | Additive retry evidence; original node contract remains binding. | failure symptom, best resume point, restart boundary, workspace decision, material delta, reuse/discard guidance, required next action, evidence pointers, validation focus | changed tactics inside unchanged task | `tests/runtime/harness_prompt.test.ts`, supervisor tests |
+| Attempt memory | `src/runtime/attempt_memory.ts` + `src/runtime/harness/types.ts` | retry prompt block | Runtime-authored memory only; evidence for continuation, not new authority. | prior event timeline, best-resume decision, completed milestones, unfinished work, artifact state, validation evidence, workspace changes, do-not-redo | resume from the best valid boundary without preserving unsafe progress or redoing validated work | `tests/runtime/engine.test.ts`, `tests/af/cli.test.ts`, `tests/runtime/attempt_memory.test.ts` |
 | Outcome verifier | `src/runtime/verification/prompt.ts` | verifier | Fresh read-only audit after mechanical completion. | graph/node intent, completion packet, artifacts, milestone evidence, command evidence, diff metadata | one fenced JSON verdict | `tests/runtime/verification/prompt.test.ts`, verifier eval scenarios |
 | Runtime CLI block | `src/runtime/harness/types.ts` | prompt block | Normal worker correctness loop only. | granted runtime metadata and current command contract | correct `af` usage, milestone evidence, completion packet | harness prompt tests, prompt-regression trajectory checks |
 | Plugin tool block | `src/runtime/harness/types.ts` | prompt block | Select granted plugin CLIs only when useful. | resolved plugin tools, descriptions, usage reminder | tool calls with `--help` just in time | tool tests, prompt-regression tool discipline |
@@ -55,12 +57,14 @@ Role text is useful only when it changes authority, scope, output contract, or e
 ## Known Failure Modes
 
 - Agent treats Agentflow docs, skills, or harness text as the work target.
+- Agent treats `af orient` as a one-time startup step and continues after compaction, drift, or unclear context without refreshing the node operating picture.
 - Agent publishes only a final response and misses declared artifacts.
 - Agent writes placeholder or stale artifacts.
 - Agent claims validation without command/tool evidence.
 - Agent records milestone evidence before verifying the claim.
 - Agent uses recovery commands as a normal worker.
-- Retry prompt causes a fresh rerun instead of continuing from attempt memory.
+- Retry prompt preserves contaminated or wrong-direction progress instead of resetting to the best valid boundary.
+- Retry prompt causes a fresh rerun when event history, artifacts, and workspace diffs show a narrower safe boundary.
 - Verification substrate failure reruns a completed worker instead of retrying verification locally.
 - Agent follows stale context over authored contract or provenance.
 - Verifier marks an inlined artifact missing because a side-channel search is incomplete.

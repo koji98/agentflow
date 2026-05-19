@@ -45,7 +45,8 @@ import type {
   SupervisorEnvironmentRepair,
   SupervisorCausalCaseFile,
   SupervisorCausalTargetRecord,
-  SupervisorRequirementEvidenceMap
+  SupervisorRequirementEvidenceMap,
+  RecoveryResumeDecision
 } from "./types.js";
 
 const evidenceConcurrencyCap = 4;
@@ -275,7 +276,7 @@ function patchGuidance(kind: SupervisorEvidenceGatherKind, caseFile: SupervisorC
       ];
     case "diagnostic_probe":
       return [
-        "Run or inspect the smallest diagnostic that explains the failed symptom.",
+        "Run or inspect the best-scoped diagnostic that explains the failed symptom.",
         "Do not repeat a prior failed command or tactic unless the diagnostic evidence changed.",
         ...promptGuidance
       ];
@@ -773,38 +774,159 @@ function retryableApplyAction(action: SupervisorRecoveryPlan["apply_action"]): b
   ].includes(action);
 }
 
-function resumePointForRecoveryPlan(plan: SupervisorRecoveryPlan): SupervisorRecoveryEnvelope["resume_point"] {
-  switch (plan.apply_action) {
-    case "repair_artifact":
-      return "repair_artifacts";
-    case "repair_validation_strategy":
-      return "repair_validation_strategy";
-    case "repair_workspace":
-      return "repair_workspace";
-    case "rerun_verification":
-      return "rerun_verification";
-    case "fail_contract_gap":
-    case "fail_terminal":
-      return "fail_contract_gap";
-    case "retry_with_evidence":
-    case "retry_node":
-    case "repair_context":
-    case "repair_evidence_context":
-    case "repair_environment":
-      return plan.recovery_target?.target_prior_execution_id
-        ? "continue_from_prior_progress"
-        : "fresh_retry";
-    case "pause_for_authority":
-      return "fail_contract_gap";
-  }
-}
-
 function workspaceDecisionForRecoveryPlan(plan: SupervisorRecoveryPlan): SupervisorRecoveryEnvelope["workspace_decision"] {
   if (plan.apply_action === "repair_workspace") {
     return "partial_cleanup";
   }
 
   return "preserve";
+}
+
+function isUnsafePriorProgress(classification: FailureClassification): boolean {
+  return classification.evidence.prior_progress_unsafe === true;
+}
+
+function buildRecoveryResumeDecision(options: {
+  recoveryPlan: SupervisorRecoveryPlan;
+  classification: FailureClassification;
+  workspaceRepairPatch?: SupervisorWorkspaceRepairPatch;
+}): RecoveryResumeDecision {
+  const plan = options.recoveryPlan;
+  const requiredNextAction = requiredNextActionForRecoveryPlan(plan);
+  const validationGate = plan.retry_directive?.validation_focus.length
+    ? plan.retry_directive.validation_focus
+    : ["Rerun the validation named by the original task when feasible."];
+  const operation = plan.recovery_target?.operation;
+  const unsafePriorProgress = isUnsafePriorProgress(options.classification);
+
+  if (plan.apply_action === "rerun_verification") {
+    return {
+      resume_point: "rerun_verification",
+      restart_boundary: "verification",
+      workspace_decision: "preserve",
+      reuse: ["Reuse completed worker output and declared artifacts from the prior attempt."],
+      discard: ["Discard only the failed verification substrate attempt."],
+      reason_code: "verification_substrate_failure",
+      confidence: "high",
+      evidence: ["Runtime reported a structured verification substrate failure."],
+      required_next_action: requiredNextAction,
+      validation_gate: validationGate
+    };
+  }
+
+  if (plan.apply_action === "repair_validation_strategy") {
+    return {
+      resume_point: "repair_validation_strategy",
+      restart_boundary: "verification",
+      workspace_decision: "preserve",
+      reuse: ["Reuse prior implementation progress unless focused validation proves a work defect."],
+      discard: ["Discard the prior broad or ambiguous validation tactic."],
+      reason_code: "validation_strategy_repair",
+      confidence: "high",
+      evidence: ["Supervisor selected a validation-strategy material delta."],
+      required_next_action: requiredNextAction,
+      validation_gate: validationGate
+    };
+  }
+
+  if (plan.apply_action === "repair_workspace" && unsafePriorProgress) {
+    return {
+      resume_point: "fresh_retry",
+      restart_boundary: "node_attempt",
+      workspace_decision: "reset",
+      reuse: ["Reuse the original node contract, context pointers, and any upstream accepted artifacts."],
+      discard: [
+        "Discard failed attempt workspace changes before retrying.",
+        ...(options.workspaceRepairPatch
+          ? [`Restore the failed attempt diff recorded at ${options.workspaceRepairPatch.changed_files_path}.`]
+          : [])
+      ],
+      reason_code: "prior_progress_unsafe",
+      confidence: "high",
+      evidence: [
+        "Structured verifier categories marked prior progress unsafe.",
+        ...(options.workspaceRepairPatch
+          ? [`Workspace repair can restore ${options.workspaceRepairPatch.changed_file_count} failed-attempt changed file(s).`]
+          : [])
+      ],
+      required_next_action: requiredNextAction,
+      validation_gate: validationGate
+    };
+  }
+
+  if (plan.apply_action === "repair_workspace") {
+    return {
+      resume_point: "repair_workspace",
+      restart_boundary: "node_attempt",
+      workspace_decision: "partial_cleanup",
+      reuse: ["Preserve in-scope prior progress that is not part of the failed attempt cleanup."],
+      discard: [
+        "Remove failed attempt workspace pollution before retrying.",
+        ...(options.workspaceRepairPatch
+          ? [`Restore the failed attempt diff recorded at ${options.workspaceRepairPatch.changed_files_path}.`]
+          : [])
+      ],
+      reason_code: "workspace_pollution_cleanup",
+      confidence: "high",
+      evidence: [
+        "Runtime reported a structured workspace repair candidate.",
+        ...(options.workspaceRepairPatch
+          ? [`Workspace repair can restore ${options.workspaceRepairPatch.changed_file_count} failed-attempt changed file(s).`]
+          : [])
+      ],
+      required_next_action: requiredNextAction,
+      validation_gate: validationGate
+    };
+  }
+
+  if (operation === "repair_upstream_node") {
+    return {
+      resume_point: plan.recovery_target?.target_prior_execution_id
+        ? "continue_from_prior_progress"
+        : "fresh_retry",
+      restart_boundary: "upstream_target",
+      workspace_decision: "preserve",
+      reuse: ["Reuse current-node failure evidence to repair the selected upstream target."],
+      discard: ["Discard assumptions made from the stale or invalid upstream artifact."],
+      reason_code: "upstream_target_selected",
+      confidence: plan.confidence,
+      evidence: plan.recovery_target?.evidence ?? ["Supervisor selected an upstream recovery target."],
+      required_next_action: requiredNextAction,
+      validation_gate: validationGate
+    };
+  }
+
+  if (plan.apply_action === "fail_contract_gap" || plan.apply_action === "fail_terminal") {
+    return {
+      resume_point: "fail_contract_gap",
+      restart_boundary: "node_attempt",
+      workspace_decision: "preserve",
+      reuse: ["Preserve evidence for the terminal contract failure."],
+      discard: ["No retry should be attempted without a new material delta or graph change."],
+      reason_code: "contract_gap",
+      confidence: plan.confidence,
+      evidence: [plan.terminal_reason ?? "Supervisor selected terminal contract failure."],
+      required_next_action: requiredNextAction,
+      validation_gate: validationGate
+    };
+  }
+
+  return {
+    resume_point: plan.recovery_target?.target_prior_execution_id
+      ? "continue_from_prior_progress"
+      : "fresh_retry",
+    restart_boundary: "node_attempt",
+    workspace_decision: workspaceDecisionForRecoveryPlan(plan),
+    reuse: preserveProgressForRecoveryPlan(plan),
+    discard: doNotRedoForRecoveryPlan(plan),
+    reason_code: plan.recovery_target?.target_prior_execution_id
+      ? "evidence_delta_retry"
+      : "fresh_retry_required",
+    confidence: plan.confidence,
+    evidence: plan.runtime_overlay?.material_delta.map((delta) => delta.summary) ?? plan.merged_claims,
+    required_next_action: requiredNextAction,
+    validation_gate: validationGate
+  };
 }
 
 function preserveProgressForRecoveryPlan(plan: SupervisorRecoveryPlan): string[] {
@@ -1249,7 +1371,9 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     `- Classification: \`${envelope.classification}\``,
     `- Selected action: \`${envelope.action}\``,
     `- Resume point: \`${envelope.resume_point}\``,
+    `- Restart boundary: \`${envelope.resume_decision.restart_boundary}\``,
     `- Workspace decision: \`${envelope.workspace_decision}\``,
+    `- Resume reason: \`${envelope.resume_decision.reason_code}\``,
     `- Failure fingerprint: \`${envelope.failure_fingerprint}\``,
     `- Repeated fingerprint count: \`${envelope.repeated_fingerprint_count}\``,
     "",
@@ -1263,6 +1387,12 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     ...(envelope.preserve_progress.length > 0
       ? envelope.preserve_progress.map((item) => `- ${item}`)
       : ["- Preserve in-scope prior progress unless the recovery evidence says it is unsafe."]),
+    "",
+    "## Reuse",
+    ...envelope.resume_decision.reuse.map((item) => `- ${item}`),
+    "",
+    "## Discard",
+    ...envelope.resume_decision.discard.map((item) => `- ${item}`),
     "",
     "## Must Not Do",
     ...[...new Set([...directive.must_not_do, ...envelope.do_not_redo])].map((item) => `- ${item}`),
@@ -1561,6 +1691,11 @@ export async function runSupervisorRecoveryCycle(options: {
   await writeFile(recoveryPlanJsonPath, `${JSON.stringify(recoveryPlan, null, 2)}\n`, "utf8");
   await writeFile(recoveryPlanMarkdownPath, `${renderRecoveryPlanMarkdown(recoveryPlan)}\n`, "utf8");
 
+  const resumeDecision = buildRecoveryResumeDecision({
+    recoveryPlan,
+    classification: options.classification,
+    ...(workspaceRepairPatch ? { workspaceRepairPatch } : {})
+  });
   const recoveryEnvelope =
     retryableApplyAction(recoveryPlan.apply_action) && recoveryPlan.retry_directive
       ? {
@@ -1577,8 +1712,9 @@ export async function runSupervisorRecoveryCycle(options: {
           classification: options.classification.class,
           failure_fingerprint: options.failure_fingerprint,
           repeated_fingerprint_count: options.repeated_fingerprint_count,
-          resume_point: resumePointForRecoveryPlan(recoveryPlan),
-          workspace_decision: workspaceDecisionForRecoveryPlan(recoveryPlan),
+          resume_point: resumeDecision.resume_point,
+          workspace_decision: resumeDecision.workspace_decision,
+          resume_decision: resumeDecision,
           preserve_progress: preserveProgressForRecoveryPlan(recoveryPlan),
           do_not_redo: doNotRedoForRecoveryPlan(recoveryPlan),
           required_next_action: requiredNextActionForRecoveryPlan(recoveryPlan),

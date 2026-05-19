@@ -96,6 +96,13 @@ function sourceAngleSummary(materials: ResearchMaterial[]): string {
   return [...new Set(materials.flatMap((material) => material.sourceAngles))].join("; ");
 }
 
+function materialInputSummary(materials: ResearchMaterial[]): string[] {
+  return materials.map((material, index) => {
+    const kind = material.reportArtifact.startsWith("synthesis_report_") ? "synthesis report" : "angle report";
+    return `- Input ${index + 1}: ${kind} \`${material.contextPrefix}_report\` covers ${sourceAngleSummary([material])}.`;
+  });
+}
+
 function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepResearchAngle, index: number): string {
   return renderPrompt([
     body("You are a research angle worker investigating one assigned angle for a larger managed research workflow. Your private report will be synthesized later, so gather useful evidence and preserve uncertainty clearly."),
@@ -139,10 +146,11 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
 
 function buildSynthesisPrompt(
   config: PatternDeepResearchConfig,
-  inputCount: number,
+  materials: ResearchMaterial[],
   layer: number,
   group: number
 ): string {
+  const inputCount = materials.length;
   return renderPrompt([
     body(`You are a research synthesis worker combining ${inputCount} research reports into one higher-signal synthesis report.`),
     section("Final Managed Workflow Contract", [
@@ -151,6 +159,10 @@ function buildSynthesisPrompt(
       `Goal: ${config.intent.goal}`,
       ...formatList("Final acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+    ]),
+    section("Assigned Input Set", [
+      "Synthesize exactly these input reports. If an input is itself a synthesis report, preserve its full underlying angle coverage.",
+      ...materialInputSummary(materials)
     ]),
     section("Synthesis Task", [
       "Produce a complete synthesis for the assigned input reports, not a high-level abstract.",
@@ -300,7 +312,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         support: mergeSupportContext(agentShared.support, materialContexts(groupMaterials)),
         artifacts: buildSynthesisArtifacts(layer, group),
         intent: {
-          goal: buildSynthesisPrompt(config, groupMaterials.length, layer, group),
+          goal: buildSynthesisPrompt(config, groupMaterials, layer, group),
           acceptance_criteria: [
             "The synthesis preserves all major findings from its input research reports.",
             "The synthesis collapses redundant claims without dropping provenance, uncertainty, or conflicts."

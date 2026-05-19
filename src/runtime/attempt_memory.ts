@@ -14,6 +14,7 @@ import type {
   RuntimeMilestoneState
 } from "./completion/index.js";
 import type {
+  RecoveryResumeDecision,
   SupervisorRecoveryEnvelope,
   SupervisorResumePoint,
   SupervisorWorkspaceDecision
@@ -32,6 +33,12 @@ export interface AttemptMemoryValidationEvidence {
   summary: string;
 }
 
+export interface AttemptMemoryPhaseEvent {
+  type: string;
+  ts: string;
+  summary: string;
+}
+
 export interface AttemptMemoryWorkspaceChanges {
   decision: SupervisorWorkspaceDecision;
   changed_files: string[];
@@ -46,11 +53,13 @@ export interface AttemptMemory {
   failure_summary: string;
   resume_point: SupervisorResumePoint;
   workspace_decision: SupervisorWorkspaceDecision;
+  resume_decision: RecoveryResumeDecision;
   required_next_action: string;
   preserve_progress: string[];
   do_not_redo: string[];
   completed_milestones: string[];
   unfinished_work: string[];
+  phase_history: AttemptMemoryPhaseEvent[];
   declared_artifact_state: AttemptMemoryArtifactState[];
   validation_evidence: AttemptMemoryValidationEvidence[];
   workspace_changes: AttemptMemoryWorkspaceChanges;
@@ -91,6 +100,83 @@ async function readPriorMilestones(priorExecutionId: string, runRoot: string): P
   return Array.isArray(state?.milestones)
     ? state.milestones.filter((milestone): milestone is RuntimeMilestone => isRecord(milestone))
     : [];
+}
+
+async function readPriorPhaseHistory(priorExecutionId: string, runRoot: string): Promise<AttemptMemoryPhaseEvent[]> {
+  const eventsPath = join(runRoot, "events.jsonl");
+  const raw = await readFile(eventsPath, "utf8").catch(() => "");
+  if (!raw.trim()) {
+    return [];
+  }
+
+  return raw
+    .split(/\r?\n/u)
+    .flatMap((line) => {
+      if (!line.trim()) {
+        return [];
+      }
+      try {
+        const event = JSON.parse(line) as unknown;
+        if (!isRecord(event) || event.execution_id !== priorExecutionId) {
+          return [];
+        }
+        const type = typeof event.type === "string" ? event.type : "runtime.event";
+        const ts = typeof event.ts === "string" ? event.ts : "";
+        return [{
+          type,
+          ts,
+          summary: summarizeRuntimeEvent(type, isRecord(event.payload) ? event.payload : {})
+        }];
+      } catch {
+        return [];
+      }
+    })
+    .slice(-12);
+}
+
+function summarizeRuntimeEvent(type: string, payload: Record<string, unknown>): string {
+  switch (type) {
+    case "node.started": {
+      const kind = typeof payload.kind === "string" ? payload.kind : "node";
+      const repo = typeof payload.repo_alias === "string" ? payload.repo_alias : "unknown";
+      return `${kind} node started in repo ${repo}`;
+    }
+    case "node.completed": {
+      const outcome = typeof payload.outcome === "string" ? payload.outcome : "completed";
+      return `node completed with outcome ${outcome}`;
+    }
+    case "verification.started": {
+      const verifier = typeof payload.verifier_kind === "string" ? payload.verifier_kind : "verification";
+      return `${verifier} verification started`;
+    }
+    case "verification.retry": {
+      const verifier = typeof payload.verifier_kind === "string" ? payload.verifier_kind : "verification";
+      return `${verifier} verification retry scheduled`;
+    }
+    case "verification.completed": {
+      const verifier = typeof payload.verifier_kind === "string" ? payload.verifier_kind : "verification";
+      const passed = payload.passed === true ? "passed" : payload.passed === false ? "failed" : "completed";
+      const summary = typeof payload.summary === "string" && payload.summary.trim().length > 0
+        ? `: ${payload.summary.trim()}`
+        : "";
+      return `${verifier} verification ${passed}${summary}`;
+    }
+    case "supervisor.retry_scheduled": {
+      const action = typeof payload.action === "string" ? payload.action : "retry";
+      const target = typeof payload.target_compiled_id === "string" ? payload.target_compiled_id : "target node";
+      return `supervisor scheduled ${action} for ${target}`;
+    }
+    case "supervisor.intervention.retry": {
+      const action = typeof payload.action === "string" ? payload.action : "intervention";
+      return `supervisor intervention retry scheduled for ${action}`;
+    }
+    default: {
+      const summary = typeof payload.summary === "string" && payload.summary.trim().length > 0
+        ? payload.summary.trim()
+        : type;
+      return summary;
+    }
+  }
 }
 
 function artifactState(
@@ -179,6 +265,7 @@ export async function buildAttemptMemory(options: {
   recoveryEnvelope: SupervisorRecoveryEnvelope;
 }): Promise<AttemptMemory> {
   const priorMilestones = await readPriorMilestones(options.recoveryEnvelope.prior_execution_id, options.runRoot);
+  const phaseHistory = await readPriorPhaseHistory(options.recoveryEnvelope.prior_execution_id, options.runRoot);
   const unfinishedMilestones = [
     ...milestoneLabels(priorMilestones, "active"),
     ...milestoneLabels(priorMilestones, "blocked")
@@ -195,11 +282,13 @@ export async function buildAttemptMemory(options: {
     failure_summary: options.recoveryEnvelope.retry_directive.summary,
     resume_point: options.recoveryEnvelope.resume_point,
     workspace_decision: options.recoveryEnvelope.workspace_decision,
+    resume_decision: options.recoveryEnvelope.resume_decision,
     required_next_action: options.recoveryEnvelope.required_next_action,
     preserve_progress: options.recoveryEnvelope.preserve_progress,
     do_not_redo: options.recoveryEnvelope.do_not_redo,
     completed_milestones: milestoneLabels(priorMilestones, "completed"),
     unfinished_work: unfinishedMilestones,
+    phase_history: phaseHistory,
     declared_artifact_state: artifactState(options.node.declared_artifacts, options.priorAttempt),
     validation_evidence: validationEvidence(priorMilestones),
     workspace_changes: await workspaceChanges(options.priorAttempt, options.recoveryEnvelope.workspace_decision),
@@ -249,6 +338,25 @@ export function renderAttemptMemoryMarkdown(memory: AttemptMemory): string {
     `| Failure symptom | ${markdownCell(memory.failure_summary)} |`,
     `| Required next action | ${markdownCell(memory.required_next_action)} |`,
     "",
+    "## Best Resume Decision",
+    "| Field | Value |",
+    "| --- | --- |",
+    `| Restart boundary | \`${memory.resume_decision.restart_boundary}\` |`,
+    `| Reason | \`${memory.resume_decision.reason_code}\` |`,
+    `| Confidence | \`${memory.resume_decision.confidence}\` |`,
+    "",
+    "### Reuse",
+    ...bulletList(memory.resume_decision.reuse, "No prior progress was selected for reuse."),
+    "",
+    "### Discard",
+    ...bulletList(memory.resume_decision.discard, "No prior progress was selected for discard."),
+    "",
+    "### Evidence",
+    ...bulletList(memory.resume_decision.evidence, "Use current context pointers and artifact status."),
+    "",
+    "### Validation Gate",
+    ...bulletList(memory.resume_decision.validation_gate, "Run the validation named by the original task when feasible."),
+    "",
     "## Preserve Progress",
     ...bulletList(memory.preserve_progress, "No preserved prior progress was identified."),
     "",
@@ -257,6 +365,12 @@ export function renderAttemptMemoryMarkdown(memory: AttemptMemory): string {
     "",
     "## Completed Milestones",
     ...bulletList(memory.completed_milestones, "No prior milestones were completed."),
+    "",
+    "## Prior Attempt Timeline",
+    ...bulletList(
+      memory.phase_history.map((event) => `${event.ts ? `${event.ts} ` : ""}${event.type}: ${event.summary}`),
+      "No prior runtime events were recorded."
+    ),
     "",
     "## Unfinished Work",
     ...bulletList(memory.unfinished_work, "No unfinished milestone state was recorded."),

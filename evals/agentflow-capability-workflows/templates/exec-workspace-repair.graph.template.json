@@ -44,26 +44,49 @@
     "id": "root",
     "steps": [
       {
-        "type": "exec",
+        "type": "check",
         "id": "workspace_gate",
+        "runtime": {
+          "repo": "main"
+        },
+        "check_kind": "deterministic",
+        "command": "node",
+        "args": [
+          "scripts/workspace-gate.js"
+        ],
+        "pass_if": {
+          "json_path": "$.passed",
+          "equals": true
+        },
+        "intent": {
+          "goal": "Run workspace_gate.",
+          "acceptance_criteria": [
+            "The deterministic workspace gate produces a trusted verdict."
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "type": "exec",
+        "id": "publish_handoff",
         "runtime": {
           "repo": "main"
         },
         "command": "node",
         "args": [
-          "scripts/workspace-gate.js"
+          "scripts/publish-handoff.js"
         ],
         "artifacts": {
           "handoff": {
             "from": "output_dir",
             "path": "handoff.md",
-            "description": "Workspace-repair handoff written after supervisor cleanup."
+            "description": "Workspace-repair handoff written after cleanup verification passes."
           }
         },
         "intent": {
-          "goal": "Run workspace_gate.",
+          "goal": "Publish the workspace-repair handoff after cleanup verification passes.",
           "acceptance_criteria": [
-            "The node satisfies its local eval contract."
+            "The handoff cites the workspace cleanup validation."
           ],
           "constraints": []
         }

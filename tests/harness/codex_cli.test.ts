@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
+import { cleanupIsolatedCodexHome, createCodexCliHarness } from "../../src/runtime/harness/codex_cli.js";
 
 async function createMockCodexBinary(tempRoot: string): Promise<{
   binary_path: string;
@@ -118,6 +118,18 @@ process.kill(process.pid, "SIGKILL");
 }
 
 describe("codex cli harness", () => {
+  it("reports isolated CODEX_HOME cleanup failures as warnings instead of throwing", async () => {
+    const warning = await cleanupIsolatedCodexHome({
+      path: "/tmp/agentflow-codex-home-test",
+      cleanup: async () => {
+        throw new Error("ENOTEMPTY: directory not empty");
+      }
+    });
+
+    expect(warning).toContain("cleanup warning");
+    expect(warning).toContain("ENOTEMPTY");
+  });
+
   it("reports readiness availability from the resolved binary path", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-preflight-"));
     const availableBinary = await createMockCodexBinary(tempRoot);

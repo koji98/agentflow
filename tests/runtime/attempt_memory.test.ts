@@ -87,6 +87,18 @@ function recoveryEnvelope(priorExecutionId: string): SupervisorRecoveryEnvelope 
     repeated_fingerprint_count: 1,
     resume_point: "continue_from_milestone",
     workspace_decision: "preserve",
+    resume_decision: {
+      resume_point: "continue_from_milestone",
+      restart_boundary: "milestone",
+      workspace_decision: "preserve",
+      reuse: ["Implementation edits from milestone m1 are still valid."],
+      discard: ["Incomplete handoff artifact draft."],
+      reason_code: "validated_progress",
+      confidence: "high",
+      evidence: ["m1 validation passed before handoff verification failed."],
+      required_next_action: "Repair the handoff artifact and rerun completion checks.",
+      validation_gate: ["af complete check must pass."]
+    },
     preserve_progress: ["Keep the implementation edits that satisfied milestone m1."],
     do_not_redo: ["Do not restart discovery from scratch."],
     required_next_action: "Repair the handoff artifact and rerun completion checks.",
@@ -120,6 +132,42 @@ describe("attempt memory", () => {
     const priorExecutionId = `exec__${"very_long_execution_segment_".repeat(12)}__attempt_1`;
     const milestonesDir = join(runRoot, "runtime", "milestones");
     await mkdir(milestonesDir, { recursive: true });
+    await writeFile(
+      join(runRoot, "events.jsonl"),
+      [
+        {
+          seq: 1,
+          ts: "2026-05-18T00:00:00.000Z",
+          run_id: "run-1",
+          type: "node.started",
+          compiled_id: "root__worker",
+          execution_id: priorExecutionId,
+          attempt_index: 1,
+          payload: { kind: "agent", repo_alias: "main", profile_name: "default" }
+        },
+        {
+          seq: 2,
+          ts: "2026-05-18T00:02:00.000Z",
+          run_id: "run-1",
+          type: "verification.completed",
+          compiled_id: "root__worker",
+          execution_id: priorExecutionId,
+          attempt_index: 1,
+          payload: { verifier_kind: "outcome", passed: false, summary: "Handoff verification failed." }
+        },
+        {
+          seq: 3,
+          ts: "2026-05-18T00:02:10.000Z",
+          run_id: "run-1",
+          type: "supervisor.retry_scheduled",
+          compiled_id: "root__worker",
+          execution_id: priorExecutionId,
+          attempt_index: 1,
+          payload: { action: "retry_with_guidance", target_compiled_id: "root__worker" }
+        }
+      ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+      "utf8"
+    );
     await writeFile(
       join(milestonesDir, `${safeRuntimeStateSegment(priorExecutionId)}.json`),
       `${JSON.stringify({
@@ -210,6 +258,27 @@ describe("attempt memory", () => {
       "src/feature.ts",
       "tests/feature.test.ts"
     ]);
+    expect(memory.resume_decision.restart_boundary).toBe("milestone");
+    expect(memory.resume_decision.reason_code).toBe("validated_progress");
+    expect(memory.resume_decision.reuse).toContain("Implementation edits from milestone m1 are still valid.");
+    expect(memory.resume_decision.discard).toContain("Incomplete handoff artifact draft.");
+    expect(memory.phase_history).toEqual([
+      {
+        type: "node.started",
+        ts: "2026-05-18T00:00:00.000Z",
+        summary: "agent node started in repo main"
+      },
+      {
+        type: "verification.completed",
+        ts: "2026-05-18T00:02:00.000Z",
+        summary: "outcome verification failed: Handoff verification failed."
+      },
+      {
+        type: "supervisor.retry_scheduled",
+        ts: "2026-05-18T00:02:10.000Z",
+        summary: "supervisor scheduled retry_with_guidance for root__worker"
+      }
+    ]);
     expect(memory.evidence_to_read).toContain("/run/artifacts/handoff.md");
     expect(memory.evidence_to_read).toContain("/run/evidence/prior-handoff.md");
     expect(memory.evidence_to_read).not.toContain("/run/human-debug/interventions/evidence-patch.md");
@@ -218,6 +287,12 @@ describe("attempt memory", () => {
 
     const markdown = renderAttemptMemoryMarkdown(memory);
     expect(markdown).toContain("## Completed Milestones");
+    expect(markdown).toContain("## Best Resume Decision");
+    expect(markdown).toContain("validated_progress");
+    expect(markdown).toContain("Implementation edits from milestone m1 are still valid.");
+    expect(markdown).toContain("Incomplete handoff artifact draft.");
+    expect(markdown).toContain("## Prior Attempt Timeline");
+    expect(markdown).toContain("outcome verification failed: Handoff verification failed.");
     expect(markdown).toContain("m1: Implement feature");
     expect(markdown).toContain("Changed: src/feature.ts");
     expect(markdown).not.toContain("recovery-plan.json");

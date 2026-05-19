@@ -250,7 +250,9 @@ function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope):
     `- Prior execution: \`${envelope.prior_execution_id}\``,
     `- Classification: \`${envelope.classification}\``,
     `- Resume point: \`${envelope.resume_point}\``,
+    `- Restart boundary: \`${envelope.resume_decision.restart_boundary}\``,
     `- Workspace decision: \`${envelope.workspace_decision}\``,
+    `- Resume reason: \`${envelope.resume_decision.reason_code}\``,
     `- Repeated matching symptom count: \`${envelope.repeated_fingerprint_count}\``,
     "",
     "## Recovery Summary",
@@ -263,6 +265,12 @@ function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope):
     ...(envelope.preserve_progress.length > 0
       ? envelope.preserve_progress.map((item) => `- ${item}`)
       : ["- Preserve in-scope prior progress unless recovery evidence says it is unsafe."]),
+    "",
+    "## Reuse",
+    ...envelope.resume_decision.reuse.map((item) => `- ${item}`),
+    "",
+    "## Discard",
+    ...envelope.resume_decision.discard.map((item) => `- ${item}`),
     "",
     "## Must Not Do",
     ...[...new Set([...directive.must_not_do, ...envelope.do_not_redo])].map((item) => `- ${item}`),
@@ -316,7 +324,9 @@ async function materializeSupervisorRecoveryEnvelopeContext(
     failure_fingerprint: envelope.failure_fingerprint,
     repeated_fingerprint_count: envelope.repeated_fingerprint_count,
     resume_point: envelope.resume_point,
+    restart_boundary: envelope.resume_decision.restart_boundary,
     workspace_decision: envelope.workspace_decision,
+    reason_code: envelope.resume_decision.reason_code,
     recovery_plan_path: envelope.recovery_plan_path,
     case_file_path: envelope.case_file_path
   };

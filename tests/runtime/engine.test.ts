@@ -887,6 +887,70 @@ describe("runtime engine", () => {
         ]));
         await rm(tempRoot, { recursive: true, force: true });
     });
+    it("promotes structured deterministic verification failure codes into attempt metadata", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-deterministic-failure-code-"));
+        const repoDir = join(tempRoot, "repo");
+        const runRoot = join(tempRoot, "run");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "runtime-deterministic-failure-code",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "check",
+                        id: "verify",
+                        runtime: {
+                            repo: "main"
+                        },
+                        check_kind: "deterministic",
+                        command: "node",
+                        args: [
+                            "-e",
+                            "const fs=require('node:fs'); const path=require('node:path'); fs.writeFileSync(path.join(process.env.AGENTFLOW_OUTPUT_DIR,'verification.json'), JSON.stringify({passed:false,summary:'workspace pollution',failure_code:'workspace_pollution'})); process.exit(1);"
+                        ],
+                        pass_if: {
+                            json_path: "$.passed",
+                            equals: true
+                        }
+                    }
+                ]
+            }
+        });
+        const run = await runCompiledGraph({
+            run_root: runRoot,
+            compiled_graph: graph,
+            repo_sources: {
+                main: repoDir
+            }
+        });
+        const verifyAttempt = run.attempts.find((attempt) => attempt.authored_id === "verify");
+        expect(run.outcome).toBe("failed");
+        expect(verifyAttempt?.metadata.failure_code).toBe("workspace_pollution");
+        expect(JSON.parse(await readFile(verifyAttempt!.result_path!, "utf8"))).toEqual(expect.objectContaining({
+            verification_json: expect.objectContaining({
+                failure_code: "workspace_pollution"
+            })
+        }));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
     it("keeps operational exec failures hard even when on_failure is continue", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-soft-exec-hard-failure-"));
         const repoDir = join(tempRoot, "repo");
@@ -3647,7 +3711,7 @@ describe("runtime engine", () => {
         });
         expect(run.outcome).toBe("passed");
         expect(nodeInvocations).toHaveLength(3);
-        expect(evidenceInvocations.length).toBeGreaterThan(0);
+        expect(evidenceInvocations.length).toBeGreaterThan(1);
         const secondPrompt = renderHarnessPrompt(nodeInvocations[1]!);
         expect(secondPrompt).toContain("## Supervisor Recovery Case");
         expect(secondPrompt).toContain("## Attempt Memory");
