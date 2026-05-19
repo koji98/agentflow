@@ -20,9 +20,9 @@ Common fields:
 - `runtime`
 - `support`
 
-## Public Artifacts
+## Graph-Addressable Artifacts
 
-Fixed public artifact:
+Fixed graph-addressable artifact:
 
 - `research`: complete, human-readable research report at `research.md`.
 
@@ -38,15 +38,15 @@ The pattern lowers into:
 
 1. Parallel research angle workers.
 2. Balanced synthesis layers when there are more than three research reports.
-3. Final public artifact publisher.
+3. Final graph-addressable artifact publisher.
 
 Each synthesis node consumes at most three research reports. Groups are split as evenly as possible, so seven angles become synthesis groups of `2`, `2`, and `3`, not `3`, `3`, and `1`. Synthesis preserves major findings, collapses duplicate claims, keeps provenance, and carries conflicts or uncertainty forward.
 
 Angle and synthesis artifacts are internal Markdown evidence in the run tree. They support the final contract but do not need to match final graph-addressable formatting. Research helpers treat the repo workspace as read-only evidence: they may inspect files and run local validation, but they must not create scratch report files or source edits in the repo. The runtime treats workspace mutations from deep-research helpers as workspace pollution.
 
-The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes exactly one public file: `research.md`. That file is the full research report. It should rewrite the angle and synthesis findings into one coherent, sufficiently detailed, conflict-resolved answer without relying on linked raw reports.
+The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes exactly one graph-addressable file: `research.md`. That file is the full research report. It should rewrite the angle and synthesis findings into one coherent, sufficiently detailed, conflict-resolved answer without relying on linked raw reports.
 
-Angle and synthesis workers may reference related angle findings in prose, but they should not create links to other angle reports or produce companion public files.
+Angle and synthesis workers may reference related angle findings in prose, but they should not create links to other angle reports or produce companion graph-addressable files.
 
 Angles can be authored as strings or objects. Object angles support:
 

@@ -35,9 +35,9 @@ Common fields:
 
 The author does not provide the item schema. The runtime owns item ids, status, and ledger shape. Authors provide the planning goal plus domain-specific item guidance so the planner can decide a finite reviewable list.
 
-## Public Artifacts
+## Graph-Addressable Artifacts
 
-Default public artifacts:
+Default graph-addressable artifacts:
 
 - `summary`: final human-readable handoff.
 - `packet`: final machine-readable packet.
@@ -54,7 +54,7 @@ The pattern lowers into:
 3. An item worker agent that executes every frozen item sequentially and writes item handoffs/results.
 4. For `item_worker.kind: "deep_work"`, a completion loop runs weighted criteria, writes a scorecard, and retries item execution over the frozen list until the gate passes or `max_cycles` is exhausted.
 5. A deterministic finalizer that verifies every frozen item completed and writes `work-items.json`.
-6. A publisher agent that writes final public artifacts and forwards the verified `work_items` artifact.
+6. A publisher agent that writes final graph-addressable artifacts and forwards the verified `work_items` artifact.
 
 The runtime freezes the list before item execution. Workers must not add, remove, split, merge, or reorder items while executing. If the list is wrong, the node fails with evidence instead of silently changing scope. In `deep_work` mode, retries happen against the frozen list; the runtime does not allow later cycles to mutate item ids or order.
 

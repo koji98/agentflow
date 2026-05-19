@@ -90,7 +90,7 @@ Each attempt is the unit of execution and audit. A typical agent attempt include
 - `human-debug/tools/index.jsonl` and paired tool input/output payloads when generated wrappers are used
 - declared output artifacts under the attempt artifact directory or workspace paths
 - reserved artifacts such as `agent_response`, `stdout`, `stderr`, and `verification_json`
-- `workspace-changes/` snapshots for agent and exec attempts that reach the execution boundary
+- `workspace-changes/` snapshots for agent, exec, and check attempts that reach the execution boundary
 - `runtime/verifier.json` and `human-debug/verifier/verdict.md` for passing agent attempts after declared artifacts materialize
 
 Normal agents read `agent/`, declared `artifacts/`, and explicit context pointers. Files under `human-debug/` are audit-only unless a diagnostic supervisor helper is explicitly asked to inspect them.

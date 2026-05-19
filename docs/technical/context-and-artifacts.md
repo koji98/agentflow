@@ -9,8 +9,8 @@ flowchart LR
   authored["Authored support.context"] --> normalize["Normalize refs and selectors"]
   normalize --> compile["Compile dependency edges"]
   compile --> attempt["Node attempt starts"]
-  attempt --> resolve["Resolve packet, manifest, provenance"]
-  resolve --> prompt["Harness prompt references packet and manifest"]
+  attempt --> resolve["Resolve agent, runtime, and debug context files"]
+  resolve --> prompt["Harness prompt uses agent/context.md"]
   prompt --> worker["Agent/check/exec opens source pointers when needed"]
   worker --> artifacts["Declared artifacts and reserved artifacts"]
   artifacts --> downstream["Downstream refs"]
@@ -67,7 +67,7 @@ flowchart TD
   glob --> sort["List repo files, sort, cap by max_files"]
   ref --> attempts["Select producer attempt by iteration/attempt selector"]
   attempts --> artifact{"Artifact path exists?"}
-  artifact -- yes --> pointer["Record pointer, digest, byte size"]
+  artifact -- yes --> pointer["Record pointer and runtime/debug metadata"]
   artifact -- no --> omit["Omit if if_available, otherwise fail context resolution"]
   file --> pointer
   plugin --> pointer

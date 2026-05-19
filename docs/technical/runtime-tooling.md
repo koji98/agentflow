@@ -15,7 +15,7 @@ flowchart TD
   context --> packet["agent/context.md and runtime/context.json"]
   bin --> env["Harness env and PATH"]
   metadata --> env
-  packet --> prompt["Rendered harness prompt"]
+  packet --> prompt["Rendered harness prompt uses agent/context.md"]
   compiled --> prompt
   env --> harness["Codex CLI or Cursor CLI"]
   prompt --> harness

@@ -1,6 +1,6 @@
 # Managed Patterns
 
-Use managed patterns when the lifecycle is standard and the operator wants inspectable lowered nodes with public artifacts. For how parent fields lower into the actual AI prompts, see `prompt-translation.md`.
+Use managed patterns when the lifecycle is standard and the operator wants inspectable lowered nodes with graph-addressable artifacts. For how parent fields lower into the actual AI prompts, see `prompt-translation.md`.
 
 ## `pattern_deep_research`
 
@@ -18,7 +18,7 @@ Angles should be controlling axes, not generic subtopics. Good angles name the a
 
 Graph-addressable output is always `research`, written at `research.md`. That report is the complete research handoff, not a high-level abstract. Raw angle reports remain internal run evidence and may conflict; the final publisher owns the graph-addressable contract by rewriting them into one coherent, sufficiently detailed answer. Synthesis reports are internal working notes for the publisher, not downstream evidence links. There is no public `packet` artifact for deep research.
 
-Angle and synthesis workers may reference related findings in prose, but they should not create cross-angle links or companion public files. If a detail matters downstream, it belongs in `research.md`.
+Angle and synthesis workers may reference related findings in prose, but they should not create cross-angle links or companion graph-addressable files. If a detail matters downstream, it belongs in `research.md`.
 
 Deep-research helpers should be authored as evidence gatherers, not workspace mutators. They may inspect repo files and run local checks, but they should not create scratch report files or source edits in the repo; the runtime treats workspace mutations from deep-research helpers as workspace pollution.
 
@@ -50,7 +50,7 @@ Good for:
 
 Author `what_counts_as_one_item` and `done_when` in domain terms. If items are PR branches, say branch/base/PR readiness; if migrations, say batch boundary, rollback, and validation; if docs, say reader outcome and review evidence. Do not hard-code the item count when discovery owns it.
 
-The planner writes `work-list.md` and `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Agents do not check off items manually. Runtime records item status in the ledger and publishes stable public artifacts: `summary`, `packet`, and `work_items`.
+The planner writes `work-list.md` and `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Agents do not check off items manually. Runtime records item status in the ledger and publishes stable graph-addressable artifacts: `summary`, `packet`, and `work_items`.
 
 Use `item_worker.kind: "agent"` for one-pass item execution. Use `item_worker.kind: "deep_work"` when the frozen list needs criteria, scorecard feedback, and bounded retries before publishing. Work-list rubric criteria can target `workspace`, `item_handoff`, or `work_list_ledger`.
 
