@@ -597,6 +597,18 @@ function buildEventSummary(
       return {
         summary: `Cleanup canceled for sequence "${String(payload.sequence_authored_id ?? "?")}": ${String(payload.reason ?? "operator_cancel")}.`
       };
+    case "delivery.curation.started":
+      return {
+        summary: `Delivery curation started with profile ${String(payload.profile ?? "supervisor")}.`
+      };
+    case "delivery.curation.completed":
+      return {
+        summary: `Delivery curation passed at ${String(payload.verdict_path ?? "delivery/evidence/curation-verdict.json")}.`
+      };
+    case "delivery.curation.failed":
+      return {
+        summary: `Delivery curation failed: ${String(payload.reason ?? "see curation verdict")}.`
+      };
     case "delivery.package.completed":
       return {
         summary: `Delivery package completed at ${String(payload.manifest_path ?? "delivery/manifest.json")}.`

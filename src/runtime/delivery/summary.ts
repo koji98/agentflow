@@ -55,6 +55,10 @@ function readEventSummary(event: RuntimeEventEnvelope): string | undefined {
         : typeof payload.reason === "string"
           ? payload.reason
           : "Supervisor paused for human input.";
+    case "delivery.curation.failed":
+      return typeof payload.reason === "string"
+        ? `Delivery curation failed: ${payload.reason}`
+        : "Delivery curation failed.";
     case "run.canceled":
       return typeof payload.reason === "string" ? `Run canceled: ${payload.reason}` : "Run canceled.";
     case "run.completed":
@@ -122,7 +126,8 @@ export function collectRunDiagnostics(
   events: RuntimeEventEnvelope[],
   state?: RuntimeStateSnapshot
 ): RunDiagnostic[] {
-  if (state?.status === "passed" && state.evidence_status === "clean") {
+  const hasDeliveryCurationFailure = events.some((event) => event.type === "delivery.curation.failed");
+  if (state?.status === "passed" && state.evidence_status === "clean" && !hasDeliveryCurationFailure) {
     return [];
   }
 
@@ -140,6 +145,7 @@ export function collectRunDiagnostics(
       state?.status === "passed"
       && state.evidence_status === "warnings"
       && event.type !== "verification.recorded"
+      && event.type !== "delivery.curation.failed"
     ) {
       continue;
     }

@@ -24,12 +24,128 @@ async function applyNodeIntentDefaultsToGraphFile(graphPath: string): Promise<vo
         // Tests that intentionally pass invalid paths or non-JSON graph files should keep their original failure.
     }
 }
+async function writeMockCodexCli(root: string): Promise<string> {
+    const path = join(root, "mock-codex.mjs");
+    await mkdir(root, { recursive: true });
+    await writeFile(path, `#!/usr/bin/env node
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
+if (process.argv.includes("--version")) {
+  process.stdout.write("mock-codex 0.0.0\\n");
+  process.exit(0);
+}
+
+let prompt = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { prompt += chunk; });
+process.stdin.on("end", () => {
+  const outputIndex = process.argv.indexOf("--output-last-message");
+  const lastMessagePath = outputIndex >= 0 ? process.argv[outputIndex + 1] : undefined;
+  const finish = (message) => {
+    if (lastMessagePath) {
+      mkdirSync(dirname(lastMessagePath), { recursive: true });
+      writeFileSync(lastMessagePath, message);
+    }
+    process.stdout.write(message);
+  };
+  const bullet = (items, empty) => items.length > 0 ? items.map((item) => "- " + item) : ["- " + empty];
+  if (prompt.includes("Agentflow outcome verifier")) {
+    finish("\`\`\`json\\n" + JSON.stringify({ passed: true, summary: "Mock verifier accepts the attempt.", findings: [], blockers: [] }, null, 2) + "\\n\`\`\`\\n");
+    return;
+  }
+  if (prompt.includes("Agentflow delivery curator")) {
+    const sourcePath = process.env.AGENTFLOW_CONTEXT_PACKET;
+    if (!sourcePath) {
+      throw new Error("AGENTFLOW_CONTEXT_PACKET is required for delivery curation.");
+    }
+    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+    const artifacts = source.final_declared_artifacts.length > 0
+      ? source.final_declared_artifacts.map((artifact) => "- \`" + artifact.id + "\`: [" + artifact.declared_path + "](" + artifact.relative_path + ")")
+      : ["- No final declared artifacts were captured."];
+    const validation = [
+      ...source.validation.milestone_validation_logs.map((log) => "- \`" + log.milestone_id + "\`: " + (log.command ? "\`" + log.command + "\` " : "") + (log.result || "recorded") + " - " + log.summary),
+      ...source.validation.outcome_verifications.map((entry) => "- \`" + entry.node + "\`: " + (entry.passed ? "pass" : "fail") + " - " + entry.summary)
+    ];
+    const learningRows = source.workspace_improvements.length > 0
+      ? source.workspace_improvements.map((entry) => "| " + entry.area + " | " + entry.recommendation + " | " + entry.evidence + " | " + entry.priority + " | " + entry.confidence + " | " + entry.done_when + " |")
+      : ["| none | No action. | source packet | low | medium | No action required. |"];
+    finish([
+      "\`\`\`review-brief",
+      "# Review Brief",
+      "## Outcome",
+      "Run \`" + source.run.run_id + "\` ended with status \`" + source.run.status + "\`.",
+      "## Reviewer Decision",
+      source.failures.active.length > 0 ? "Do not approve until active failures are resolved." : "Review changed files, final artifacts, and validation evidence.",
+      "## What To Inspect First",
+      "- [Change map](" + source.evidence_links.change_map + ")",
+      "- [Validation ledger](" + source.evidence_links.validation_ledger + ")",
+      "## Success Contract",
+      source.intent.goal,
+      "## Changed Files",
+      "- [Change map](" + source.evidence_links.change_map + ")",
+      "## Final Declared Artifacts",
+      ...artifacts,
+      "## Validation Evidence",
+      ...(validation.length > 0 ? validation : ["- [Validation ledger](" + source.evidence_links.validation_ledger + ")"]),
+      "## Active Failures And Risks",
+      ...bullet(source.failures.active.map((failure) => "\`" + failure.node + "\`: " + failure.summary), "No active failures remain."),
+      "## Recovered Issues",
+      ...bullet(source.failures.recovered.map((failure) => "\`" + failure.node + "\`: " + failure.summary), "No recovered issues were recorded."),
+      "## Historical Attempts",
+      ...bullet(source.failures.historical.map((failure) => "\`" + failure.node + "\`: " + failure.summary), "No historical attempts require reviewer action."),
+      "## Supervisor And Human Interventions",
+      ...bullet(source.interventions.map((intervention) => "\`" + intervention.action + "\`: " + intervention.reason), "No supervisor or human interventions were recorded."),
+      "## Supporting Evidence",
+      "- [Run learnings](02-run-learnings.md)",
+      "- [Audit index](03-audit-index.md)",
+      "\`\`\`",
+      "\`\`\`run-learnings",
+      "# Run Learnings",
+      "## Where Agents Struggled",
+      "- See the review brief for failure and recovery details.",
+      "## Workspace Improvements",
+      "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+      "| --- | --- | --- | --- | --- | --- |",
+      ...learningRows,
+      "## Graph Prompt And Support Improvements",
+      "- No changes identified.",
+      "## Plugin Skill And Eval Opportunities",
+      "- No changes identified.",
+      "## What Worked",
+      "- Runtime produced deterministic evidence for the delivery curator.",
+      "## Evidence Links",
+      "- [Milestones](" + source.evidence_links.milestones + ")",
+      "- [Validation ledger](" + source.evidence_links.validation_ledger + ")",
+      "\`\`\`"
+    ].join("\\n") + "\\n");
+    return;
+  }
+  if (prompt.includes("supervisor")) {
+    finish(JSON.stringify({ claims: ["Mock supervisor evidence recorded."], retry_guidance: ["Retry with focused guidance."], conflicts: [], confidence: "medium" }) + "\\n");
+    return;
+  }
+  finish("mock codex response\\n");
+});
+`, "utf8");
+    await chmod(path, 0o755);
+    return path;
+}
+let sharedMockCodexCliPath: string | undefined;
+async function getSharedMockCodexCli(): Promise<string> {
+    if (!sharedMockCodexCliPath) {
+        sharedMockCodexCliPath = await writeMockCodexCli(join(tmpdir(), `agentflow-cli-mock-codex-${process.pid}`));
+    }
+    return sharedMockCodexCliPath;
+}
 async function executeCli(args: string[], cwd?: string, execution: {
     signal?: AbortSignal;
 } = {}) {
     const previousCodex = process.env.AGENTFLOW_CODEX_CLI_BIN;
     const previousCursor = process.env.AGENTFLOW_CURSOR_CLI_BIN;
-    process.env.AGENTFLOW_CODEX_CLI_BIN ??= process.execPath;
+    if (previousCodex === undefined) {
+        process.env.AGENTFLOW_CODEX_CLI_BIN = await getSharedMockCodexCli();
+    }
     process.env.AGENTFLOW_CURSOR_CLI_BIN ??= process.execPath;
     const graphFlagIndex = args.indexOf("--graph");
     const graphPath = graphFlagIndex === -1 ? undefined : args[graphFlagIndex + 1];

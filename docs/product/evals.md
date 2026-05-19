@@ -124,7 +124,7 @@ Supported criterion kinds:
 - `workspace`: forbidden path checks.
 - `supervisor`: expected classifications, gatherers, and apply actions.
 - `trajectory`: ordered or forbidden trace events.
-- `delivery`: delivery manifest presence.
+- `delivery`: delivery manifest presence plus passing curated delivery verdict.
 - `custom_script`: deterministic script criterion.
 - `quality`: LLM-backed quality criterion with a rubric file.
 

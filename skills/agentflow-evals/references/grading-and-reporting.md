@@ -47,7 +47,7 @@ Built-in criteria check:
 - `workspace`: forbidden paths.
 - `supervisor`: expected classifications, gatherers, and apply actions.
 - `trajectory`: ordered, unordered, exact, or forbidden trajectory events.
-- `delivery`: delivery manifest presence.
+- `delivery`: delivery manifest presence plus passing curated delivery verdict.
 
 ## Custom Script Criteria
 

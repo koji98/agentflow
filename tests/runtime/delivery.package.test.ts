@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CompiledGraph } from "../../src/graph/compiled.js";
 import { writeDeliveryPackage, type DeliveryPackageManifest } from "../../src/runtime/delivery/package.js";
+import type { DeliveryCurator } from "../../src/runtime/delivery/curation.js";
 import type { RuntimeNodeAttempt } from "../../src/runtime/attempts.js";
 import type { RuntimeEventEnvelope } from "../../src/runtime/events.js";
 import type { RuntimeStateSnapshot } from "../../src/runtime/session.js";
@@ -157,6 +158,121 @@ async function readJson<T>(path: string): Promise<T> {
     return JSON.parse(await readFile(path, "utf8")) as T;
 }
 
+function buildPassingCurator(): DeliveryCurator {
+    return {
+        async curate(input) {
+            const artifact = input.source.final_declared_artifacts[0];
+            const validation = input.source.validation.milestone_validation_logs[0];
+            const reviewBrief = [
+                "# Review Brief",
+                "",
+                "## Outcome",
+                "",
+                `Run \`${input.source.run.run_id}\` ended with status \`${input.source.run.status}\`.`,
+                "",
+                "## Reviewer Decision",
+                "",
+                "Review the final artifacts and validation evidence before merging.",
+                "",
+                "## What To Inspect First",
+                "",
+                "- [Change map](evidence/change-map.json)",
+                "- [Validation ledger](evidence/validation-ledger.json)",
+                "",
+                "## Success Contract",
+                "",
+                input.source.intent.goal,
+                "",
+                "## Changed Files",
+                "",
+                "- [Change map](evidence/change-map.json)",
+                "",
+                "## Final Declared Artifacts",
+                "",
+                artifact
+                    ? `- \`${artifact.id}\`: [${artifact.declared_path}](${artifact.relative_path})`
+                    : "- No final declared artifacts were captured.",
+                "",
+                "## Validation Evidence",
+                "",
+                validation
+                    ? `- \`${validation.result}\` \`${validation.command}\`: ${validation.summary}`
+                    : "- [Validation ledger](evidence/validation-ledger.json)",
+                "",
+                "## Active Failures And Risks",
+                "",
+                input.source.failures.active.length > 0
+                    ? input.source.failures.active.map((failure) => `- \`${failure.node}\`: ${failure.summary}`).join("\n")
+                    : "- No active failures remain.",
+                "",
+                "## Recovered Issues",
+                "",
+                input.source.failures.recovered.length > 0
+                    ? input.source.failures.recovered.map((failure) => `- \`${failure.node}\`: ${failure.summary}`).join("\n")
+                    : "- No recovered issues were recorded.",
+                "",
+                "## Historical Attempts",
+                "",
+                input.source.failures.historical.length > 0
+                    ? input.source.failures.historical.map((attempt) => `- \`${attempt.node}\`: ${attempt.summary}`).join("\n")
+                    : "- No historical attempts require reviewer action.",
+                "",
+                "## Supervisor And Human Interventions",
+                "",
+                input.source.interventions.length > 0
+                    ? input.source.interventions.map((intervention) => `- \`${intervention.action}\`: ${intervention.reason}`).join("\n")
+                    : "- No supervisor or human interventions were recorded.",
+                "",
+                "## Supporting Evidence",
+                "",
+                "- [Run learnings](02-run-learnings.md)",
+                "- [Audit index](03-audit-index.md)",
+                "- [Delivery source](evidence/delivery-source.md)"
+            ].join("\n");
+            const runLearnings = [
+                "# Run Learnings",
+                "",
+                "## Where Agents Struggled",
+                "",
+                input.source.failures.recovered.length > 0
+                    ? input.source.failures.recovered.map((failure) => `- \`${failure.node}\`: ${failure.summary}`).join("\n")
+                    : "- No concrete agent struggle was inferred.",
+                "",
+                "## Workspace Improvements",
+                "",
+                "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+                "| --- | --- | --- | --- | --- | --- |",
+                ...input.source.workspace_improvements.map((entry) =>
+                    `| ${entry.area} | ${entry.recommendation} | ${entry.evidence} | ${entry.priority} | ${entry.confidence} | ${entry.done_when} |`
+                ),
+                "",
+                "## Graph Prompt And Support Improvements",
+                "",
+                "- Keep graph context pointer-only and validate delivery with [curation verdict](evidence/curation-verdict.json).",
+                "",
+                "## Plugin Skill And Eval Opportunities",
+                "",
+                "- Add evals for any recovered issue that should not repeat.",
+                "",
+                "## What Worked",
+                "",
+                "- Deterministic evidence remained available in [audit index](03-audit-index.md).",
+                "",
+                "## Evidence Links",
+                "",
+                "- [Validation ledger](evidence/validation-ledger.json)",
+                "- [Milestones](evidence/milestones.json)"
+            ].join("\n");
+
+            return {
+                review_brief_markdown: reviewBrief,
+                run_learnings_markdown: runLearnings,
+                metadata: { test_curator: true }
+            };
+        }
+    };
+}
+
 describe("delivery package", () => {
     it("writes the human-first delivery structure without old top-level files", async () => {
         const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-"));
@@ -244,7 +360,8 @@ describe("delivery package", () => {
             }),
             attempts,
             events,
-            interventions
+            interventions,
+            curator: buildPassingCurator()
         });
 
         expect(Object.keys(manifest.sections).sort()).toEqual([
@@ -271,7 +388,9 @@ describe("delivery package", () => {
             decision_log: join(runRoot, "delivery", "evidence", "decision-log.md"),
             intervention_trace: join(runRoot, "delivery", "evidence", "intervention-trace.json"),
             milestones: join(runRoot, "delivery", "evidence", "milestones.json"),
-            workspace_improvements: join(runRoot, "delivery", "evidence", "workspace-improvements.json")
+            workspace_improvements: join(runRoot, "delivery", "evidence", "workspace-improvements.json"),
+            delivery_source: join(runRoot, "delivery", "evidence", "delivery-source.json"),
+            curation_verdict: join(runRoot, "delivery", "evidence", "curation-verdict.json")
         }));
         expect(manifest.artifact_counts.final_declared_artifacts).toBe(1);
         expect(manifest.artifact_counts.superseded_declared_artifacts).toBe(0);
@@ -286,6 +405,10 @@ describe("delivery package", () => {
         expect(reviewBrief).toContain("npm test");
         expect(reviewBrief).toContain("../nodes/001-implement/executions/001-exec/artifacts/handoff.md");
         expect(reviewBrief).not.toContain(runRoot);
+        expect(reviewBrief).not.toContain("human-debug");
+        await expect(readFile(join(runRoot, "delivery", "evidence", "delivery-source.md"), "utf8")).resolves.toContain("# Delivery Source");
+        const verdict = await readJson<{ passed: boolean }>(join(runRoot, "delivery", "evidence", "curation-verdict.json"));
+        expect(verdict.passed).toBe(true);
         await expect(readFile(join(runRoot, "delivery", "evidence", "artifact-index.json"), "utf8")).resolves.toContain('"final_declared_artifacts"');
         await expect(readFile(join(runRoot, "delivery", "evidence", "validation-ledger.json"), "utf8")).resolves.toContain('"milestone_validation_logs"');
         expect(manifest.artifact_taxonomy.declared_artifacts).toEqual(expect.arrayContaining([
@@ -357,13 +480,14 @@ describe("delivery package", () => {
             }),
             attempts,
             events: [],
-            interventions: []
+            interventions: [],
+            curator: buildPassingCurator()
         });
 
         expect(manifest.active_failure_count).toBe(0);
         expect(manifest.recovered_issue_count).toBe(1);
         const reviewBrief = await readFile(join(runRoot, "delivery", "01-review-brief.md"), "utf8");
-        expect(reviewBrief).toContain("No active failed node attempts remain.");
+        expect(reviewBrief).toContain("No active failures remain.");
         expect(reviewBrief).toContain("Recovered Issues");
         expect(reviewBrief).toContain("first handoff missed validation evidence");
         const validationLedger = await readJson<{
@@ -433,13 +557,14 @@ describe("delivery package", () => {
             }),
             attempts,
             events: [],
-            interventions: []
+            interventions: [],
+            curator: buildPassingCurator()
         });
 
         expect(manifest.active_failure_count).toBe(1);
         expect(manifest.recovered_issue_count).toBe(0);
         const reviewBrief = await readFile(join(runRoot, "delivery", "01-review-brief.md"), "utf8");
-        expect(reviewBrief).toContain("Active Risks And Follow-ups");
+        expect(reviewBrief).toContain("Active Failures And Risks");
         expect(reviewBrief).toContain("required evidence is still missing");
         const validationLedger = await readJson<{
             active_failures: unknown[];
@@ -447,5 +572,126 @@ describe("delivery package", () => {
         }>(join(runRoot, "delivery", "evidence", "validation-ledger.json"));
         expect(validationLedger.active_failures).toHaveLength(1);
         expect(validationLedger.recovered_issues).toEqual([]);
+    });
+
+    it("fails delivery when curated review hides an active failure", async () => {
+        const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-curation-fail-"));
+        await writeRunScaffold(runRoot);
+        const attempts: RuntimeNodeAttempt[] = [
+            {
+                execution_id: "exec-check-1",
+                compiled_id: "root__handoff_review",
+                authored_id: "handoff_review",
+                kind: "check",
+                repo_alias: "main",
+                execution_dir: join(runRoot, "nodes", "001-check", "executions", "001-exec"),
+                attempt_index: 1,
+                status: "failed",
+                outcome: "failed",
+                started_at: "2026-04-24T00:00:00.000Z",
+                ended_at: "2026-04-24T00:00:01.000Z",
+                artifacts: {},
+                metadata: {
+                    verification: {
+                        passed: false,
+                        summary: "Check failed because required evidence is still missing."
+                    }
+                }
+            }
+        ];
+        const curator: DeliveryCurator = {
+            async curate() {
+                return {
+                    review_brief_markdown: [
+                        "# Review Brief",
+                        "## Outcome",
+                        "Everything passed.",
+                        "## Reviewer Decision",
+                        "Merge.",
+                        "## What To Inspect First",
+                        "- [Audit index](03-audit-index.md)",
+                        "## Success Contract",
+                        "Review the handoff.",
+                        "## Changed Files",
+                        "- [Change map](evidence/change-map.json)",
+                        "## Final Declared Artifacts",
+                        "- None.",
+                        "## Validation Evidence",
+                        "- [Validation ledger](evidence/validation-ledger.json)",
+                        "## Active Failures And Risks",
+                        "- No active failures remain.",
+                        "## Recovered Issues",
+                        "- No recovered issues.",
+                        "## Historical Attempts",
+                        "- None.",
+                        "## Supervisor And Human Interventions",
+                        "- None.",
+                        "## Supporting Evidence",
+                        "- [Run learnings](02-run-learnings.md)"
+                    ].join("\n"),
+                    run_learnings_markdown: [
+                        "# Run Learnings",
+                        "## Where Agents Struggled",
+                        "- None.",
+                        "## Workspace Improvements",
+                        "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+                        "| --- | --- | --- | --- | --- | --- |",
+                        "| none | No action. | none | low | low | done |",
+                        "## Graph Prompt And Support Improvements",
+                        "- None.",
+                        "## Plugin Skill And Eval Opportunities",
+                        "- None.",
+                        "## What Worked",
+                        "- Everything.",
+                        "## Evidence Links",
+                        "- [Validation ledger](evidence/validation-ledger.json)"
+                    ].join("\n")
+                };
+            }
+        };
+
+        await expect(writeDeliveryPackage({
+            run_root: runRoot,
+            graph: checkGraph,
+            state: baseState({
+                status: "failed",
+                evidence_status: "warnings",
+                counts: {
+                    total: 1,
+                    pending: 0,
+                    ready: 0,
+                    running: 0,
+                    passed: 0,
+                    failed: 1,
+                    blocked: 0,
+                    canceled: 0,
+                    skipped: 0
+                },
+                node_statuses: { root__handoff_review: "failed" },
+                latest_execution_by_compiled_id: {
+                    root__handoff_review: {
+                        execution_id: "exec-check-1",
+                        compiled_id: "root__handoff_review",
+                        authored_id: "handoff_review",
+                        kind: "check",
+                        status: "failed",
+                        attempt_index: 1,
+                        started_at: "2026-04-24T00:00:00.000Z",
+                        ended_at: "2026-04-24T00:00:01.000Z"
+                    }
+                }
+            }),
+            attempts,
+            events: [],
+            interventions: [],
+            curator
+        })).rejects.toThrow(/curated delivery failed verification/u);
+        const verdict = await readJson<{ passed: boolean; findings: Array<{ kind: string }> }>(
+            join(runRoot, "delivery", "evidence", "curation-verdict.json")
+        );
+        expect(verdict.passed).toBe(false);
+        expect(verdict.findings).toEqual(expect.arrayContaining([
+            expect.objectContaining({ kind: "missing_active_failure" })
+        ]));
     });
 });

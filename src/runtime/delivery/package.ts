@@ -14,6 +14,14 @@ import type { RuntimeEventEnvelope } from "../events.js";
 import type { RuntimeStateSnapshot, WorkspaceChangeArtifacts } from "../session.js";
 import { operatorObservationsPath } from "../observations/index.js";
 import { collectDeliveryEvidence, type DeliveryEvidence } from "./collect.js";
+import {
+  DeliveryCurationError,
+  type DeliveryCurator,
+  type DeliveryCurationFinding,
+  type DeliveryCurationVerdict,
+  type DeliverySourcePacket,
+  verifyCuratedDelivery
+} from "./curation.js";
 
 const sectionFiles: Record<DeliverySection, string> = {
   review_brief: "01-review-brief.md",
@@ -110,6 +118,11 @@ export interface DeliveryPackageManifest {
     intervention_trace: string;
     milestones: string;
     workspace_improvements: string;
+    delivery_source: string;
+    delivery_source_markdown: string;
+    curation_verdict: string;
+    curation_prompt?: string;
+    curation_response?: string;
     supervisor_timeline: string;
     runtime_log: string;
     operator_observations: string;
@@ -153,6 +166,15 @@ export interface DeliveryPackageManifest {
   active_failure_count: number;
   recovered_issue_count: number;
   workspace_changed_file_count: number;
+  curation: {
+    status: "pending" | "passed" | "failed";
+    source_path: string;
+    source_markdown_path: string;
+    verdict_path: string;
+    prompt_path?: string;
+    response_path?: string;
+    failure?: string;
+  };
 }
 
 function writeJson(filePath: string, payload: unknown): Promise<void> {
@@ -408,12 +430,20 @@ function buildWorkspaceRecommendations(
 
 function buildDeliveryModel(evidence: DeliveryEvidence): DeliveryModel {
   const finalAttemptIds = buildFinalAttemptIds(evidence);
+  const finalAttemptByCompiledId = new Map<string, RuntimeNodeAttempt>();
+  for (const attempt of evidence.attempts) {
+    if (finalAttemptIds.has(attempt.execution_id)) {
+      finalAttemptByCompiledId.set(attempt.compiled_id, attempt);
+    }
+  }
   const classifiedAttempts = evidence.attempts.map((attempt): ClassifiedAttempt => {
     const isFinal = finalAttemptIds.has(attempt.execution_id);
     const hasFailure = attemptHasFailure(evidence, attempt);
+    const finalAttempt = finalAttemptByCompiledId.get(attempt.compiled_id);
+    const finalRecoveredThisNode = finalAttempt !== undefined && !attemptHasFailure(evidence, finalAttempt);
     const classification: AttemptClassification = isFinal
       ? hasFailure ? "active_failure" : "final"
-      : hasFailure ? "recovered_issue" : "historical_attempt";
+      : hasFailure && finalRecoveredThisNode ? "recovered_issue" : "historical_attempt";
     return {
       attempt,
       classification,
@@ -472,66 +502,243 @@ function buildDeliveryModel(evidence: DeliveryEvidence): DeliveryModel {
   };
 }
 
-function renderChangedFiles(evidence: DeliveryEvidence): string[] {
-  if (evidence.workspace_changes.length === 0) {
-    return ["- No workspace change captures were recorded."];
-  }
+function deliveryEvidencePath(deliveryDir: string, fileName: string): string {
+  return join(deliveryDir, "evidence", fileName);
+}
 
-  return evidence.workspace_changes.flatMap((change) => [
-    `### ${change.repo_alias}`,
+function sourceArtifactEntry(
+  artifact: ArtifactIndexEntry,
+  deliveryDir: string
+): DeliverySourcePacket["final_declared_artifacts"][number] {
+  return {
+    id: `${artifact.authored_id}.${artifact.name}`,
+    node: artifact.authored_id,
+    name: artifact.name,
+    description: artifact.description,
+    declared_path: artifact.declared_path,
+    absolute_path: artifact.artifact_path,
+    relative_path: relativeMarkdownPath(deliveryDir, artifact.artifact_path)
+  };
+}
+
+function sourceFailure(entry: ClassifiedAttempt): DeliverySourcePacket["failures"]["active"][number] {
+  return {
+    node: entry.attempt.authored_id,
+    execution_id: entry.attempt.execution_id,
+    status: `${entry.attempt.status}${entry.attempt.outcome ? `/${entry.attempt.outcome}` : ""}`,
+    summary: sanitizeDeliveryEvidenceText(entry.summary)
+  };
+}
+
+function sanitizeDeliveryEvidenceText(value: string): string {
+  return value
+    .replace(/\bhuman-debug\b/giu, "debug/audit evidence")
+    .replace(/\.agentflow\/runs\/[^\s)]+/giu, "run audit evidence")
+    .replace(/\/private\/tmp\/[^\s)]+/giu, "temporary run path");
+}
+
+function sanitizeDeliveryCommand(value: string): string {
+  const parts = value.trim().split(/\s+/u);
+  const prefixOffset = parts[0] === "env" ? 1 : 0;
+  const commandStart = parts.findIndex((part, index) => index >= prefixOffset && !/^[A-Za-z_][A-Za-z0-9_]*=/u.test(part));
+  return commandStart >= prefixOffset && commandStart >= 0 ? parts.slice(commandStart).join(" ") : value;
+}
+
+function sanitizeDeliveryInterventionReason(intervention: SupervisorInterventionRecord): string {
+  const reason = sanitizeDeliveryEvidenceText(intervention.reason).trim();
+  if (
+    reason.length > 500
+    || /^OpenAI Codex\b/u.test(reason)
+    || reason.includes("\n--------\n")
+    || reason.includes("\nuser\n## Role")
+  ) {
+    return `${intervention.action} intervention details are available in the intervention trace.`;
+  }
+  return reason;
+}
+
+function buildDeliverySourcePacket(options: {
+  manifest: DeliveryPackageManifest;
+  evidence: DeliveryEvidence;
+  model: DeliveryModel;
+  deliveryDir: string;
+}): DeliverySourcePacket {
+  const { manifest, evidence, model, deliveryDir } = options;
+  return {
+    version: "1",
+    run: {
+      run_id: evidence.run_id,
+      graph_id: evidence.graph_id,
+      status: evidence.status,
+      evidence_status: evidence.evidence_status,
+      duration: formatDuration(evidence.started_at, evidence.ended_at)
+    },
+    intent: {
+      goal: evidence.intent.goal,
+      acceptance_criteria: intentList(evidence.intent.acceptance_criteria),
+      constraints: intentList(evidence.intent.constraints)
+    },
+    counts: {
+      final_attempts: model.final_attempts.length,
+      active_failures: model.active_failures.length + model.active_blocking_observations.length,
+      recovered_issues: model.recovered_issues.length,
+      supervisor_interventions: evidence.interventions.length,
+      changed_files: manifest.workspace_changed_file_count
+    },
+    final_declared_artifacts: model.final_artifacts.map((artifact) => sourceArtifactEntry(artifact, deliveryDir)),
+    superseded_declared_artifacts: model.superseded_artifacts.map((artifact) => sourceArtifactEntry(artifact, deliveryDir)),
+    changed_files: evidence.workspace_changes.map((change) => ({
+      repo: change.repo_alias,
+      workspace_path: change.workspace_path,
+      files: change.changed_files
+    })),
+    validation: {
+      milestone_validation_logs: model.milestone_validation_logs.map((log) => ({
+        execution_id: log.execution_id,
+        milestone_id: log.milestone_id,
+        ...(log.command ? { command: sanitizeDeliveryCommand(log.command) } : {}),
+        ...(log.result ? { result: log.result } : {}),
+        summary: sanitizeDeliveryEvidenceText(log.summary)
+      })),
+      outcome_verifications: evidence.outcome_verifications.map((entry) => ({
+        node: entry.authored_id,
+        execution_id: entry.execution_id,
+        passed: entry.passed,
+        summary: sanitizeDeliveryEvidenceText(entry.summary),
+        findings_count: entry.findings_count,
+        blockers_count: entry.blockers_count,
+        evidence_path: relativeMarkdownPath(deliveryDir, manifest.evidence_files.validation_ledger)
+      }))
+    },
+    failures: {
+      active: [
+        ...model.active_failures.map(sourceFailure),
+        ...model.active_blocking_observations.map((observation) => ({
+          node: observation.observation_id,
+          execution_id: observation.observation_id,
+          status: observation.status,
+          summary: sanitizeDeliveryEvidenceText(observation.summary)
+        }))
+      ],
+      recovered: model.recovered_issues.map(sourceFailure),
+      historical: model.historical_attempts.map(sourceFailure)
+    },
+    interventions: evidence.interventions.map((intervention) => ({
+      action: intervention.action,
+      ...(intervention.target_compiled_id ? { target: intervention.target_compiled_id } : {}),
+      reason: sanitizeDeliveryInterventionReason(intervention)
+    })),
+    workspace_improvements: model.workspace_recommendations,
+    evidence_links: {
+      artifact_index: relativeMarkdownPath(deliveryDir, manifest.evidence_files.artifact_index),
+      change_map: relativeMarkdownPath(deliveryDir, manifest.evidence_files.change_map),
+      validation_ledger: relativeMarkdownPath(deliveryDir, manifest.evidence_files.validation_ledger),
+      decision_log: relativeMarkdownPath(deliveryDir, manifest.evidence_files.decision_log),
+      intervention_trace: relativeMarkdownPath(deliveryDir, manifest.evidence_files.intervention_trace),
+      milestones: relativeMarkdownPath(deliveryDir, manifest.evidence_files.milestones),
+      workspace_improvements: relativeMarkdownPath(deliveryDir, manifest.evidence_files.workspace_improvements),
+      audit_index: relativeMarkdownPath(deliveryDir, manifest.human_entrypoints.audit_index)
+    }
+  };
+}
+
+function renderDeliverySourceMarkdown(source: DeliverySourcePacket): string {
+  const lines = [
+    "# Delivery Source",
     "",
-    change.changed_files.length > 0
-      ? change.changed_files.map((file) => `- \`${file}\``).join("\n")
-      : "- No changed files were captured.",
-    ""
-  ]);
-}
-
-function renderFinalArtifacts(
-  model: DeliveryModel,
-  deliveryDir: string
-): string[] {
-  if (model.final_artifacts.length === 0) {
-    return ["- No final declared artifacts were captured."];
-  }
-
-  return [
-    "| Artifact | Expected Content | Authoritative Path |",
-    "| --- | --- | --- |",
-    ...model.final_artifacts.map((artifact) =>
-      `| \`${artifact.authored_id}.${artifact.name}\` | ${artifact.description} | ${markdownLink(deliveryDir, artifact.declared_path, artifact.artifact_path)} |`
-    )
+    "This runtime-authored packet is the evidence source for the AI-curated human delivery files.",
+    "",
+    "## Run",
+    "",
+    `- Run: \`${source.run.run_id}\``,
+    `- Graph: \`${source.run.graph_id}\``,
+    `- Status: \`${source.run.status}\``,
+    `- Evidence status: \`${source.run.evidence_status}\``,
+    `- Duration: \`${source.run.duration}\``,
+    "",
+    "## Success Contract",
+    "",
+    source.intent.goal,
+    "",
+    "Acceptance criteria:",
+    ...markdownList(source.intent.acceptance_criteria, "No explicit acceptance criteria were authored."),
+    "",
+    "Constraints:",
+    ...markdownList(source.intent.constraints, "No explicit constraints were authored."),
+    "",
+    "## Final Declared Artifacts",
+    "",
+    ...(source.final_declared_artifacts.length > 0
+      ? [
+          "| Artifact | Description | Path |",
+          "| --- | --- | --- |",
+          ...source.final_declared_artifacts.map((artifact) =>
+            `| \`${artifact.id}\` | ${artifact.description} | [${artifact.declared_path}](${artifact.relative_path}) |`
+          )
+        ]
+      : ["- No final declared artifacts were captured."]),
+    "",
+    "## Changed Files",
+    "",
+    ...(source.changed_files.length > 0
+      ? source.changed_files.flatMap((change) => [
+          `### ${change.repo}`,
+          "",
+          ...markdownList(change.files.map((file) => `\`${file}\``), "No changed files were captured."),
+          ""
+        ])
+      : ["- No workspace change captures were recorded."]),
+    "## Validation",
+    "",
+    ...(source.validation.milestone_validation_logs.length > 0
+      ? [
+          "| Source | Result | Command | Summary |",
+          "| --- | --- | --- | --- |",
+          ...source.validation.milestone_validation_logs.map((log) =>
+            `| \`${log.milestone_id}\` | \`${log.result ?? "recorded"}\` | ${log.command ? `\`${log.command}\`` : "not specified"} | ${log.summary} |`
+          )
+        ]
+      : ["- No milestone validation logs were captured."]),
+    "",
+    ...(source.validation.outcome_verifications.length > 0
+      ? [
+          "| Node | Result | Evidence | Summary |",
+          "| --- | --- | --- | --- |",
+          ...source.validation.outcome_verifications.map((entry) =>
+            `| \`${entry.node}\` | \`${entry.passed ? "pass" : "fail"}\` | [validation ledger](${entry.evidence_path}) | ${entry.summary} |`
+          )
+        ]
+      : ["- No outcome verifications were captured."]),
+    "",
+    "## Active Failures",
+    "",
+    ...markdownList(source.failures.active.map((failure) => `\`${failure.node}\`: ${failure.summary}`), "No active failures remain."),
+    "",
+    "## Recovered Issues",
+    "",
+    ...markdownList(source.failures.recovered.map((failure) => `\`${failure.node}\`: ${failure.summary}`), "No recovered issues were recorded."),
+    "",
+    "## Historical Attempts",
+    "",
+    ...markdownList(source.failures.historical.map((failure) => `\`${failure.node}\`: ${failure.summary}`), "No historical attempts require reviewer action."),
+    "",
+    "## Interventions",
+    "",
+    ...markdownList(source.interventions.map((intervention) => `\`${intervention.action}\`: ${intervention.reason}`), "No supervisor or human interventions were recorded."),
+    "",
+    "## Workspace Improvements",
+    "",
+    "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...source.workspace_improvements.map((entry) =>
+      `| ${entry.area} | ${entry.recommendation} | ${entry.evidence} | ${entry.priority} | ${entry.confidence} | ${entry.done_when} |`
+    ),
+    "",
+    "## Evidence Links",
+    "",
+    ...Object.entries(source.evidence_links).map(([label, path]) => `- [${label.replace(/_/gu, " ")}](${path})`)
   ];
-}
-
-function renderValidationRows(
-  evidence: DeliveryEvidence,
-  model: DeliveryModel,
-  deliveryDir: string
-): string[] {
-  const rows: string[] = [];
-
-  for (const log of model.milestone_validation_logs) {
-    rows.push(
-      `| milestone \`${log.milestone_id}\` | \`${log.result ?? "recorded"}\` | ${log.command ? `\`${log.command}\`` : "not specified"} | ${log.summary} |`
-    );
-  }
-
-  for (const verification of evidence.outcome_verifications) {
-    rows.push(
-      `| outcome verifier \`${verification.authored_id}\` | \`${verification.passed ? "pass" : "fail"}\` | ${markdownLink(deliveryDir, "markdown", verification.verify_outcome_markdown_path)} / ${markdownLink(deliveryDir, "json", verification.verify_outcome_json_path)} | ${verification.summary} |`
-    );
-  }
-
-  if (rows.length === 0) {
-    return ["- No validation evidence was captured."];
-  }
-
-  return [
-    "| Source | Result | Command Or Evidence | Summary |",
-    "| --- | --- | --- | --- |",
-    ...rows
-  ];
+  return lines.join("\n");
 }
 
 function renderAttemptTable(
@@ -549,183 +756,6 @@ function renderAttemptTable(
       `| \`${entry.attempt.authored_id}\` | \`${entry.attempt.execution_id}\` | \`${entry.attempt.status}${entry.attempt.outcome ? `/${entry.attempt.outcome}` : ""}\` | ${entry.summary} |`
     )
   ];
-}
-
-function renderObservationRows(
-  observations: DeliveryEvidence["operator_observations"],
-  emptyText: string
-): string[] {
-  if (observations.length === 0) {
-    return [`- ${emptyText}`];
-  }
-
-  return [
-    "| Observation | Kind | Status | Summary |",
-    "| --- | --- | --- | --- |",
-    ...observations.map((observation) =>
-      `| \`${observation.observation_id}\` | \`${observation.kind}\` | \`${observation.status}\` | ${observation.summary} |`
-    )
-  ];
-}
-
-function renderReviewBrief(
-  manifest: DeliveryPackageManifest,
-  evidence: DeliveryEvidence,
-  model: DeliveryModel,
-  deliveryDir: string
-): string {
-  return [
-    "# Review Brief",
-    "",
-    "## Outcome",
-    "",
-    "| Field | Value |",
-    "| --- | --- |",
-    `| Run | \`${evidence.run_id}\` |`,
-    `| Graph | \`${evidence.graph_id}\` |`,
-    `| Status | \`${evidence.status}\` |`,
-    `| Evidence status | \`${evidence.evidence_status}\` |`,
-    `| Duration | \`${formatDuration(evidence.started_at, evidence.ended_at)}\` |`,
-    `| Final attempts | \`${model.final_attempts.length}\` |`,
-    `| Active failures | \`${model.active_failures.length + model.active_blocking_observations.length}\` |`,
-    `| Recovered issues | \`${model.recovered_issues.length}\` |`,
-    `| Supervisor interventions | \`${evidence.interventions.length}\` |`,
-    "",
-    "## Success Contract",
-    "",
-    "### Goal",
-    "",
-    evidence.intent.goal,
-    "",
-    "### Acceptance Criteria",
-    "",
-    ...markdownList(intentList(evidence.intent.acceptance_criteria), "No explicit acceptance criteria were authored."),
-    "",
-    "### Constraints",
-    "",
-    ...markdownList(intentList(evidence.intent.constraints), "No explicit constraints were authored."),
-    "",
-    "## Reviewer Checklist",
-    "",
-    `1. Review changed files in this brief and, if needed, open ${markdownLink(deliveryDir, "change-map", manifest.evidence_files.change_map)}.`,
-    "2. Open final declared artifacts listed below; ignore superseded artifacts unless auditing recovery behavior.",
-    "3. Check validation rows for commands, verifier outcomes, and blocked results.",
-    "4. Resolve active risks and follow-ups before trusting the run output.",
-    `5. Use ${markdownLink(deliveryDir, "audit index", manifest.human_entrypoints.audit_index)} only when debugging or auditing raw trace evidence.`,
-    "",
-    "## Changed Files",
-    "",
-    ...renderChangedFiles(evidence),
-    "## Final Declared Artifacts",
-    "",
-    ...renderFinalArtifacts(model, deliveryDir),
-    "",
-    "## Validation Evidence",
-    "",
-    ...renderValidationRows(evidence, model, deliveryDir),
-    "",
-    "## Active Risks And Follow-ups",
-    "",
-    ...renderAttemptTable(model.active_failures, "No active failed node attempts remain."),
-    "",
-    ...renderObservationRows(model.active_blocking_observations, "No active blocking observations remain."),
-    "",
-    "## Recovered Issues",
-    "",
-    ...renderAttemptTable(model.recovered_issues, "No failed-then-recovered attempts were recorded."),
-    "",
-    "## Supervisor And Human Interventions",
-    "",
-    evidence.interventions.length > 0
-      ? evidence.interventions.map((intervention) =>
-          `- \`${intervention.action}\` on \`${intervention.target_compiled_id ?? "run"}\`: ${intervention.reason}`
-        ).join("\n")
-      : "- No supervisor interventions were recorded.",
-    "",
-    evidence.operator_observations.length > 0
-      ? renderObservationRows(evidence.operator_observations, "No human observations were recorded.").join("\n")
-      : "- No human observations were recorded.",
-    "",
-    "## Supporting Files",
-    "",
-    `- ${markdownLink(deliveryDir, "Run learnings", manifest.human_entrypoints.run_learnings)}`,
-    `- ${markdownLink(deliveryDir, "Audit index", manifest.human_entrypoints.audit_index)}`,
-    `- ${markdownLink(deliveryDir, "Artifact index", manifest.evidence_files.artifact_index)}`,
-    `- ${markdownLink(deliveryDir, "Validation ledger", manifest.evidence_files.validation_ledger)}`,
-    `- ${markdownLink(deliveryDir, "Workspace improvements", manifest.evidence_files.workspace_improvements)}`
-  ].join("\n");
-}
-
-function renderRunLearnings(
-  manifest: DeliveryPackageManifest,
-  evidence: DeliveryEvidence,
-  model: DeliveryModel,
-  deliveryDir: string
-): string {
-  const struggles = [
-    ...model.active_failures.map((entry) => ({
-      area: "active failure",
-      evidence: `${entry.attempt.authored_id}:${entry.attempt.execution_id}`,
-      lesson: entry.summary
-    })),
-    ...model.recovered_issues.map((entry) => ({
-      area: "recovered issue",
-      evidence: `${entry.attempt.authored_id}:${entry.attempt.execution_id}`,
-      lesson: entry.summary
-    })),
-    ...model.active_blocking_observations.map((observation) => ({
-      area: "human blocker",
-      evidence: observation.observation_id,
-      lesson: observation.summary
-    }))
-  ];
-  const worked = [
-    ...(model.final_attempts.length > 0 ? [`${model.final_attempts.length} final node attempt(s) reached the terminal review surface.`] : []),
-    ...(model.milestone_validation_logs.length > 0 ? [`${model.milestone_validation_logs.length} milestone validation log(s) were captured.`] : []),
-    ...(evidence.outcome_verifications.filter((entry) => entry.passed).length > 0
-      ? [`${evidence.outcome_verifications.filter((entry) => entry.passed).length} outcome verifier result(s) passed.`]
-      : []),
-    ...(evidence.interventions.length > 0 ? [`${evidence.interventions.length} supervisor intervention(s) produced auditable recovery evidence.`] : [])
-  ];
-
-  return [
-    "# Run Learnings",
-    "",
-    "## Agent Friction",
-    "",
-    ...(struggles.length > 0
-      ? [
-          "| Area | Evidence | Lesson |",
-          "| --- | --- | --- |",
-          ...struggles.map((entry) => `| ${entry.area} | \`${entry.evidence}\` | ${entry.lesson} |`)
-        ]
-      : ["- No concrete agent friction was inferred from this run."]),
-    "",
-    "## Workspace And Workflow Improvements",
-    "",
-    "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
-    "| --- | --- | --- | --- | --- | --- |",
-    ...model.workspace_recommendations.map((entry) =>
-      `| ${entry.area} | ${entry.recommendation} | ${entry.evidence} | \`${entry.priority}\` | \`${entry.confidence}\` | ${entry.done_when} |`
-    ),
-    "",
-    "## What Worked",
-    "",
-    ...markdownList(worked, "No positive run signals were inferred automatically."),
-    "",
-    "## Extraction Candidates",
-    "",
-    "- Plugin candidates: only create a plugin when the same command sequence needs reuse, credentials, policy, or auditability.",
-    "- Skill candidates: update a skill when repeated run evidence shows the same authoring or execution mistake.",
-    "- Eval candidates: add or strengthen evals for any recovered issue that should not regress.",
-    "",
-    "## Evidence Links",
-    "",
-    `- ${markdownLink(deliveryDir, "Review brief", manifest.human_entrypoints.review_brief)}`,
-    `- ${markdownLink(deliveryDir, "Validation ledger", manifest.evidence_files.validation_ledger)}`,
-    `- ${markdownLink(deliveryDir, "Milestone evidence", manifest.evidence_files.milestones)}`,
-    `- ${markdownLink(deliveryDir, "Intervention trace", manifest.evidence_files.intervention_trace)}`
-  ].join("\n");
 }
 
 function renderAuditIndex(
@@ -917,6 +947,7 @@ async function buildArtifactTaxonomy(options: {
 }): Promise<DeliveryPackageManifest["artifact_taxonomy"]> {
   const { evidence, model, runRoot, sections } = options;
   const runPaths = resolveRunArtifactPaths(runRoot);
+  const deliveryDir = join(runRoot, "delivery");
   const humanEntryPoints = await Promise.all([
     artifactEntry({
       path: sections.review_brief,
@@ -1060,6 +1091,21 @@ async function buildArtifactTaxonomy(options: {
           purpose: "Delivery evidence file referenced by the manifest and audit index."
         })
       ),
+    artifactEntry({
+      path: deliveryEvidencePath(deliveryDir, "delivery-source.json"),
+      label: "delivery source",
+      purpose: "Runtime-authored source packet used by the delivery curator and verifier."
+    }),
+    artifactEntry({
+      path: deliveryEvidencePath(deliveryDir, "delivery-source.md"),
+      label: "delivery source markdown",
+      purpose: "Human-readable source packet used by the delivery curator."
+    }),
+    artifactEntry({
+      path: deliveryEvidencePath(deliveryDir, "curation-verdict.json"),
+      label: "curation verdict",
+      purpose: "Deterministic verification result for the curated delivery files."
+    }),
     ...outcomeVerificationEntries,
     ...nodeWorkspaceChangeEntries,
     ...interventionArtifactEntries,
@@ -1235,6 +1281,11 @@ async function buildManifest(
   ) as Record<DeliverySection, string>;
   const runPaths = resolveRunArtifactPaths(runRoot);
   const observationsPath = operatorObservationsPath(runRoot);
+  const deliverySourcePath = deliveryEvidencePath(deliveryDir, "delivery-source.json");
+  const deliverySourceMarkdownPath = deliveryEvidencePath(deliveryDir, "delivery-source.md");
+  const curationVerdictPath = deliveryEvidencePath(deliveryDir, "curation-verdict.json");
+  const curationPromptPath = deliveryEvidencePath(deliveryDir, "curation-prompt.md");
+  const curationResponsePath = deliveryEvidencePath(deliveryDir, "curation-response.md");
   const artifactTaxonomy = await buildArtifactTaxonomy({
     evidence,
     model,
@@ -1264,6 +1315,11 @@ async function buildManifest(
       intervention_trace: sections.intervention_trace,
       milestones: sections.milestones,
       workspace_improvements: sections.workspace_improvements,
+      delivery_source: deliverySourcePath,
+      delivery_source_markdown: deliverySourceMarkdownPath,
+      curation_verdict: curationVerdictPath,
+      curation_prompt: curationPromptPath,
+      curation_response: curationResponsePath,
       supervisor_timeline: runPaths.supervisor_timeline_file,
       runtime_log: runPaths.runtime_log_file,
       operator_observations: observationsPath
@@ -1302,7 +1358,15 @@ async function buildManifest(
     workspace_changed_file_count: evidence.workspace_changes.reduce(
       (sum, artifact) => sum + artifact.changed_files.length,
       0
-    )
+    ),
+    curation: {
+      status: "pending",
+      source_path: deliverySourcePath,
+      source_markdown_path: deliverySourceMarkdownPath,
+      verdict_path: curationVerdictPath,
+      prompt_path: curationPromptPath,
+      response_path: curationResponsePath
+    }
   };
 }
 
@@ -1377,6 +1441,7 @@ export async function writeDeliveryPackage(options: {
   attempts: RuntimeNodeAttempt[];
   events: RuntimeEventEnvelope[];
   interventions: SupervisorInterventionRecord[];
+  curator: DeliveryCurator;
 }): Promise<DeliveryPackageManifest> {
   const deliveryDir = join(options.run_root, "delivery");
   await mkdir(join(deliveryDir, "evidence"), { recursive: true });
@@ -1384,10 +1449,10 @@ export async function writeDeliveryPackage(options: {
   const evidence = await collectDeliveryEvidence(options);
   const model = buildDeliveryModel(evidence);
   const manifest = await buildManifest(evidence, model, options.run_root, deliveryDir);
+  const source = buildDeliverySourcePacket({ manifest, evidence, model, deliveryDir });
+  const sourceMarkdown = renderDeliverySourceMarkdown(source);
 
   await Promise.all([
-    writeText(manifest.sections.review_brief, renderReviewBrief(manifest, evidence, model, deliveryDir)),
-    writeText(manifest.sections.run_learnings, renderRunLearnings(manifest, evidence, model, deliveryDir)),
     writeText(manifest.sections.audit_index, renderAuditIndex(manifest, evidence, model, deliveryDir)),
     writeJson(manifest.sections.artifact_index, {
       graph_id: evidence.graph_id,
@@ -1432,9 +1497,73 @@ export async function writeDeliveryPackage(options: {
       graph_id: evidence.graph_id,
       run_id: evidence.run_id,
       recommendations: model.workspace_recommendations
+    }),
+    writeJson(manifest.evidence_files.delivery_source, source),
+    writeText(manifest.evidence_files.delivery_source_markdown, sourceMarkdown),
+    writeJson(manifest.evidence_files.curation_verdict, {
+      passed: false,
+      generated_at: new Date().toISOString(),
+      findings: [{
+        severity: "warning",
+        kind: "curation_pending",
+        message: "Delivery curation has not completed yet."
+      }]
     })
   ]);
 
-  await writeJson(manifest.manifest_path, manifest);
-  return manifest;
+  let verdict: DeliveryCurationVerdict;
+  try {
+    const curated = await options.curator.curate({
+      source,
+      source_markdown: sourceMarkdown,
+      source_json_path: manifest.evidence_files.delivery_source,
+      source_markdown_path: manifest.evidence_files.delivery_source_markdown,
+      review_brief_path: manifest.sections.review_brief,
+      run_learnings_path: manifest.sections.run_learnings,
+      delivery_dir: deliveryDir
+    });
+    await Promise.all([
+      writeText(manifest.sections.review_brief, curated.review_brief_markdown),
+      writeText(manifest.sections.run_learnings, curated.run_learnings_markdown)
+    ]);
+    verdict = await verifyCuratedDelivery({
+      source,
+      review_brief_markdown: curated.review_brief_markdown,
+      run_learnings_markdown: curated.run_learnings_markdown,
+      review_brief_path: manifest.sections.review_brief,
+      run_learnings_path: manifest.sections.run_learnings,
+      delivery_dir: deliveryDir,
+      ...(curated.metadata ? { curator_metadata: curated.metadata } : {})
+    });
+  } catch (error) {
+    const finding: DeliveryCurationFinding = {
+      severity: "blocker",
+      kind: "curator_failed",
+      message: error instanceof Error ? error.message : String(error)
+    };
+    verdict = {
+      passed: false,
+      generated_at: new Date().toISOString(),
+      findings: [finding]
+    };
+  }
+
+  const completedManifest: DeliveryPackageManifest = {
+    ...manifest,
+    curation: {
+      ...manifest.curation,
+      status: verdict.passed ? "passed" : "failed",
+      ...(verdict.passed ? {} : { failure: verdict.findings.map((finding) => finding.message).join("; ") })
+    }
+  };
+  await writeJson(completedManifest.evidence_files.curation_verdict, verdict);
+  await writeJson(completedManifest.manifest_path, completedManifest);
+  if (!verdict.passed) {
+    throw new DeliveryCurationError(
+      `curated delivery failed verification; see ${completedManifest.evidence_files.curation_verdict}`,
+      completedManifest.evidence_files.curation_verdict,
+      verdict.findings
+    );
+  }
+  return completedManifest;
 }

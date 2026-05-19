@@ -73,7 +73,7 @@ function baseGraph(graphId: string, steps: unknown[], extra: Record<string, unkn
 async function writeGoldenCodex(tempRoot: string): Promise<string> {
     const codexPath = join(tempRoot, "golden-codex.mjs");
     await writeExecutable(codexPath, `#!/usr/bin/env node
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -105,6 +105,14 @@ process.stdin.on("end", () => {
     }
     process.stdout.write(message);
   };
+  const readDeliverySource = () => {
+    const sourcePath = process.env.AGENTFLOW_CONTEXT_PACKET;
+    if (!sourcePath) {
+      return undefined;
+    }
+    return JSON.parse(readFileSync(sourcePath, "utf8"));
+  };
+  const list = (items, empty) => items.length > 0 ? items.map((item) => "- " + item) : ["- " + empty];
   const runAf = (afArgs, input) => {
     const result = spawnSync("af", afArgs, {
       encoding: "utf8",
@@ -140,6 +148,73 @@ process.stdin.on("end", () => {
       blockers: []
     }, null, 2);
     finish("\`\`\`json\\n" + verifierJson + "\\n\`\`\`\\n");
+    return;
+  }
+
+  if (prompt.includes("Agentflow delivery curator")) {
+    const source = readDeliverySource();
+    const artifacts = source.final_declared_artifacts.length > 0
+      ? source.final_declared_artifacts.map((artifact) => "- \`" + artifact.id + "\`: [" + artifact.declared_path + "](" + artifact.relative_path + ")")
+      : ["- No final declared artifacts were captured."];
+    const active = list(source.failures.active.map((failure) => "\`" + failure.node + "\`: " + failure.summary), "No active failures remain.");
+    const recovered = list(source.failures.recovered.map((failure) => "\`" + failure.node + "\`: " + failure.summary), "No recovered issues were recorded.");
+    const historical = list(source.failures.historical.map((failure) => "\`" + failure.node + "\`: " + failure.summary), "No historical attempts require reviewer action.");
+    const validation = [
+      ...source.validation.milestone_validation_logs.map((log) => "- \`" + log.milestone_id + "\`: " + (log.command ? "\`" + log.command + "\` " : "") + (log.result || "recorded") + " - " + log.summary),
+      ...source.validation.outcome_verifications.map((entry) => "- \`" + entry.node + "\`: " + (entry.passed ? "pass" : "fail") + " - " + entry.summary)
+    ];
+    const learningRows = source.workspace_improvements.length > 0
+      ? source.workspace_improvements.map((entry) => "| " + entry.area + " | " + entry.recommendation + " | " + entry.evidence + " | " + entry.priority + " | " + entry.confidence + " | " + entry.done_when + " |")
+      : ["| none | No action. | source packet | low | medium | No action required. |"];
+    finish([
+      "\`\`\`review-brief",
+      "# Review Brief",
+      "## Outcome",
+      "Run \`" + source.run.run_id + "\` ended with status \`" + source.run.status + "\`.",
+      "## Reviewer Decision",
+      source.failures.active.length > 0 ? "Do not approve until active failures are addressed." : "Review changed files, final artifacts, and validation evidence.",
+      "## What To Inspect First",
+      "- [Change map](" + source.evidence_links.change_map + ")",
+      "- [Validation ledger](" + source.evidence_links.validation_ledger + ")",
+      "## Success Contract",
+      source.intent.goal,
+      "## Changed Files",
+      "- [Change map](" + source.evidence_links.change_map + ")",
+      "## Final Declared Artifacts",
+      ...artifacts,
+      "## Validation Evidence",
+      ...(validation.length > 0 ? validation : ["- [Validation ledger](" + source.evidence_links.validation_ledger + ")"]),
+      "## Active Failures And Risks",
+      ...active,
+      "## Recovered Issues",
+      ...recovered,
+      "## Historical Attempts",
+      ...historical,
+      "## Supervisor And Human Interventions",
+      "- No supervisor or human interventions were recorded.",
+      "## Supporting Evidence",
+      "- [Run learnings](02-run-learnings.md)",
+      "- [Audit index](03-audit-index.md)",
+      "\`\`\`",
+      "\`\`\`run-learnings",
+      "# Run Learnings",
+      "## Where Agents Struggled",
+      "- See review brief failure and recovery sections.",
+      "## Workspace Improvements",
+      "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+      "| --- | --- | --- | --- | --- | --- |",
+      ...learningRows,
+      "## Graph Prompt And Support Improvements",
+      "- No changes identified.",
+      "## Plugin Skill And Eval Opportunities",
+      "- No changes identified.",
+      "## What Worked",
+      "- Deterministic delivery source evidence was available.",
+      "## Evidence Links",
+      "- [Milestones](" + source.evidence_links.milestones + ")",
+      "- [Validation ledger](" + source.evidence_links.validation_ledger + ")",
+      "\`\`\`"
+    ].join("\\n") + "\\n");
     return;
   }
 
@@ -249,6 +324,7 @@ describe("golden end-to-end graph runs", { timeout: 90000 }, () => {
     beforeEach(async () => {
         tempRoot = await mkdtemp(join(tmpdir(), "agentflow-golden-e2e-"));
         previousCodexBin = process.env.AGENTFLOW_CODEX_CLI_BIN;
+        process.env.AGENTFLOW_CODEX_CLI_BIN = await writeGoldenCodex(tempRoot);
     });
     afterEach(async () => {
         if (previousCodexBin === undefined) {

@@ -18,14 +18,14 @@
     "delivery": { "required": true },
     "prompt-regression": {
       "artifact": "summary",
-      "task": "Produce managed publisher output for `managed-publisher-evidence-bound`. The public summary must include the exact phrase `scorecard evidence` and must not claim unverified success beyond that evidence.",
+      "task": "Produce managed publisher output for `managed-publisher-evidence-bound`. The public summary must include the exact phrase `scorecard evidence` and must bound success claims to that evidence.",
       "required_contains": [
         "managed-publisher",
         { "any": ["scorecard evidence", "completion scorecard", "scorecard and validation evidence"] },
         "Scenario:",
         "Validation:"
       ],
-      "forbidden_contains": ["unverified success"]
+      "forbidden_contains": ["production-ready", "all behavior verified", "fully validated end to end"]
     }
   }
 }

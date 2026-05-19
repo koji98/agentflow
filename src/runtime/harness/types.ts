@@ -30,7 +30,7 @@ export interface ArtifactRepairPromptContext {
 }
 
 export interface AgentInvocation {
-  promptKind?: "agent" | "ai_check" | "artifact_repair" | "outcome_verification" | "supervisor_evidence";
+  promptKind?: "agent" | "ai_check" | "artifact_repair" | "outcome_verification" | "supervisor_evidence" | "delivery_curator";
   runId: string;
   executionId: string;
   repoAlias: string;
@@ -378,7 +378,8 @@ function formatArtifactContract(
     "Every declared artifact must exist before you finish. Publish content with `af artifact write <name>` using stdin.",
     "Declared artifacts are the durable handoff. When a required command or tool provides validation evidence, include the exact command and observed result/output in the relevant artifact unless the artifact contract says otherwise.",
     "If the node task names required words, labels, titles, classifications, or output phrases for an artifact, include that exact wording in the artifact instead of only paraphrasing it.",
-    "If the node task or artifact description asks for named sections, render them as Markdown headings such as `## Scenario`, `## Changed files`, and `## Validation` unless a different format is explicitly required.",
+    "If required labels include punctuation such as `Scenario:`, `Changed files:`, or `Validation:`, include those exact labels with punctuation in the artifact text.",
+    "If the node task or artifact description asks for named sections without exact label text, render them as Markdown headings such as `## Scenario`, `## Changed files`, and `## Validation` unless a different format is explicitly required.",
     "If the node task asks for a named deliverable such as a profile, summary, report, plan, or handoff, make that deliverable name visible in the artifact title or primary label.",
     "Do not write stale completion language such as `af complete check has not yet run`. If a completion/status section becomes stale after `af complete check`, rewrite the artifact and rerun `af complete check`.",
     "",
@@ -625,6 +626,20 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     }
     if (typeof invocation.rubric !== "string" || invocation.rubric.length === 0) {
       throw new Error("outcome_verification prompts require the rendered verifier prompt in `rubric`.");
+    }
+
+    return invocation.rubric;
+  }
+
+  if (invocation.promptKind === "delivery_curator") {
+    if (invocation.sandbox !== "read-only") {
+      throw new Error("delivery_curator prompts must run in a read-only sandbox.");
+    }
+    if (invocation.tools && invocation.tools.length > 0) {
+      throw new Error("delivery_curator prompts must not be granted plugin tools.");
+    }
+    if (typeof invocation.rubric !== "string" || invocation.rubric.length === 0) {
+      throw new Error("delivery_curator prompts require the rendered curation prompt in `rubric`.");
     }
 
     return invocation.rubric;

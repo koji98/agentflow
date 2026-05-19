@@ -93,6 +93,9 @@ Important event types:
 - `supervisor.intervention.failed`
 - `supervisor.paused`
 - `run.completed`
+- `delivery.curation.started`
+- `delivery.curation.completed`
+- `delivery.curation.failed`
 - `delivery.package.completed`
 
 ## Inspect A Run
@@ -239,9 +242,9 @@ At terminal state, review in this order:
 4. evidence files named by `delivery/manifest.json`
 5. internal runtime artifacts only for resume debugging, failed repair diagnosis, or low-level audit
 
-The review brief is the primary human handoff: outcome, success contract, changed files, final declared artifacts, validation evidence, active risks, recovered issues, and intervention summary. Run learnings capture future improvements for workspace docs, tests, scripts, graph shape, skills, plugins, and evals. The audit index maps runtime context state, tool ledgers, milestones, supervisor timeline, and runtime logs without making them the default review path.
+The review brief is the primary human handoff: outcome, reviewer decision, success contract, changed files, final declared artifacts, validation evidence, active risks, recovered issues, and intervention summary. Run learnings capture future improvements for workspace docs, tests, scripts, graph shape, prompts, skills, tools, plugins, and evals. Both files are curated by a required read-only delivery curator and verified against deterministic evidence. The audit index maps runtime context state, tool ledgers, milestones, supervisor timeline, and runtime logs without making them the default review path.
 
-`delivery/manifest.json` keeps semantic machine keys for human entrypoints and evidence files. Generated human-facing Markdown files use numeric prefixes so local file browsers present the review order clearly. Treat missing or low-quality delivery artifacts as a failed run quality signal even if code changes exist.
+`delivery/manifest.json` keeps semantic machine keys for human entrypoints and evidence files. `delivery/evidence/delivery-source.json` is the deterministic source packet and `delivery/evidence/curation-verdict.json` is the trust check for the curated Markdown. Generated human-facing Markdown files use numeric prefixes so local file browsers present the review order clearly. Treat missing or failed curated delivery as a failed run quality signal even if code changes exist.
 
 ## Applying Captured Changes
 

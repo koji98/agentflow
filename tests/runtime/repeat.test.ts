@@ -11,6 +11,7 @@ import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import { markExecutorRuntimeReady } from "../helpers/agentflow-runtime.js";
+import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
 const TEST_INTENT = {
@@ -107,6 +108,9 @@ describe("runtime repeat", () => {
             compiled_graph: graph,
             repo_sources: {
                 main: repoDir
+            },
+            harnesses: {
+                "codex-cli": createPassingDeliveryHarness()
             },
             executors: {
                 agent: async (context) => {

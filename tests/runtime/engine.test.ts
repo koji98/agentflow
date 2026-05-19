@@ -94,6 +94,68 @@ function createHarness(kind: HarnessAdapter["kind"], run: HarnessAdapter["run"],
                 transcript: { last_message: PASSING_VERIFIER_JSON }
             };
         }
+        if (invocation.promptKind === "delivery_curator") {
+            const source = invocation.contextManifest;
+            const finalArtifacts = [...source.matchAll(/\| `([^`]+\.[^`]+)` \| ([^|]+) \| \[([^\]]+)\]\(([^)]+)\) \|/gu)]
+                .map((match) => `- \`${match[1]}\`: [${match[3]}](${match[4]})`);
+            const recoveredIssues = [...source.matchAll(/^-\s+`([^`]+)`: (.+)$/gmu)]
+                .filter((match) => !String(match[2]).includes("No active failures remain"))
+                .map((match) => `- \`${match[1]}\`: ${match[2]}`);
+            return {
+                status: "passed",
+                exitCode: 0,
+                transcript: {
+                    last_message: [
+                        "```review-brief",
+                        "# Review Brief",
+                        "## Outcome",
+                        "Run completed.",
+                        "## Reviewer Decision",
+                        "Review deterministic evidence.",
+                        "## What To Inspect First",
+                        "- [Change map](evidence/change-map.json)",
+                        "## Success Contract",
+                        "See source packet.",
+                        "## Changed Files",
+                        "- [Change map](evidence/change-map.json)",
+                        "## Final Declared Artifacts",
+                        ...(finalArtifacts.length > 0 ? finalArtifacts : ["- [Artifact index](evidence/artifact-index.json)"]),
+                        "## Validation Evidence",
+                        "- [Validation ledger](evidence/validation-ledger.json)",
+                        "## Active Failures And Risks",
+                        "- No active failures remain.",
+                        "## Recovered Issues",
+                        ...(recoveredIssues.length > 0 ? recoveredIssues : ["- No recovered issues were recorded."]),
+                        "## Historical Attempts",
+                        "- No historical attempts require reviewer action.",
+                        "## Supervisor And Human Interventions",
+                        "- No supervisor or human interventions were recorded.",
+                        "## Supporting Evidence",
+                        "- [Run learnings](02-run-learnings.md)",
+                        "- [Audit index](03-audit-index.md)",
+                        "```",
+                        "```run-learnings",
+                        "# Run Learnings",
+                        "## Where Agents Struggled",
+                        "- No concrete agent struggle was inferred.",
+                        "## Workspace Improvements",
+                        "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+                        "| --- | --- | --- | --- | --- | --- |",
+                        "| none | No action. | source packet | low | medium | No action required. |",
+                        "## Graph Prompt And Support Improvements",
+                        "- No changes identified.",
+                        "## Plugin Skill And Eval Opportunities",
+                        "- No changes identified.",
+                        "## What Worked",
+                        "- Deterministic evidence was available.",
+                        "## Evidence Links",
+                        "- [Validation ledger](evidence/validation-ledger.json)",
+                        "- [Milestones](evidence/milestones.json)",
+                        "```"
+                    ].join("\n")
+                }
+            };
+        }
         const result = await run(invocation);
         await markInvocationRuntimeReady(invocation, result);
         return result;

@@ -32,6 +32,11 @@ import {
 import { renderRunSummary } from "../delivery/summary.js";
 import { writeDeliveryPackage, type DeliveryPackageManifest } from "../delivery/package.js";
 import {
+  createHarnessDeliveryCurator,
+  DeliveryCurationError,
+  type DeliveryCurator
+} from "../delivery/curation.js";
+import {
   buildExecutionId,
   closeNodeAttempt,
   createAttemptRegistry,
@@ -1151,6 +1156,51 @@ function resolveSupervisorHarness(
     ...(harnessName ? { harnessName } : {}),
     ...(harnessName && harnesses?.[harnessName] ? { harness: harnesses[harnessName] } : {})
   };
+}
+
+function resolveDeliveryCurator(options: {
+  session: RuntimeSession;
+  harnesses: RunCompiledGraphOptions["harnesses"];
+  runRoot: string;
+  signal?: AbortSignal;
+  environment?: NodeJS.ProcessEnv;
+}): DeliveryCurator {
+  const firstNode = options.session.graph.nodes[0];
+  if (!firstNode && !options.session.graph.supervisor_effective_policy) {
+    return {
+      async curate() {
+        throw new Error("Delivery curation requires a supervisor profile or at least one node policy to choose a harness.");
+      }
+    };
+  }
+  const policy = options.session.graph.supervisor_effective_policy ?? resolveSupervisorPolicyForNode(options.session, firstNode!);
+  if (!policy.harness) {
+    return {
+      async curate() {
+        throw new Error("Delivery curation requires a supervisor harness.");
+      }
+    };
+  }
+  const harness = options.harnesses?.[policy.harness];
+  if (!harness) {
+    return {
+      async curate() {
+        throw new Error(`Delivery curation requires configured harness adapter "${policy.harness}".`);
+      }
+    };
+  }
+  const deliveryDir = join(options.runRoot, "delivery");
+  return createHarnessDeliveryCurator({
+    harness,
+    policy,
+    run_id: options.session.run_id,
+    repo_path: options.runRoot,
+    delivery_dir: deliveryDir,
+    prompt_path: join(deliveryDir, "evidence", "curation-prompt.md"),
+    response_path: join(deliveryDir, "evidence", "curation-response.md"),
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.environment ? { base_env: options.environment } : {})
+  });
 }
 
 function spendRuntimeSupervisorAction(session: RuntimeSession, action: SupervisorActionKind): void {
@@ -4949,6 +4999,7 @@ async function finalizeRun(
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
   onEvent: RunCompiledGraphOptions["on_event"],
+  deliveryOptions: Pick<RunCompiledGraphOptions, "harnesses" | "environment" | "signal">,
   outcome: RuntimeRunStatus,
   reason?: string
 ): Promise<RunCompiledGraphResult> {
@@ -4973,13 +5024,26 @@ async function finalizeRun(
   let deliveryManifest: DeliveryPackageManifest | undefined;
 
   try {
+    await emitEvent(session, writer, runOwner, events, onEvent, "delivery.curation.started", {
+      profile: session.graph.supervisor_effective_policy?.profile_name ?? "supervisor"
+    });
     deliveryManifest = await writeDeliveryPackage({
       run_root: writer.run_root,
       graph: session.graph,
       state,
       attempts,
       events,
-      interventions: await readSupervisorInterventions(writer.run_root)
+      interventions: await readSupervisorInterventions(writer.run_root),
+      curator: resolveDeliveryCurator({
+        session,
+        harnesses: deliveryOptions.harnesses,
+        runRoot: writer.run_root,
+        ...(deliveryOptions.signal ? { signal: deliveryOptions.signal } : {}),
+        ...(deliveryOptions.environment ? { environment: deliveryOptions.environment } : {})
+      })
+    });
+    await emitEvent(session, writer, runOwner, events, onEvent, "delivery.curation.completed", {
+      verdict_path: deliveryManifest.evidence_files.curation_verdict
     });
     await emitEvent(session, writer, runOwner, events, onEvent, "delivery.package.completed", {
       manifest_path: deliveryManifest.manifest_path,
@@ -4992,13 +5056,12 @@ async function finalizeRun(
     attempts = await readRunExecutionAttempts(writer.run_root);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    session.status = "failed";
-    state = await syncRunArtifacts(session, writer, runOwner);
-    await emitEvent(session, writer, runOwner, events, onEvent, "run.completed", {
-      outcome: "failed",
-      duration_ms,
-      reason: `delivery_package_failed: ${message}`
+    const verdictPath = error instanceof DeliveryCurationError ? error.verdict_path : undefined;
+    await emitEvent(session, writer, runOwner, events, onEvent, "delivery.curation.failed", {
+      ...(verdictPath ? { verdict_path: verdictPath } : {}),
+      reason: message
     });
+    state = await syncRunArtifacts(session, writer, runOwner);
   }
 
   state = await writeTerminalRunSummary(session, writer, events, deliveryManifest);
@@ -5019,6 +5082,7 @@ async function finalizeRunWithWorkspaceCleanup(
   runOwner: RunOwnerRecord,
   events: RuntimeEventEnvelope[],
   onEvent: RunCompiledGraphOptions["on_event"],
+  deliveryOptions: Pick<RunCompiledGraphOptions, "harnesses" | "environment" | "signal">,
   workspace: WorkspaceSetup | undefined,
   outcome: RuntimeRunStatus,
   reason?: string
@@ -5043,7 +5107,7 @@ async function finalizeRunWithWorkspaceCleanup(
     }
   }
 
-  return finalizeRun(session, writer, runOwner, events, onEvent, finalOutcome, finalReason);
+  return finalizeRun(session, writer, runOwner, events, onEvent, deliveryOptions, finalOutcome, finalReason);
 }
 
 async function finalizeRunAfterCleanup(
@@ -5111,6 +5175,7 @@ async function finalizeRunAfterCleanup(
     runOwner,
     events,
     options.on_event,
+    options,
     workspace,
     finalOutcome,
     finalReason

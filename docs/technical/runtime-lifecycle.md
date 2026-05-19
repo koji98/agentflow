@@ -155,8 +155,8 @@ Paused supervisor runs additionally require explicit `--human-action` and option
 
 ## Delivery
 
-Terminal runs always attempt to write the delivery package. The collector reads state, attempts, events, checks, interventions, workspace changes, milestones, and declared artifacts, then writes `delivery/01-review-brief.md`, `delivery/02-run-learnings.md`, `delivery/03-audit-index.md`, and semantic evidence files under `delivery/evidence/`.
+Terminal runs always attempt to write the delivery package. Runtime first collects deterministic evidence from state, attempts, events, checks, interventions, workspace changes, milestones, and declared artifacts. It writes `delivery/evidence/delivery-source.json`, `delivery/evidence/delivery-source.md`, the audit/index evidence files, and `delivery/03-audit-index.md`. A required read-only delivery curator then uses the supervisor profile to write the human-facing `delivery/01-review-brief.md` and `delivery/02-run-learnings.md`. Runtime verifies those curated files against `delivery/evidence/delivery-source.json` and records the result in `delivery/evidence/curation-verdict.json`.
 
 Delivery is derived from final runtime state. Final accepted attempts and artifacts are the review surface; failed prior attempts that were later repaired or retried are listed as recovered issues, not active follow-ups. Active failures are reserved for unresolved terminal failures or active blocking observations.
 
-If delivery creation fails, the run is marked failed. This keeps the runtime contract honest: a successful terminal run must be reviewable, not merely complete.
+If curated delivery fails, graph control-flow status remains the terminal graph outcome, but CLI/reporting mark delivery as failed and the run is not review-ready. This keeps the runtime contract honest: a successful graph outcome still needs a verified human handoff.

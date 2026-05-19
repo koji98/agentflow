@@ -9,7 +9,7 @@ At terminal state, review in this order:
 5. declared artifacts and evidence files named by the manifest
 6. raw runtime files only for debug, audit, or resume
 
-The review brief is the human front door. Run learnings capture future-run and workspace improvements. The audit index maps raw evidence for deeper inspection. The manifest uses semantic keys for tools, automation, and exact provenance.
+The review brief and run learnings are AI-curated from deterministic runtime evidence. The audit index maps raw evidence for deeper inspection. The manifest uses semantic keys for tools, automation, and exact provenance. Treat `delivery/evidence/delivery-source.json` and `delivery/evidence/curation-verdict.json` as the trust boundary: if curation failed, the graph may have reached terminal state, but the run is not review-ready.
 
 Review questions:
 
@@ -19,3 +19,4 @@ Review questions:
 - Does validation evidence support the claimed outcome?
 - Did supervisor interventions change tactics or reveal missing context?
 - Are active risks real unresolved work, while recovered issues are separated from current follow-ups?
+- Does `delivery/evidence/curation-verdict.json` pass, with no invented files, commands, validation claims, or hidden active failures?

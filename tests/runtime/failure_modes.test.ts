@@ -10,6 +10,7 @@ import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { readRunExecutionAttempts, readSupervisorInterventions, readSupervisorTimeline } from "../../src/artifacts/reader.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
+import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 function compileGraph(document: AuthoredGraphDocument) {
     const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({
@@ -30,7 +31,12 @@ function createHarness(run: HarnessAdapter["run"], overrides: Partial<HarnessAda
     return {
         kind: "codex-cli",
         capabilities: getHarnessCapabilities("codex-cli")!,
-        run,
+        async run(invocation) {
+            if (invocation.promptKind === "delivery_curator") {
+                return createPassingDeliveryHarness().run(invocation);
+            }
+            return run(invocation);
+        },
         async cancel() {
             return;
         },

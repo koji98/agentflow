@@ -9,6 +9,7 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
+import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
 const TEST_INTENT = {
@@ -99,6 +100,9 @@ describe("workspace backends", () => {
                 compiled_graph: compileGraph(createWorkspaceDocument("inplace")),
                 repo_sources: {
                     main: repoDir
+                },
+                harnesses: {
+                    "codex-cli": createPassingDeliveryHarness()
                 }
             });
             expect(inplaceRun.outcome).toBe("passed");
@@ -110,6 +114,9 @@ describe("workspace backends", () => {
                 compiled_graph: compileGraph(createWorkspaceDocument("worktree")),
                 repo_sources: {
                     main: repoDir
+                },
+                harnesses: {
+                    "codex-cli": createPassingDeliveryHarness()
                 }
             });
             expect(worktreeRun.outcome).toBe("passed");
@@ -132,6 +139,9 @@ describe("workspace backends", () => {
                 compiled_graph: compileGraph(createWorkspaceDocument("worktree")),
                 repo_sources: {
                     main: repoDir
+                },
+                harnesses: {
+                    "codex-cli": createPassingDeliveryHarness()
                 },
                 executors: {
                     exec: async () => ({
@@ -165,6 +175,9 @@ describe("workspace backends", () => {
                 compiled_graph: compileGraph(createWorkspaceDocument("worktree")),
                 repo_sources: {
                     main: repoDir
+                },
+                harnesses: {
+                    "codex-cli": createPassingDeliveryHarness()
                 },
                 signal: controller.signal,
                 executors: {
@@ -205,6 +218,9 @@ describe("workspace backends", () => {
                 compiled_graph: compileGraph(createWorkspaceDocument("worktree")),
                 repo_sources: {
                     main: repoDir
+                },
+                harnesses: {
+                    "codex-cli": createPassingDeliveryHarness()
                 },
                 executors: {
                     exec: async () => {
@@ -270,6 +286,9 @@ describe("workspace backends", () => {
                 compiled_graph: compileGraph(document),
                 repo_sources: {
                     main: repoDir
+                },
+                harnesses: {
+                    "codex-cli": createPassingDeliveryHarness()
                 },
                 signal: controller.signal,
                 executors: {
@@ -359,6 +378,9 @@ describe("workspace backends", () => {
                 repo_sources: {
                     main: repoDir,
                     broken: brokenDir
+                },
+                harnesses: {
+                    "codex-cli": createPassingDeliveryHarness()
                 }
             });
             expect(run.outcome).toBe("passed");
