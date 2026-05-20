@@ -13,6 +13,7 @@ import { resolveExecutionRuntimeCompletionPacketPath } from "../../src/artifacts
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
+import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
 async function initGitRepo(repoDir: string): Promise<void> {
@@ -40,10 +41,15 @@ function harnessOk(invocation: AgentInvocation, lastMessage = "agent done"): Awa
     };
 }
 function buildHarness(): HarnessAdapter {
+    const deliveryHarness = createPassingDeliveryHarness("codex-cli");
     return {
         kind: "codex-cli",
         capabilities: getHarnessCapabilities("codex-cli")!,
         async run(invocation) {
+            if (invocation.promptKind === "delivery_curator") {
+                return deliveryHarness.run(invocation);
+            }
+
             if (invocation.promptKind === "supervisor_evidence") {
                 return harnessOk(invocation, JSON.stringify({
                     claims: ["Managed completion failed because the required criterion still fails."],

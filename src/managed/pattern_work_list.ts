@@ -87,7 +87,6 @@ function zeroPad(value: number): string {
 export function defaultPatternWorkListPublicArtifacts(): Record<string, ArtifactDefinition> {
   return mergeArtifacts(
     outputDirArtifact("summary", "summary.md", "Human-readable final summary for the managed work list."),
-    outputDirArtifact("packet", "packet.json", "Machine-readable final packet for downstream Agentflow nodes."),
     outputDirArtifact("work_items", "work-items.json", "Machine-readable index of frozen work-list items, item outcomes, validation evidence, and residual risks.")
   );
 }
@@ -182,6 +181,12 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
       ...listOrFallback("Done when", config.work_list.item_guidance.done_when, "The item is completed with evidence and a handoff.")
     ]),
     section("Item Worker", workerLines),
+    section("Retry And Preservation", [
+      "On retry, inspect repeat history, attempt memory, and prior item evidence before editing.",
+      "Preserve completed, in-scope item work unless the verifier or supervisor identifies it as contaminated or based on a bad premise.",
+      "Focus the next cycle on failed, blocked, or semantically rejected items; do not redo completed items just because the work-list node restarted.",
+      "If a later item fails, keep earlier accepted item evidence as the starting point for the retry."
+    ]),
     section("Output Contract", [
       "Publish the `item_handoffs` artifact; include one section per frozen item id with item goal, result, evidence, validation, risks, and downstream implications.",
       "Publish the `item_results` artifact using this exact JSON shape:",
@@ -213,7 +218,7 @@ function buildPublisherPrompt(
       "Publish the declared public artifacts.",
       ...formatPublicArtifacts(publicArtifacts),
       "The `work_items` artifact is forwarded by the runtime from the deterministic verifier; do not rewrite it.",
-      "The `packet` artifact should summarize the frozen list, completed items, validation evidence, risks, and downstream constraints."
+      "The `summary` artifact should summarize the frozen list, completed items, validation evidence, risks, and downstream constraints."
     ])
   ]);
 }

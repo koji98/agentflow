@@ -638,6 +638,23 @@ function cancelActiveExecutions(
   }
 }
 
+function hasActiveExecutionInRepeatIteration(
+  activeExecutions: Map<string, ActiveExecutionHandle>,
+  repeatScopeId: string,
+  iterationIndex: number
+): boolean {
+  for (const handle of activeExecutions.values()) {
+    if (
+      handle.ready_node.repeat_scope_id === repeatScopeId &&
+      handle.ready_node.iteration_index === iterationIndex
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function buildRunRecord(session: RuntimeSession, runOwner: RunOwnerRecord) {
   return {
     run_id: session.run_id,
@@ -5624,6 +5641,115 @@ async function executeRunLoop(
       }
 
       completeRepeatIteration(session, repeatScopeId, "passed");
+      continue;
+    }
+
+    if (
+      outcome === "failed" &&
+      repeatScope &&
+      repeatScopeId &&
+      node.compiled_id !== repeatScope.until_compiled_id &&
+      attempt.iteration_index !== undefined &&
+      !hasFailureContinuation(topology, node) &&
+      !hasActiveExecutionInRepeatIteration(activeExecutions, repeatScopeId, attempt.iteration_index)
+    ) {
+      await emitEvent(session, writer, runOwner, events, options.on_event, "repeat.iteration.completed", {
+        outcome,
+        iteration_index: attempt.iteration_index,
+        failed_compiled_id: node.compiled_id
+      }, {
+        compiled_id: undefined,
+        execution_id: undefined,
+        repeat_scope_id: repeatScopeId,
+        iteration_index: attempt.iteration_index,
+        attempt_index: undefined
+      });
+
+      const attemptsRemaining = repeatScope.latest_iteration_index < repeatScope.max_attempts;
+
+      if (attemptsRemaining) {
+        const updatedScope = openRepeatIteration(session, repeatScopeId);
+        await emitEvent(session, writer, runOwner, events, options.on_event, "repeat.iteration.started", {
+          max_attempts: updatedScope.max_attempts
+        }, {
+          compiled_id: undefined,
+          execution_id: undefined,
+          repeat_scope_id: repeatScopeId,
+          iteration_index: updatedScope.active_iteration_index,
+          attempt_index: undefined
+        });
+
+        const bodyEntryDeps = topology.repeat_scopes_by_id.get(repeatScopeId)?.body_entry_node_ids.map(
+          (compiledId) =>
+            computeReadyDeps(
+              session,
+              topology,
+              topology.nodes_by_id.get(compiledId)!,
+              updatedScope.active_iteration_index
+            ) ?? []
+        ) ?? [];
+
+        await Promise.all(
+          (topology.repeat_scopes_by_id.get(repeatScopeId)?.body_entry_node_ids ?? []).map(
+            (compiledId, index) =>
+              queueReadyNode(readyQueue, session, writer, runOwner, events, options.on_event, {
+                compiled_id: compiledId,
+                deps_satisfied: bodyEntryDeps[index] ?? [],
+                repeat_scope_id: repeatScopeId,
+                iteration_index: updatedScope.active_iteration_index
+              })
+          )
+        );
+        continue;
+      }
+
+      const managedExhausted = await emitManagedRepeatExhaustedProgress({
+        session,
+        writer,
+        runOwner,
+        events,
+        onEvent: options.on_event,
+        repeatScopeId,
+        repeatScopeAuthoredId: repeatScope.authored_id,
+        node,
+        attempt,
+        outcome
+      });
+
+      if (managedExhausted) {
+        const retried = await handleFailedNodeWithSupervisor({
+          runOptions: options,
+          session,
+          writer,
+          runOwner,
+          events,
+          readyQueue,
+          topology,
+          node,
+          attempt,
+          result,
+          readyNode: {
+            compiled_id: node.compiled_id,
+            deps_satisfied: computeReadyDeps(session, topology, node, attempt.iteration_index) ?? [],
+            repeat_scope_id: attempt.repeat_scope_id,
+            iteration_index: attempt.iteration_index
+          }
+        });
+
+        if (retried) {
+          continue;
+        }
+
+        if (session.status === "paused") {
+          cancelActiveExecutions(activeExecutions);
+          continue;
+        }
+      }
+
+      completeRepeatIteration(session, repeatScopeId, "failed");
+      session.status = "failed";
+      await markPendingNodesBlocked(session, writer, runOwner, events, options.on_event, node);
+      cancelActiveExecutions(activeExecutions);
       continue;
     }
 

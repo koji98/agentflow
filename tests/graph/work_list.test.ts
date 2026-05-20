@@ -165,7 +165,6 @@ describe("pattern work list", () => {
       type: "agent",
       artifacts: expect.objectContaining({
         summary: expect.objectContaining({ path: "summary.md" }),
-        packet: expect.objectContaining({ path: "packet.json" }),
         work_items: expect.objectContaining({ path: "work-items.json" })
       }),
       managed_artifact_forwards: {
@@ -177,6 +176,7 @@ describe("pattern work list", () => {
     }));
     expect(publishPrompt).toContain("stable artifacts, not the internal item attempts");
     expect(publishPrompt).toContain("The `work_items` artifact is forwarded by the runtime");
+    expect(publishPrompt).not.toContain("The `packet` artifact");
   });
 
   it("supports a deep_work item worker with item handoff and ledger rubric targets", () => {

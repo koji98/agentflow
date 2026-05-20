@@ -52,7 +52,7 @@ For normal worker prompts, `af orient` is both the first operating-picture comma
 | Work-list item worker | `src/managed/pattern_work_list.ts` | managed agent | Execute frozen items sequentially without changing the list. | frozen list, ledger, item guidance, prior evidence | `item-handoffs.md`, `item-results.json`, `item-validation.md` | `tests/graph/work_list.test.ts` |
 | Work-list criterion evaluator | `src/managed/pattern_work_list.ts` | AI check rubric | Grade only frozen-list item evidence for one criterion. | rubric criterion, item handoffs/results, validation notes, ledger | JSON `{passed, score, summary, issues}` | `tests/graph/work_list.test.ts`, `tests/runtime/work_list.test.ts` |
 | Work-list completion gate | `src/managed/pattern_work_list.ts` | deterministic check | Aggregate frozen item completion and criteria results; no workspace mutation. | frozen list, item results, criterion outputs | `scorecard.json`, `verification.json` | `tests/runtime/work_list.test.ts` |
-| Work-list publisher | `src/managed/pattern_work_list.ts` | managed agent | Publish stable graph-addressable artifacts from verified item evidence. | verified work-items index, frozen list, item handoffs | `summary`, `packet`, forwarded `work_items` | `tests/graph/work_list.test.ts` |
+| Work-list publisher | `src/managed/pattern_work_list.ts` | managed agent | Publish stable graph-addressable artifacts from verified item evidence. | verified work-items index, frozen list, item handoffs | `summary`, forwarded `work_items` | `tests/graph/work_list.test.ts` |
 
 ## Known Failure Modes
 

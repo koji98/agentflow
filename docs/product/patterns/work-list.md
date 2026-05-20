@@ -40,7 +40,6 @@ The author does not provide the item schema. The runtime owns item ids, status, 
 Default graph-addressable artifacts:
 
 - `summary`: final human-readable handoff.
-- `packet`: final machine-readable packet.
 - `work_items`: verified machine-readable index of frozen items, completed item outcomes, validation evidence, risks, and downstream implications.
 
 Downstream graph nodes reference stable artifacts such as `my_work_list.work_items`. Dynamic item refs such as `my_work_list.w3` are not part of the graph contract.
@@ -52,11 +51,11 @@ The pattern lowers into:
 1. A planner agent that writes `work-list.md` and `work-list.json`.
 2. A deterministic freeze step that validates the list and writes `work-list-frozen.json` plus an initial ledger.
 3. An item worker agent that executes every frozen item sequentially and writes item handoffs/results.
-4. For `item_worker.kind: "deep_work"`, a completion loop runs weighted criteria, writes a scorecard, and retries item execution over the frozen list until the gate passes or `max_cycles` is exhausted.
+4. For `item_worker.kind: "deep_work"`, a completion loop runs weighted criteria, writes a scorecard, and retries item execution over the frozen list until the gate passes or `max_cycles` is exhausted. A failed item-worker attempt inside the loop consumes the loop budget before downstream nodes are blocked.
 5. A deterministic finalizer that verifies every frozen item completed and writes `work-items.json`.
 6. A publisher agent that writes final graph-addressable artifacts and forwards the verified `work_items` artifact.
 
-The runtime freezes the list before item execution. Workers must not add, remove, split, merge, or reorder items while executing. If the list is wrong, the node fails with evidence instead of silently changing scope. In `deep_work` mode, retries happen against the frozen list; the runtime does not allow later cycles to mutate item ids or order.
+The runtime freezes the list before item execution. Workers must not add, remove, split, merge, or reorder items while executing. If the list is wrong, the node fails with evidence instead of silently changing scope. In `deep_work` mode, retries happen against the frozen list; the runtime does not allow later cycles to mutate item ids or order. Retry workers should preserve completed, in-scope item evidence from prior cycles and focus on the failed, blocked, or semantically rejected item evidence.
 
 ## Example
 
