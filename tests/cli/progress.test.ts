@@ -231,16 +231,16 @@ describe("runtime progress reporter", () => {
         });
         const rendered = lines.join("");
         expect(rendered).toContain('agentflow: compiled graph "progress-graph" with 2 executable nodes');
-        expect(rendered).toContain("agentflow: started run · workspace=inplace");
-        expect(rendered).toContain("[0/2] start agent Inspect Repo · repo=main");
-        expect(rendered).toContain("[1/2] passed agent Inspect Repo · 1s");
-        expect(rendered).toContain("agentflow: repeat retry iteration 2/3");
-        expect(rendered).toContain("agentflow: check failed Quality Check · score=0.62");
-        expect(rendered).toContain("agentflow: intervention retry Quality Check · retry_with_guidance · attempt 1/3 · delay=3s · Supervisor harness was temporarily unavailable.");
-        expect(rendered).toContain("agentflow: verification started Quality Check · check");
-        expect(rendered).toContain("agentflow: verification failed Quality Check · Spec is not implementation-ready.");
-        expect(rendered).toContain("[2/2] blocked check Quality Check · terminal_failure");
-        expect(rendered).toContain("agentflow: run failed · 2/2 terminal nodes");
+        expect(rendered).toContain("agentflow: RUN      run · workspace=inplace");
+        expect(rendered).toContain("[0/2] RUN      agent Inspect Repo · repo=main");
+        expect(rendered).toContain("[1/2] PASS     agent Inspect Repo · 1s");
+        expect(rendered).toContain("  REPEAT   retry · iteration=2/3");
+        expect(rendered).toContain("  FAIL     check Quality Check · score=0.62");
+        expect(rendered).toContain("  RETRY    intervention Quality Check · retry_with_guidance · attempt=1/3 · delay=3s · Supervisor harness was temporarily unavailable.");
+        expect(rendered).toContain("  VERIFY   start Quality Check · check");
+        expect(rendered).toContain("  FAIL     verification Quality Check · Spec is not implementation-ready.");
+        expect(rendered).toContain("[2/2] BLOCK    check Quality Check · terminal_failure");
+        expect(rendered).toContain("agentflow: FAIL     run · 2/2 terminal nodes");
     });
     it("counts preserved nodes when reporting resumed runs", () => {
         const lines: string[] = [];
@@ -297,10 +297,10 @@ describe("runtime progress reporter", () => {
             }
         });
         const rendered = lines.join("");
-        expect(rendered).toContain("agentflow: resumed run from failed · preserved=1 restarted=1 · workspace=inplace");
-        expect(rendered).toContain("[1/2] start check Quality Check · repo=main");
-        expect(rendered).toContain("[2/2] passed check Quality Check · 500ms");
-        expect(rendered).toContain("agentflow: run passed · 2/2 terminal nodes · 1s");
+        expect(rendered).toContain("agentflow: RUN      resume · from=failed · preserved=1 restarted=1 · workspace=inplace");
+        expect(rendered).toContain("[1/2] RUN      check Quality Check · repo=main");
+        expect(rendered).toContain("[2/2] PASS     check Quality Check · 500ms");
+        expect(rendered).toContain("agentflow: PASS     run · 2/2 terminal nodes · 1s");
     });
     it("counts skipped nodes as terminal progress", () => {
         const lines: string[] = [];
@@ -339,8 +339,100 @@ describe("runtime progress reporter", () => {
             }
         });
         const rendered = lines.join("");
-        expect(rendered).toContain("agentflow: started run · workspace=inplace");
-        expect(rendered).toContain("[1/2] skipped check Quality Check · operator_cancel");
-        expect(rendered).toContain("agentflow: run canceled · operator_cancel");
+        expect(rendered).toContain("agentflow: RUN      run · workspace=inplace");
+        expect(rendered).toContain("[1/2] SKIP     check Quality Check · operator_cancel");
+        expect(rendered).toContain("agentflow: CANCEL   run · operator_cancel");
+    });
+    it("adds ANSI color only for TTY-like streams", () => {
+        const lines: string[] = [];
+        const previousNoColor = process.env.NO_COLOR;
+        const previousTerm = process.env.TERM;
+        delete process.env.NO_COLOR;
+        process.env.TERM = "xterm-256color";
+        try {
+            const reporter = createRuntimeProgressReporter(createCompiledGraph(), {
+                isTTY: true,
+                write(chunk: string) {
+                    lines.push(chunk);
+                    return true;
+                }
+            });
+            reporter.onEvent({
+                seq: 1,
+                ts: new Date().toISOString(),
+                run_id: "run-4",
+                type: "node.started",
+                compiled_id: "root__inspect",
+                payload: {
+                    kind: "agent",
+                    repo_alias: "main"
+                }
+            });
+            reporter.onEvent({
+                seq: 2,
+                ts: new Date().toISOString(),
+                run_id: "run-4",
+                type: "node.completed",
+                compiled_id: "root__inspect",
+                payload: {
+                    outcome: "passed",
+                    duration_ms: 100
+                }
+            });
+            const rendered = lines.join("");
+            expect(rendered).toContain("\u001b[36mRUN     \u001b[0m");
+            expect(rendered).toContain("\u001b[32mPASS    \u001b[0m");
+            expect(rendered).toContain("\u001b[2m · repo=main\u001b[0m");
+        }
+        finally {
+            if (previousNoColor === undefined) {
+                delete process.env.NO_COLOR;
+            }
+            else {
+                process.env.NO_COLOR = previousNoColor;
+            }
+            if (previousTerm === undefined) {
+                delete process.env.TERM;
+            }
+            else {
+                process.env.TERM = previousTerm;
+            }
+        }
+    });
+    it("keeps TTY-like streams plain when color is disabled", () => {
+        const lines: string[] = [];
+        const previousNoColor = process.env.NO_COLOR;
+        process.env.NO_COLOR = "1";
+        try {
+            const reporter = createRuntimeProgressReporter(createCompiledGraph(), {
+                isTTY: true,
+                write(chunk: string) {
+                    lines.push(chunk);
+                    return true;
+                }
+            });
+            reporter.onEvent({
+                seq: 1,
+                ts: new Date().toISOString(),
+                run_id: "run-5",
+                type: "node.started",
+                compiled_id: "root__inspect",
+                payload: {
+                    kind: "agent",
+                    repo_alias: "main"
+                }
+            });
+            const rendered = lines.join("");
+            expect(rendered).toContain("[0/2] RUN      agent Inspect Repo · repo=main");
+            expect(rendered).not.toContain("\u001b[");
+        }
+        finally {
+            if (previousNoColor === undefined) {
+                delete process.env.NO_COLOR;
+            }
+            else {
+                process.env.NO_COLOR = previousNoColor;
+            }
+        }
     });
 });
