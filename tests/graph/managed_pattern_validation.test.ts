@@ -139,7 +139,7 @@ describe("managed pattern normalization edges", () => {
             id: "implement",
             intent: {
                 goal: "Implement a change.",
-                acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
+                acceptance_criteria: ["The managed deep work node publishes a valid summary and work-items index."],
                 constraints: []
             },
             completion: {
@@ -180,7 +180,7 @@ describe("managed pattern normalization edges", () => {
             id: "implement",
             intent: {
                 goal: "Implement a change.",
-                acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
+                acceptance_criteria: ["The managed deep work node publishes a valid summary and work-items index."],
                 constraints: []
             },
             completion: {
@@ -217,7 +217,7 @@ describe("managed pattern normalization edges", () => {
             id: "implement",
             intent: {
                 goal: "Implement a change.",
-                acceptance_criteria: ["The managed deep work node publishes a valid summary and packet."],
+                acceptance_criteria: ["The managed deep work node publishes a valid summary and work-items index."],
                 constraints: []
             },
             completion: {
@@ -253,7 +253,7 @@ describe("managed pattern normalization edges", () => {
             id: "deliver",
             intent: {
                 goal: "Deliver a bounded work list.",
-                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and work-items index."],
                 constraints: []
             },
             work_list: {
@@ -284,7 +284,7 @@ describe("managed pattern normalization edges", () => {
             id: "deliver",
             intent: {
                 goal: "Deliver a bounded work list.",
-                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and work-items index."],
                 constraints: []
             },
             work_list: {
@@ -312,7 +312,7 @@ describe("managed pattern normalization edges", () => {
             id: "deliver",
             intent: {
                 goal: "Deliver a bounded work list.",
-                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and work-items index."],
                 constraints: []
             },
             work_list: {
@@ -343,7 +343,7 @@ describe("managed pattern normalization edges", () => {
             id: "deliver",
             intent: {
                 goal: "Deliver a bounded work list.",
-                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and work-items index."],
                 constraints: []
             },
             work_list: {
@@ -382,7 +382,7 @@ describe("managed pattern normalization edges", () => {
             id: "deliver",
             intent: {
                 goal: "Deliver a bounded work list.",
-                acceptance_criteria: ["The managed work-list node publishes a valid summary and packet."],
+                acceptance_criteria: ["The managed work-list node publishes a valid summary and work-items index."],
                 constraints: []
             },
             work_list: {

@@ -321,6 +321,10 @@ describe("runtime engine", () => {
             profiles: {
                 default: {
                     harness: "codex-cli"
+                },
+                supervisor: {
+                    harness: "codex-cli",
+                    sandbox: "read-only"
                 }
             },
             graph: {
@@ -983,7 +987,15 @@ describe("runtime engine", () => {
             profiles: {
                 default: {
                     harness: "codex-cli"
+                },
+                supervisor: {
+                    harness: "codex-cli",
+                    sandbox: "read-only"
                 }
+            },
+            supervision: {
+                profile: "supervisor",
+                max_total_interventions: 0
             },
             graph: {
                 type: "sequence",
@@ -1564,6 +1576,204 @@ describe("runtime engine", () => {
         expect(attempt.artifacts.handoff).toBe(join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "handoff.md"));
         expect(await readFile(attempt.artifacts.handoff!, "utf8")).toBe("handoff\n");
         expect(attempt.artifacts.agent_response).toBe(join(resolveExecutionArtifactsDirectory(attempt.execution_dir), "agent-response.md"));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("fails passed agents when the completion packet is not ready for verification", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-agent-incomplete-completion-"));
+        const repoDir = join(tempRoot, "repo");
+        const runRoot = join(tempRoot, "run");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "runtime-agent-incomplete-completion",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                },
+                supervisor: {
+                    harness: "codex-cli",
+                    sandbox: "read-only"
+                }
+            },
+            supervision: {
+                profile: "supervisor",
+                max_total_interventions: 0
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "agent",
+                        id: "incomplete_worker",
+                        intent: {
+                            goal: "Write the handoff without calling af orient or af complete.",
+                            acceptance_criteria: ["The runtime rejects incomplete completion state."],
+                            constraints: []
+                        },
+                        artifacts: {
+                            handoff: {
+                                from: "output_dir",
+                                path: "handoff.md",
+                                description: "Test artifact produced at handoff.md."
+                            }
+                        }
+                    }
+                ]
+            }
+        });
+        const harness: HarnessAdapter = {
+            kind: "codex-cli",
+            capabilities: getHarnessCapabilities("codex-cli")!,
+            async run(invocation) {
+                if (invocation.promptKind === "delivery_curator") {
+                    return createHarness("codex-cli", async () => ({ status: "passed", exitCode: 0 })).run(invocation);
+                }
+                await mkdir(invocation.outputDir, { recursive: true });
+                await writeFile(join(invocation.outputDir, "handoff.md"), "handoff\n");
+                return {
+                    status: "passed",
+                    exitCode: 0,
+                    transcript: {
+                        last_message: "published handoff without runtime completion"
+                    }
+                };
+            },
+            async cancel() {}
+        };
+        const run = await runCompiledGraph({
+            run_root: runRoot,
+            compiled_graph: graph,
+            repo_sources: {
+                main: repoDir
+            },
+            harnesses: {
+                "codex-cli": harness
+            }
+        });
+        const attempt = run.attempts.find((candidate) => candidate.authored_id === "incomplete_worker")!;
+        expect(run.outcome).toBe("failed");
+        expect(JSON.parse(await readFile(attempt.result_path!, "utf8"))).toEqual(expect.objectContaining({
+            completion: expect.objectContaining({
+                completion_status: expect.not.stringMatching(/^ready_for_verification$/u)
+            })
+        }));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("records verifier unavailable when the supervisor harness cannot run outcome verification", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-verifier-unavailable-"));
+        const repoDir = join(tempRoot, "repo");
+        const runRoot = join(tempRoot, "run");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "runtime-verifier-unavailable",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                },
+                supervisor: {
+                    harness: "cursor-cli",
+                    sandbox: "read-only"
+                }
+            },
+            supervision: {
+                profile: "supervisor",
+                max_total_interventions: 0
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "agent",
+                        id: "worker",
+                        intent: {
+                            goal: "Write the handoff.",
+                            acceptance_criteria: ["The node satisfies its acceptance criteria."],
+                            constraints: []
+                        },
+                        artifacts: {
+                            handoff: {
+                                from: "output_dir",
+                                path: "handoff.md",
+                                description: "Test artifact produced at handoff.md."
+                            }
+                        }
+                    }
+                ]
+            }
+        });
+        const harness = createHarness("codex-cli", async (invocation) => {
+            await writeFile(join(invocation.outputDir, "handoff.md"), "handoff\n");
+            return {
+                status: "passed",
+                exitCode: 0,
+                transcript: {
+                    last_message: "published handoff"
+                }
+            };
+        });
+        const run = await runCompiledGraph({
+            run_root: runRoot,
+            compiled_graph: graph,
+            repo_sources: {
+                main: repoDir
+            },
+            harnesses: {
+                "codex-cli": harness
+            }
+        });
+        const attempt = run.attempts.find((candidate) => candidate.authored_id === "worker")!;
+        expect(run.outcome).toBe("failed");
+        expect(run.events).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: "verification.completed",
+                payload: expect.objectContaining({
+                    passed: false,
+                    summary: expect.stringContaining('Outcome verification requires harness "cursor-cli"')
+                })
+            }),
+            expect.objectContaining({
+                type: "outcome.verified",
+                payload: expect.objectContaining({
+                    passed: false,
+                    verifier_harness: "cursor-cli",
+                    parse_status: "unparseable"
+                })
+            })
+        ]));
+        expect(JSON.parse(await readFile(attempt.result_path!, "utf8"))).toEqual(expect.objectContaining({
+            failure_code: "verifier_unavailable",
+            outcome_verification: expect.objectContaining({
+                passed: false,
+                blockers: expect.arrayContaining([
+                    expect.objectContaining({
+                        category: "verifier_unavailable"
+                    })
+                ])
+            })
+        }));
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("substitutes AGENTFLOW_ tokens in agent prompts before invoking the harness", async () => {

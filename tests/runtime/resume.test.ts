@@ -14,6 +14,7 @@ import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
+import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
 const execFileAsync = promisify(execFile);
 async function initGitRepo(repoDir: string): Promise<void> {
@@ -57,6 +58,7 @@ async function createResumeFixture(options: {
     await initGitRepo(repoDir);
     await options.setupRepo?.(repoDir);
     const graph = compileGraph(options.document);
+    const deliveryHarness = createPassingDeliveryHarness("codex-cli");
     const result = await runCompiledGraph({
         run_root: runRoot,
         compiled_graph: graph,
@@ -77,6 +79,10 @@ async function createResumeFixture(options: {
                 kind: "codex-cli",
                 capabilities: getHarnessCapabilities("codex-cli")!,
                 async run(invocation) {
+                    if (invocation.promptKind === "delivery_curator") {
+                        return deliveryHarness.run(invocation);
+                    }
+
                     if (invocation.promptKind === "outcome_verification") {
                         return {
                             status: "passed",

@@ -74,8 +74,10 @@ For the implementation flow behind launch, node attempts, context pointer resolu
 
 ## Progress Events
 
-TTY progress includes node lifecycle, check results, supervisor decisions, supervisor interventions, typed authority pauses, and delivery package completion.
-Verification is also visible as its own phase so transient verifier/check substrate failures are distinguishable from worker failures.
+Terminal progress uses fixed status labels such as `RUN`, `PASS`, `FAIL`, `BLOCK`, `SKIP`, and `CANCEL` for node lifecycle lines.
+Verification, repeat, supervisor, managed-pattern, and delivery updates are indented one level under the active flow so they scan as supporting events rather than additional graph depth.
+TTY-like streams use gated color for status labels and muted metadata; pipes, CI logs, `NO_COLOR`, and `TERM=dumb` stay deterministic plain text.
+Verification is visible as its own phase so transient verifier/check substrate failures are distinguishable from worker failures.
 
 Important event types:
 

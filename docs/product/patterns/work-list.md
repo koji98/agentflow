@@ -20,7 +20,7 @@ Required fields:
 Supported item workers:
 
 - `agent`: one-pass item worker with standard Agentflow orientation, milestones, validation evidence, and item handoff.
-- `deep_work`: deep-work style item execution with a frozen-list criteria gate, scorecard feedback, and bounded retry semantics described by `completion.max_cycles`, `completion.pass_threshold`, and weighted completion criteria.
+- `deep_work`: deep-work style item execution for each frozen item, with per-item criteria, scorecard feedback, semantic verification, and bounded retry semantics described by `completion.max_cycles`, `completion.pass_threshold`, and weighted completion criteria.
 
 Common fields:
 
@@ -40,7 +40,6 @@ The author does not provide the item schema. The runtime owns item ids, status, 
 Default graph-addressable artifacts:
 
 - `summary`: final human-readable handoff.
-- `packet`: final machine-readable packet.
 - `work_items`: verified machine-readable index of frozen items, completed item outcomes, validation evidence, risks, and downstream implications.
 
 Downstream graph nodes reference stable artifacts such as `my_work_list.work_items`. Dynamic item refs such as `my_work_list.w3` are not part of the graph contract.
@@ -49,14 +48,21 @@ Downstream graph nodes reference stable artifacts such as `my_work_list.work_ite
 
 The pattern lowers into:
 
-1. A planner agent that writes `work-list.md` and `work-list.json`.
+1. A planner agent that writes only `work-list.json`.
 2. A deterministic freeze step that validates the list and writes `work-list-frozen.json` plus an initial ledger.
-3. An item worker agent that executes every frozen item sequentially and writes item handoffs/results.
-4. For `item_worker.kind: "deep_work"`, a completion loop runs weighted criteria, writes a scorecard, and retries item execution over the frozen list until the gate passes or `max_cycles` is exhausted.
-5. A deterministic finalizer that verifies every frozen item completed and writes `work-items.json`.
-6. A publisher agent that writes final graph-addressable artifacts and forwards the verified `work_items` artifact.
+3. A runtime-owned item phase that launches one managed agent execution per frozen item in order.
+4. Each item attempt writes `item-handoff.md`, `item-result.json`, and `item-validation.md` in its own execution directory, then receives item-level semantic verification.
+5. For `item_worker.kind: "deep_work"`, each item also runs weighted criteria, writes a per-item scorecard, and retries that same item until its gate passes or `max_cycles` is exhausted.
+6. A deterministic finalizer that verifies every frozen item completed and writes `work-items.json`.
+7. A publisher agent that writes final graph-addressable artifacts and forwards the verified `work_items` artifact.
 
-The runtime freezes the list before item execution. Workers must not add, remove, split, merge, or reorder items while executing. If the list is wrong, the node fails with evidence instead of silently changing scope. In `deep_work` mode, retries happen against the frozen list; the runtime does not allow later cycles to mutate item ids or order.
+The runtime freezes the list before item execution. Workers must not add, remove, split, merge, or reorder items while executing. If the list is wrong, the node fails with evidence instead of silently changing scope. Retries are item-local: a failed `w4` retry preserves accepted `w1` through `w3` unless structured evidence shows earlier work is contaminated. Runtime owns item status and ledger updates; item agents produce evidence and handoffs, not checkmarks.
+
+`work-list.json` must include:
+
+- `planning_summary`
+- `ordering_rationale`
+- `items[]` with sequential ids, title, goal, acceptance criteria, constraints, validation expectations, handoff focus, and rationale
 
 ## Example
 
