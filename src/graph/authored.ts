@@ -6,6 +6,7 @@ import type {
   CursorSandboxMode,
   FailureBehavior,
   HarnessName,
+  LoweredManagedKind,
   ReasoningEffort,
   SandboxMode,
   WorkspaceBackend
@@ -216,6 +217,13 @@ export interface ManagedArtifactForward {
   artifact: string;
 }
 
+export interface ManagedRuntimeMetadata {
+  kind: LoweredManagedKind;
+  root_id: string;
+  phase: string;
+  config?: Record<string, unknown>;
+}
+
 export interface BaseNode {
   id: string;
   label?: string;
@@ -227,6 +235,7 @@ export interface BaseExecutableNode extends BaseNode {
   support?: NodeSupport;
   artifacts?: Record<string, ArtifactDefinition>;
   managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
+  managed_runtime?: ManagedRuntimeMetadata;
 }
 
 export interface AgentNode extends BaseExecutableNode {

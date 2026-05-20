@@ -50,9 +50,9 @@ Good for:
 
 Author `what_counts_as_one_item` and `done_when` in domain terms. If items are PR branches, say branch/base/PR readiness; if migrations, say batch boundary, rollback, and validation; if docs, say reader outcome and review evidence. Do not hard-code the item count when discovery owns it.
 
-The planner writes `work-list.md` and `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Agents do not check off items manually. Runtime records item status in the ledger and publishes stable graph-addressable artifacts: `summary`, `packet`, and `work_items`.
+The planner writes only `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Runtime then launches one managed item execution per frozen item. Agents do not check off items manually. Runtime records item status in the ledger and publishes stable graph-addressable artifacts: `summary` and `work_items`.
 
-Use `item_worker.kind: "agent"` for one-pass item execution. Use `item_worker.kind: "deep_work"` when the frozen list needs criteria, scorecard feedback, and bounded retries before publishing. Work-list rubric criteria can target `workspace`, `item_handoff`, or `work_list_ledger`.
+Use `item_worker.kind: "agent"` for one-pass item execution. Use `item_worker.kind: "deep_work"` when each item needs criteria, scorecard feedback, item-level semantic verification, and bounded retries before publishing. Work-list rubric criteria can target `workspace`, `item_handoff`, or `work_list_ledger`.
 
 Downstream nodes should reference stable artifacts such as `my_work_list.work_items`; do not depend on dynamic item ids like `my_work_list.w3`.
 

@@ -11,7 +11,7 @@ export const managedPatternDescriptors = [
     kind: "pattern_deep_research",
     label: "Pattern Deep Research",
     summary:
-      "Parallel angle-based research pattern that gathers evidence, synthesizes balanced batches, and publishes a sourced summary plus machine packet.",
+      "Parallel angle-based research pattern that gathers evidence, synthesizes balanced batches, and publishes one complete sourced research report.",
     contract_status: "implemented",
     runtime_shape: "compiled-subgraph",
     orchestration: {
@@ -25,7 +25,7 @@ export const managedPatternDescriptors = [
     phases: [
       { id: "angles", label: "Research Angles", summary: "Run each authored angle independently in parallel.", mode: "parallel-agents" },
       { id: "synthesis", label: "Balanced Synthesis", summary: "Collapse redundancy while preserving major findings, provenance, uncertainty, and conflicts.", mode: "parallel-agents" },
-      { id: "publish", label: "Publish Research", summary: "Write the declared public summary, packet, and any authored artifacts.", mode: "single-agent" }
+      { id: "publish", label: "Publish Research", summary: "Write one complete public research report from accepted angle and synthesis evidence.", mode: "single-agent" }
     ]
   }),
   definePattern({
@@ -60,7 +60,7 @@ export const managedPatternDescriptors = [
     runtime_shape: "compiled-subgraph",
     orchestration: {
       summary:
-        "Plan the ordered item list, deterministically freeze it, run frozen items sequentially, verify all items completed, then publish stable summary, packet, and work-items artifacts.",
+        "Plan the ordered item list, deterministically freeze it, launch one managed execution per frozen item, verify all items completed, then publish stable summary and work-items artifacts.",
       planner: true,
       fan_out: false,
       council: false,
@@ -69,9 +69,9 @@ export const managedPatternDescriptors = [
     phases: [
       { id: "plan", label: "Plan Work List", summary: "Discover the finite ordered list of work items needed for the node contract.", mode: "single-agent" },
       { id: "freeze", label: "Freeze Work List", summary: "Validate and freeze sequential item ids, concrete item goals, and acceptance criteria.", mode: "deterministic-check" },
-      { id: "run_items", label: "Run Items", summary: "Execute frozen items sequentially and write item evidence handoffs.", mode: "single-agent" },
-      { id: "criteria", label: "Completion Criteria", summary: "When deep_work is selected, run command criteria and targeted rubric checks in parallel.", mode: "parallel-agents" },
-      { id: "gate", label: "Completion Gate", summary: "When deep_work is selected, aggregate a deterministic weighted scorecard and repeat item execution on misses.", mode: "repair-loop" },
+      { id: "run_items", label: "Run Items", summary: "Launch one managed item execution per frozen item and aggregate accepted handoffs.", mode: "single-agent" },
+      { id: "criteria", label: "Item Criteria", summary: "When deep_work is selected, run command criteria and targeted rubric checks for the current item.", mode: "parallel-agents" },
+      { id: "gate", label: "Item Gate", summary: "When deep_work is selected, aggregate a per-item scorecard and retry only that item on misses.", mode: "repair-loop" },
       { id: "verify", label: "Verify Item Ledger", summary: "Deterministically verify every frozen item completed before publication.", mode: "deterministic-check" },
       { id: "publish", label: "Publish Work List", summary: "Write final stable public artifacts from the verified item ledger.", mode: "single-agent" }
     ]

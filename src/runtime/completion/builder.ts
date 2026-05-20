@@ -1067,7 +1067,12 @@ function decideCompletionStatus(options: {
   let incomplete = false;
   const authorityRequests = normalizeAuthorityRequests(options.authorityRequests ?? []);
 
-  if (options.nodeKind === "agent") {
+  const runtimeManagedAgentComplete =
+    options.nodeKind === "agent" &&
+    options.managed.active &&
+    options.managed.ready_for_publish === true;
+
+  if (options.nodeKind === "agent" && !runtimeManagedAgentComplete) {
     if (!options.orientation.orient_called) {
       incomplete = true;
       reasons.push("af orient was not run for this agent node.");

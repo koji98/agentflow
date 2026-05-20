@@ -553,6 +553,7 @@ function compileExecutableNode(
     context: node.support?.context ?? [],
     declared_artifacts: node.artifacts ?? {},
     ...(node.managed_artifact_forwards ? { managed_artifact_forwards: node.managed_artifact_forwards } : {}),
+    ...(node.managed_runtime ? { managed_runtime: node.managed_runtime } : {}),
     skills: resolvedSkills,
     cli: expandedSupport.cli,
     ...(lowered_from ? { lowered_from } : {}),

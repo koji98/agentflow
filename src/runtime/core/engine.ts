@@ -23,9 +23,14 @@ import {
   readSupervisorInterventions
 } from "../../artifacts/reader.js";
 import {
+  resolveExecutionAgentContextPath,
   resolveExecutionAgentPromptPath,
   resolveExecutionAgentResponsePath,
   resolveExecutionArtifactsDirectory,
+  resolveExecutionHumanDebugHarnessDirectory,
+  resolveExecutionRuntimeContextPath,
+  resolveExecutionRuntimeDirectory,
+  resolveExecutionRuntimeResultPath,
   resolveExecutionRuntimeVerifierPath,
   resolveInterventionDirectory
 } from "../../artifacts/paths.js";
@@ -82,7 +87,6 @@ import {
   diffNodeSnapshots,
   persistNodeBaselineSnapshot,
   persistNodeWorkspaceChanges,
-  restoreNodeWorkspaceChangesFromSnapshot,
   snapshotWorkspaceForNode
 } from "../workspace/node-snapshot.js";
 import { initializeWorktreeWorkspace } from "../workspace/worktree.js";
@@ -127,10 +131,15 @@ import {
   type ReadyNode,
   type SchedulerTopology
 } from "./scheduler.js";
+import { isManagedWorkListRunItemsNode, runManagedWorkListItems } from "../managed/work_list_items.js";
 import {
-  runSupervisorRecoveryCycleWithBackoff,
-  type SupervisorRecoveryCycleRetryResult
-} from "./supervisor_recovery_retry.js";
+  appendFailedSupervisorRecoveryCycle,
+  applyRuntimeOverlayBeforeRetry,
+  computeRetryDelayMs,
+  runSupervisorRecoveryCycleWithRuntimeBackoff,
+  sleepForRetryDelay,
+  type RuntimeSupervisorEventEmitter
+} from "../supervisor/recovery_runtime.js";
 
 export interface RuntimeNodeExecutionResult {
   status: "passed" | "failed" | "canceled";
@@ -161,6 +170,14 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
   supervisor_recovery_envelope?: SupervisorRecoveryEnvelope;
   attempt_memory_path?: string;
   attempt_memory_markdown_path?: string;
+  emit_managed_progress?: (payload: {
+    phase?: string;
+    status: string;
+    summary?: string;
+    item_id?: string;
+    attempt?: number;
+    max_attempts?: number;
+  }) => Promise<void>;
   environment: NodeJS.ProcessEnv;
   runtime_env?: Record<string, string>;
   signal: AbortSignal | undefined;
@@ -1037,6 +1054,23 @@ async function buildManagedCompletionSummary(options: {
   attempt: RuntimeNodeAttempt;
   artifacts: Record<string, string>;
 }): Promise<CompletionManagedSummary | undefined> {
+  if (
+    options.node.kind === "agent" &&
+    options.node.managed_runtime?.kind === "pattern_work_list" &&
+    options.node.managed_runtime.phase === "run_items"
+  ) {
+    const requiredArtifacts = ["item_handoffs", "item_results", "item_validation"];
+    const missing = requiredArtifacts.filter((name) => !options.artifacts[name]);
+    return {
+      active: true,
+      managed_kind: "pattern_work_list",
+      ready_for_publish: missing.length === 0,
+      blocking_criteria: missing.map((name) => `${name}_missing`),
+      material_delta: [],
+      evidence_refs: requiredArtifacts.flatMap((name) => options.artifacts[name] ? [options.artifacts[name]] : [])
+    };
+  }
+
   const managed = parseManagedAuthoredId(options.node.authored_id, options.node.lowered_from);
   if (!managed || managed.managed_kind !== "pattern_deep_work") {
     return undefined;
@@ -1365,212 +1399,24 @@ function updateFailureFingerprintState(
   return count;
 }
 
-function retryDelayBaseMs(): number {
-  const configured = Number.parseInt(process.env.AGENTFLOW_RETRY_BASE_DELAY_MS ?? "", 10);
-  if (Number.isFinite(configured) && configured >= 0) {
-    return configured;
-  }
-  return process.env.NODE_ENV === "test" || process.env.VITEST || process.env.VITEST_WORKER_ID ? 0 : 10_000;
-}
-
-function retryDelayMaxMs(): number {
-  const configured = Number.parseInt(process.env.AGENTFLOW_RETRY_MAX_DELAY_MS ?? "", 10);
-  if (Number.isFinite(configured) && configured >= 0) {
-    return configured;
-  }
-  return 120_000;
-}
-
-function computeRetryDelayMs(repeatedFingerprintCount: number): number {
-  const base = retryDelayBaseMs();
-  const max = retryDelayMaxMs();
-  const exponent = Math.max(0, repeatedFingerprintCount - 1);
-  return Math.min(max, base * (2 ** exponent));
-}
-
-async function sleepForRetryDelay(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  if (ms <= 0) {
-    return;
-  }
-
-  await new Promise<void>((resolveSleep, reject) => {
-    const timer = setTimeout(resolveSleep, ms);
-    /* c8 ignore next 4 -- cancellation during retry sleep is exercised at run level; this branch depends on abort timing. */
-    const abort = () => {
-      clearTimeout(timer);
-      reject(new Error("Retry delay canceled."));
-    };
-
-    /* c8 ignore next 4 -- same abort-timing path as above. */
-    if (signal?.aborted) {
-      abort();
-      return;
-    }
-
-    signal?.addEventListener("abort", abort, { once: true });
-  });
-}
-
-type SupervisorRecoveryCycleResult = Awaited<ReturnType<typeof runSupervisorRecoveryCycle>>;
-type FailedSupervisorRecoveryCycleResult = Extract<
-  SupervisorRecoveryCycleRetryResult<SupervisorRecoveryCycleResult>,
-  { status: "failed" }
->;
-
-function supervisorRecoveryCycleMaxAttempts(): number {
-  const configured = Number.parseInt(process.env.AGENTFLOW_SUPERVISOR_RECOVERY_MAX_ATTEMPTS ?? "", 10);
-  if (Number.isFinite(configured) && configured >= 1) {
-    return configured;
-  }
-  return 3;
-}
-
-async function runSupervisorRecoveryCycleWithRuntimeBackoff(options: {
-  runOptions: RunCompiledGraphOptions;
+function createSupervisorEventEmitter(options: {
   session: RuntimeSession;
   writer: ArtifactWriter;
   runOwner: RunOwnerRecord;
   events: RuntimeEventEnvelope[];
-  node: CompiledExecutableNode;
-  attempt: RuntimeNodeAttempt;
-  action: SupervisorActionKind;
-  interventionId: string;
-  decisionId: string;
-  targetCompiledId: string;
-  run: () => Promise<SupervisorRecoveryCycleResult>;
-}): Promise<SupervisorRecoveryCycleRetryResult<SupervisorRecoveryCycleResult>> {
-  return runSupervisorRecoveryCycleWithBackoff({
-    maxAttempts: supervisorRecoveryCycleMaxAttempts(),
-    run: options.run,
-    delayForAttempt: computeRetryDelayMs,
-    sleep: (delayMs) => sleepForRetryDelay(delayMs, options.runOptions.signal),
-    onRetry: async (retry) => {
-      await emitEvent(
-        options.session,
-        options.writer,
-        options.runOwner,
-        options.events,
-        options.runOptions.on_event,
-        "supervisor.intervention.retry",
-        {
-          intervention_id: options.interventionId,
-          decision_id: options.decisionId,
-          action: options.action,
-          target_compiled_id: options.targetCompiledId,
-          ...retry
-        },
-        {
-          compiled_id: options.node.compiled_id,
-          execution_id: options.attempt.execution_id,
-          repeat_scope_id: options.attempt.repeat_scope_id,
-          iteration_index: options.attempt.iteration_index,
-          attempt_index: options.attempt.attempt_index
-        }
-      );
-    }
-  });
-}
-
-async function appendFailedSupervisorRecoveryCycle(options: {
-  runOptions: RunCompiledGraphOptions;
-  session: RuntimeSession;
-  writer: ArtifactWriter;
-  runOwner: RunOwnerRecord;
-  events: RuntimeEventEnvelope[];
-  node: CompiledExecutableNode;
-  attempt: RuntimeNodeAttempt;
-  action: SupervisorActionKind;
-  decisionId: string;
-  interventionId: string;
-  recoveryTargetNode: CompiledExecutableNode;
-  targetExecutionId: string;
-  failureFingerprint: string;
-  repeatedFingerprintCount: number;
-  classification: FailureClassification;
-  retryResult: FailedSupervisorRecoveryCycleResult;
-  finalSupervisorStatus: "exhausted" | "paused";
-}): Promise<void> {
-  const reason = `Supervisor recovery cycle failed after ${options.retryResult.attempts} attempt(s): ${options.retryResult.summary}`;
-  const now = new Date().toISOString();
-  const intervention: SupervisorInterventionRecord = {
-    intervention_id: options.interventionId,
-    decision_id: options.decisionId,
-    action: options.action,
-    status: "failed",
-    target_compiled_id: options.recoveryTargetNode.compiled_id,
-    target_execution_id: options.targetExecutionId,
-    started_at: now,
-    ended_at: now,
-    reason,
-    evidence: {
-      supervisor_recovery_error: true,
-      attempts: options.retryResult.attempts,
-      errors: options.retryResult.errors,
-      failure_fingerprint: options.failureFingerprint,
-      repeated_fingerprint_count: options.repeatedFingerprintCount,
-      symptom_compiled_id: options.node.compiled_id,
-      symptom_execution_id: options.attempt.execution_id,
-      classification: options.classification.class
-    },
-    artifact_paths: {}
-  };
-
-  options.session.supervisor.status = options.finalSupervisorStatus;
-  if (options.finalSupervisorStatus !== "paused" && options.session.status === "paused") {
-    options.session.status = "failed";
-  }
-
-  await options.writer.appendSupervisorIntervention(intervention);
-  await emitEvent(
-    options.session,
-    options.writer,
-    options.runOwner,
-    options.events,
-    options.runOptions.on_event,
-    "supervisor.intervention.failed",
-    {
-      intervention_id: intervention.intervention_id,
-      decision_id: intervention.decision_id,
-      action: intervention.action,
-      target_compiled_id: intervention.target_compiled_id,
-      summary: intervention.reason,
-      attempts: options.retryResult.attempts,
-      errors: options.retryResult.errors
-    },
-    {
-      compiled_id: options.node.compiled_id,
-      execution_id: options.attempt.execution_id,
-      repeat_scope_id: options.attempt.repeat_scope_id,
-      iteration_index: options.attempt.iteration_index,
-      attempt_index: options.attempt.attempt_index
-    }
-  );
-}
-
-async function applyRuntimeOverlayBeforeRetry(options: {
-  recovery: Awaited<ReturnType<typeof runSupervisorRecoveryCycle>>;
-  attempt: RuntimeNodeAttempt;
-  workspacePath: string;
-}): Promise<boolean> {
-  const overlay = options.recovery.recovery_plan.runtime_overlay;
-  if (!overlay) {
-    return false;
-  }
-
-  if (overlay.apply_action === "repair_workspace") {
-    const patch = overlay.workspace_repair;
-    if (!patch) {
-      return false;
-    }
-    const result = await restoreNodeWorkspaceChangesFromSnapshot({
-      workspacePath: options.workspacePath,
-      attemptDir: options.attempt.execution_dir,
-      ...(patch.result_path ? { resultPath: patch.result_path } : {})
-    });
-    return result.status === "passed" || result.status === "partial";
-  }
-
-  return true;
+  onEvent: RunCompiledGraphOptions["on_event"];
+}): RuntimeSupervisorEventEmitter {
+  return (type, payload, context) =>
+    emitEvent(
+      options.session,
+      options.writer,
+      options.runOwner,
+      options.events,
+      options.onEvent,
+      type,
+      payload,
+      context
+    );
 }
 
 async function handleFailedNodeWithSupervisor(options: {
@@ -1622,6 +1468,13 @@ async function handleFailedNodeWithSupervisor(options: {
   });
   const recoveryTargetNode =
     options.topology.nodes_by_id.get(causalContext.selected_target.target_compiled_id) ?? options.node;
+  const emitSupervisorEvent = createSupervisorEventEmitter({
+    session: options.session,
+    writer: options.writer,
+    runOwner: options.runOwner,
+    events: options.events,
+    onEvent: options.runOptions.on_event
+  });
   const action = retryActionForClassification(classification);
 
   if (!action) {
@@ -1716,17 +1569,14 @@ async function handleFailedNodeWithSupervisor(options: {
       );
       const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.runOptions.harnesses);
       const recoveryAttempt = await runSupervisorRecoveryCycleWithRuntimeBackoff({
-        runOptions: options.runOptions,
-        session: options.session,
-        writer: options.writer,
-        runOwner: options.runOwner,
-        events: options.events,
+        signal: options.runOptions.signal,
         node: options.node,
         attempt: options.attempt,
         action: "pause_for_authority",
         interventionId,
         decisionId,
         targetCompiledId: recoveryTargetNode.compiled_id,
+        emitEvent: emitSupervisorEvent,
         run: async () => {
           const priorInterventions = await readSupervisorInterventions(options.writer.run_root).catch(() => []);
           return runSupervisorRecoveryCycle({
@@ -1759,11 +1609,8 @@ async function handleFailedNodeWithSupervisor(options: {
       });
       if (recoveryAttempt.status === "failed") {
         await appendFailedSupervisorRecoveryCycle({
-          runOptions: options.runOptions,
           session: options.session,
           writer: options.writer,
-          runOwner: options.runOwner,
-          events: options.events,
           node: options.node,
           attempt: options.attempt,
           action: "pause_for_authority",
@@ -1775,7 +1622,8 @@ async function handleFailedNodeWithSupervisor(options: {
           repeatedFingerprintCount,
           classification,
           retryResult: recoveryAttempt,
-          finalSupervisorStatus: "paused"
+          finalSupervisorStatus: "paused",
+          emitEvent: emitSupervisorEvent
         });
         await emitEvent(
           options.session,
@@ -1985,17 +1833,14 @@ async function handleFailedNodeWithSupervisor(options: {
 
   const supervisorHarness = resolveSupervisorHarness(options.session, options.node, options.runOptions.harnesses);
   const recoveryAttempt = await runSupervisorRecoveryCycleWithRuntimeBackoff({
-    runOptions: options.runOptions,
-    session: options.session,
-    writer: options.writer,
-    runOwner: options.runOwner,
-    events: options.events,
+    signal: options.runOptions.signal,
     node: options.node,
     attempt: options.attempt,
     action,
     interventionId,
     decisionId,
     targetCompiledId: recoveryTargetNode.compiled_id,
+    emitEvent: emitSupervisorEvent,
     run: async () => {
       const priorInterventions = await readSupervisorInterventions(options.writer.run_root).catch(() => []);
       return runSupervisorRecoveryCycle({
@@ -2028,11 +1873,8 @@ async function handleFailedNodeWithSupervisor(options: {
   });
   if (recoveryAttempt.status === "failed") {
     await appendFailedSupervisorRecoveryCycle({
-      runOptions: options.runOptions,
       session: options.session,
       writer: options.writer,
-      runOwner: options.runOwner,
-      events: options.events,
       node: options.node,
       attempt: options.attempt,
       action,
@@ -2044,7 +1886,8 @@ async function handleFailedNodeWithSupervisor(options: {
       repeatedFingerprintCount,
       classification,
       retryResult: recoveryAttempt,
-      finalSupervisorStatus: "exhausted"
+      finalSupervisorStatus: "exhausted",
+      emitEvent: emitSupervisorEvent
     });
     return false;
   }
@@ -3014,6 +2857,11 @@ async function defaultAgentExecutor(
       },
     };
   }
+
+  if (isManagedWorkListRunItemsNode(context.node)) {
+    return runManagedWorkListItems(context, harnesses);
+  }
+
   const invocationOutputDir = outputDir;
   const invocationRuntimeDir = runtimeDir;
   const toolSetup = await (async () => {
@@ -3848,6 +3696,43 @@ async function executeNode(
       workspacePath: workspace.workspace_path
     });
 
+    const emitManagedProgress = async (payload: {
+      phase?: string;
+      status: string;
+      summary?: string;
+      item_id?: string;
+      attempt?: number;
+      max_attempts?: number;
+    }): Promise<void> => {
+      const managedRuntime = node.managed_runtime;
+      const parsed = parseManagedAuthoredId(node.authored_id, node.lowered_from);
+      await emitEvent(
+        session,
+        writer,
+        runOwner,
+        events,
+        options.on_event,
+        "managed.progress",
+        {
+          managed_kind: managedRuntime?.kind ?? parsed?.managed_kind ?? node.lowered_from ?? "pattern_work_list",
+          managed_authored_id: managedRuntime?.root_id ?? parsed?.managed_authored_id ?? node.authored_id,
+          phase: payload.phase ?? managedRuntime?.phase ?? parsed?.phase ?? "progress",
+          status: payload.status,
+          ...(payload.summary ? { summary: payload.summary } : {}),
+          ...(payload.item_id ? { item_id: payload.item_id } : {}),
+          ...(payload.attempt !== undefined ? { attempt: payload.attempt } : {}),
+          ...(payload.max_attempts !== undefined ? { max_attempts: payload.max_attempts } : {})
+        },
+        {
+          compiled_id: node.compiled_id,
+          execution_id: attempt.execution_id,
+          repeat_scope_id: attempt.repeat_scope_id,
+          iteration_index: attempt.iteration_index,
+          attempt_index: attempt.attempt_index
+        }
+      );
+    };
+
     let result: RuntimeNodeExecutionResult;
     const usedCustomAgentExecutor =
       node.kind === "agent" && Boolean(options.executors?.agent);
@@ -3870,6 +3755,7 @@ async function executeNode(
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
             ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
             ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
+            emit_managed_progress: emitManagedProgress,
             environment: runtimeEnvironment,
             ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal,
@@ -3958,6 +3844,7 @@ async function executeNode(
               ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
               ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
               ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
+              emit_managed_progress: emitManagedProgress,
               environment: runtimeEnvironment,
               ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
               signal,
@@ -4006,6 +3893,7 @@ async function executeNode(
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
+            context_materials: context.packet.materials,
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
             ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
             ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
@@ -4026,6 +3914,7 @@ async function executeNode(
               execution_dir: attempt.execution_dir,
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
+              context_materials: context.packet.materials,
               ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
               ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
               ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),

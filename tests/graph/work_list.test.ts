@@ -122,12 +122,14 @@ describe("pattern work list", () => {
       type: "agent",
       id: "deliver_stack__managed__pattern_work_list__plan",
       artifacts: expect.objectContaining({
-        work_list_md: expect.objectContaining({ path: "work-list.md" }),
         work_list_json: expect.objectContaining({ path: "work-list.json" })
       })
     }));
+    expect(planNode.artifacts).not.toHaveProperty("work_list_md");
     expect(planPrompt).toContain("runtime will freeze this list before execution");
     expect(planPrompt).toContain("Use sequential ids starting at `w1`");
+    expect(planPrompt).toContain("planning_summary");
+    expect(planPrompt).toContain("ordering_rationale");
 
     expect(freezeNode).toEqual(expect.objectContaining({
       type: "exec",
@@ -141,6 +143,17 @@ describe("pattern work list", () => {
 
     expect(runItemsNode).toEqual(expect.objectContaining({
       type: "agent",
+      managed_runtime: expect.objectContaining({
+        kind: "pattern_work_list",
+        root_id: "deliver_stack",
+        phase: "run_items",
+        config: expect.objectContaining({
+          parent_intent: expect.objectContaining({
+            goal: "Deliver the bounded work needed for the stack."
+          }),
+          item_worker: { kind: "agent" }
+        })
+      }),
       artifacts: expect.objectContaining({
         item_handoffs: expect.objectContaining({ path: "item-handoffs.md" }),
         item_results: expect.objectContaining({ path: "item-results.json" }),
@@ -231,38 +244,45 @@ describe("pattern work list", () => {
     if (!workflow || workflow.type !== "sequence") {
       throw new Error("Expected pattern_work_list to lower into a sequence workflow.");
     }
-    const workLoop = workflow.steps[2];
-    expect(workLoop).toEqual(expect.objectContaining({
-      type: "repeat",
-      id: "deliver_stack__managed__pattern_work_list__work_loop",
-      max_attempts: 2,
-      until: {
-        node: "deliver_stack__managed__pattern_work_list__completion_gate"
-      }
-    }));
-    if (!workLoop || workLoop.type !== "repeat" || workLoop.body.type !== "sequence") {
-      throw new Error("Expected deep_work item worker to lower into a repeat loop.");
-    }
-    const runItemsNode = workLoop.body.steps[0];
-    const criteriaPanel = workLoop.body.steps[1];
-    const gateNode = workLoop.body.steps[2];
-    const prompt = JSON.stringify(workLoop);
-    expect(criteriaPanel).toEqual(expect.objectContaining({
-      type: "parallel",
-      id: "deliver_stack__managed__pattern_work_list__criteria_panel"
-    }));
-    expect(gateNode).toEqual(expect.objectContaining({
-      type: "check",
-      id: "deliver_stack__managed__pattern_work_list__completion_gate",
-      check_kind: "deterministic",
+    const runItemsNode = workflow.steps[2];
+    expect(runItemsNode).toEqual(expect.objectContaining({
+      type: "agent",
+      id: "deliver_stack__managed__pattern_work_list__run_items",
+      managed_runtime: expect.objectContaining({
+        kind: "pattern_work_list",
+        root_id: "deliver_stack",
+        phase: "run_items",
+        config: expect.objectContaining({
+          parent_intent: expect.objectContaining({
+            goal: "Deliver the bounded work needed for the stack."
+          }),
+          item_worker: expect.objectContaining({
+            kind: "deep_work",
+            completion: expect.objectContaining({
+              max_cycles: 2,
+              pass_threshold: 0.9,
+              criteria: expect.arrayContaining([
+                expect.objectContaining({ id: "item_contract", target: "workspace" }),
+                expect.objectContaining({ id: "handoff_quality", target: "item_handoff" }),
+                expect.objectContaining({ id: "ledger_integrity", target: "work_list_ledger" })
+              ])
+            })
+          })
+        })
+      }),
       artifacts: expect.objectContaining({
-        work_list_scorecard: expect.objectContaining({ path: "scorecard.json" })
+        item_handoffs: expect.objectContaining({ path: "item-handoffs.md" }),
+        item_results: expect.objectContaining({ path: "item-results.json" }),
+        item_validation: expect.objectContaining({ path: "item-validation.md" })
       })
     }));
+    const prompt = JSON.stringify(runItemsNode);
     expect(prompt).toContain("Worker kind: deep_work.");
-    expect(prompt).toContain("Maximum frozen-list cycles: 2");
+    expect(prompt).toContain("Maximum item cycles: 2");
+    expect(prompt).toContain("Pass threshold for each item gate: 0.9");
     expect(prompt).toContain("target item_handoff");
     expect(prompt).toContain("target work_list_ledger");
+    expect(workflow.steps.map((step) => step.id)).not.toContain("deliver_stack__managed__pattern_work_list__completion_gate");
   });
 
   it("compiles downstream refs against stable public artifacts only", () => {

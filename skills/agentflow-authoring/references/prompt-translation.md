@@ -26,7 +26,7 @@ Use this when authoring or reviewing a graph for prompt quality. Agentflow graph
 | plugin-lowered agent node | Plugin workflow config/context is interpolated, then lowered to normal prompt-backed nodes with plugin file context and managed tool grants. | Keep plugin config schema-backed. Add `what`/`why` to plugin file context. Do not hide product intent inside plugin files alone. |
 | `pattern_deep_research` | Angle worker prompts, synthesis prompts, then publisher prompt. Each angle sees the parent contract, support, and its assigned angle; synthesis sees accepted reports; publisher writes one complete `research.md`. | Make angles controlling lenses. Put the assigned angle in direct, specific language. Downstream nodes consume `research`; important detail should be in that one report, not hidden in internal angle artifacts. |
 | `pattern_deep_work` | Planner, worker/validator, criterion evaluator, scorecard gate, retry, and publisher prompts. Parent intent/support flow into the work loop; criteria become grading prompts and gate weights. | Use for bounded mutation with feedback. Criteria should cover correctness, convention fit, no AI slop, validation evidence, and handoff quality when relevant. |
-| `pattern_work_list` | Planner prompt discovers a finite ordered list; runtime freezes it; item runner prompts execute each item sequentially; optional deep-work item criteria grade each item; publisher writes stable artifacts. | Use when item count is unknown until discovery. Author `planning_goal`, `what_counts_as_one_item`, and `done_when`; do not pre-bake fake item rows. |
+| `pattern_work_list` | Planner prompt discovers a finite ordered list; runtime freezes it; one managed item prompt executes each frozen item; optional deep-work item criteria and item verifier grade that item; publisher writes stable artifacts. | Use when item count is unknown until discovery. Author `planning_goal`, `what_counts_as_one_item`, and `done_when`; do not pre-bake fake item rows. |
 
 ## Per-Node Authoring Guidance
 
@@ -89,7 +89,7 @@ Authoring rules:
 
 ### `pattern_work_list`
 
-Work list lowers into a planner, runtime freeze, sequential item runner, optional item-level deep-work evaluators, gate, finalizer, and publisher. The planner decides the finite ordered list, but runtime owns item ids and status. Later item prompts receive the frozen list, current ledger, current item, previous accepted handoffs, and parent support context.
+Work list lowers into a planner, runtime freeze, one managed item execution per frozen item, optional item-level deep-work criteria, item-level semantic verification, finalizer, and publisher. The planner writes only `work-list.json` and decides the finite ordered list, but runtime owns item ids and status. Later item prompts receive the frozen list, current ledger, current item, previous accepted handoffs, scorecard/recovery memory when relevant, and parent support context.
 
 Authoring rules:
 
@@ -98,7 +98,7 @@ Authoring rules:
 - Use `done_when` to define evidence each item must leave behind: validation, changed-output summary, branch/base or batch boundary, risks, and downstream implications.
 - Choose `item_worker.kind: "agent"` for one-pass work; choose `deep_work` when each item needs scored feedback and retries.
 - Criteria for `deep_work` items should target the item handoff, workspace outcome, and ledger coherence. They should not depend on dynamic ids outside the frozen list.
-- Downstream nodes reference stable work-list artifacts such as `summary`, `packet`, and `work_items`, not `w1` or `w3`.
+- Downstream nodes reference stable work-list artifacts such as `summary` and `work_items`, not `w1` or `w3`.
 
 ## Runtime-Owned AI Surfaces
 

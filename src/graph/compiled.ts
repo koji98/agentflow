@@ -6,6 +6,7 @@ import type {
   ExecutableNodeIntent,
   GraphIntent,
   ManagedArtifactForward,
+  ManagedRuntimeMetadata,
   CliHint,
   SupervisionPolicy
 } from "./authored.js";
@@ -34,6 +35,7 @@ export interface CompiledExecutableNodeBase {
   context: ContextItem[];
   declared_artifacts: Record<string, ArtifactDefinition>;
   managed_artifact_forwards?: Record<string, ManagedArtifactForward>;
+  managed_runtime?: ManagedRuntimeMetadata;
   skills: ResolvedSkill[];
   cli: CliHint[];
   lowered_from?: LoweredManagedKind;

@@ -113,7 +113,7 @@ Add:
 }
 ```
 
-The pattern runs a planner, deterministically freezes `work-list.json`, runs frozen items sequentially, verifies that every frozen item completed, then publishes `summary` and `work_items`. Use `item_worker.kind: "deep_work"` when item execution needs completion criteria and bounded retry semantics over the frozen list.
+The pattern runs a planner that writes only `work-list.json`, deterministically freezes it, launches one managed item execution per frozen item, verifies each item, then publishes `summary` and `work_items`. Use `item_worker.kind: "deep_work"` when each item needs criteria, scorecard feedback, and bounded retry semantics. Retries are item-local; accepted earlier items remain ledger evidence unless structured recovery evidence says they are contaminated.
 
 `pattern_work_list` is generic. It does not know about branches, PRs, migrations, APIs, or UI. Those belong in the node intent, item guidance, and downstream artifacts.
 
@@ -123,7 +123,7 @@ Managed patterns do not have a second supervisor. The normal runtime supervisor 
 
 Managed workflows emit `managed.progress` events at their internal boundaries so operators can see whether the pattern is moving, receiving ordinary feedback, or approaching a terminal boundary. These events are monitoring evidence; they do not create a second supervisor loop.
 
-For managed repeats, failed loop-body attempts without authored failure continuations and failed gate checks are normal loop feedback and do not spend supervisor budget while cycles remain. Runtime failures still go to the normal supervisor after the managed repeat exhausts: context repair, harness failure, artifact repair, malformed evaluator output, environment issues, workspace cleanup, and recoverable validation strategy failures. When the managed repeat exhausts its allowed cycles, Agentflow records a `managed.progress` exhaustion event, persists the completion packet with scorecard blockers/regressions, and gives the normal supervisor one chance to recover if it can produce a real material delta. If there is no material delta, the managed node fails with scorecard evidence and downstream work remains blocked.
+For managed repeats and work-list item retries, failed loop-body attempts without authored failure continuations and failed gate checks are normal managed feedback and do not spend supervisor budget while cycles remain. Runtime failures still go to the normal supervisor after the managed boundary exhausts: context repair, harness failure, artifact repair, malformed evaluator output, environment issues, workspace cleanup, and recoverable validation strategy failures. When a managed boundary exhausts its allowed cycles, Agentflow records `managed.progress` evidence, persists completion evidence with blockers/regressions, and gives the normal supervisor one chance to recover if it can produce a real material delta. If there is no material delta, the managed node fails with evidence and downstream work remains blocked.
 
 ## Validation
 
