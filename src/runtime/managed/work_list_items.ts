@@ -57,7 +57,7 @@ interface ManagedWorkListItemResult {
   id: string;
   status: string;
   summary: string;
-  validation: unknown[];
+  validation: ManagedWorkListItemValidation;
   risks: string[];
   downstream_implications: string[];
   accepted_attempt_path?: string;
@@ -65,6 +65,13 @@ interface ManagedWorkListItemResult {
   item_validation_path?: string;
   scorecard_path?: string;
   cycles?: unknown[];
+}
+
+interface ManagedWorkListItemValidation {
+  passed: string[];
+  failed_then_fixed: string[];
+  unavailable: string[];
+  blocked: string[];
 }
 
 interface ManagedWorkListPriorProgress {
@@ -152,6 +159,37 @@ async function readTextFileOptional(filePath: string | undefined): Promise<strin
 
 function managedWorkListErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function normalizeManagedWorkListItemValidation(value: unknown): ManagedWorkListItemValidation | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const validation = {
+    passed: stringArray(record.passed),
+    failed_then_fixed: stringArray(record.failed_then_fixed),
+    unavailable: stringArray(record.unavailable),
+    blocked: stringArray(record.blocked)
+  };
+
+  if (
+    validation.passed.length === 0
+    && validation.failed_then_fixed.length === 0
+    && validation.unavailable.length === 0
+  ) {
+    return undefined;
+  }
+
+  return validation;
 }
 
 function itemArtifactDefinitions(): Record<string, ArtifactDefinition> {
@@ -397,8 +435,27 @@ function buildManagedWorkListItemGoal(options: {
     "",
     "Write exactly these declared item artifacts:",
     "- `item_handoff`: Markdown with item goal, changes/results, evidence, validation, risks, and downstream implications.",
-    "- `item_result`: JSON with id, status, summary, validation, risks, and downstream_implications.",
+    [
+      "- `item_result`: JSON with this exact shape:",
+      "  ```json",
+      "  {",
+      `    "id": "${options.item.id}",`,
+      "    \"status\": \"completed\",",
+      "    \"summary\": \"Concrete summary of the completed item outcome.\",",
+      "    \"validation\": {",
+      "      \"passed\": [\"Exact command/check/manual result evidence that passed.\"],",
+      "      \"failed_then_fixed\": [],",
+      "      \"unavailable\": [],",
+      "      \"blocked\": []",
+      "    },",
+      "    \"risks\": [],",
+      "    \"downstream_implications\": []",
+      "  }",
+      "  ```"
+    ].join("\n"),
     "- `item_validation`: Markdown with validation commands, checks, manual evidence, unavailable validation, and reruns.",
+    "",
+    "If the item requires branch, base, PR, or workspace evidence, use inspectable local workspace evidence unless the graph explicitly says otherwise. Remote-only branch or PR updates are not a substitute for local branch/base evidence.",
     "",
     "Do not work on later frozen items. Do not add, remove, split, merge, or reorder work-list items."
   ].join("\n");
@@ -474,7 +531,8 @@ async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkList
   if (typeof result.summary !== "string" || result.summary.trim().length === 0) {
     throw new RuntimeFailureError("artifact_contract_failure", `Item ${item.id} result is missing a summary.`);
   }
-  if (!Array.isArray(result.validation) || result.validation.length === 0) {
+  const validation = normalizeManagedWorkListItemValidation(result.validation);
+  if (!validation) {
     throw new RuntimeFailureError("artifact_contract_failure", `Item ${item.id} result is missing validation evidence.`);
   }
 
@@ -484,6 +542,7 @@ async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkList
     validationPath,
     result: {
       ...result,
+      validation,
       risks: Array.isArray(result.risks) ? result.risks : [],
       downstream_implications: Array.isArray(result.downstream_implications) ? result.downstream_implications : []
     }
@@ -500,8 +559,7 @@ function isReusableManagedWorkListResult(
     && result.status === "completed"
     && typeof result.summary === "string"
     && result.summary.trim().length > 0
-    && Array.isArray(result.validation)
-    && result.validation.length > 0
+    && Boolean(normalizeManagedWorkListItemValidation(result.validation))
   );
 }
 

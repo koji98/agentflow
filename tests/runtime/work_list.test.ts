@@ -71,6 +71,15 @@ function isWorkListItemInvocation(invocation: AgentInvocation): boolean {
   return Boolean(invocation.artifacts && Object.prototype.hasOwnProperty.call(invocation.artifacts, "item_result"));
 }
 
+function itemValidationEvidence(
+  message: string,
+  options: { blocked?: boolean } = {}
+): { passed: string[]; failed_then_fixed: string[]; unavailable: string[]; blocked: string[] } {
+  return options.blocked
+    ? { passed: [], failed_then_fixed: [], unavailable: [], blocked: [message] }
+    : { passed: [message], failed_then_fixed: [], unavailable: [], blocked: [] };
+}
+
 async function initGitRepo(repoDir: string): Promise<void> {
   await execFileAsync("git", ["init"], { cwd: repoDir });
   await execFileAsync("git", ["config", "user.email", "agentflow@example.com"], { cwd: repoDir });
@@ -121,7 +130,7 @@ function buildHarness(): HarnessAdapter {
           id: "w1",
           status: "completed",
           summary: "Produced the evidence handoff.",
-          validation: [{ summary: "Runtime finalizer can verify this result.", result: "pass" }],
+          validation: itemValidationEvidence("Runtime finalizer can verify this result."),
           risks: [],
           downstream_implications: ["Downstream nodes can consume work_items."]
         }, null, 2)}\n`, "utf8");
@@ -184,7 +193,10 @@ function buildDeepWorkHarness(state: { runItemsCalls: number }): HarnessAdapter 
           id: "w1",
           status: completed ? "completed" : "blocked",
           summary: completed ? "Produced the evidence handoff." : "First cycle intentionally lacks completion evidence.",
-          validation: [{ summary: completed ? "Runtime gate can verify this result." : "Runtime gate should reject this cycle.", result: completed ? "pass" : "blocked" }],
+          validation: itemValidationEvidence(
+            completed ? "Runtime gate can verify this result." : "Runtime gate should reject this cycle.",
+            { blocked: !completed }
+          ),
           risks: [],
           downstream_implications: ["Downstream nodes can consume work_items after completion."]
         }, null, 2)}\n`, "utf8");
@@ -244,7 +256,7 @@ function buildTwoItemHarness(state: { itemOrder: string[]; secondSawPriorHandoff
           id: itemId,
           status: "completed",
           summary: `${itemId} produced the evidence handoff.`,
-          validation: [{ summary: "Runtime finalizer can verify this result.", result: "pass" }],
+          validation: itemValidationEvidence("Runtime finalizer can verify this result."),
           risks: [],
           downstream_implications: ["Downstream nodes can consume work_items."]
         }, null, 2)}\n`, "utf8");
@@ -320,7 +332,10 @@ function buildTwoItemParentRetryHarness(state: { itemOrder: string[]; w2Attempts
           summary: shouldComplete
             ? `${itemId} produced the evidence handoff.`
             : `${itemId} intentionally failed before retry.`,
-          validation: [{ summary: shouldComplete ? "Runtime finalizer can verify this result." : "Runtime should reject this result.", result: shouldComplete ? "pass" : "blocked" }],
+          validation: itemValidationEvidence(
+            shouldComplete ? "Runtime finalizer can verify this result." : "Runtime should reject this result.",
+            { blocked: !shouldComplete }
+          ),
           risks: [],
           downstream_implications: ["Downstream nodes can consume work_items."]
         }, null, 2)}\n`, "utf8");
@@ -403,7 +418,7 @@ function buildDeepWorkOutcomeRetryHarness(state: { runItemsCalls: number; reject
           summary: state.runItemsCalls > 1
             ? "Produced the repaired evidence handoff."
             : "Produced an initial handoff that verifier will reject.",
-          validation: [{ summary: "Outcome verifier checks semantic evidence.", result: "pass" }],
+          validation: itemValidationEvidence("Outcome verifier checks semantic evidence."),
           risks: [],
           downstream_implications: ["Downstream nodes can consume work_items after verification."]
         }, null, 2)}\n`, "utf8");
