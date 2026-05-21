@@ -179,7 +179,8 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
       "If a later item fails, keep earlier accepted item evidence as the starting point for the retry."
     ]),
     section("Output Contract", [
-      "Each item worker publishes `item_handoff`, `item_result`, and `item_validation` in its own item execution directory.",
+      "Each item worker writes the item handoff, item result, and item validation artifacts in its own item execution directory.",
+      "The item result validation field is an object with passed, failed_then_fixed, unavailable, and blocked arrays. A completed item needs concrete evidence recorded under passed, failed_then_fixed, or unavailable.",
       "The runtime aggregates accepted item artifacts into final work-list artifacts.",
       "The final runtime step fails unless every frozen item is marked completed with evidence.",
       "For deep_work mode, include item cycle and scorecard evidence in the item result when useful."

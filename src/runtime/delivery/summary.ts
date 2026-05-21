@@ -70,6 +70,19 @@ function readEventSummary(event: RuntimeEventEnvelope): string | undefined {
   }
 }
 
+function readAttemptErrorDiagnostic(attempt: RuntimeNodeAttempt): RunDiagnostic | undefined {
+  const error =
+    typeof attempt.metadata?.error === "string" && attempt.metadata.error.trim().length > 0
+      ? attempt.metadata.error.trim()
+      : undefined;
+
+  if (!error) {
+    return undefined;
+  }
+
+  return { label: attempt.authored_id, summary: error };
+}
+
 function formatSoftVerificationCounts(state: RuntimeStateSnapshot): string {
   return [
     `passed=${state.soft_verification_counts.passed}`,
@@ -176,23 +189,18 @@ export function collectRunDiagnostics(
   }
 
   for (const attempt of [...attempts].reverse()) {
-    const error =
-      typeof attempt.metadata?.error === "string" && attempt.metadata.error.trim().length > 0
-        ? attempt.metadata.error.trim()
-        : undefined;
-
-    if (!error) {
+    const diagnostic = readAttemptErrorDiagnostic(attempt);
+    if (!diagnostic) {
       continue;
     }
 
-    const label = attempt.authored_id;
-    const key = `${label}\u0000${error}`;
+    const key = `${diagnostic.label}\u0000${diagnostic.summary}`;
 
     if (seen.has(key)) {
       continue;
     }
 
-    diagnostics.push({ label, summary: error });
+    diagnostics.push(diagnostic);
     seen.add(key);
 
     if (diagnostics.length >= 4) {
@@ -212,8 +220,20 @@ export function selectPrimaryRunDiagnostic(
   events: RuntimeEventEnvelope[],
   state?: RuntimeStateSnapshot
 ): RunDiagnostic | undefined {
+  if (state?.status && state.status !== "passed") {
+    for (const attempt of [...attempts].reverse()) {
+      const diagnostic = readAttemptErrorDiagnostic(attempt);
+      if (diagnostic) {
+        return diagnostic;
+      }
+    }
+  }
+
   const diagnostics = collectRunDiagnostics(attempts, events, state);
-  return diagnostics.find((diagnostic) => !diagnostic.label.startsWith("run.")) ?? diagnostics[0];
+  return diagnostics.find((diagnostic) =>
+    diagnostic.label !== "delivery.curation.failed"
+    && !diagnostic.label.startsWith("run.")
+  ) ?? diagnostics[0];
 }
 
 export function renderRunSummary(

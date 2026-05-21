@@ -64,6 +64,26 @@ The runtime freezes the list before item execution. Workers must not add, remove
 - `ordering_rationale`
 - `items[]` with sequential ids, title, goal, acceptance criteria, constraints, validation expectations, handoff focus, and rationale
 
+Each item worker writes `item-result.json` with this shape:
+
+```json
+{
+  "id": "w1",
+  "status": "completed",
+  "summary": "Concrete summary of the completed item outcome.",
+  "validation": {
+    "passed": ["Exact command/check/manual result evidence that passed."],
+    "failed_then_fixed": [],
+    "unavailable": [],
+    "blocked": []
+  },
+  "risks": [],
+  "downstream_implications": []
+}
+```
+
+`passed`, `failed_then_fixed`, or `unavailable` must include concrete evidence for a completed item. `blocked` is allowed for context, but it is not completion evidence by itself.
+
 ## Example
 
 ```json
