@@ -108,6 +108,7 @@ interface ManagedWorkListRuntimeConfig {
           }>;
         };
       };
+  criteria_concurrency?: number;
 }
 
 export function isManagedWorkListRunItemsNode(node: CompiledAgentNode): boolean {
@@ -563,6 +564,144 @@ function isReusableManagedWorkListResult(
   );
 }
 
+async function mapWithConcurrency<TItem, TResult>(
+  items: TItem[],
+  concurrency: number,
+  worker: (item: TItem, index: number) => Promise<TResult>
+): Promise<TResult[]> {
+  const results = new Array<TResult>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= items.length) {
+        return;
+      }
+
+      results[index] = await worker(items[index]!, index);
+    }
+  }));
+
+  return results;
+}
+
+async function collectReusableManagedWorkListResult(
+  result: ManagedWorkListItemResult | undefined,
+  frozenItem: ManagedWorkListFrozenItem
+): Promise<{
+  result: ManagedWorkListItemResult;
+  handoff: string;
+  validation: string;
+} | undefined> {
+  if (!isReusableManagedWorkListResult(result, frozenItem)) {
+    return undefined;
+  }
+
+  const handoff = await readTextFileOptional(result.item_handoff_path);
+  const validation = await readTextFileOptional(result.item_validation_path);
+  if (!handoff || !validation) {
+    return undefined;
+  }
+
+  return { result, handoff, validation };
+}
+
+async function loadPriorManagedWorkListProgressFromAggregate(options: {
+  attempt: RuntimeNodeAttempt;
+  frozen: ManagedWorkListFrozen;
+}): Promise<ManagedWorkListPriorProgress | undefined> {
+  if (!options.attempt.artifacts.item_results) {
+    return undefined;
+  }
+
+  const previous = await readJsonFile<{ items?: ManagedWorkListItemResult[] }>(
+    "previous work-list item results",
+    options.attempt.artifacts.item_results
+  );
+  const previousById = new Map((previous.items ?? []).map((item) => [item.id, item]));
+  const acceptedResults: ManagedWorkListItemResult[] = [];
+  const acceptedHandoffs: string[] = [];
+  const acceptedValidation: string[] = [];
+
+  for (const frozenItem of options.frozen.items) {
+    const reusable = await collectReusableManagedWorkListResult(previousById.get(frozenItem.id), frozenItem);
+    if (!reusable) {
+      break;
+    }
+
+    acceptedResults.push(reusable.result);
+    acceptedHandoffs.push(reusable.handoff);
+    acceptedValidation.push(reusable.validation);
+  }
+
+  if (acceptedResults.length === 0) {
+    return undefined;
+  }
+
+  return {
+    accepted_results: acceptedResults,
+    accepted_handoffs: acceptedHandoffs,
+    accepted_validation: acceptedValidation
+  };
+}
+
+async function loadPriorManagedWorkListProgressFromLedger(options: {
+  attempt: RuntimeNodeAttempt;
+  frozen: ManagedWorkListFrozen;
+}): Promise<ManagedWorkListPriorProgress | undefined> {
+  const ledgerPath = join(resolveExecutionRuntimeDirectory(options.attempt.execution_dir), "work-list-ledger.json");
+  const ledger = await readJsonFile<{ items?: Array<{ id?: string; status?: string; accepted_attempt_path?: string }> }>(
+    "previous work-list ledger",
+    ledgerPath
+  );
+  const ledgerById = new Map((ledger.items ?? []).map((item) => [item.id, item]));
+  const acceptedResults: ManagedWorkListItemResult[] = [];
+  const acceptedHandoffs: string[] = [];
+  const acceptedValidation: string[] = [];
+
+  for (const frozenItem of options.frozen.items) {
+    const ledgerItem = ledgerById.get(frozenItem.id);
+    if (
+      ledgerItem?.status !== "completed" ||
+      !ledgerItem.accepted_attempt_path
+    ) {
+      break;
+    }
+
+    const artifacts = await readManagedItemArtifacts(
+      resolveExecutionArtifactsDirectory(ledgerItem.accepted_attempt_path),
+      frozenItem
+    );
+    const reusable = await collectReusableManagedWorkListResult({
+      ...artifacts.result,
+      accepted_attempt_path: ledgerItem.accepted_attempt_path,
+      item_handoff_path: artifacts.handoffPath,
+      item_validation_path: artifacts.validationPath
+    }, frozenItem);
+    if (!reusable) {
+      break;
+    }
+
+    acceptedResults.push(reusable.result);
+    acceptedHandoffs.push(reusable.handoff);
+    acceptedValidation.push(reusable.validation);
+  }
+
+  if (acceptedResults.length === 0) {
+    return undefined;
+  }
+
+  return {
+    accepted_results: acceptedResults,
+    accepted_handoffs: acceptedHandoffs,
+    accepted_validation: acceptedValidation
+  };
+}
+
 async function loadPriorManagedWorkListProgress(options: {
   context: RuntimeNodeExecutorContext<CompiledAgentNode>;
   frozen: ManagedWorkListFrozen;
@@ -576,44 +715,19 @@ async function loadPriorManagedWorkListProgress(options: {
     .filter((attempt) =>
       attempt.compiled_id === options.context.node.compiled_id
       && attempt.attempt_index < options.context.attempt.attempt_index
-      && attempt.artifacts.item_results
     )
     .sort((left, right) => right.attempt_index - left.attempt_index);
 
   for (const attempt of previousAttempts) {
     try {
-      const previous = await readJsonFile<{ items?: ManagedWorkListItemResult[] }>(
-        "previous work-list item results",
-        attempt.artifacts.item_results
-      );
-      const previousById = new Map((previous.items ?? []).map((item) => [item.id, item]));
-      const acceptedResults: ManagedWorkListItemResult[] = [];
-      const acceptedHandoffs: string[] = [];
-      const acceptedValidation: string[] = [];
-
-      for (const frozenItem of options.frozen.items) {
-        const result = previousById.get(frozenItem.id);
-        if (!isReusableManagedWorkListResult(result, frozenItem)) {
-          break;
-        }
-
-        const handoff = await readTextFileOptional(result.item_handoff_path);
-        const validation = await readTextFileOptional(result.item_validation_path);
-        if (!handoff || !validation) {
-          break;
-        }
-
-        acceptedResults.push(result);
-        acceptedHandoffs.push(handoff);
-        acceptedValidation.push(validation);
+      const aggregateProgress = await loadPriorManagedWorkListProgressFromAggregate({ attempt, frozen: options.frozen });
+      if (aggregateProgress) {
+        return aggregateProgress;
       }
 
-      if (acceptedResults.length > 0) {
-        return {
-          accepted_results: acceptedResults,
-          accepted_handoffs: acceptedHandoffs,
-          accepted_validation: acceptedValidation
-        };
+      const ledgerProgress = await loadPriorManagedWorkListProgressFromLedger({ attempt, frozen: options.frozen });
+      if (ledgerProgress) {
+        return ledgerProgress;
       }
     } catch {
       // Stale or malformed prior attempts are audit evidence, not reusable progress.
@@ -773,10 +887,11 @@ async function evaluateManagedWorkListItemCriteria(options: {
   contextManifest: string;
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
   cycle: number;
+  maxConcurrency?: number;
 }): Promise<{ passed: boolean; scorecardPath: string; scorecard: Record<string, unknown> }> {
   const criteriaDir = join(options.itemExecutionDir, "criteria");
   await mkdir(criteriaDir, { recursive: true });
-  const criterionResults: Array<{
+  type CriterionResult = {
     id: string;
     kind: string;
     weight: number;
@@ -787,9 +902,9 @@ async function evaluateManagedWorkListItemCriteria(options: {
     summary: string;
     issues: unknown[];
     evidence_path?: string;
-  }> = [];
+  };
 
-  for (const [index, criterion] of options.config.criteria.entries()) {
+  const criterionResults = await mapWithConcurrency(options.config.criteria, options.maxConcurrency ?? options.config.criteria.length, async (criterion, index): Promise<CriterionResult> => {
     const criterionDir = join(criteriaDir, `${String(index + 1).padStart(2, "0")}-${criterion.id}`);
     await mkdir(criterionDir, { recursive: true });
 
@@ -818,7 +933,7 @@ async function evaluateManagedWorkListItemCriteria(options: {
       await writeFile(join(criterionDir, "stdout.log"), result.stdout, "utf8");
       await writeFile(join(criterionDir, "stderr.log"), result.stderr, "utf8");
       const score = result.passed ? 1 : 0;
-      criterionResults.push({
+      return {
         id: criterion.id,
         kind: "command",
         weight: criterion.weight,
@@ -829,8 +944,7 @@ async function evaluateManagedWorkListItemCriteria(options: {
         summary: result.summary,
         issues: result.passed ? [] : [result.summary],
         evidence_path: evidencePath
-      });
-      continue;
+      };
     }
 
     const harnessName = options.itemNode.effective_policy.harness!;
@@ -878,7 +992,7 @@ async function evaluateManagedWorkListItemCriteria(options: {
       issues: aiResult.evaluation.issues ?? [],
       raw: aiResult.evaluation.raw
     }, null, 2)}\n`, "utf8");
-    criterionResults.push({
+    return {
       id: criterion.id,
       kind: "rubric",
       weight: criterion.weight,
@@ -889,8 +1003,8 @@ async function evaluateManagedWorkListItemCriteria(options: {
       summary: aiResult.evaluation.summary ?? (aiResult.evaluation.passed ? "Criterion passed." : "Criterion failed."),
       issues: aiResult.evaluation.issues ?? [],
       evidence_path: evidencePath
-    });
-  }
+    };
+  });
 
   const blockers = criterionResults
     .filter((result) => result.required && !result.passed)
@@ -1079,7 +1193,8 @@ export async function runManagedWorkListItems(
           contextManifestPath: itemContext.manifestPath,
           contextManifest,
           harnesses,
-          cycle
+          cycle,
+          ...(config.criteria_concurrency !== undefined ? { maxConcurrency: config.criteria_concurrency } : {})
         });
         scorecardPath = scorecard.scorecardPath;
         lastScorecardPath = scorecard.scorecardPath;

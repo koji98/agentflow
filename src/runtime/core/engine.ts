@@ -3897,6 +3897,7 @@ async function executeNode(
             ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
             ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
             ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
+            emit_managed_progress: emitManagedProgress,
             environment: runtimeEnvironment,
             ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
             signal
@@ -3918,6 +3919,7 @@ async function executeNode(
               ...(activeRecoveryEnvelope ? { supervisor_recovery_envelope: activeRecoveryEnvelope } : {}),
               ...(attemptMemoryMetadata?.attempt_memory_path ? { attempt_memory_path: attemptMemoryMetadata.attempt_memory_path } : {}),
               ...(attemptMemoryMetadata?.attempt_memory_markdown_path ? { attempt_memory_markdown_path: attemptMemoryMetadata.attempt_memory_markdown_path } : {}),
+              emit_managed_progress: emitManagedProgress,
               environment: runtimeEnvironment,
               ...(runtimeEnv ? { runtime_env: runtimeEnv } : {}),
               signal,
