@@ -219,6 +219,79 @@ function buildDeepWorkHarness(state: { runItemsCalls: number }): HarnessAdapter 
   };
 }
 
+function buildParallelCriteriaHarness(state: { activeChecks: number; maxActiveChecks: number }): HarnessAdapter {
+  const deliveryHarness = createPassingDeliveryHarness("codex-cli");
+  return {
+    kind: "codex-cli",
+    capabilities: getHarnessCapabilities("codex-cli")!,
+    async run(invocation: AgentInvocation) {
+      if (invocation.promptKind === "delivery_curator") {
+        return deliveryHarness.run(invocation);
+      }
+
+      if (invocation.promptKind === "ai_check") {
+        state.activeChecks += 1;
+        state.maxActiveChecks = Math.max(state.maxActiveChecks, state.activeChecks);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        state.activeChecks -= 1;
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: {
+            last_message: [
+              "```json",
+              JSON.stringify({ passed: true, score: 1, summary: "Criterion passed.", issues: [] }),
+              "```"
+            ].join("\n")
+          }
+        };
+      }
+
+      if (invocation.promptKind === "outcome_verification") {
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: {
+            last_message: [
+              "```json",
+              JSON.stringify({ passed: true, summary: "Work-list verifier accepted the artifacts.", findings: [] }),
+              "```"
+            ].join("\n")
+          }
+        };
+      }
+
+      if (invocation.nodeGoal?.includes("work_list_json")) {
+        await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
+      } else if (isWorkListItemInvocation(invocation)) {
+        await writeFile(join(invocation.outputDir, "item-handoff.md"), "# Item Handoff\n\nCompleted with evidence.\n", "utf8");
+        await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
+          id: "w1",
+          status: "completed",
+          summary: "Produced the evidence handoff.",
+          validation: itemValidationEvidence("Runtime finalizer can verify this result."),
+          risks: [],
+          downstream_implications: ["Downstream nodes can consume work_items."]
+        }, null, 2)}\n`, "utf8");
+        await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: runtime finalizer verifies item-result.json.\n", "utf8");
+      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+        await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item.\n", "utf8");
+      }
+
+      const result = {
+        status: "passed" as const,
+        exitCode: 0,
+        transcript: { last_message: "done" }
+      };
+      await markInvocationRuntimeReady(invocation, result);
+      return result;
+    },
+    async cancel() {
+      return;
+    }
+  };
+}
+
 function buildTwoItemHarness(state: { itemOrder: string[]; secondSawPriorHandoff: boolean }): HarnessAdapter {
   const deliveryHarness = createPassingDeliveryHarness("codex-cli");
   return {
@@ -514,6 +587,26 @@ describe("runtime pattern_work_list", () => {
     expect(workItems.items).toEqual([
       expect.objectContaining({ id: "w1", status: "completed" })
     ]);
+    const itemProgress = run.events.filter((event) =>
+      event.type === "managed.progress" &&
+      event.payload.managed_kind === "pattern_work_list" &&
+      event.payload.managed_authored_id === "deliver" &&
+      event.payload.phase === "run_item"
+    );
+    expect(itemProgress.map((event) => event.payload.status)).toEqual(
+      expect.arrayContaining(["item_started", "item_verifying", "item_verified", "item_completed"])
+    );
+    expect(itemProgress).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            item_id: "w1",
+            attempt: 1,
+            max_attempts: 1
+          })
+        })
+      ])
+    );
 
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -853,6 +946,93 @@ describe("runtime pattern_work_list", () => {
     expect(managedItemAttempts.map((attempt) => attempt.outcome)).toEqual(["passed", "passed"]);
     const runItemAttempts = attempts.filter((attempt) => attempt.authored_id === "deliver__managed__pattern_work_list__run_items");
     expect(runItemAttempts.map((attempt) => attempt.outcome)).toEqual(["passed"]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("runs deep-work item criteria in parallel", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-parallel-criteria-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-work-list-parallel-criteria",
+      intent: {
+        goal: "Exercise parallel work-list item criteria.",
+        acceptance_criteria: ["The work-list pattern evaluates independent item criteria in parallel."]
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli", sandbox: "workspace-write" },
+        supervisor: { harness: "codex-cli", sandbox: "read-only" }
+      },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_work_list",
+            id: "deliver",
+            runtime: { repo: "main", profile: "default" },
+            intent: {
+              goal: "Deliver a bounded runtime-test work list with parallel criteria.",
+              acceptance_criteria: ["The work_items artifact lists completed items."],
+              constraints: []
+            },
+            work_list: {
+              planning_goal: "Discover the ordered runtime-test items.",
+              item_guidance: {
+                what_counts_as_one_item: "One coherent runtime-test unit.",
+                done_when: ["The item has evidence and validation."]
+              },
+              item_worker: {
+                kind: "deep_work",
+                completion: {
+                  max_cycles: 1,
+                  pass_threshold: 1,
+                  criteria: [
+                    {
+                      id: "contract",
+                      kind: "rubric",
+                      target: "workspace",
+                      rubric: "The item satisfies its contract.",
+                      weight: 0.5,
+                      required: true
+                    },
+                    {
+                      id: "handoff",
+                      kind: "rubric",
+                      target: "item_handoff",
+                      rubric: "The item handoff is complete.",
+                      weight: 0.5,
+                      required: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const state = { activeChecks: 0, maxActiveChecks: 0 };
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: {
+        "codex-cli": buildParallelCriteriaHarness(state)
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(state.maxActiveChecks).toBeGreaterThan(1);
 
     await rm(tempRoot, { recursive: true, force: true });
   });

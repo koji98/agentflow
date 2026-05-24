@@ -12,6 +12,7 @@ import {
   managedId,
   mergeArtifacts,
   mergeSupportContext,
+  maxConcurrency,
   outputDirArtifact,
   renderPrompt,
   section,
@@ -537,7 +538,10 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       config: {
         parent_intent: config.intent,
         item_guidance: config.work_list.item_guidance,
-        item_worker: config.work_list.item_worker
+        item_worker: config.work_list.item_worker,
+        ...(config.work_list.item_worker.kind === "deep_work"
+          ? { criteria_concurrency: maxConcurrency(config.runtime, config.work_list.item_worker.completion.criteria.length) }
+          : {})
       }
     },
     intent: {

@@ -343,6 +343,34 @@ describe("runtime progress reporter", () => {
         expect(rendered).toContain("[1/2] SKIP     check Quality Check · operator_cancel");
         expect(rendered).toContain("agentflow: CANCEL   run · operator_cancel");
     });
+    it("renders managed work-list item progress details", () => {
+        const lines: string[] = [];
+        const reporter = createRuntimeProgressReporter(createCompiledGraph(), {
+            write(chunk: string) {
+                lines.push(chunk);
+                return true;
+            }
+        });
+        reporter.onEvent({
+            seq: 1,
+            ts: new Date().toISOString(),
+            run_id: "run-4",
+            type: "managed.progress",
+            compiled_id: "root__inspect",
+            payload: {
+                managed_kind: "pattern_work_list",
+                managed_authored_id: "deliver",
+                phase: "run_item",
+                status: "item_started",
+                item_id: "w1",
+                attempt: 1,
+                max_attempts: 3,
+                summary: "Content foundation"
+            }
+        });
+        const rendered = lines.join("");
+        expect(rendered).toContain("MANAGED  pattern_work_list deliver run_item · item_started · item=w1 · attempt=1/3 · Content foundation");
+    });
     it("adds ANSI color only for TTY-like streams", () => {
         const lines: string[] = [];
         const previousNoColor = process.env.NO_COLOR;

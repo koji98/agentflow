@@ -365,14 +365,26 @@ export function createRuntimeProgressReporter(
             managed_authored_id?: string;
             phase?: string;
             status?: string;
+            item_id?: string;
+            attempt?: number;
+            max_attempts?: number;
+            summary?: string;
           };
           if (payload.status !== "healthy_progress") {
+            const detailParts = [
+              payload.status ?? "unknown",
+              ...(payload.item_id ? [`item=${payload.item_id}`] : []),
+              ...(payload.attempt !== undefined || payload.max_attempts !== undefined
+                ? [`attempt=${payload.attempt ?? "?"}/${payload.max_attempts ?? "?"}`]
+                : []),
+              ...(payload.summary ? [payload.summary] : [])
+            ];
             writeLine(
               formatSubEventLine(
                 colorEnabled,
-                payload.status?.includes("failed") ? "FAIL" : payload.status?.includes("recover") ? "RETRY" : "MANAGED",
+                payload.status?.includes("failed") ? "FAIL" : payload.status?.includes("retry") || payload.status?.includes("recover") ? "RETRY" : "MANAGED",
                 `${payload.managed_kind ?? "pattern"} ${payload.managed_authored_id ?? "workflow"} ${payload.phase ?? "progress"}`,
-                ` · ${payload.status ?? "unknown"}`,
+                ` · ${detailParts.join(" · ")}`,
                 { muteDetail: true }
               )
             );

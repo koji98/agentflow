@@ -52,11 +52,15 @@ The pattern lowers into:
 2. A deterministic freeze step that validates the list and writes `work-list-frozen.json` plus an initial ledger.
 3. A runtime-owned item phase that launches one managed agent execution per frozen item in order.
 4. Each item attempt writes `item-handoff.md`, `item-result.json`, and `item-validation.md` in its own execution directory, then receives item-level semantic verification.
-5. For `item_worker.kind: "deep_work"`, each item also runs weighted criteria, writes a per-item scorecard, and retries that same item until its gate passes or `max_cycles` is exhausted.
+5. For `item_worker.kind: "deep_work"`, each item also runs weighted criteria in bounded parallelism, writes a per-item scorecard in stable criterion order, and retries that same item until its gate passes or `max_cycles` is exhausted.
 6. A deterministic finalizer that verifies every frozen item completed and writes `work-items.json`.
 7. A publisher agent that writes final graph-addressable artifacts and forwards the verified `work_items` artifact.
 
 The runtime freezes the list before item execution. Workers must not add, remove, split, merge, or reorder items while executing. If the list is wrong, the node fails with evidence instead of silently changing scope. Retries are item-local: a failed `w4` retry preserves accepted `w1` through `w3` unless structured evidence shows earlier work is contaminated. Runtime owns item status and ledger updates; item agents produce evidence and handoffs, not checkmarks.
+
+During `agentflow run` and `agentflow resume`, the CLI shows item-lifecycle progress from the managed runtime: item id, retry attempt, status, and title/summary. These are runtime progress events, not authored graph nodes.
+
+On parent `run_items` retry or resume, Agentflow first reuses verified aggregate item results when they exist. If a prior attempt did not reach aggregate publication but did update the runtime ledger with completed item attempts, Agentflow can reconstruct the completed prefix from the ledger and item artifact directories. It still executes items sequentially and never mutates the frozen list.
 
 `work-list.json` must include:
 
