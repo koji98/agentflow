@@ -80,6 +80,22 @@ interface ManagedWorkListItemValidation {
   blocked: string[];
 }
 
+interface ManagedWorkListScorecardCriterion {
+  id: string;
+  required: boolean;
+  passed: boolean;
+  score: number;
+  summary: string;
+}
+
+interface ManagedWorkListItemScorecard {
+  passed?: boolean;
+  total_score?: number;
+  pass_threshold?: number;
+  blockers?: unknown[];
+  criteria?: ManagedWorkListScorecardCriterion[];
+}
+
 interface ManagedWorkListPriorProgress {
   accepted_results: ManagedWorkListItemResult[];
   accepted_handoffs: string[];
@@ -197,6 +213,76 @@ function normalizeManagedWorkListItemValidation(value: unknown): ManagedWorkList
   }
 
   return validation;
+}
+
+function requiredCriterionGateBlocker(
+  criterion: ManagedWorkListScorecardCriterion,
+  passThreshold: number
+): { criterion_id: string; summary: string } | undefined {
+  if (!criterion.required) {
+    return undefined;
+  }
+
+  if (!criterion.passed) {
+    return { criterion_id: criterion.id, summary: criterion.summary };
+  }
+
+  if (criterion.score < passThreshold) {
+    return {
+      criterion_id: criterion.id,
+      summary: `${criterion.summary} Required criterion score ${criterion.score.toFixed(2)} is below the item pass threshold ${passThreshold.toFixed(2)}.`
+    };
+  }
+
+  return undefined;
+}
+
+function normalizeCriterionForGate(
+  criterion: ManagedWorkListScorecardCriterion,
+  passThreshold: number
+): ManagedWorkListScorecardCriterion & { evaluator_passed?: boolean } {
+  const blocker = requiredCriterionGateBlocker(criterion, passThreshold);
+  if (!blocker) {
+    return criterion;
+  }
+
+  return {
+    ...criterion,
+    evaluator_passed: criterion.passed,
+    passed: false,
+    summary: blocker.summary
+  };
+}
+
+function scorecardPassesItemGate(scorecard: ManagedWorkListItemScorecard): boolean {
+  const passThreshold = typeof scorecard.pass_threshold === "number" ? scorecard.pass_threshold : undefined;
+  const criteria = Array.isArray(scorecard.criteria) ? scorecard.criteria : [];
+  if (
+    scorecard.passed !== true ||
+    passThreshold === undefined ||
+    typeof scorecard.total_score !== "number" ||
+    scorecard.total_score < passThreshold ||
+    (Array.isArray(scorecard.blockers) && scorecard.blockers.length > 0)
+  ) {
+    return false;
+  }
+
+  return criteria.every((criterion) =>
+    requiredCriterionGateBlocker(criterion, passThreshold) === undefined
+  );
+}
+
+async function reusableScorecardPath(scorecardPath: string | undefined): Promise<boolean> {
+  if (!scorecardPath) {
+    return true;
+  }
+
+  try {
+    const scorecard = JSON.parse(await readFile(scorecardPath, "utf8")) as ManagedWorkListItemScorecard;
+    return scorecardPassesItemGate(scorecard);
+  } catch {
+    return false;
+  }
 }
 
 function itemArtifactDefinitions(): Record<string, ArtifactDefinition> {
@@ -606,6 +692,9 @@ async function collectReusableManagedWorkListResult(
   if (!isReusableManagedWorkListResult(result, frozenItem)) {
     return undefined;
   }
+  if (!await reusableScorecardPath(result.scorecard_path)) {
+    return undefined;
+  }
 
   const handoff = await readTextFileOptional(result.item_handoff_path);
   const validation = await readTextFileOptional(result.item_validation_path);
@@ -927,16 +1016,12 @@ async function evaluateManagedWorkListItemCriteria(options: {
 }): Promise<{ passed: boolean; scorecardPath: string; scorecard: Record<string, unknown> }> {
   const criteriaDir = join(options.itemExecutionDir, "criteria");
   await mkdir(criteriaDir, { recursive: true });
-  type CriterionResult = {
-    id: string;
+  type CriterionResult = ManagedWorkListScorecardCriterion & {
     kind: string;
     weight: number;
-    required: boolean;
-    passed: boolean;
-    score: number;
     weighted_score: number;
-    summary: string;
     issues: unknown[];
+    evaluator_passed?: boolean;
     evidence_path?: string;
   };
 
@@ -1052,16 +1137,29 @@ async function evaluateManagedWorkListItemCriteria(options: {
         };
       }
 
+      const gatedCriterionResult = normalizeCriterionForGate(
+        criterionResult,
+        options.config.pass_threshold
+      ) as CriterionResult;
+      const issues = [...gatedCriterionResult.issues];
+      if (gatedCriterionResult.passed === false && criterionResult.passed === true) {
+        issues.push(gatedCriterionResult.summary);
+      }
+      const finalCriterionResult: CriterionResult = {
+        ...gatedCriterionResult,
+        issues
+      };
+
       await options.emitManagedProgress?.({
         phase: "item_criterion",
-        status: criterionResult.passed ? "criterion_completed" : "criterion_failed",
+        status: finalCriterionResult.passed ? "criterion_completed" : "criterion_failed",
         item_id: options.item.id,
         criterion_id: criterion.id,
         attempt: options.cycle,
         max_attempts: options.maxCycles,
-        summary: criterionResult.summary
+        summary: finalCriterionResult.summary
       });
-      return criterionResult;
+      return finalCriterionResult;
     } catch (error) {
       await options.emitManagedProgress?.({
         phase: "item_criterion",
@@ -1077,8 +1175,10 @@ async function evaluateManagedWorkListItemCriteria(options: {
   });
 
   const blockers = criterionResults
-    .filter((result) => result.required && !result.passed)
-    .map((result) => ({ criterion_id: result.id, summary: result.summary }));
+    .flatMap((result) => {
+      const blocker = requiredCriterionGateBlocker(result, options.config.pass_threshold);
+      return blocker ? [blocker] : [];
+    });
   const totalScore = criterionResults.reduce((sum, result) => sum + result.weighted_score, 0);
   const passed = blockers.length === 0 && totalScore >= options.config.pass_threshold;
   const scorecard = {
@@ -1090,7 +1190,7 @@ async function evaluateManagedWorkListItemCriteria(options: {
     blockers,
     criteria: criterionResults,
     next_attempt_guidance: criterionResults
-      .filter((result) => !result.passed || result.score < 0.85)
+      .filter((result) => !result.passed || result.score < options.config.pass_threshold)
       .map((result) => ({ criterion_id: result.id, guidance: result.summary })),
     generated_at: new Date().toISOString()
   };
