@@ -113,7 +113,7 @@ Add:
 }
 ```
 
-The pattern runs a planner that writes only `work-list.json`, deterministically freezes it, launches one managed item execution per frozen item, verifies each item, then publishes `summary` and `work_items`. Use `item_worker.kind: "deep_work"` when each item needs criteria, scorecard feedback, and bounded retry semantics. Retries are item-local; accepted earlier items remain ledger evidence unless structured recovery evidence says they are contaminated.
+The pattern runs a planner that writes only `work-list.json`, deterministically freezes it, launches one managed item execution per frozen item, verifies each item, then publishes `summary` and `work_items`. Use `item_worker.kind: "deep_work"` when each item needs criteria, scorecard feedback, and bounded retry semantics. `pass_threshold` gates the weighted item score and every required criterion score, so a required criterion below threshold keeps the item in retry even if the evaluator marked that criterion passed. Retries are item-local; accepted earlier items remain ledger evidence unless structured recovery evidence says they are contaminated.
 
 `pattern_work_list` is generic. It does not know about branches, PRs, migrations, APIs, or UI. Those belong in the node intent, item guidance, and downstream artifacts.
 

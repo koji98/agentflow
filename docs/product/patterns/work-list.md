@@ -153,6 +153,6 @@ For higher-risk work lists, use `deep_work` when the frozen list needs rubric or
 }
 ```
 
-Work-list rubric criteria support `target: "workspace"` for the current workspace candidate, `target: "item_handoff"` for the item handoff evidence, and `target: "work_list_ledger"` for the frozen-list ledger.
+Work-list rubric criteria support `target: "workspace"` for the current workspace candidate, `target: "item_handoff"` for the item handoff evidence, and `target: "work_list_ledger"` for the frozen-list ledger. For `deep_work` item workers, `pass_threshold` gates both the item weighted score and every required criterion score; a required criterion below threshold retries the current item even if the evaluator returned `passed: true`.
 
 Make `what_counts_as_one_item` and `done_when` concrete to the domain. For branch stacks, mention branch/base and PR readiness. For migrations, mention batch boundary, rollback, and data validation. For documentation, mention reader outcome, source evidence, and review path.
