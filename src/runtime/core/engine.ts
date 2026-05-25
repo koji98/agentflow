@@ -175,6 +175,7 @@ export interface RuntimeNodeExecutorContext<TNode extends CompiledExecutableNode
     status: string;
     summary?: string;
     item_id?: string;
+    criterion_id?: string;
     attempt?: number;
     max_attempts?: number;
   }) => Promise<void>;
@@ -3701,6 +3702,7 @@ async function executeNode(
       status: string;
       summary?: string;
       item_id?: string;
+      criterion_id?: string;
       attempt?: number;
       max_attempts?: number;
     }): Promise<void> => {
@@ -3720,6 +3722,7 @@ async function executeNode(
           status: payload.status,
           ...(payload.summary ? { summary: payload.summary } : {}),
           ...(payload.item_id ? { item_id: payload.item_id } : {}),
+          ...(payload.criterion_id ? { criterion_id: payload.criterion_id } : {}),
           ...(payload.attempt !== undefined ? { attempt: payload.attempt } : {}),
           ...(payload.max_attempts !== undefined ? { max_attempts: payload.max_attempts } : {})
         },

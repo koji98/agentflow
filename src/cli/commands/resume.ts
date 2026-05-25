@@ -38,7 +38,7 @@ import {
 } from "../command_support.js";
 import { createRuntimeProgressReporter } from "../progress.js";
 import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
-import { createRunTerminalFields } from "../run_output.js";
+import { createRunTerminalFields, createSupervisorDisplayFields } from "../run_output.js";
 
 function summarizeResumeNode(
   node: CompiledExecutableNode,
@@ -619,7 +619,7 @@ export const resumeCommand = {
           preserved_node_count,
           restarted_node_count,
           would_start_node_count: resumePlan.start_nodes.length,
-          supervisor_status: session.supervisor.status,
+          ...createSupervisorDisplayFields(session),
           intervention_count: session.supervisor.intervention_count,
           supervisor_budget_reset: resetSupervisorBudget,
           supervisor_budget_remaining: session.supervisor.budget_remaining,
@@ -700,7 +700,7 @@ export const resumeCommand = {
         preserved_node_count,
         restarted_node_count,
         counts: resumed.state.counts,
-        supervisor_status: resumed.state.supervisor.status,
+        ...createSupervisorDisplayFields(resumed.state),
         intervention_count: resumed.state.supervisor.intervention_count,
         supervisor_budget_reset: resetSupervisorBudget,
         supervisor_budget_remaining: resumed.state.supervisor.budget_remaining,

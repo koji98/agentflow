@@ -20,6 +20,40 @@ function formatTerminalDiagnostic(label: string, summary: string): string {
   return label.startsWith("run.") ? summary : `${label}: ${summary}`;
 }
 
+export function deriveSupervisorDisplayStatus(
+  state: Pick<RuntimeStateSnapshot, "supervisor">
+): RuntimeStateSnapshot["supervisor"]["status"] {
+  if (state.supervisor.pause) {
+    return "paused";
+  }
+
+  if (
+    Object.keys(state.supervisor.active_recovery_envelopes ?? {}).length > 0 ||
+    Object.keys(state.supervisor.active_recovery_chains ?? {}).length > 0
+  ) {
+    return "intervening";
+  }
+
+  if (state.supervisor.status === "intervening") {
+    return "healthy";
+  }
+
+  return state.supervisor.status;
+}
+
+export function createSupervisorDisplayFields(state: Pick<RuntimeStateSnapshot, "supervisor">): {
+  supervisor_status: RuntimeStateSnapshot["supervisor"]["status"];
+  supervisor_recorded_status?: RuntimeStateSnapshot["supervisor"]["status"];
+} {
+  const supervisorStatus = deriveSupervisorDisplayStatus(state);
+  return {
+    supervisor_status: supervisorStatus,
+    ...(supervisorStatus !== state.supervisor.status
+      ? { supervisor_recorded_status: state.supervisor.status }
+      : {})
+  };
+}
+
 export interface AttemptOutcomeVerificationCounts {
   passed: number;
   failed: number;

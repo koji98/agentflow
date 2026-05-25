@@ -10,7 +10,7 @@ import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
-import { readRunExecutionAttempts } from "../../src/artifacts/reader.js";
+import { readRunEvents, readRunExecutionAttempts } from "../../src/artifacts/reader.js";
 import { runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
@@ -1044,6 +1044,29 @@ describe("runtime pattern_work_list", () => {
 
     expect(run.outcome).toBe("passed");
     expect(state.maxActiveChecks).toBeGreaterThan(1);
+    const events = await readRunEvents(runRoot);
+    const criterionProgress = events.filter((event) =>
+      event.type === "managed.progress" &&
+      event.payload?.phase === "item_criterion"
+    );
+    expect(criterionProgress.map((event) => event.payload?.status)).toEqual(expect.arrayContaining([
+      "criterion_started",
+      "criterion_completed"
+    ]));
+    expect(criterionProgress).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          item_id: "w1",
+          criterion_id: "contract"
+        })
+      }),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          item_id: "w1",
+          criterion_id: "handoff"
+        })
+      })
+    ]));
 
     await rm(tempRoot, { recursive: true, force: true });
   });

@@ -921,7 +921,9 @@ async function evaluateManagedWorkListItemCriteria(options: {
   contextManifest: string;
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
   cycle: number;
+  maxCycles: number;
   maxConcurrency?: number;
+  emitManagedProgress?: RuntimeNodeExecutorContext<CompiledAgentNode>["emit_managed_progress"];
 }): Promise<{ passed: boolean; scorecardPath: string; scorecard: Record<string, unknown> }> {
   const criteriaDir = join(options.itemExecutionDir, "criteria");
   await mkdir(criteriaDir, { recursive: true });
@@ -941,103 +943,137 @@ async function evaluateManagedWorkListItemCriteria(options: {
   const criterionResults = await mapWithConcurrency(options.config.criteria, options.maxConcurrency ?? options.config.criteria.length, async (criterion, index): Promise<CriterionResult> => {
     const criterionDir = join(criteriaDir, `${String(index + 1).padStart(2, "0")}-${criterion.id}`);
     await mkdir(criterionDir, { recursive: true });
-
-    if (criterion.kind === "command") {
-      const result = await runDeterministicCheck({
-        command: "sh",
-        args: ["-lc", criterion.command ?? ""],
-        pass_if: { exit_code: 0 },
-        cwd: options.context.workspace_path,
-        env: undefined,
-        base_env: options.context.environment,
-        runtime_env: {
-          ...(options.context.runtime_env ?? {}),
-          AGENTFLOW_OUTPUT_DIR: criterionDir,
-          AGENTFLOW_CONTEXT_CURRENT_ITEM: join(options.itemExecutionDir, "runtime", "current-item.json"),
-          AGENTFLOW_CONTEXT_ITEM_HANDOFF: options.itemArtifacts.handoffPath,
-          AGENTFLOW_CONTEXT_ITEM_RESULT: options.itemArtifacts.resultPath,
-          AGENTFLOW_CONTEXT_ITEM_VALIDATION: options.itemArtifacts.validationPath,
-          AGENTFLOW_CONTEXT_WORK_LIST_LEDGER: options.ledgerPath
-        },
-        timeout_sec: options.itemNode.effective_policy.timeout_sec,
-        signal: options.context.signal
-      });
-      const evidencePath = join(criterionDir, "verification.json");
-      await writeFile(evidencePath, `${JSON.stringify(result.verification_json, null, 2)}\n`, "utf8");
-      await writeFile(join(criterionDir, "stdout.log"), result.stdout, "utf8");
-      await writeFile(join(criterionDir, "stderr.log"), result.stderr, "utf8");
-      const score = result.passed ? 1 : 0;
-      return {
-        id: criterion.id,
-        kind: "command",
-        weight: criterion.weight,
-        required: criterion.required === true,
-        passed: result.passed,
-        score,
-        weighted_score: score * criterion.weight,
-        summary: result.summary,
-        issues: result.passed ? [] : [result.summary],
-        evidence_path: evidencePath
-      };
-    }
-
-    const harnessName = options.itemNode.effective_policy.harness!;
-    const harness = options.harnesses[harnessName]!;
-    const promptPath = join(criterionDir, "prompt.md");
-    const aiResult = await runAiCheck({
-      harness,
-      run_id: options.context.run_id,
-      execution_id: `${options.itemNode.compiled_id}__criterion_${criterion.id}__cycle_${options.cycle}`,
-      repo_alias: options.itemNode.repo,
-      repo_path: options.context.workspace_path,
-      model: options.itemNode.effective_policy.model,
-      ...(options.itemNode.effective_policy.reasoning_effort ? { reasoning_effort: options.itemNode.effective_policy.reasoning_effort } : {}),
-      ...(options.itemNode.effective_policy.harness_config ? { harness_config: options.itemNode.effective_policy.harness_config } : {}),
-      ...(options.itemNode.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
-      rubric: criterion.rubric,
-      graph_goal: options.context.graph_intent.goal,
-      ...(options.context.graph_intent.acceptance_criteria ? { graph_acceptance_criteria: options.context.graph_intent.acceptance_criteria } : {}),
-      ...(options.context.graph_intent.constraints ? { graph_constraints: options.context.graph_intent.constraints } : {}),
-      node_goal: [
-        `Evaluate work-list item ${options.item.id}: ${options.item.title}.`,
-        `Criterion target: ${criterion.target ?? "workspace"}.`,
-        "Grade only the current item evidence and the relevant ledger/prior-item pointers."
-      ].join("\n"),
-      node_acceptance_criteria: options.item.acceptance_criteria,
-      node_constraints: options.itemNode.intent.constraints,
-      context_packet_path: options.contextPacketPath,
-      context_manifest_path: options.contextManifestPath,
-      context_manifest: options.contextManifest,
-      prompt_path: promptPath,
-      output_dir: criterionDir,
-      skills: options.itemNode.skills,
-      cli: options.itemNode.cli,
-      timeout_sec: options.itemNode.effective_policy.timeout_sec,
-      signal: options.context.signal
+    await options.emitManagedProgress?.({
+      phase: "item_criterion",
+      status: "criterion_started",
+      item_id: options.item.id,
+      criterion_id: criterion.id,
+      attempt: options.cycle,
+      max_attempts: options.maxCycles,
+      summary: criterion.kind === "command" ? criterion.command ?? criterion.id : criterion.rubric ?? criterion.id
     });
-    const score = typeof aiResult.evaluation.score === "number"
-      ? Math.max(0, Math.min(1, aiResult.evaluation.score))
-      : aiResult.evaluation.passed ? 1 : 0;
-    const evidencePath = join(criterionDir, "verification.json");
-    await writeFile(evidencePath, `${JSON.stringify({
-      passed: aiResult.evaluation.passed,
-      score,
-      summary: aiResult.evaluation.summary,
-      issues: aiResult.evaluation.issues ?? [],
-      raw: aiResult.evaluation.raw
-    }, null, 2)}\n`, "utf8");
-    return {
-      id: criterion.id,
-      kind: "rubric",
-      weight: criterion.weight,
-      required: criterion.required === true,
-      passed: aiResult.evaluation.passed,
-      score,
-      weighted_score: score * criterion.weight,
-      summary: aiResult.evaluation.summary ?? (aiResult.evaluation.passed ? "Criterion passed." : "Criterion failed."),
-      issues: aiResult.evaluation.issues ?? [],
-      evidence_path: evidencePath
-    };
+
+    try {
+      let criterionResult: CriterionResult;
+      if (criterion.kind === "command") {
+        const result = await runDeterministicCheck({
+          command: "sh",
+          args: ["-lc", criterion.command ?? ""],
+          pass_if: { exit_code: 0 },
+          cwd: options.context.workspace_path,
+          env: undefined,
+          base_env: options.context.environment,
+          runtime_env: {
+            ...(options.context.runtime_env ?? {}),
+            AGENTFLOW_OUTPUT_DIR: criterionDir,
+            AGENTFLOW_CONTEXT_CURRENT_ITEM: join(options.itemExecutionDir, "runtime", "current-item.json"),
+            AGENTFLOW_CONTEXT_ITEM_HANDOFF: options.itemArtifacts.handoffPath,
+            AGENTFLOW_CONTEXT_ITEM_RESULT: options.itemArtifacts.resultPath,
+            AGENTFLOW_CONTEXT_ITEM_VALIDATION: options.itemArtifacts.validationPath,
+            AGENTFLOW_CONTEXT_WORK_LIST_LEDGER: options.ledgerPath
+          },
+          timeout_sec: options.itemNode.effective_policy.timeout_sec,
+          signal: options.context.signal
+        });
+        const evidencePath = join(criterionDir, "verification.json");
+        await writeFile(evidencePath, `${JSON.stringify(result.verification_json, null, 2)}\n`, "utf8");
+        await writeFile(join(criterionDir, "stdout.log"), result.stdout, "utf8");
+        await writeFile(join(criterionDir, "stderr.log"), result.stderr, "utf8");
+        const score = result.passed ? 1 : 0;
+        criterionResult = {
+          id: criterion.id,
+          kind: "command",
+          weight: criterion.weight,
+          required: criterion.required === true,
+          passed: result.passed,
+          score,
+          weighted_score: score * criterion.weight,
+          summary: result.summary,
+          issues: result.passed ? [] : [result.summary],
+          evidence_path: evidencePath
+        };
+      } else {
+        const harnessName = options.itemNode.effective_policy.harness!;
+        const harness = options.harnesses[harnessName]!;
+        const promptPath = join(criterionDir, "prompt.md");
+        const aiResult = await runAiCheck({
+          harness,
+          run_id: options.context.run_id,
+          execution_id: `${options.itemNode.compiled_id}__criterion_${criterion.id}__cycle_${options.cycle}`,
+          repo_alias: options.itemNode.repo,
+          repo_path: options.context.workspace_path,
+          model: options.itemNode.effective_policy.model,
+          ...(options.itemNode.effective_policy.reasoning_effort ? { reasoning_effort: options.itemNode.effective_policy.reasoning_effort } : {}),
+          ...(options.itemNode.effective_policy.harness_config ? { harness_config: options.itemNode.effective_policy.harness_config } : {}),
+          ...(options.itemNode.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
+          rubric: criterion.rubric,
+          graph_goal: options.context.graph_intent.goal,
+          ...(options.context.graph_intent.acceptance_criteria ? { graph_acceptance_criteria: options.context.graph_intent.acceptance_criteria } : {}),
+          ...(options.context.graph_intent.constraints ? { graph_constraints: options.context.graph_intent.constraints } : {}),
+          node_goal: [
+            `Evaluate work-list item ${options.item.id}: ${options.item.title}.`,
+            `Criterion target: ${criterion.target ?? "workspace"}.`,
+            "Grade only the current item evidence and the relevant ledger/prior-item pointers."
+          ].join("\n"),
+          node_acceptance_criteria: options.item.acceptance_criteria,
+          node_constraints: options.itemNode.intent.constraints,
+          context_packet_path: options.contextPacketPath,
+          context_manifest_path: options.contextManifestPath,
+          context_manifest: options.contextManifest,
+          prompt_path: promptPath,
+          output_dir: criterionDir,
+          skills: options.itemNode.skills,
+          cli: options.itemNode.cli,
+          timeout_sec: options.itemNode.effective_policy.timeout_sec,
+          signal: options.context.signal
+        });
+        const score = typeof aiResult.evaluation.score === "number"
+          ? Math.max(0, Math.min(1, aiResult.evaluation.score))
+          : aiResult.evaluation.passed ? 1 : 0;
+        const evidencePath = join(criterionDir, "verification.json");
+        await writeFile(evidencePath, `${JSON.stringify({
+          passed: aiResult.evaluation.passed,
+          score,
+          summary: aiResult.evaluation.summary,
+          issues: aiResult.evaluation.issues ?? [],
+          raw: aiResult.evaluation.raw
+        }, null, 2)}\n`, "utf8");
+        criterionResult = {
+          id: criterion.id,
+          kind: "rubric",
+          weight: criterion.weight,
+          required: criterion.required === true,
+          passed: aiResult.evaluation.passed,
+          score,
+          weighted_score: score * criterion.weight,
+          summary: aiResult.evaluation.summary ?? (aiResult.evaluation.passed ? "Criterion passed." : "Criterion failed."),
+          issues: aiResult.evaluation.issues ?? [],
+          evidence_path: evidencePath
+        };
+      }
+
+      await options.emitManagedProgress?.({
+        phase: "item_criterion",
+        status: criterionResult.passed ? "criterion_completed" : "criterion_failed",
+        item_id: options.item.id,
+        criterion_id: criterion.id,
+        attempt: options.cycle,
+        max_attempts: options.maxCycles,
+        summary: criterionResult.summary
+      });
+      return criterionResult;
+    } catch (error) {
+      await options.emitManagedProgress?.({
+        phase: "item_criterion",
+        status: "criterion_failed",
+        item_id: options.item.id,
+        criterion_id: criterion.id,
+        attempt: options.cycle,
+        max_attempts: options.maxCycles,
+        summary: managedWorkListErrorMessage(error)
+      });
+      throw error;
+    }
   });
 
   const blockers = criterionResults
@@ -1228,6 +1264,8 @@ export async function runManagedWorkListItems(
           contextManifest,
           harnesses,
           cycle,
+          maxCycles,
+          emitManagedProgress: context.emit_managed_progress,
           ...(config.criteria_concurrency !== undefined ? { maxConcurrency: config.criteria_concurrency } : {})
         });
         scorecardPath = scorecard.scorecardPath;
