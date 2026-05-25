@@ -18,9 +18,15 @@ import {
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import { runAiCheck } from "../checks/ai.js";
 import { runDeterministicCheck } from "../checks/deterministic.js";
+import {
+  buildCompletionPacket,
+  persistCompletionPacket,
+  type CompletionPacket
+} from "../completion/index.js";
 import type { ContextPacketMaterializedItem } from "../context/packet.js";
 import { RuntimeFailureError } from "../failure.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter, type HarnessResult } from "../harness/types.js";
+import { readOperatorObservations } from "../observations/index.js";
 import { prepareAgentTools } from "../tools/setup.js";
 import type { OutcomeVerificationResult } from "../verification/types.js";
 import { runOutcomeVerification } from "../verification/verifier.js";
@@ -814,12 +820,39 @@ async function runManagedWorkListItemAgent(options: {
   return harness.run(invocation);
 }
 
+async function buildManagedWorkListItemCompletionPacket(options: {
+  context: RuntimeNodeExecutorContext<CompiledAgentNode>;
+  itemNode: CompiledAgentNode;
+  itemAttempt: RuntimeNodeAttempt;
+}): Promise<CompletionPacket> {
+  const priorAttempts = (await readRunExecutionAttempts(options.context.run_root).catch(() => []))
+    .filter((attempt) =>
+      attempt.execution_id !== options.itemAttempt.execution_id &&
+      attempt.compiled_id === options.itemNode.compiled_id
+    );
+  const runtimeDir = join(options.context.run_root, "runtime");
+  const packet = await buildCompletionPacket({
+    runRoot: options.context.run_root,
+    node: options.itemNode,
+    attempt: options.itemAttempt,
+    priorAttempts,
+    workspacePath: options.context.workspace_path,
+    outputDir: resolveExecutionArtifactsDirectory(options.itemAttempt.execution_dir),
+    runtimeDir,
+    sandbox: options.itemNode.effective_policy.sandbox ?? "workspace-write",
+    observations: await readOperatorObservations(options.context.run_root)
+  });
+  await persistCompletionPacket(packet);
+  return packet;
+}
+
 async function verifyManagedWorkListItemAttempt(options: {
   context: RuntimeNodeExecutorContext<CompiledAgentNode>;
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
   itemNode: CompiledAgentNode;
   itemAttempt: RuntimeNodeAttempt;
   itemArtifacts: Awaited<ReturnType<typeof readManagedItemArtifacts>>;
+  completionPacket: CompletionPacket;
   contextPacketPath: string;
   contextManifestPath: string;
   contextManifest: string;
@@ -866,6 +899,7 @@ async function verifyManagedWorkListItemAttempt(options: {
       item_result: options.itemArtifacts.resultPath,
       item_validation: options.itemArtifacts.validationPath
     },
+    completionPacket: options.completionPacket,
     harness,
     runId: options.context.run_id,
     baseEnv: options.context.environment,
@@ -1215,12 +1249,33 @@ export async function runManagedWorkListItems(
         max_attempts: maxCycles,
         summary: item.title
       });
+      const completionPacket = await buildManagedWorkListItemCompletionPacket({
+        context,
+        itemNode,
+        itemAttempt: completedItemAttempt
+      });
+      if (!completionPacket.ready_for_verification) {
+        lastFailure = [
+          `Item ${item.id} completion packet is ${completionPacket.completion_status}.`,
+          ...completionPacket.blocking_reasons
+        ].filter(Boolean).join(" ");
+        await context.emit_managed_progress?.({
+          phase: "run_item",
+          status: "item_retrying",
+          item_id: item.id,
+          attempt: cycle,
+          max_attempts: maxCycles,
+          summary: lastFailure
+        });
+        continue;
+      }
       const itemVerification = await verifyManagedWorkListItemAttempt({
         context,
         harnesses,
         itemNode,
         itemAttempt: completedItemAttempt,
         itemArtifacts,
+        completionPacket,
         contextPacketPath: itemContext.packetPath,
         contextManifestPath: itemContext.manifestPath,
         contextManifest

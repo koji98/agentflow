@@ -944,6 +944,17 @@ describe("runtime pattern_work_list", () => {
     const attempts = await readRunExecutionAttempts(runRoot);
     const managedItemAttempts = attempts.filter((attempt) => attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1");
     expect(managedItemAttempts.map((attempt) => attempt.outcome)).toEqual(["passed", "passed"]);
+    const completionPacket = JSON.parse(
+      await readFile(join(managedItemAttempts[0]!.execution_dir, "runtime", "completion-packet.json"), "utf8")
+    ) as { ready_for_verification: boolean; completion_status: string };
+    expect(completionPacket).toEqual(expect.objectContaining({
+      ready_for_verification: true,
+      completion_status: "ready_for_verification"
+    }));
+    const verifierPrompt = await readFile(join(managedItemAttempts[0]!.execution_dir, "human-debug", "verifier", "prompt.md"), "utf8");
+    expect(verifierPrompt).toContain("## Completion Packet");
+    expect(verifierPrompt).toContain("- Ready for verification: true");
+    expect(verifierPrompt).not.toContain("(no completion packet was provided)");
     const runItemAttempts = attempts.filter((attempt) => attempt.authored_id === "deliver__managed__pattern_work_list__run_items");
     expect(runItemAttempts.map((attempt) => attempt.outcome)).toEqual(["passed"]);
 
