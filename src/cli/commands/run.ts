@@ -27,7 +27,7 @@ import {
 } from "../command_support.js";
 import { createRuntimeProgressReporter } from "../progress.js";
 import { collectReferencedRepoAliases, resolveRepoSources } from "../repo_sources.js";
-import { createRunTerminalFields } from "../run_output.js";
+import { createRunTerminalFields, createSupervisorDisplayFields } from "../run_output.js";
 
 export const runCommand = {
   name: "run",
@@ -275,7 +275,7 @@ export const runCommand = {
         run_id: run.run_id,
         run_root: run.run_root,
         counts: run.state.counts,
-        supervisor_status: run.state.supervisor.status,
+        ...createSupervisorDisplayFields(run.state),
         intervention_count: run.state.supervisor.intervention_count,
         supervisor_budget_remaining: run.state.supervisor.budget_remaining,
         delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,

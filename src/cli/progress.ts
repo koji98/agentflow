@@ -366,6 +366,7 @@ export function createRuntimeProgressReporter(
             phase?: string;
             status?: string;
             item_id?: string;
+            criterion_id?: string;
             attempt?: number;
             max_attempts?: number;
             summary?: string;
@@ -374,6 +375,7 @@ export function createRuntimeProgressReporter(
             const detailParts = [
               payload.status ?? "unknown",
               ...(payload.item_id ? [`item=${payload.item_id}`] : []),
+              ...(payload.criterion_id ? [`criterion=${payload.criterion_id}`] : []),
               ...(payload.attempt !== undefined || payload.max_attempts !== undefined
                 ? [`attempt=${payload.attempt ?? "?"}/${payload.max_attempts ?? "?"}`]
                 : []),

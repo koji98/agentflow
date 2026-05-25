@@ -12,7 +12,7 @@ import {
 } from "../../artifacts/reader.js";
 import { operatorObservationsPath, readOperatorObservations } from "../../runtime/observations/index.js";
 import type { RuntimeNodeAttempt } from "../../runtime/attempts.js";
-import { createRunTerminalFields } from "../run_output.js";
+import { createRunTerminalFields, createSupervisorDisplayFields } from "../run_output.js";
 import { renderCommandUsageError } from "../command_support.js";
 
 const stderrTailMaxBytes = 4_000;
@@ -53,9 +53,7 @@ async function readStderrTail(filePath: string): Promise<{ stderr_tail: string; 
 }
 
 async function summarizeFailedNodes(attempts: RuntimeNodeAttempt[]): Promise<NodeStderrTail[]> {
-  const failed = attempts
-    .filter((attempt) => attempt.status === "failed")
-    .slice(-stderrTailMaxAttempts);
+  const failed = attempts.slice(-stderrTailMaxAttempts);
 
   return Promise.all(
     failed.map(async (attempt) => {
@@ -85,6 +83,23 @@ async function summarizeFailedNodes(attempts: RuntimeNodeAttempt[]): Promise<Nod
       return summary;
     })
   );
+}
+
+function isActiveFailedAttempt(
+  attempt: RuntimeNodeAttempt,
+  state: Awaited<ReturnType<typeof readRunState>> | undefined
+): boolean {
+  if (attempt.status !== "failed") {
+    return false;
+  }
+
+  if (!state) {
+    return true;
+  }
+
+  const latest = state.latest_execution_by_compiled_id[attempt.compiled_id];
+  return state.node_statuses[attempt.compiled_id] === "failed" &&
+    latest?.execution_id === attempt.execution_id;
 }
 
 async function readDeliveryTaxonomySummary(manifestPath: string): Promise<Record<string, number> | undefined> {
@@ -214,7 +229,13 @@ export const inspectCommand = {
       readOperatorObservations(runRoot)
     ]);
 
-    const failedNodeStderrTails = await summarizeFailedNodes(attempts);
+    const failedAttempts = attempts.filter((attempt) => attempt.status === "failed");
+    const activeFailedAttempts = failedAttempts.filter((attempt) => isActiveFailedAttempt(attempt, state));
+    const historicalFailedAttempts = failedAttempts.filter((attempt) => !isActiveFailedAttempt(attempt, state));
+    const [failedNodeStderrTails, historicalFailedAttemptStderrTails] = await Promise.all([
+      summarizeFailedNodes(activeFailedAttempts),
+      summarizeFailedNodes(historicalFailedAttempts)
+    ]);
     const terminalFields = state
       ? createRunTerminalFields(state, attempts, events)
       : undefined;
@@ -237,7 +258,7 @@ export const inspectCommand = {
           ? {
               counts: state.counts,
               evidence_status: state.evidence_status,
-              supervisor_status: state.supervisor.status,
+              ...createSupervisorDisplayFields(state),
               supervisor_pause: state.supervisor.pause,
               supervisor_timeline_count: supervisorTimelineCount,
               runtime_log_count: runtimeLogCount,
@@ -262,8 +283,12 @@ export const inspectCommand = {
         ...(terminalFields ?? {}),
         attempt_count: attempts.length,
         event_count: events.length,
-        failed_node_count: attempts.filter((attempt) => attempt.status === "failed").length,
+        failed_node_count: activeFailedAttempts.length,
+        active_failed_node_count: activeFailedAttempts.length,
+        failed_attempt_count: failedAttempts.length,
+        historical_failed_attempt_count: historicalFailedAttempts.length,
         failed_node_stderr_tails: failedNodeStderrTails,
+        historical_failed_attempt_stderr_tails: historicalFailedAttemptStderrTails,
         artifacts: {
           run_file: artifactPaths.run_file,
           authored_graph_file: artifactPaths.authored_graph_file,

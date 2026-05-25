@@ -371,6 +371,54 @@ describe("runtime progress reporter", () => {
         const rendered = lines.join("");
         expect(rendered).toContain("MANAGED  pattern_work_list deliver run_item · item_started · item=w1 · attempt=1/3 · Content foundation");
     });
+    it("renders managed work-list criterion progress details", () => {
+        const lines: string[] = [];
+        const reporter = createRuntimeProgressReporter(createCompiledGraph(), {
+            write(chunk: string) {
+                lines.push(chunk);
+                return true;
+            }
+        });
+        reporter.onEvent({
+            seq: 1,
+            ts: new Date().toISOString(),
+            run_id: "run-criterion",
+            type: "managed.progress",
+            compiled_id: "root__inspect",
+            payload: {
+                managed_kind: "pattern_work_list",
+                managed_authored_id: "deliver",
+                phase: "item_criterion",
+                status: "criterion_started",
+                item_id: "w1",
+                criterion_id: "validation_evidence",
+                attempt: 2,
+                max_attempts: 3,
+                summary: "Validation evidence"
+            }
+        });
+        reporter.onEvent({
+            seq: 2,
+            ts: new Date().toISOString(),
+            run_id: "run-criterion",
+            type: "managed.progress",
+            compiled_id: "root__inspect",
+            payload: {
+                managed_kind: "pattern_work_list",
+                managed_authored_id: "deliver",
+                phase: "item_criterion",
+                status: "criterion_completed",
+                item_id: "w1",
+                criterion_id: "validation_evidence",
+                attempt: 2,
+                max_attempts: 3,
+                summary: "Criterion passed."
+            }
+        });
+        const rendered = lines.join("");
+        expect(rendered).toContain("MANAGED  pattern_work_list deliver item_criterion · criterion_started · item=w1 · criterion=validation_evidence · attempt=2/3 · Validation evidence");
+        expect(rendered).toContain("MANAGED  pattern_work_list deliver item_criterion · criterion_completed · item=w1 · criterion=validation_evidence · attempt=2/3 · Criterion passed.");
+    });
     it("adds ANSI color only for TTY-like streams", () => {
         const lines: string[] = [];
         const previousNoColor = process.env.NO_COLOR;
