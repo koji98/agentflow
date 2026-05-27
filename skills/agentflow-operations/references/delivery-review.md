@@ -1,6 +1,6 @@
 # Delivery Review
 
-At terminal state, review in this order:
+At terminal state, first check `delivery/manifest.json` for `graph_status`, `delivery_status`, and `review_ready`. Review in this order when `review_ready` is true, or when `delivery_status` is failed and you are inspecting the deterministic failure package:
 
 1. `delivery/01-review-brief.md`
 2. `delivery/02-run-learnings.md`
@@ -9,7 +9,7 @@ At terminal state, review in this order:
 5. declared artifacts and evidence files named by the manifest
 6. raw runtime files only for debug, audit, or resume
 
-The review brief and run learnings are AI-curated from deterministic runtime evidence. The audit index maps raw evidence for deeper inspection. The manifest uses semantic keys for tools, automation, and exact provenance. Treat `delivery/evidence/delivery-source.json` and `delivery/evidence/curation-verdict.json` as the trust boundary: if curation failed, the graph may have reached terminal state, but the run is not review-ready.
+The review brief and run learnings are AI-curated from deterministic runtime evidence. The audit index maps raw evidence for deeper inspection. The manifest uses semantic keys for tools, automation, and exact provenance. Treat `delivery/evidence/delivery-source.json` and `delivery/evidence/curation-verdict.json` as the trust boundary: if curation failed, the graph may have reached terminal state, but `review_ready` is false and the front-door Markdown is a delivery-failure brief rather than a merge-ready handoff.
 
 Review questions:
 

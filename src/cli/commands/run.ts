@@ -242,7 +242,7 @@ export const runCommand = {
       explicitRunsRoot
     );
     const terminalFields = createRunTerminalFields(run.state, run.attempts, run.events);
-    const deliveryFailed = run.events.some((event) => event.type === "delivery.curation.failed");
+    const deliveryFailed = run.state.delivery_status === "failed";
     const runMessage =
       deliveryFailed
         ? "Run reached terminal graph state, but curated delivery failed verification."
@@ -257,7 +257,6 @@ export const runCommand = {
       output: {
         command: "run",
         status: run.outcome,
-        delivery_status: deliveryFailed ? "failed" : "ready",
         message: runMessage,
         graph_path: loaded.absolute_path,
         path_resolution: pathResolution,
@@ -279,7 +278,7 @@ export const runCommand = {
         intervention_count: run.state.supervisor.intervention_count,
         supervisor_budget_remaining: run.state.supervisor.budget_remaining,
         delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
-        review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md`,
+        ...(run.state.review_ready || deliveryFailed ? { review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md` } : {}),
         repo_workspaces: run.state.repo_workspaces,
         workspace_change_artifacts: run.state.workspace_change_artifacts,
         attempt_count: run.attempts.length,

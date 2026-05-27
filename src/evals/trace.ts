@@ -247,6 +247,7 @@ export async function buildEvalTracePacket(options: {
   const gatherers = new Set<string>();
   const applyActions = new Set<string>();
   const resumeDecisions: EvalTracePacket["supervisor"]["resume_decisions"] = [];
+  const interventionDecisions: EvalTracePacket["supervisor"]["intervention_decisions"] = [];
   const interventionEvents = eventRecords.filter((event) =>
     typeof event.type === "string" && (event.type.includes("intervention") || event.type.includes("supervisor"))
   );
@@ -266,21 +267,35 @@ export async function buildEvalTracePacket(options: {
   for (const event of eventRecords) {
     const payload = readRecord(event.payload);
     const decision = readRecord(payload?.resume_decision);
-    if (!decision) {
-      continue;
+    if (decision) {
+      resumeDecisions.push({
+        ...(typeof decision.resume_point === "string" ? { resume_point: decision.resume_point } : {}),
+        ...(typeof decision.restart_boundary === "string" ? { restart_boundary: decision.restart_boundary } : {}),
+        ...(typeof decision.workspace_decision === "string" ? { workspace_decision: decision.workspace_decision } : {}),
+        ...(typeof decision.reason_code === "string" ? { reason_code: decision.reason_code } : {})
+      });
     }
-    resumeDecisions.push({
-      ...(typeof decision.resume_point === "string" ? { resume_point: decision.resume_point } : {}),
-      ...(typeof decision.restart_boundary === "string" ? { restart_boundary: decision.restart_boundary } : {}),
-      ...(typeof decision.workspace_decision === "string" ? { workspace_decision: decision.workspace_decision } : {}),
-      ...(typeof decision.reason_code === "string" ? { reason_code: decision.reason_code } : {})
-    });
+    const interventionDecision = readRecord(payload?.intervention_decision);
+    if (interventionDecision) {
+      const materialDelta = Array.isArray(interventionDecision.material_delta)
+        ? interventionDecision.material_delta
+        : undefined;
+      interventionDecisions.push({
+        ...(typeof interventionDecision.selected_strategy === "string" ? { selected_strategy: interventionDecision.selected_strategy } : {}),
+        ...(typeof interventionDecision.prior_strategy === "string" ? { prior_strategy: interventionDecision.prior_strategy } : {}),
+        ...(typeof interventionDecision.restart_boundary === "string" ? { restart_boundary: interventionDecision.restart_boundary } : {}),
+        ...(typeof interventionDecision.workspace_decision === "string" ? { workspace_decision: interventionDecision.workspace_decision } : {}),
+        ...(materialDelta ? { material_delta_count: materialDelta.length } : {}),
+        ...(typeof interventionDecision.fallback_if_repeated === "string" ? { fallback_if_repeated: interventionDecision.fallback_if_repeated } : {})
+      });
+    }
   }
 
   const manifestPath = join(options.run_root, "delivery", "manifest.json");
   const reviewBriefPath = join(options.run_root, "delivery", "01-review-brief.md");
   const curationVerdictPath = join(options.run_root, "delivery", "evidence", "curation-verdict.json");
   const manifest = await readOptionalJson(manifestPath);
+  const manifestRecord = readRecord(manifest);
   const curationVerdict = await readOptionalJson(curationVerdictPath);
   const trajectory: EvalTrajectoryEvent[] = [];
   let order = 1;
@@ -428,6 +443,7 @@ export async function buildEvalTracePacket(options: {
       gatherers: [...gatherers],
       apply_actions: [...applyActions],
       resume_decisions: resumeDecisions,
+      intervention_decisions: interventionDecisions,
       intervention_count: interventionEvents.length,
       recovery_count: interventionEvents.filter((event) =>
         typeof event.type === "string" && event.type.includes("intervention")
@@ -437,6 +453,9 @@ export async function buildEvalTracePacket(options: {
       manifest_path: manifestPath,
       review_brief_path: reviewBriefPath,
       curation_verdict_path: curationVerdictPath,
+      ...(typeof manifestRecord?.graph_status === "string" ? { graph_status: manifestRecord.graph_status } : {}),
+      ...(typeof manifestRecord?.delivery_status === "string" ? { delivery_status: manifestRecord.delivery_status } : {}),
+      ...(typeof manifestRecord?.review_ready === "boolean" ? { review_ready: manifestRecord.review_ready } : {}),
       ...(curationVerdict !== undefined ? { curation_verdict: curationVerdict } : {}),
       ...(manifest !== undefined ? { manifest } : {})
     },

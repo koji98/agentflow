@@ -36,9 +36,11 @@ import type {
   SupervisorEvidenceGatherRequest,
   SupervisorEvidencePatch,
   SupervisorInterventionRecord,
+  SupervisorInterventionDecision,
   SupervisorMaterialDelta,
   SupervisorRecoveryEnvelope,
   SupervisorRecoveryPlan,
+  SupervisorApplyAction,
   SupervisorRuntimeOverlay,
   SupervisorValidationStrategyRepair,
   SupervisorWorkspaceRepairPatch,
@@ -929,6 +931,156 @@ function buildRecoveryResumeDecision(options: {
   };
 }
 
+function materialDeltaKey(deltas: SupervisorMaterialDelta[] | undefined): string {
+  return (deltas ?? [])
+    .map((delta) => `${delta.kind}:${delta.summary}`)
+    .sort()
+    .join("|");
+}
+
+function evidenceRefsForPlan(plan: SupervisorRecoveryPlan): string[] {
+  return [
+    ...(plan.runtime_overlay?.context_repair?.analysis_path ? [plan.runtime_overlay.context_repair.analysis_path] : []),
+    ...(plan.runtime_overlay?.workspace_repair
+      ? [
+          plan.runtime_overlay.workspace_repair.baseline_path,
+          plan.runtime_overlay.workspace_repair.changed_files_path,
+          ...(plan.runtime_overlay.workspace_repair.diff_patch_path ? [plan.runtime_overlay.workspace_repair.diff_patch_path] : [])
+        ]
+      : []),
+    ...Object.values(plan.runtime_overlay?.material_delta ?? {}).flatMap((delta) => Object.values(delta.artifact_paths ?? {})),
+    ...(plan.recovery_target?.evidence ?? [])
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 12);
+}
+
+function priorStrategyForFingerprint(
+  priorInterventions: SupervisorInterventionRecord[],
+  failureFingerprint: string
+): {
+  strategy?: SupervisorApplyAction;
+  target?: string;
+  material_delta_key?: string;
+} | undefined {
+  for (const intervention of [...priorInterventions].reverse()) {
+    const evidence = isRecord(intervention.evidence) ? intervention.evidence : {};
+    if (evidence.failure_fingerprint !== failureFingerprint) {
+      continue;
+    }
+    const plan = isRecord(evidence.recovery_plan) ? evidence.recovery_plan : {};
+    const strategy = typeof plan.apply_action === "string" ? plan.apply_action as SupervisorApplyAction : undefined;
+    const target = intervention.target_compiled_id;
+    const materialDeltaFingerprint = Array.isArray(evidence.material_delta)
+      ? evidence.material_delta
+        .filter(isRecord)
+        .map((delta) => `${String(delta.kind ?? "")}:${String(delta.summary ?? "")}`)
+        .sort()
+        .join("|")
+      : undefined;
+    return {
+      ...(strategy ? { strategy } : {}),
+      ...(target ? { target } : {}),
+      ...(materialDeltaFingerprint ? { material_delta_key: materialDeltaFingerprint } : {})
+    };
+  }
+  return undefined;
+}
+
+function fallbackForRepeatedStrategy(action: SupervisorApplyAction): SupervisorInterventionDecision["fallback_if_repeated"] {
+  switch (action) {
+    case "rerun_verification":
+      return "repair_validation_strategy";
+    case "repair_artifact":
+      return "retry_with_evidence";
+    case "repair_workspace":
+      return "retry_with_evidence";
+    case "repair_environment":
+      return "repair_validation_strategy";
+    case "retry_with_evidence":
+    case "repair_context":
+    case "repair_evidence_context":
+    case "repair_validation_strategy":
+      return "fail_contract_gap";
+    default:
+      return "fail_contract_gap";
+  }
+}
+
+function buildInterventionDecision(options: {
+  failureFingerprint: string;
+  priorInterventions: SupervisorInterventionRecord[];
+  recoveryPlan: SupervisorRecoveryPlan;
+  resumeDecision: RecoveryResumeDecision;
+}): SupervisorInterventionDecision | undefined {
+  const plan = options.recoveryPlan;
+  if (!retryableApplyAction(plan.apply_action)) {
+    return undefined;
+  }
+  const prior = priorStrategyForFingerprint(options.priorInterventions, options.failureFingerprint);
+  const deltas = plan.runtime_overlay?.material_delta ?? [];
+
+  return {
+    decision_kind: "intervention",
+    capability: plan.apply_action === "repair_environment" ? "environment" : "intervention",
+    failure_fingerprint: options.failureFingerprint,
+    ...(prior?.strategy ? { prior_strategy: prior.strategy } : {}),
+    selected_strategy: plan.apply_action,
+    restart_boundary: options.resumeDecision.restart_boundary,
+    workspace_decision: options.resumeDecision.workspace_decision,
+    preserve: options.resumeDecision.reuse,
+    discard: options.resumeDecision.discard,
+    material_delta: deltas,
+    evidence_refs: evidenceRefsForPlan(plan),
+    required_next_action: options.resumeDecision.required_next_action,
+    validation_gate: options.resumeDecision.validation_gate,
+    fallback_if_repeated: fallbackForRepeatedStrategy(plan.apply_action)
+  };
+}
+
+function repeatedStrategyWithoutDelta(options: {
+  failureFingerprint: string;
+  repeatedFingerprintCount: number;
+  priorInterventions: SupervisorInterventionRecord[];
+  recoveryPlan: SupervisorRecoveryPlan;
+}): string | undefined {
+  if (options.repeatedFingerprintCount < 2 || !retryableApplyAction(options.recoveryPlan.apply_action)) {
+    return undefined;
+  }
+  const prior = priorStrategyForFingerprint(options.priorInterventions, options.failureFingerprint);
+  if (!prior?.strategy || prior.strategy !== options.recoveryPlan.apply_action) {
+    return undefined;
+  }
+  const currentTarget = options.recoveryPlan.recovery_target?.target_compiled_id;
+  if (prior.target && currentTarget && prior.target !== currentTarget) {
+    return undefined;
+  }
+  const currentDeltaKey = materialDeltaKey(options.recoveryPlan.runtime_overlay?.material_delta);
+  if (currentDeltaKey.length > 0 && currentDeltaKey !== prior.material_delta_key) {
+    return undefined;
+  }
+  return `Repeated failure fingerprint selected the same ${options.recoveryPlan.apply_action} strategy without a new material delta.`;
+}
+
+function forceContractGapForRepeatedStrategy(
+  plan: SupervisorRecoveryPlan,
+  terminalReason: string
+): SupervisorRecoveryPlan {
+  const {
+    retry_directive: _retryDirective,
+    runtime_overlay: _runtimeOverlay,
+    repair_directive: _repairDirective,
+    pause_request: _pauseRequest,
+    intervention_decision: _interventionDecision,
+    ...rest
+  } = plan;
+  return {
+    ...rest,
+    apply_action: "fail_contract_gap",
+    operation: "fail_contract_gap",
+    terminal_reason: terminalReason,
+    confidence: "high"
+  };
+}
+
 function preserveProgressForRecoveryPlan(plan: SupervisorRecoveryPlan): string[] {
   const items = [
     plan.recovery_target?.target_prior_execution_id
@@ -1678,7 +1830,7 @@ export async function runSupervisorRecoveryCycle(options: {
     await writeFile(materialDeltaPath, `${JSON.stringify(runtimeOverlay.material_delta, null, 2)}\n`, "utf8");
   }
 
-  const recoveryPlan = buildRecoveryPlan({
+  let recoveryPlan = buildRecoveryPlan({
     planId: `${options.intervention_id}__plan`,
     action: options.action,
     classification: options.classification,
@@ -1688,14 +1840,36 @@ export async function runSupervisorRecoveryCycle(options: {
     ...(options.causal_context ? { causalContext: options.causal_context } : {}),
     requirementEvidenceMapPath: requirementEvidenceMapMarkdownPath
   });
-  await writeFile(recoveryPlanJsonPath, `${JSON.stringify(recoveryPlan, null, 2)}\n`, "utf8");
-  await writeFile(recoveryPlanMarkdownPath, `${renderRecoveryPlanMarkdown(recoveryPlan)}\n`, "utf8");
+
+  const repeatedStrategyBlocker = repeatedStrategyWithoutDelta({
+    failureFingerprint: options.failure_fingerprint,
+    repeatedFingerprintCount: options.repeated_fingerprint_count,
+    priorInterventions: options.prior_interventions,
+    recoveryPlan
+  });
+  if (repeatedStrategyBlocker) {
+    recoveryPlan = forceContractGapForRepeatedStrategy(recoveryPlan, repeatedStrategyBlocker);
+  }
 
   const resumeDecision = buildRecoveryResumeDecision({
     recoveryPlan,
     classification: options.classification,
     ...(workspaceRepairPatch ? { workspaceRepairPatch } : {})
   });
+  const interventionDecision = buildInterventionDecision({
+    failureFingerprint: options.failure_fingerprint,
+    priorInterventions: options.prior_interventions,
+    recoveryPlan,
+    resumeDecision
+  });
+  if (interventionDecision) {
+    recoveryPlan = {
+      ...recoveryPlan,
+      intervention_decision: interventionDecision
+    };
+  }
+  await writeFile(recoveryPlanJsonPath, `${JSON.stringify(recoveryPlan, null, 2)}\n`, "utf8");
+  await writeFile(recoveryPlanMarkdownPath, `${renderRecoveryPlanMarkdown(recoveryPlan)}\n`, "utf8");
   const recoveryEnvelope =
     retryableApplyAction(recoveryPlan.apply_action) && recoveryPlan.retry_directive
       ? {
@@ -1847,6 +2021,8 @@ export async function runSupervisorRecoveryCycle(options: {
         apply_action: recoveryPlan.apply_action,
         confidence: recoveryPlan.confidence
       },
+      material_delta: recoveryPlan.runtime_overlay?.material_delta ?? [],
+      ...(recoveryPlan.intervention_decision ? { intervention_decision: recoveryPlan.intervention_decision } : {}),
       requirement_evidence_map: {
         map_id: requirementEvidenceMap.map_id,
         missing_count: requirementEvidenceMap.missing_evidence.length,

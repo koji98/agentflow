@@ -850,6 +850,19 @@ describe("runtime pattern_work_list", () => {
       ["w1", "completed"],
       ["w2", "completed"]
     ]);
+    const resumedRunItemsAttempt = runItemAttempts.find((attempt) => attempt.outcome === "passed");
+    const reuseDecision = JSON.parse(await readFile(
+      join(resumedRunItemsAttempt!.execution_dir, "managed-items", "w1", "reuse-decision.json"),
+      "utf8"
+    )) as { item_id: string; decision: string; contract_hash?: string; frozen_item_hash?: string; validation_refs?: string[] };
+    expect(reuseDecision).toEqual(expect.objectContaining({
+      item_id: "w1",
+      decision: "reuse_prior_completed_item",
+      accepted_prior_attempt_state: "passed"
+    }));
+    expect(reuseDecision.contract_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(reuseDecision.frozen_item_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(reuseDecision.validation_refs?.length).toBeGreaterThan(0);
 
     await rm(tempRoot, { recursive: true, force: true });
   });

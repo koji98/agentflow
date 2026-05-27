@@ -30,7 +30,7 @@ Use `agentflow-authoring` for graph creation and `agentflow-run-review` for post
 ## Decision Rules
 
 - Validate before expensive harness work.
-- Start delivery review from `delivery/01-review-brief.md`, then `delivery/02-run-learnings.md`, `delivery/03-audit-index.md`, and `delivery/manifest.json`.
+- Start delivery review by checking `delivery/manifest.json` for `graph_status`, `delivery_status`, and `review_ready`, then use `delivery/01-review-brief.md`, `delivery/02-run-learnings.md`, and `delivery/03-audit-index.md`.
 - Use raw `events.jsonl`, attempts, and runtime logs only for debug, audit, or resume.
 - Treat missing or weak delivery as a run-quality failure even when code changed.
 - Use `agentflow-run-review` after completion when the goal is learning or extraction.

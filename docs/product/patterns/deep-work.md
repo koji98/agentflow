@@ -22,6 +22,7 @@ Common fields:
 - `artifacts`
 - `completion.max_cycles`
 - `completion.pass_threshold`
+- `stages`
 
 ## Completion Criteria
 
@@ -57,6 +58,17 @@ The pattern lowers into:
 The normal supervisor still handles internal runtime failures. Criterion misses are loop feedback and do not spend supervisor budget while cycles remain. If the repeat exhausts, Agentflow persists the latest completion scorecard into the attempt completion packet, emits supervisor-visible managed completion evidence, and lets the supervisor drive a causal recovery only when it can make a real material delta.
 
 The completion criteria panel is not the first validation attempt. The generate-and-validate agent should already have tried to validate the candidate and fix clear validation failures before yielding to the criteria panel.
+
+## Stage Overrides
+
+Use `stages` when planning, execution, verification, and publication need different directions or capabilities. Supported stage keys are `plan`, `execute`, `verify`, and `publish`. Each stage may set:
+
+- `directions`: stage-specific behavioral instructions.
+- `validation_focus`: evidence or quality focus for that stage.
+- `support`: additional support/context available only to that stage.
+- `model`, `reasoning_effort`, `sandbox`: stage-specific runtime policy.
+
+Stage overrides inherit the parent managed contract. They do not create separate graph-addressable artifacts, change the completion criteria, or allow a stage to exceed the selected repo/profile authority. Keep them narrow: planning should improve the next plan, execution should complete and validate the selected plan, verification should judge current evidence, and publication should only publish claims supported by the passing scorecard.
 
 ## Example
 
@@ -117,6 +129,32 @@ The completion criteria panel is not the first validation attempt. The generate-
         "weight": 0.2
       }
     ]
+  },
+  "stages": {
+    "plan": {
+      "directions": [
+        "Plan from the latest scorecard and avoid designing unrelated architecture."
+      ],
+      "validation_focus": [
+        "Name the smallest credible validation command."
+      ]
+    },
+    "execute": {
+      "directions": [
+        "Implement only the selected plan and keep diffs narrow."
+      ],
+      "sandbox": "workspace-write"
+    },
+    "verify": {
+      "validation_focus": [
+        "Penalize missing validation evidence."
+      ]
+    },
+    "publish": {
+      "directions": [
+        "Publish only claims supported by the passing scorecard."
+      ]
+    }
   }
 }
 ```

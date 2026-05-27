@@ -271,7 +271,9 @@ export const inspectCommand = {
               intervention_count: state.supervisor.intervention_count,
               supervisor_budget_remaining: state.supervisor.budget_remaining,
               delivery_package: deliveryManifestPath,
-              review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md`,
+              ...(state.review_ready || state.delivery_status === "failed"
+                ? { review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md` }
+                : {}),
               ...(deliveryTaxonomySummary
                 ? { delivery_artifact_taxonomy: deliveryTaxonomySummary }
                 : {}),

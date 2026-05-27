@@ -161,6 +161,7 @@ function renderWorkspaceDiff(snippet: OutcomeVerificationPromptInput["workspace_
   const lines: string[] = [
     "## Workspace Diff",
     "Workspace diffs are audit/provenance evidence. They are not the primary pass/fail oracle.",
+    "This diff is captured against the node-start baseline. Preexisting dirty workspace files are not node-local mutations and must not be treated as this node's contamination.",
     "Use declared artifacts, milestone decision/validation logs, and deterministic command/tool evidence as the primary supervision surface.",
     "Do not fail solely because the workspace diff is absent, degraded, ambiguous, or surprising. Fail on workspace evidence only when it provides strong, concrete, actionable proof of a contract violation and no stronger declared evidence resolves the contradiction.",
     `- Status: ${snippet.status}`,

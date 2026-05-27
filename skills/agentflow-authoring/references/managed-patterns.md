@@ -36,6 +36,8 @@ Good for:
 
 Completion criteria should mix hard commands when stable and rubric criteria when correctness is semantic. Required criteria are blockers. Weights should reflect the evidence that matters, not equal distribution by habit. For code work, include convention fit, no AI slop, validation evidence, and handoff quality when those are material to success.
 
+Use `stages.plan`, `stages.execute`, `stages.verify`, and `stages.publish` only when those phases need different directions, context/support, model, reasoning effort, sandbox posture, or validation focus. Stage overrides inherit the parent contract; they should sharpen a phase, not redefine the task.
+
 ## `pattern_work_list`
 
 Use when the task is "discover the finite list, freeze it, then work the list to a stable handoff."

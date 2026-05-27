@@ -107,6 +107,9 @@ function baseState(overrides: Partial<RuntimeStateSnapshot> = {}): RuntimeStateS
         graph_id: "delivery-test",
         snapshot_seq: 1,
         status: "passed",
+        graph_status: "passed",
+        delivery_status: "pending",
+        review_ready: false,
         evidence_status: "clean",
         workspace_backend: "inplace",
         repo_workspaces: {},
@@ -703,6 +706,16 @@ describe("delivery package", () => {
         expect(verdict.findings).toEqual(expect.arrayContaining([
             expect.objectContaining({ kind: "missing_active_failure" })
         ]));
+        const manifest = await readJson<{ delivery_status: string; review_ready: boolean }>(
+            join(runRoot, "delivery", "manifest.json")
+        );
+        expect(manifest).toEqual(expect.objectContaining({
+            delivery_status: "failed",
+            review_ready: false
+        }));
+        const reviewBrief = await readFile(join(runRoot, "delivery", "01-review-brief.md"), "utf8");
+        expect(reviewBrief).toContain("Delivery curation failed verification");
+        expect(reviewBrief).toContain("Graph status: `failed`");
     });
 
     it("retries curation once with verifier findings before accepting delivery", async () => {

@@ -74,7 +74,8 @@ export function buildBudgetExhaustedDecision(
   const now = new Date().toISOString();
   return {
     decision_id: `decision_${Date.now()}`,
-    kind: "fail_run",
+    kind: "contract_failure",
+    capability: "intervention",
     classification: "policy_or_scope_risk",
     ...(target.compiled_id ? { target_compiled_id: target.compiled_id } : {}),
     ...(target.execution_id ? { target_execution_id: target.execution_id } : {}),

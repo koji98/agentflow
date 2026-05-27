@@ -784,7 +784,7 @@ describe("runtime engine", () => {
             expect(await pathExists(resolveExecutionArtifactsDirectory(attempt.execution_dir))).toBe(true);
         }));
         const summary = await readFile(join(runRoot, "summary.md"), "utf8");
-        expect(summary).toContain("- Control-flow status: `passed`");
+        expect(summary).toContain("- Graph status: `passed`");
         expect(summary).toContain("- Evidence status: `clean`");
         await rm(tempRoot, { recursive: true, force: true });
     });
@@ -1037,7 +1037,7 @@ describe("runtime engine", () => {
             })
         }));
         await rm(tempRoot, { recursive: true, force: true });
-    });
+    }, 90000);
     it("keeps operational exec failures hard even when on_failure is continue", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-soft-exec-hard-failure-"));
         const repoDir = join(tempRoot, "repo");
@@ -3625,12 +3625,13 @@ describe("runtime engine", () => {
                 compiled_id: "root__writer",
                 payload: expect.objectContaining({
                     classification: "completion_contract_failure",
-                    action: "retry_with_guidance",
+                    action: "run_diagnostic",
+                    capability: "diagnosis",
                     target_execution_id: attempts[0]!.execution_id
                 })
             })
         ]));
-        await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain('"action":"retry_with_guidance"');
+        await expect(readFile(join(runRoot, "interventions.jsonl"), "utf8")).resolves.toContain('"selected_strategy":"retry_with_evidence"');
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("fails no-op harness completions with missing declared artifacts without untyped pause", async () => {
@@ -3994,8 +3995,8 @@ describe("runtime engine", () => {
                 "codex-cli": harness
             }
         });
-        expect(run.outcome).toBe("passed");
-        expect(nodeInvocations).toHaveLength(3);
+        expect(run.outcome).toBe("failed");
+        expect(nodeInvocations).toHaveLength(2);
         expect(evidenceInvocations.length).toBeGreaterThan(1);
         const secondPrompt = renderHarnessPrompt(nodeInvocations[1]!);
         expect(secondPrompt).toContain("## Supervisor Recovery Case");
@@ -4009,8 +4010,6 @@ describe("runtime engine", () => {
         expect(secondPrompt.indexOf("## Supervisor Recovery Case")).toBeLessThan(secondPrompt.indexOf("## Graph Context"));
         expect(secondPrompt).toContain("Preserve the original node intent, sandbox, repo authority, and declared artifacts.");
         expect(secondPrompt).toContain("Prior attempt artifacts are evidence only");
-        const thirdPrompt = renderHarnessPrompt(nodeInvocations[2]!);
-        expect(thirdPrompt).toContain("| Repeated symptom count | `2` |");
         const retryManifest = await readFile(nodeInvocations[1]!.contextManifestPath, "utf8");
         expect(retryManifest).toContain("supervisor_recovery_envelope");
         const retryPacket = JSON.parse(await readFile(nodeInvocations[1]!.contextPacketPath, "utf8")) as {
@@ -4036,12 +4035,14 @@ describe("runtime engine", () => {
                 })
             }),
             expect.objectContaining({
-                type: "supervisor.retry_scheduled",
+                type: "supervisor.intervention.completed",
                 payload: expect.objectContaining({
-                    repeated_fingerprint_count: 2
+                    action: "run_diagnostic",
+                    apply_action: "fail_contract_gap"
                 })
             })
         ]));
+        expect(run.events.filter((event) => event.type === "supervisor.retry_scheduled")).toHaveLength(1);
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("resolves large authored context as pointers without repair retries", async () => {

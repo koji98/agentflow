@@ -27,14 +27,15 @@ describe("supervisor policy", () => {
         expect(exhausted.spent.total).toBe(2);
         expect(canSpendSupervisorAction(exhausted, "retry_with_guidance")).toBe(false);
     });
-    it("builds an escalation decision when budget is exhausted", () => {
+    it("builds a contractual failure decision when budget is exhausted", () => {
         const state = spendSupervisorAction(createSupervisorBudget(policy), "retry_with_guidance");
         const decision = buildBudgetExhaustedDecision(state, "retry_with_guidance", {
             compiled_id: "root__fix",
             execution_id: "exec__root__fix__attempt_1"
         });
         expect(decision).toEqual(expect.objectContaining({
-            kind: "fail_run",
+            kind: "contract_failure",
+            capability: "intervention",
             classification: "policy_or_scope_risk",
             action: "fail",
             target_compiled_id: "root__fix",

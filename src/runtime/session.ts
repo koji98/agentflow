@@ -22,6 +22,7 @@ export type RuntimeNodeStatus =
 
 export type RuntimeRunStatus = "pending" | "running" | "passed" | "failed" | "canceled" | "paused";
 export type EvidenceStatus = "clean" | "warnings";
+export type DeliveryStatus = "pending" | "passed" | "failed";
 
 export interface WorkspaceBinding {
   repo_alias: string;
@@ -151,6 +152,9 @@ export interface RuntimeStateSnapshot {
   graph_id: string;
   snapshot_seq: number;
   status: RuntimeRunStatus;
+  graph_status: RuntimeRunStatus;
+  delivery_status: DeliveryStatus;
+  review_ready: boolean;
   evidence_status: EvidenceStatus;
   workspace_backend: WorkspaceBackend;
   repo_workspaces: Record<string, WorkspaceBinding>;
@@ -174,6 +178,8 @@ export interface RuntimeSession {
   graph: CompiledGraph;
   manifest: ExecutionManifest;
   status: RuntimeRunStatus;
+  delivery_status: DeliveryStatus;
+  review_ready: boolean;
   next_event_seq: number;
   attempts: AttemptRegistry;
   node_statuses: Map<string, RuntimeNodeStatus>;
@@ -297,6 +303,8 @@ export function createRuntimeSession(
     graph,
     manifest: buildExecutionManifest(runId, graph, repoWorkspaces),
     status: "pending",
+    delivery_status: "pending",
+    review_ready: false,
     next_event_seq: 1,
     attempts,
     node_statuses: new Map(graph.nodes.map((node) => [node.compiled_id, "pending"])),
@@ -420,6 +428,9 @@ export function buildRuntimeStateSnapshot(session: RuntimeSession): RuntimeState
     graph_id: session.graph.graph_id,
     snapshot_seq,
     status: session.status,
+    graph_status: session.status,
+    delivery_status: session.delivery_status,
+    review_ready: session.review_ready,
     evidence_status: softVerificationSummary.evidence_status,
     workspace_backend: session.manifest.workspace_backend,
     repo_workspaces: session.manifest.repo_workspaces,

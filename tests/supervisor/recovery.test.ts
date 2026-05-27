@@ -158,6 +158,14 @@ describe("supervisor recovery cycle", () => {
                 kind: "requirement_evidence_mapped"
             })
         ]));
+        expect(recovery.recovery_plan.intervention_decision).toEqual(expect.objectContaining({
+            decision_kind: "intervention",
+            selected_strategy: "retry_with_evidence",
+            restart_boundary: "node_attempt",
+            material_delta: expect.arrayContaining([
+                expect.objectContaining({ kind: "requirement_evidence_mapped" })
+            ])
+        }));
         expect(recovery.recovery_envelope?.resume_decision).toEqual(expect.objectContaining({
             resume_point: "fresh_retry",
             restart_boundary: "node_attempt",
@@ -175,6 +183,60 @@ describe("supervisor recovery cycle", () => {
         await expect(readFile(recovery.intervention.artifact_paths.case_file_json, "utf8")).resolves.toContain("exact failed prompt");
         await expect(readFile(recovery.intervention.artifact_paths.case_file_json, "utf8")).resolves.toContain(runtimeAttempt.prompt_sha256!);
         await expect(readFile(recovery.intervention.artifact_paths.recovery_plan_markdown, "utf8")).resolves.toContain("Apply action: `retry_with_evidence`");
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("fails contractually instead of repeating the same fingerprint strategy without material delta", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-anti-spin-"));
+        const runtimeAttempt = attempt(tempRoot);
+        const runtimeResult = dependencyDocsVerifierResult();
+        await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+        const classification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult
+        });
+        const firstRecovery = await runSupervisorRecoveryCycle({
+            action: "rebuild_context",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult,
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification,
+            failure_fingerprint: "fingerprint-anti-spin",
+            repeated_fingerprint_count: 1,
+            prior_interventions: [],
+            workspace_path: tempRoot
+        });
+        const secondRecovery = await runSupervisorRecoveryCycle({
+            action: "rebuild_context",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult,
+            decision_id: "decision-2",
+            intervention_id: "intervention-2",
+            classification,
+            failure_fingerprint: "fingerprint-anti-spin",
+            repeated_fingerprint_count: 2,
+            prior_interventions: [firstRecovery.intervention],
+            workspace_path: tempRoot
+        });
+        expect(secondRecovery.recovery_plan.apply_action).toBe("fail_contract_gap");
+        expect(secondRecovery.recovery_plan.terminal_reason).toContain("Repeated failure fingerprint");
+        expect(secondRecovery.recovery_envelope).toBeUndefined();
+        expect(secondRecovery.intervention.status).toBe("failed");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("does not pause when helper output uses the old authority boolean", async () => {

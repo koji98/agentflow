@@ -403,6 +403,8 @@ export async function createResumedRuntimeSession(options: {
 
   session.manifest = options.manifest;
   session.started_at = options.prior_state.started_at;
+  session.delivery_status = "pending";
+  session.review_ready = false;
   if (fingerprintGraphRunContract(options.prior_graph) === fingerprintGraphRunContract(options.graph)) {
     const budgetRemaining = options.reset_supervisor_budget
       ? session.supervisor.budget_remaining

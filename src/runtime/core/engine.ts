@@ -1483,7 +1483,8 @@ async function handleFailedNodeWithSupervisor(options: {
     const decisionId = createSupervisorDecisionId(options.attempt, requestedAction);
     const decision: SupervisorDecision = {
       decision_id: decisionId,
-      kind: requestedAction === "pause_for_authority" ? "pause_for_human" : "fail_run",
+      kind: requestedAction === "pause_for_authority" ? "authority_request" : "contract_failure",
+      capability: requestedAction === "pause_for_authority" ? "authority" : "intervention",
       classification: classification.class,
       health_state: classification.class === "policy_or_scope_risk" ? "drifting" : "unhealthy",
       confidence: "medium",
@@ -1508,7 +1509,8 @@ async function handleFailedNodeWithSupervisor(options: {
     if (requestedAction === "pause_for_authority") {
       if (!canSpendRuntimeSupervisorAction(options.session, "pause_for_authority")) {
         options.session.supervisor.status = "exhausted";
-        decision.kind = "fail_run";
+        decision.kind = "contract_failure";
+        decision.capability = "intervention";
         decision.action = "fail";
         decision.requires_human = false;
         decision.reason = 'Supervisor cannot run action "pause_for_authority" because its budget is exhausted or the action is disabled.';
@@ -1544,7 +1546,7 @@ async function handleFailedNodeWithSupervisor(options: {
         attempt_index: options.attempt.attempt_index
       }
     );
-    if (requestedAction === "pause_for_authority" && decision.kind === "pause_for_human") {
+    if (requestedAction === "pause_for_authority" && decision.kind === "authority_request") {
       const interventionId = createSupervisorInterventionId(options.attempt, "pause_for_authority");
       await emitEvent(
         options.session,
@@ -1677,6 +1679,9 @@ async function handleFailedNodeWithSupervisor(options: {
           target_compiled_id: recovery.intervention.target_compiled_id ?? recoveryTargetNode.compiled_id,
           summary: recovery.intervention.reason,
           apply_action: recovery.recovery_plan.apply_action,
+          ...(recovery.recovery_plan.intervention_decision
+            ? { intervention_decision: recovery.recovery_plan.intervention_decision }
+            : {}),
           artifacts: recovery.intervention.artifact_paths
         },
         {
@@ -1719,7 +1724,8 @@ async function handleFailedNodeWithSupervisor(options: {
     options.session.supervisor.last_decision_id = decisionId;
     const decision: SupervisorDecision = {
       decision_id: decisionId,
-      kind: "fail_run",
+      kind: "contract_failure",
+      capability: "intervention",
       classification: classification.class,
       health_state: "unhealthy",
       confidence: "high",
@@ -1768,9 +1774,16 @@ async function handleFailedNodeWithSupervisor(options: {
     total: 1,
     [action]: 1
   };
+  const decisionKind: SupervisorDecision["kind"] = action === "run_diagnostic"
+    ? "diagnosis_finding"
+    : action === "semantic_evaluation" ? "review_finding" : "intervention";
+  const decisionCapability: SupervisorDecision["capability"] = action === "run_diagnostic"
+    ? "diagnosis"
+    : action === "semantic_evaluation" ? "review" : "intervention";
   const decision: SupervisorDecision = {
     decision_id: decisionId,
-    kind: "retry_with_guidance",
+    kind: decisionKind,
+    capability: decisionCapability,
     classification: classification.class,
     health_state: "unhealthy",
     confidence: "medium",
@@ -1909,6 +1922,9 @@ async function handleFailedNodeWithSupervisor(options: {
       target_compiled_id: recovery.intervention.target_compiled_id ?? recoveryTargetNode.compiled_id,
       summary: recovery.intervention.reason,
       apply_action: recovery.recovery_plan.apply_action,
+      ...(recovery.recovery_plan.intervention_decision
+        ? { intervention_decision: recovery.recovery_plan.intervention_decision }
+        : {}),
       artifacts: recovery.intervention.artifact_paths
     },
     {
@@ -1961,6 +1977,11 @@ async function handleFailedNodeWithSupervisor(options: {
   if (!retryableOverlayAction || !recovery.recovery_envelope || !hasMaterialDelta) {
     options.session.supervisor.status = "exhausted";
     return false;
+  }
+  decision.kind = recovery.recovery_plan.apply_action === "repair_environment" ? "environment_action" : "intervention";
+  decision.capability = recovery.recovery_plan.apply_action === "repair_environment" ? "environment" : "intervention";
+  if (recovery.recovery_plan.intervention_decision) {
+    decision.intervention_decision = recovery.recovery_plan.intervention_decision;
   }
   const overlayApplied = await applyRuntimeOverlayBeforeRetry({
     recovery,
@@ -2803,7 +2824,8 @@ function failDeepResearchWorkspacePollution(
   const changedFiles = diff.changed_files.map((file) => file.path);
   const summary = [
     "Deep research nodes are read-only with respect to the repo workspace.",
-    `Unexpected workspace changes: ${changedFiles.join(", ")}.`
+    "This finding uses node-local workspace changes captured against the node-start baseline, not preexisting dirty files.",
+    `Unexpected node-local workspace changes: ${changedFiles.join(", ")}.`
   ].join(" ");
   const details = {
     changed_files: diff.changed_files,
@@ -3317,7 +3339,8 @@ async function materializeDeclaredArtifactsWithRepair(options: {
 
       const decision: SupervisorDecision = {
         decision_id: decisionId,
-        kind: "run_intervention",
+        kind: "intervention",
+        capability: "intervention",
         classification: "artifact_contract_failure",
         health_state: "artifact_at_risk",
         confidence: "high",
@@ -4278,9 +4301,7 @@ async function executeNode(
       ...(result.stderr !== undefined ? { stderr: result.stderr } : {})
     });
 
-    if (result.status === "passed" && result.outcome === "passed") {
-      delete session.supervisor.active_recovery_envelopes[node.compiled_id];
-    }
+    delete session.supervisor.active_recovery_envelopes[node.compiled_id];
 
     return {
       node,
@@ -4966,6 +4987,8 @@ async function finalizeRun(
         ...(deliveryOptions.environment ? { environment: deliveryOptions.environment } : {})
       })
     });
+    session.delivery_status = "passed";
+    session.review_ready = true;
     await emitEvent(session, writer, runOwner, events, onEvent, "delivery.curation.completed", {
       verdict_path: deliveryManifest.evidence_files.curation_verdict
     });
@@ -4981,8 +5004,19 @@ async function finalizeRun(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const verdictPath = error instanceof DeliveryCurationError ? error.verdict_path : undefined;
+    session.delivery_status = "failed";
+    session.review_ready = false;
+    const manifestPath = join(writer.run_root, "delivery", "manifest.json");
+    const parsedManifest = await readFile(manifestPath, "utf8")
+      .then((raw) => JSON.parse(raw) as DeliveryPackageManifest)
+      .catch(() => undefined);
+    if (parsedManifest) {
+      deliveryManifest = parsedManifest;
+    }
     await emitEvent(session, writer, runOwner, events, onEvent, "delivery.curation.failed", {
       ...(verdictPath ? { verdict_path: verdictPath } : {}),
+      manifest_path: deliveryManifest?.manifest_path,
+      review_brief: deliveryManifest?.sections.review_brief,
       reason: message
     });
     state = await syncRunArtifacts(session, writer, runOwner);

@@ -236,7 +236,7 @@ The real validator skips only when `codex-cli` is unavailable. When the binary e
 
 ## Delivery Review
 
-At terminal state, review in this order:
+At terminal state, first check `delivery/manifest.json` for `graph_status`, `delivery_status`, and `review_ready`. Review in this order when `review_ready` is true, or when `delivery_status` is failed and you are inspecting the deterministic failure package:
 
 1. `delivery/01-review-brief.md`
 2. `delivery/02-run-learnings.md`
@@ -246,7 +246,7 @@ At terminal state, review in this order:
 
 The review brief is the primary human handoff: outcome, reviewer decision, success contract, changed files, final declared artifacts, validation evidence, active risks, recovered issues, and intervention summary. Run learnings capture future improvements for workspace docs, tests, scripts, graph shape, prompts, skills, tools, plugins, and evals. Both files are curated by a required read-only delivery curator and verified against deterministic evidence. The audit index maps runtime context state, tool ledgers, milestones, supervisor timeline, and runtime logs without making them the default review path.
 
-`delivery/manifest.json` keeps semantic machine keys for human entrypoints and evidence files. `delivery/evidence/delivery-source.json` is the deterministic source packet and `delivery/evidence/curation-verdict.json` is the trust check for the curated Markdown. Generated human-facing Markdown files use numeric prefixes so local file browsers present the review order clearly. Treat missing or failed curated delivery as a failed run quality signal even if code changes exist.
+`delivery/manifest.json` keeps semantic machine keys for human entrypoints and evidence files. `delivery/evidence/delivery-source.json` is the deterministic source packet and `delivery/evidence/curation-verdict.json` is the trust check for the curated Markdown. Generated human-facing Markdown files use numeric prefixes so local file browsers present the review order clearly. If curation fails, Agentflow still writes a deterministic failure package and a delivery-failure review brief, but `review_ready` remains false even when `graph_status` passed.
 
 ## Applying Captured Changes
 
