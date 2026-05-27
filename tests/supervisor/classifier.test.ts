@@ -127,7 +127,7 @@ describe("supervisor failure classifier", () => {
         expect(classify({ error_message: 'Required output_dir artifact "implementation_summary" is missing at agent-implementation-summary.md.' })).toEqual(expect.objectContaining({
             class: "unknown",
             retryable: true,
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("classifies incomplete completion packets as current-node retry failures", () => {
@@ -146,7 +146,7 @@ describe("supervisor failure classifier", () => {
         })).toEqual(expect.objectContaining({
             class: "completion_contract_failure",
             retryable: true,
-            recommended_action: "retry_with_guidance",
+            recommended_action: "run_diagnostic",
             summary: "Missing expected artifact: handoff",
             evidence: expect.objectContaining({
                 completion: expect.objectContaining({
@@ -172,7 +172,7 @@ describe("supervisor failure classifier", () => {
         })).toEqual(expect.objectContaining({
             class: "completion_contract_failure",
             retryable: true,
-            recommended_action: "retry_with_guidance",
+            recommended_action: "run_diagnostic",
             summary: "Export proof requires operator-managed backend worker."
         }));
     });
@@ -248,7 +248,7 @@ describe("supervisor failure classifier", () => {
         })).toEqual(expect.objectContaining({
             class: "unknown",
             retryable: true,
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("pauses on Cursor authentication only when harness metadata includes a trusted authority request", () => {
@@ -287,7 +287,7 @@ describe("supervisor failure classifier", () => {
         })).toEqual(expect.objectContaining({
             class: "unknown",
             retryable: true,
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("ignores singular authority_request metadata because the trusted field is authority_requests", () => {
@@ -303,7 +303,7 @@ describe("supervisor failure classifier", () => {
         })).toEqual(expect.objectContaining({
             class: "unknown",
             retryable: true,
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("classifies structured Cursor sandbox availability failures as harness failures before completion repair", () => {
@@ -380,14 +380,14 @@ describe("supervisor failure classifier", () => {
         expect(classify({ error_message: "bash: prompt-validate: command not found" })).toEqual(expect.objectContaining({
             class: "unknown",
             retryable: true,
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("keeps generic harness wording as generic retry evidence", () => {
         expect(classify({ error_message: "The prior harness output mentioned a missing artifact, but no structured failure code was recorded." })).toEqual(expect.objectContaining({
             class: "unknown",
             retryable: true,
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("classifies structured context resolution errors as context failures", () => {
@@ -441,7 +441,7 @@ describe("supervisor failure classifier", () => {
         ]) {
             expect(classify({ error_message: message })).toEqual(expect.objectContaining({
                 retryable: true,
-                recommended_action: "retry_with_guidance"
+                recommended_action: "run_diagnostic"
             }));
         }
     });
@@ -460,14 +460,14 @@ describe("supervisor failure classifier", () => {
             expect(classify({ error_message: message })).toEqual(expect.objectContaining({
                 class: "unknown",
                 retryable: true,
-                recommended_action: "retry_with_guidance"
+                recommended_action: "run_diagnostic"
             }));
         }
     });
     it("does not classify incidental context mentions as context-resolution failures", () => {
         expect(classify({ error_message: "Model failed because the context window was exhausted." })).toEqual(expect.objectContaining({
             class: "unknown",
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("keeps path-escape stderr generic when no structured error is available", () => {
@@ -484,7 +484,7 @@ describe("supervisor failure classifier", () => {
         })).toEqual(expect.objectContaining({
             class: "unknown",
             retryable: true,
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("classifies structured harness readiness errors as harness failures", () => {
@@ -508,7 +508,7 @@ describe("supervisor failure classifier", () => {
     it("does not classify generic unavailable resources as harness failures", () => {
         expect(classify({ error_message: "Package mirror is temporarily unavailable." })).toEqual(expect.objectContaining({
             class: "unknown",
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("classifies timeouts as diagnostic-needed failures", () => {
@@ -526,7 +526,7 @@ describe("supervisor failure classifier", () => {
         expect(classify({ error_message: "The task timed out while waiting for a server." })).toEqual(expect.objectContaining({
             class: "unknown",
             retryable: true,
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("classifies failed deterministic checks as diagnostic-needed failures", () => {
@@ -724,7 +724,7 @@ describe("supervisor failure classifier", () => {
             error_message: "Build failed because the zod v4 API changed; missing dependency docs for package zod."
         })).toEqual(expect.objectContaining({
             class: "unknown",
-            recommended_action: "retry_with_guidance"
+            recommended_action: "run_diagnostic"
         }));
     });
     it("classifies verifier dependency documentation categories into external and metadata gathers", () => {

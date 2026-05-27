@@ -10,7 +10,7 @@ Each trial writes:
 - `trial.json`: scenario, variant, trial id, and environment bindings.
 - `run-root.txt`: underlying Agentflow run root, when launch reached runtime.
 - `simulation-events.jsonl`: deterministic environment simulation calls, when configured.
-- `supervisor.resume_decisions` in trace packets: structured retry locality evidence, including resume point, restart boundary, workspace decision, and reason code. Use this for recovery-locality assertions instead of inferring from free-text summaries.
+- `supervisor.resume_decisions` and `supervisor.intervention_decisions` in trace packets: structured retry locality and anti-spin evidence, including selected strategy, material delta count, restart boundary, workspace decision, fallback, resume point, and reason code. Use these for recovery-locality assertions instead of inferring from free-text summaries.
 - `trace.jsonl`: normalized event trace.
 - `trace-packet.json`: compact grading packet with `trajectory`.
 - `criteria-results.json`: every criterion result.
@@ -32,8 +32,8 @@ The trace packet summarizes:
 - runtime events
 - `trajectory` events for attempts, simulation calls, artifact writes, supervisor events, and delivery
 - simulation events
-- supervisor classifications, gatherers, apply actions, intervention count, and recovery count
-- delivery manifest summary
+- supervisor classifications, gatherers, apply actions, intervention decisions, intervention count, and recovery count
+- delivery manifest summary, including `graph_status`, `delivery_status`, and `review_ready` when available
 - metrics such as attempts, artifacts, events, recovery cycles, trajectory length, and duration
 
 Use trace packets for criterion input. Use the full run root only when diagnosing a concrete failure.

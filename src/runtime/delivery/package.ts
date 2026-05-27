@@ -1,5 +1,5 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 
 import {
   resolveExecutionHumanDebugHarnessDirectory,
@@ -104,6 +104,9 @@ export interface DeliveryPackageManifest {
   run_id: string;
   graph_id: string;
   status: RuntimeStateSnapshot["status"];
+  graph_status: RuntimeStateSnapshot["graph_status"];
+  delivery_status: RuntimeStateSnapshot["delivery_status"];
+  review_ready: boolean;
   evidence_status: RuntimeStateSnapshot["evidence_status"];
   generated_at: string;
   manifest_path: string;
@@ -1317,6 +1320,9 @@ async function buildManifest(
     run_id: evidence.run_id,
     graph_id: evidence.graph_id,
     status: evidence.status,
+    graph_status: evidence.status,
+    delivery_status: "pending",
+    review_ready: false,
     evidence_status: evidence.evidence_status,
     generated_at: new Date().toISOString(),
     manifest_path: join(deliveryDir, "manifest.json"),
@@ -1453,6 +1459,126 @@ function buildValidationLedger(evidence: DeliveryEvidence, model: DeliveryModel)
   };
 }
 
+function renderDeliveryFailureReviewBrief(options: {
+  manifest: DeliveryPackageManifest;
+  source: DeliverySourcePacket;
+  verdict: DeliveryCurationVerdict;
+}): string {
+  const { manifest, source, verdict } = options;
+  return [
+    "# Review Brief",
+    "",
+    "## Outcome",
+    "",
+    `Graph status: \`${manifest.graph_status}\`. Delivery status: \`failed\`. Review ready: \`false\`.`,
+    "Agentflow reached terminal graph state but could not verify the curated human handoff.",
+    "",
+    "## Reviewer Decision",
+    "",
+    "Do not treat this run as review-ready from the front-door delivery files. Use the audit evidence below to inspect the terminal graph state and curation failure.",
+    "",
+    "## What To Inspect First",
+    "",
+    `- [Curation verdict](${relativeMarkdownPath(dirname(manifest.manifest_path), manifest.evidence_files.curation_verdict)})`,
+    `- [Audit index](${relativeMarkdownPath(dirname(manifest.manifest_path), manifest.sections.audit_index)})`,
+    `- [Delivery source](${relativeMarkdownPath(dirname(manifest.manifest_path), manifest.evidence_files.delivery_source_markdown)})`,
+    "",
+    "## Success Contract",
+    "",
+    `- Goal: ${source.intent.goal}`,
+    ...markdownList(source.intent.acceptance_criteria.map((item) => `Acceptance: ${item}`), "No graph acceptance criteria were recorded."),
+    ...markdownList(source.intent.constraints.map((item) => `Constraint: ${item}`), "No graph constraints were recorded."),
+    "",
+    "## Changed Files",
+    "",
+    source.changed_files.length > 0
+      ? source.changed_files.map((entry) => `- \`${entry.repo}\`: ${entry.files.length} changed file(s).`).join("\n")
+      : "- No workspace change evidence was recorded.",
+    "",
+    "## Final Declared Artifacts",
+    "",
+    ...markdownList(
+      source.final_declared_artifacts.map((artifact) => `\`${artifact.id}\` at ${artifact.relative_path}`),
+      "No final declared artifacts were recorded."
+    ),
+    "",
+    "## Validation Evidence",
+    "",
+    `- Outcome verifications: ${source.validation.outcome_verifications.length}`,
+    `- Milestone validation logs: ${source.validation.milestone_validation_logs.length}`,
+    "",
+    "## Active Failures And Risks",
+    "",
+    ...markdownList(
+      source.failures.active.map((failure) => `\`${failure.node}\`: ${failure.summary}`),
+      "No active graph failures were recorded."
+    ),
+    "- Delivery curation failed verification, so the run is not review-ready.",
+    "",
+    "## Recovered Issues",
+    "",
+    ...markdownList(
+      source.failures.recovered.map((failure) => `\`${failure.node}\`: ${failure.summary}`),
+      "No recovered issues were recorded."
+    ),
+    "",
+    "## Historical Attempts",
+    "",
+    ...markdownList(
+      source.failures.historical.map((failure) => `\`${failure.node}\`: ${failure.summary}`),
+      "No historical failed attempts were recorded."
+    ),
+    "",
+    "## Supervisor And Human Interventions",
+    "",
+    ...markdownList(
+      source.interventions.map((intervention) => `\`${intervention.action}\`: ${intervention.reason}`),
+      "No supervisor or human interventions were recorded."
+    ),
+    "",
+    "## Supporting Evidence",
+    "",
+    ...verdict.findings.map((finding) => `- \`${finding.kind}\`: ${finding.message}`),
+    `- [Manifest](${relativeMarkdownPath(dirname(manifest.manifest_path), manifest.manifest_path)})`
+  ].join("\n");
+}
+
+function renderDeliveryFailureLearnings(options: {
+  manifest: DeliveryPackageManifest;
+  verdict: DeliveryCurationVerdict;
+}): string {
+  return [
+    "# Run Learnings",
+    "",
+    "## Where Agents Struggled",
+    "",
+    "- Delivery curation did not produce a verifier-accepted human handoff.",
+    "",
+    "## Workspace Improvements",
+    "",
+    "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+    "| --- | --- | --- | --- | --- | --- |",
+    `| delivery | Inspect the curation verdict and source packet before rerunning delivery curation. | ${options.verdict.findings.map((finding) => finding.kind).join(", ") || "curation_failed"} | high | high | Delivery curation passes and \`review_ready\` is true. |`,
+    "",
+    "## Graph Prompt And Support Improvements",
+    "",
+    "- None inferred beyond the delivery curation failure.",
+    "",
+    "## Plugin Skill And Eval Opportunities",
+    "",
+    "- Add or update a delivery-curation eval if this failure shape was not already covered.",
+    "",
+    "## What Worked",
+    "",
+    "- Deterministic delivery evidence was still written for audit and debugging.",
+    "",
+    "## Evidence Links",
+    "",
+    `- [Curation verdict](${relativeMarkdownPath(dirname(options.manifest.manifest_path), options.manifest.evidence_files.curation_verdict)})`,
+    `- [Audit index](${relativeMarkdownPath(dirname(options.manifest.manifest_path), options.manifest.sections.audit_index)})`
+  ].join("\n");
+}
+
 export async function writeDeliveryPackage(options: {
   run_root: string;
   graph: CompiledGraph;
@@ -1587,12 +1713,27 @@ export async function writeDeliveryPackage(options: {
 
   const completedManifest: DeliveryPackageManifest = {
     ...manifest,
+    delivery_status: verdict.passed ? "passed" : "failed",
+    review_ready: verdict.passed,
     curation: {
       ...manifest.curation,
       status: verdict.passed ? "passed" : "failed",
       ...(verdict.passed ? {} : { failure: verdict.findings.map((finding) => finding.message).join("; ") })
     }
   };
+  if (!verdict.passed) {
+    await Promise.all([
+      writeText(completedManifest.sections.review_brief, renderDeliveryFailureReviewBrief({
+        manifest: completedManifest,
+        source,
+        verdict
+      })),
+      writeText(completedManifest.sections.run_learnings, renderDeliveryFailureLearnings({
+        manifest: completedManifest,
+        verdict
+      }))
+    ]);
+  }
   await writeJson(completedManifest.evidence_files.curation_verdict, verdict);
   await writeJson(completedManifest.manifest_path, completedManifest);
   if (!verdict.passed) {

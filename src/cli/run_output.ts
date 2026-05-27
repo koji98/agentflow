@@ -170,6 +170,9 @@ export function createRunTerminalFields(
   soft_verification_counts: RuntimeStateSnapshot["soft_verification_counts"];
   outcome_verification_counts: AttemptOutcomeVerificationCounts;
   node_workspace_change_counts: AttemptNodeWorkspaceCounts;
+  graph_status: RuntimeStateSnapshot["graph_status"];
+  delivery_status: RuntimeStateSnapshot["delivery_status"];
+  review_ready: boolean;
 } {
   const durationMs = computeDurationMs(state);
   const diagnostics = collectRunDiagnostics(attempts, events, state).map((diagnostic) =>
@@ -179,6 +182,9 @@ export function createRunTerminalFields(
 
   return {
     evidence_status: state.evidence_status,
+    graph_status: state.graph_status,
+    delivery_status: state.delivery_status,
+    review_ready: state.review_ready,
     soft_verification_counts: state.soft_verification_counts,
     outcome_verification_counts: summarizeOutcomeVerifications(attempts),
     node_workspace_change_counts: summarizeNodeWorkspaceChanges(attempts),

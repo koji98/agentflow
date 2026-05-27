@@ -673,7 +673,7 @@ export const resumeCommand = {
 
     const artifactPaths = resolveRunArtifactPaths(run_root);
     const terminalFields = createRunTerminalFields(resumed.state, resumed.attempts, resumed.events);
-    const deliveryFailed = resumed.events.some((event) => event.type === "delivery.curation.failed");
+    const deliveryFailed = resumed.state.delivery_status === "failed";
     const message =
       deliveryFailed
         ? "Run resumed to terminal graph state, but curated delivery failed verification."
@@ -690,7 +690,6 @@ export const resumeCommand = {
       output: {
         command: "resume",
         status: resumed.outcome,
-        delivery_status: deliveryFailed ? "failed" : "ready",
         message,
         run_id: resumed.run_id,
         run_root,
@@ -705,7 +704,7 @@ export const resumeCommand = {
         supervisor_budget_reset: resetSupervisorBudget,
         supervisor_budget_remaining: resumed.state.supervisor.budget_remaining,
         delivery_package: `${artifactPaths.delivery_dir}/manifest.json`,
-        review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md`,
+        ...(resumed.state.review_ready || deliveryFailed ? { review_brief: `${artifactPaths.delivery_dir}/01-review-brief.md` } : {}),
         repo_workspaces: resumed.state.repo_workspaces,
         workspace_change_artifacts: resumed.state.workspace_change_artifacts,
         attempt_count: resumed.attempts.length,

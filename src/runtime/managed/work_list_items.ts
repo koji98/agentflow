@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -102,6 +103,21 @@ interface ManagedWorkListPriorProgress {
   accepted_validation: string[];
 }
 
+interface ManagedWorkListReuseDecision {
+  item_id: string;
+  decision: "reuse_prior_completed_item";
+  accepted_attempt_path: string;
+  contract_hash: string;
+  frozen_list_hash: string;
+  frozen_item_hash: string;
+  criterion_thresholds_hash: string;
+  support_tool_contract_hash: string;
+  validation_refs: string[];
+  accepted_prior_attempt_state: "passed";
+  reason: string;
+  created_at: string;
+}
+
 interface ManagedWorkListRuntimeConfig {
   parent_intent: {
     goal: string;
@@ -189,6 +205,23 @@ function stringArray(value: unknown): string[] {
     return [];
   }
   return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256(value: unknown): string {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
 function normalizeManagedWorkListItemValidation(value: unknown): ManagedWorkListItemValidation | undefined {
@@ -311,6 +344,61 @@ function managedItemExecutionDir(parentExecutionDir: string, itemId: string, cyc
 
 function managedItemExecutionId(parentAttempt: RuntimeNodeAttempt, itemId: string, cycle: number): string {
   return `${parentAttempt.execution_id}__item_${itemId}__cycle_${cycle}`;
+}
+
+async function writeManagedWorkListReuseDecision(options: {
+  parentExecutionDir: string;
+  node: CompiledAgentNode;
+  config: ManagedWorkListRuntimeConfig;
+  frozen: ManagedWorkListFrozen;
+  item: ManagedWorkListFrozenItem;
+  result: ManagedWorkListItemResult;
+}): Promise<string> {
+  if (!options.result.accepted_attempt_path) {
+    throw new RuntimeFailureError(
+      "context_contract_failure",
+      `Cannot preserve completed work-list item ${options.item.id} without an accepted attempt path.`
+    );
+  }
+
+  const decision: ManagedWorkListReuseDecision = {
+    item_id: options.item.id,
+    decision: "reuse_prior_completed_item",
+    accepted_attempt_path: options.result.accepted_attempt_path,
+    contract_hash: sha256({
+      parent_intent: options.config.parent_intent,
+      item_guidance: options.config.item_guidance,
+      item_worker: options.config.item_worker
+    }),
+    frozen_list_hash: sha256(options.frozen),
+    frozen_item_hash: sha256(options.item),
+    criterion_thresholds_hash: sha256(options.config.item_worker.kind === "deep_work"
+      ? options.config.item_worker.completion
+      : { kind: "agent" }),
+    support_tool_contract_hash: sha256({
+      model: options.node.effective_policy.model,
+      reasoning_effort: options.node.effective_policy.reasoning_effort,
+      sandbox: options.node.effective_policy.sandbox,
+      harness: options.node.effective_policy.harness,
+      skills: options.node.skills,
+      cli: options.node.cli,
+      tools: options.node.tools
+    }),
+    validation_refs: [
+      ...(options.result.item_validation_path ? [options.result.item_validation_path] : []),
+      ...(options.result.scorecard_path ? [options.result.scorecard_path] : []),
+      ...options.result.validation.passed,
+      ...options.result.validation.failed_then_fixed,
+      ...options.result.validation.unavailable
+    ],
+    accepted_prior_attempt_state: "passed",
+    reason: "The frozen item contract, worker contract, validation evidence, and accepted prior attempt are still trusted for this run attempt.",
+    created_at: new Date().toISOString()
+  };
+  const decisionPath = join(options.parentExecutionDir, "managed-items", options.item.id, "reuse-decision.json");
+  await mkdir(dirname(decisionPath), { recursive: true });
+  await writeFile(decisionPath, `${JSON.stringify(decision, null, 2)}\n`, "utf8");
+  return decisionPath;
 }
 
 function buildManagedItemAttempt(options: {
@@ -1243,12 +1331,24 @@ export async function runManagedWorkListItems(
     summary: `Executing ${frozen.items.length} frozen work-list item(s).`
   });
 
+  const frozenItemById = new Map(frozen.items.map((item) => [item.id, item]));
   for (const reused of acceptedResults) {
+    const frozenItem = frozenItemById.get(reused.id);
+    const reuseDecisionPath = frozenItem
+      ? await writeManagedWorkListReuseDecision({
+          parentExecutionDir: context.execution_dir,
+          node: context.node,
+          config,
+          frozen,
+          item: frozenItem,
+          result: reused
+        })
+      : undefined;
     await context.emit_managed_progress?.({
       phase: "run_item",
       status: "item_completed",
       item_id: reused.id,
-      summary: `Preserved completed item ${reused.id} from a prior attempt.`
+      summary: `Preserved completed item ${reused.id} from a prior attempt.${reuseDecisionPath ? ` Reuse decision: ${reuseDecisionPath}.` : ""}`
     });
   }
 

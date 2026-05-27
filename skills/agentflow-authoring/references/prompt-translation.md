@@ -25,7 +25,7 @@ Use this when authoring or reviewing a graph for prompt quality. Agentflow graph
 | `check` with `kind: "ai"` | Read-only evaluator prompt with graph/check intent, context/artifact evidence, rubric, and JSON verdict contract. | Use for semantic gates. Make the rubric judge observable artifacts, not private reasoning or implementation preference. |
 | plugin-lowered agent node | Plugin workflow config/context is interpolated, then lowered to normal prompt-backed nodes with plugin file context and managed tool grants. | Keep plugin config schema-backed. Add `what`/`why` to plugin file context. Do not hide product intent inside plugin files alone. |
 | `pattern_deep_research` | Angle worker prompts, synthesis prompts, then publisher prompt. Each angle sees the parent contract, support, and its assigned angle; synthesis sees accepted reports; publisher writes one complete `research.md`. | Make angles controlling lenses. Put the assigned angle in direct, specific language. Downstream nodes consume `research`; important detail should be in that one report, not hidden in internal angle artifacts. |
-| `pattern_deep_work` | Planner, worker/validator, criterion evaluator, scorecard gate, retry, and publisher prompts. Parent intent/support flow into the work loop; criteria become grading prompts and gate weights. | Use for bounded mutation with feedback. Criteria should cover correctness, convention fit, no AI slop, validation evidence, and handoff quality when relevant. |
+| `pattern_deep_work` | Planner, worker/validator, criterion evaluator, scorecard gate, retry, and publisher prompts. Parent intent/support flow into the work loop; criteria become grading prompts and gate weights. Optional `stages.plan`, `stages.execute`, `stages.verify`, and `stages.publish` overrides compile only into their matching phase. | Use for bounded mutation with feedback. Criteria should cover correctness, convention fit, no AI slop, validation evidence, and handoff quality when relevant. Add stage overrides when planning, implementation, judging, or publishing need different directions, support, model, sandbox, or validation focus. |
 | `pattern_work_list` | Planner prompt discovers a finite ordered list; runtime freezes it; one managed item prompt executes each frozen item; optional deep-work item criteria and item verifier grade that item; publisher writes stable artifacts. | Use when item count is unknown until discovery. Author `planning_goal`, `what_counts_as_one_item`, and `done_when`; do not pre-bake fake item rows. |
 
 ## Per-Node Authoring Guidance
@@ -77,7 +77,7 @@ Authoring rules:
 
 ### `pattern_deep_work`
 
-Deep work lowers into planning, work/validation, criteria evaluation, scorecard gate, retry, and publish phases. Parent support and intent flow through the loop. Criteria become independent evaluator prompts and weighted gate inputs, so bad criteria cause bad retries.
+Deep work lowers into planning, work/validation, criteria evaluation, scorecard gate, retry, and publish phases. Parent support and intent flow through the loop. Criteria become independent evaluator prompts and weighted gate inputs, so bad criteria cause bad retries. Stage overrides are additive and phase-local: `plan` affects the planner prompt and policy, `execute` affects the worker/validator, `verify` affects AI criteria prompts and check policy, and `publish` affects the final publisher.
 
 Authoring rules:
 
@@ -85,6 +85,7 @@ Authoring rules:
 - Write criteria around evidence that matters: functional correctness, repo conventions, generated-contract integrity, no AI slop, privacy/access, validation evidence, artifact/handoff quality, branch hygiene, or UX quality.
 - Weight the criteria by importance; do not use equal weights by default.
 - Put command evidence in acceptance criteria or criteria only when the commands are stable and expected to exist.
+- Use `stages` only for real phase differences. Do not duplicate the parent goal in every stage.
 - Keep downstream handoffs as declared artifacts from the publisher, not draft files from an intermediate cycle.
 
 ### `pattern_work_list`
@@ -108,7 +109,7 @@ Authors do not write these prompts directly, but graph quality determines whethe
 | --- | --- | --- |
 | Outcome verifier | Graph/node intent, completion packet, declared artifacts, milestone evidence, validation evidence, and workspace-change summaries. | Make acceptance criteria observable and artifacts concrete. Avoid vague criteria that require guessing intent. |
 | Artifact repair | Original node contract, missing artifact names, agent-facing repair brief, prior response/artifact evidence. | Declare only meaningful artifacts with clear descriptions and paths. |
-| Supervisor recovery worker retry | Original contract plus `agent/supervisor-recovery.md` and `agent/attempt-memory.md` with symptom, best resume point, restart boundary, workspace decision, progress to reuse/discard, material delta, forbidden actions, evidence pointers, and validation focus. | Keep graph/node constraints stable and explicit so recovery can preserve useful prior progress, reset unsafe progress, and avoid drifting into a new task. |
+| Supervisor recovery worker retry | Original contract plus `agent/supervisor-recovery.md` and `agent/attempt-memory.md` with symptom, best resume point, restart boundary, workspace decision, progress to reuse/discard, material delta, forbidden actions, evidence pointers, and validation focus. Runtime also records an `InterventionDecision` so repeated same-fingerprint recovery cannot spin without a new material delta. | Keep graph/node constraints stable and explicit so recovery can preserve useful prior progress, reset unsafe progress, and avoid drifting into a new task. |
 | Supervisor diagnostic helper | Read-only case/debug evidence, gather role, required JSON evidence patch. | Prefer structured artifacts and checks so helpers can map failures without reading raw logs as truth. |
 
 ## Prompt Engineering Checks

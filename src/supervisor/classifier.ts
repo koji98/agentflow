@@ -489,7 +489,7 @@ export function classifyNodeFailure(input: {
       class: "completion_contract_failure",
       summary: reasons[0] ?? "Completion packet reports a supported blocker.",
       retryable: true,
-      recommended_action: "retry_with_guidance",
+      recommended_action: "run_diagnostic",
       gather_plan: gatherPlan([
         gather("local_context", "Inspect the blocked completion packet and determine whether the blocker is recoverable under the current node contract.", 1),
         gather("investigate_failure", "Identify a concrete material delta or terminal contract gap without asking for human input.", 2)
@@ -513,7 +513,7 @@ export function classifyNodeFailure(input: {
       class: "completion_contract_failure",
       summary: reasons[0] ?? "Completion packet is incomplete.",
       retryable: true,
-      recommended_action: "retry_with_guidance",
+      recommended_action: "run_diagnostic",
       gather_plan: gatherPlan([
         gather("local_context", "Inspect the completion packet, node contract, current-attempt artifacts, and runtime logs.", 1),
         gather("investigate_failure", "Identify the concrete missing artifact, placeholder artifact, validation gap, or unresolved blocker.", 2)
@@ -746,7 +746,7 @@ export function classifyNodeFailure(input: {
     class: "unknown",
     summary: message || "Node failed without a recognized failure class.",
     retryable: true,
-    recommended_action: "retry_with_guidance",
+    recommended_action: "run_diagnostic",
     gather_plan: gatherPlan([
       gather("investigate_failure", "Inspect failed attempt logs, output, artifacts, and context.", 1),
       gather("local_context", "Recover local context that should guide the retry.", 2)

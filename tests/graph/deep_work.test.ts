@@ -297,4 +297,78 @@ describe("pattern deep work", () => {
             deps: ["root__implement_checkout__managed__pattern_deep_work__workflow__implement_checkout"]
         }));
     });
+    it("compiles stage-specific deep-work controls into distinct prompt-backed phases", () => {
+        const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+            buildPatternStep({
+                stages: {
+                    plan: {
+                        directions: ["Plan from current scorecard only; do not design unrelated architecture."],
+                        validation_focus: ["Name the smallest credible validation command."],
+                        model: "gpt-5-planner"
+                    },
+                    execute: {
+                        directions: ["Implement only the selected plan and keep diffs narrow."],
+                        validation_focus: ["Record exact command output in work notes."],
+                        sandbox: "workspace-write"
+                    },
+                    verify: {
+                        directions: ["Judge evidence, not intentions."],
+                        validation_focus: ["Penalize missing validation evidence."]
+                    },
+                    publish: {
+                        directions: ["Publish only claims supported by the passing scorecard."],
+                        validation_focus: ["Keep downstream handoff bounded to accepted evidence."]
+                    }
+                }
+            })
+        ])));
+        expect(normalized.diagnostics).toEqual([]);
+        const root = normalized.document?.graph;
+        if (!root || root.type !== "sequence") {
+            throw new Error("Expected normalized graph root to be a sequence.");
+        }
+        const workflow = root.steps[0];
+        if (!workflow || workflow.type !== "sequence") {
+            throw new Error("Expected pattern_deep_work to lower into a workflow sequence.");
+        }
+        const loop = workflow.steps[0];
+        const finalNode = workflow.steps[1];
+        if (!loop || loop.type !== "repeat" || loop.body.type !== "sequence") {
+            throw new Error("Expected deep-work loop body.");
+        }
+        const planNode = loop.body.steps[0];
+        const generateNode = loop.body.steps[1];
+        const criteriaPanel = loop.body.steps[2];
+        if (!criteriaPanel || criteriaPanel.type !== "parallel") {
+            throw new Error("Expected criteria panel.");
+        }
+        expect(JSON.stringify(planNode)).toContain("Plan from current scorecard only");
+        expect(JSON.stringify(planNode)).toContain("Name the smallest credible validation command");
+        expect(planNode).toEqual(expect.objectContaining({ model: "gpt-5-planner" }));
+        expect(JSON.stringify(generateNode)).toContain("Implement only the selected plan");
+        expect(JSON.stringify(generateNode)).toContain("Record exact command output in work notes");
+        expect(generateNode).toEqual(expect.objectContaining({ sandbox: "workspace-write" }));
+        expect(JSON.stringify(criteriaPanel.steps[1])).toContain("Judge evidence, not intentions");
+        expect(JSON.stringify(criteriaPanel.steps[1])).toContain("Penalize missing validation evidence");
+        expect(JSON.stringify(finalNode)).toContain("Publish only claims supported by the passing scorecard");
+        expect(JSON.stringify(finalNode)).toContain("Keep downstream handoff bounded to accepted evidence");
+    });
+    it("rejects unknown deep-work stage override fields", () => {
+        const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+            buildPatternStep({
+                stages: {
+                    execute: {
+                        persona: "senior implementer"
+                    }
+                }
+            })
+        ])));
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].stages.execute.persona",
+                message: expect.stringContaining("Unknown field")
+            })
+        ]));
+        expect(normalized.document).toBeUndefined();
+    });
 });

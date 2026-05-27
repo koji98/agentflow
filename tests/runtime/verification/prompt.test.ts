@@ -102,8 +102,10 @@ describe("renderOutcomeVerificationPrompt", () => {
         expect(prompt).not.toContain("stderr log:");
         expect(prompt).not.toContain("/run/widget/human-debug/harness/stdout.log");
         expect(prompt).not.toContain("/run/widget/human-debug/harness/stderr.log");
-        expect(prompt).toContain("/run/widget/workspace-changes/diff.patch");
-        expect(prompt).toContain("Diff excerpt: (not inlined by default");
+	    expect(prompt).toContain("/run/widget/workspace-changes/diff.patch");
+	    expect(prompt).toContain("node-start baseline");
+	    expect(prompt).toContain("Preexisting dirty workspace files are not node-local mutations");
+	    expect(prompt).toContain("Diff excerpt: (not inlined by default");
         expect(prompt).not.toContain("export const widget = 1;");
     });
     it("does not expose compiled ids or raw execution ids in the verifier prompt", () => {

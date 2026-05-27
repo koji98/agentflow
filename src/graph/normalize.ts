@@ -67,7 +67,8 @@ import {
   type PatternDeepWorkCommandCriterion,
   type PatternDeepWorkCompletionCriterion,
   type PatternDeepWorkConfig,
-  type PatternDeepWorkRubricCriterion
+  type PatternDeepWorkRubricCriterion,
+  type PatternDeepWorkStageName
 } from "../managed/pattern_deep_work.js";
 import {
   buildPatternWorkList,
@@ -2654,6 +2655,77 @@ function normalizePatternDeepWorkCompletion(
   };
 }
 
+const patternDeepWorkStageNames = ["plan", "execute", "verify", "publish"] as const;
+
+function normalizePatternDeepWorkStages(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternDeepWorkConfig["stages"] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_deep_work.stages must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, patternDeepWorkStageNames, diagnostics);
+
+  const stages: PatternDeepWorkConfig["stages"] = {};
+  for (const stage of patternDeepWorkStageNames) {
+    const rawStage = record[stage];
+    if (rawStage === undefined) {
+      continue;
+    }
+
+    const stagePath = `${path}.${stage}`;
+    const stageRecord = asRecord(rawStage);
+    if (!stageRecord) {
+      diagnostics.push({
+        path: stagePath,
+        message: "pattern_deep_work stage overrides must be objects."
+      });
+      continue;
+    }
+
+    pushUnknownKeyDiagnostics(
+      stageRecord,
+      stagePath,
+      ["directions", "validation_focus", "support", "model", "reasoning_effort", "sandbox"],
+      diagnostics
+    );
+
+    const directions = readStringArray(stageRecord.directions, `${stagePath}.directions`, diagnostics);
+    const validation_focus = readStringArray(stageRecord.validation_focus, `${stagePath}.validation_focus`, diagnostics);
+    const support = normalizeNodeSupport(stageRecord.support, `${stagePath}.support`, diagnostics);
+    const model = readOptionalString(stageRecord.model, `${stagePath}.model`, diagnostics);
+    const reasoning_effort = readEnumValue(
+      stageRecord.reasoning_effort,
+      `${stagePath}.reasoning_effort`,
+      reasoningEfforts,
+      diagnostics
+    );
+    const sandbox = readEnumValue(stageRecord.sandbox, `${stagePath}.sandbox`, sandboxModes, diagnostics);
+
+    stages[stage as PatternDeepWorkStageName] = {
+      ...(directions && directions.length > 0 ? { directions } : {}),
+      ...(validation_focus && validation_focus.length > 0 ? { validation_focus } : {}),
+      ...(support ? { support } : {}),
+      ...(model ? { model } : {}),
+      ...(reasoning_effort ? { reasoning_effort } : {}),
+      ...(sandbox ? { sandbox } : {})
+    };
+  }
+
+  return Object.keys(stages).length > 0 ? stages : undefined;
+}
+
 function normalizePatternDeepWorkNode(
   record: Record<string, unknown>,
   path: string,
@@ -2676,7 +2748,7 @@ function normalizePatternDeepWorkNode(
       "sandbox",
       "artifact_repair",
       "completion",
-      "runtime"
+      "stages"
     ],
     diagnostics
   );
@@ -2695,6 +2767,7 @@ function normalizePatternDeepWorkNode(
     diagnostics,
     publicArtifacts
   );
+  const stages = normalizePatternDeepWorkStages(record.stages, `${path}.stages`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
   if (!base || !completion) {
@@ -2711,6 +2784,7 @@ function normalizePatternDeepWorkNode(
     ...base,
     ...agentOptions,
     completion,
+    ...(stages ? { stages } : {}),
     runtime
   });
 }

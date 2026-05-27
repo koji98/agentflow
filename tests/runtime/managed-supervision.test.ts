@@ -267,7 +267,8 @@ describe("managed supervision monitoring", () => {
         const supervisorDecision = run.events.find((event) => event.type === "supervisor.decision");
         expect(supervisorDecision?.payload).toEqual(expect.objectContaining({
             classification: "completion_contract_failure",
-            action: "retry_with_guidance",
+            action: "run_diagnostic",
+            capability: "diagnosis",
             target_compiled_id: expect.stringContaining("generate_validate")
         }));
         const gateAttempt = run.attempts.find((attempt) => attempt.authored_id.includes("completion_gate") &&

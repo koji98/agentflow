@@ -6,10 +6,12 @@ import type {
   BaseExecutableNode,
   CheckNode,
   ContextItem,
+  NodeSupport,
   ParallelNode,
   RepeatNode,
   SequenceNode
 } from "../graph/authored.js";
+import type { ReasoningEffort, SandboxMode } from "../graph/schema.js";
 import {
   artifactContext,
   body,
@@ -25,7 +27,8 @@ import {
   sharedAiCheckBase,
   sharedNonPromptNodeBase,
   type ManagedPatternAgentOptions,
-  type ManagedPatternRuntime
+  type ManagedPatternRuntime,
+  type PromptSection
 } from "./foundation.js";
 
 export type PatternDeepWorkCompletionCriterion =
@@ -55,7 +58,19 @@ export interface PatternDeepWorkConfig extends BaseExecutableNode, ManagedPatter
     pass_threshold: number;
     criteria: PatternDeepWorkCompletionCriterion[];
   };
+  stages?: Partial<Record<PatternDeepWorkStageName, PatternDeepWorkStageOverride>>;
   runtime?: ManagedPatternRuntime;
+}
+
+export type PatternDeepWorkStageName = "plan" | "execute" | "verify" | "publish";
+
+export interface PatternDeepWorkStageOverride {
+  directions?: string[];
+  validation_focus?: string[];
+  support?: NodeSupport;
+  model?: string;
+  reasoning_effort?: ReasoningEffort;
+  sandbox?: SandboxMode;
 }
 
 function workflowNodeId(rootId: string, suffix: string): string {
@@ -104,6 +119,68 @@ function formatCriteria(criteria: PatternDeepWorkCompletionCriterion[]): string[
   });
 }
 
+function mergeSupport(base: NodeSupport | undefined, override: NodeSupport | undefined): NodeSupport | undefined {
+  if (!base && !override) {
+    return undefined;
+  }
+  const merged: NodeSupport = {
+    ...(base ?? {}),
+    ...(override ?? {})
+  };
+  const capabilities = [...(base?.capabilities ?? []), ...(override?.capabilities ?? [])];
+  const skills = [...(base?.skills ?? []), ...(override?.skills ?? [])];
+  const tools = [...(base?.tools ?? []), ...(override?.tools ?? [])];
+  const cli = [...(base?.cli ?? []), ...(override?.cli ?? [])];
+  const context = [...(base?.context ?? []), ...(override?.context ?? [])];
+  if (capabilities.length > 0) {
+    merged.capabilities = capabilities;
+  }
+  if (skills.length > 0) {
+    merged.skills = skills;
+  }
+  if (tools.length > 0) {
+    merged.tools = tools;
+  }
+  if (cli.length > 0) {
+    merged.cli = cli;
+  }
+  if (context.length > 0) {
+    merged.context = context;
+  }
+  return merged;
+}
+
+function stageConfig(config: PatternDeepWorkConfig, stage: PatternDeepWorkStageName): PatternDeepWorkConfig {
+  const override = config.stages?.[stage];
+  if (!override) {
+    return config;
+  }
+  const support = override.support ? mergeSupport(config.support, override.support) : undefined;
+  return {
+    ...config,
+    ...(override.model ? { model: override.model } : {}),
+    ...(override.reasoning_effort ? { reasoning_effort: override.reasoning_effort } : {}),
+    ...(override.sandbox ? { sandbox: override.sandbox } : {}),
+    ...(support ? { support } : {})
+  };
+}
+
+function formatStageOverride(config: PatternDeepWorkConfig, stage: PatternDeepWorkStageName): PromptSection[] {
+  const override = config.stages?.[stage];
+  if (!override) {
+    return [];
+  }
+  const directions = override.directions ?? [];
+  const validationFocus = override.validation_focus ?? [];
+  if (directions.length === 0 && validationFocus.length === 0) {
+    return [];
+  }
+  return [section("Stage-Specific Direction", [
+    ...formatList("Directions", directions, "Use the managed workflow contract."),
+    ...formatList("Validation focus", validationFocus, "Use the completion model and authored validation expectations.")
+  ])];
+}
+
 function buildPlanPrompt(
   config: PatternDeepWorkConfig,
   cycleCount: number
@@ -121,6 +198,7 @@ function buildPlanPrompt(
       `Pass threshold: ${config.completion.pass_threshold}`,
       ...formatCriteria(config.completion.criteria)
     ]),
+    ...formatStageOverride(config, "plan"),
     section("Planning Task", [
       "This prompt and context pointer packet are sufficient for the planning phase.",
       "Read the task context, any prior failed scorecard, criterion verification records, command output excerpts, and current workspace state available to you.",
@@ -155,6 +233,7 @@ function buildGenerateValidatePrompt(
       `Pass threshold: ${config.completion.pass_threshold}`,
       ...formatCriteria(config.completion.criteria)
     ]),
+    ...formatStageOverride(config, "execute"),
     section("Execution Task", [
       "Follow the cycle plan in context.",
       "Inspect enough repository context to follow local patterns before editing.",
@@ -202,6 +281,15 @@ function buildRubricGoal(criterion: PatternDeepWorkRubricCriterion): string {
   ]);
 }
 
+function buildRubricGoalWithStage(
+  config: PatternDeepWorkConfig,
+  criterion: PatternDeepWorkRubricCriterion
+): string {
+  const stageLines = formatStageOverride(config, "verify");
+  const base = buildRubricGoal(criterion);
+  return stageLines.length === 0 ? base : `${base}\n\n${renderPrompt(stageLines)}`;
+}
+
 function buildFinalPublishPrompt(
   config: PatternDeepWorkConfig,
   publicArtifacts: Record<string, ArtifactDefinition>
@@ -217,6 +305,7 @@ function buildFinalPublishPrompt(
       "Use the latest passing completion scorecard, work notes, and draft artifact materials.",
       "Do not claim success beyond the completion evidence."
     ]),
+    ...formatStageOverride(config, "publish"),
     section("Required Summary Shape", [
       "Preserve task-specific identifiers and phrases from the managed workflow goal when they are part of the requested public output.",
       "Include a clearly labeled `Scorecard Evidence` or `Completion Scorecard` section in the Markdown summary.",
@@ -405,9 +494,10 @@ function buildCriterionNode(
   index: number
 ): CheckNode {
   const id = workflowNodeId(config.id, `criterion_${zeroPad(index + 1)}_${criterion.id}`);
+  const verifyConfig = stageConfig(config, "verify");
 
   if (criterion.kind === "command") {
-    const checkShared = sharedNonPromptNodeBase(config);
+    const checkShared = sharedNonPromptNodeBase(verifyConfig);
 
     return {
       type: "check",
@@ -427,7 +517,7 @@ function buildCriterionNode(
         acceptance_criteria: [
           "The command result is captured as completion feedback for the deterministic gate."
         ],
-        constraints: config.intent.constraints
+        constraints: verifyConfig.intent.constraints
       }
     };
   }
@@ -436,21 +526,21 @@ function buildCriterionNode(
     type: "check",
     id,
     label: `Completion Criterion ${criterion.id}`,
-    ...sharedAiCheckBase(config),
+    ...sharedAiCheckBase(verifyConfig),
     check_kind: "ai",
     on_failure: "continue",
     support: mergeSupportContext(
-      sharedAiCheckBase(config).support,
+      sharedAiCheckBase(verifyConfig).support,
       buildCriterionContext(generateValidateId, publicArtifacts, criterion)
     ),
     rubric: criterion.rubric,
     intent: {
-      goal: buildRubricGoal(criterion),
+      goal: buildRubricGoalWithStage(config, criterion),
       acceptance_criteria: [
         "The evaluator returns valid JSON with passed, score, summary, and issues fields.",
         "The evaluator grades only evidence in context and does not require work outside the managed workflow contract."
       ],
-      constraints: config.intent.constraints
+      constraints: verifyConfig.intent.constraints
     }
   };
 }
@@ -548,7 +638,13 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
   const loopId = workflowNodeId(config.id, "work_loop");
   const loopBodyId = workflowNodeId(config.id, "work_loop_body");
   const publicArtifacts = mergeManagedPublicArtifacts(config.artifacts);
-  const agentShared = sharedAgentBase(config);
+  const planConfig = stageConfig(config, "plan");
+  const executeConfig = stageConfig(config, "execute");
+  const publishConfig = stageConfig(config, "publish");
+  const planShared = sharedAgentBase(planConfig);
+  const executeShared = sharedAgentBase(executeConfig);
+  const publishShared = sharedAgentBase(publishConfig);
+  const gateShared = sharedNonPromptNodeBase(config);
   const criterionNodes = config.completion.criteria.map((criterion, index) =>
     buildCriterionNode(config, generateValidateId, publicArtifacts, criterion, index)
   );
@@ -564,17 +660,17 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     type: "agent",
     id: planId,
     label: "Deep Work Plan",
-    ...agentShared,
-    support: mergeSupportContext(agentShared.support, buildPlanContext(config, generateValidateId, gateId)),
+    ...planShared,
+    support: mergeSupportContext(planShared.support, buildPlanContext(config, generateValidateId, gateId)),
     artifacts: outputDirArtifact("cycle_plan", "cycle-plan.md", "Focused plan for the next deep work cycle."),
     intent: {
-      goal: buildPlanPrompt(config, config.completion.max_cycles),
+      goal: buildPlanPrompt(planConfig, config.completion.max_cycles),
       acceptance_criteria: [
         "The plan addresses the managed workflow contract and any prior failed completion criteria.",
         "The plan identifies focused validation the execution agent should run when feasible.",
         "The plan does not edit the workspace."
       ],
-      constraints: config.intent.constraints
+      constraints: planConfig.intent.constraints
     }
   };
 
@@ -582,8 +678,8 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     type: "agent",
     id: generateValidateId,
     label: "Generate And Validate",
-    ...agentShared,
-    support: mergeSupportContext(agentShared.support, [
+    ...executeShared,
+    support: mergeSupportContext(executeShared.support, [
       artifactContext("cycle_plan", planId, "cycle_plan"),
       artifactContext("failed_completion_scorecard", gateId, "completion_scorecard", {
         iteration: "latest_failed",
@@ -595,13 +691,13 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
       buildDraftArtifacts(publicArtifacts)
     ),
     intent: {
-      goal: buildGenerateValidatePrompt(config, publicArtifacts),
+      goal: buildGenerateValidatePrompt(executeConfig, publicArtifacts),
       acceptance_criteria: [
         "The cycle implements the plan or records why the plan had to change.",
         "Focused validation is run when feasible, with exact results recorded in work notes and draft artifacts.",
         "Draft public artifacts exist so completion criteria can grade the result."
       ],
-      constraints: config.intent.constraints
+      constraints: executeConfig.intent.constraints
     }
   };
 
@@ -609,7 +705,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     type: "check",
     id: gateId,
     label: "Completion Gate",
-    ...sharedNonPromptNodeBase(config),
+    ...gateShared,
     check_kind: "deterministic",
     command: "node",
     args: ["-e", buildGateScript(config.completion.criteria, config.completion.pass_threshold)],
@@ -626,7 +722,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
       json_path: "$.passed",
       equals: true
     },
-    support: mergeSupportContext(sharedNonPromptNodeBase(config).support, buildGateContext(config)),
+    support: mergeSupportContext(gateShared.support, buildGateContext(config)),
     artifacts: outputDirArtifact(
       "completion_scorecard",
       "scorecard.json",
@@ -665,17 +761,17 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
         type: "agent",
         id: config.id,
         ...(config.label ? { label: config.label } : { label: "Publish Deep Work" }),
-        ...agentShared,
-        support: mergeSupportContext(agentShared.support, buildPublishContext(config, publicArtifacts, generateValidateId, gateId)),
+        ...publishShared,
+        support: mergeSupportContext(publishShared.support, buildPublishContext(config, publicArtifacts, generateValidateId, gateId)),
         artifacts: publicArtifacts,
         intent: {
-          goal: buildFinalPublishPrompt(config, publicArtifacts),
+          goal: buildFinalPublishPrompt(publishConfig, publicArtifacts),
           acceptance_criteria: [
-            ...config.intent.acceptance_criteria,
+            ...publishConfig.intent.acceptance_criteria,
             "The public artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success.",
             "The packet preserves completion score, criterion results, validation evidence, residual risks, and next actions."
           ],
-          constraints: config.intent.constraints
+          constraints: publishConfig.intent.constraints
         }
       }
     ]

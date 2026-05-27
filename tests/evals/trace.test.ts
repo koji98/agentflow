@@ -82,6 +82,15 @@ describe("eval trace packets", () => {
             payload: {
                 action: "retry_with_guidance",
                 target_compiled_id: "ship",
+                intervention_decision: {
+                    selected_strategy: "rerun_verification",
+                    restart_boundary: "verification",
+                    workspace_decision: "preserve",
+                    material_delta: [
+                        { kind: "validation_strategy_changed", summary: "Retry verifier only." }
+                    ],
+                    fallback_if_repeated: "repair_validation_strategy"
+                },
                 resume_decision: {
                     resume_point: "rerun_verification",
                     restart_boundary: "verification",
@@ -91,6 +100,11 @@ describe("eval trace packets", () => {
             }
         })}\n`, "utf8");
         await writeFile(paths.interventions_file, "", "utf8");
+        await writeJson(join(runRoot, "delivery", "manifest.json"), {
+            graph_status: "passed",
+            delivery_status: "passed",
+            review_ready: true
+        });
         await writeJson(join(executionDir, "runtime/execution.json"), {
             execution_id: "exec__ship__attempt_1",
             compiled_id: "ship",
@@ -153,6 +167,20 @@ describe("eval trace packets", () => {
                 reason_code: "verification_substrate_failure"
             }
         ]);
+        expect(packet.supervisor.intervention_decisions).toEqual([
+            expect.objectContaining({
+                selected_strategy: "rerun_verification",
+                restart_boundary: "verification",
+                workspace_decision: "preserve",
+                material_delta_count: 1,
+                fallback_if_repeated: "repair_validation_strategy"
+            })
+        ]);
+        expect(packet.delivery).toEqual(expect.objectContaining({
+            graph_status: "passed",
+            delivery_status: "passed",
+            review_ready: true
+        }));
         await expect(readFile(completionPacketPath, "utf8")).resolves.toContain("ready_for_verification");
     });
 });

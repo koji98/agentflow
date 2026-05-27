@@ -10,6 +10,17 @@ export const supervisorActionKinds = [
 
 export type SupervisorActionKind = (typeof supervisorActionKinds)[number];
 
+export const supervisorCapabilityKinds = [
+  "review",
+  "diagnosis",
+  "intervention",
+  "environment",
+  "authority",
+  "memory"
+] as const;
+
+export type SupervisorCapabilityKind = (typeof supervisorCapabilityKinds)[number];
+
 export type FailureClass =
   | "context_contract_failure"
   | "graph_context_gap"
@@ -255,6 +266,23 @@ export interface RecoveryResumeDecision {
   validation_gate: string[];
 }
 
+export interface SupervisorInterventionDecision {
+  decision_kind: "intervention";
+  capability: "intervention" | "environment";
+  failure_fingerprint: string;
+  prior_strategy?: string;
+  selected_strategy: SupervisorApplyAction;
+  restart_boundary: SupervisorRestartBoundary;
+  workspace_decision: SupervisorWorkspaceDecision;
+  preserve: string[];
+  discard: string[];
+  material_delta: SupervisorMaterialDelta[];
+  evidence_refs: string[];
+  required_next_action: string;
+  validation_gate: string[];
+  fallback_if_repeated: SupervisorApplyAction | "fail_contract_gap";
+}
+
 export type SupervisorRequirementEvidenceStatus =
   | "available"
   | "missing"
@@ -385,6 +413,7 @@ export interface SupervisorRecoveryPlan {
     reason: string;
     unblock_request: string;
   };
+  intervention_decision?: SupervisorInterventionDecision;
   terminal_reason?: string;
   confidence: "low" | "medium" | "high";
   merged_claims: string[];
@@ -437,11 +466,12 @@ export interface SupervisorRecoveryEnvelope {
 }
 
 export type SupervisorDecisionKind =
-  | "continue_graph"
-  | "run_intervention"
-  | "retry_with_guidance"
-  | "pause_for_human"
-  | "fail_run";
+  | "review_finding"
+  | "diagnosis_finding"
+  | "intervention"
+  | "environment_action"
+  | "authority_request"
+  | "contract_failure";
 
 export type SupervisorHealthState =
   | "healthy"
@@ -458,6 +488,7 @@ export type SupervisorHealthState =
 export interface SupervisorDecision {
   decision_id: string;
   kind: SupervisorDecisionKind;
+  capability?: SupervisorCapabilityKind;
   classification: FailureClass;
   health_state?: SupervisorHealthState;
   confidence?: "low" | "medium" | "high";
@@ -469,6 +500,7 @@ export interface SupervisorDecision {
   created_at: string;
   requires_human?: boolean;
   evidence?: Record<string, unknown>;
+  intervention_decision?: SupervisorInterventionDecision;
 }
 
 export interface SupervisorInterventionRecord {

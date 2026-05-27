@@ -315,6 +315,14 @@ export interface EvalTracePacket {
       workspace_decision?: string;
       reason_code?: string;
     }>;
+    intervention_decisions: Array<{
+      selected_strategy?: string;
+      prior_strategy?: string;
+      restart_boundary?: string;
+      workspace_decision?: string;
+      material_delta_count?: number;
+      fallback_if_repeated?: string;
+    }>;
     intervention_count: number;
     recovery_count: number;
   };
@@ -322,6 +330,9 @@ export interface EvalTracePacket {
     manifest_path?: string;
     review_brief_path?: string;
     curation_verdict_path?: string;
+    graph_status?: string;
+    delivery_status?: string;
+    review_ready?: boolean;
     curation_verdict?: unknown;
     manifest?: unknown;
   };

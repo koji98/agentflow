@@ -1814,8 +1814,8 @@ process.exit(0);
             preserved_node_count: 1,
             restarted_node_count: 2
         }));
-        expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(4);
-        expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
+        expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
+        expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(3);
         expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
         expect(resumedProgress).toContain("agentflow: RUN      resume · from=failed · preserved=1 restarted=2 · workspace=inplace");
         expect(resumedProgress).toContain("[1/3] RUN      check gate_resume · repo=main");
@@ -1913,8 +1913,8 @@ process.exit(0);
         expect(resumedPayload.restarted_node_count).toBe(3);
         expect(await readFile(join(repoDir, "seed.txt"), "utf8")).toBe("seed-updated\n");
         expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
-        expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(5);
-        expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
+        expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(3);
+        expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(3);
         expect(attempts.filter((attempt) => attempt.authored_id === "after_resume")).toHaveLength(1);
         await rm(tempRoot, { recursive: true, force: true });
     }, 60000);
@@ -2066,9 +2066,9 @@ process.exit(0);
         expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-updated\n");
         expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
         expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(2);
-        expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(5);
+        expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(3);
         expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
-        expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
+        expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(3);
         expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
         expect(attempts.filter((attempt) => attempt.authored_id === "write_seed").map((attempt) => ({
             attempt_index: attempt.attempt_index,
@@ -2270,9 +2270,9 @@ process.exit(0);
         expect(await readFile(join(repoDir, "loop.txt"), "utf8")).toBe("seed-updated\n");
         expect(await readFile(join(repoDir, "done.txt"), "utf8")).toBe("seed-updated\n");
         expect(attempts.filter((attempt) => attempt.authored_id === "write_seed")).toHaveLength(1);
-        expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(5);
+        expect(attempts.filter((attempt) => attempt.authored_id === "prepare_loop_output")).toHaveLength(3);
         expect(attempts.filter((attempt) => attempt.authored_id === "verify_loop")).toHaveLength(2);
-        expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(5);
+        expect(attempts.filter((attempt) => attempt.authored_id === "gate_resume")).toHaveLength(3);
         expect(attempts.filter((attempt) => attempt.authored_id === "finalize")).toHaveLength(1);
         await rm(tempRoot, { recursive: true, force: true });
     }, 60000);

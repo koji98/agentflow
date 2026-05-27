@@ -58,6 +58,9 @@ function baseState(overrides: Partial<RuntimeStateSnapshot>): RuntimeStateSnapsh
     graph_id: "inspect-graph",
     snapshot_seq: 1,
     status: "running",
+    graph_status: "running",
+    delivery_status: "pending",
+    review_ready: false,
     evidence_status: "clean",
     workspace_backend: "inplace",
     repo_workspaces: {},
@@ -189,5 +192,8 @@ describe("inspect command", () => {
         stderr_tail: "old recovered failure\n"
       })
     ]);
+    expect(output.delivery_status).toBe("pending");
+    expect(output.review_ready).toBe(false);
+    expect(output.review_brief).toBeUndefined();
   });
 });
