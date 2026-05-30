@@ -1749,7 +1749,11 @@ export async function runSupervisorRecoveryCycle(options: {
       : undefined;
   if (contextAnalysis) {
     const contextAnalysisReport: ContextAnalysisReport = {
-      status: contextAnalysis.warnings.length > 0 ? "warnings" : "passed",
+      status: contextAnalysis.errors.length > 0
+        ? "blocked"
+        : contextAnalysis.warnings.length > 0
+          ? "warnings"
+          : "passed",
       nodes: [contextAnalysis],
       diagnostics: []
     };

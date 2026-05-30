@@ -42,6 +42,14 @@ export interface DeliverySourcePacket {
     declared_path: string;
     absolute_path: string;
     relative_path: string;
+    content_type: string;
+    detected_content_type: string;
+    declared_content_type?: string;
+    media_kind: string;
+    encoding: string;
+    size_bytes: number;
+    sha256: string;
+    preview: Record<string, unknown>;
   }>;
   superseded_declared_artifacts: Array<{
     id: string;
@@ -51,6 +59,14 @@ export interface DeliverySourcePacket {
     declared_path: string;
     absolute_path: string;
     relative_path: string;
+    content_type: string;
+    detected_content_type: string;
+    declared_content_type?: string;
+    media_kind: string;
+    encoding: string;
+    size_bytes: number;
+    sha256: string;
+    preview: Record<string, unknown>;
   }>;
   changed_files: Array<{
     repo: string;

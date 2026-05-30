@@ -115,4 +115,98 @@ describe("context analysis", () => {
         expect(report.nodes[0]!.warnings).toEqual(expect.arrayContaining([expect.stringContaining("has no max_files cap")]));
         await rm(tempRoot, { recursive: true, force: true });
     });
+    it("blocks missing required static context before launch", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-analysis-missing-static-"));
+        const repoDir = join(tempRoot, "repo");
+        await mkdir(repoDir, { recursive: true });
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "context-analysis-missing-static",
+            repos: { main: { path: "." } },
+            defaults: { launch_profile: "default" },
+            profiles: { default: { harness: "codex-cli" } },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "consumer",
+                        command: "true",
+                        support: {
+                            context: [
+                                { name: "missing_file", kind: "workspace_file", path: "missing.md", what: "Required static context.", why: "This file must exist before launch." },
+                                { name: "missing_glob", kind: "workspace_glob", path: "docs/*.md", what: "Required static context.", why: "At least one match must exist before launch." },
+                                { name: "missing_plugin", kind: "plugin_file", path: join(tempRoot, "plugin-missing.md"), what: "Required plugin context.", why: "Plugin context must exist before launch." }
+                            ]
+                        }
+                    }
+                ]
+            }
+        });
+        const report = await analyzeGraphContext({
+            graph,
+            repo_workspaces: { main: repoDir }
+        });
+        const itemErrors = report.nodes[0]!.items.flatMap((item) => item.errors);
+        expect(report.status).toBe("blocked");
+        expect(report.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({ severity: "error", message: expect.stringContaining("workspace_file") }),
+            expect.objectContaining({ severity: "error", message: expect.stringContaining("workspace_glob") }),
+            expect.objectContaining({ severity: "error", message: expect.stringContaining("plugin_file") })
+        ]));
+        expect(itemErrors).toEqual(expect.arrayContaining([
+            expect.stringContaining("missing.md"),
+            expect.stringContaining("docs/*.md"),
+            expect.stringContaining("plugin-missing.md")
+        ]));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("does not preflight artifact refs by file existence", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-analysis-artifact-ref-"));
+        const repoDir = join(tempRoot, "repo");
+        await mkdir(repoDir, { recursive: true });
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "context-analysis-artifact-ref",
+            repos: { main: { path: "." } },
+            defaults: { launch_profile: "default" },
+            profiles: { default: { harness: "codex-cli" } },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "produce",
+                        command: "true",
+                        artifacts: {
+                            handoff: {
+                                from: "output_dir",
+                                path: "handoff.md",
+                                description: "Runtime-produced handoff."
+                            }
+                        }
+                    },
+                    {
+                        type: "exec",
+                        id: "consume",
+                        command: "true",
+                        support: {
+                            context: [
+                                { name: "handoff", kind: "artifact", ref: "produce.handoff", what: "Runtime-produced context.", why: "Produced context flows through artifacts." }
+                            ]
+                        }
+                    }
+                ]
+            }
+        });
+        const report = await analyzeGraphContext({
+            graph,
+            repo_workspaces: { main: repoDir }
+        });
+        expect(report.status).toBe("passed");
+        expect(report.diagnostics).toEqual([]);
+        await rm(tempRoot, { recursive: true, force: true });
+    });
 });

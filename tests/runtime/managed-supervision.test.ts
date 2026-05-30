@@ -77,8 +77,11 @@ function buildHarness(): HarnessAdapter {
                     "Relevant evidence",
                     "The required managed criterion still needs execution evidence.",
                     "",
-                    "Planned changes",
+                    "Planned material delta",
                     "Keep the next cycle focused on the required criterion.",
+                    "",
+                    "Criterion evidence map",
+                    "always_fail requires a passing command result.",
                     "",
                     "Validation plan",
                     "Run the managed completion criteria after execution.",
@@ -88,7 +91,22 @@ function buildHarness(): HarnessAdapter {
                 ].join("\n"), "utf8");
             }
             if (invocation.nodeGoal.includes("work_notes")) {
-                await writeFile(join(invocation.outputDir, "work-notes.md"), "Changed nothing useful.\n", "utf8");
+                await writeFile(join(invocation.outputDir, "work-notes.md"), [
+                    "Plan followed",
+                    "Followed the managed cycle plan.",
+                    "",
+                    "What changed",
+                    "Changed nothing useful.",
+                    "",
+                    "Validation attempted",
+                    "The managed completion criteria ran after execution.",
+                    "",
+                    "Criterion evidence map",
+                    "always_fail still lacks passing evidence.",
+                    "",
+                    "Remaining risks",
+                    "The required command criterion is still failing."
+                ].join("\n"), "utf8");
                 await writeFile(join(invocation.outputDir, "draft-summary.md"), "Draft summary.\n", "utf8");
                 await writeFile(join(invocation.outputDir, "draft-packet.json"), "{\"status\":\"draft\"}\n", "utf8");
             }

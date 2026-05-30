@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, realpathSync, readFileSync } from "node:fs";
 import { access, appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -546,13 +546,23 @@ function currentArtifactPath(metadata: RuntimeMetadata, name: string): string {
     : resolveSubpathWithinRoot(metadata.workspace_path, definition.path, `Artifact "${name}" path`);
 }
 
-async function readStdin(): Promise<string> {
-  let value = "";
-  process.stdin.setEncoding("utf8");
+async function readStdinBuffer(): Promise<Buffer> {
+  const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
-    value += String(chunk);
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
   }
-  return value;
+  return Buffer.concat(chunks);
+}
+
+async function readStdin(): Promise<string> {
+  return (await readStdinBuffer()).toString("utf8");
+}
+
+function pathIsInside(parent: string, candidate: string): boolean {
+  const resolvedParent = resolve(parent);
+  const resolvedCandidate = resolve(candidate);
+  const relativePath = relative(resolvedParent, resolvedCandidate);
+  return relativePath.length === 0 || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 function renderHelp(): string {
@@ -646,11 +656,13 @@ function commandHelp(commandPath: string): string | undefined {
       "",
       "Usage:",
       "  af artifact write <name>",
+      "  af artifact write <name> --file <path>",
       "",
       "Arguments:",
       "  <name>  Declared artifact name. Required.",
       "",
       "Options:",
+      "  --file <path>  Copy artifact bytes from a workspace or output-dir file instead of stdin.",
       "  --help  Show this help and exit. Default: false",
       "",
       "Output:",
@@ -662,12 +674,13 @@ function commandHelp(commandPath: string): string | undefined {
       "",
       "Examples:",
       "  af artifact write handoff < handoff.md",
+      "  af artifact write screenshot --file screenshots/settings.png",
       "  af artifact write handoff <<'EOF'",
       "  # Handoff",
       "  EOF",
       "",
       "Safety:",
-      "  Reads content from stdin and writes only to the declared artifact destination enforced by Agentflow."
+      "  Reads bytes from stdin or --file and writes only to the declared artifact destination enforced by Agentflow."
     ],
     "complete check": [
       "af complete check - report whether the current attempt is mechanically ready for outcome verification.",
@@ -791,10 +804,10 @@ function renderArtifactTable(metadata: RuntimeMetadata): string[] {
     return ["No declared artifacts."];
   }
   return [
-    "| Name | Write Command | Description |",
-    "| --- | --- | --- |",
+    "| Name | Write Command | Type | Description |",
+    "| --- | --- | --- | --- |",
     ...entries.map(([name, definition]) =>
-      `| \`${name}\` | \`${metadata.sandbox === "read-only" ? "write disabled (read-only)" : `af artifact write ${name}`}\` | ${markdownCell(definition.description)} |`
+      `| \`${name}\` | \`${metadata.sandbox === "read-only" ? "write disabled (read-only)" : `af artifact write ${name}`}\` | ${definition.content_type ? `\`${markdownCell(definition.content_type)}\`` : "auto-detect"} | ${markdownCell(definition.description)} |`
     )
   ];
 }
@@ -1530,19 +1543,22 @@ async function commandArtifactWrite(
   const destination = currentArtifactPath(metadata, name);
   await mkdir(dirname(destination), { recursive: true });
 
-  if (optionString(options, "file") || optionString(options, "content") || options.stdin === true) {
-    throw new Error("af artifact write reads content from stdin; do not pass --file, --content, or --stdin.");
+  const fileOption = optionString(options, "file");
+  if (optionString(options, "content") || options.stdin === true) {
+    throw new Error("af artifact write reads content from stdin or --file; do not pass --content or --stdin.");
   }
 
-  const content = await readStdin();
+  const content = fileOption
+    ? await readArtifactWriteFile(metadata, fileOption)
+    : await readStdinBuffer();
   if (destination.endsWith(".json")) {
     try {
-      JSON.parse(content);
+      JSON.parse(content.toString("utf8"));
     } catch (error) {
       throw new Error(`Artifact "${name}" must be valid JSON: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  await writeFile(destination, content, "utf8");
+  await writeFile(destination, content);
 
   return {
     exitCode: 0,
@@ -1553,6 +1569,14 @@ async function commandArtifactWrite(
     }
   };
   });
+}
+
+async function readArtifactWriteFile(metadata: RuntimeMetadata, filePath: string): Promise<Buffer> {
+  const absolutePath = resolve(filePath);
+  if (!pathIsInside(metadata.workspace_path, absolutePath) && !pathIsInside(metadata.output_dir, absolutePath)) {
+    throw new Error("af artifact write --file must reference a file inside the node workspace or artifact output directory.");
+  }
+  return await readFile(absolutePath);
 }
 
 async function commandMilestone(
@@ -2000,7 +2024,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "",
     "## Required Artifact",
     `Publish \`${artifactName}\` before finishing.`,
-    `Use \`af artifact write ${artifactName}\` with stdin content.`,
+    `Use \`af artifact write ${artifactName}\` with stdin bytes or \`--file <path>\` for an existing workspace/output file.`,
     session.role
       ? "The artifact must be concise Markdown with: findings, evidence pointers, confidence, and recommended runtime delta or contract gap."
       : "The artifact must directly satisfy the helper task and cite the evidence used.",
@@ -2014,7 +2038,7 @@ async function helperRun(options: Record<string, string | boolean | string[]>): 
     "- Use `af orient` to inspect this helper session.",
     "- Understand the helper task and relevant parent context before committing to execution milestones.",
     "- Use `af milestone add`, `af milestone log`, and `af milestone complete` to track macro progress with evidence.",
-    "- Use `af artifact write <name>` to publish the required artifact from stdin.",
+    "- Use `af artifact write <name>` to publish the required artifact from stdin, or `af artifact write <name> --file <path>` for an existing workspace/output file.",
     ...(toolContract.length > 0 ? ["", ...toolContract] : []),
     "",
     "## Completion Gate",
@@ -2318,7 +2342,7 @@ async function runAfViaBroker(argv: string[]): Promise<number> {
   let stdinPath: string | undefined;
   if (isArtifactWriteCommand(argv)) {
     stdinPath = join(requestsDir, `${requestId}.stdin`);
-    await writeFile(stdinPath, await readStdin(), "utf8");
+    await writeFile(stdinPath, await readStdinBuffer());
   }
 
   const requestPath = join(requestsDir, `${requestId}.json`);

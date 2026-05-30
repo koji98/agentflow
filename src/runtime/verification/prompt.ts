@@ -5,6 +5,13 @@ export interface OutcomeVerificationPromptArtifactSnippet {
   content?: string;
   truncated?: boolean;
   byte_count?: number;
+  content_type?: string;
+  detected_content_type?: string;
+  declared_content_type?: string;
+  media_kind?: string;
+  encoding?: string;
+  sha256?: string;
+  preview?: Record<string, unknown>;
   read_error?: string;
 }
 
@@ -40,6 +47,12 @@ export interface OutcomeVerificationPromptCompletionPacket {
     status: string;
     current_attempt: boolean;
     size_bytes?: number;
+    content_type?: string;
+    detected_content_type?: string;
+    media_kind?: string;
+    encoding?: string;
+    sha256?: string;
+    preview?: Record<string, unknown>;
   }>;
   artifact_findings?: Array<{
     artifact: string;
@@ -136,9 +149,32 @@ function renderArtifactSnippet(snippet: OutcomeVerificationPromptArtifactSnippet
   if (snippet.byte_count !== undefined) {
     lines.push(`Size: ${snippet.byte_count} bytes`);
   }
+  if (snippet.content_type) {
+    lines.push(`Content type: ${snippet.content_type}`);
+  }
+  if (snippet.detected_content_type) {
+    lines.push(`Detected content type: ${snippet.detected_content_type}`);
+  }
+  if (snippet.media_kind) {
+    lines.push(`Media kind: ${snippet.media_kind}`);
+  }
+  if (snippet.encoding) {
+    lines.push(`Encoding: ${snippet.encoding}`);
+  }
+  if (snippet.sha256) {
+    lines.push(`SHA-256: ${snippet.sha256}`);
+  }
+  if (snippet.preview) {
+    lines.push(`Preview: ${renderArtifactPreview(snippet.preview)}`);
+  }
 
   if (snippet.read_error) {
     lines.push("", `Read error: ${snippet.read_error}`);
+    return lines;
+  }
+
+  if (snippet.encoding === "binary") {
+    lines.push("", "This non-text artifact is not inlined. Judge it from the metadata, path, and worker-provided validation or milestone evidence.");
     return lines;
   }
 
@@ -148,6 +184,14 @@ function renderArtifactSnippet(snippet: OutcomeVerificationPromptArtifactSnippet
   }
 
   return lines;
+}
+
+function renderArtifactPreview(preview: Record<string, unknown>): string {
+  const kind = typeof preview.kind === "string" ? preview.kind : "unknown";
+  const details = Object.entries(preview)
+    .filter(([key]) => key !== "kind")
+    .map(([key, value]) => `${key}=${String(value)}`);
+  return [kind, ...details].join("; ");
 }
 
 function renderWorkspaceDiff(snippet: OutcomeVerificationPromptInput["workspace_diff_snippet"]): string[] {
@@ -298,7 +342,14 @@ function renderCompletionPacket(packet: OutcomeVerificationPromptCompletionPacke
   if (packet.declared_artifacts && packet.declared_artifacts.length > 0) {
     lines.push("- Declared artifact status:");
     for (const artifact of packet.declared_artifacts) {
-      lines.push(`  - ${artifact.name}: ${artifact.status}; current_attempt=${artifact.current_attempt}${artifact.size_bytes !== undefined ? `; size=${artifact.size_bytes}` : ""}`);
+      lines.push([
+        `  - ${artifact.name}: ${artifact.status}`,
+        `current_attempt=${artifact.current_attempt}`,
+        ...(artifact.size_bytes !== undefined ? [`size=${artifact.size_bytes}`] : []),
+        ...(artifact.content_type ? [`content_type=${artifact.content_type}`] : []),
+        ...(artifact.media_kind ? [`media_kind=${artifact.media_kind}`] : []),
+        ...(artifact.encoding ? [`encoding=${artifact.encoding}`] : [])
+      ].join("; "));
     }
   }
 
@@ -353,8 +404,9 @@ export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPrompt
     "- Treat graph and node acceptance criteria as authoritative over any task text that describes an intentionally failing fallback, blocker report, or retry trigger.",
     "- A final response explicitly marked as an intentional failure, retry request, missing-context fallback, or not-done state is blocker evidence unless the acceptance criteria explicitly say that terminal fallback is acceptable.",
     "- A required declared artifact that is empty, placeholder-only, missing the requested content, or inconsistent with the final response is blocker evidence even when the final response claims success.",
-    "- The Declared Artifacts section below is authoritative for artifact presence. If a declared artifact snippet has a path, size/content, and no read error, treat that artifact as present; do not claim it is missing because a separate file search, transcript, or directory listing appears incomplete.",
+    "- The Declared Artifacts section below is authoritative for artifact presence. If a declared artifact snippet has a path, size plus content or metadata, and no read error, treat that artifact as present; do not claim it is missing because a separate file search, transcript, or directory listing appears incomplete.",
     "- Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section, has a read error, or the inlined content proves the artifact does not satisfy the authored artifact contract.",
+    "- Non-text artifacts are valid declared artifacts when they have a path, content type, byte size, hash, and no read error. Judge their meaning from artifact metadata plus milestone/final-response validation evidence; do not fail only because binary bytes are not inlined.",
     "- For exact labels or literal phrase requirements, defer to the Completion Packet artifact findings when the packet is ready for verification. Do not invent a missing-literal blocker when the packet reports the artifact present with no placeholder, forbidden-content, or missing-required-content finding and the inlined artifact text contains the literal.",
     "- For command/tool output evidence, judge the material observed values. Do not create a blocker only because the same output is represented with different line breaks, bullets, punctuation, or prose wrapping across milestone evidence and artifact text.",
     "- If an artifact is truncated in this prompt, read the full artifact path before making a blocker judgment that depends on omitted content.",

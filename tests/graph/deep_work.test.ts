@@ -297,27 +297,47 @@ describe("pattern deep work", () => {
             deps: ["root__implement_checkout__managed__pattern_deep_work__workflow__implement_checkout"]
         }));
     });
-    it("compiles stage-specific deep-work controls into distinct prompt-backed phases", () => {
+    it("compiles phase-specific deep-work controls into distinct prompt-backed phases", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
             buildPatternStep({
-                stages: {
+                phases: {
                     plan: {
-                        directions: ["Plan from current scorecard only; do not design unrelated architecture."],
-                        validation_focus: ["Name the smallest credible validation command."],
+                        intent: {
+                            goal: "Plan from current scorecard only; do not design unrelated architecture.",
+                            acceptance_criteria: ["Name the smallest credible validation command."],
+                            constraints: ["Do not prescribe broad rewrites."]
+                        },
+                        support: {
+                            cli: [
+                                {
+                                    cmd: "npm test -- tests/checkout",
+                                    description: "Focused checkout validation command."
+                                }
+                            ]
+                        },
+                        runtime: {
+                            profile: "supervisor"
+                        },
                         model: "gpt-5-planner"
                     },
                     execute: {
-                        directions: ["Implement only the selected plan and keep diffs narrow."],
-                        validation_focus: ["Record exact command output in work notes."],
+                        intent: {
+                            goal: "Implement only the selected plan and keep diffs narrow.",
+                            acceptance_criteria: ["Record exact command output in work notes."]
+                        },
                         sandbox: "workspace-write"
                     },
                     verify: {
-                        directions: ["Judge evidence, not intentions."],
-                        validation_focus: ["Penalize missing validation evidence."]
+                        intent: {
+                            goal: "Judge evidence, not intentions.",
+                            acceptance_criteria: ["Penalize missing validation evidence."]
+                        }
                     },
                     publish: {
-                        directions: ["Publish only claims supported by the passing scorecard."],
-                        validation_focus: ["Keep downstream handoff bounded to accepted evidence."]
+                        intent: {
+                            goal: "Publish only claims supported by the passing scorecard.",
+                            acceptance_criteria: ["Keep downstream handoff bounded to accepted evidence."]
+                        }
                     }
                 }
             })
@@ -342,9 +362,18 @@ describe("pattern deep work", () => {
         if (!criteriaPanel || criteriaPanel.type !== "parallel") {
             throw new Error("Expected criteria panel.");
         }
+        expect(JSON.stringify(planNode)).toContain("Phase Contract");
         expect(JSON.stringify(planNode)).toContain("Plan from current scorecard only");
         expect(JSON.stringify(planNode)).toContain("Name the smallest credible validation command");
+        expect(JSON.stringify(planNode)).toContain("Do not prescribe broad rewrites");
+        expect(JSON.stringify(planNode)).toContain("Focused checkout validation command");
         expect(planNode).toEqual(expect.objectContaining({ model: "gpt-5-planner" }));
+        expect(planNode).toEqual(expect.objectContaining({
+            runtime: {
+                repo: "main",
+                profile: "supervisor"
+            }
+        }));
         expect(JSON.stringify(generateNode)).toContain("Implement only the selected plan");
         expect(JSON.stringify(generateNode)).toContain("Record exact command output in work notes");
         expect(generateNode).toEqual(expect.objectContaining({ sandbox: "workspace-write" }));
@@ -352,20 +381,66 @@ describe("pattern deep work", () => {
         expect(JSON.stringify(criteriaPanel.steps[1])).toContain("Penalize missing validation evidence");
         expect(JSON.stringify(finalNode)).toContain("Publish only claims supported by the passing scorecard");
         expect(JSON.stringify(finalNode)).toContain("Keep downstream handoff bounded to accepted evidence");
+        expect(JSON.stringify(finalNode)).toContain("Implement checkout rounding and publish a clear handoff.");
     });
-    it("rejects unknown deep-work stage override fields", () => {
+    it("rejects removed deep-work stage fields", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
             buildPatternStep({
                 stages: {
                     execute: {
-                        persona: "senior implementer"
+                        directions: ["Implement narrowly."],
+                        validation_focus: ["Record validation."]
                     }
                 }
             })
         ])));
         expect(normalized.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                path: "$.graph.steps[0].stages.execute.persona",
+                path: "$.graph.steps[0].stages",
+                message: expect.stringContaining("Unknown field")
+            })
+        ]));
+        expect(normalized.document).toBeUndefined();
+    });
+    it("rejects removed phase direction and validation-focus fields", () => {
+        const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+            buildPatternStep({
+                phases: {
+                    execute: {
+                        directions: ["Implement narrowly."],
+                        validation_focus: ["Record validation."]
+                    }
+                }
+            })
+        ])));
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].phases.execute.directions",
+                message: expect.stringContaining("Unknown field")
+            }),
+            expect.objectContaining({
+                path: "$.graph.steps[0].phases.execute.validation_focus",
+                message: expect.stringContaining("Unknown field")
+            })
+        ]));
+        expect(normalized.document).toBeUndefined();
+    });
+    it("rejects phase-level repo overrides", () => {
+        const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+            buildPatternStep({
+                phases: {
+                    execute: {
+                        runtime: {
+                            repo: "other",
+                            profile: "default"
+                        }
+                    }
+                }
+            })
+        ])));
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.graph.steps[0].phases.execute.runtime.repo",
                 message: expect.stringContaining("Unknown field")
             })
         ]));

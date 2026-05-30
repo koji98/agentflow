@@ -123,6 +123,7 @@ describe("renderOutcomeVerificationPrompt", () => {
     const prompt = renderOutcomeVerificationPrompt(buildInput());
 
     expect(prompt).toContain("The Declared Artifacts section below is authoritative for artifact presence.");
+    expect(prompt).toContain("size plus content or metadata");
     expect(prompt).toContain("treat that artifact as present; do not claim it is missing");
     expect(prompt).toContain("Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section");
     expect(prompt).toContain("defer to the Completion Packet artifact findings");
@@ -178,6 +179,38 @@ describe("renderOutcomeVerificationPrompt", () => {
     );
     expect(prompt).toContain("(truncated)");
     expect(prompt).toContain("Read the full file from the path above before judging.");
+  });
+  it("renders binary artifact metadata without inlining corrupted text", () => {
+    const prompt = renderOutcomeVerificationPrompt(
+      buildInput({
+        declared_artifact_snippets: [
+          {
+            name: "settings_screenshot",
+            description: "Rendered settings screenshot.",
+            path: "/run/widget/artifacts/screens/settings.png",
+            byte_count: 33,
+            content_type: "image/png",
+            detected_content_type: "image/png",
+            media_kind: "image",
+            encoding: "binary",
+            sha256: "abc123",
+            preview: {
+              kind: "image",
+              width: 2,
+              height: 3
+            }
+          }
+        ]
+      })
+    );
+    expect(prompt).toContain("### `settings_screenshot`");
+    expect(prompt).toContain("Content type: image/png");
+    expect(prompt).toContain("Media kind: image");
+    expect(prompt).toContain("Encoding: binary");
+    expect(prompt).toContain("SHA-256: abc123");
+    expect(prompt).toContain("Preview: image; width=2; height=3");
+    expect(prompt).toContain("This non-text artifact is not inlined");
+    expect(prompt).not.toContain("�PNG");
   });
 
   it("flags missing diff capture in degraded mode", () => {

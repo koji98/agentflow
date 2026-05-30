@@ -176,7 +176,7 @@ Minimal `workflow.json`:
 
 Inside workflow graphs:
 
-- `kind: "plugin_file"` embeds plugin-owned text and requires `name`, `path`, `what`, and `why`.
+- `kind: "plugin_file"` embeds plugin-owned static text and requires `name`, `path`, `what`, and `why`. The file must exist before validation/launch; context produced during a run should be a declared artifact consumed with `ref`.
 - Plain relative paths such as `./context/guidance.md` resolve inside the workflow directory.
 - `plugin://...` strings resolve from the plugin package root, which lets workflows reuse package-level scripts and shared context without wrapper files.
 - config placeholders use `{{config.key}}`.

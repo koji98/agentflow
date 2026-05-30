@@ -86,7 +86,7 @@ Add:
 }
 ```
 
-Criteria weights must sum to `1`. Required criteria are hard blockers. Each cycle plans the next move, generates and validates a candidate, grades completion criteria, writes a completion scorecard, and retries with feedback until the score reaches `pass_threshold` or `max_cycles` is exhausted. Use optional `stages.plan`, `stages.execute`, `stages.verify`, and `stages.publish` overrides when those phases need different directions, support/context, model, reasoning effort, sandbox posture, or validation focus.
+Criteria weights must sum to `1`. Required criteria are hard blockers. Each cycle plans the next move, generates and validates a candidate, grades completion criteria, writes a completion scorecard, and retries with feedback until the score reaches `pass_threshold` or `max_cycles` is exhausted. Use optional `phases.plan`, `phases.execute`, `phases.verify`, and `phases.publish` overrides when those phases need additive intent, support/context, profile, model, reasoning effort, or sandbox posture. Phase intent appends to the parent contract; it never replaces the goal, weakens constraints, changes criteria, or switches repos.
 
 ### `pattern_work_list`
 

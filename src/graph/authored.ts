@@ -210,6 +210,7 @@ export interface ArtifactDefinition {
   from: ArtifactSourceKind;
   path: string;
   description: string;
+  content_type?: string;
 }
 
 export interface ManagedArtifactForward {

@@ -59,7 +59,7 @@ async function writeWorkflowEvalFixture(tempRoot: string): Promise<{
         "process.stdin.on('end', () => {",
         "  const lastMessageIndex = process.argv.indexOf('--output-last-message');",
         "  const lastMessagePath = lastMessageIndex >= 0 ? process.argv[lastMessageIndex + 1] : undefined;",
-        "  const artifacts = [...input.matchAll(/\\| `([^`]+\\.[^`]+)` \\| ([^|]+) \\| \\[([^\\]]+)\\]\\(([^)]+)\\) \\|/g)].map(match => `- \\`${match[1]}\\`: [${match[3]}](${match[4]})`);",
+        "  const artifacts = [...input.matchAll(/\\| `([^`]+\\.[^`]+)` \\| ([^|]+) \\| `([^`]+)` \\| \\[([^\\]]+)\\]\\(([^)]+)\\) \\|/g)].map(match => `- \\`${match[1]}\\`: [${match[4]}](${match[5]})`);",
         "  const artifactLines = artifacts.length > 0 ? artifacts : ['- [Artifact index](evidence/artifact-index.json)'];",
         "  const response = [",
         "    '```review-brief',",

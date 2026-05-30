@@ -8,6 +8,10 @@ import {
   resolveExecutionHumanDebugVerifierDirectory,
   resolveExecutionRuntimeVerifierPath
 } from "../../artifacts/paths.js";
+import {
+  artifactMetadataFields,
+  inspectArtifactFile
+} from "../../artifacts/metadata.js";
 import type { AgentInvocation, HarnessAdapter } from "../harness/types.js";
 import type { CompletionPacket } from "../completion/index.js";
 import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
@@ -58,10 +62,21 @@ export interface RunOutcomeVerificationOptions {
   now?: () => number;
 }
 
-async function readSnippet(path: string | undefined, maxBytes: number): Promise<{
+async function readSnippet(
+  path: string | undefined,
+  maxBytes: number,
+  declaredContentType?: string
+): Promise<{
   content?: string;
   truncated?: boolean;
   byte_count?: number;
+  content_type?: string;
+  detected_content_type?: string;
+  declared_content_type?: string;
+  media_kind?: string;
+  encoding?: string;
+  sha256?: string;
+  preview?: Record<string, unknown>;
   read_error?: string;
 }> {
   if (!path) {
@@ -69,13 +84,21 @@ async function readSnippet(path: string | undefined, maxBytes: number): Promise<
   }
 
   try {
-    const raw = await readFile(path, "utf8");
-    const byteCount = Buffer.byteLength(raw, "utf8");
+    const metadata = await inspectArtifactFile(path, declaredContentType);
+    const metadataFields = artifactMetadataFields(metadata);
+    if (metadata.encoding === "binary") {
+      return {
+        ...metadataFields,
+        byte_count: metadata.size_bytes
+      };
+    }
+    const raw = metadata.text ?? "";
     const { content, truncated } = truncateForPrompt(raw, maxBytes);
     return {
       content,
       truncated,
-      byte_count: byteCount
+      byte_count: metadata.size_bytes,
+      ...metadataFields
     };
   } catch (error) {
     return {
@@ -88,9 +111,10 @@ async function buildArtifactSnippet(
   name: string,
   path: string | undefined,
   description: string,
-  maxBytes: number
+  maxBytes: number,
+  declaredContentType?: string
 ): Promise<OutcomeVerificationPromptArtifactSnippet> {
-  const snippet = await readSnippet(path, maxBytes);
+  const snippet = await readSnippet(path, maxBytes, declaredContentType);
   return {
     name,
     description,
@@ -515,7 +539,13 @@ function buildPromptCompletionPacket(packet: CompletionPacket): OutcomeVerificat
       name: artifact.name,
       status: artifact.status,
       current_attempt: artifact.current_attempt,
-      ...(artifact.size_bytes !== undefined ? { size_bytes: artifact.size_bytes } : {})
+      ...(artifact.size_bytes !== undefined ? { size_bytes: artifact.size_bytes } : {}),
+      ...(artifact.content_type ? { content_type: artifact.content_type } : {}),
+      ...(artifact.detected_content_type ? { detected_content_type: artifact.detected_content_type } : {}),
+      ...(artifact.media_kind ? { media_kind: artifact.media_kind } : {}),
+      ...(artifact.encoding ? { encoding: artifact.encoding } : {}),
+      ...(artifact.sha256 ? { sha256: artifact.sha256 } : {}),
+      ...(artifact.preview ? { preview: artifact.preview } : {})
     })),
     artifact_findings: packet.artifact_findings.map((finding) => ({
       artifact: finding.artifact,
@@ -583,7 +613,7 @@ export async function runOutcomeVerification(
     }
     const path = options.declaredArtifactPaths[name];
     declaredArtifactSnippets.push(
-      await buildArtifactSnippet(name, path, definition.description, maxArtifactPromptBytes)
+      await buildArtifactSnippet(name, path, definition.description, maxArtifactPromptBytes, definition.content_type)
     );
   }
 

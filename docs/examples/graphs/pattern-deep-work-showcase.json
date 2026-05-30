@@ -96,6 +96,36 @@
               "kind": "workspace_file"
             }
           ]
+        },
+        "phases": {
+          "plan": {
+            "intent": {
+              "goal": "Plan from the current docs contract and completion criteria before proposing edits.",
+              "acceptance_criteria": [
+                "The plan maps each completion criterion to expected evidence."
+              ]
+            }
+          },
+          "execute": {
+            "intent": {
+              "goal": "Keep documentation edits narrow and evidence-backed.",
+              "acceptance_criteria": [
+                "Work notes include exact validation evidence or a concrete blocker."
+              ]
+            }
+          },
+          "verify": {
+            "intent": {
+              "acceptance_criteria": [
+                "Rubric checks judge documented evidence rather than intent."
+              ]
+            }
+          },
+          "publish": {
+            "intent": {
+              "goal": "Publish only claims supported by the passing scorecard."
+            }
+          }
         }
       },
       {

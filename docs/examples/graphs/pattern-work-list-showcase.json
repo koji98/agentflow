@@ -116,7 +116,7 @@
               "name": "work_items",
               "ref": "bounded_delivery.work_items",
               "what": "Stable public work item index from the managed work-list node.",
-              "why": "The deterministic check verifies downstream nodes can consume the stable graph-addressable artifact."
+              "why": "The deterministic check verifies the stable work item index is present and suitable for later review."
             }
           ]
         },

@@ -26,9 +26,9 @@ The verifier receives:
 - Completion packet facts: status, blocking reasons, missing artifacts, and packet path.
 - Milestone evidence recorded by the node, especially `decision` and `validation` milestone logs with summaries, commands, results, and completion evidence.
 - The agent's captured response (`agent-response.md`) as an inline snippet.
-- Each declared artifact's content as an inline snippet, with size truncation guards and explicit `(truncated)` markers.
+- Each declared artifact's metadata: path, description, content type, media kind, byte size, SHA-256, preview metadata, and text excerpt only when the artifact is text.
 
-Per-artifact prompt contents are truncated above a fixed byte budget. Truncation is reported in the verifier metadata via `truncated_artifacts` so reviewers know the verifier judged from a partial view. Workspace diffs are not inlined by default; the verifier receives the changed-file count and artifact paths, and should read the full diff only when investigating a concrete contradiction.
+Text artifact prompt contents are truncated above a fixed byte budget. Truncation is reported in the verifier metadata via `truncated_artifacts` so reviewers know the verifier judged from a partial view. Non-text artifacts are never inlined or base64 encoded; the verifier judges their presence and relevance from metadata, pointers, completion-packet facts, and worker-provided milestone or handoff evidence. Workspace diffs are not inlined by default; the verifier receives the changed-file count and artifact paths, and should read the full diff only when investigating a concrete contradiction.
 
 ## Verification Posture
 

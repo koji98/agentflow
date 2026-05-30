@@ -797,7 +797,8 @@ export const validateCommand = {
       repo_workspaces: repoResolution.repo_sources ?? {}
     });
     const authoringReview = reviewCompiledGraph(loaded.document, compiledGraph, {
-      mode: strict ? "strict" : "review"
+      mode: strict ? "strict" : "review",
+      authored_document: loaded.authoring_review_document
     });
     const strictAuthoringBlocked = strict && authoringReview.summary.serious_count > 0;
     const mermaidDiagram = diagramOutput || diagramImageOutput || outputDir

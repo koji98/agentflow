@@ -3,6 +3,7 @@ import type {
   ArtifactDefinition,
   BaseExecutableNode,
   ContextItem,
+  ManagedRuntimeMetadata,
   ParallelNode,
   SequenceNode
 } from "../graph/authored.js";
@@ -50,6 +51,26 @@ function formatArtifactContract(artifacts: Record<string, ArtifactDefinition>): 
     `- ${name}: publish this declared artifact; the Declared Artifacts table shows the exact command.`,
     `  ${artifact.description}`
   ]);
+}
+
+function disposableInvestigationWorkspaceLines(): string[] {
+  return [
+    "This attempt runs in a disposable investigation workspace.",
+    "The source workspace is protected; any temporary workspace changes are discarded after the attempt.",
+    "Temporary exploratory edits are allowed only when they materially help the investigation.",
+    "Do not present exploratory edits as delivered implementation changes or persistent output."
+  ];
+}
+
+function deepResearchRuntime(config: PatternDeepResearchConfig, phase: string): ManagedRuntimeMetadata {
+  return {
+    kind: "pattern_deep_research",
+    root_id: config.id,
+    phase,
+    config: {
+      uses_ephemeral_investigation_workspace: true
+    }
+  };
 }
 
 interface ResearchMaterial {
@@ -120,7 +141,7 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Research Method", [
-      "Treat repository files as read-only evidence. Do not edit, create, or delete files in the repo workspace.",
+      ...disposableInvestigationWorkspaceLines(),
       "Use local repository files, provided context, available local CLIs, docs, or web research, whichever best serves this angle.",
       "Prefer authoritative local/source evidence when the question is repo-specific.",
       "Use external or web context when docs, package behavior, standards, release notes, or broader comparisons would materially improve the answer.",
@@ -165,6 +186,7 @@ function buildSynthesisPrompt(
       ...materialInputSummary(materials)
     ]),
     section("Synthesis Task", [
+      ...disposableInvestigationWorkspaceLines(),
       "Produce a complete synthesis for the assigned input reports, not a high-level abstract.",
       "Preserve every major finding from the input material.",
       "Collapse redundant claims while keeping the strongest provenance.",
@@ -196,6 +218,7 @@ function buildFinalPrompt(
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
     ]),
     section("Current Context", [
+      ...disposableInvestigationWorkspaceLines(),
       "Use the research reports in context as evidence.",
       "Resolve disagreements explicitly. Preserve uncertainty and cite the evidence behind important claims.",
       "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
@@ -262,6 +285,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       id: workflowNodeId(config.id, `angle_${suffix}`),
       label: `Research Angle ${suffix}`,
       ...agentShared,
+      managed_runtime: deepResearchRuntime(config, "angle"),
       artifacts: buildAngleArtifacts(index),
       intent: {
         goal: buildAnglePrompt(config, angle, index),
@@ -309,6 +333,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         id: workflowNodeId(config.id, `synthesis_${suffix}`),
         label: `Research Synthesis ${zeroPad(layer)}.${zeroPad(group)}`,
         ...agentShared,
+        managed_runtime: deepResearchRuntime(config, "synthesis"),
         support: mergeSupportContext(agentShared.support, materialContexts(groupMaterials)),
         artifacts: buildSynthesisArtifacts(layer, group),
         intent: {
@@ -361,6 +386,7 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         id: config.id,
         ...(config.label ? { label: config.label } : { label: "Publish Deep Research" }),
         ...agentShared,
+        managed_runtime: deepResearchRuntime(config, "publish"),
         support: mergeSupportContext(
           agentShared.support,
           materialContexts(finalEvidenceMaterials)

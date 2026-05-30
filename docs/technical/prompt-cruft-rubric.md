@@ -20,7 +20,7 @@ Alpha rule: do not add backwards-compatible prompt layers, prompt aliases, legac
 ## Accept
 
 - `If an artifact description requires literal labels, copy those labels exactly into the artifact body.`
-- `Use af artifact write <name> with stdin content for declared artifacts.`
+- `Use af artifact write <name> for declared artifacts, or --file when the artifact already exists as a screenshot, PDF, trace, archive, or other binary file.`
 - `If the same validation tactic fails twice with the same symptom, change strategy or block the active milestone with concrete evidence.`
 - `Record validation only after verifying the claim, and attach it to the relevant milestone.`
 

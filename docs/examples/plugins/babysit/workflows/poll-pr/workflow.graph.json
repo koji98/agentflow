@@ -34,7 +34,7 @@
       "type": "agent",
       "id": "publish_status",
       "intent": {
-        "goal": "Read the polled status from the pr_status_raw artifact and publish a clean JSON report with `af artifact write pr_status`.",
+        "goal": "Read the polled status from the pr_status_raw artifact and publish a clean JSON report.",
         "acceptance_criteria": [
           "The JSON report faithfully summarizes the raw PR status artifact.",
           "The output is suitable for downstream workflow consumption."

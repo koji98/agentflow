@@ -421,6 +421,108 @@ describe("delivery package", () => {
             })
         ]));
     });
+    it("records binary declared artifact metadata in delivery evidence without reading it as text", async () => {
+        const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-binary-"));
+        const executionDir = join(runRoot, "nodes", "001-capture", "executions", "001-exec");
+        const artifactDir = join(executionDir, "artifacts", "screens");
+        await mkdir(artifactDir, { recursive: true });
+        await writeRunScaffold(runRoot);
+
+        const screenshotPath = join(artifactDir, "settings.png");
+        const pngBytes = Buffer.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03,
+            0x08, 0x02, 0x00, 0x00, 0x00, 0x12, 0x16, 0xf1,
+            0x4d
+        ]);
+        await writeFile(screenshotPath, pngBytes);
+
+        const binaryNode = {
+            ...agentNode,
+            declared_artifacts: {
+                screenshot: {
+                    from: "output_dir",
+                    path: "screens/settings.png",
+                    description: "Rendered settings screenshot.",
+                    content_type: "image/png"
+                }
+            }
+        } as const;
+        const binaryGraph: CompiledGraph = {
+            ...graph,
+            nodes: [binaryNode]
+        };
+        const attempts: RuntimeNodeAttempt[] = [{
+            execution_id: "exec-1",
+            compiled_id: "root__implement",
+            authored_id: "implement",
+            kind: "agent",
+            repo_alias: "main",
+            execution_dir: executionDir,
+            attempt_index: 1,
+            status: "passed",
+            outcome: "passed",
+            started_at: "2026-04-24T00:00:00.000Z",
+            ended_at: "2026-04-24T00:00:01.000Z",
+            duration_ms: 1000,
+            artifacts: {
+                screenshot: screenshotPath
+            },
+            metadata: {}
+        }];
+
+        await writeDeliveryPackage({
+            run_root: runRoot,
+            graph: binaryGraph,
+            state: baseState({
+                node_statuses: { root__implement: "passed" },
+                latest_execution_by_compiled_id: {
+                    root__implement: {
+                        execution_id: "exec-1",
+                        compiled_id: "root__implement",
+                        authored_id: "implement",
+                        kind: "agent",
+                        status: "passed",
+                        attempt_index: 1,
+                        started_at: "2026-04-24T00:00:00.000Z",
+                        ended_at: "2026-04-24T00:00:01.000Z"
+                    }
+                }
+            }),
+            attempts,
+            events: [],
+            interventions: [],
+            curator: buildPassingCurator()
+        });
+
+        const source = await readJson<{
+            final_declared_artifacts: Array<{
+                content?: string;
+                content_type?: string;
+                detected_content_type?: string;
+                media_kind?: string;
+                encoding?: string;
+                sha256?: string;
+                preview?: { kind: string; width?: number; height?: number };
+            }>;
+        }>(join(runRoot, "delivery", "evidence", "delivery-source.json"));
+        expect(source.final_declared_artifacts[0]).toEqual(expect.objectContaining({
+            content_type: "image/png",
+            detected_content_type: "image/png",
+            media_kind: "image",
+            encoding: "binary",
+            sha256: expect.any(String),
+            preview: expect.objectContaining({
+                kind: "image",
+                width: 2,
+                height: 3
+            })
+        }));
+        expect(source.final_declared_artifacts[0]?.content).toBeUndefined();
+        await expect(readFile(join(runRoot, "delivery", "evidence", "artifact-index.json"), "utf8"))
+            .resolves.toContain('"media_kind": "image"');
+    });
 
     it("treats failed prior attempts as recovered issues when the final attempt passed", async () => {
         const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-recovered-"));

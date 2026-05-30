@@ -35,7 +35,7 @@
             "Investigate the intended user-facing contract for deep research and deep work.",
             {
               "id": "artifact_contract",
-              "prompt": "Identify how graph-addressable artifacts should be shaped so downstream nodes can consume them without internal ids."
+              "prompt": "Identify how stable research and work artifacts should be shaped so later reviewers and workers can consume them without relying on internal ids."
             },
             "Assess how supervisor recovery should interact with managed-pattern internal failures and loop feedback."
           ]

@@ -135,7 +135,7 @@ Runtime coordination files are under `<run-root>/runtime/`. They are useful when
 - `observations.jsonl`: live human observations added without pausing the run.
 - `human-resume-input.jsonl`: structured human input used when resuming paused runs.
 
-Agents should orient with `af orient`, understand any provided plan/research/context before committing to execution milestones, publish durable results with `af artifact write <name>` from stdin, check mechanical readiness with `af complete check`, and record milestone evidence with `finding`, `decision`, and `validation` logs. A completed agent is not an online collaborator; inspect its artifacts, completion packet, milestone state, observations, and supervisor timeline rather than expecting live intervention.
+Agents should orient with `af orient`, understand any provided plan/research/context before committing to execution milestones, publish durable results with `af artifact write <name>` or `af artifact write <name> --file <path>` for existing screenshots/PDFs/media, check mechanical readiness with `af complete check`, and record milestone evidence with `finding`, `decision`, and `validation` logs. A completed agent is not an online collaborator; inspect its artifacts, completion packet, milestone state, observations, and supervisor timeline rather than expecting live intervention.
 
 On retries, `af orient` starts with retry orientation and runtime-authored attempt memory. It tells the agent the prior failure symptom, best resume point, restart boundary, workspace decision, progress to reuse, progress to discard, required next action, validation gate, and do-not-redo guidance before showing the unchanged contract. Use this instead of asking the agent to rediscover the entire prior attempt from raw logs.
 
@@ -149,7 +149,7 @@ agentflow observe resolve --run <run-root> --observation <id> --resolution "Work
 
 `af orient` and `af complete check` surface active observations relevant to the current node. Observations are evidence, not graph edits; they do not change acceptance criteria, repo authority, sandbox, or declared artifacts.
 
-When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map the agent context brief, runtime context state, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --graph <path>` reports context analysis before launch when a graph has broad globs, large docs, generated trees, unresolved context pointers, missing CLI hints, or managed tool readiness issues.
+When debugging what an agent actually received, use `../technical/context-and-artifacts.md` and `../technical/runtime-tooling.md` to map the agent context brief, runtime context state, generated wrappers, tool invocation ledgers, and credential isolation. `agentflow validate --graph <path>` reports context analysis before launch when a graph has broad globs, large docs, generated trees, missing static workspace/plugin context, missing CLI hints, or managed tool readiness issues. Runtime-produced context should appear as declared artifacts and downstream `ref` pointers, not as workspace files that only exist after an upstream node runs.
 
 ## Resume
 

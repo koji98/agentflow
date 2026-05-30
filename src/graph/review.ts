@@ -24,6 +24,7 @@ export interface GraphReviewFinding {
     | "intent"
     | "node_purpose"
     | "parallel"
+    | "prompt_surface"
     | "repeat"
     | "supervision"
     | "tool_policy"
@@ -74,6 +75,34 @@ const implementationIntentPattern =
   /\b(implement|ship|fix|change|update|refactor|build|generate|patch|feature|bug|release)\b/i;
 const credentialToolDescription = "credential-backed";
 const automaticArtifactNames = new Set<string>(reservedArtifactNames);
+const managedPhaseNames = ["plan", "execute", "verify", "publish"] as const;
+
+interface PromptSurfaceField {
+  path: string;
+  text: string;
+  severity: "serious" | "warning";
+  audience: string;
+}
+
+const promptSurfaceLeakPatterns: Array<{ label: string; pattern: RegExp }> = [
+  { label: "this graph", pattern: /\bthis graph\b/iu },
+  { label: "the graph should", pattern: /\bthe graph should\b/iu },
+  { label: "downstream node", pattern: /\bdownstream nodes?\b/iu },
+  { label: "compiled prompt", pattern: /\bcompiled prompts?\b/iu },
+  { label: "graph topology", pattern: /\bgraph topology\b/iu },
+  { label: "pattern_deep_research", pattern: /\bpattern_deep_research\b/iu },
+  { label: "pattern_deep_work", pattern: /\bpattern_deep_work\b/iu },
+  { label: "pattern_work_list", pattern: /\bpattern_work_list\b/iu },
+  { label: "managed pattern mechanics", pattern: /\b(?:this|the|a)\s+managed pattern\b/iu },
+  { label: "private angle report", pattern: /\bprivate angle report\b/iu },
+  { label: "synthesis node", pattern: /\bsynthesis node\b/iu },
+  { label: "as public", pattern: /\bas public\b/iu },
+  { label: "af artifact write", pattern: /\baf artifact write\b/iu },
+  { label: "af complete check", pattern: /\baf complete check\b/iu },
+  { label: "graph-addressable artifact", pattern: /\bgraph-addressable artifacts?\b/iu },
+  { label: "use this node to", pattern: /\buse this node to\b/iu },
+  { label: "this prompt will", pattern: /\bthis prompt will\b/iu }
+];
 
 function isExecutableNode(node: AuthoredGraphNode): node is ExecutableGraphNode {
   return node.type === "agent" || node.type === "exec" || node.type === "check" || node.type === "checkpoint";
@@ -147,6 +176,12 @@ function hasAnyText(values: string[] | undefined): boolean {
   return (values ?? []).some((value) => value.trim().length > 0);
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function pathForNode(
   authoredMetadata: Map<string, AuthoredNodeMetadata>,
   node: CompiledExecutableNode
@@ -181,6 +216,313 @@ function pushFinding(
   finding: GraphReviewFinding
 ): void {
   findings.push(finding);
+}
+
+function addPromptSurfaceString(
+  fields: PromptSurfaceField[],
+  value: unknown,
+  path: string,
+  options: {
+    severity: "serious" | "warning";
+    audience: string;
+  }
+): void {
+  if (typeof value === "string" && value.trim().length > 0) {
+    fields.push({
+      path,
+      text: value,
+      severity: options.severity,
+      audience: options.audience
+    });
+  }
+}
+
+function addPromptSurfaceStringArray(
+  fields: PromptSurfaceField[],
+  value: unknown,
+  path: string,
+  options: {
+    severity: "serious" | "warning";
+    audience: string;
+  }
+): void {
+  if (!Array.isArray(value)) {
+    return;
+  }
+
+  value.forEach((item, index) => {
+    addPromptSurfaceString(fields, item, `${path}[${index}]`, options);
+  });
+}
+
+function addPromptSurfaceIntentFields(
+  fields: PromptSurfaceField[],
+  value: unknown,
+  path: string,
+  options: {
+    goalSeverity: "serious" | "warning";
+    detailSeverity: "serious" | "warning";
+    audience: string;
+  }
+): void {
+  const intent = asRecord(value);
+  if (!intent) {
+    return;
+  }
+
+  addPromptSurfaceString(fields, intent.goal, `${path}.goal`, {
+    severity: options.goalSeverity,
+    audience: options.audience
+  });
+  addPromptSurfaceStringArray(fields, intent.acceptance_criteria, `${path}.acceptance_criteria`, {
+    severity: options.detailSeverity,
+    audience: options.audience
+  });
+  addPromptSurfaceStringArray(fields, intent.constraints, `${path}.constraints`, {
+    severity: options.detailSeverity,
+    audience: options.audience
+  });
+}
+
+function addPromptSurfaceArtifacts(
+  fields: PromptSurfaceField[],
+  value: unknown,
+  path: string
+): void {
+  const artifacts = asRecord(value);
+  if (!artifacts) {
+    return;
+  }
+
+  Object.entries(artifacts).forEach(([artifactName, artifactValue]) => {
+    const artifact = asRecord(artifactValue);
+    if (!artifact) {
+      return;
+    }
+    addPromptSurfaceString(fields, artifact.description, `${path}.${artifactName}.description`, {
+      severity: "warning",
+      audience: "artifact publisher, verifier, and reviewer"
+    });
+  });
+}
+
+function addPromptSurfaceSupport(
+  fields: PromptSurfaceField[],
+  value: unknown,
+  path: string
+): void {
+  const support = asRecord(value);
+  const context = Array.isArray(support?.context) ? support.context : [];
+
+  context.forEach((item, index) => {
+    const contextItem = asRecord(item);
+    if (!contextItem) {
+      return;
+    }
+    addPromptSurfaceString(fields, contextItem.what, `${path}.context[${index}].what`, {
+      severity: "warning",
+      audience: "context reader"
+    });
+    addPromptSurfaceString(fields, contextItem.why, `${path}.context[${index}].why`, {
+      severity: "warning",
+      audience: "context reader"
+    });
+  });
+}
+
+function addPromptSurfaceCriteriaRubrics(
+  fields: PromptSurfaceField[],
+  value: unknown,
+  path: string,
+  audience: string
+): void {
+  if (!Array.isArray(value)) {
+    return;
+  }
+
+  value.forEach((item, index) => {
+    const criterion = asRecord(item);
+    if (!criterion) {
+      return;
+    }
+    addPromptSurfaceString(fields, criterion.rubric, `${path}[${index}].rubric`, {
+      severity: "serious",
+      audience
+    });
+  });
+}
+
+function collectPromptSurfaceFieldsFromNode(
+  fields: PromptSurfaceField[],
+  value: unknown,
+  path: string
+): void {
+  const node = asRecord(value);
+  if (!node) {
+    return;
+  }
+
+  addPromptSurfaceString(fields, node.label, `${path}.label`, {
+    severity: "warning",
+    audience: "operator-facing node label"
+  });
+
+  const type = typeof node.type === "string" ? node.type : "";
+  if (type === "sequence" || type === "parallel") {
+    const steps = Array.isArray(node.steps) ? node.steps : [];
+    steps.forEach((child, index) => collectPromptSurfaceFieldsFromNode(fields, child, `${path}.steps[${index}]`));
+
+    if (type === "sequence" && Array.isArray(node.cleanup)) {
+      node.cleanup.forEach((child, index) =>
+        collectPromptSurfaceFieldsFromNode(fields, child, `${path}.cleanup[${index}]`)
+      );
+    }
+    return;
+  }
+
+  if (type === "repeat") {
+    collectPromptSurfaceFieldsFromNode(fields, node.body, `${path}.body`);
+    return;
+  }
+
+  addPromptSurfaceIntentFields(fields, node.intent, `${path}.intent`, {
+    goalSeverity: "serious",
+    detailSeverity: "warning",
+    audience: "executing node"
+  });
+  addPromptSurfaceSupport(fields, node.support, `${path}.support`);
+  addPromptSurfaceArtifacts(fields, node.artifacts, `${path}.artifacts`);
+
+  addPromptSurfaceString(fields, node.rubric, `${path}.rubric`, {
+    severity: "serious",
+    audience: "AI check evaluator"
+  });
+
+  if (type === "pattern_deep_research") {
+    const research = asRecord(node.research);
+    const angles = Array.isArray(research?.angles) ? research.angles : [];
+    angles.forEach((angle, index) => {
+      if (typeof angle === "string") {
+        addPromptSurfaceString(fields, angle, `${path}.research.angles[${index}]`, {
+          severity: "serious",
+          audience: "research angle worker"
+        });
+        return;
+      }
+
+      const angleRecord = asRecord(angle);
+      if (!angleRecord) {
+        return;
+      }
+      addPromptSurfaceString(fields, angleRecord.prompt, `${path}.research.angles[${index}].prompt`, {
+        severity: "serious",
+        audience: "research angle worker"
+      });
+    });
+  }
+
+  if (type === "pattern_deep_work") {
+    const completion = asRecord(node.completion);
+    addPromptSurfaceCriteriaRubrics(
+      fields,
+      completion?.criteria,
+      `${path}.completion.criteria`,
+      "deep-work criterion evaluator"
+    );
+
+    const phases = asRecord(node.phases);
+    if (phases) {
+      for (const phase of managedPhaseNames) {
+        const phaseRecord = asRecord(phases[phase]);
+        if (!phaseRecord) {
+          continue;
+        }
+        addPromptSurfaceIntentFields(fields, phaseRecord.intent, `${path}.phases.${phase}.intent`, {
+          goalSeverity: "serious",
+          detailSeverity: "serious",
+          audience: `deep-work ${phase} phase`
+        });
+        addPromptSurfaceSupport(fields, phaseRecord.support, `${path}.phases.${phase}.support`);
+      }
+    }
+  }
+
+  if (type === "pattern_work_list") {
+    const workList = asRecord(node.work_list);
+    addPromptSurfaceString(fields, workList?.planning_goal, `${path}.work_list.planning_goal`, {
+      severity: "serious",
+      audience: "work-list planner"
+    });
+
+    const itemGuidance = asRecord(workList?.item_guidance);
+    addPromptSurfaceString(
+      fields,
+      itemGuidance?.what_counts_as_one_item,
+      `${path}.work_list.item_guidance.what_counts_as_one_item`,
+      {
+        severity: "serious",
+        audience: "work-list planner and item worker"
+      }
+    );
+    addPromptSurfaceStringArray(fields, itemGuidance?.done_when, `${path}.work_list.item_guidance.done_when`, {
+      severity: "serious",
+      audience: "work-list item worker and verifier"
+    });
+
+    const itemWorker = asRecord(workList?.item_worker);
+    const itemCompletion = asRecord(itemWorker?.completion);
+    addPromptSurfaceCriteriaRubrics(
+      fields,
+      itemCompletion?.criteria,
+      `${path}.work_list.item_worker.completion.criteria`,
+      "work-list item criterion evaluator"
+    );
+  }
+}
+
+function collectPromptSurfaceFields(value: unknown): PromptSurfaceField[] {
+  const document = asRecord(value);
+  if (!document) {
+    return [];
+  }
+
+  const fields: PromptSurfaceField[] = [];
+  addPromptSurfaceIntentFields(fields, document.intent, "$.intent", {
+    goalSeverity: "serious",
+    detailSeverity: "warning",
+    audience: "all executable nodes"
+  });
+  collectPromptSurfaceFieldsFromNode(fields, document.graph, "$.graph");
+  return fields;
+}
+
+function findPromptSurfaceLeak(text: string): { label: string } | undefined {
+  for (const { label, pattern } of promptSurfaceLeakPatterns) {
+    if (pattern.test(text)) {
+      return { label };
+    }
+  }
+  return undefined;
+}
+
+function reviewPromptSurface(
+  value: unknown,
+  findings: GraphReviewFinding[]
+): void {
+  for (const field of collectPromptSurfaceFields(value)) {
+    const leak = findPromptSurfaceLeak(field.text);
+    if (!leak) {
+      continue;
+    }
+
+    pushFinding(findings, {
+      severity: field.severity,
+      category: "prompt_surface",
+      path: field.path,
+      message: `Prompt-facing field for the ${field.audience} contains graph-authoring language (${leak.label}).`,
+      recommendation: "Rewrite this field for the runtime reader: state the outcome, evidence, or boundary only; keep graph shape, pattern choice, and authoring rationale outside graph JSON."
+    });
+  }
 }
 
 function reviewIntent(document: AuthoredGraphDocument, findings: GraphReviewFinding[]): void {
@@ -524,13 +866,14 @@ function buildArtifactHandoffs(graph: CompiledGraph): GraphReviewArtifactHandoff
 export function reviewCompiledGraph(
   document: AuthoredGraphDocument,
   graph: CompiledGraph,
-  options: { mode?: GraphReviewMode } = {}
+  options: { mode?: GraphReviewMode; authored_document?: unknown } = {}
 ): GraphReviewReport {
   const mode = options.mode ?? "review";
   const findings: GraphReviewFinding[] = [];
   const authoredMetadata = collectAuthoredMetadata(document.graph);
 
   reviewIntent(document, findings);
+  reviewPromptSurface(options.authored_document ?? document, findings);
 
   graph.nodes.forEach((node) => {
     reviewExecutableNode(document, node, authoredMetadata, findings, { fullReview: true });

@@ -107,6 +107,13 @@ describe("deep research managed pattern", () => {
         }
         for (const loweredNode of [...fanout.steps, finalNode]) {
             expect(loweredNode).toEqual(expect.objectContaining({
+                managed_runtime: expect.objectContaining({
+                    kind: "pattern_deep_research",
+                    root_id: "market_scan",
+                    config: expect.objectContaining({
+                        uses_ephemeral_investigation_workspace: true
+                    })
+                }),
                 runtime: {
                     repo: "main",
                     profile: "default"
@@ -114,7 +121,8 @@ describe("deep research managed pattern", () => {
             }));
         }
         expect(fanout.steps[0].intent.goal).toContain("The assigned angle id is angle_01.");
-        expect(fanout.steps[0].intent.goal).toContain("Treat repository files as read-only evidence.");
+        expect(fanout.steps[0].intent.goal).toContain("This attempt runs in a disposable investigation workspace.");
+        expect(fanout.steps[0].intent.goal).toContain("Temporary exploratory edits are allowed only when they materially help the investigation.");
         expect(fanout.steps[0].intent.goal).toContain("Do not create a report file in the repo workspace");
         expect(JSON.stringify(fanout.steps[0])).not.toContain("expert");
         expect(finalNode).toEqual(expect.objectContaining({

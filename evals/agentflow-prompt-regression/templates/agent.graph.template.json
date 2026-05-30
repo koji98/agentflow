@@ -64,7 +64,7 @@
             "If the scenario task says to write or select a value from a command/tool, use the observed command/tool output as the value in `handoff.md` instead of substituting a nearby fixture or context value.",
             "If the scenario task asks for a decision, record an `af milestone log` entry with `--kind decision`; validation logs do not count as decision evidence.",
             "Use `af milestone` evidence logs when the scenario asks for a progress, finding, validation, or decision record.",
-            "Run `af complete check` before the final response and stop when it reports ready for verification."
+            "The final handoff is mechanically ready for verification before the final response."
           ],
           "constraints": [
             "Do not treat Agentflow docs, skills, or harness text as the task target.",

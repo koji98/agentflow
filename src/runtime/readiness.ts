@@ -10,12 +10,13 @@ import type { HarnessAdapter } from "./harness/types.js";
 import { resolveCliBinary } from "./harness/types.js";
 import { createCredentialStore } from "../auth/store.js";
 import type { CredentialScopeSpec } from "../auth/types.js";
+import { analyzeGraphContext } from "./context/analyze.js";
 
 export type ReadinessCheckStatus = "passed" | "warning" | "blocked";
 export type ReadinessStatus = "ready" | "warnings" | "blocked";
 
 export interface ReadinessCheckResult {
-  kind: "file" | "command" | "env" | "repo" | "harness" | "credential" | "tool" | "mcp" | "cli";
+  kind: "file" | "command" | "env" | "repo" | "harness" | "credential" | "tool" | "mcp" | "cli" | "context";
   required: boolean;
   status: ReadinessCheckStatus;
   target: string;
@@ -813,6 +814,26 @@ export async function evaluateGraphReadiness(options: {
       target: diagnostic.path,
       message: diagnostic.message
     });
+  }
+
+  if (options.graph.nodes) {
+    const context = await analyzeGraphContext({
+      graph: { nodes: options.graph.nodes },
+      repo_workspaces: options.repo_sources
+    });
+    for (const diagnostic of context.diagnostics) {
+      if (diagnostic.severity !== "error") {
+        continue;
+      }
+
+      checks.push({
+        kind: "context",
+        required: true,
+        status: "blocked",
+        target: `${diagnostic.authored_id}: ${diagnostic.path}`,
+        message: diagnostic.message
+      });
+    }
   }
 
   if (options.machine_checks && options.graph.launch && options.graph.nodes) {

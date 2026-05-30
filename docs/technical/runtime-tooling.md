@@ -190,7 +190,8 @@ Common commands:
 - `af milestone add --title <text> --goal <text>`: declare a meaningful phase of work after orientation, including a planning/research milestone when discovery is substantial.
 - `af milestone log <id> --kind finding|decision|validation --summary <text>`: attach audit evidence to a milestone. Validation logs also include `--command` and `--result pass|fail|blocked`.
 - `af milestone complete <id> --evidence <text>` or `af milestone block <id> --blocked-on <text> --recoverable-by <text> --evidence <text>`: close the milestone with evidence or record a true external blocker.
-- `af artifact write <name>`: publish declared artifact content from stdin to its declared destination.
+- `af artifact write <name>`: publish declared artifact bytes from stdin to its declared destination.
+- `af artifact write <name> --file <path>`: copy an existing workspace/output file, such as a screenshot, PDF, trace, or generated archive, into the declared artifact destination without decoding it as text.
 - `af complete check`: build the runtime completion packet and report whether the current attempt is `ready_for_verification`, `incomplete`, or `blocked`.
 
 `af --help` is intentionally narrow for normal agents. The runtime metadata carries an `af` command policy, and the generated wrapper plus parent broker enforce the same policy. Normal workers can use only `orient`, `milestone`, `artifact write`, and `complete check`. Recovery/debug/orchestration commands such as `af diagnose`, `af learn`, and `af spawn` require diagnostic or orchestrator authority; forged broker requests do not expand the policy. There is no standalone `af wait`; `af spawn ... --wait` is available only to runtime-authorized supervisor or managed-pattern orchestration.
@@ -199,7 +200,7 @@ Supervisor diagnostics include `af diagnose evidence-map --node <id> [--attempt 
 
 The runtime CLI is file-backed from Agentflow's point of view. The broker is an execution detail that prevents harness filesystem sandboxes from breaking runtime-owned writes; it validates `af` argv, ignores agent-supplied working-directory expansion, constrains stdin sidecar paths, and does not expose a general service or extra authority to the model.
 
-`af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include orientation state, milestone summaries, validation evidence, blocked milestones, declared artifact state, placeholder/empty/stale artifact findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, helper session evidence, and typed authority requests when a trusted runtime component produced one. Outcome verification only judges semantic correctness after this mechanical packet is ready. A `blocked` packet is valid only with a typed authority request; other blockers remain `incomplete`.
+`af complete check` writes the same packet shape that the engine enforces after each attempt. Completion packets include orientation state, milestone summaries, validation evidence, blocked milestones, declared artifact state, content type/media metadata, binary-safe hashes, placeholder/empty/stale artifact findings, active live human observations, supervisor recovery requirements, managed-pattern summaries, helper session evidence, and typed authority requests when a trusted runtime component produced one. Outcome verification only judges semantic correctness after this mechanical packet is ready. A `blocked` packet is valid only with a typed authority request; other blockers remain `incomplete`.
 
 ## Tool Invocation Evidence
 
