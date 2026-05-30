@@ -477,6 +477,21 @@ function collectPromptSurfaceFieldsFromNode(
       `${path}.work_list.item_worker.completion.criteria`,
       "work-list item criterion evaluator"
     );
+    const itemPhases = asRecord(itemWorker?.phases);
+    if (itemPhases) {
+      for (const phase of managedPhaseNames) {
+        const phaseRecord = asRecord(itemPhases[phase]);
+        if (!phaseRecord) {
+          continue;
+        }
+        addPromptSurfaceIntentFields(fields, phaseRecord.intent, `${path}.work_list.item_worker.phases.${phase}.intent`, {
+          goalSeverity: "serious",
+          detailSeverity: "serious",
+          audience: `work-list item ${phase} phase`
+        });
+        addPromptSurfaceSupport(fields, phaseRecord.support, `${path}.work_list.item_worker.phases.${phase}.support`);
+      }
+    }
   }
 }
 

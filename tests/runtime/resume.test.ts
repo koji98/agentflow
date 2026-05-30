@@ -11,7 +11,7 @@ import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { readExecutionManifest } from "../../src/artifacts/reader.js";
 import { resumeCompiledGraph, runCompiledGraph } from "../../src/runtime/core/engine.js";
-import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
+import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
 import { resumeWorkspaceFromManifest } from "../../src/runtime/workspace/resume.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
@@ -41,6 +41,141 @@ function compileGraph(document: AuthoredGraphDocument) {
     expect(compilation.compiled_graph).toBeDefined();
     return compilation.compiled_graph!;
 }
+
+function resumeWorkListJson(): string {
+    return `${JSON.stringify({
+        planning_summary: "One item is enough to test work-list resume compatibility.",
+        ordering_rationale: "The single item can execute immediately after freeze.",
+        items: [
+            {
+                id: "w1",
+                title: "Complete resume fixture item",
+                goal: "Complete the bounded resume fixture item.",
+                acceptance_criteria: ["The item handoff is present."],
+                constraints: [],
+                validation_expectations: ["The item criterion passes."],
+                handoff_focus: ["Downstream nodes need the accepted item result."],
+                rationale: "This item exercises item phase contract compatibility."
+            }
+        ]
+    }, null, 2)}\n`;
+}
+
+function isWorkListItemPlanInvocation(invocation: AgentInvocation): boolean {
+    return invocation.nodeGoal?.includes("Plan frozen work-list item") === true;
+}
+
+function isWorkListItemExecuteInvocation(invocation: AgentInvocation): boolean {
+    return invocation.nodeGoal?.includes("Execute frozen work-list item") === true;
+}
+
+function isWorkListItemPublishInvocation(invocation: AgentInvocation): boolean {
+    return invocation.nodeGoal?.includes("Publish frozen work-list item") === true;
+}
+
+async function writeWorkListItemDrafts(invocation: AgentInvocation): Promise<void> {
+    await writeFile(join(invocation.outputDir, "item-work-notes.md"), "# Item Work Notes\n\nExecuted resume fixture item.\n", "utf8");
+    await writeFile(join(invocation.outputDir, "draft-item-handoff.md"), "# Draft Item Handoff\n\nFixture item is complete.\n", "utf8");
+    await writeFile(join(invocation.outputDir, "draft-item-result.json"), `${JSON.stringify({
+        id: "w1",
+        status: "completed",
+        summary: "Completed the resume fixture item.",
+        validation: {
+            passed: ["The fixture criterion passed."],
+            failed_then_fixed: [],
+            unavailable: [],
+            blocked: []
+        },
+        risks: [],
+        downstream_implications: ["Downstream nodes can consume the work_items ledger."]
+    }, null, 2)}\n`, "utf8");
+    await writeFile(join(invocation.outputDir, "draft-item-validation.md"), "Validation: fixture criterion passed.\n", "utf8");
+}
+
+async function writeWorkListItemFinals(invocation: AgentInvocation): Promise<void> {
+    await writeFile(join(invocation.outputDir, "item-handoff.md"), "# Item Handoff\n\nFixture item is complete.\n", "utf8");
+    await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
+        id: "w1",
+        status: "completed",
+        summary: "Completed the resume fixture item.",
+        validation: {
+            passed: ["The fixture criterion passed."],
+            failed_then_fixed: [],
+            unavailable: [],
+            blocked: []
+        },
+        risks: [],
+        downstream_implications: ["Downstream nodes can consume the work_items ledger."]
+    }, null, 2)}\n`, "utf8");
+    await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: fixture criterion passed.\n", "utf8");
+}
+
+function createWorkListResumeHarness(): HarnessAdapter {
+    const deliveryHarness = createPassingDeliveryHarness("codex-cli");
+    return {
+        kind: "codex-cli",
+        capabilities: getHarnessCapabilities("codex-cli")!,
+        async run(invocation) {
+            if (invocation.promptKind === "delivery_curator") {
+                return deliveryHarness.run(invocation);
+            }
+
+            if (invocation.promptKind === "ai_check") {
+                return {
+                    status: "passed",
+                    exitCode: 0,
+                    transcript: {
+                        last_message: [
+                            "```json",
+                            JSON.stringify({ passed: true, score: 1, summary: "Fixture criterion passed.", issues: [] }),
+                            "```"
+                        ].join("\n")
+                    }
+                };
+            }
+
+            if (invocation.promptKind === "outcome_verification") {
+                return {
+                    status: "passed",
+                    exitCode: 0,
+                    transcript: {
+                        last_message: [
+                            "```json",
+                            JSON.stringify({ passed: true, summary: "Fixture verifier accepts.", findings: [], blockers: [] }),
+                            "```"
+                        ].join("\n")
+                    }
+                };
+            }
+
+            if (invocation.nodeGoal?.includes("work_list_json")) {
+                await writeFile(join(invocation.outputDir, "work-list.json"), resumeWorkListJson(), "utf8");
+            } else if (isWorkListItemPlanInvocation(invocation)) {
+                await writeFile(join(invocation.outputDir, "item-cycle-plan.md"), "# Item Cycle Plan\n\nPlan the fixture item.\n", "utf8");
+            } else if (isWorkListItemExecuteInvocation(invocation)) {
+                await writeWorkListItemDrafts(invocation);
+            } else if (isWorkListItemPublishInvocation(invocation)) {
+                await writeWorkListItemFinals(invocation);
+            } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+                await writeFile(join(invocation.outputDir, "summary.md"), "Completed the work-list resume fixture.\n", "utf8");
+            }
+
+            const result = {
+                status: "passed" as const,
+                exitCode: 0,
+                transcript: {
+                    last_message: "done"
+                }
+            };
+            await markInvocationRuntimeReady(invocation, result);
+            return result;
+        },
+        async cancel() {
+            return;
+        }
+    };
+}
+
 async function createResumeFixture(options: {
     document: AuthoredGraphDocument;
     setupRepo?: (repoDir: string) => Promise<void>;
@@ -803,5 +938,135 @@ describe("runtime resume", () => {
         expect(resumed.restarted_node_count).toBeGreaterThan(0);
         expect(resumed.preserved_node_count).toBeLessThan(fixture.graph.nodes.length);
         await rm(fixture.tempRoot, { recursive: true, force: true });
+    });
+
+    it("restarts completed work-list deep-work items when item phase prompt inputs change", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-runtime-work-list-phase-resume-"));
+        const repoDir = join(tempRoot, "repo");
+        const runRoot = join(tempRoot, "run");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+
+        const baseDocument: AuthoredGraphDocument = {
+            version: "1",
+            graph_id: "resume-work-list-item-phase-change",
+            repos: {
+                main: { path: "." }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "pattern_work_list",
+                        id: "deliver",
+                        intent: {
+                            goal: "Complete the work-list phase resume fixture.",
+                            acceptance_criteria: ["The fixture item is completed."],
+                            constraints: []
+                        },
+                        runtime: {
+                            repo: "main"
+                        },
+                        work_list: {
+                            planning_goal: "Plan the single fixture item.",
+                            item_guidance: {
+                                what_counts_as_one_item: "One bounded fixture item.",
+                                done_when: ["The item handoff and validation evidence are present."]
+                            },
+                            item_worker: {
+                                kind: "deep_work",
+                                phases: {
+                                    execute: {
+                                        intent: {
+                                            goal: "Record the baseline execute-phase evidence."
+                                        }
+                                    }
+                                },
+                                completion: {
+                                    max_cycles: 1,
+                                    pass_threshold: 1,
+                                    criteria: [
+                                        {
+                                            id: "fixture_rubric",
+                                            kind: "rubric",
+                                            target: "item_handoff",
+                                            rubric: "The item handoff proves the fixture item is complete.",
+                                            weight: 1,
+                                            required: true
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        };
+        const graph = compileGraph(baseDocument);
+        const result = await runCompiledGraph({
+            run_root: runRoot,
+            compiled_graph: graph,
+            repo_sources: {
+                main: repoDir
+            },
+            harnesses: {
+                "codex-cli": createWorkListResumeHarness()
+            }
+        });
+        expect(result.outcome).toBe("passed");
+        const manifest = await readExecutionManifest(runRoot);
+        const changedGraph = compileGraph({
+            ...baseDocument,
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        ...baseDocument.graph.steps[0],
+                        work_list: {
+                            ...baseDocument.graph.steps[0].work_list,
+                            item_worker: {
+                                ...baseDocument.graph.steps[0].work_list.item_worker,
+                                phases: {
+                                    execute: {
+                                        intent: {
+                                            goal: "Record the changed execute-phase evidence."
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        });
+        const resumed = await createResumedRuntimeSession({
+            run_root: runRoot,
+            prior_graph: graph,
+            graph: changedGraph,
+            manifest,
+            prior_state: result.state,
+            attempts: result.attempts,
+            events: result.events
+        });
+        const runItemsNode = changedGraph.nodes.find((node) =>
+            node.authored_id.endsWith("__managed__pattern_work_list__run_items")
+        );
+        expect(runItemsNode).toBeDefined();
+        expect(resumed.session.node_statuses.get(runItemsNode!.compiled_id)).toBe("pending");
+        expect(resumed.restarted_node_count).toBeGreaterThan(0);
+        expect(resumed.preserved_node_count).toBeLessThan(graph.nodes.length);
+
+        await rm(tempRoot, { recursive: true, force: true });
     });
 });

@@ -368,6 +368,106 @@ describe("compiled graph authoring review", () => {
             })
         ]));
     });
+    it("flags graph-authoring language in work-list deep-work item phases", () => {
+        const { authored, document, graph } = compileReviewGraph({
+            version: "1",
+            graph_id: "review-work-list-item-phase-prose",
+            intent: {
+                goal: "Deliver a focused implementation package.",
+                acceptance_criteria: ["The package includes validation evidence."],
+                constraints: ["Do not widen scope."]
+            },
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "pattern_work_list",
+                        id: "work_items",
+                        intent: {
+                            goal: "Complete the bounded item set.",
+                            acceptance_criteria: ["Every item has evidence."],
+                            constraints: ["Do not change unrelated files."]
+                        },
+                        work_list: {
+                            planning_goal: "Find the implementation items.",
+                            item_guidance: {
+                                what_counts_as_one_item: "One independently reviewable item.",
+                                done_when: ["The item has evidence."]
+                            },
+                            item_worker: {
+                                kind: "deep_work",
+                                phases: {
+                                    plan: {
+                                        intent: {
+                                            goal: "This prompt will plan the work-list item."
+                                        },
+                                        support: {
+                                            context: [
+                                                {
+                                                    name: "brief",
+                                                    kind: "workspace_file",
+                                                    path: "README.md",
+                                                    what: "Context for the downstream node.",
+                                                    why: "This graph should keep the item grounded."
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                completion: {
+                                    max_cycles: 1,
+                                    pass_threshold: 1,
+                                    criteria: [
+                                        {
+                                            id: "item_quality",
+                                            kind: "rubric",
+                                            target: "workspace",
+                                            rubric: "The item is complete.",
+                                            weight: 1,
+                                            required: true
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        });
+
+        const review = reviewCompiledGraph(document, graph, { authored_document: authored });
+        expect(review.findings).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                category: "prompt_surface",
+                severity: "serious",
+                path: "$.graph.steps[0].work_list.item_worker.phases.plan.intent.goal"
+            }),
+            expect.objectContaining({
+                category: "prompt_surface",
+                severity: "warning",
+                path: "$.graph.steps[0].work_list.item_worker.phases.plan.support.context[0].what"
+            }),
+            expect.objectContaining({
+                category: "prompt_surface",
+                severity: "warning",
+                path: "$.graph.steps[0].work_list.item_worker.phases.plan.support.context[0].why"
+            })
+        ]));
+    });
     it("does not flag Agentflow product language when it is not graph-authoring mechanics", () => {
         const { authored, document, graph } = compileReviewGraph({
             version: "1",

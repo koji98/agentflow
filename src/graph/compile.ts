@@ -7,6 +7,7 @@ import type {
   AuthoredGraphNode,
   ContainerGraphNode,
   CliHint,
+  ManagedRuntimeMetadata,
   ManagedToolDefinition,
   NodeSupport,
   SupportReference
@@ -449,6 +450,131 @@ function buildAgentResolvedTools(
   return effectiveTools;
 }
 
+const workListDeepWorkPhaseNames = ["plan", "execute", "verify", "publish"] as const;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function mergeNodeSupport(base: NodeSupport | undefined, override: NodeSupport | undefined): NodeSupport | undefined {
+  if (!base && !override) {
+    return undefined;
+  }
+  const merged: NodeSupport = {
+    ...(base ?? {}),
+    ...(override ?? {})
+  };
+  const capabilities = [...(base?.capabilities ?? []), ...(override?.capabilities ?? [])];
+  const skills = [...(base?.skills ?? []), ...(override?.skills ?? [])];
+  const tools = [...(base?.tools ?? []), ...(override?.tools ?? [])];
+  const cli = [...(base?.cli ?? []), ...(override?.cli ?? [])];
+  const contextItems = [...(base?.context ?? []), ...(override?.context ?? [])];
+  if (capabilities.length > 0) {
+    merged.capabilities = capabilities;
+  }
+  if (skills.length > 0) {
+    merged.skills = skills;
+  }
+  if (tools.length > 0) {
+    merged.tools = tools;
+  }
+  if (cli.length > 0) {
+    merged.cli = cli;
+  }
+  if (contextItems.length > 0) {
+    merged.context = contextItems;
+  }
+  return merged;
+}
+
+function resolveWorkListDeepWorkPhaseTemplates(
+  context: CompileContext,
+  node: ExecutableGraphNode,
+  path: string
+): ManagedRuntimeMetadata | undefined {
+  const managedRuntime = node.managed_runtime;
+  if (
+    !managedRuntime ||
+    managedRuntime.kind !== "pattern_work_list" ||
+    managedRuntime.phase !== "run_items" ||
+    node.type !== "agent"
+  ) {
+    return managedRuntime;
+  }
+
+  const config = asRecord(managedRuntime.config);
+  const itemWorker = asRecord(config?.item_worker);
+  const phases = asRecord(itemWorker?.phases);
+  if (itemWorker?.kind !== "deep_work" || !phases) {
+    return managedRuntime;
+  }
+
+  const templates: Record<string, unknown> = {};
+  for (const phase of workListDeepWorkPhaseNames) {
+    const phaseRecord = asRecord(phases[phase]);
+    if (!phaseRecord) {
+      continue;
+    }
+
+    const phaseSupport = asRecord(phaseRecord.support) as NodeSupport | undefined;
+    const phaseRuntime = asRecord(phaseRecord.runtime);
+    const phaseReasoningEffort = typeof phaseRecord.reasoning_effort === "string"
+      ? phaseRecord.reasoning_effort as AgentNode["reasoning_effort"]
+      : undefined;
+    const phaseSandbox = typeof phaseRecord.sandbox === "string"
+      ? phaseRecord.sandbox as AgentNode["sandbox"]
+      : undefined;
+    const mergedPhaseSupport = phaseSupport ? mergeNodeSupport(node.support, phaseSupport) : undefined;
+    const syntheticNode: AgentNode = {
+      ...node,
+      id: `${node.id}__item_${phase}`,
+      runtime: {
+        ...(node.runtime ?? {}),
+        ...(typeof phaseRuntime?.profile === "string" ? { profile: phaseRuntime.profile } : {})
+      },
+      ...(typeof phaseRecord.model === "string" ? { model: phaseRecord.model } : {}),
+      ...(phaseReasoningEffort ? { reasoning_effort: phaseReasoningEffort } : {}),
+      ...(phaseSandbox ? { sandbox: phaseSandbox } : {}),
+      ...(mergedPhaseSupport ? { support: mergedPhaseSupport } : {})
+    };
+
+    const phasePolicyResolution = resolveNodePolicy(context.document, context.launch, syntheticNode);
+    context.diagnostics.push(...phasePolicyResolution.diagnostics);
+    const expandedPhaseSupport = expandSupport(
+      context.document,
+      syntheticNode.support,
+      `${path}.managed_runtime.config.item_worker.phases.${phase}`,
+      context.diagnostics
+    );
+    templates[phase] = {
+      effective_policy: phasePolicyResolution.policy,
+      context: syntheticNode.support?.context ?? [],
+      skills: buildResolvedSkills(context, expandedPhaseSupport.skills, `${path}.managed_runtime.config.item_worker.phases.${phase}`),
+      cli: expandedPhaseSupport.cli,
+      tools: phase === "verify"
+        ? []
+        : buildAgentResolvedTools(context, expandedPhaseSupport.toolRefs, `${path}.managed_runtime.config.item_worker.phases.${phase}`)
+    };
+  }
+
+  if (Object.keys(templates).length === 0) {
+    return managedRuntime;
+  }
+
+  return {
+    ...managedRuntime,
+    config: {
+      ...(config ?? {}),
+      item_worker: {
+        ...(itemWorker ?? {}),
+        phase_templates: templates
+      }
+    }
+  };
+}
+
 function resolveCheckFields(
   node: CheckNode,
   nodePolicyResolution: ReturnType<typeof resolveNodePolicy>
@@ -515,6 +641,7 @@ function compileExecutableNode(
   const expandedSupport = expandSupport(context.document, node.support, path, context.diagnostics);
   const resolvedSkills = buildResolvedSkills(context, expandedSupport.skills, path);
   const isPromptBackedNode = node.type === "agent" || (node.type === "check" && node.check_kind === "ai");
+  const managedRuntime = resolveWorkListDeepWorkPhaseTemplates(context, node, path);
 
   if (node.type !== "agent" && expandedSupport.toolRefs.length > 0) {
     context.diagnostics.push({
@@ -553,7 +680,7 @@ function compileExecutableNode(
     context: node.support?.context ?? [],
     declared_artifacts: node.artifacts ?? {},
     ...(node.managed_artifact_forwards ? { managed_artifact_forwards: node.managed_artifact_forwards } : {}),
-    ...(node.managed_runtime ? { managed_runtime: node.managed_runtime } : {}),
+    ...(managedRuntime ? { managed_runtime: managedRuntime } : {}),
     skills: resolvedSkills,
     cli: expandedSupport.cli,
     ...(lowered_from ? { lowered_from } : {}),

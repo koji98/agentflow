@@ -285,6 +285,195 @@ describe("pattern work list", () => {
     expect(workflow.steps.map((step) => step.id)).not.toContain("deliver_stack__managed__pattern_work_list__completion_gate");
   });
 
+  it("carries deep_work item phase overrides in the managed runtime config", () => {
+    const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+      buildPatternStep({
+        work_list: {
+          planning_goal: "Discover the ordered work items needed to satisfy this node contract.",
+          item_guidance: {
+            what_counts_as_one_item: "One coherent reviewable unit of work with its own evidence handoff.",
+            done_when: ["The item is complete with validation evidence."]
+          },
+          item_worker: {
+            kind: "deep_work",
+            phases: {
+              plan: {
+                intent: {
+                  goal: "Map item evidence before implementation."
+                },
+                model: "planner-model"
+              },
+              execute: {
+                intent: {
+                  goal: "Apply only the planned item delta."
+                },
+                reasoning_effort: "high"
+              },
+              verify: {
+                intent: {
+                  goal: "Check item evidence against the rubric."
+                },
+                sandbox: "read-only"
+              },
+              publish: {
+                intent: {
+                  goal: "Publish only accepted item evidence."
+                }
+              }
+            },
+            completion: {
+              max_cycles: 2,
+              pass_threshold: 1,
+              criteria: [
+                {
+                  id: "item_contract",
+                  kind: "rubric",
+                  target: "workspace",
+                  rubric: "The item satisfies its frozen contract.",
+                  weight: 1,
+                  required: true
+                }
+              ]
+            }
+          }
+        }
+      })
+    ])));
+    expect(normalized.diagnostics).toEqual([]);
+    const root = normalized.document?.graph;
+    if (!root || root.type !== "sequence") {
+      throw new Error("Expected normalized graph root to be a sequence.");
+    }
+    const workflow = root.steps[0];
+    if (!workflow || workflow.type !== "sequence") {
+      throw new Error("Expected pattern_work_list to lower into a sequence workflow.");
+    }
+    const runItemsNode = workflow.steps[2];
+    expect(runItemsNode).toEqual(expect.objectContaining({
+      type: "agent",
+      managed_runtime: expect.objectContaining({
+        config: expect.objectContaining({
+          item_worker: expect.objectContaining({
+            kind: "deep_work",
+            phases: expect.objectContaining({
+              plan: expect.objectContaining({
+                intent: expect.objectContaining({ goal: "Map item evidence before implementation." }),
+                model: "planner-model"
+              }),
+              execute: expect.objectContaining({
+                intent: expect.objectContaining({ goal: "Apply only the planned item delta." }),
+                reasoning_effort: "high"
+              }),
+              verify: expect.objectContaining({
+                intent: expect.objectContaining({ goal: "Check item evidence against the rubric." }),
+                sandbox: "read-only"
+              }),
+              publish: expect.objectContaining({
+                intent: expect.objectContaining({ goal: "Publish only accepted item evidence." })
+              })
+            })
+          })
+        })
+      })
+    }));
+    const prompt = JSON.stringify(runItemsNode);
+    expect(prompt).toContain("Item deep-work phases may add phase-specific intent, support, model, reasoning effort, sandbox, or profile policy.");
+  });
+
+  it("rejects phases on agent item workers", () => {
+    const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+      buildPatternStep({
+        work_list: {
+          planning_goal: "Discover the ordered work items needed to satisfy this node contract.",
+          item_guidance: {
+            what_counts_as_one_item: "One coherent reviewable unit of work with its own evidence handoff.",
+            done_when: ["The item is complete with validation evidence."]
+          },
+          item_worker: {
+            kind: "agent",
+            phases: {
+              plan: {
+                intent: {
+                  goal: "This should not be accepted for agent workers."
+                }
+              }
+            }
+          }
+        }
+      })
+    ])));
+    expect(normalized.diagnostics).toEqual([
+      expect.objectContaining({
+        path: "$.graph.steps[0].work_list.item_worker.phases",
+        message: "Unknown field \"phases\" is not part of the graph contract."
+      })
+    ]);
+  });
+
+  it("rejects stale deep_work item phase fields and phase repo overrides", () => {
+    const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+      buildPatternStep({
+        work_list: {
+          planning_goal: "Discover the ordered work items needed to satisfy this node contract.",
+          item_guidance: {
+            what_counts_as_one_item: "One coherent reviewable unit of work with its own evidence handoff.",
+            done_when: ["The item is complete with validation evidence."]
+          },
+          item_worker: {
+            kind: "deep_work",
+            stages: {},
+            directions: "old field",
+            validation_focus: "old field",
+            phases: {
+              inspect: {},
+              plan: {
+                runtime: {
+                  repo: "other"
+                }
+              }
+            },
+            completion: {
+              max_cycles: 1,
+              pass_threshold: 1,
+              criteria: [
+                {
+                  id: "item_contract",
+                  kind: "rubric",
+                  target: "workspace",
+                  rubric: "The item satisfies its frozen contract.",
+                  weight: 1,
+                  required: true
+                }
+              ]
+            }
+          }
+        }
+      })
+    ])));
+    expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "$.graph.steps[0].work_list.item_worker.stages",
+        message: "Unknown field \"stages\" is not part of the graph contract."
+      }),
+      expect.objectContaining({
+        path: "$.graph.steps[0].work_list.item_worker.directions",
+        message: "Unknown field \"directions\" is not part of the graph contract."
+      }),
+      expect.objectContaining({
+        path: "$.graph.steps[0].work_list.item_worker.validation_focus",
+        message: "Unknown field \"validation_focus\" is not part of the graph contract."
+      }),
+      expect.objectContaining({
+        path: "$.graph.steps[0].work_list.item_worker.phases.inspect",
+        message: "Unknown field \"inspect\" is not part of the graph contract."
+      }),
+      expect.objectContaining({
+        path: "$.graph.steps[0].work_list.item_worker.phases.plan.runtime.repo",
+        message: "Unknown field \"repo\" is not part of the graph contract."
+      })
+    ]));
+  });
+
   it("compiles downstream refs against stable public artifacts only", () => {
     const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
       buildPatternStep(),

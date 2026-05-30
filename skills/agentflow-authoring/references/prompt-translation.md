@@ -90,14 +90,16 @@ Authoring rules:
 
 ### `pattern_work_list`
 
-Work list lowers into a planner, runtime freeze, one managed item execution per frozen item, optional item-level deep-work criteria, item-level semantic verification, finalizer, and publisher. The planner writes only `work-list.json` and decides the finite ordered list, but runtime owns item ids and status. Later item prompts receive the frozen list, current ledger, current item, previous accepted handoffs, scorecard/recovery memory when relevant, and parent support context.
+Work list lowers into a planner, runtime freeze, one managed item execution per frozen item, optional item-level deep-work phases and criteria, item-level semantic verification, finalizer, and publisher. The planner writes only `work-list.json` and decides the finite ordered list, but runtime owns item ids and status. Later item prompts receive the frozen list, current ledger, current item, previous accepted handoffs, scorecard/recovery memory when relevant, and parent support context.
 
 Authoring rules:
 
 - Use `planning_goal` to describe how to discover the list, not what the list already is.
 - Use `what_counts_as_one_item` to define item boundaries in human-reviewable terms.
 - Use `done_when` to define evidence each item must leave behind: validation, changed-output summary, branch/base or batch boundary, risks, and downstream implications.
-- Choose `item_worker.kind: "agent"` for one-pass work; choose `deep_work` when each item needs scored feedback and retries.
+- Choose `item_worker.kind: "agent"` for one-pass work; choose `deep_work` when each item needs plan/execute/verify/publish phases, scored feedback, and retries.
+- For `deep_work` item workers, optional `item_worker.phases.plan/execute/verify/publish` mirrors top-level `pattern_deep_work.phases`: phase intent appends to the parent and item contract, phase support merges only for that phase, and phase model/reasoning/sandbox/profile apply only to the matching item phase.
+- Use item phases only for real differences between item planning, execution, verification, and publication. Do not duplicate the parent work-list goal or item guidance in every phase.
 - Criteria for `deep_work` items should target the item handoff, workspace outcome, and ledger coherence. They should not depend on dynamic ids outside the frozen list.
 - Downstream nodes reference stable work-list artifacts such as `summary` and `work_items`, not `w1` or `w3`.
 
