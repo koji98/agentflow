@@ -865,6 +865,56 @@ describe("graph normalization", () => {
             })
         ]));
     });
+    it("normalizes optional artifact content types", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "typed-artifact",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "agent",
+                        id: "capture_visual",
+                        intent: {
+                            goal: "Capture the rendered UI state.",
+                            acceptance_criteria: ["The screenshot artifact is published."],
+                            constraints: []
+                        },
+                        artifacts: {
+                            screenshot: {
+                                from: "output_dir",
+                                path: "screens/settings.png",
+                                description: "Rendered settings-page screenshot.",
+                                content_type: "image/png"
+                            }
+                        }
+                    }
+                ]
+            }
+        });
+        expect(normalized.diagnostics).toEqual([]);
+        expect(normalized.document?.graph.steps[0]).toEqual(expect.objectContaining({
+            artifacts: {
+                screenshot: {
+                    from: "output_dir",
+                    path: "screens/settings.png",
+                    description: "Rendered settings-page screenshot.",
+                    content_type: "image/png"
+                }
+            }
+        }));
+    });
     it("rejects executable top-level graphs instead of producing a document", () => {
         const normalized = normalizeAuthoredGraphDocument({
             version: "1",
@@ -1211,6 +1261,32 @@ describe("graph normalization", () => {
         });
         expect(normalized.diagnostics).toEqual([]);
         expect(normalized.document?.defaults?.workspace_backend).toBe("inplace");
+    });
+    it("does not expose ephemeral as an authored workspace backend", () => {
+        const normalized = normalizeAuthoredGraphDocument({
+            version: "1",
+            graph_id: "no-authored-ephemeral-workspace",
+            repos: { main: { path: "." } },
+            defaults: {
+                workspace_backend: "ephemeral"
+            },
+            profiles: {
+                default: {
+                    harness: "cursor-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [{ type: "exec", id: "noop", command: "true" }]
+            }
+        } as never);
+        expect(normalized.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: "$.defaults.workspace_backend",
+                message: "Expected one of: inplace, worktree."
+            })
+        ]));
     });
     it("defaults launch_profile to default when a default profile exists", () => {
         const normalized = normalizeAuthoredGraphDocument({

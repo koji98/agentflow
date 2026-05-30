@@ -1,6 +1,6 @@
-import { basename, extname, relative, resolve } from "node:path";
+import { basename, relative, resolve } from "node:path";
 import type { Dirent } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 
 import type { AuthoredGraphDocument } from "../graph/authored.js";
 import type {
@@ -23,7 +23,6 @@ import type {
 } from "../runtime/session.js";
 import {
   readAuthoredGraph,
-  readBinaryFile,
   readCompiledGraph,
   readExecutionFiles,
   readExecutionManifest,
@@ -34,6 +33,11 @@ import {
 } from "./reader.js";
 import { resolveRunArtifactPaths } from "./paths.js";
 import { reconcileRunArtifacts } from "./reconcile.js";
+import {
+  artifactMetadataFields,
+  inspectArtifactFile,
+  type ArtifactPreviewMetadata
+} from "./metadata.js";
 import type { SupervisorInterventionRecord } from "../supervisor/types.js";
 
 const defaultRecentEventLimit = 50;
@@ -152,7 +156,13 @@ export interface ProjectedArtifactItem {
   label: string;
   kind: "stdout" | "stderr" | "context" | "result" | "artifact";
   content_type: string;
+  detected_content_type?: string;
+  declared_content_type?: string;
+  media_kind: string;
+  encoding: string;
   size_bytes: number;
+  sha256: string;
+  preview?: ArtifactPreviewMetadata;
 }
 
 export interface ProjectedCheckEvaluation {
@@ -204,8 +214,11 @@ export interface ProjectedNodeDetail {
 export interface ProjectedTextArtifact {
   relative_path: string;
   absolute_path: string;
-  content: string;
+  content?: string;
   truncated: boolean;
+  content_type?: string;
+  media_kind?: string;
+  encoding?: string;
 }
 
 export interface ProjectedNodeLogPayload {
@@ -223,7 +236,7 @@ export interface ProjectedArtifactRead {
   compiled_id: string;
   execution_id: string;
   artifact: ProjectedArtifactItem;
-  content: string;
+  content?: string;
   truncated: boolean;
 }
 
@@ -857,31 +870,13 @@ function classifyArtifactKind(relativePath: string): ProjectedArtifactItem["kind
   return "artifact";
 }
 
-function guessContentType(relativePath: string): string {
-  const extension = extname(relativePath).toLowerCase();
-
-  if (extension === ".json") {
-    return "application/json";
-  }
-
-  if (extension === ".md") {
-    return "text/markdown";
-  }
-
-  if (extension === ".log" || extension === ".txt") {
-    return "text/plain";
-  }
-
-  return "text/plain";
-}
-
 async function indexExecutionArtifacts(execution: RuntimeNodeAttempt): Promise<ProjectedArtifactItem[]> {
   const filePaths = await readExecutionFiles(execution.execution_dir);
   const artifactPaths = filePaths.filter((filePath) => basename(filePath) !== "execution.json");
   const artifacts = await Promise.all(
     artifactPaths.map(async (filePath) => {
-      const fileStat = await stat(filePath);
       const relativePath = relative(execution.execution_dir, filePath).split("\\").join("/");
+      const metadata = artifactMetadataFields(await inspectArtifactFile(filePath));
 
       return {
         execution_id: execution.execution_id,
@@ -889,8 +884,7 @@ async function indexExecutionArtifacts(execution: RuntimeNodeAttempt): Promise<P
         absolute_path: resolve(filePath),
         label: basename(filePath),
         kind: classifyArtifactKind(relativePath),
-        content_type: guessContentType(relativePath),
-        size_bytes: fileStat.size
+        ...metadata
       } satisfies ProjectedArtifactItem;
     })
   );
@@ -1235,15 +1229,19 @@ async function readTextArtifact(
   absolutePath: string,
   executionDir: string
 ): Promise<ProjectedTextArtifact> {
-  const buffer = await readBinaryFile(absolutePath);
-  const truncated = buffer.byteLength > maxTextArtifactBytes;
-  const contentBuffer = truncated ? buffer.subarray(0, maxTextArtifactBytes) : buffer;
+  const metadata = await inspectArtifactFile(absolutePath);
+  const contentBuffer = metadata.buffer.byteLength > maxTextArtifactBytes
+    ? metadata.buffer.subarray(0, maxTextArtifactBytes)
+    : metadata.buffer;
 
   return {
     relative_path: relative(executionDir, absolutePath).split("\\").join("/"),
     absolute_path: absolutePath,
-    content: contentBuffer.toString("utf8"),
-    truncated
+    ...(metadata.encoding === "utf-8" ? { content: contentBuffer.toString("utf8") } : {}),
+    truncated: metadata.buffer.byteLength > maxTextArtifactBytes,
+    content_type: metadata.content_type,
+    media_kind: metadata.media_kind,
+    encoding: metadata.encoding
   };
 }
 
@@ -1316,16 +1314,16 @@ export async function readProjectedArtifact(
     throw new Error(`Unknown artifact "${relativePath}" for execution "${executionId}".`);
   }
 
-  const buffer = await readBinaryFile(artifact.absolute_path);
-  const truncated = buffer.byteLength > maxTextArtifactBytes;
-  const contentBuffer = truncated ? buffer.subarray(0, maxTextArtifactBytes) : buffer;
+  const metadata = await inspectArtifactFile(artifact.absolute_path);
+  const truncated = metadata.buffer.byteLength > maxTextArtifactBytes;
+  const contentBuffer = truncated ? metadata.buffer.subarray(0, maxTextArtifactBytes) : metadata.buffer;
 
   return {
     run_id: state.run_id,
     compiled_id: execution.compiled_id,
     execution_id: executionId,
     artifact,
-    content: contentBuffer.toString("utf8"),
+    ...(metadata.encoding === "utf-8" ? { content: contentBuffer.toString("utf8") } : {}),
     truncated
   };
 }

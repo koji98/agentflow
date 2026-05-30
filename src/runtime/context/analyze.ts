@@ -30,6 +30,7 @@ export interface ContextAnalysisItem {
   largest_matches: ContextAnalysisFileMatch[];
   default_ignored_roots: string[];
   explicit_ignored_root_opt_in?: string;
+  errors: string[];
   warnings: string[];
 }
 
@@ -40,11 +41,12 @@ export interface ContextAnalysisNode {
   pointer_count: number;
   total_size_bytes: number;
   items: ContextAnalysisItem[];
+  errors: string[];
   warnings: string[];
 }
 
 export interface ContextAnalysisReport {
-  status: "passed" | "warnings";
+  status: "passed" | "warnings" | "blocked";
   nodes: ContextAnalysisNode[];
   diagnostics: Array<{
     severity: "warning" | "error";
@@ -79,6 +81,20 @@ function explicitIgnoredRootOptIn(pattern: string): string | undefined {
     : undefined;
 }
 
+function isNotFileError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("not_file:");
+}
+
+function isPathSafetyError(error: unknown): boolean {
+  return error instanceof Error
+    && (error.message.includes("must be a relative path that stays within")
+      || error.message.includes("must stay within its repo or workspace root"));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function readFilePointerMatch(
   root: string,
   relativePath: string
@@ -89,6 +105,9 @@ async function readFilePointerMatch(
     `Context analysis file "${relativePath}"`
   );
   const fileStat = await stat(absolutePath);
+  if (!fileStat.isFile()) {
+    throw new Error(`not_file:${absolutePath}`);
+  }
   return {
     path: relativePath,
     size_bytes: fileStat.size
@@ -116,9 +135,10 @@ async function analyzeWorkspaceFile(options: {
       sample_matches: [match.path],
       largest_matches: [match],
       default_ignored_roots: [...defaultContextIgnoredRoots],
+      errors: [],
       warnings: []
     };
-  } catch {
+  } catch (error) {
     return {
       key: options.key,
       name: options.item.name,
@@ -130,7 +150,14 @@ async function analyzeWorkspaceFile(options: {
       sample_matches: [],
       largest_matches: [],
       default_ignored_roots: [...defaultContextIgnoredRoots],
-      warnings: [`Workspace file "${options.item.path}" was not found during context analysis.`]
+      errors: [
+        isNotFileError(error)
+          ? `Required static workspace_file "${options.item.path}" exists but is not a file before launch.`
+          : isPathSafetyError(error)
+            ? `Required static workspace_file "${options.item.path}" could not be resolved safely before launch: ${errorMessage(error)}`
+          : `Required static workspace_file "${options.item.path}" was not found before launch.`
+      ],
+      warnings: []
     };
   }
 }
@@ -160,6 +187,10 @@ async function analyzeWorkspaceGlob(options: {
     warnings.push(`workspace_glob "${options.item.path}" has no max_files cap.`);
   }
 
+  const errors = matchedPaths.length === 0
+    ? [`Required static workspace_glob "${options.item.path}" matched no files before launch.`]
+    : [];
+
   return {
     key: options.key,
     name: options.item.name,
@@ -175,6 +206,7 @@ async function analyzeWorkspaceGlob(options: {
       .slice(0, 10),
     default_ignored_roots: repoFiles.ignored_roots,
     ...(ignoredRootOptIn ? { explicit_ignored_root_opt_in: ignoredRootOptIn } : {}),
+    errors,
     warnings
   };
 }
@@ -185,6 +217,9 @@ async function analyzePluginFile(options: {
 }): Promise<ContextAnalysisItem> {
   try {
     const fileStat = await stat(options.item.path);
+    if (!fileStat.isFile()) {
+      throw new Error(`not_file:${options.item.path}`);
+    }
     return {
       key: options.key,
       name: options.item.name,
@@ -195,9 +230,10 @@ async function analyzePluginFile(options: {
       sample_matches: [options.item.path],
       largest_matches: [{ path: options.item.path, size_bytes: fileStat.size }],
       default_ignored_roots: [],
+      errors: [],
       warnings: []
     };
-  } catch {
+  } catch (error) {
     return {
       key: options.key,
       name: options.item.name,
@@ -208,7 +244,12 @@ async function analyzePluginFile(options: {
       sample_matches: [],
       largest_matches: [],
       default_ignored_roots: [],
-      warnings: [`Plugin file "${options.item.path}" was not found during context analysis.`]
+      errors: [
+        isNotFileError(error)
+          ? `Required static plugin_file "${options.item.path}" exists but is not a file before launch.`
+          : `Required static plugin_file "${options.item.path}" was not found before launch.`
+      ],
+      warnings: []
     };
   }
 }
@@ -231,7 +272,8 @@ async function analyzeContextItem(options: {
       sample_matches: [],
       largest_matches: [],
       default_ignored_roots: [],
-      warnings: ["Artifact context is runtime-dependent and cannot be resolved before launch."]
+      errors: [],
+      warnings: []
     };
   }
 
@@ -256,7 +298,8 @@ async function analyzeContextItem(options: {
       sample_matches: [],
       largest_matches: [],
       default_ignored_roots: [...defaultContextIgnoredRoots],
-      warnings: [`Repo alias "${split.repo_alias}" is not bound for context analysis.`]
+      errors: [`Repo alias "${split.repo_alias}" is not bound for required static context before launch.`],
+      warnings: []
     };
   }
 
@@ -294,6 +337,7 @@ export async function analyzeNodeContext(options: {
     )
   );
   const warnings = items.flatMap((item) => item.warnings);
+  const errors = items.flatMap((item) => item.errors);
 
   return {
     compiled_id: options.node.compiled_id,
@@ -302,12 +346,13 @@ export async function analyzeNodeContext(options: {
     pointer_count: items.reduce((sum, item) => sum + item.match_count, 0),
     total_size_bytes: items.reduce((sum, item) => sum + item.total_size_bytes, 0),
     items,
+    errors,
     warnings
   };
 }
 
 export async function analyzeGraphContext(options: {
-  graph: CompiledGraph;
+  graph: Pick<CompiledGraph, "nodes">;
   repo_workspaces: Record<string, string>;
 }): Promise<ContextAnalysisReport> {
   const nodes = await Promise.all(
@@ -318,18 +363,26 @@ export async function analyzeGraphContext(options: {
       })
     )
   );
-  const diagnostics = nodes.flatMap((node) =>
-    node.warnings.map((warning) => ({
+  const diagnostics = nodes.flatMap((node) => [
+    ...node.errors.map((error) => ({
+      severity: "error" as const,
+      compiled_id: node.compiled_id,
+      authored_id: node.authored_id,
+      path: `${node.authored_id}.context`,
+      message: error
+    })),
+    ...node.warnings.map((warning) => ({
       severity: "warning" as const,
       compiled_id: node.compiled_id,
       authored_id: node.authored_id,
       path: `${node.authored_id}.context`,
       message: warning
     }))
-  );
+  ]);
+  const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
   return {
-    status: diagnostics.length > 0 ? "warnings" : "passed",
+    status: hasErrors ? "blocked" : diagnostics.length > 0 ? "warnings" : "passed",
     nodes,
     diagnostics
   };
@@ -365,6 +418,9 @@ export function renderContextAnalysisMarkdown(report: ContextAnalysisReport): st
           : []),
         ...(item.explicit_ignored_root_opt_in
           ? [`- Explicit ignored-root opt-in: \`${item.explicit_ignored_root_opt_in}\``]
+          : []),
+        ...(item.errors.length > 0
+          ? ["- Errors:", ...item.errors.map((error) => `  - ${error}`)]
           : []),
         ...(item.warnings.length > 0
           ? ["- Warnings:", ...item.warnings.map((warning) => `  - ${warning}`)]
@@ -407,6 +463,12 @@ export function createCompactContextIndex(report: ContextAnalysisNode): string {
         : []),
       ...(item.explicit_ignored_root_opt_in
         ? [`- Explicit ignored-root opt-in: ${item.explicit_ignored_root_opt_in}`]
+        : []),
+      ...(item.errors.length > 0
+        ? ["- Errors:", ...item.errors.map((error) => `  - ${error}`)]
+        : []),
+      ...(item.warnings.length > 0
+        ? ["- Warnings:", ...item.warnings.map((warning) => `  - ${warning}`)]
         : []),
       ...(item.sample_matches.length > 0
         ? ["- Sample matches:", ...item.sample_matches.slice(0, 20).map((match) => `  - ${match}`)]

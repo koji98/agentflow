@@ -12,7 +12,7 @@ Use this to review whether a graph will compile into strong AI prompts. Each ski
 | node `constraints` | Authority and non-goal boundaries. | Do they start with `Do not` and avoid positive requirements or implementation recipes? |
 | `support.context` | Context pointer table with `what` and `why`. | Does each pointer reduce guessing, and is it node-local rather than a global dump? |
 | skills/capabilities/CLI/tools | Optional support tables. | Are selected supports relevant to this node, or will they add prompt noise? |
-| declared artifacts | Artifact table and downstream contract. | Are all durable handoffs declared, described, and referenced by downstream nodes? |
+| declared artifacts | Artifact table, byte-safe artifact contract, and reviewer/verifier evidence row. | Are all durable handoffs declared, described, content-typed when format-sensitive, and referenced by later consumers? |
 
 ## Node-Type Checks
 
@@ -24,6 +24,20 @@ Use this to review whether a graph will compile into strong AI prompts. Each ski
 | `pattern_deep_research` | Runs angle workers, synthesis, and publisher; assigned angle controls each worker. | Angles overlap, are too generic, lack evidence authority, or expose raw artifacts unnecessarily. |
 | `pattern_deep_work` | Runs planner, worker/validator, criteria evaluators, scorecard gate, retries, and publisher. Retry prompts receive attempt memory when recovery is scheduled. | Criteria are equally weighted by habit, too vague, command-dependent without stable commands, miss code quality/no-slop evidence, or leave no milestone/validation evidence for the supervisor to choose the best retry boundary. |
 | `pattern_work_list` | Plans a finite list, freezes it, launches one managed execution per item, grades optional deep-work item evidence, verifies item outcomes, and publishes stable artifacts. Retry prompts receive the frozen ledger plus attempt memory for the failed item. | The graph pre-bakes item count, weakly defines item boundaries, downstream nodes depend on dynamic item ids, or item handoffs do not preserve enough evidence to retry the right item without redoing the whole list. |
+
+## Prompt-Facing Prose Purity
+
+Review authored prose before judging the lowered prompt. Authoring rationale belongs outside the graph. Runtime-facing fields must speak only to the executing agent, verifier, researcher, planner, item worker, or reviewer.
+
+| Field family | Review for |
+| --- | --- |
+| `intent.goal`, acceptance criteria, and constraints | Outcome, evidence, and `Do not` boundaries. Flag graph topology, pattern choice, node mechanics, and file-by-file recipes. |
+| Research angle prompts | Controlling evidence lenses. Flag angle-report mechanics, synthesis-node mechanics, public/private artifact choices, and generic angle labels. |
+| Work-list planning fields | Discovery method, item boundary, and item evidence. Flag pre-baked item rows, dynamic graph ids, managed-pattern rationale, and downstream-node mechanics. |
+| AI check rubrics and deep-work criteria | Observable judgment standards. Flag compiled-prompt judgment, private reasoning, or producer-work instructions. |
+| Context `what` / `why` | What the pointer contains and why this node needs it. Flag provenance/debug chatter and graph-construction rationale. |
+| Artifact descriptions | Durable output contract and what the artifact proves. Flag write-command instructions or runtime lowering details. |
+| Deep-work `phases.*.intent` | Additive phase-specific objective, evidence, or boundary. Flag replacement parent contracts or generic instructions repeated across every phase. |
 
 ## Approval Bar
 

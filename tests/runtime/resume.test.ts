@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { AuthoredGraphDocument } from "../../src/graph/authored.js";
@@ -10,9 +10,10 @@ import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js"
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { readExecutionManifest } from "../../src/artifacts/reader.js";
-import { runCompiledGraph } from "../../src/runtime/core/engine.js";
+import { resumeCompiledGraph, runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
+import { resumeWorkspaceFromManifest } from "../../src/runtime/workspace/resume.js";
 import { markInvocationRuntimeReady } from "../helpers/agentflow-runtime.js";
 import { createPassingDeliveryHarness } from "../helpers/delivery-curation.js";
 import { withNodeIntentDefaults } from "../helpers/graph.js";
@@ -113,6 +114,59 @@ async function createResumeFixture(options: {
                             ok: true
                         }
                     };
+                    for (const [name, artifact] of Object.entries(invocation.artifacts)) {
+                        if (artifact.from !== "output_dir") {
+                            continue;
+                        }
+                        const artifactPath = join(invocation.outputDir, artifact.path);
+                        await mkdir(dirname(artifactPath), { recursive: true });
+                        const content = artifact.path.endsWith(".json")
+                            ? `${JSON.stringify({
+                                name,
+                                ok: true,
+                                completion_score: 1,
+                                criteria: [],
+                                "Completion Scorecard": "Completion score 1 met threshold 1.",
+                                "Scorecard Evidence": "Fixture scorecard evidence is present."
+                              }, null, 2)}\n`
+                            : [
+                                `# ${name}`,
+                                "",
+                                "## Objective",
+                                "Satisfy the fixture contract.",
+                                "",
+                                "## Relevant evidence",
+                                "The test harness supplies passing runtime evidence.",
+                                "",
+                                "## Planned material delta",
+                                "No source change is required for this fixture.",
+                                "",
+                                "## Criterion evidence map",
+                                "The fixture command passes.",
+                                "",
+                                "## Validation plan",
+                                "Use the fixture command result.",
+                                "",
+                                "## Risks or constraints",
+                                "No fixture constraints are at risk.",
+                                "",
+                                "## What changed",
+                                "The fixture completed.",
+                                "",
+                                "## Validation attempted",
+                                "Fixture validation passed.",
+                                "",
+                                "## Remaining risks",
+                                "No fixture risks.",
+                                "",
+                                "## Scorecard Evidence",
+                                "Completion score 1 met threshold 1.",
+                                "",
+                                "## Completion Scorecard",
+                                "Completion score 1 met threshold 1."
+                              ].join("\n") + "\n";
+                        await writeFile(artifactPath, content, "utf8");
+                    }
                     await markInvocationRuntimeReady(invocation, result);
                     return result;
                 },
@@ -195,6 +249,85 @@ describe("runtime resume", () => {
         const resumed = await buildResumedSession(fixture);
         expect(resumed.preserved_node_count).toBe(1);
         expect(resumed.restarted_node_count).toBe(0);
+        await rm(fixture.tempRoot, { recursive: true, force: true });
+    });
+    it("blocks resume before restarting work when required static context is missing", async () => {
+        const fixture = await createResumeFixture({
+            document: {
+                version: "1",
+                graph_id: "resume-missing-static-context",
+                repos: {
+                    main: { path: "." }
+                },
+                defaults: {
+                    launch_profile: "default",
+                    workspace_backend: "inplace"
+                },
+                profiles: {
+                    default: {}
+                },
+                graph: {
+                    type: "sequence",
+                    id: "root",
+                    steps: [
+                        {
+                            type: "exec",
+                            id: "consumer",
+                            command: "placeholder",
+                            support: {
+                                context: [
+                                    {
+                                        name: "watched",
+                                        kind: "workspace_file",
+                                        path: "watched.txt",
+                                        what: "Required static context.",
+                                        why: "Resume should preflight this file before restarting work."
+                                    }
+                                ]
+                            },
+                            runtime: {
+                                repo: "main"
+                            }
+                        }
+                    ]
+                }
+            },
+            async setupRepo(repoDir) {
+                await writeFile(join(repoDir, "watched.txt"), "stable\n");
+            }
+        });
+        await unlink(join(fixture.repoDir, "watched.txt"));
+        const resumed = await buildResumedSession(fixture);
+        const workspace = await resumeWorkspaceFromManifest(fixture.manifest);
+        const result = await resumeCompiledGraph({
+            run_root: fixture.runRoot,
+            compiled_graph: fixture.graph,
+            repo_sources: {
+                main: fixture.repoDir
+            },
+            resumed_session: resumed.session,
+            prior_events: fixture.result.events,
+            workspace,
+            previous_status: "failed",
+            preserved_node_count: resumed.preserved_node_count,
+            restarted_node_count: resumed.restarted_node_count,
+            executors: {
+                exec: async () => {
+                    throw new Error("executor should not run when resume static context preflight fails");
+                }
+            }
+        });
+        expect(result.outcome).toBe("failed");
+        expect(result.events).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: "run.preflight_failed",
+                payload: expect.objectContaining({
+                    reason: "readiness_blocked",
+                    message: expect.stringContaining("workspace_file")
+                })
+            })
+        ]));
+        await workspace.cleanup();
         await rm(fixture.tempRoot, { recursive: true, force: true });
     });
     it("preserves a passed node when glob contents or matches change after the prior run", async () => {
@@ -596,6 +729,79 @@ describe("runtime resume", () => {
         const resumed = await buildResumedSession(fixture, changedGraph);
         expect(resumed.preserved_node_count).toBe(0);
         expect(resumed.restarted_node_count).toBe(2);
+        await rm(fixture.tempRoot, { recursive: true, force: true });
+    });
+    it("restarts completed deep-work internals when phase prompt inputs change", async () => {
+        const baseDocument: AuthoredGraphDocument = {
+            version: "1",
+            graph_id: "resume-deep-work-phase-change",
+            repos: {
+                main: { path: "." }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "pattern_deep_work",
+                        id: "deep_work",
+                        intent: {
+                            goal: "Complete the deep work fixture.",
+                            acceptance_criteria: ["The fixture passes."],
+                            constraints: []
+                        },
+                        runtime: {
+                            repo: "main"
+                        },
+                        completion: {
+                            max_cycles: 1,
+                            pass_threshold: 1,
+                            criteria: [
+                                {
+                                    id: "fixture_command",
+                                    kind: "command",
+                                    command: "true",
+                                    weight: 1,
+                                    required: true
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        };
+        const fixture = await createResumeFixture({ document: baseDocument });
+        const changedGraph = compileGraph({
+            ...baseDocument,
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        ...baseDocument.graph.steps[0],
+                        phases: {
+                            execute: {
+                                intent: {
+                                    goal: "Record the exact evidence map in work notes."
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        });
+        const resumed = await buildResumedSession(fixture, changedGraph);
+        expect(resumed.restarted_node_count).toBeGreaterThan(0);
+        expect(resumed.preserved_node_count).toBeLessThan(fixture.graph.nodes.length);
         await rm(fixture.tempRoot, { recursive: true, force: true });
     });
 });

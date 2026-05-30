@@ -22,12 +22,14 @@ Executable nodes receive authored context through `support.context`. Each entry 
 
 Context kinds are:
 
-- `workspace_file`: one file from the selected repo workspace.
-- `workspace_glob`: a sorted set of files from the selected repo workspace.
-- `plugin_file`: a plugin-owned file forwarded by a plugin workflow.
+- `workspace_file`: one required static file from the selected repo workspace.
+- `workspace_glob`: one required static glob from the selected repo workspace; it must match at least one non-ignored file.
+- `plugin_file`: one required static plugin-owned file forwarded by a plugin workflow.
 - `ref`: a prior node artifact reference such as `design_spec.spec` or bare `design_spec`.
 
-Inline text context is not part of the graph contract. Durable context belongs in `intent`, a workspace file, a plugin file, or a prior artifact.
+Inline text context is not part of the graph contract. Durable launch-time context belongs in `intent`, a workspace file, or a plugin file. Context produced during the run belongs in a declared artifact on the producer and a `ref` on the consumer.
+
+Workspace and plugin context are static launch prerequisites. `agentflow validate`, `agentflow run`, and `agentflow resume` fail before launching any node when a required `workspace_file`, `workspace_glob`, or `plugin_file` is missing. Do not model a file that an upstream node will create as `workspace_file` context for a downstream node; declare it as an artifact and consume it with `ref`.
 
 Authored artifact refs use `ref` as the source of truth. A dotted ref names `node.artifact`; a bare ref names a node and uses that node type's canonical artifact, such as `agent_response` for agent nodes. The normalizer derives `node` and `artifact` internally for compiled/runtime use.
 
@@ -84,7 +86,7 @@ flowchart TD
 - sample glob matches and largest matched files
 - non-text or unsafe source warnings
 - default ignored roots and explicit ignored-root opt-ins
-- unresolved artifact refs and missing `what` or `why`
+- missing static workspace/plugin context as blockers
 
 Workspace globs skip common dependency and generated roots by default, including `.git`, `.agentflow`, `node_modules`, `.venv`, `venv`, `.tox`, cache directories, build output, coverage, `vendor`, `third_party`, `generated`, `gen`, `__generated__`, and Bazel output. Authors can intentionally opt into one of those roots by starting the authored context path inside that root, such as `.venv/*eval*.md`; broad globs like `**/*eval*` still skip those roots.
 
@@ -96,7 +98,7 @@ Artifact refs can select attempts with:
 - `attempt`: `latest`, `latest_passed`, `latest_failed`, or a positive integer.
 - `if_available: true`: record an optional missing artifact reference in runtime/debug state rather than fail when the selected material does not exist. Optional omissions are not rendered into normal agent prompts.
 
-Missing required workspace files, glob matches, plugin files, and artifact references fail context resolution before the node runs.
+Missing required artifact references fail context resolution before the consumer node runs because the producer's runtime result determines availability. Missing static workspace files, glob matches, and plugin files are launch preflight failures.
 
 Inside repeat bodies, Agentflow can also add repeat history pointers for the current iteration. That gives a repair/retry node a concise view of previous failed attempts without making graph authors wire every internal attempt artifact manually. Supervisor retry guidance can also appear as runtime-provided context after recovery; it contains the retry brief and prior execution id for the retrying node. Runtime-authored attempt memory is separate: `agent/attempt-memory.md` and `runtime/attempt-memory.json` summarize the best-resume decision, prior timeline from `events.jsonl`, progress to reuse, progress to discard, artifact state, validation evidence, workspace decision, resume point, restart boundary, and do-not-redo guidance.
 
@@ -114,6 +116,11 @@ Nodes declare durable handoffs under `artifacts`. An artifact definition says wh
 
 - `from: "output_dir"`: the file must exist under `$AGENTFLOW_OUTPUT_DIR`.
 - `from: "workspace"`: the file must exist under the node workspace path.
+- `content_type`: optional expected MIME type such as `text/markdown`, `application/json`, `image/png`, or `application/pdf`. When present, runtime verifies it against detected bytes or known file evidence.
+
+Artifacts are bytes-first. Markdown and JSON artifacts still receive text checks such as empty, placeholder, exact required content, forbidden content, and JSON parsing. Screenshots, PDFs, traces, videos, archives, and other binary artifacts are validated as non-empty byte artifacts with detected content type, media kind, size, SHA-256, and cheap preview metadata when available. Agents can stream artifact bytes through `af artifact write <name>` or copy an existing workspace/output file with `af artifact write <name> --file <path>`.
+
+When binary artifact content matters to acceptance criteria, the worker should also record textual validation evidence in milestones or a text handoff that explains what the binary proves. Agentflow never inlines base64 or raw binary into prompts.
 
 Agent nodes also produce reserved automatic artifacts regardless of whether declared artifact projection succeeds:
 

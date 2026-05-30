@@ -119,17 +119,17 @@ describe("harness prompt rendering", () => {
     }));
 
     expect(prompt).toContain("## Declared Artifacts");
-    expect(prompt).toContain("Publish content with `af artifact write <name>` using stdin.");
+    expect(prompt).toContain("Publish text or binary content with `af artifact write <name>` using stdin");
     expect(prompt).toContain("include the exact command and observed result/output");
     expect(prompt).toContain("include that exact wording in the artifact instead of only paraphrasing it");
     expect(prompt).toContain("include those exact labels with punctuation in the artifact text");
     expect(prompt).toContain("asks for named sections without exact label text");
     expect(prompt).toContain("Do not write stale completion language");
-    expect(prompt).toContain("| `handoff` | `af artifact write handoff` | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
+    expect(prompt).toContain("| `handoff` | `af artifact write handoff` | auto-detect | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
     expect(prompt).not.toContain("| `handoff` | `/tmp/run/output/handoff.md` |");
     expect(prompt).not.toContain("If the node task, authored goal, acceptance criteria, or artifact description names required labels");
     expect(prompt).not.toContain("Do not use `/tmp`");
-    expect(prompt).not.toContain("--file <path>");
+    expect(prompt).toContain("--file <path>");
   });
 
   it("renders a Working Loop section that anchors iterate-until-done behavior on the agent path", () => {
@@ -150,7 +150,7 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("Attach findings, decisions, and validation evidence with `af milestone log`.");
     expect(prompt).toContain("validation logs are not a substitute for required decision evidence");
     expect(prompt).toContain('quote the full command as one `--command "..."` value');
-    expect(prompt).toContain("Publish declared artifacts with `af artifact write <name>` using stdin.");
+    expect(prompt).toContain("Publish declared artifacts with `af artifact write <name>`");
     expect(prompt).toContain("When the node task names an exact command, attempt that command exactly at least once");
     expect(prompt).toContain("af complete check");
     expect(prompt).toContain("treat that output as repair feedback");

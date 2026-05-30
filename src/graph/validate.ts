@@ -45,6 +45,7 @@ export type ValidationDiagnostic = GraphDiagnostic;
 
 export interface LoadedGraphDocument {
   document?: AuthoredGraphDocument;
+  authoring_review_document?: unknown;
   diagnostics: ValidationDiagnostic[];
   absolute_path: string;
   lowered_managed_nodes: LoweredManagedNode[];
@@ -1073,6 +1074,7 @@ export async function loadAuthoredGraphDocument(
       return {
         diagnostics,
         absolute_path,
+        authoring_review_document: pluginExpansion.document,
         lowered_managed_nodes: loweredManagedNodes,
         resolved_plugins: pluginExpansion.resolved_plugins,
         resolved_skill_sources: resolvedSkillSources
@@ -1081,6 +1083,7 @@ export async function loadAuthoredGraphDocument(
 
     return {
       document: normalized.document,
+      authoring_review_document: pluginExpansion.document,
       diagnostics: [],
       absolute_path,
       lowered_managed_nodes: loweredManagedNodes,

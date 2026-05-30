@@ -26,6 +26,8 @@ The engine snapshots once before invoking the harness (the baseline), then snaps
 - New untracked files: set difference `(after.untracked - baseline.untracked)`. For each new file the engine runs `git diff --binary --no-index -- /dev/null <path>` so the diff patch contains the new content.
 - Deleted untracked files: set difference `(baseline.untracked - after.untracked)`; reported as path-only deletes since the content is no longer present.
 
+For internally isolated deep-research attempts, the same algorithm runs inside a disposable synthetic Git workspace. Runtime materializes the current source state into that workspace, commits it as the baseline, executes the research attempt there, records the after-state diff, and discards the workspace. Those diffs describe investigation-playground activity, not source workspace mutations.
+
 ## Persistence Layout
 
 Per-attempt artifacts live under `<attempt_dir>/workspace-changes/`:
@@ -51,6 +53,8 @@ The captured diff is not always the same thing as "what this node intentionally 
 - work spans repos outside the node's primary workspace.
 
 In those cases, the diff remains useful for audit and investigation, but declared artifacts, milestone evidence, command evidence, commit ranges, or PR base/head facts are usually stronger supervision evidence.
+
+Deep-research investigation workspace diffs should be read as disposable exploratory activity. They can explain how a researcher probed the code, but they are not implementation output and are not a read-only source-workspace violation by themselves.
 
 ## Resume Safety
 

@@ -17,6 +17,11 @@ import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
 import { readOperatorObservations } from "../observations/index.js";
 import type { OperatorObservation } from "../completion/index.js";
 import type { RuntimeMilestone } from "../completion/types.js";
+import {
+  artifactMetadataFields,
+  inspectArtifactFile,
+  type ArtifactPreviewMetadata
+} from "../../artifacts/metadata.js";
 
 export interface DeliveryEvidence {
   graph_id: string;
@@ -54,6 +59,14 @@ export interface DeliveryEvidence {
     path: string;
     description: string;
     artifact_path: string;
+    content_type: string;
+    detected_content_type: string;
+    declared_content_type?: string;
+    media_kind: string;
+    encoding: string;
+    size_bytes: number;
+    sha256: string;
+    preview: ArtifactPreviewMetadata;
     content?: string;
   }>;
   tool_invocations: Array<{
@@ -236,7 +249,7 @@ export async function collectDeliveryEvidence(options: {
             return [];
           }
 
-          return [readTextArtifact(artifactPath).then((content) => ({
+          return [inspectArtifactFile(artifactPath, definition.content_type).then((metadata) => ({
             authored_id: attempt.authored_id,
             compiled_id: attempt.compiled_id,
             execution_id: attempt.execution_id,
@@ -244,7 +257,8 @@ export async function collectDeliveryEvidence(options: {
             path: definition.path,
             description: definition.description,
             artifact_path: artifactPath,
-            ...(content !== undefined ? { content } : {})
+            ...artifactMetadataFields(metadata),
+            ...(metadata.text !== undefined ? { content: metadata.text } : {})
           }))];
         });
       })

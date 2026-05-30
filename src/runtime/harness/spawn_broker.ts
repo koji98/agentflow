@@ -101,7 +101,7 @@ export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } 
       return;
     }
 
-    let stdin = "";
+    let stdin = Buffer.alloc(0);
     if (request.stdin_path) {
       const requestsRoot = join(afBrokerDirValue, "requests");
       if (!pathIsInside(requestsRoot, request.stdin_path)) {
@@ -117,7 +117,7 @@ export function startSpawnBroker(invocation: AgentInvocation): { stop(): void } 
         }, null, 2)}\n`, "utf8");
         return;
       }
-      stdin = await readFile(request.stdin_path, "utf8").catch(() => "");
+      stdin = await readFile(request.stdin_path).catch(() => Buffer.alloc(0));
     }
 
     const result = await new Promise<{

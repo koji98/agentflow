@@ -22,7 +22,7 @@ Common fields:
 - `artifacts`
 - `completion.max_cycles`
 - `completion.pass_threshold`
-- `stages`
+- `phases`
 
 ## Completion Criteria
 
@@ -59,16 +59,18 @@ The normal supervisor still handles internal runtime failures. Criterion misses 
 
 The completion criteria panel is not the first validation attempt. The generate-and-validate agent should already have tried to validate the candidate and fix clear validation failures before yielding to the criteria panel.
 
-## Stage Overrides
+## Phase Overrides
 
-Use `stages` when planning, execution, verification, and publication need different directions or capabilities. Supported stage keys are `plan`, `execute`, `verify`, and `publish`. Each stage may set:
+Use `phases` when planning, execution, verification, and publication need different additive intent, support, or runtime policy. Supported phase keys are `plan`, `execute`, `verify`, and `publish`. Each phase is optional and may set:
 
-- `directions`: stage-specific behavioral instructions.
-- `validation_focus`: evidence or quality focus for that stage.
-- `support`: additional support/context available only to that stage.
-- `model`, `reasoning_effort`, `sandbox`: stage-specific runtime policy.
+- `intent.goal`: extra phase objective appended to the built-in phase objective.
+- `intent.acceptance_criteria`: extra observable evidence expectations for that phase.
+- `intent.constraints`: extra phase constraints that cannot weaken parent constraints.
+- `support`: additional support/context available only to that phase.
+- `runtime.profile`: phase-specific profile; phase-level repo switching is not supported.
+- `model`, `reasoning_effort`, `sandbox`: phase-specific prompt-backed execution policy.
 
-Stage overrides inherit the parent managed contract. They do not create separate graph-addressable artifacts, change the completion criteria, or allow a stage to exceed the selected repo/profile authority. Keep them narrow: planning should improve the next plan, execution should complete and validate the selected plan, verification should judge current evidence, and publication should only publish claims supported by the passing scorecard.
+Phase overrides inherit the parent managed contract. They append to the built-in phase contract and do not create separate graph-addressable artifacts, change completion criteria, weaken constraints, or switch repos. Keep them narrow: planning improves the next plan, execution completes and validates the selected plan, verification judges current evidence, and publication only publishes claims supported by the passing scorecard.
 
 ## Example
 
@@ -130,30 +132,35 @@ Stage overrides inherit the parent managed contract. They do not create separate
       }
     ]
   },
-  "stages": {
+  "phases": {
     "plan": {
-      "directions": [
-        "Plan from the latest scorecard and avoid designing unrelated architecture."
-      ],
-      "validation_focus": [
-        "Name the smallest credible validation command."
-      ]
+      "intent": {
+        "goal": "Plan from the latest scorecard and avoid designing unrelated architecture.",
+        "acceptance_criteria": [
+          "Name the smallest credible validation command."
+        ]
+      }
     },
     "execute": {
-      "directions": [
-        "Implement only the selected plan and keep diffs narrow."
-      ],
+      "intent": {
+        "goal": "Implement only the selected plan and keep diffs narrow.",
+        "acceptance_criteria": [
+          "Record exact command output in work notes."
+        ]
+      },
       "sandbox": "workspace-write"
     },
     "verify": {
-      "validation_focus": [
-        "Penalize missing validation evidence."
-      ]
+      "intent": {
+        "acceptance_criteria": [
+          "Penalize missing validation evidence."
+        ]
+      }
     },
     "publish": {
-      "directions": [
-        "Publish only claims supported by the passing scorecard."
-      ]
+      "intent": {
+        "goal": "Publish only claims supported by the passing scorecard."
+      }
     }
   }
 }

@@ -67,8 +67,10 @@ import {
   type PatternDeepWorkCommandCriterion,
   type PatternDeepWorkCompletionCriterion,
   type PatternDeepWorkConfig,
-  type PatternDeepWorkRubricCriterion,
-  type PatternDeepWorkStageName
+  type PatternDeepWorkPhaseIntent,
+  type PatternDeepWorkPhaseName,
+  type PatternDeepWorkPhaseRuntime,
+  type PatternDeepWorkRubricCriterion
 } from "../managed/pattern_deep_work.js";
 import {
   buildPatternWorkList,
@@ -1452,13 +1454,14 @@ function normalizeArtifactDefinition(
     return undefined;
   }
 
-  pushUnknownKeyDiagnostics(record, path, ["from", "path", "description"], diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["from", "path", "description", "content_type"], diagnostics);
 
   const from = readEnumValue(record.from, `${path}.from`, artifactSourceKinds, diagnostics, {
     required: true
   });
   const artifactPath = readRequiredString(record.path, `${path}.path`, diagnostics);
   const description = readRequiredString(record.description, `${path}.description`, diagnostics);
+  const contentType = readOptionalString(record.content_type, `${path}.content_type`, diagnostics);
 
   if (!from || !artifactPath || !description) {
     return undefined;
@@ -1467,7 +1470,8 @@ function normalizeArtifactDefinition(
   return {
     from,
     path: artifactPath,
-    description
+    description,
+    ...(contentType ? { content_type: contentType.trim().toLowerCase() } : {})
   };
 }
 
@@ -2655,13 +2659,13 @@ function normalizePatternDeepWorkCompletion(
   };
 }
 
-const patternDeepWorkStageNames = ["plan", "execute", "verify", "publish"] as const;
+const patternDeepWorkPhaseNames = ["plan", "execute", "verify", "publish"] as const;
 
-function normalizePatternDeepWorkStages(
+function normalizePatternDeepWorkPhaseIntent(
   value: unknown,
   path: string,
   diagnostics: GraphDiagnostic[]
-): PatternDeepWorkConfig["stages"] | undefined {
+): PatternDeepWorkPhaseIntent | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -2670,60 +2674,116 @@ function normalizePatternDeepWorkStages(
   if (!record) {
     diagnostics.push({
       path,
-      message: "pattern_deep_work.stages must be an object."
+      message: "pattern_deep_work phase intent must be an object."
     });
     return undefined;
   }
 
-  pushUnknownKeyDiagnostics(record, path, patternDeepWorkStageNames, diagnostics);
+  pushUnknownKeyDiagnostics(record, path, ["goal", "acceptance_criteria", "constraints"], diagnostics);
+  const goal = readOptionalString(record.goal, `${path}.goal`, diagnostics);
+  const acceptance_criteria = readStringArray(record.acceptance_criteria, `${path}.acceptance_criteria`, diagnostics);
+  const constraints = readStringArray(record.constraints, `${path}.constraints`, diagnostics);
 
-  const stages: PatternDeepWorkConfig["stages"] = {};
-  for (const stage of patternDeepWorkStageNames) {
-    const rawStage = record[stage];
-    if (rawStage === undefined) {
+  return {
+    ...(goal ? { goal } : {}),
+    ...(acceptance_criteria && acceptance_criteria.length > 0 ? { acceptance_criteria } : {}),
+    ...(constraints && constraints.length > 0 ? { constraints } : {})
+  };
+}
+
+function normalizePatternDeepWorkPhaseRuntime(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternDeepWorkPhaseRuntime | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_deep_work phase runtime must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, ["profile"], diagnostics);
+  const profile = readOptionalString(record.profile, `${path}.profile`, diagnostics);
+
+  return {
+    ...(profile ? { profile } : {})
+  };
+}
+
+function normalizePatternDeepWorkPhases(
+  value: unknown,
+  path: string,
+  diagnostics: GraphDiagnostic[]
+): PatternDeepWorkConfig["phases"] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    diagnostics.push({
+      path,
+      message: "pattern_deep_work.phases must be an object."
+    });
+    return undefined;
+  }
+
+  pushUnknownKeyDiagnostics(record, path, patternDeepWorkPhaseNames, diagnostics);
+
+  const phases: PatternDeepWorkConfig["phases"] = {};
+  for (const phase of patternDeepWorkPhaseNames) {
+    const rawPhase = record[phase];
+    if (rawPhase === undefined) {
       continue;
     }
 
-    const stagePath = `${path}.${stage}`;
-    const stageRecord = asRecord(rawStage);
-    if (!stageRecord) {
+    const phasePath = `${path}.${phase}`;
+    const phaseRecord = asRecord(rawPhase);
+    if (!phaseRecord) {
       diagnostics.push({
-        path: stagePath,
-        message: "pattern_deep_work stage overrides must be objects."
+        path: phasePath,
+        message: "pattern_deep_work phase overrides must be objects."
       });
       continue;
     }
 
     pushUnknownKeyDiagnostics(
-      stageRecord,
-      stagePath,
-      ["directions", "validation_focus", "support", "model", "reasoning_effort", "sandbox"],
+      phaseRecord,
+      phasePath,
+      ["intent", "support", "runtime", "model", "reasoning_effort", "sandbox"],
       diagnostics
     );
 
-    const directions = readStringArray(stageRecord.directions, `${stagePath}.directions`, diagnostics);
-    const validation_focus = readStringArray(stageRecord.validation_focus, `${stagePath}.validation_focus`, diagnostics);
-    const support = normalizeNodeSupport(stageRecord.support, `${stagePath}.support`, diagnostics);
-    const model = readOptionalString(stageRecord.model, `${stagePath}.model`, diagnostics);
+    const intent = normalizePatternDeepWorkPhaseIntent(phaseRecord.intent, `${phasePath}.intent`, diagnostics);
+    const support = normalizeNodeSupport(phaseRecord.support, `${phasePath}.support`, diagnostics);
+    const runtime = normalizePatternDeepWorkPhaseRuntime(phaseRecord.runtime, `${phasePath}.runtime`, diagnostics);
+    const model = readOptionalString(phaseRecord.model, `${phasePath}.model`, diagnostics);
     const reasoning_effort = readEnumValue(
-      stageRecord.reasoning_effort,
-      `${stagePath}.reasoning_effort`,
+      phaseRecord.reasoning_effort,
+      `${phasePath}.reasoning_effort`,
       reasoningEfforts,
       diagnostics
     );
-    const sandbox = readEnumValue(stageRecord.sandbox, `${stagePath}.sandbox`, sandboxModes, diagnostics);
+    const sandbox = readEnumValue(phaseRecord.sandbox, `${phasePath}.sandbox`, sandboxModes, diagnostics);
 
-    stages[stage as PatternDeepWorkStageName] = {
-      ...(directions && directions.length > 0 ? { directions } : {}),
-      ...(validation_focus && validation_focus.length > 0 ? { validation_focus } : {}),
+    phases[phase as PatternDeepWorkPhaseName] = {
+      ...(intent && Object.keys(intent).length > 0 ? { intent } : {}),
       ...(support ? { support } : {}),
+      ...(runtime && Object.keys(runtime).length > 0 ? { runtime } : {}),
       ...(model ? { model } : {}),
       ...(reasoning_effort ? { reasoning_effort } : {}),
       ...(sandbox ? { sandbox } : {})
     };
   }
 
-  return Object.keys(stages).length > 0 ? stages : undefined;
+  return Object.keys(phases).length > 0 ? phases : undefined;
 }
 
 function normalizePatternDeepWorkNode(
@@ -2748,7 +2808,7 @@ function normalizePatternDeepWorkNode(
       "sandbox",
       "artifact_repair",
       "completion",
-      "stages"
+      "phases"
     ],
     diagnostics
   );
@@ -2767,7 +2827,7 @@ function normalizePatternDeepWorkNode(
     diagnostics,
     publicArtifacts
   );
-  const stages = normalizePatternDeepWorkStages(record.stages, `${path}.stages`, diagnostics);
+  const phases = normalizePatternDeepWorkPhases(record.phases, `${path}.phases`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);
 
   if (!base || !completion) {
@@ -2784,7 +2844,7 @@ function normalizePatternDeepWorkNode(
     ...base,
     ...agentOptions,
     completion,
-    ...(stages ? { stages } : {}),
+    ...(phases ? { phases } : {}),
     runtime
   });
 }

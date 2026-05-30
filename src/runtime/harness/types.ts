@@ -375,7 +375,7 @@ function formatArtifactContract(
 
   return [
     "## Declared Artifacts",
-    "Every declared artifact must exist before you finish. Publish content with `af artifact write <name>` using stdin.",
+    "Every declared artifact must exist before you finish. Publish text or binary content with `af artifact write <name>` using stdin, or `af artifact write <name> --file <path>` for an existing workspace/output file.",
     "Declared artifacts are the durable handoff. When a required command or tool provides validation evidence, include the exact command and observed result/output in the relevant artifact unless the artifact contract says otherwise.",
     "If the node task names required words, labels, titles, classifications, or output phrases for an artifact, include that exact wording in the artifact instead of only paraphrasing it.",
     "If required labels include punctuation such as `Scenario:`, `Changed files:`, or `Validation:`, include those exact labels with punctuation in the artifact text.",
@@ -383,10 +383,10 @@ function formatArtifactContract(
     "If the node task asks for a named deliverable such as a profile, summary, report, plan, or handoff, make that deliverable name visible in the artifact title or primary label.",
     "Do not write stale completion language such as `af complete check has not yet run`. If a completion/status section becomes stale after `af complete check`, rewrite the artifact and rerun `af complete check`.",
     "",
-    "| Name | Write Command | Description |",
-    "| --- | --- | --- |",
+    "| Name | Write Command | Type | Description |",
+    "| --- | --- | --- | --- |",
     ...entries.map(([name, artifact]) =>
-      `| \`${name}\` | \`af artifact write ${name}\` | ${artifact.description} |`
+      `| \`${name}\` | \`af artifact write ${name}\` | ${artifact.content_type ? `\`${artifact.content_type}\`` : "auto-detect"} | ${artifact.description} |`
     )
   ];
 }
@@ -824,7 +824,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "4. Create meaningful execution milestones with `af milestone add`; add more as evidence changes instead of forcing the initial plan to fit.",
     "5. Work milestone by milestone. Attach findings, decisions, and validation evidence with `af milestone log`.",
     "6. Complete each milestone with `af milestone complete --evidence ...`, or block a true external blocker with `af milestone block`.",
-    "7. Publish declared artifacts with `af artifact write <name>` using stdin.",
+    "7. Publish declared artifacts with `af artifact write <name>` using stdin, or `af artifact write <name> --file <path>` when the artifact already exists as a workspace/output file.",
     "   Do not create temporary artifact draft files in the repo workspace; stream final artifact content directly to `af artifact write`.",
     "8. Run `af complete check`; if it reports incomplete, treat that output as repair feedback, fix it, and rerun.",
     "When the node task names an exact command, attempt that command exactly at least once; do not substitute a nearby validation command unless the exact command fails as unavailable and you record that failure before falling back.",

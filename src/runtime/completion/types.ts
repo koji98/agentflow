@@ -147,14 +147,21 @@ export interface CompletionDeclaredArtifact {
   path: string;
   expected_path: string;
   description: string;
-  status: "present" | "missing" | "empty" | "placeholder" | "invalid_json" | "forbidden_content" | "missing_required_content" | "blocked";
+  status: "present" | "missing" | "empty" | "placeholder" | "invalid_json" | "forbidden_content" | "missing_required_content" | "content_type_mismatch" | "blocked";
   current_attempt: boolean;
   size_bytes?: number;
+  content_type?: string;
+  detected_content_type?: string;
+  declared_content_type?: string;
+  media_kind?: string;
+  encoding?: string;
+  sha256?: string;
+  preview?: Record<string, unknown>;
 }
 
 export interface CompletionArtifactFinding {
   artifact: string;
-  kind: "missing" | "empty" | "placeholder" | "invalid_json" | "forbidden_content" | "missing_required_content" | "stale_prior_attempt" | "blocked";
+  kind: "missing" | "empty" | "placeholder" | "invalid_json" | "forbidden_content" | "missing_required_content" | "content_type_mismatch" | "stale_prior_attempt" | "blocked";
   summary: string;
   evidence_ref?: string;
 }

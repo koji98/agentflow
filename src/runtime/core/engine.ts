@@ -81,8 +81,13 @@ import {
   type WorkspaceBinding
 } from "../session.js";
 import { initializeInplaceWorkspace } from "../workspace/inplace.js";
-import type { NodeWorkspaceChangeArtifacts, NodeWorkspaceDiff, WorkspaceSetup } from "../workspace/types.js";
+import type { NodeWorkspaceChangeArtifacts, WorkspaceSetup } from "../workspace/types.js";
 import { captureWorkspaceChanges } from "../workspace/changes.js";
+import {
+  createEphemeralInvestigationWorkspace,
+  type EphemeralInvestigationWorkspaceLease,
+  type EphemeralInvestigationWorkspaceMetadata
+} from "../workspace/ephemeral.js";
 import {
   diffNodeSnapshots,
   persistNodeBaselineSnapshot,
@@ -2798,53 +2803,9 @@ function withSilentAgentHarnessFailureDiagnostic(
   };
 }
 
-function isManagedDeepResearchNode(node: CompiledExecutableNode): boolean {
-  return (
-    node.lowered_from === "pattern_deep_research" ||
-    node.authored_id.includes("__managed__pattern_deep_research__")
-  );
-}
-
-function failDeepResearchWorkspacePollution(
-  node: CompiledExecutableNode,
-  result: RuntimeNodeExecutionResult,
-  diff: NodeWorkspaceDiff | undefined
-): RuntimeNodeExecutionResult {
-  if (
-    node.kind !== "agent" ||
-    result.status !== "passed" ||
-    result.outcome !== "passed" ||
-    !isManagedDeepResearchNode(node) ||
-    !diff ||
-    diff.changed_files.length === 0
-  ) {
-    return result;
-  }
-
-  const changedFiles = diff.changed_files.map((file) => file.path);
-  const summary = [
-    "Deep research nodes are read-only with respect to the repo workspace.",
-    "This finding uses node-local workspace changes captured against the node-start baseline, not preexisting dirty files.",
-    `Unexpected node-local workspace changes: ${changedFiles.join(", ")}.`
-  ].join(" ");
-  const details = {
-    changed_files: diff.changed_files,
-    status_text_after: diff.status_text_after
-  };
-
-  return {
-    ...result,
-    status: "failed",
-    outcome: "failed",
-    result: {
-      ...(isRecord(result.result) ? result.result : {}),
-      ...runtimeFailurePayload("workspace_pollution", summary, details)
-    },
-    metadata: {
-      ...(result.metadata ?? {}),
-      ...runtimeFailureMetadata("workspace_pollution", summary, details)
-    }
-  };
+function usesEphemeralInvestigationWorkspace(node: CompiledExecutableNode): boolean {
+  return node.managed_runtime?.kind === "pattern_deep_research"
+    && node.managed_runtime.config?.uses_ephemeral_investigation_workspace === true;
 }
 
 async function defaultAgentExecutor(
@@ -3656,8 +3617,11 @@ async function executeNode(
   const captureSnapshots = node.kind === "agent" || node.kind === "exec" || node.kind === "check";
   let baselineSnapshot: Awaited<ReturnType<typeof snapshotWorkspaceForNode>> | undefined;
   let workspaceChangeArtifacts: NodeWorkspaceChangeArtifacts | undefined;
-  let workspaceDiff: NodeWorkspaceDiff | undefined;
   let attemptMemoryMetadata: Record<string, string> | undefined;
+  let executionWorkspacePath = workspace.workspace_path;
+  let executionRepoWorkspaces: Record<string, string> = {};
+  let ephemeralWorkspaceLease: EphemeralInvestigationWorkspaceLease | undefined;
+  let ephemeralWorkspaceMetadata: EphemeralInvestigationWorkspaceMetadata | undefined;
 
   try {
     executionPaths = await writer.writeExecutionStart(attempt);
@@ -3665,8 +3629,38 @@ async function executeNode(
 
     await ensureNodeReadiness(node, options, readinessCache);
 
+    if (usesEphemeralInvestigationWorkspace(node)) {
+      ephemeralWorkspaceLease = await createEphemeralInvestigationWorkspace({
+        source_path: workspace.workspace_path,
+        execution_dir: attempt.execution_dir,
+        repo_alias: node.repo,
+        context: node.context
+      });
+      executionWorkspacePath = ephemeralWorkspaceLease.workspace_path;
+      ephemeralWorkspaceMetadata = {
+        kind: "ephemeral_investigation_workspace",
+        source_path: ephemeralWorkspaceLease.source_path,
+        workspace_path: ephemeralWorkspaceLease.workspace_path,
+        manifest_path: ephemeralWorkspaceLease.manifest_path,
+        included_file_count: ephemeralWorkspaceLease.included_file_count,
+        explicit_context_file_count: ephemeralWorkspaceLease.explicit_context_file_count,
+        status: "active"
+      };
+      attempt.metadata = {
+        ...attempt.metadata,
+        ephemeral_investigation_workspace: ephemeralWorkspaceMetadata
+      };
+    }
+
+    executionRepoWorkspaces = Object.fromEntries(
+      Object.entries(session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
+        repoAlias,
+        repoAlias === node.repo ? executionWorkspacePath : binding.workspace_path
+      ])
+    );
+
     if (captureSnapshots) {
-      baselineSnapshot = await snapshotWorkspaceForNode(workspace.workspace_path);
+      baselineSnapshot = await snapshotWorkspaceForNode(executionWorkspacePath);
       try {
         await persistNodeBaselineSnapshot(attempt.execution_dir, baselineSnapshot);
       } catch {
@@ -3702,13 +3696,8 @@ async function executeNode(
       node,
       execution_id: attempt.execution_id,
       execution_dir: attempt.execution_dir,
-      workspace_path: workspace.workspace_path,
-      repo_workspaces: Object.fromEntries(
-        Object.entries(session.manifest.repo_workspaces).map(([repoAlias, binding]) => [
-          repoAlias,
-          binding.workspace_path
-        ])
-      ),
+      workspace_path: executionWorkspacePath,
+      repo_workspaces: executionRepoWorkspaces,
       attempts: session.attempts,
       ...(activeRecoveryEnvelope ? { recovery_envelope: activeRecoveryEnvelope } : {})
     });
@@ -3717,7 +3706,7 @@ async function executeNode(
       node,
       session,
       attempt,
-      workspacePath: workspace.workspace_path
+      workspacePath: executionWorkspacePath
     });
 
     const emitManagedProgress = async (payload: {
@@ -3773,7 +3762,7 @@ async function executeNode(
             credential_specs: session.graph.credential_specs ?? {},
             node,
             attempt,
-            workspace_path: workspace.workspace_path,
+            workspace_path: executionWorkspacePath,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
@@ -3796,7 +3785,7 @@ async function executeNode(
             credential_specs: session.graph.credential_specs ?? {},
             node,
             attempt,
-            workspace_path: workspace.workspace_path,
+            workspace_path: executionWorkspacePath,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
@@ -3839,7 +3828,7 @@ async function executeNode(
             credential_specs: session.graph.credential_specs ?? {},
             node,
             attempt,
-            workspace_path: workspace.workspace_path,
+            workspace_path: executionWorkspacePath,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
@@ -3862,7 +3851,7 @@ async function executeNode(
               credential_specs: session.graph.credential_specs ?? {},
               node,
               attempt,
-              workspace_path: workspace.workspace_path,
+              workspace_path: executionWorkspacePath,
               execution_dir: attempt.execution_dir,
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
@@ -3892,7 +3881,7 @@ async function executeNode(
         credential_specs: session.graph.credential_specs ?? {},
         node,
         attempt,
-        workspace_path: workspace.workspace_path,
+        workspace_path: executionWorkspacePath,
         execution_dir: attempt.execution_dir,
         context_packet_path: context.packet_path,
         context_manifest_path: context.manifest_path,
@@ -3915,7 +3904,7 @@ async function executeNode(
             credential_specs: session.graph.credential_specs ?? {},
             node,
             attempt,
-            workspace_path: workspace.workspace_path,
+            workspace_path: executionWorkspacePath,
             execution_dir: attempt.execution_dir,
             context_packet_path: context.packet_path,
             context_manifest_path: context.manifest_path,
@@ -3937,7 +3926,7 @@ async function executeNode(
               credential_specs: session.graph.credential_specs ?? {},
               node,
               attempt,
-              workspace_path: workspace.workspace_path,
+              workspace_path: executionWorkspacePath,
               execution_dir: attempt.execution_dir,
               context_packet_path: context.packet_path,
               context_manifest_path: context.manifest_path,
@@ -3988,13 +3977,12 @@ async function executeNode(
     result = withSilentAgentHarnessFailureDiagnostic(node, result);
 
     if (captureSnapshots && baselineSnapshot) {
-      const afterSnapshot = await snapshotWorkspaceForNode(workspace.workspace_path);
+      const afterSnapshot = await snapshotWorkspaceForNode(executionWorkspacePath);
       const diff = await diffNodeSnapshots(
-        workspace.workspace_path,
+        executionWorkspacePath,
         baselineSnapshot,
         afterSnapshot
       );
-      workspaceDiff = diff;
       try {
         workspaceChangeArtifacts = await persistNodeWorkspaceChanges(
           attempt.execution_dir,
@@ -4006,8 +3994,6 @@ async function executeNode(
         // Persistence is best-effort; failures here must not block node completion.
       }
     }
-
-    result = failDeepResearchWorkspacePollution(node, result, workspaceDiff);
 
     await writer.writeExecutionCompletion(attempt, {
       result: result.result,
@@ -4022,7 +4008,7 @@ async function executeNode(
       node,
       session,
       attempt,
-      workspacePath: workspace.workspace_path
+      workspacePath: executionWorkspacePath
     });
     const materialized =
       result.status !== "passed"
@@ -4030,7 +4016,7 @@ async function executeNode(
             artifacts: await materializePresentDeclaredArtifacts({
               node,
               attempt,
-              workspacePath: workspace.workspace_path,
+              workspacePath: executionWorkspacePath,
               automaticArtifacts
             })
           }
@@ -4042,7 +4028,7 @@ async function executeNode(
             runOwner,
             events,
             onEvent: options.on_event,
-            workspacePath: workspace.workspace_path,
+            workspacePath: executionWorkspacePath,
             automaticArtifacts,
             contextPacketPath: context.packet_path,
             contextManifestPath: context.manifest_path,
@@ -4054,7 +4040,7 @@ async function executeNode(
       node,
       session,
       attempt,
-      workspacePath: workspace.workspace_path
+      workspacePath: executionWorkspacePath
     });
     artifactRepairMetadata = materialized.repair_metadata;
 
@@ -4071,7 +4057,7 @@ async function executeNode(
       session,
       node,
       attempt,
-      workspacePath: workspace.workspace_path,
+      workspacePath: executionWorkspacePath,
       artifacts,
       stdoutLogPath: executionPaths.stdout_log_path,
       stderrLogPath: executionPaths.stderr_log_path,
@@ -4170,7 +4156,7 @@ async function executeNode(
           graph: session.graph,
           node: node as CompiledAgentNode,
           attempt,
-          workspacePath: workspace.workspace_path,
+          workspacePath: executionWorkspacePath,
           outputDir: resolveExecutionArtifactsDirectory(attempt.execution_dir),
           contextPacketPath: context.packet_path,
           contextManifestPath: context.manifest_path,
@@ -4265,6 +4251,10 @@ async function executeNode(
       }
     }
 
+    if (ephemeralWorkspaceLease) {
+      ephemeralWorkspaceMetadata = await ephemeralWorkspaceLease.cleanup();
+    }
+
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
       status: result.status,
       ...(result.outcome ? { outcome: result.outcome } : {}),
@@ -4281,6 +4271,7 @@ async function executeNode(
               ...(attemptMemoryMetadata ?? {}),
               ...(result.metadata ?? {}),
               ...(artifactRepairMetadata ? { artifact_repair: artifactRepairMetadata } : {}),
+              ...(ephemeralWorkspaceMetadata ? { ephemeral_investigation_workspace: ephemeralWorkspaceMetadata } : {}),
               completion: {
                 completion_status: completionPacket.completion_status,
                 ready_for_verification: completionPacket.ready_for_verification,
@@ -4341,9 +4332,9 @@ async function executeNode(
 
     if (captureSnapshots && baselineSnapshot && executionPaths) {
       try {
-        const afterSnapshot = await snapshotWorkspaceForNode(workspace.workspace_path);
+        const afterSnapshot = await snapshotWorkspaceForNode(executionWorkspacePath);
         const diff = await diffNodeSnapshots(
-          workspace.workspace_path,
+        executionWorkspacePath,
           baselineSnapshot,
           afterSnapshot
         );
@@ -4366,7 +4357,7 @@ async function executeNode(
           session,
           node,
           attempt,
-          workspacePath: workspace.workspace_path,
+          workspacePath: executionWorkspacePath,
           artifacts: failureArtifacts ?? {},
           stdoutLogPath: executionPaths.stdout_log_path,
           stderrLogPath: executionPaths.stderr_log_path,
@@ -4378,6 +4369,10 @@ async function executeNode(
       } catch {
         // Completion packet persistence is best-effort on failures that occur before enough runtime state exists.
       }
+    }
+
+    if (ephemeralWorkspaceLease) {
+      ephemeralWorkspaceMetadata = await ephemeralWorkspaceLease.cleanup();
     }
 
     const completedAttempt = closeNodeAttempt(session.attempts, attempt.execution_id, {
@@ -4415,6 +4410,7 @@ async function executeNode(
             }
           : {}),
         ...(repairMetadata ? { artifact_repair: repairMetadata } : {}),
+        ...(ephemeralWorkspaceMetadata ? { ephemeral_investigation_workspace: ephemeralWorkspaceMetadata } : {}),
         ...(workspaceChangeArtifacts ? { node_workspace_changes: workspaceChangeArtifacts } : {})
       }
     });
@@ -4447,6 +4443,7 @@ async function executeNode(
           error: message,
           ...(failureCode ? { failure_code: failureCode } : {}),
           ...(failureDetails ? { failure_details: failureDetails } : {}),
+          ...(ephemeralWorkspaceMetadata ? { ephemeral_investigation_workspace: ephemeralWorkspaceMetadata } : {}),
           context_status: context ? "resolved" : "failed"
         }
       }

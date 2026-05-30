@@ -58,16 +58,26 @@ export interface PatternDeepWorkConfig extends BaseExecutableNode, ManagedPatter
     pass_threshold: number;
     criteria: PatternDeepWorkCompletionCriterion[];
   };
-  stages?: Partial<Record<PatternDeepWorkStageName, PatternDeepWorkStageOverride>>;
+  phases?: Partial<Record<PatternDeepWorkPhaseName, PatternDeepWorkPhaseOverride>>;
   runtime?: ManagedPatternRuntime;
 }
 
-export type PatternDeepWorkStageName = "plan" | "execute" | "verify" | "publish";
+export type PatternDeepWorkPhaseName = "plan" | "execute" | "verify" | "publish";
 
-export interface PatternDeepWorkStageOverride {
-  directions?: string[];
-  validation_focus?: string[];
+export interface PatternDeepWorkPhaseIntent {
+  goal?: string;
+  acceptance_criteria?: string[];
+  constraints?: string[];
+}
+
+export interface PatternDeepWorkPhaseRuntime {
+  profile?: string;
+}
+
+export interface PatternDeepWorkPhaseOverride {
+  intent?: PatternDeepWorkPhaseIntent;
   support?: NodeSupport;
+  runtime?: PatternDeepWorkPhaseRuntime;
   model?: string;
   reasoning_effort?: ReasoningEffort;
   sandbox?: SandboxMode;
@@ -150,35 +160,68 @@ function mergeSupport(base: NodeSupport | undefined, override: NodeSupport | und
   return merged;
 }
 
-function stageConfig(config: PatternDeepWorkConfig, stage: PatternDeepWorkStageName): PatternDeepWorkConfig {
-  const override = config.stages?.[stage];
+function mergePhaseRuntime(
+  base: ManagedPatternRuntime | undefined,
+  override: PatternDeepWorkPhaseRuntime | undefined
+): ManagedPatternRuntime | undefined {
+  if (!base && !override?.profile) {
+    return undefined;
+  }
+
+  return {
+    ...(base ?? {}),
+    ...(override?.profile ? { profile: override.profile } : {})
+  };
+}
+
+function phaseConfig(config: PatternDeepWorkConfig, phase: PatternDeepWorkPhaseName): PatternDeepWorkConfig {
+  const override = config.phases?.[phase];
   if (!override) {
     return config;
   }
   const support = override.support ? mergeSupport(config.support, override.support) : undefined;
+  const runtime = override.runtime ? mergePhaseRuntime(config.runtime, override.runtime) : undefined;
   return {
     ...config,
     ...(override.model ? { model: override.model } : {}),
     ...(override.reasoning_effort ? { reasoning_effort: override.reasoning_effort } : {}),
     ...(override.sandbox ? { sandbox: override.sandbox } : {}),
+    ...(runtime ? { runtime } : {}),
     ...(support ? { support } : {})
   };
 }
 
-function formatStageOverride(config: PatternDeepWorkConfig, stage: PatternDeepWorkStageName): PromptSection[] {
-  const override = config.stages?.[stage];
-  if (!override) {
+function formatPhaseContract(config: PatternDeepWorkConfig, phase: PatternDeepWorkPhaseName): PromptSection[] {
+  const intent = config.phases?.[phase]?.intent;
+  if (!intent) {
     return [];
   }
-  const directions = override.directions ?? [];
-  const validationFocus = override.validation_focus ?? [];
-  if (directions.length === 0 && validationFocus.length === 0) {
+
+  const acceptanceCriteria = intent.acceptance_criteria ?? [];
+  const constraints = intent.constraints ?? [];
+  if (!intent.goal && acceptanceCriteria.length === 0 && constraints.length === 0) {
     return [];
   }
-  return [section("Stage-Specific Direction", [
-    ...formatList("Directions", directions, "Use the managed workflow contract."),
-    ...formatList("Validation focus", validationFocus, "Use the completion model and authored validation expectations.")
-  ])];
+
+  const lines = [
+    "This phase contract is additive. It does not replace or weaken the managed workflow contract, completion criteria, threshold, or constraints."
+  ];
+
+  if (intent.goal) {
+    lines.push(`Additional phase objective: ${intent.goal}`);
+  }
+
+  if (acceptanceCriteria.length > 0) {
+    lines.push("Additional phase acceptance criteria:");
+    lines.push(...acceptanceCriteria.map((criterion) => `- ${criterion}`));
+  }
+
+  if (constraints.length > 0) {
+    lines.push("Additional phase constraints:");
+    lines.push(...constraints.map((constraint) => `- ${constraint}`));
+  }
+
+  return [section("Phase Contract", lines)];
 }
 
 function buildPlanPrompt(
@@ -198,7 +241,7 @@ function buildPlanPrompt(
       `Pass threshold: ${config.completion.pass_threshold}`,
       ...formatCriteria(config.completion.criteria)
     ]),
-    ...formatStageOverride(config, "plan"),
+    ...formatPhaseContract(config, "plan"),
     section("Planning Task", [
       "This prompt and context pointer packet are sufficient for the planning phase.",
       "Read the task context, any prior failed scorecard, criterion verification records, command output excerpts, and current workspace state available to you.",
@@ -206,13 +249,15 @@ function buildPlanPrompt(
       "Do not wait for, search globally for, or report a blocker solely because first-cycle private materials are missing.",
       "Identify the concrete gap between the current state and the managed workflow contract.",
       "Define the smallest credible next plan that can satisfy failed criteria without widening scope.",
+      "Map every completion criterion to the evidence the execution phase should produce or inspect.",
+      "Name the expected material delta for this cycle so retries can distinguish real progress from repeated spin.",
       "Name likely files or areas to inspect or change, but do not over-prescribe exact code unless the evidence requires it.",
       "Recommend focused validation commands or checks the execution agent should run.",
       "Do not edit repository or workspace files in this planning phase. Only write the planning artifact requested below."
     ]),
     section("Output Contract", [
       "Publish the `cycle_plan` artifact.",
-      "Include sections: `Objective`, `Relevant evidence`, `Planned changes`, `Validation plan`, and `Risks or constraints`."
+      "Include sections: `Objective`, `Relevant evidence`, `Planned material delta`, `Criterion evidence map`, `Validation plan`, and `Risks or constraints`."
     ])
   ]);
 }
@@ -233,9 +278,10 @@ function buildGenerateValidatePrompt(
       `Pass threshold: ${config.completion.pass_threshold}`,
       ...formatCriteria(config.completion.criteria)
     ]),
-    ...formatStageOverride(config, "execute"),
+    ...formatPhaseContract(config, "execute"),
     section("Execution Task", [
       "Follow the cycle plan in context.",
+      "If evidence shows the plan is wrong, make the smallest justified deviation and record why in work notes.",
       "Inspect enough repository context to follow local patterns before editing.",
       "When draft artifacts rely on upstream research, plans, tests, or prior context, cite concrete evidence names, paths, commands, or packet fields instead of using generic references like prior research.",
       "Use available repo, device, and plugin CLIs naturally when they help complete or validate the work.",
@@ -246,6 +292,7 @@ function buildGenerateValidatePrompt(
     ]),
     section("Output Contract", [
       "Publish the `work_notes` artifact with what changed, validation attempted, and remaining risks.",
+      "Include the plan followed, any justified deviations, exact validation evidence, and the current criterion evidence map.",
       "Also write draft versions of every public artifact so completion criteria can grade them before final publication.",
       "Draft handoffs and summaries should include enough evidence citations for an evaluator to see why the change, validation, and risk claims are supported.",
       ...formatDraftArtifacts(publicArtifacts)
@@ -281,13 +328,13 @@ function buildRubricGoal(criterion: PatternDeepWorkRubricCriterion): string {
   ]);
 }
 
-function buildRubricGoalWithStage(
+function buildRubricGoalWithPhase(
   config: PatternDeepWorkConfig,
   criterion: PatternDeepWorkRubricCriterion
 ): string {
-  const stageLines = formatStageOverride(config, "verify");
+  const phaseLines = formatPhaseContract(config, "verify");
   const base = buildRubricGoal(criterion);
-  return stageLines.length === 0 ? base : `${base}\n\n${renderPrompt(stageLines)}`;
+  return phaseLines.length === 0 ? base : `${base}\n\n${renderPrompt(phaseLines)}`;
 }
 
 function buildFinalPublishPrompt(
@@ -305,7 +352,7 @@ function buildFinalPublishPrompt(
       "Use the latest passing completion scorecard, work notes, and draft artifact materials.",
       "Do not claim success beyond the completion evidence."
     ]),
-    ...formatStageOverride(config, "publish"),
+    ...formatPhaseContract(config, "publish"),
     section("Required Summary Shape", [
       "Preserve task-specific identifiers and phrases from the managed workflow goal when they are part of the requested public output.",
       "Include a clearly labeled `Scorecard Evidence` or `Completion Scorecard` section in the Markdown summary.",
@@ -494,7 +541,7 @@ function buildCriterionNode(
   index: number
 ): CheckNode {
   const id = workflowNodeId(config.id, `criterion_${zeroPad(index + 1)}_${criterion.id}`);
-  const verifyConfig = stageConfig(config, "verify");
+  const verifyConfig = phaseConfig(config, "verify");
 
   if (criterion.kind === "command") {
     const checkShared = sharedNonPromptNodeBase(verifyConfig);
@@ -535,7 +582,7 @@ function buildCriterionNode(
     ),
     rubric: criterion.rubric,
     intent: {
-      goal: buildRubricGoalWithStage(config, criterion),
+      goal: buildRubricGoalWithPhase(config, criterion),
       acceptance_criteria: [
         "The evaluator returns valid JSON with passed, score, summary, and issues fields.",
         "The evaluator grades only evidence in context and does not require work outside the managed workflow contract."
@@ -638,9 +685,9 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
   const loopId = workflowNodeId(config.id, "work_loop");
   const loopBodyId = workflowNodeId(config.id, "work_loop_body");
   const publicArtifacts = mergeManagedPublicArtifacts(config.artifacts);
-  const planConfig = stageConfig(config, "plan");
-  const executeConfig = stageConfig(config, "execute");
-  const publishConfig = stageConfig(config, "publish");
+  const planConfig = phaseConfig(config, "plan");
+  const executeConfig = phaseConfig(config, "execute");
+  const publishConfig = phaseConfig(config, "publish");
   const planShared = sharedAgentBase(planConfig);
   const executeShared = sharedAgentBase(executeConfig);
   const publishShared = sharedAgentBase(publishConfig);

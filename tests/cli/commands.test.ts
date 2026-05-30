@@ -396,6 +396,79 @@ describe("graph CLI", () => {
         expect(strictPayload.checks.readiness.status).toBe("ready");
         await rm(tempRoot, { recursive: true, force: true });
     });
+    it("fails strict validation on serious prompt-surface authoring findings", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-prompt-surface-review-"));
+        const graphPath = join(tempRoot, "agentflow.graph.json");
+        await initGitRepo(tempRoot);
+        await writeFile(graphPath, `${JSON.stringify({
+            version: "1",
+            graph_id: "prompt-surface-review",
+            intent: {
+                goal: "Write an operator handoff.",
+                acceptance_criteria: ["The handoff is clear."],
+                constraints: ["Do not mutate source files."]
+            },
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli",
+                    sandbox: "read-only"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "handoff",
+                        intent: {
+                            goal: "Use this node to write the graph handoff.",
+                            acceptance_criteria: ["The command exits successfully."],
+                            constraints: ["Do not mutate source files."]
+                        },
+                        runtime: {
+                            repo: "main"
+                        },
+                        command: "node",
+                        args: ["--version"]
+                    }
+                ]
+            }
+        }, null, 2)}\n`);
+
+        const normalResult = await withMockValidateHarnesses(() => executeCli(["validate", "--graph", graphPath], tempRoot));
+        const normalPayload = JSON.parse(normalResult.stdout);
+        const strictResult = await withMockValidateHarnesses(() => executeCli(["validate", "--graph", graphPath, "--strict"], tempRoot));
+        const strictPayload = JSON.parse(strictResult.stdout);
+
+        expect(normalResult.exitCode).toBe(0);
+        expect(normalPayload.checks.authoring_review.findings).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                severity: "serious",
+                category: "prompt_surface",
+                path: "$.graph.steps[0].intent.goal"
+            })
+        ]));
+        expect(strictResult.exitCode).toBe(1);
+        expect(strictPayload.message).toContain("strict authoring review");
+        expect(strictPayload.findings.blockers).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: "prompt_surface",
+                path: "$.graph.steps[0].intent.goal"
+            })
+        ]));
+
+        await rm(tempRoot, { recursive: true, force: true });
+    });
     it("emits and writes compiled Mermaid diagrams from validate", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-diagram-"));
         const graphPath = fileURLToPath(new URL("../graph/fixtures/repeat.graph.json", import.meta.url));
@@ -928,6 +1001,65 @@ process.exit(0);
         expect(result.exitCode).toBe(0);
         expect(payload.status).toBe("passed");
         expect(payload.checks.context.status).not.toBe("blocked");
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("blocks validation when required static context is missing", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cli-run-ready-missing-context-"));
+        const repoDir = join(tempRoot, "repo");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+        const graphPath = join(tempRoot, "graph.json");
+        await writeFile(graphPath, JSON.stringify({
+            version: "1",
+            graph_id: "cli-run-ready-missing-context",
+            intent: {
+                goal: "Validate static context preflight.",
+                acceptance_criteria: ["Missing static context blocks launch."]
+            },
+            repos: { main: { path: repoDir } },
+            defaults: { launch_profile: "default", workspace_backend: "inplace" },
+            profiles: { default: {} },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "consumer",
+                        command: "true",
+                        support: {
+                            context: [
+                                {
+                                    name: "static_file",
+                                    kind: "workspace_file",
+                                    path: "documentation/design/page-anatomy.md",
+                                    what: "Required static design context.",
+                                    why: "Launch should fail before a node starts when this file is missing."
+                                },
+                                {
+                                    name: "plugin_guidance",
+                                    kind: "plugin_file",
+                                    path: join(tempRoot, "plugin-guidance.md"),
+                                    what: "Required static plugin context.",
+                                    why: "Plugin context must exist before launch."
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }, null, 2), "utf8");
+        const result = await executeCli(["validate", "--graph", graphPath], tempRoot);
+        const payload = JSON.parse(result.stdout);
+        expect(result.exitCode).toBe(1);
+        expect(payload.status).toBe("failed");
+        expect(payload.checks.context.status).toBe("blocked");
+        expect(payload.checks.readiness.status).toBe("blocked");
+        expect(payload.findings.blockers).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: "context", message: expect.stringContaining("workspace_file") }),
+            expect.objectContaining({ source: "context", message: expect.stringContaining("plugin_file") }),
+            expect.objectContaining({ source: "readiness", kind: "context", message: expect.stringContaining("workspace_file") })
+        ]));
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("runs a deterministic graph end to end and writes run artifacts", async () => {

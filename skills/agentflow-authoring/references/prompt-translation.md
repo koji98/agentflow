@@ -15,7 +15,7 @@ Use this when authoring or reviewing a graph for prompt quality. Agentflow graph
 | `support.skills` and capability skills | Optional skills table with skill name, description, and `SKILL.md` path. | Skills are optional support. Do not rely on skill presence to make a requirement mandatory. |
 | capability `cli` | Ambient CLI hints table. | Use for ordinary commands the agent may run; required command evidence belongs in acceptance criteria or managed criteria. |
 | managed `tools` | Managed plugin tool table with callable, description, and `--help` reminder. | Use only for reusable audited tools, credential isolation, policy, or stable I/O. |
-| declared `artifacts` | Declared artifact table and write contract. | Any downstream or human handoff must be a declared artifact; final response alone is not durable. |
+| declared `artifacts` | Declared artifact table, byte-safe artifact contract, and verifier evidence row. | Any downstream or human handoff must be a declared artifact; final response alone is not durable. Add `content_type` when the expected format matters, such as JSON, screenshots, PDFs, traces, or archives. |
 
 ## AI-Backed Node Shapes
 
@@ -25,7 +25,7 @@ Use this when authoring or reviewing a graph for prompt quality. Agentflow graph
 | `check` with `kind: "ai"` | Read-only evaluator prompt with graph/check intent, context/artifact evidence, rubric, and JSON verdict contract. | Use for semantic gates. Make the rubric judge observable artifacts, not private reasoning or implementation preference. |
 | plugin-lowered agent node | Plugin workflow config/context is interpolated, then lowered to normal prompt-backed nodes with plugin file context and managed tool grants. | Keep plugin config schema-backed. Add `what`/`why` to plugin file context. Do not hide product intent inside plugin files alone. |
 | `pattern_deep_research` | Angle worker prompts, synthesis prompts, then publisher prompt. Each angle sees the parent contract, support, and its assigned angle; synthesis sees accepted reports; publisher writes one complete `research.md`. | Make angles controlling lenses. Put the assigned angle in direct, specific language. Downstream nodes consume `research`; important detail should be in that one report, not hidden in internal angle artifacts. |
-| `pattern_deep_work` | Planner, worker/validator, criterion evaluator, scorecard gate, retry, and publisher prompts. Parent intent/support flow into the work loop; criteria become grading prompts and gate weights. Optional `stages.plan`, `stages.execute`, `stages.verify`, and `stages.publish` overrides compile only into their matching phase. | Use for bounded mutation with feedback. Criteria should cover correctness, convention fit, no AI slop, validation evidence, and handoff quality when relevant. Add stage overrides when planning, implementation, judging, or publishing need different directions, support, model, sandbox, or validation focus. |
+| `pattern_deep_work` | Planner, worker/validator, criterion evaluator, scorecard gate, retry, and publisher prompts. Parent intent/support flow into the work loop; criteria become grading prompts and gate weights. Optional `phases.plan`, `phases.execute`, `phases.verify`, and `phases.publish` overrides compile only into their matching phase. | Use for bounded mutation with feedback. Criteria should cover correctness, convention fit, no AI slop, validation evidence, and handoff quality when relevant. Add phase overrides when planning, implementation, judging, or publishing need different additive intent, support, model, sandbox, or reasoning policy. |
 | `pattern_work_list` | Planner prompt discovers a finite ordered list; runtime freezes it; one managed item prompt executes each frozen item; optional deep-work item criteria and item verifier grade that item; publisher writes stable artifacts. | Use when item count is unknown until discovery. Author `planning_goal`, `what_counts_as_one_item`, and `done_when`; do not pre-bake fake item rows. |
 
 ## Per-Node Authoring Guidance
@@ -39,7 +39,7 @@ Authoring rules:
 - Put the actual outcome in `intent.goal`, not a title like "implement the feature."
 - Put proof requirements in `acceptance_criteria`: validation commands to cite, reviewable branch or artifact expectations, privacy/access requirements, UX expectations, and handoff evidence.
 - Put hard boundaries in `constraints`: `Do not` mutate other repos, call remote services, change generated files by hand, expand scope, or introduce unrelated rewrites.
-- Add context pointers for exact docs/specs/artifacts the worker should inspect. Do not expect the worker to infer hidden product context from graph ids.
+- Add context pointers for exact static docs/specs or upstream artifacts the worker should inspect. `workspace_file`, `workspace_glob`, and `plugin_file` must exist before launch; produced-at-runtime context must be declared on the producer and consumed as an artifact ref.
 - Declare every artifact a downstream node or reviewer must consume.
 
 ### AI `check`
@@ -65,7 +65,7 @@ Authoring rules:
 
 ### `pattern_deep_research`
 
-Deep research lowers into angle workers, synthesis workers, and a publisher. Angle prompts put the assigned angle before broader workflow context, so each angle must be a controlling lens. Angle and synthesis helpers treat repo files as read-only evidence: they inspect and validate, then stream Markdown to `af artifact write`, without creating scratch report files or source edits in the repo. Synthesis prompts consolidate accepted Markdown reports without dropping unique findings. The publisher writes one graph-addressable `research.md` and rewrites the findings into a complete, conflict-resolved answer.
+Deep research lowers into angle workers, synthesis workers, and a publisher. Angle prompts put the assigned angle before broader workflow context, so each angle must be a controlling lens. Angle, synthesis, and publisher attempts run in disposable investigation workspaces: they may use temporary exploratory edits only when useful for research, but those edits are discarded and never delivered as implementation work. Synthesis prompts consolidate accepted Markdown reports without dropping unique findings. The publisher writes one complete `research.md` and rewrites the findings into a complete, conflict-resolved answer.
 
 Authoring rules:
 
@@ -77,7 +77,7 @@ Authoring rules:
 
 ### `pattern_deep_work`
 
-Deep work lowers into planning, work/validation, criteria evaluation, scorecard gate, retry, and publish phases. Parent support and intent flow through the loop. Criteria become independent evaluator prompts and weighted gate inputs, so bad criteria cause bad retries. Stage overrides are additive and phase-local: `plan` affects the planner prompt and policy, `execute` affects the worker/validator, `verify` affects AI criteria prompts and check policy, and `publish` affects the final publisher.
+Deep work lowers into planning, work/validation, criteria evaluation, scorecard gate, retry, and publish phases. Parent support and intent flow through the loop. Criteria become independent evaluator prompts and weighted gate inputs, so bad criteria cause bad retries. Phase overrides are additive and phase-local: `plan` affects the planner prompt and policy, `execute` affects the worker/validator, `verify` affects AI criteria prompts and check policy, and `publish` affects the final publisher.
 
 Authoring rules:
 
@@ -85,7 +85,7 @@ Authoring rules:
 - Write criteria around evidence that matters: functional correctness, repo conventions, generated-contract integrity, no AI slop, privacy/access, validation evidence, artifact/handoff quality, branch hygiene, or UX quality.
 - Weight the criteria by importance; do not use equal weights by default.
 - Put command evidence in acceptance criteria or criteria only when the commands are stable and expected to exist.
-- Use `stages` only for real phase differences. Do not duplicate the parent goal in every stage.
+- Use `phases` only for real phase differences. Do not duplicate the parent goal in every phase.
 - Keep downstream handoffs as declared artifacts from the publisher, not draft files from an intermediate cycle.
 
 ### `pattern_work_list`

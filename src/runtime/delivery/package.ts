@@ -14,6 +14,7 @@ import type { RuntimeEventEnvelope } from "../events.js";
 import type { RuntimeStateSnapshot, WorkspaceChangeArtifacts } from "../session.js";
 import { operatorObservationsPath } from "../observations/index.js";
 import { collectDeliveryEvidence, type DeliveryEvidence } from "./collect.js";
+import type { ArtifactPreviewMetadata } from "../../artifacts/metadata.js";
 import {
   DeliveryCurationError,
   DeliveryCurationSetupError,
@@ -67,6 +68,14 @@ interface ArtifactIndexEntry {
   declared_path: string;
   description: string;
   artifact_path: string;
+  content_type: string;
+  detected_content_type: string;
+  declared_content_type?: string;
+  media_kind: string;
+  encoding: string;
+  size_bytes: number;
+  sha256: string;
+  preview: ArtifactPreviewMetadata;
   classification: ArtifactClassification;
 }
 
@@ -486,6 +495,14 @@ function buildDeliveryModel(evidence: DeliveryEvidence): DeliveryModel {
       declared_path: artifact.path,
       description: artifact.description,
       artifact_path: artifact.artifact_path,
+      content_type: artifact.content_type,
+      detected_content_type: artifact.detected_content_type,
+      ...(artifact.declared_content_type ? { declared_content_type: artifact.declared_content_type } : {}),
+      media_kind: artifact.media_kind,
+      encoding: artifact.encoding,
+      size_bytes: artifact.size_bytes,
+      sha256: artifact.sha256,
+      preview: artifact.preview,
       classification: "final" as const
     }));
   const supersededArtifacts = evidence.declared_artifacts
@@ -498,6 +515,14 @@ function buildDeliveryModel(evidence: DeliveryEvidence): DeliveryModel {
       declared_path: artifact.path,
       description: artifact.description,
       artifact_path: artifact.artifact_path,
+      content_type: artifact.content_type,
+      detected_content_type: artifact.detected_content_type,
+      ...(artifact.declared_content_type ? { declared_content_type: artifact.declared_content_type } : {}),
+      media_kind: artifact.media_kind,
+      encoding: artifact.encoding,
+      size_bytes: artifact.size_bytes,
+      sha256: artifact.sha256,
+      preview: artifact.preview,
       classification: "superseded" as const
     }));
   const milestoneValidationLogs = buildMilestoneValidationLogs(evidence);
@@ -539,7 +564,15 @@ function sourceArtifactEntry(
     description: artifact.description,
     declared_path: artifact.declared_path,
     absolute_path: artifact.artifact_path,
-    relative_path: relativeMarkdownPath(deliveryDir, artifact.artifact_path)
+    relative_path: relativeMarkdownPath(deliveryDir, artifact.artifact_path),
+    content_type: artifact.content_type,
+    detected_content_type: artifact.detected_content_type,
+    ...(artifact.declared_content_type ? { declared_content_type: artifact.declared_content_type } : {}),
+    media_kind: artifact.media_kind,
+    encoding: artifact.encoding,
+    size_bytes: artifact.size_bytes,
+    sha256: artifact.sha256,
+    preview: artifact.preview
   };
 }
 
@@ -692,10 +725,10 @@ function renderDeliverySourceMarkdown(source: DeliverySourcePacket): string {
     "",
     ...(source.final_declared_artifacts.length > 0
       ? [
-          "| Artifact | Description | Path |",
-          "| --- | --- | --- |",
+          "| Artifact | Description | Type | Path |",
+          "| --- | --- | --- | --- |",
           ...source.final_declared_artifacts.map((artifact) =>
-            `| \`${artifact.id}\` | ${artifact.description} | [${artifact.declared_path}](${artifact.relative_path}) |`
+            `| \`${artifact.id}\` | ${artifact.description} | \`${artifact.content_type}\` | [${artifact.declared_path}](${artifact.relative_path}) |`
           )
         ]
       : ["- No final declared artifacts were captured."]),

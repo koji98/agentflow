@@ -58,11 +58,12 @@
           "release_notes": {
             "from": "output_dir",
             "path": "release-notes.md",
-            "description": "Draft release-notes section produced by the agent."
+            "description": "Draft release-notes section produced by the agent.",
+            "content_type": "text/markdown"
           }
         },
         "intent": {
-          "goal": "Draft a tight, well-structured release-notes section that covers the most recent changes summarized from the README. Publish the `release_notes` artifact with `af artifact write release_notes`.",
+          "goal": "Draft a tight, well-structured release-notes section that covers the most recent changes summarized from the README.",
           "acceptance_criteria": [
             "The release-notes artifact is concise, specific, and grounded in README context.",
             "The node leaves the repository unchanged."
@@ -97,7 +98,7 @@
           }
         },
         "intent": {
-          "goal": "Use the `babysit-poll` plugin tool to fetch the current state of pull request `123` (run `babysit-poll --help` if you need exact syntax, then call `babysit-poll --pr 123`). Combine the polled JSON with the release-notes draft to produce a short ship-readiness handoff. Publish the `ship_handoff` artifact with `af artifact write ship_handoff`.",
+          "goal": "Use the `babysit-poll` plugin tool to fetch the current state of pull request `123` (run `babysit-poll --help` if you need exact syntax, then call `babysit-poll --pr 123`). Combine the polled JSON with the release-notes draft to produce a short ship-readiness handoff.",
           "acceptance_criteria": [
             "The handoff cites the release notes and plugin-produced PR status evidence.",
             "The node does not mutate repository files or remote services."

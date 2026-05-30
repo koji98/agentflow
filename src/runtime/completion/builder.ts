@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
@@ -8,6 +8,12 @@ import {
   resolveExecutionHumanDebugToolDirectory,
   resolveExecutionRuntimeCompletionPacketPath
 } from "../../artifacts/paths.js";
+import {
+  artifactMetadataFields,
+  contentTypeMismatch,
+  inspectArtifactFile,
+  type ArtifactInspectionResult
+} from "../../artifacts/metadata.js";
 import type { ArtifactDefinition } from "../../graph/authored.js";
 import { normalizeAuthorityRequests } from "../authority.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
@@ -261,15 +267,9 @@ async function inspectArtifact(options: {
     };
   }
 
-  let sizeBytes = 0;
-  let content = "";
+  let metadata: ArtifactInspectionResult;
   try {
-    const [stats, raw] = await Promise.all([
-      stat(options.expectedPath),
-      readFile(options.expectedPath, "utf8")
-    ]);
-    sizeBytes = stats.size;
-    content = raw;
+    metadata = await inspectArtifactFile(options.expectedPath, options.definition.content_type);
   } catch {
     findings.push({
       artifact: options.name,
@@ -292,7 +292,9 @@ async function inspectArtifact(options: {
     };
   }
 
-  if (content.trim().length === 0) {
+  const metadataFields = artifactMetadataFields(metadata);
+
+  if (metadata.size_bytes === 0 || (metadata.text !== undefined && metadata.text.trim().length === 0)) {
     findings.push({
       artifact: options.name,
       kind: "empty",
@@ -309,7 +311,50 @@ async function inspectArtifact(options: {
         description: options.definition.description,
         status: "empty",
         current_attempt: true,
-        size_bytes: sizeBytes
+        ...metadataFields
+      },
+      findings
+    };
+  }
+
+  const mismatch = contentTypeMismatch(metadata);
+  if (mismatch) {
+    findings.push({
+      artifact: options.name,
+      kind: "content_type_mismatch",
+      summary: `Declared artifact "${options.name}" expected content type ${mismatch.expected} but detected ${mismatch.detected}.`,
+      evidence_ref: options.expectedPath
+    });
+    return {
+      artifact: {
+        name: options.name,
+        required: true,
+        from: options.definition.from,
+        path: options.definition.path,
+        expected_path: options.expectedPath,
+        description: options.definition.description,
+        status: "content_type_mismatch",
+        current_attempt: true,
+        ...metadataFields
+      },
+      findings
+    };
+  }
+
+  const content = metadata.text;
+
+  if (!content) {
+    return {
+      artifact: {
+        name: options.name,
+        required: true,
+        from: options.definition.from,
+        path: options.definition.path,
+        expected_path: options.expectedPath,
+        description: options.definition.description,
+        status: "present",
+        current_attempt: true,
+        ...metadataFields
       },
       findings
     };
@@ -332,7 +377,7 @@ async function inspectArtifact(options: {
         description: options.definition.description,
         status: "placeholder",
         current_attempt: true,
-        size_bytes: sizeBytes
+        ...metadataFields
       },
       findings
     };
@@ -355,11 +400,11 @@ async function inspectArtifact(options: {
           required: true,
           from: options.definition.from,
           path: options.definition.path,
-          expected_path: options.expectedPath,
-          description: options.definition.description,
-          status: "invalid_json",
-          current_attempt: true,
-          size_bytes: sizeBytes
+        expected_path: options.expectedPath,
+        description: options.definition.description,
+        status: "invalid_json",
+        current_attempt: true,
+          ...metadataFields
         },
         findings
       };
@@ -384,7 +429,7 @@ async function inspectArtifact(options: {
         description: options.definition.description,
         status: "forbidden_content",
         current_attempt: true,
-        size_bytes: sizeBytes
+        ...metadataFields
       },
       findings
     };
@@ -417,7 +462,7 @@ async function inspectArtifact(options: {
         description: options.definition.description,
         status: "missing_required_content",
         current_attempt: true,
-        size_bytes: sizeBytes
+        ...metadataFields
       },
       findings
     };
@@ -433,7 +478,7 @@ async function inspectArtifact(options: {
       description: options.definition.description,
       status: "present",
       current_attempt: true,
-      size_bytes: sizeBytes
+      ...metadataFields
     },
     findings
   };

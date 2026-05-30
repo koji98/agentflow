@@ -15,6 +15,7 @@ const requiredSkillReferences = {
     "graph-quality-bar.md",
     "intent-writing.md",
     "prompt-translation.md",
+    "runtime-prose-field-guide.md",
     "support-surfaces.md"
   ],
   "agentflow-evals": [
@@ -151,6 +152,75 @@ const staleArtifactContextPatterns = [
   }
 ];
 
+const runtimeProseGuidePath = "skills/agentflow-authoring/references/runtime-prose-field-guide.md";
+const runtimeProseRequiredPhrases = [
+  "Rule: authoring rationale belongs outside graph JSON",
+  "## Authoring Flow",
+  "## Field Taxonomy",
+  "## Bad -> Good Examples",
+  "research.angles[].prompt",
+  "work_list.planning_goal",
+  "AI check `rubric`",
+  "deep-work criterion `rubric`",
+  "deep-work `phases.*.intent`",
+  "context `what` / `why`",
+  "artifact `description`"
+];
+const promptSurfaceExampleLeakPatterns = [
+  /\bthis graph\b/iu,
+  /\bthe graph should\b/iu,
+  /\bdownstream nodes?\b/iu,
+  /\bcompiled prompts?\b/iu,
+  /\bgraph topology\b/iu,
+  /\bpattern_deep_research\b/iu,
+  /\bpattern_deep_work\b/iu,
+  /\bpattern_work_list\b/iu,
+  /\b(?:this|the|a)\s+managed pattern\b/iu,
+  /\bprivate angle report\b/iu,
+  /\bsynthesis node\b/iu,
+  /\bas public\b/iu,
+  /\baf artifact write\b/iu,
+  /\baf complete check\b/iu,
+  /\bgraph-addressable artifacts?\b/iu,
+  /\buse this node to\b/iu,
+  /\bthis prompt will\b/iu
+];
+
+function collectGoodExampleBlocks(text) {
+  const blocks = [];
+  let current = [];
+  let capturing = false;
+
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (/^Good\b/iu.test(trimmed)) {
+      if (capturing && current.length > 0) {
+        blocks.push(current.join("\n"));
+      }
+      capturing = true;
+      current = [line];
+      continue;
+    }
+
+    if (capturing && (/^Bad\b/iu.test(trimmed) || /^#{1,3}\s/u.test(trimmed))) {
+      blocks.push(current.join("\n"));
+      capturing = false;
+      current = [];
+      continue;
+    }
+
+    if (capturing) {
+      current.push(line);
+    }
+  }
+
+  if (capturing && current.length > 0) {
+    blocks.push(current.join("\n"));
+  }
+
+  return blocks;
+}
+
 async function fileExists(relativePath) {
   try {
     await access(resolve(rootDir, relativePath), constants.F_OK);
@@ -227,6 +297,47 @@ async function validateSkills() {
     missingReferenceRoutes.length === 0
       ? "Each focused SKILL.md routes to its required references."
       : `Missing reference routes: ${missingReferenceRoutes.join(", ")}`
+  );
+
+  const runtimeProseGuideMissing = [];
+  if (await fileExists(runtimeProseGuidePath)) {
+    const guideText = await readText(runtimeProseGuidePath);
+    for (const phrase of runtimeProseRequiredPhrases) {
+      if (!guideText.includes(phrase)) {
+        runtimeProseGuideMissing.push(phrase);
+      }
+    }
+  } else {
+    runtimeProseGuideMissing.push(runtimeProseGuidePath);
+  }
+
+  record(
+    "runtime prose field guide",
+    runtimeProseGuideMissing.length === 0,
+    runtimeProseGuideMissing.length === 0
+      ? "Authoring skill includes the runtime prose field guide with required field taxonomy and examples."
+      : `Runtime prose field guide is missing required coverage: ${runtimeProseGuideMissing.join(", ")}`
+  );
+
+  const promptSurfaceGoodExampleLeaks = [];
+  if (await fileExists(runtimeProseGuidePath)) {
+    const guideText = await readText(runtimeProseGuidePath);
+    const goodExamples = collectGoodExampleBlocks(guideText);
+    goodExamples.forEach((block, blockIndex) => {
+      promptSurfaceExampleLeakPatterns.forEach((pattern) => {
+        if (pattern.test(block)) {
+          promptSurfaceGoodExampleLeaks.push(`good example ${blockIndex + 1}: ${pattern}`);
+        }
+      });
+    });
+  }
+
+  record(
+    "runtime prose good examples stay clean",
+    promptSurfaceGoodExampleLeaks.length === 0,
+    promptSurfaceGoodExampleLeaks.length === 0
+      ? "Runtime prose guide good examples do not teach graph/meta language in runtime-facing fields."
+      : `Runtime prose guide good examples contain prompt-surface leakage: ${promptSurfaceGoodExampleLeaks.join("; ")}`
   );
 
   const staleRoutingMatches = [];

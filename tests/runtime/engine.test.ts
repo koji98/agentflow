@@ -13,7 +13,6 @@ import {
     resolveExecutionAgentPromptPath,
     resolveExecutionArtifactsDirectory,
     resolveExecutionHumanDebugToolDirectory,
-    resolveExecutionRuntimeDirectory,
     resolveInterventionDirectory,
     resolveNodeExecutionDirectory
 } from "../../src/artifacts/paths.js";
@@ -262,6 +261,13 @@ describe("runtime engine", () => {
                     await markExecutorRuntimeReady(context, result);
                     return result;
                 }
+            },
+            harnesses: {
+                "codex-cli": createHarness("codex-cli", async () => ({
+                    status: "passed",
+                    exitCode: 0,
+                    transcript: { last_message: "ok" }
+                }))
             }
         });
         const finalAttempt = run.attempts.find((attempt) => attempt.authored_id === "market_scan");
@@ -299,12 +305,13 @@ describe("runtime engine", () => {
         ]));
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("fails deep research helpers that mutate the repo workspace", async () => {
+    it("runs deep research helpers in isolated investigation workspaces", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-deep-research-workspace-pollution-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
         await mkdir(repoDir, { recursive: true });
         await initGitRepo(repoDir);
+        await writeFile(join(repoDir, "dirty-note.md"), "visible uncommitted source state\n");
         const graph = compileGraph({
             version: "1",
             graph_id: "runtime-deep-research-workspace-pollution",
@@ -335,7 +342,21 @@ describe("runtime engine", () => {
                         type: "pattern_deep_research",
                         id: "polluting_research",
                         research: {
-                            angles: ["Inspect the repo without changing it."]
+                            angles: [
+                                "Inspect the repo without changing it.",
+                                "Confirm parallel research helpers are isolated."
+                            ]
+                        },
+                        support: {
+                            context: [
+                                {
+                                    name: "dirty_note",
+                                    kind: "workspace_file",
+                                    path: "dirty-note.md",
+                                    what: "Uncommitted source note.",
+                                    why: "It proves deep research sees current source state in its disposable workspace."
+                                }
+                            ]
                         },
                         runtime: {
                             repo: "main",
@@ -355,9 +376,14 @@ describe("runtime engine", () => {
                 agent: async (context) => {
                     const { node, workspace_path, execution_dir } = context;
                     const outputDir = resolveExecutionArtifactsDirectory(execution_dir);
-                    if (node.authored_id.endsWith("__angle_01")) {
-                        await writeFile(join(workspace_path, "angle_report_01.md"), "scratch report in the repo\n");
-                        await writeFile(join(outputDir, "angle-report.md"), "real report\n");
+                    if (node.authored_id.endsWith("__angle_01") || node.authored_id.endsWith("__angle_02")) {
+                        expect(workspace_path).not.toBe(repoDir);
+                        expect(await readFile(join(workspace_path, "dirty-note.md"), "utf8")).toContain("visible uncommitted source state");
+                        const dirtyNoteContext = context.context_materials.find((item) => item.key === "dirty_note");
+                        expect(dirtyNoteContext?.pointer_path.startsWith(workspace_path)).toBe(true);
+                        const suffix = node.authored_id.endsWith("__angle_01") ? "angle_01" : "angle_02";
+                        await writeFile(join(workspace_path, `${suffix}.scratch.md`), "scratch report in the investigation workspace\n");
+                        await writeFile(join(outputDir, "angle-report.md"), `real report for ${suffix}\n`);
                     }
                     else if (node.authored_id === "polluting_research") {
                         await writeFile(join(outputDir, "research.md"), "research\n");
@@ -372,15 +398,33 @@ describe("runtime engine", () => {
                     await markExecutorRuntimeReady(context, result);
                     return result;
                 }
+            },
+            harnesses: {
+                "codex-cli": createHarness("codex-cli", async () => ({
+                    status: "passed",
+                    exitCode: 0,
+                    transcript: { last_message: "ok" }
+                }))
             }
         });
-        const angleAttempt = run.attempts.find((attempt) => attempt.authored_id.endsWith("__angle_01"));
-        expect(run.outcome).toBe("failed");
-        expect(angleAttempt?.status).toBe("failed");
-        expect(angleAttempt?.metadata.failure_code).toBe("workspace_pollution");
+        const angleAttempts = run.attempts.filter((attempt) => attempt.authored_id.includes("__angle_"));
+        const angleAttempt = angleAttempts.find((attempt) => attempt.authored_id.endsWith("__angle_01"));
+        expect(run.outcome).toBe("passed");
+        expect(angleAttempts).toHaveLength(2);
+        expect(new Set(angleAttempts.map((attempt) =>
+            (attempt.metadata.ephemeral_investigation_workspace as { workspace_path: string }).workspace_path
+        )).size).toBe(2);
+        expect(angleAttempt?.status).toBe("passed");
+        expect(angleAttempt?.metadata.failure_code).toBeUndefined();
         expect(angleAttempt?.metadata.node_workspace_changes).toEqual(expect.objectContaining({
             changed_file_count: 1
         }));
+        expect(angleAttempt?.metadata.ephemeral_investigation_workspace).toEqual(expect.objectContaining({
+            status: "discarded"
+        }));
+        await expect(access(join(repoDir, "angle_01.scratch.md"))).rejects.toThrow();
+        await expect(access(join(repoDir, "angle_02.scratch.md"))).rejects.toThrow();
+        await expect(access((angleAttempt?.metadata.ephemeral_investigation_workspace as { workspace_path: string }).workspace_path)).rejects.toThrow();
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("repairs an upstream worker when a downstream check is the failed symptom", async () => {
@@ -2735,17 +2779,16 @@ describe("runtime engine", () => {
             }
         });
         expect(run.outcome).toBe("failed");
-        expect(run.attempts).toHaveLength(1);
-        expect(run.state.node_statuses.root__reader).toBe("failed");
+        expect(run.attempts).toEqual([]);
         expect(run.events).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                type: "node.completed",
-                compiled_id: "root__reader"
+                type: "run.preflight_failed",
+                payload: expect.objectContaining({
+                    reason: "readiness_blocked",
+                    message: expect.stringContaining("../secret.txt")
+                })
             })
         ]));
-        expect((run.attempts[0]?.metadata as {
-            error?: string;
-        } | undefined)?.error).toContain('Context path "../secret.txt" must be a relative path that stays within its repo or workspace root.');
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("fails when exec cwd escapes the workspace root", async () => {
@@ -4832,7 +4875,7 @@ describe("runtime engine", () => {
         expect(consumeAttempt?.metadata?.failure_code).toBe("unresolved_context");
         await rm(tempRoot, { recursive: true, force: true });
     });
-    it("does not preflight-fail a blocked node with a bad authored input path", async () => {
+    it("preflight-fails missing required static context before any node attempts start", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-blocked-input-"));
         const repoDir = join(tempRoot, "repo");
         const runRoot = join(tempRoot, "run");
@@ -4894,18 +4937,24 @@ describe("runtime engine", () => {
                 main: repoDir
             },
             executors: {
-                exec: async ({ node }) => ({
-                    status: node.authored_id === "fail_first" ? "failed" : "passed",
-                    outcome: node.authored_id === "fail_first" ? "failed" : "passed",
-                    stdout: "",
-                    stderr: "",
-                    result: { node: node.authored_id }
-                })
+                exec: async () => {
+                    throw new Error("executor should not run when static context preflight fails");
+                }
             }
         });
         expect(run.outcome).toBe("failed");
-        expect(run.state.node_statuses.root__fail_first).toBe("failed");
-        expect(run.state.node_statuses.root__never_runs).toBe("blocked");
+        expect(run.attempts).toEqual([]);
+        expect(run.events).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: "run.preflight_failed",
+                payload: expect.objectContaining({
+                    reason: "readiness_blocked",
+                    message: expect.stringContaining("workspace_file")
+                })
+            })
+        ]));
+        expect(run.state.node_statuses.root__fail_first).toBe("pending");
+        expect(run.state.node_statuses.root__never_runs).toBe("pending");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("preflight-fails missing declared CLI hints before execution begins", async () => {
@@ -4969,6 +5018,65 @@ describe("runtime engine", () => {
                 kind: "cli",
                 status: "blocked",
                 message: expect.stringContaining("definitely-missing-command")
+            })
+        ]));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("reports zero-match static workspace globs as readiness blockers", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-engine-context-readiness-"));
+        const repoDir = join(tempRoot, "repo");
+        await mkdir(repoDir, { recursive: true });
+        await initGitRepo(repoDir);
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "runtime-static-context-readiness",
+            repos: {
+                main: {
+                    path: "."
+                }
+            },
+            defaults: {
+                launch_profile: "default",
+                workspace_backend: "inplace"
+            },
+            profiles: {
+                default: {}
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "consumer",
+                        command: "true",
+                        support: {
+                            context: [
+                                {
+                                    name: "missing_docs",
+                                    kind: "workspace_glob",
+                                    path: "docs/*.md",
+                                    what: "Required static docs.",
+                                    why: "A required static glob must match before launch."
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        });
+        const readiness = await evaluateGraphReadiness({
+            graph,
+            repo_sources: {
+                main: repoDir
+            }
+        });
+        expect(readiness.status).toBe("blocked");
+        expect(readiness.checks).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                kind: "context",
+                status: "blocked",
+                message: expect.stringContaining("workspace_glob")
             })
         ]));
         await rm(tempRoot, { recursive: true, force: true });
@@ -5234,16 +5342,17 @@ describe("runtime engine", () => {
                 main: repoDir
             }
         });
-        const attempt = run.attempts.find((candidate) => candidate.authored_id === "consume");
-        const executionRecord = JSON.parse(await readFile(join(resolveExecutionRuntimeDirectory(attempt!.execution_dir), "execution.json"), "utf8")) as Record<string, unknown>;
         expect(run.outcome).toBe("failed");
-        expect(attempt?.context_packet_path).toBeUndefined();
-        expect(attempt?.context_manifest_path).toBeUndefined();
-        expect(executionRecord.context_packet_path).toBeUndefined();
-        expect(executionRecord.context_manifest_path).toBeUndefined();
-        expect(attempt?.metadata).toEqual(expect.objectContaining({
-            context_status: "failed"
-        }));
+        expect(run.attempts).toEqual([]);
+        expect(run.events).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: "run.preflight_failed",
+                payload: expect.objectContaining({
+                    reason: "readiness_blocked",
+                    message: expect.stringContaining("../escape.txt")
+                })
+            })
+        ]));
         await rm(tempRoot, { recursive: true, force: true });
     });
 });

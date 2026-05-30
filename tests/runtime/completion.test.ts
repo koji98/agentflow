@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -336,6 +337,96 @@ describe("completion packet", () => {
         ]);
         expect(packet.declared_artifacts[0]).toEqual(expect.objectContaining({
             status: "invalid_json"
+        }));
+    });
+    it("records binary-safe metadata for declared image artifacts", async () => {
+        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "screens/settings.png");
+        const pngBytes = Buffer.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03,
+            0x08, 0x02, 0x00, 0x00, 0x00, 0x12, 0x16, 0xf1,
+            0x4d
+        ]);
+        await mkdir(join(resolveExecutionArtifactsDirectory(executionDir), "screens"), { recursive: true });
+        await writeFile(artifactPath, pngBytes);
+        const packet = await buildCompletionPacket({
+            runRoot,
+            node: makeNode({
+                declared_artifacts: {
+                    screenshot: {
+                        from: "output_dir",
+                        path: "screens/settings.png",
+                        description: "Rendered settings screenshot.",
+                        content_type: "image/png"
+                    }
+                }
+            }),
+            attempt: makeAttempt(executionDir, {
+                artifacts: { screenshot: artifactPath }
+            }),
+            workspacePath: workspace,
+            sandbox: "workspace-write"
+        });
+        expect(packet.completion_status).toBe("ready_for_verification");
+        expect(packet.artifact_findings).toEqual([]);
+        expect(packet.declared_artifacts[0]).toEqual(expect.objectContaining({
+            name: "screenshot",
+            status: "present",
+            content_type: "image/png",
+            detected_content_type: "image/png",
+            media_kind: "image",
+            encoding: "binary",
+            size_bytes: pngBytes.byteLength,
+            sha256: createHash("sha256").update(pngBytes).digest("hex"),
+            preview: expect.objectContaining({
+                kind: "image",
+                width: 2,
+                height: 3
+            })
+        }));
+    });
+    it("rejects authored content-type mismatches without decoding binary as text", async () => {
+        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "screens/settings.png");
+        const pngBytes = Buffer.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+            0xde
+        ]);
+        await mkdir(join(resolveExecutionArtifactsDirectory(executionDir), "screens"), { recursive: true });
+        await writeFile(artifactPath, pngBytes);
+        const packet = await buildCompletionPacket({
+            runRoot,
+            node: makeNode({
+                declared_artifacts: {
+                    screenshot: {
+                        from: "output_dir",
+                        path: "screens/settings.png",
+                        description: "Rendered settings screenshot.",
+                        content_type: "application/pdf"
+                    }
+                }
+            }),
+            attempt: makeAttempt(executionDir, {
+                artifacts: { screenshot: artifactPath }
+            }),
+            workspacePath: workspace,
+            sandbox: "workspace-write"
+        });
+        expect(packet.completion_status).toBe("incomplete");
+        expect(packet.artifact_findings).toEqual([
+            expect.objectContaining({
+                artifact: "screenshot",
+                kind: "content_type_mismatch",
+                summary: expect.stringContaining("application/pdf")
+            })
+        ]);
+        expect(packet.declared_artifacts[0]).toEqual(expect.objectContaining({
+            status: "content_type_mismatch",
+            detected_content_type: "image/png",
+            encoding: "binary"
         }));
     });
     it("rejects declared artifacts that include contract-forbidden exact content", async () => {
