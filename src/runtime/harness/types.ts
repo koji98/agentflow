@@ -11,6 +11,7 @@ import type {
   SupervisorEvidenceGatherKind,
   SupervisorRecoveryEnvelope
 } from "../../supervisor/types.js";
+import { renderAttemptEvidenceMarkdown } from "../attempt_evidence.js";
 
 export type HarnessKind = "codex-cli" | "cursor-cli";
 
@@ -452,7 +453,6 @@ function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[]
     "",
     "| Field | Value |",
     "| --- | --- |",
-    `| Prior execution | \`${envelope.prior_execution_id}\` |`,
     `| Classification | \`${envelope.classification}\` |`,
     `| Resume point | \`${envelope.resume_point}\` |`,
     `| Restart boundary | \`${envelope.resume_decision.restart_boundary}\` |`,
@@ -461,6 +461,8 @@ function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[]
     `| Repeated symptom count | \`${envelope.repeated_fingerprint_count}\` |`,
     `| Symptom | ${directive.summary} |`,
     `| Required next action | ${envelope.required_next_action} |`,
+    "",
+    ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence, { heading: "### Prior Attempt Evidence" }),
     "",
     "### Preserve Progress",
     ...formatBullets(envelope.preserve_progress, "Preserve in-scope prior progress unless evidence says it is unsafe."),

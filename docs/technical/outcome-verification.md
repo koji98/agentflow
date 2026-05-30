@@ -21,7 +21,7 @@ It is skipped for `check`, `checkpoint`, `pattern_*`, and `exec` nodes because t
 The verifier receives:
 
 - Graph intent: goal, acceptance criteria, constraints.
-- Node intent: authored id, compiled id, execution id, attempt and iteration indices, goal, acceptance criteria, constraints.
+- Node intent: authored id, compiled id, attempt and iteration indices, goal, acceptance criteria, constraints. Runtime ledgers retain execution ids for joins, but prompt-facing verifier guidance relies on paths and attempt ordinals.
 - Workspace path and a per-node workspace-change summary with paths to full audit artifacts (see `node-workspace-snapshots.md`).
 - Completion packet facts: status, blocking reasons, missing artifacts, and packet path.
 - Milestone evidence recorded by the node, especially `decision` and `validation` milestone logs with summaries, commands, results, and completion evidence.

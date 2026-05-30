@@ -21,6 +21,7 @@ import {
   type DeliveryCurator,
   type DeliveryCurationFinding,
   type DeliveryCurationVerdict,
+  type DeliverySourceFailure,
   type DeliverySourcePacket,
   verifyCuratedDelivery
 } from "./curation.js";
@@ -391,7 +392,7 @@ function buildWorkspaceRecommendations(
     recommendations.push({
       area: "workflow",
       recommendation: "Resolve active terminal failures before relying on this run's output.",
-      evidence: activeFailures.map((entry) => `${entry.attempt.authored_id}:${entry.attempt.execution_id}`).join(", "),
+      evidence: activeFailures.map((entry) => `${entry.attempt.authored_id}:${entry.attempt.execution_dir}`).join(", "),
       priority: "high",
       confidence: "high",
       done_when: "The failing node or blocker has a passing final attempt and no active blocking observation remains."
@@ -402,7 +403,7 @@ function buildWorkspaceRecommendations(
     recommendations.push({
       area: "graph",
       recommendation: "Review failed-then-recovered attempts for missing context, brittle checks, or oversized node scope.",
-      evidence: recoveredIssues.map((entry) => `${entry.attempt.authored_id}:${entry.attempt.execution_id}`).join(", "),
+      evidence: recoveredIssues.map((entry) => `${entry.attempt.authored_id}:${entry.attempt.execution_dir}`).join(", "),
       priority: "medium",
       confidence: "medium",
       done_when: "The next comparable run completes without the same supervisor recovery or failed first attempt."
@@ -576,13 +577,32 @@ function sourceArtifactEntry(
   };
 }
 
-function sourceFailure(entry: ClassifiedAttempt): DeliverySourcePacket["failures"]["active"][number] {
+function sourceFailure(
+  entry: ClassifiedAttempt,
+  deliveryDir: string
+): DeliverySourcePacket["failures"]["active"][number] {
   return {
     node: entry.attempt.authored_id,
     execution_id: entry.attempt.execution_id,
+    attempt_path: entry.attempt.execution_dir,
+    attempt_relative_path: relativeMarkdownPath(deliveryDir, entry.attempt.execution_dir),
     status: `${entry.attempt.status}${entry.attempt.outcome ? `/${entry.attempt.outcome}` : ""}`,
     summary: sanitizeDeliveryEvidenceText(entry.summary)
   };
+}
+
+function attemptPathForExecution(
+  evidence: DeliveryEvidence,
+  deliveryDir: string,
+  executionId: string
+): { attempt_path?: string; attempt_relative_path?: string } {
+  const attempt = evidence.attempts.find((candidate) => candidate.execution_id === executionId);
+  return attempt
+    ? {
+        attempt_path: attempt.execution_dir,
+        attempt_relative_path: relativeMarkdownPath(deliveryDir, attempt.execution_dir)
+      }
+    : {};
 }
 
 function sanitizeDeliveryEvidenceText(value: string): string {
@@ -650,6 +670,7 @@ function buildDeliverySourcePacket(options: {
     validation: {
       milestone_validation_logs: model.milestone_validation_logs.map((log) => ({
         execution_id: log.execution_id,
+        ...attemptPathForExecution(evidence, deliveryDir, log.execution_id),
         milestone_id: log.milestone_id,
         ...(log.command ? { command: sanitizeDeliveryCommand(log.command) } : {}),
         ...(log.result ? { result: log.result } : {}),
@@ -658,6 +679,7 @@ function buildDeliverySourcePacket(options: {
       outcome_verifications: evidence.outcome_verifications.map((entry) => ({
         node: entry.authored_id,
         execution_id: entry.execution_id,
+        ...attemptPathForExecution(evidence, deliveryDir, entry.execution_id),
         passed: entry.passed,
         summary: sanitizeDeliveryEvidenceText(entry.summary),
         findings_count: entry.findings_count,
@@ -667,7 +689,7 @@ function buildDeliverySourcePacket(options: {
     },
     failures: {
       active: [
-        ...model.active_failures.map(sourceFailure),
+        ...model.active_failures.map((entry) => sourceFailure(entry, deliveryDir)),
         ...model.active_blocking_observations.map((observation) => ({
           node: observation.observation_id,
           execution_id: observation.observation_id,
@@ -675,8 +697,8 @@ function buildDeliverySourcePacket(options: {
           summary: sanitizeDeliveryEvidenceText(observation.summary)
         }))
       ],
-      recovered: model.recovered_issues.map(sourceFailure),
-      historical: model.historical_attempts.map(sourceFailure)
+      recovered: model.recovered_issues.map((entry) => sourceFailure(entry, deliveryDir)),
+      historical: model.historical_attempts.map((entry) => sourceFailure(entry, deliveryDir))
     },
     interventions: evidence.interventions.map((intervention) => ({
       action: intervention.action,
@@ -747,35 +769,35 @@ function renderDeliverySourceMarkdown(source: DeliverySourcePacket): string {
     "",
     ...(source.validation.milestone_validation_logs.length > 0
       ? [
-          "| Source | Result | Command | Summary |",
-          "| --- | --- | --- | --- |",
+          "| Source | Attempt | Result | Command | Summary |",
+          "| --- | --- | --- | --- | --- |",
           ...source.validation.milestone_validation_logs.map((log) =>
-            `| \`${log.milestone_id}\` | \`${log.result ?? "recorded"}\` | ${log.command ? `\`${log.command}\`` : "not specified"} | ${log.summary} |`
+            `| \`${log.milestone_id}\` | ${log.attempt_relative_path ? `[attempt](${log.attempt_relative_path})` : "not recorded"} | \`${log.result ?? "recorded"}\` | ${log.command ? `\`${log.command}\`` : "not specified"} | ${log.summary} |`
           )
         ]
       : ["- No milestone validation logs were captured."]),
     "",
     ...(source.validation.outcome_verifications.length > 0
       ? [
-          "| Node | Result | Evidence | Summary |",
-          "| --- | --- | --- | --- |",
+          "| Node | Attempt | Result | Evidence | Summary |",
+          "| --- | --- | --- | --- | --- |",
           ...source.validation.outcome_verifications.map((entry) =>
-            `| \`${entry.node}\` | \`${entry.passed ? "pass" : "fail"}\` | [validation ledger](${entry.evidence_path}) | ${entry.summary} |`
+            `| \`${entry.node}\` | ${entry.attempt_relative_path ? `[attempt](${entry.attempt_relative_path})` : "not recorded"} | \`${entry.passed ? "pass" : "fail"}\` | [validation ledger](${entry.evidence_path}) | ${entry.summary} |`
           )
         ]
       : ["- No outcome verifications were captured."]),
     "",
     "## Active Failures",
     "",
-    ...markdownList(source.failures.active.map((failure) => `\`${failure.node}\`: ${failure.summary}`), "No active failures remain."),
+    ...markdownList(source.failures.active.map((failure) => `${sourceFailureLabel(failure)}: ${failure.summary}`), "No active failures remain."),
     "",
     "## Recovered Issues",
     "",
-    ...markdownList(source.failures.recovered.map((failure) => `\`${failure.node}\`: ${failure.summary}`), "No recovered issues were recorded."),
+    ...markdownList(source.failures.recovered.map((failure) => `${sourceFailureLabel(failure)}: ${failure.summary}`), "No recovered issues were recorded."),
     "",
     "## Historical Attempts",
     "",
-    ...markdownList(source.failures.historical.map((failure) => `\`${failure.node}\`: ${failure.summary}`), "No historical attempts require reviewer action."),
+    ...markdownList(source.failures.historical.map((failure) => `${sourceFailureLabel(failure)}: ${failure.summary}`), "No historical attempts require reviewer action."),
     "",
     "## Interventions",
     "",
@@ -796,19 +818,26 @@ function renderDeliverySourceMarkdown(source: DeliverySourcePacket): string {
   return lines.join("\n");
 }
 
+function sourceFailureLabel(failure: DeliverySourceFailure): string {
+  return failure.attempt_relative_path
+    ? `\`${failure.node}\` ([attempt](${failure.attempt_relative_path}))`
+    : `\`${failure.node}\``;
+}
+
 function renderAttemptTable(
   attempts: ClassifiedAttempt[],
-  emptyText: string
+  emptyText: string,
+  deliveryDir: string
 ): string[] {
   if (attempts.length === 0) {
     return [`- ${emptyText}`];
   }
 
   return [
-    "| Node | Execution | Status | Summary |",
-    "| --- | --- | --- | --- |",
+    "| Node | Attempt | Execution ID | Status | Summary |",
+    "| --- | --- | --- | --- | --- |",
     ...attempts.map((entry) =>
-      `| \`${entry.attempt.authored_id}\` | \`${entry.attempt.execution_id}\` | \`${entry.attempt.status}${entry.attempt.outcome ? `/${entry.attempt.outcome}` : ""}\` | ${entry.summary} |`
+      `| \`${entry.attempt.authored_id}\` | ${markdownLink(deliveryDir, "attempt", entry.attempt.execution_dir)} | \`${entry.attempt.execution_id}\` | \`${entry.attempt.status}${entry.attempt.outcome ? `/${entry.attempt.outcome}` : ""}\` | ${entry.summary} |`
     )
   ];
 }
@@ -819,17 +848,20 @@ function renderAuditIndex(
   model: DeliveryModel,
   deliveryDir: string
 ): string {
+  const attemptByExecutionId = new Map(evidence.attempts.map((attempt) => [attempt.execution_id, attempt]));
   const contextRows = evidence.attempts.flatMap((attempt) =>
     attempt.context_packet_path
-      ? [`| \`${attempt.authored_id}\` | \`${attempt.execution_id}\` | ${markdownLink(deliveryDir, "runtime context", attempt.context_packet_path)} |`]
+      ? [`| \`${attempt.authored_id}\` | ${markdownLink(deliveryDir, "attempt", attempt.execution_dir)} | \`${attempt.execution_id}\` | ${markdownLink(deliveryDir, "runtime context", attempt.context_packet_path)} |`]
       : []
   );
-  const toolRows = evidence.tool_invocations.map((entry) =>
-    `| \`${entry.authored_id}\` | \`${entry.execution_id}\` | ${entry.records.length} | ${markdownLink(deliveryDir, "ledger", entry.invocation_path)} |`
-  );
-  const milestoneRows = evidence.milestone_states.map((entry) =>
-    `| \`${entry.execution_id}\` | ${entry.milestones.length} | ${markdownLink(deliveryDir, "milestone file", entry.path)} |`
-  );
+  const toolRows = evidence.tool_invocations.map((entry) => {
+    const attempt = attemptByExecutionId.get(entry.execution_id);
+    return `| \`${entry.authored_id}\` | ${attempt ? markdownLink(deliveryDir, "attempt", attempt.execution_dir) : "not recorded"} | \`${entry.execution_id}\` | ${entry.records.length} | ${markdownLink(deliveryDir, "ledger", entry.invocation_path)} |`;
+  });
+  const milestoneRows = evidence.milestone_states.map((entry) => {
+    const attempt = attemptByExecutionId.get(entry.execution_id);
+    return `| ${attempt ? markdownLink(deliveryDir, "attempt", attempt.execution_dir) : "not recorded"} | \`${entry.execution_id}\` | ${entry.milestones.length} | ${markdownLink(deliveryDir, "milestone file", entry.path)} |`;
+  });
 
   return [
     "# Audit Index",
@@ -846,32 +878,34 @@ function renderAuditIndex(
     "",
     ...renderAttemptTable(
       model.classified_attempts.filter((entry) => entry.classification === "final" || entry.classification === "active_failure"),
-      "No final attempts were recorded."
+      "No final attempts were recorded.",
+      deliveryDir
     ),
     "",
     "## Superseded Attempts",
     "",
     ...renderAttemptTable(
       [...model.recovered_issues, ...model.historical_attempts],
-      "No superseded attempts were recorded."
+      "No superseded attempts were recorded.",
+      deliveryDir
     ),
     "",
     "## Context Runtime State",
     "",
     ...(contextRows.length > 0
-      ? ["| Node | Execution | Runtime Context |", "| --- | --- | --- |", ...contextRows]
+      ? ["| Node | Attempt | Execution ID | Runtime Context |", "| --- | --- | --- | --- |", ...contextRows]
       : ["- No runtime context files were referenced by attempts."]),
     "",
     "## Managed Tool Ledgers",
     "",
     ...(toolRows.length > 0
-      ? ["| Node | Execution | Records | Ledger |", "| --- | --- | --- | --- |", ...toolRows]
+      ? ["| Node | Attempt | Execution ID | Records | Ledger |", "| --- | --- | --- | --- | --- |", ...toolRows]
       : ["- No managed tool invocation ledgers were recorded."]),
     "",
     "## Milestones",
     "",
     ...(milestoneRows.length > 0
-      ? ["| Execution | Milestones | File |", "| --- | --- | --- |", ...milestoneRows]
+      ? ["| Attempt | Execution ID | Milestones | File |", "| --- | --- | --- | --- |", ...milestoneRows]
       : ["- No milestone files were recorded."]),
     "",
     "## Raw Ledgers",
@@ -926,7 +960,8 @@ function renderDecisionLog(evidence: DeliveryEvidence, model: DeliveryModel): st
         .reduce((sum, toolEntry) => sum + toolEntry.records.length, 0);
 
       lines.push(`### ${attempt.authored_id}`, "");
-      lines.push(`- Execution: \`${attempt.execution_id}\``);
+      lines.push(`- Attempt path: \`${attempt.execution_dir}\``);
+      lines.push(`- Execution ID: \`${attempt.execution_id}\``);
       lines.push(`- Classification: \`${entry.classification}\``);
       lines.push(`- Kind: \`${attempt.kind}\``);
       lines.push(`- Status: \`${attempt.status}\`${attempt.outcome ? `, outcome: \`${attempt.outcome}\`` : ""}`);

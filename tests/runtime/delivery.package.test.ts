@@ -409,7 +409,19 @@ describe("delivery package", () => {
         expect(reviewBrief).toContain("../nodes/001-implement/executions/001-exec/artifacts/handoff.md");
         expect(reviewBrief).not.toContain(runRoot);
         expect(reviewBrief).not.toContain("human-debug");
-        await expect(readFile(join(runRoot, "delivery", "evidence", "delivery-source.md"), "utf8")).resolves.toContain("# Delivery Source");
+        const deliverySourceMarkdown = await readFile(join(runRoot, "delivery", "evidence", "delivery-source.md"), "utf8");
+        expect(deliverySourceMarkdown).toContain("# Delivery Source");
+        expect(deliverySourceMarkdown).toContain("[attempt](../nodes/001-implement/executions/001-exec)");
+        const deliverySource = await readJson<{
+            validation: {
+                milestone_validation_logs: Array<{ attempt_path?: string; attempt_relative_path?: string }>;
+                outcome_verifications: Array<{ attempt_path?: string; attempt_relative_path?: string }>;
+            };
+        }>(join(runRoot, "delivery", "evidence", "delivery-source.json"));
+        expect(deliverySource.validation.milestone_validation_logs[0]).toEqual(expect.objectContaining({
+            attempt_path: executionDir,
+            attempt_relative_path: "../nodes/001-implement/executions/001-exec"
+        }));
         const verdict = await readJson<{ passed: boolean }>(join(runRoot, "delivery", "evidence", "curation-verdict.json"));
         expect(verdict.passed).toBe(true);
         await expect(readFile(join(runRoot, "delivery", "evidence", "artifact-index.json"), "utf8")).resolves.toContain('"final_declared_artifacts"');

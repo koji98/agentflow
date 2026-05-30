@@ -90,6 +90,7 @@ export interface SupervisorCausalCaseFile {
     distance: number;
     status?: string;
     latest_execution_id?: string;
+    latest_attempt_path?: string;
     latest_outcome?: string;
     repo_alias: string;
     artifact_names: string[];
@@ -113,6 +114,8 @@ export interface SupervisorCausalTargetRecord {
     resume_compiled_id: string;
     resume_authored_id: string;
     target_prior_execution_id?: string;
+    target_prior_attempt_path?: string;
+    target_prior_artifact_paths?: Record<string, string>;
     symptom_compiled_id: string;
     symptom_authored_id: string;
     symptom_execution_id: string;
@@ -124,6 +127,7 @@ export interface SupervisorCaseFile {
   compiled_id: string;
   authored_id: string;
   prior_execution_id: string;
+  prior_attempt_path: string;
   attempt_index: number;
   failed_at: string;
   failure_class: FailureClass;
@@ -264,6 +268,34 @@ export interface RecoveryResumeDecision {
   evidence: string[];
   required_next_action: string;
   validation_gate: string[];
+}
+
+export interface AttemptEvidenceBundle {
+  identity: {
+    execution_id: string;
+    compiled_id: string;
+    authored_id: string;
+  };
+  agent_paths: {
+    attempt_root: string;
+    response_path?: string;
+    artifacts_dir: string;
+    artifact_paths: Record<string, string>;
+    attempt_memory_path?: string;
+    supervisor_recovery_path?: string;
+  };
+  audit_paths: {
+    prompt_path?: string;
+    context_path?: string;
+    result_path?: string;
+    completion_packet_path?: string;
+    verifier_json_path?: string;
+    verifier_verdict_path?: string;
+    stdout_path?: string;
+    stderr_path?: string;
+    case_file_path?: string;
+    recovery_plan_path?: string;
+  };
 }
 
 export interface SupervisorInterventionDecision {
@@ -431,6 +463,7 @@ export interface SupervisorRecoveryEnvelope {
   compiled_id: string;
   authored_id: string;
   prior_execution_id: string;
+  prior_attempt_evidence: AttemptEvidenceBundle;
   symptom_compiled_id?: string;
   symptom_authored_id?: string;
   symptom_execution_id?: string;

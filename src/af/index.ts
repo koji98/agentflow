@@ -47,6 +47,7 @@ import {
 } from "../runtime/completion/index.js";
 import { readOperatorObservations } from "../runtime/observations/index.js";
 import type { AttemptMemory } from "../runtime/attempt_memory.js";
+import { renderAttemptEvidenceMarkdown } from "../runtime/attempt_evidence.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -861,6 +862,12 @@ function renderRetryOrientation(
       `- Workspace decision: \`${envelope?.workspace_decision ?? "preserve"}\``,
       `- Resume reason: \`${envelope?.resume_decision.reason_code ?? "fresh_retry_required"}\``,
       `- Required next action: ${envelope?.required_next_action ?? "Inspect current artifact status and continue within the unchanged contract."}`,
+      ...(envelope
+        ? [
+            "",
+            ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence, { heading: "### Prior Attempt Evidence" })
+          ]
+        : []),
       "",
       "### Reuse",
       ...renderList(envelope?.resume_decision.reuse, "Use current context pointers and artifact status."),
@@ -876,13 +883,14 @@ function renderRetryOrientation(
     "| Field | Value |",
     "| --- | --- |",
     `| Failure symptom | ${markdownCell(attemptMemory.failure_summary)} |`,
-    `| Prior execution | \`${attemptMemory.prior_execution_id}\` |`,
     `| Supervisor decision | ${markdownCell(envelope?.retry_directive.summary ?? attemptMemory.failure_summary)} |`,
     `| Resume point | \`${attemptMemory.resume_point}\` |`,
     `| Restart boundary | \`${attemptMemory.resume_decision.restart_boundary}\` |`,
     `| Workspace decision | \`${attemptMemory.workspace_decision}\` |`,
     `| Resume reason | \`${attemptMemory.resume_decision.reason_code}\` |`,
     `| Required next action | ${markdownCell(attemptMemory.required_next_action)} |`,
+    "",
+    ...renderAttemptEvidenceMarkdown(attemptMemory.prior_attempt_evidence, { heading: "### Prior Attempt Evidence" }),
     "",
     "### Reuse",
     ...renderList(attemptMemory.resume_decision.reuse, "No prior progress was selected for reuse."),

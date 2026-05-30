@@ -571,6 +571,26 @@ describe("af runtime CLI", () => {
                 compiled_id: "main",
                 authored_id: "main",
                 prior_execution_id: "exec-previous",
+                prior_attempt_evidence: {
+                    identity: {
+                        execution_id: "exec-previous",
+                        compiled_id: "main",
+                        authored_id: "main"
+                    },
+                    agent_paths: {
+                        attempt_root: join(executionDir, "previous"),
+                        response_path: join(executionDir, "previous", "agent", "response.md"),
+                        artifacts_dir: join(executionDir, "previous", "artifacts"),
+                        artifact_paths: {
+                            handoff: join(executionDir, "previous", "artifacts", "handoff.md")
+                        },
+                        attempt_memory_path: join(executionDir, "previous", "agent", "attempt-memory.md"),
+                        supervisor_recovery_path: join(executionDir, "previous", "agent", "supervisor-recovery.md")
+                    },
+                    audit_paths: {
+                        result_path: join(executionDir, "previous", "runtime", "result.json")
+                    }
+                },
                 recovery_plan_path: join(executionDir, "runtime/supervisor/recovery-plan.json"),
                 case_file_path: join(executionDir, "runtime/supervisor/case-file.json"),
                 action: "retry_node",
@@ -617,6 +637,26 @@ describe("af runtime CLI", () => {
         await writeFile(attemptMemoryPath, `${JSON.stringify({
             version: "1",
             prior_execution_id: "exec-previous",
+            prior_attempt_evidence: {
+                identity: {
+                    execution_id: "exec-previous",
+                    compiled_id: "main",
+                    authored_id: "main"
+                },
+                agent_paths: {
+                    attempt_root: join(executionDir, "previous"),
+                    response_path: join(executionDir, "previous", "agent", "response.md"),
+                    artifacts_dir: join(executionDir, "previous", "artifacts"),
+                    artifact_paths: {
+                        handoff: join(executionDir, "previous", "artifacts", "handoff.md")
+                    },
+                    attempt_memory_path: join(executionDir, "previous", "agent", "attempt-memory.md"),
+                    supervisor_recovery_path: join(executionDir, "previous", "agent", "supervisor-recovery.md")
+                },
+                audit_paths: {
+                    result_path: join(executionDir, "previous", "runtime", "result.json")
+                }
+            },
             prior_outcome: "failed",
             failure_summary: "Missing declared handoff artifact.",
             resume_point: "repair_artifacts",

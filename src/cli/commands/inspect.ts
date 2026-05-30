@@ -21,6 +21,7 @@ const stderrTailMaxAttempts = 5;
 export interface NodeStderrTail {
   authored_id: string;
   compiled_id: string;
+  execution_dir: string;
   execution_id: string;
   status: RuntimeNodeAttempt["status"];
   attempt_index: number;
@@ -60,6 +61,7 @@ async function summarizeFailedNodes(attempts: RuntimeNodeAttempt[]): Promise<Nod
       const summary: NodeStderrTail = {
         authored_id: attempt.authored_id,
         compiled_id: attempt.compiled_id,
+        execution_dir: attempt.execution_dir,
         execution_id: attempt.execution_id,
         status: attempt.status,
         attempt_index: attempt.attempt_index,
