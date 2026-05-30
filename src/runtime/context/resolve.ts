@@ -34,6 +34,7 @@ import {
   type ContextDiscoveryCache
 } from "./provenance.js";
 import { RuntimeFailureError } from "../failure.js";
+import { renderAttemptEvidenceMarkdown } from "../attempt_evidence.js";
 import {
   globPatternToRegExp,
   normalizeRelativePath,
@@ -247,13 +248,14 @@ function renderSupervisorRecoveryEnvelope(envelope: SupervisorRecoveryEnvelope):
     "This node is being retried after a supervisor recovery cycle.",
     "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
     "",
-    `- Prior execution: \`${envelope.prior_execution_id}\``,
     `- Classification: \`${envelope.classification}\``,
     `- Resume point: \`${envelope.resume_point}\``,
     `- Restart boundary: \`${envelope.resume_decision.restart_boundary}\``,
     `- Workspace decision: \`${envelope.workspace_decision}\``,
     `- Resume reason: \`${envelope.resume_decision.reason_code}\``,
     `- Repeated matching symptom count: \`${envelope.repeated_fingerprint_count}\``,
+    "",
+    ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence),
     "",
     "## Recovery Summary",
     directive.summary,

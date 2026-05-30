@@ -411,6 +411,8 @@ describe("supervisor recovery cycle", () => {
                 resume_compiled_id: "root__node",
                 resume_authored_id: "node",
                 target_prior_execution_id: runtimeAttempt.execution_id,
+                target_prior_attempt_path: runtimeAttempt.execution_dir,
+                target_prior_artifact_paths: runtimeAttempt.artifacts,
                 symptom_compiled_id: "root__node",
                 symptom_authored_id: "node",
                 symptom_execution_id: runtimeAttempt.execution_id,

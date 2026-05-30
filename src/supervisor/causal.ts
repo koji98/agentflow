@@ -15,6 +15,7 @@ export interface SupervisorCausalConeNode {
   distance: number;
   status?: RuntimeNodeStatus;
   latest_execution_id?: string;
+  latest_attempt_path?: string;
   latest_outcome?: string;
   repo_alias: string;
   artifact_names: string[];
@@ -35,6 +36,8 @@ export interface SupervisorRecoveryTarget {
   resume_compiled_id: string;
   resume_authored_id: string;
   target_prior_execution_id?: string;
+  target_prior_attempt_path?: string;
+  target_prior_artifact_paths?: Record<string, string>;
   symptom_compiled_id: string;
   symptom_authored_id: string;
   symptom_execution_id: string;
@@ -82,6 +85,7 @@ function nodeSummary(options: {
     kind: options.node.kind,
     distance: options.distance,
     ...(attempt ? { latest_execution_id: attempt.execution_id } : {}),
+    ...(attempt ? { latest_attempt_path: attempt.execution_dir } : {}),
     ...(attempt?.outcome ? { latest_outcome: attempt.outcome } : {}),
     ...(options.nodeStatuses.get(options.node.compiled_id)
       ? { status: options.nodeStatuses.get(options.node.compiled_id)! }
@@ -183,6 +187,8 @@ function makeTarget(options: {
     resume_compiled_id: options.symptom.compiled_id,
     resume_authored_id: options.symptom.authored_id,
     ...(targetAttempt ? { target_prior_execution_id: targetAttempt.execution_id } : {}),
+    ...(targetAttempt ? { target_prior_attempt_path: targetAttempt.execution_dir } : {}),
+    ...(targetAttempt ? { target_prior_artifact_paths: targetAttempt.artifacts } : {}),
     symptom_compiled_id: options.symptom.compiled_id,
     symptom_authored_id: options.symptom.authored_id,
     symptom_execution_id: options.attempt.execution_id,

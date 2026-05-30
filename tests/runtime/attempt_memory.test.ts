@@ -74,11 +74,30 @@ function nodeFixture(): CompiledExecutableNode {
 }
 
 function recoveryEnvelope(priorExecutionId: string): SupervisorRecoveryEnvelope {
+  const priorAttemptRoot = "/run/nodes/worker/executions/001";
   return {
     envelope_id: "env-1",
     compiled_id: "root__worker",
     authored_id: "worker",
     prior_execution_id: priorExecutionId,
+    prior_attempt_evidence: {
+      identity: {
+        execution_id: priorExecutionId,
+        authored_id: "worker",
+        compiled_id: "root__worker"
+      },
+      agent_paths: {
+        attempt_root: priorAttemptRoot,
+        response_path: `${priorAttemptRoot}/agent/response.md`,
+        artifacts_dir: `${priorAttemptRoot}/artifacts`,
+        artifact_paths: {
+          handoff: "/run/artifacts/handoff.md"
+        }
+      },
+      audit_paths: {
+        result_path: `${priorAttemptRoot}/runtime/result.json`
+      }
+    },
     recovery_plan_path: "/debug/recovery-plan.json",
     case_file_path: "/debug/case-file.json",
     action: "retry_node",
@@ -286,6 +305,12 @@ describe("attempt memory", () => {
     expect(memory.evidence_to_read).not.toContain("/run/agent/context.md");
 
     const markdown = renderAttemptMemoryMarkdown(memory);
+    expect(markdown).toContain("## Prior Attempt Evidence");
+    expect(markdown).toContain(priorAttempt.execution_dir);
+    expect(markdown).toContain(join(priorAttempt.execution_dir, "agent", "response.md"));
+    expect(markdown).toContain(join(priorAttempt.execution_dir, "artifacts"));
+    expect(markdown).not.toContain(priorExecutionId);
+    expect(markdown).not.toContain("Prior execution");
     expect(markdown).toContain("## Completed Milestones");
     expect(markdown).toContain("## Best Resume Decision");
     expect(markdown).toContain("validated_progress");

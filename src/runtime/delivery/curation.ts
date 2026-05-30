@@ -9,6 +9,8 @@ export type DeliveryCurationStatus = "passed" | "failed";
 export interface DeliverySourceFailure {
   node: string;
   execution_id: string;
+  attempt_path?: string;
+  attempt_relative_path?: string;
   status: string;
   summary: string;
 }
@@ -76,6 +78,8 @@ export interface DeliverySourcePacket {
   validation: {
     milestone_validation_logs: Array<{
       execution_id: string;
+      attempt_path?: string;
+      attempt_relative_path?: string;
       milestone_id: string;
       command?: string;
       result?: string;
@@ -84,6 +88,8 @@ export interface DeliverySourcePacket {
     outcome_verifications: Array<{
       node: string;
       execution_id: string;
+      attempt_path?: string;
+      attempt_relative_path?: string;
       passed: boolean;
       summary: string;
       findings_count: number;

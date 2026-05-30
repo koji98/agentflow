@@ -168,6 +168,24 @@ describe("context resolution", () => {
             compiled_id: consumerNode.compiled_id,
             authored_id: consumerNode.authored_id,
             prior_execution_id: "exec__consumer__attempt_1",
+            prior_attempt_evidence: {
+                identity: {
+                    execution_id: "exec__consumer__attempt_1",
+                    authored_id: "consumer",
+                    compiled_id: consumerNode.compiled_id
+                },
+                agent_paths: {
+                    attempt_root: join(tempRoot, "prior-attempt"),
+                    response_path: join(tempRoot, "prior-attempt", "agent", "response.md"),
+                    artifacts_dir: join(tempRoot, "prior-attempt", "artifacts"),
+                    artifact_paths: {
+                        prior_handoff: join(tempRoot, "artifacts", "prior-handoff.md")
+                    }
+                },
+                audit_paths: {
+                    result_path: join(tempRoot, "prior-attempt", "runtime", "result.json")
+                }
+            },
             recovery_plan_path: join(tempRoot, "recovery-plan.json"),
             case_file_path: join(tempRoot, "case-file.json"),
             action: "retry_node",
@@ -235,6 +253,10 @@ describe("context resolution", () => {
         }));
         const recoveryBrief = await readFile(resolved.packet.materials[0]!.pointer_path, "utf8");
         expect(recoveryBrief).toContain("The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.");
+        expect(recoveryBrief).toContain("Prior Attempt Evidence");
+        expect(recoveryBrief).toContain(join(tempRoot, "prior-attempt", "agent", "response.md"));
+        expect(recoveryBrief).not.toContain("Prior execution");
+        expect(recoveryBrief).not.toContain("exec__consumer__attempt_1");
         expect(recoveryBrief).toContain(join(tempRoot, "artifacts", "prior-handoff.md"));
         expect(recoveryBrief).not.toContain("human-debug");
         expect(recoveryBrief).not.toContain("runtime/context.json");

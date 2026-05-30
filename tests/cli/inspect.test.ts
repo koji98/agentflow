@@ -182,12 +182,14 @@ describe("inspect command", () => {
     expect(output.historical_failed_attempt_count).toBe(1);
     expect(output.failed_node_stderr_tails).toEqual([
       expect.objectContaining({
+        execution_dir: join(runRoot, "nodes", "002-broken", "executions", "exec-active-fail"),
         execution_id: "exec-active-fail",
         stderr_tail: "active failure\n"
       })
     ]);
     expect(output.historical_failed_attempt_stderr_tails).toEqual([
       expect.objectContaining({
+        execution_dir: join(runRoot, "nodes", "001-recovered", "executions", "exec-recovered-fail"),
         execution_id: "exec-recovered-fail",
         stderr_tail: "old recovered failure\n"
       })

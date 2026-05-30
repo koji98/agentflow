@@ -895,9 +895,11 @@ describe("completion packet", () => {
             expect.objectContaining({
                 artifact: "implementation_summary",
                 kind: "stale_prior_attempt",
+                summary: expect.stringContaining(join(tempRoot, "prior-exec")),
                 evidence_ref: priorArtifactPath
             })
         ]));
+        expect(packet.artifact_findings?.map((finding) => finding.summary).join("\n")).not.toContain("exec__ship__attempt_0");
     });
     it("requires validation evidence only for unambiguous literal commands", async () => {
         const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");

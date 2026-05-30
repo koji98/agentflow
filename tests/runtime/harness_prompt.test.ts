@@ -293,6 +293,24 @@ describe("harness prompt rendering", () => {
       compiled_id: "root__node",
       authored_id: "node",
       prior_execution_id: "exec-0",
+      prior_attempt_evidence: {
+        identity: {
+          execution_id: "exec-0",
+          authored_id: "worker",
+          compiled_id: "root__worker"
+        },
+        agent_paths: {
+          attempt_root: "/tmp/run/prior-attempt",
+          response_path: "/tmp/run/prior-attempt/agent/response.md",
+          artifacts_dir: "/tmp/run/prior-attempt/artifacts",
+          artifact_paths: {
+            prior_handoff: "/tmp/run/prior-attempt/artifacts/prior-handoff.md"
+          }
+        },
+        audit_paths: {
+          result_path: "/tmp/run/prior-attempt/runtime/result.json"
+        }
+      },
       recovery_plan_path: "/tmp/run/exec-0/interventions/recovery-1/recovery-plan.json",
       case_file_path: "/tmp/run/exec-0/interventions/recovery-1/case-file.json",
       action: "retry_node",
@@ -321,10 +339,10 @@ describe("harness prompt rendering", () => {
         must_do: ["Read the cited zod v4 docs fixture before editing."],
         must_not_do: ["Do not change acceptance criteria."],
         evidence_to_read: [
-          "/tmp/run/exec-0/human-debug/interventions/recovery-1/evidence/external_context/evidence-patch.md",
-          "/tmp/run/exec-0/runtime/context.json",
-          "/tmp/run/exec-0/agent/context.md",
-          "/tmp/run/exec-0/artifacts/prior-handoff.md"
+          "/tmp/run/prior-attempt/human-debug/interventions/recovery-1/evidence/external_context/evidence-patch.md",
+          "/tmp/run/prior-attempt/runtime/context.json",
+          "/tmp/run/prior-attempt/agent/context.md",
+          "/tmp/run/prior-attempt/artifacts/prior-handoff.md"
         ],
         validation_focus: ["Run the existing failing test."],
         unchanged_contract: {
@@ -347,6 +365,11 @@ describe("harness prompt rendering", () => {
     }));
 
     expect(prompt).toContain("## Supervisor Recovery Case");
+    expect(prompt).toContain("Prior Attempt Evidence");
+    expect(prompt).toContain("/tmp/run/prior-attempt/agent/response.md");
+    expect(prompt).toContain("/tmp/run/prior-attempt/artifacts");
+    expect(prompt).not.toContain("Prior execution");
+    expect(prompt).not.toContain("exec-0");
     expect(prompt).toContain("Resume point");
     expect(prompt).toContain("continue_from_prior_progress");
     expect(prompt).toContain("Workspace decision");
@@ -354,7 +377,7 @@ describe("harness prompt rendering", () => {
     expect(prompt).toContain("Read the cited zod v4 docs fixture, then repair the API usage.");
     expect(prompt).toContain("Retry from the selected resume point while preserving the original node contract and useful prior progress.");
     expect(prompt).toContain("Read the cited zod v4 docs fixture before editing.");
-    expect(prompt).toContain("/tmp/run/exec-0/artifacts/prior-handoff.md");
+    expect(prompt).toContain("/tmp/run/prior-attempt/artifacts/prior-handoff.md");
     expect(prompt).not.toContain("human-debug");
     expect(prompt).not.toContain("runtime/context.json");
     expect(prompt).not.toContain("agent/context.md");

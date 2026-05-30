@@ -17,6 +17,11 @@ import {
   type ContextAnalysisNode
 } from "../runtime/context/analyze.js";
 import type { RuntimeNodeExecutionResult } from "../runtime/core/engine.js";
+import {
+  buildAttemptEvidenceBundleFromAttempt,
+  buildAttemptEvidenceBundleFromPaths,
+  renderAttemptEvidenceMarkdown
+} from "../runtime/attempt_evidence.js";
 import type { HarnessAdapter } from "../runtime/harness/types.js";
 import { renderHarnessPrompt } from "../runtime/harness/types.js";
 import type { SupervisorCausalContext, SupervisorRecoveryTarget } from "./causal.js";
@@ -92,6 +97,8 @@ function toCausalTargetRecord(target: SupervisorRecoveryTarget): SupervisorCausa
     resume_compiled_id: target.resume_compiled_id,
     resume_authored_id: target.resume_authored_id,
     ...(target.target_prior_execution_id ? { target_prior_execution_id: target.target_prior_execution_id } : {}),
+    ...(target.target_prior_attempt_path ? { target_prior_attempt_path: target.target_prior_attempt_path } : {}),
+    ...(target.target_prior_artifact_paths ? { target_prior_artifact_paths: target.target_prior_artifact_paths } : {}),
     symptom_compiled_id: target.symptom_compiled_id,
     symptom_authored_id: target.symptom_authored_id,
     symptom_execution_id: target.symptom_execution_id,
@@ -149,7 +156,7 @@ function renderCaseFileMarkdown(caseFile: SupervisorCaseFile): string {
     "",
     `- Case: \`${caseFile.case_id}\``,
     `- Node: \`${caseFile.authored_id}\` (\`${caseFile.compiled_id}\`)`,
-    `- Prior execution: \`${caseFile.prior_execution_id}\``,
+    `- Prior attempt: \`${caseFile.prior_attempt_path}\``,
     `- Failure class: \`${caseFile.failure_class}\``,
     `- Fingerprint: \`${caseFile.failure_fingerprint}\``,
     `- Repeated fingerprint count: \`${caseFile.repeated_fingerprint_count}\``,
@@ -1084,8 +1091,8 @@ function forceContractGapForRepeatedStrategy(
 function preserveProgressForRecoveryPlan(plan: SupervisorRecoveryPlan): string[] {
   const items = [
     plan.recovery_target?.target_prior_execution_id
-      ? `Preserve in-scope progress and declared artifacts from prior execution ${plan.recovery_target.target_prior_execution_id} unless the recovery brief identifies them as unsafe.`
-      : "No useful prior execution progress was identified for this target.",
+      ? `Preserve in-scope progress and declared artifacts from the prior attempt at ${plan.recovery_target.target_prior_attempt_path ?? "the selected attempt path"} unless the recovery brief identifies them as unsafe.`
+      : "No useful prior attempt progress was identified for this target.",
     ...(plan.runtime_overlay?.material_delta ?? []).map((delta) => `Runtime delta: ${delta.summary}`)
   ];
 
@@ -1519,7 +1526,6 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     "",
     "The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.",
     "",
-    `- Prior execution: \`${envelope.prior_execution_id}\``,
     `- Classification: \`${envelope.classification}\``,
     `- Selected action: \`${envelope.action}\``,
     `- Resume point: \`${envelope.resume_point}\``,
@@ -1528,6 +1534,8 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
     `- Resume reason: \`${envelope.resume_decision.reason_code}\``,
     `- Failure fingerprint: \`${envelope.failure_fingerprint}\``,
     `- Repeated fingerprint count: \`${envelope.repeated_fingerprint_count}\``,
+    "",
+    ...renderAttemptEvidenceMarkdown(envelope.prior_attempt_evidence),
     "",
     "## Summary",
     directive.summary,
@@ -1563,6 +1571,31 @@ function renderRecoveryEnvelopeMarkdown(envelope: SupervisorRecoveryEnvelope): s
       ? directive.validation_focus.map((item) => `- ${item}`)
       : ["- Re-run the validation named by the original task when feasible."])
   ].join("\n");
+}
+
+function recoveryTargetAttemptEvidence(options: {
+  recoveryPlan: SupervisorRecoveryPlan;
+  attempt: RuntimeNodeAttempt;
+  caseFilePath: string;
+  recoveryPlanPath: string;
+}) {
+  const target = options.recoveryPlan.recovery_target;
+  if (target?.target_prior_execution_id && target.target_prior_attempt_path) {
+    return buildAttemptEvidenceBundleFromPaths({
+      execution_id: target.target_prior_execution_id,
+      compiled_id: target.target_compiled_id,
+      authored_id: target.target_authored_id,
+      attempt_root: target.target_prior_attempt_path,
+      ...(target.target_prior_artifact_paths ? { artifact_paths: target.target_prior_artifact_paths } : {}),
+      case_file_path: options.caseFilePath,
+      recovery_plan_path: options.recoveryPlanPath
+    });
+  }
+
+  return buildAttemptEvidenceBundleFromAttempt(options.attempt, {
+    case_file_path: options.caseFilePath,
+    recovery_plan_path: options.recoveryPlanPath
+  });
 }
 
 function renderCausalTargetsMarkdown(causal: SupervisorCausalCaseFile): string {
@@ -1679,6 +1712,7 @@ export async function runSupervisorRecoveryCycle(options: {
     compiled_id: options.node.compiled_id,
     authored_id: options.node.authored_id,
     prior_execution_id: options.attempt.execution_id,
+    prior_attempt_path: options.attempt.execution_dir,
     attempt_index: options.attempt.attempt_index,
     failed_at: options.attempt.ended_at ?? startedAt,
     failure_class: options.classification.class,
@@ -1881,6 +1915,12 @@ export async function runSupervisorRecoveryCycle(options: {
           compiled_id: recoveryPlan.recovery_target?.target_compiled_id ?? options.node.compiled_id,
           authored_id: recoveryPlan.recovery_target?.target_authored_id ?? options.node.authored_id,
           prior_execution_id: recoveryPlan.recovery_target?.target_prior_execution_id ?? options.attempt.execution_id,
+          prior_attempt_evidence: recoveryTargetAttemptEvidence({
+            recoveryPlan,
+            attempt: options.attempt,
+            caseFilePath: caseFileJsonPath,
+            recoveryPlanPath: recoveryPlanJsonPath
+          }),
           symptom_compiled_id: options.node.compiled_id,
           symptom_authored_id: options.node.authored_id,
           symptom_execution_id: options.attempt.execution_id,

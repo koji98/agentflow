@@ -14,11 +14,16 @@ import type {
   RuntimeMilestoneState
 } from "./completion/index.js";
 import type {
+  AttemptEvidenceBundle,
   RecoveryResumeDecision,
   SupervisorRecoveryEnvelope,
   SupervisorResumePoint,
   SupervisorWorkspaceDecision
 } from "../supervisor/types.js";
+import {
+  buildAttemptEvidenceBundleFromAttempt,
+  renderAttemptEvidenceMarkdown
+} from "./attempt_evidence.js";
 
 export interface AttemptMemoryArtifactState {
   name: string;
@@ -49,6 +54,7 @@ export interface AttemptMemoryWorkspaceChanges {
 export interface AttemptMemory {
   version: "1";
   prior_execution_id: string;
+  prior_attempt_evidence: AttemptEvidenceBundle;
   prior_outcome: string;
   failure_summary: string;
   resume_point: SupervisorResumePoint;
@@ -278,6 +284,9 @@ export async function buildAttemptMemory(options: {
   return {
     version: "1",
     prior_execution_id: options.recoveryEnvelope.prior_execution_id,
+    prior_attempt_evidence: options.priorAttempt
+      ? buildAttemptEvidenceBundleFromAttempt(options.priorAttempt)
+      : options.recoveryEnvelope.prior_attempt_evidence,
     prior_outcome: options.priorAttempt?.outcome ?? options.priorAttempt?.status ?? "unknown",
     failure_summary: options.recoveryEnvelope.retry_directive.summary,
     resume_point: options.recoveryEnvelope.resume_point,
@@ -331,12 +340,13 @@ export function renderAttemptMemoryMarkdown(memory: AttemptMemory): string {
     "",
     "| Field | Value |",
     "| --- | --- |",
-    `| Prior execution | \`${memory.prior_execution_id}\` |`,
     `| Prior outcome | \`${memory.prior_outcome}\` |`,
     `| Resume point | \`${memory.resume_point}\` |`,
     `| Workspace decision | \`${memory.workspace_decision}\` |`,
     `| Failure symptom | ${markdownCell(memory.failure_summary)} |`,
     `| Required next action | ${markdownCell(memory.required_next_action)} |`,
+    "",
+    ...renderAttemptEvidenceMarkdown(memory.prior_attempt_evidence),
     "",
     "## Best Resume Decision",
     "| Field | Value |",

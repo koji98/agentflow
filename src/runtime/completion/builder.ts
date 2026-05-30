@@ -248,7 +248,7 @@ async function inspectArtifact(options: {
       findings.push({
         artifact: options.name,
         kind: "stale_prior_attempt",
-        summary: `Artifact "${options.name}" exists only on prior attempt ${prior.execution_id}.`,
+        summary: `Artifact "${options.name}" exists only in prior attempt path ${prior.execution_dir}.`,
         evidence_ref: priorPath
       });
     }
