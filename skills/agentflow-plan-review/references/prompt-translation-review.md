@@ -38,6 +38,7 @@ Review authored prose before judging the lowered prompt. Authoring rationale bel
 | Context `what` / `why` | What the pointer contains and why this node needs it. Flag provenance/debug chatter and graph-construction rationale. |
 | Artifact descriptions | Durable output contract and what the artifact proves. Flag write-command instructions or runtime lowering details. |
 | Deep-work `phases.*.intent` | Additive phase-specific objective, evidence, or boundary. Flag replacement parent contracts or generic instructions repeated across every phase. |
+| Work-list deep-work `item_worker.phases.*.intent` | Additive item-phase objective, evidence, or boundary. Flag duplicated parent/item goals, graph mechanics, or phase text that weakens frozen-item constraints. |
 
 ## Approval Bar
 

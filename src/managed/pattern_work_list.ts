@@ -6,6 +6,7 @@ import type {
   ExecNode,
   SequenceNode
 } from "../graph/authored.js";
+import type { PatternDeepWorkPhaseName, PatternDeepWorkPhaseOverride } from "./pattern_deep_work.js";
 import {
   artifactContext,
   body,
@@ -59,6 +60,7 @@ export type PatternWorkListItemWorker =
   | {
       kind: "deep_work";
       completion: PatternWorkListDeepWorkCompletion;
+      phases?: Partial<Record<PatternDeepWorkPhaseName, PatternDeepWorkPhaseOverride>>;
     };
 
 export interface PatternWorkListBlock {
@@ -151,6 +153,9 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
         `Pass threshold for each item gate: ${worker.completion.pass_threshold}`,
         ...formatCriteria(worker.completion.criteria),
         "The runtime will run a bounded deep-work lifecycle for each frozen item before moving to the next item.",
+        "Each item cycle runs planning, execution, verification, and publishing phases.",
+        "Item deep-work phases may add phase-specific intent, support, model, reasoning effort, sandbox, or profile policy.",
+        "Phase intent is additive to the parent work-list contract and current frozen item contract.",
         "Use prior item scorecard feedback when present, but do not mutate the frozen list between cycles.",
         "If an item cannot be completed, record the concrete blocker and evidence instead of silently changing scope."
       ];

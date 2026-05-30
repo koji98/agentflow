@@ -20,7 +20,7 @@ Required fields:
 Supported item workers:
 
 - `agent`: one-pass item worker with standard Agentflow orientation, milestones, validation evidence, and item handoff.
-- `deep_work`: deep-work style item execution for each frozen item, with per-item criteria, scorecard feedback, semantic verification, and bounded retry semantics described by `completion.max_cycles`, `completion.pass_threshold`, and weighted completion criteria.
+- `deep_work`: deep-work style item execution for each frozen item, with per-item plan, execute, verify, and publish phases, per-item criteria, scorecard feedback, semantic verification, and bounded retry semantics described by `completion.max_cycles`, `completion.pass_threshold`, and weighted completion criteria.
 
 Common fields:
 
@@ -50,9 +50,9 @@ The pattern lowers into:
 
 1. A planner agent that writes only `work-list.json`.
 2. A deterministic freeze step that validates the list and writes `work-list-frozen.json` plus an initial ledger.
-3. A runtime-owned item phase that launches one managed agent execution per frozen item in order.
-4. Each item attempt writes `item-handoff.md`, `item-result.json`, and `item-validation.md` in its own execution directory, then receives item-level semantic verification.
-5. For `item_worker.kind: "deep_work"`, each item also runs weighted criteria in bounded parallelism, writes a per-item scorecard in stable criterion order, and retries that same item until its gate passes or `max_cycles` is exhausted.
+3. A runtime-owned item phase that launches one managed execution per frozen item in order.
+4. For `item_worker.kind: "agent"`, each item attempt writes `item-handoff.md`, `item-result.json`, and `item-validation.md` in its own execution directory, then receives item-level semantic verification.
+5. For `item_worker.kind: "deep_work"`, each item cycle runs item planning, item execution, item verification criteria, and item publishing. The publish phase writes final item artifacts only after the item scorecard passes. Failed criteria retry the current item from the next item plan cycle until the gate passes or `max_cycles` is exhausted.
 6. A deterministic finalizer that verifies every frozen item completed and writes `work-items.json`.
 7. A publisher agent that writes final graph-addressable artifacts and forwards the verified `work_items` artifact.
 
@@ -147,6 +147,45 @@ For higher-risk work lists, use `deep_work` when the frozen list needs rubric or
         "target": "item_handoff",
         "rubric": "The item handoff cites concrete evidence, validation, risks, and downstream implications.",
         "weight": 0.4
+      }
+    ]
+  }
+}
+```
+
+`deep_work` item workers may also use optional `phases.plan`, `phases.execute`, `phases.verify`, and `phases.publish` overrides. This is the same additive phase contract as top-level `pattern_deep_work`: phase intent appends to the parent work-list contract and current frozen item contract, phase support is merged with top-level support for that phase only, and phase `model`, `reasoning_effort`, `sandbox`, and `runtime.profile` affect only the matching item phase. Use item phases only for real phase differences; do not copy the parent goal into every phase.
+
+```json
+"item_worker": {
+  "kind": "deep_work",
+  "phases": {
+    "plan": {
+      "intent": {
+        "goal": "Map the current item to concrete evidence and validation before editing."
+      }
+    },
+    "verify": {
+      "runtime": {
+        "profile": "reviewer"
+      },
+      "intent": {
+        "acceptance_criteria": [
+          "Criterion judgments cite the current item handoff, validation evidence, and prior-item ledger when relevant."
+        ]
+      }
+    }
+  },
+  "completion": {
+    "max_cycles": 3,
+    "pass_threshold": 0.85,
+    "criteria": [
+      {
+        "id": "item_contract",
+        "kind": "rubric",
+        "target": "item_handoff",
+        "rubric": "The current item handoff proves the frozen item contract is complete.",
+        "weight": 1,
+        "required": true
       }
     ]
   }

@@ -2,9 +2,12 @@ import { createHash } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import type { ArtifactDefinition } from "../../graph/authored.js";
-import type { CompiledAgentNode, CompiledGraph } from "../../graph/compiled.js";
+import type { ArtifactDefinition, ContextItem } from "../../graph/authored.js";
+import type { CompiledAgentNode, CompiledGraph, ResolvedSkill, ResolvedTool } from "../../graph/compiled.js";
+import type { EffectiveNodePolicy } from "../../graph/profiles.js";
 import type { HarnessName } from "../../graph/schema.js";
+import type { PatternDeepWorkPhaseName, PatternDeepWorkPhaseOverride } from "../../managed/pattern_deep_work.js";
+import { resolveSubpathWithinRoot } from "../../path_rules.js";
 import { readRunExecutionAttempts } from "../../artifacts/reader.js";
 import {
   resolveExecutionAgentContextPath,
@@ -103,6 +106,14 @@ interface ManagedWorkListPriorProgress {
   accepted_validation: string[];
 }
 
+interface ManagedWorkListPhaseTemplate {
+  effective_policy: EffectiveNodePolicy;
+  context: ContextItem[];
+  skills: ResolvedSkill[];
+  cli: CompiledAgentNode["cli"];
+  tools: ResolvedTool[];
+}
+
 interface ManagedWorkListReuseDecision {
   item_id: string;
   decision: "reuse_prior_completed_item";
@@ -145,6 +156,8 @@ interface ManagedWorkListRuntimeConfig {
             rubric?: string;
           }>;
         };
+        phases?: Partial<Record<PatternDeepWorkPhaseName, PatternDeepWorkPhaseOverride>>;
+        phase_templates?: Partial<Record<PatternDeepWorkPhaseName, ManagedWorkListPhaseTemplate>>;
       };
   criteria_concurrency?: number;
 }
@@ -338,12 +351,55 @@ function itemArtifactDefinitions(): Record<string, ArtifactDefinition> {
   };
 }
 
+function itemPlanArtifactDefinitions(): Record<string, ArtifactDefinition> {
+  return {
+    item_cycle_plan: {
+      from: "output_dir",
+      path: "item-cycle-plan.md",
+      description: "Focused plan for the current work-list item cycle."
+    }
+  };
+}
+
+function itemDraftArtifactDefinitions(): Record<string, ArtifactDefinition> {
+  return {
+    item_work_notes: {
+      from: "output_dir",
+      path: "item-work-notes.md",
+      description: "Execution notes for the current work-list item cycle."
+    },
+    draft_item_handoff: {
+      from: "output_dir",
+      path: "draft-item-handoff.md",
+      description: "Draft item handoff to be graded before final publication."
+    },
+    draft_item_result: {
+      from: "output_dir",
+      path: "draft-item-result.json",
+      description: "Draft structured item result to be graded before final publication."
+    },
+    draft_item_validation: {
+      from: "output_dir",
+      path: "draft-item-validation.md",
+      description: "Draft validation evidence to be graded before final publication."
+    }
+  };
+}
+
 function managedItemExecutionDir(parentExecutionDir: string, itemId: string, cycle: number): string {
   return join(parentExecutionDir, "managed-items", itemId, "executions", `${String(cycle).padStart(3, "0")}-exec`);
 }
 
 function managedItemExecutionId(parentAttempt: RuntimeNodeAttempt, itemId: string, cycle: number): string {
   return `${parentAttempt.execution_id}__item_${itemId}__cycle_${cycle}`;
+}
+
+function managedItemPhaseExecutionDir(itemExecutionDir: string, phase: PatternDeepWorkPhaseName): string {
+  return join(itemExecutionDir, "phases", phase);
+}
+
+function managedItemPhaseExecutionId(parentAttempt: RuntimeNodeAttempt, itemId: string, cycle: number, phase: PatternDeepWorkPhaseName): string {
+  return `${managedItemExecutionId(parentAttempt, itemId, cycle)}__${phase}`;
 }
 
 async function writeManagedWorkListReuseDecision(options: {
@@ -407,6 +463,7 @@ function buildManagedItemAttempt(options: {
   executionDir: string;
   executionId: string;
   cycle: number;
+  managedPhase?: string;
 }): RuntimeNodeAttempt {
   return {
     execution_id: options.executionId,
@@ -421,7 +478,7 @@ function buildManagedItemAttempt(options: {
     artifacts: {},
     metadata: {
       managed_parent_execution_id: options.context.attempt.execution_id,
-      managed_phase: "work_list_item"
+      managed_phase: options.managedPhase ?? "work_list_item"
     }
   };
 }
@@ -500,6 +557,37 @@ function renderManagedItemContextManifest(rows: Array<{
   return `${lines.join("\n")}\n`;
 }
 
+function managedItemContextRows(context: ContextItem[], workspacePath: string): Array<{
+  name: string;
+  kind: string;
+  pointer: string;
+  what: string;
+  why: string;
+}> {
+  return context.map((item) => {
+    if ("from" in item) {
+      const pointer = item.from === "workspace_file" || item.from === "workspace_glob"
+        ? resolveSubpathWithinRoot(workspacePath, item.path, `context ${item.name}`)
+        : item.path;
+      return {
+        name: item.name,
+        kind: item.from,
+        pointer,
+        what: item.what,
+        why: item.why
+      };
+    }
+
+    return {
+      name: item.name,
+      kind: "artifact_ref",
+      pointer: item.ref,
+      what: item.what,
+      why: item.why
+    };
+  });
+}
+
 async function writeManagedItemContext(options: {
   parentContext: RuntimeNodeExecutorContext<CompiledAgentNode>;
   itemNode: CompiledAgentNode;
@@ -510,6 +598,13 @@ async function writeManagedItemContext(options: {
   ledgerPath: string;
   priorHandoffsPath?: string;
   priorScorecardPath?: string;
+  extraRows?: Array<{
+    name: string;
+    kind: string;
+    pointer: string;
+    what: string;
+    why: string;
+  }>;
 }): Promise<{ packetPath: string; manifestPath: string; currentItemPath: string }> {
   const runtimeDir = join(options.executionDir, "runtime");
   const agentDir = join(options.executionDir, "agent");
@@ -557,7 +652,9 @@ async function writeManagedItemContext(options: {
           what: "Most recent failed scorecard for this item.",
           why: "The retry should address concrete item-level feedback."
         }]
-      : [])
+      : []),
+    ...managedItemContextRows(options.itemNode.context, options.parentContext.workspace_path),
+    ...(options.extraRows ?? [])
   ];
 
   const packetPath = resolveExecutionRuntimeContextPath(options.executionDir);
@@ -642,6 +739,153 @@ function buildManagedWorkListItemGoal(options: {
   ].join("\n");
 }
 
+function phaseContractLines(
+  worker: Extract<ManagedWorkListRuntimeConfig["item_worker"], { kind: "deep_work" }>,
+  phase: PatternDeepWorkPhaseName
+): string[] {
+  const intent = worker.phases?.[phase]?.intent;
+  if (!intent) {
+    return [];
+  }
+  const lines = [
+    "",
+    "Phase contract:",
+    "This phase contract is additive. It does not replace or weaken the parent work-list contract, current frozen item contract, completion criteria, threshold, or constraints."
+  ];
+  if (intent.goal) {
+    lines.push(`Additional phase objective: ${intent.goal}`);
+  }
+  if (intent.acceptance_criteria && intent.acceptance_criteria.length > 0) {
+    lines.push("Additional phase acceptance criteria:");
+    lines.push(...intent.acceptance_criteria.map((entry) => `- ${entry}`));
+  }
+  if (intent.constraints && intent.constraints.length > 0) {
+    lines.push("Additional phase constraints:");
+    lines.push(...intent.constraints.map((entry) => `- ${entry}`));
+  }
+  return lines;
+}
+
+function buildManagedWorkListItemPlanGoal(options: {
+  item: ManagedWorkListFrozenItem;
+  config: ManagedWorkListRuntimeConfig;
+  worker: Extract<ManagedWorkListRuntimeConfig["item_worker"], { kind: "deep_work" }>;
+  cycle: number;
+  maxCycles: number;
+}): string {
+  return [
+    `Plan frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
+    "",
+    "You are planning one cycle for a managed work-list item. Do not edit source files in this phase.",
+    `Parent work-list goal: ${options.config.parent_intent.goal}`,
+    `Current item goal: ${options.item.goal}`,
+    `Current item rationale: ${options.item.rationale}`,
+    `Cycle: ${options.cycle} of ${options.maxCycles}`,
+    "",
+    "Map the current item contract to evidence, planned material delta, validation strategy, risks, and likely files or areas to inspect.",
+    "If prior scorecard feedback is present, plan directly against that feedback.",
+    "Keep the plan narrow to the current item. Do not plan later frozen items.",
+    ...phaseContractLines(options.worker, "plan"),
+    "",
+    "Output contract:",
+    "Publish only the `item_cycle_plan` artifact.",
+    "Include sections: Objective, Relevant evidence, Planned material delta, Criterion evidence map, Validation plan, and Risks or constraints."
+  ].join("\n");
+}
+
+function buildManagedWorkListItemExecuteGoal(options: {
+  item: ManagedWorkListFrozenItem;
+  config: ManagedWorkListRuntimeConfig;
+  worker: Extract<ManagedWorkListRuntimeConfig["item_worker"], { kind: "deep_work" }>;
+  cycle: number;
+  maxCycles: number;
+}): string {
+  return [
+    `Execute frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
+    "",
+    "You are executing one planned cycle for a managed work-list item. Follow the item cycle plan in context.",
+    "If evidence shows the plan is wrong, make the smallest justified deviation and record why in work notes.",
+    `Parent work-list goal: ${options.config.parent_intent.goal}`,
+    `Current item goal: ${options.item.goal}`,
+    `Cycle: ${options.cycle} of ${options.maxCycles}`,
+    "",
+    "Produce draft item evidence for grading. Do not publish final item artifacts in this phase.",
+    ...phaseContractLines(options.worker, "execute"),
+    "",
+    "Output contract:",
+    "Publish `item_work_notes`, `draft_item_handoff`, `draft_item_result`, and `draft_item_validation`.",
+    "The draft item result JSON uses the same shape as the final item result and must use the current frozen item id."
+  ].join("\n");
+}
+
+function buildManagedWorkListItemPublishGoal(options: {
+  item: ManagedWorkListFrozenItem;
+  config: ManagedWorkListRuntimeConfig;
+  worker: Extract<ManagedWorkListRuntimeConfig["item_worker"], { kind: "deep_work" }>;
+  cycle: number;
+  maxCycles: number;
+}): string {
+  return [
+    `Publish frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
+    "",
+    "You are publishing final item artifacts from the latest passing item scorecard.",
+    "Use the cycle plan, draft item artifacts, scorecard, and validation evidence in context.",
+    "Do not claim success beyond the accepted item evidence.",
+    `Parent work-list goal: ${options.config.parent_intent.goal}`,
+    `Current item goal: ${options.item.goal}`,
+    `Cycle: ${options.cycle} of ${options.maxCycles}`,
+    ...phaseContractLines(options.worker, "publish"),
+    "",
+    "Output contract:",
+    "Publish exactly these final declared item artifacts:",
+    "- `item_handoff`: Markdown with item goal, final results, evidence, validation, risks, and downstream implications.",
+    "- `item_result`: JSON with id, status completed, summary, validation, risks, and downstream_implications.",
+    "- `item_validation`: Markdown with exact validation evidence and any unavailable validation."
+  ].join("\n");
+}
+
+function buildManagedWorkListItemVerifyGoal(options: {
+  item: ManagedWorkListFrozenItem;
+  config: ManagedWorkListRuntimeConfig;
+  worker: Extract<ManagedWorkListRuntimeConfig["item_worker"], { kind: "deep_work" }>;
+  cycle: number;
+  maxCycles: number;
+}): string {
+  return [
+    `Verify frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
+    "",
+    "You are evaluating draft evidence for one managed work-list item cycle.",
+    "Grade only the current item evidence, draft artifacts, validation evidence, and relevant ledger/prior-item pointers.",
+    `Parent work-list goal: ${options.config.parent_intent.goal}`,
+    `Current item goal: ${options.item.goal}`,
+    `Cycle: ${options.cycle} of ${options.maxCycles}`,
+    ...phaseContractLines(options.worker, "verify")
+  ].join("\n");
+}
+
+function applyPhaseTemplate(
+  node: CompiledAgentNode,
+  worker: Extract<ManagedWorkListRuntimeConfig["item_worker"], { kind: "deep_work" }>,
+  phase: PatternDeepWorkPhaseName
+): CompiledAgentNode {
+  const template = worker.phase_templates?.[phase];
+  const override = worker.phases?.[phase];
+  return {
+    ...node,
+    effective_policy: template?.effective_policy ?? {
+      ...node.effective_policy,
+      ...(override?.model ? { model: override.model } : {}),
+      ...(override?.reasoning_effort ? { reasoning_effort: override.reasoning_effort } : {}),
+      ...(override?.sandbox ? { sandbox: override.sandbox } : {}),
+      ...(override?.runtime?.profile ? { profile_name: override.runtime.profile } : {})
+    },
+    context: template?.context ?? node.context,
+    skills: template?.skills ?? node.skills,
+    cli: template?.cli ?? node.cli,
+    tools: phase === "verify" ? [] : template?.tools ?? node.tools
+  };
+}
+
 function buildManagedWorkListItemNode(options: {
   parentNode: CompiledAgentNode;
   item: ManagedWorkListFrozenItem;
@@ -668,7 +912,7 @@ function buildManagedWorkListItemNode(options: {
         "Do not work on any item other than the current item."
       ]
     },
-    context: [],
+    context: options.parentNode.context,
     declared_artifacts: itemArtifactDefinitions(),
     managed_runtime: {
       kind: "pattern_work_list",
@@ -680,6 +924,62 @@ function buildManagedWorkListItemNode(options: {
       }
     }
   };
+}
+
+function buildManagedWorkListItemPhaseNode(options: {
+  parentNode: CompiledAgentNode;
+  item: ManagedWorkListFrozenItem;
+  config: ManagedWorkListRuntimeConfig;
+  worker: Extract<ManagedWorkListRuntimeConfig["item_worker"], { kind: "deep_work" }>;
+  phase: PatternDeepWorkPhaseName;
+  cycle: number;
+  maxCycles: number;
+}): CompiledAgentNode {
+  const baseNode = buildManagedWorkListItemNode(options);
+  const phaseGoal = options.phase === "plan"
+    ? buildManagedWorkListItemPlanGoal(options)
+    : options.phase === "execute"
+      ? buildManagedWorkListItemExecuteGoal(options)
+      : options.phase === "verify"
+        ? buildManagedWorkListItemVerifyGoal(options)
+      : options.phase === "publish"
+        ? buildManagedWorkListItemPublishGoal(options)
+        : baseNode.intent.goal;
+  const artifacts = options.phase === "plan"
+    ? itemPlanArtifactDefinitions()
+    : options.phase === "execute"
+      ? itemDraftArtifactDefinitions()
+      : options.phase === "publish"
+        ? itemArtifactDefinitions()
+        : {};
+
+  return applyPhaseTemplate({
+    ...baseNode,
+    compiled_id: `${baseNode.compiled_id}__${options.phase}`,
+    authored_id: `${baseNode.authored_id}__${options.phase}`,
+    label: `Work List Item ${options.item.id} ${options.phase}`,
+    intent: {
+      goal: phaseGoal,
+      acceptance_criteria: [
+        ...options.item.acceptance_criteria,
+        `The ${options.phase} phase stays scoped to frozen item ${options.item.id}.`
+      ],
+      constraints: [
+        ...baseNode.intent.constraints,
+        ...(options.worker.phases?.[options.phase]?.intent?.constraints ?? [])
+      ]
+    },
+    declared_artifacts: artifacts,
+    managed_runtime: {
+      kind: "pattern_work_list",
+      root_id: options.parentNode.managed_runtime?.root_id ?? options.parentNode.authored_id,
+      phase: `item_${options.phase}`,
+      config: {
+        item_id: options.item.id,
+        cycle: options.cycle
+      }
+    }
+  }, options.worker, options.phase);
 }
 
 async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkListFrozenItem): Promise<{
@@ -721,6 +1021,55 @@ async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkList
     handoffPath,
     resultPath,
     validationPath,
+    result: {
+      ...result,
+      validation,
+      risks: Array.isArray(result.risks) ? result.risks : [],
+      downstream_implications: Array.isArray(result.downstream_implications) ? result.downstream_implications : []
+    }
+  };
+}
+
+async function readManagedDraftItemArtifacts(outputDir: string, item: ManagedWorkListFrozenItem): Promise<{
+  handoffPath: string;
+  resultPath: string;
+  validationPath: string;
+  workNotesPath: string;
+  result: ManagedWorkListItemResult;
+}> {
+  const handoffPath = join(outputDir, "draft-item-handoff.md");
+  const resultPath = join(outputDir, "draft-item-result.json");
+  const validationPath = join(outputDir, "draft-item-validation.md");
+  const workNotesPath = join(outputDir, "item-work-notes.md");
+  try {
+    await access(handoffPath);
+    await access(resultPath);
+    await access(validationPath);
+    await access(workNotesPath);
+  } catch {
+    throw new RuntimeFailureError(
+      "artifact_contract_failure",
+      `Managed work-list item ${item.id} execution phase did not publish item_work_notes, draft_item_handoff, draft_item_result, and draft_item_validation.`
+    );
+  }
+
+  const result = await readJsonFile<ManagedWorkListItemResult>("draft item result", resultPath);
+  if (result.id !== item.id) {
+    throw new RuntimeFailureError("artifact_contract_failure", `Draft item result id "${result.id}" does not match frozen item "${item.id}".`);
+  }
+  if (result.status !== "completed") {
+    throw new RuntimeFailureError("artifact_contract_failure", `Draft item ${item.id} result status is "${result.status}", not completed.`);
+  }
+  const validation = normalizeManagedWorkListItemValidation(result.validation);
+  if (!validation) {
+    throw new RuntimeFailureError("artifact_contract_failure", `Draft item ${item.id} result is missing validation evidence.`);
+  }
+
+  return {
+    handoffPath,
+    resultPath,
+    validationPath,
+    workNotesPath,
     result: {
       ...result,
       validation,
@@ -929,10 +1278,11 @@ async function runManagedWorkListItemAgent(options: {
   contextPacketPath: string;
   contextManifestPath: string;
   contextManifest: string;
+  artifactsRoot?: string;
 }): Promise<HarnessResult> {
   const harnessName = options.itemNode.effective_policy.harness!;
   const harness = options.harnesses[harnessName]!;
-  const outputDir = resolveExecutionArtifactsDirectory(options.executionDir);
+  const outputDir = options.artifactsRoot ?? resolveExecutionArtifactsDirectory(options.executionDir);
   await mkdir(outputDir, { recursive: true });
   const runtimeDir = join(options.context.run_root, "runtime");
   const toolSetup = await prepareAgentTools({
@@ -1001,6 +1351,7 @@ async function buildManagedWorkListItemCompletionPacket(options: {
   context: RuntimeNodeExecutorContext<CompiledAgentNode>;
   itemNode: CompiledAgentNode;
   itemAttempt: RuntimeNodeAttempt;
+  runtimeManagedReady?: boolean;
 }): Promise<CompletionPacket> {
   const priorAttempts = (await readRunExecutionAttempts(options.context.run_root).catch(() => []))
     .filter((attempt) =>
@@ -1019,8 +1370,18 @@ async function buildManagedWorkListItemCompletionPacket(options: {
     sandbox: options.itemNode.effective_policy.sandbox ?? "workspace-write",
     observations: await readOperatorObservations(options.context.run_root)
   });
-  await persistCompletionPacket(packet);
-  return packet;
+  const finalPacket: CompletionPacket = options.runtimeManagedReady &&
+    packet.missing_artifacts.length === 0 &&
+    packet.artifact_findings.length === 0
+    ? {
+        ...packet,
+        completion_status: "ready_for_verification",
+        ready_for_verification: true,
+        blocking_reasons: []
+      }
+    : packet;
+  await persistCompletionPacket(finalPacket);
+  return finalPacket;
 }
 
 async function verifyManagedWorkListItemAttempt(options: {
@@ -1184,6 +1545,8 @@ async function evaluateManagedWorkListItemCriteria(options: {
           ...(options.context.graph_intent.acceptance_criteria ? { graph_acceptance_criteria: options.context.graph_intent.acceptance_criteria } : {}),
           ...(options.context.graph_intent.constraints ? { graph_constraints: options.context.graph_intent.constraints } : {}),
           node_goal: [
+            options.itemNode.intent.goal,
+            "",
             `Evaluate work-list item ${options.item.id}: ${options.item.title}.`,
             `Criterion target: ${criterion.target ?? "workspace"}.`,
             "Grade only the current item evidence and the relevant ledger/prior-item pointers."
@@ -1283,8 +1646,257 @@ async function evaluateManagedWorkListItemCriteria(options: {
     generated_at: new Date().toISOString()
   };
   const scorecardPath = join(options.itemExecutionDir, "artifacts", "scorecard.json");
+  await mkdir(dirname(scorecardPath), { recursive: true });
   await writeFile(scorecardPath, `${JSON.stringify(scorecard, null, 2)}\n`, "utf8");
   return { passed, scorecardPath, scorecard };
+}
+
+function contextRow(name: string, kind: string, pointer: string, what: string, why: string): {
+  name: string;
+  kind: string;
+  pointer: string;
+  what: string;
+  why: string;
+} {
+  return { name, kind, pointer, what, why };
+}
+
+async function runManagedWorkListDeepWorkItemCycle(options: {
+  context: RuntimeNodeExecutorContext<CompiledAgentNode>;
+  harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
+  config: ManagedWorkListRuntimeConfig;
+  worker: Extract<ManagedWorkListRuntimeConfig["item_worker"], { kind: "deep_work" }>;
+  item: ManagedWorkListFrozenItem;
+  itemNode: CompiledAgentNode;
+  itemAttempt: RuntimeNodeAttempt;
+  itemExecutionDir: string;
+  itemExecutionId: string;
+  frozenPath: string;
+  runtimeLedgerPath: string;
+  priorHandoffsPath?: string;
+  lastScorecardPath?: string;
+  cycle: number;
+  maxCycles: number;
+  maxConcurrency?: number;
+}): Promise<{
+  completedItemAttempt?: RuntimeNodeAttempt;
+  itemArtifacts?: Awaited<ReturnType<typeof readManagedItemArtifacts>>;
+  scorecardPath?: string;
+  cycles?: unknown[];
+  lastFailure?: string;
+}> {
+  const runPhase = async (
+    phase: PatternDeepWorkPhaseName,
+    phaseNode: CompiledAgentNode,
+    extraRows: Array<ReturnType<typeof contextRow>>,
+    artifactsRoot?: string
+  ): Promise<{ result: HarnessResult; attempt: RuntimeNodeAttempt; phaseDir: string; contextManifest: string; contextPacketPath: string; contextManifestPath: string }> => {
+    const phaseDir = managedItemPhaseExecutionDir(options.itemExecutionDir, phase);
+    const phaseExecutionId = managedItemPhaseExecutionId(options.context.attempt, options.item.id, options.cycle, phase);
+    const phaseAttempt = buildManagedItemAttempt({
+      context: options.context,
+      itemNode: phaseNode,
+      executionDir: phaseDir,
+      executionId: phaseExecutionId,
+      cycle: options.cycle,
+      managedPhase: `work_list_item_${phase}`
+    });
+    await writeManagedItemAttemptStart(phaseAttempt);
+    const phaseContext = await writeManagedItemContext({
+      parentContext: options.context,
+      itemNode: phaseNode,
+      executionDir: phaseDir,
+      executionId: phaseExecutionId,
+      item: options.item,
+      frozenPath: options.frozenPath,
+      ledgerPath: options.runtimeLedgerPath,
+      ...(options.priorHandoffsPath ? { priorHandoffsPath: options.priorHandoffsPath } : {}),
+      ...(options.lastScorecardPath ? { priorScorecardPath: options.lastScorecardPath } : {}),
+      extraRows
+    });
+    const contextManifest = await readContextManifestContent(phaseContext.manifestPath);
+    const result = await runManagedWorkListItemAgent({
+      context: options.context,
+      harnesses: options.harnesses,
+      itemNode: phaseNode,
+      executionDir: phaseDir,
+      executionId: phaseExecutionId,
+      contextPacketPath: phaseContext.packetPath,
+      contextManifestPath: phaseContext.manifestPath,
+      contextManifest,
+      ...(artifactsRoot ? { artifactsRoot } : {})
+    });
+    await writeFile(join(phaseDir, "agent", "response.md"), result.transcript?.last_message ?? result.stdout ?? "", "utf8");
+    const completedPhaseAttempt = await writeManagedItemAttemptResult({
+      attempt: phaseAttempt,
+      result
+    });
+    return {
+      result,
+      attempt: completedPhaseAttempt,
+      phaseDir,
+      contextManifest,
+      contextPacketPath: phaseContext.packetPath,
+      contextManifestPath: phaseContext.manifestPath
+    };
+  };
+
+  const planNode = buildManagedWorkListItemPhaseNode({
+    parentNode: options.context.node,
+    item: options.item,
+    config: options.config,
+    worker: options.worker,
+    phase: "plan",
+    cycle: options.cycle,
+    maxCycles: options.maxCycles
+  });
+  const planRun = await runPhase("plan", planNode, []);
+  if (planRun.result.status !== "passed") {
+    return { lastFailure: planRun.result.stderr ?? planRun.result.stdout ?? `Item ${options.item.id} plan phase failed.` };
+  }
+  const planPath = join(resolveExecutionArtifactsDirectory(planRun.phaseDir), "item-cycle-plan.md");
+  try {
+    await access(planPath);
+  } catch {
+    return { lastFailure: `Item ${options.item.id} plan phase did not publish item_cycle_plan.` };
+  }
+
+  const executeNode = buildManagedWorkListItemPhaseNode({
+    parentNode: options.context.node,
+    item: options.item,
+    config: options.config,
+    worker: options.worker,
+    phase: "execute",
+    cycle: options.cycle,
+    maxCycles: options.maxCycles
+  });
+  const executeRun = await runPhase("execute", executeNode, [
+    contextRow("item_cycle_plan", "artifact", planPath, "Focused plan for this work-list item cycle.", "The execution phase should follow or explicitly justify deviations from this plan.")
+  ]);
+  if (executeRun.result.status !== "passed") {
+    return { lastFailure: executeRun.result.stderr ?? executeRun.result.stdout ?? `Item ${options.item.id} execute phase failed.` };
+  }
+
+  let draftArtifacts: Awaited<ReturnType<typeof readManagedDraftItemArtifacts>>;
+  try {
+    draftArtifacts = await readManagedDraftItemArtifacts(resolveExecutionArtifactsDirectory(executeRun.phaseDir), options.item);
+  } catch (error) {
+    return { lastFailure: managedWorkListErrorMessage(error) };
+  }
+
+  const verifyNode = buildManagedWorkListItemPhaseNode({
+    parentNode: options.context.node,
+    item: options.item,
+    config: options.config,
+    worker: options.worker,
+    phase: "verify",
+    cycle: options.cycle,
+    maxCycles: options.maxCycles
+  });
+  const verifyDir = managedItemPhaseExecutionDir(options.itemExecutionDir, "verify");
+  const verifyExecutionId = managedItemPhaseExecutionId(options.context.attempt, options.item.id, options.cycle, "verify");
+  const verifyContext = await writeManagedItemContext({
+    parentContext: options.context,
+    itemNode: verifyNode,
+    executionDir: verifyDir,
+    executionId: verifyExecutionId,
+    item: options.item,
+    frozenPath: options.frozenPath,
+    ledgerPath: options.runtimeLedgerPath,
+    ...(options.priorHandoffsPath ? { priorHandoffsPath: options.priorHandoffsPath } : {}),
+    ...(options.lastScorecardPath ? { priorScorecardPath: options.lastScorecardPath } : {}),
+    extraRows: [
+      contextRow("item_cycle_plan", "artifact", planPath, "Focused plan for this work-list item cycle.", "The verifier uses this to judge planned vs actual item evidence."),
+      contextRow("item_work_notes", "artifact", draftArtifacts.workNotesPath, "Execution notes for this item cycle.", "The verifier uses this to inspect validation and deviations."),
+      contextRow("draft_item_handoff", "artifact", draftArtifacts.handoffPath, "Draft item handoff.", "The verifier grades this draft before final publication."),
+      contextRow("draft_item_result", "artifact", draftArtifacts.resultPath, "Draft structured item result.", "The verifier grades this draft before final publication."),
+      contextRow("draft_item_validation", "artifact", draftArtifacts.validationPath, "Draft validation evidence.", "The verifier grades this draft before final publication.")
+    ]
+  });
+  const verifyManifest = await readContextManifestContent(verifyContext.manifestPath);
+  const scorecard = await evaluateManagedWorkListItemCriteria({
+    context: options.context,
+    config: options.worker.completion,
+    item: options.item,
+    itemNode: verifyNode,
+    itemExecutionDir: options.itemExecutionDir,
+    itemArtifacts: draftArtifacts,
+    ledgerPath: options.runtimeLedgerPath,
+    contextPacketPath: verifyContext.packetPath,
+    contextManifestPath: verifyContext.manifestPath,
+    contextManifest: verifyManifest,
+    harnesses: options.harnesses,
+    cycle: options.cycle,
+    maxCycles: options.maxCycles,
+    emitManagedProgress: options.context.emit_managed_progress,
+    ...(options.maxConcurrency !== undefined ? { maxConcurrency: options.maxConcurrency } : {})
+  });
+  const cycles = [{ cycle: options.cycle, scorecard_path: scorecard.scorecardPath, passed: scorecard.passed }];
+  if (!scorecard.passed) {
+    return {
+      scorecardPath: scorecard.scorecardPath,
+      cycles,
+      lastFailure: typeof scorecard.scorecard.summary === "string"
+        ? scorecard.scorecard.summary
+        : `Item ${options.item.id} criteria did not pass.`
+    };
+  }
+
+  const publishNode = buildManagedWorkListItemPhaseNode({
+    parentNode: options.context.node,
+    item: options.item,
+    config: options.config,
+    worker: options.worker,
+    phase: "publish",
+    cycle: options.cycle,
+    maxCycles: options.maxCycles
+  });
+  const parentArtifactsRoot = resolveExecutionArtifactsDirectory(options.itemExecutionDir);
+  const publishRun = await runPhase("publish", publishNode, [
+    contextRow("item_cycle_plan", "artifact", planPath, "Focused plan for this work-list item cycle.", "The publisher should preserve planned scope and justified deviations."),
+    contextRow("item_scorecard", "artifact", scorecard.scorecardPath, "Passing item scorecard.", "The publisher must only finalize accepted evidence."),
+    contextRow("item_work_notes", "artifact", draftArtifacts.workNotesPath, "Execution notes for this item cycle.", "The publisher uses these notes for final validation evidence."),
+    contextRow("draft_item_handoff", "artifact", draftArtifacts.handoffPath, "Accepted draft item handoff.", "The publisher turns this into the final handoff."),
+    contextRow("draft_item_result", "artifact", draftArtifacts.resultPath, "Accepted draft structured item result.", "The publisher turns this into the final item result."),
+    contextRow("draft_item_validation", "artifact", draftArtifacts.validationPath, "Accepted draft validation evidence.", "The publisher turns this into final validation evidence.")
+  ], parentArtifactsRoot);
+  await mkdir(join(options.itemExecutionDir, "agent"), { recursive: true });
+  await writeFile(join(options.itemExecutionDir, "agent", "response.md"), publishRun.result.transcript?.last_message ?? publishRun.result.stdout ?? "", "utf8");
+  if (publishRun.result.status !== "passed") {
+    return {
+      scorecardPath: scorecard.scorecardPath,
+      cycles,
+      lastFailure: publishRun.result.stderr ?? publishRun.result.stdout ?? `Item ${options.item.id} publish phase failed.`
+    };
+  }
+
+  let itemArtifacts: Awaited<ReturnType<typeof readManagedItemArtifacts>>;
+  try {
+    itemArtifacts = await readManagedItemArtifacts(parentArtifactsRoot, options.item);
+  } catch (error) {
+    return {
+      scorecardPath: scorecard.scorecardPath,
+      cycles,
+      lastFailure: managedWorkListErrorMessage(error)
+    };
+  }
+
+  const completedItemAttempt = await writeManagedItemAttemptResult({
+    attempt: options.itemAttempt,
+    result: publishRun.result,
+    artifacts: {
+      item_handoff: itemArtifacts.handoffPath,
+      item_result: itemArtifacts.resultPath,
+      item_validation: itemArtifacts.validationPath
+    }
+  });
+
+  return {
+    completedItemAttempt,
+    itemArtifacts,
+    scorecardPath: scorecard.scorecardPath,
+    cycles
+  };
 }
 
 export async function runManagedWorkListItems(
@@ -1396,87 +2008,134 @@ export async function runManagedWorkListItems(
       if (priorHandoffsPath) {
         await writeFile(priorHandoffsPath, acceptedHandoffs.join("\n\n"), "utf8");
       }
-      const itemContext = await writeManagedItemContext({
-        parentContext: context,
-        itemNode,
-        executionDir: itemExecutionDir,
-        executionId: itemExecutionId,
-        item,
-        frozenPath: frozenPath!,
-        ledgerPath: runtimeLedgerPath,
-        ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
-        ...(lastScorecardPath ? { priorScorecardPath: lastScorecardPath } : {})
-      });
-      const contextManifest = await readContextManifestContent(itemContext.manifestPath);
-      const harnessResult = await runManagedWorkListItemAgent({
-        context,
-        harnesses,
-        itemNode,
-        executionDir: itemExecutionDir,
-        executionId: itemExecutionId,
-        contextPacketPath: itemContext.packetPath,
-        contextManifestPath: itemContext.manifestPath,
-        contextManifest
-      });
-      await writeFile(join(itemExecutionDir, "agent", "response.md"), harnessResult.transcript?.last_message ?? harnessResult.stdout ?? "", "utf8");
-      let completedItemAttempt = await writeManagedItemAttemptResult({
-        attempt: itemAttempt,
-        result: harnessResult
-      });
-
-      if (harnessResult.status !== "passed") {
-        lastFailure = harnessResult.stderr ?? harnessResult.stdout ?? `Item ${item.id} harness failed.`;
-        continue;
-      }
-
       let itemArtifacts: Awaited<ReturnType<typeof readManagedItemArtifacts>>;
-      try {
-        itemArtifacts = await readManagedItemArtifacts(
-          resolveExecutionArtifactsDirectory(itemExecutionDir),
-          item
-        );
-      } catch (error) {
-        lastFailure = managedWorkListErrorMessage(error);
-        continue;
-      }
-      completedItemAttempt = await writeManagedItemAttemptResult({
-        attempt: completedItemAttempt,
-        result: harnessResult,
-        artifacts: {
-          item_handoff: itemArtifacts.handoffPath,
-          item_result: itemArtifacts.resultPath,
-          item_validation: itemArtifacts.validationPath
-        }
-      });
+      let completedItemAttempt: RuntimeNodeAttempt;
       let scorecardPath: string | undefined;
       let cycles: unknown[] | undefined;
+      let verificationContextPacketPath: string;
+      let verificationContextManifestPath: string;
+      let verificationContextManifest: string;
+
       if (config.item_worker.kind === "deep_work") {
-        const scorecard = await evaluateManagedWorkListItemCriteria({
+        const deepWorkResult = await runManagedWorkListDeepWorkItemCycle({
           context,
-          config: config.item_worker.completion,
+          harnesses,
+          config,
+          worker: config.item_worker,
           item,
           itemNode,
+          itemAttempt,
           itemExecutionDir,
-          itemArtifacts,
-          ledgerPath: runtimeLedgerPath,
-          contextPacketPath: itemContext.packetPath,
-          contextManifestPath: itemContext.manifestPath,
-          contextManifest,
-          harnesses,
+          itemExecutionId,
+          frozenPath: frozenPath!,
+          runtimeLedgerPath,
+          ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
+          ...(lastScorecardPath ? { lastScorecardPath } : {}),
           cycle,
           maxCycles,
-          emitManagedProgress: context.emit_managed_progress,
           ...(config.criteria_concurrency !== undefined ? { maxConcurrency: config.criteria_concurrency } : {})
         });
-        scorecardPath = scorecard.scorecardPath;
-        lastScorecardPath = scorecard.scorecardPath;
-        cycles = [{ cycle, scorecard_path: scorecard.scorecardPath, passed: scorecard.passed }];
-        if (!scorecard.passed) {
-          lastFailure = typeof scorecard.scorecard.summary === "string"
-            ? scorecard.scorecard.summary
-            : `Item ${item.id} criteria did not pass.`;
+
+        if (!deepWorkResult.completedItemAttempt || !deepWorkResult.itemArtifacts) {
+          lastFailure = deepWorkResult.lastFailure ?? `Item ${item.id} deep-work cycle failed.`;
+          if (deepWorkResult.scorecardPath) {
+            lastScorecardPath = deepWorkResult.scorecardPath;
+          }
+          await writeManagedItemAttemptResult({
+            attempt: itemAttempt,
+            result: {
+              status: "failed",
+              exitCode: 1,
+              stderr: lastFailure,
+              transcript: { last_message: lastFailure }
+            }
+          });
           continue;
         }
+
+        completedItemAttempt = deepWorkResult.completedItemAttempt;
+        itemArtifacts = deepWorkResult.itemArtifacts;
+        scorecardPath = deepWorkResult.scorecardPath;
+        lastScorecardPath = deepWorkResult.scorecardPath;
+        cycles = deepWorkResult.cycles;
+
+        const verificationContext = await writeManagedItemContext({
+          parentContext: context,
+          itemNode,
+          executionDir: itemExecutionDir,
+          executionId: itemExecutionId,
+          item,
+          frozenPath: frozenPath!,
+          ledgerPath: runtimeLedgerPath,
+          ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
+          ...(lastScorecardPath ? { priorScorecardPath: lastScorecardPath } : {}),
+          extraRows: [
+            ...(scorecardPath
+              ? [contextRow("item_scorecard", "artifact", scorecardPath, "Passing item scorecard.", "The outcome verifier checks final item claims against this accepted scorecard.")]
+              : []),
+            contextRow("item_handoff", "artifact", itemArtifacts.handoffPath, "Final item handoff.", "The outcome verifier checks this final item artifact."),
+            contextRow("item_result", "artifact", itemArtifacts.resultPath, "Final structured item result.", "The outcome verifier checks this final item artifact."),
+            contextRow("item_validation", "artifact", itemArtifacts.validationPath, "Final item validation evidence.", "The outcome verifier checks this final item artifact.")
+          ]
+        });
+        verificationContextPacketPath = verificationContext.packetPath;
+        verificationContextManifestPath = verificationContext.manifestPath;
+        verificationContextManifest = await readContextManifestContent(verificationContext.manifestPath);
+      } else {
+        const itemContext = await writeManagedItemContext({
+          parentContext: context,
+          itemNode,
+          executionDir: itemExecutionDir,
+          executionId: itemExecutionId,
+          item,
+          frozenPath: frozenPath!,
+          ledgerPath: runtimeLedgerPath,
+          ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
+          ...(lastScorecardPath ? { priorScorecardPath: lastScorecardPath } : {})
+        });
+        const contextManifest = await readContextManifestContent(itemContext.manifestPath);
+        const harnessResult = await runManagedWorkListItemAgent({
+          context,
+          harnesses,
+          itemNode,
+          executionDir: itemExecutionDir,
+          executionId: itemExecutionId,
+          contextPacketPath: itemContext.packetPath,
+          contextManifestPath: itemContext.manifestPath,
+          contextManifest
+        });
+        await writeFile(join(itemExecutionDir, "agent", "response.md"), harnessResult.transcript?.last_message ?? harnessResult.stdout ?? "", "utf8");
+        completedItemAttempt = await writeManagedItemAttemptResult({
+          attempt: itemAttempt,
+          result: harnessResult
+        });
+
+        if (harnessResult.status !== "passed") {
+          lastFailure = harnessResult.stderr ?? harnessResult.stdout ?? `Item ${item.id} harness failed.`;
+          continue;
+        }
+
+        try {
+          itemArtifacts = await readManagedItemArtifacts(
+            resolveExecutionArtifactsDirectory(itemExecutionDir),
+            item
+          );
+        } catch (error) {
+          lastFailure = managedWorkListErrorMessage(error);
+          continue;
+        }
+        completedItemAttempt = await writeManagedItemAttemptResult({
+          attempt: completedItemAttempt,
+          result: harnessResult,
+          artifacts: {
+            item_handoff: itemArtifacts.handoffPath,
+            item_result: itemArtifacts.resultPath,
+            item_validation: itemArtifacts.validationPath
+          }
+        });
+        verificationContextPacketPath = itemContext.packetPath;
+        verificationContextManifestPath = itemContext.manifestPath;
+        verificationContextManifest = contextManifest;
       }
 
       await context.emit_managed_progress?.({
@@ -1490,7 +2149,8 @@ export async function runManagedWorkListItems(
       const completionPacket = await buildManagedWorkListItemCompletionPacket({
         context,
         itemNode,
-        itemAttempt: completedItemAttempt
+        itemAttempt: completedItemAttempt,
+        runtimeManagedReady: config.item_worker.kind === "deep_work"
       });
       if (!completionPacket.ready_for_verification) {
         lastFailure = [
@@ -1514,9 +2174,9 @@ export async function runManagedWorkListItems(
         itemAttempt: completedItemAttempt,
         itemArtifacts,
         completionPacket,
-        contextPacketPath: itemContext.packetPath,
-        contextManifestPath: itemContext.manifestPath,
-        contextManifest
+        contextPacketPath: verificationContextPacketPath,
+        contextManifestPath: verificationContextManifestPath,
+        contextManifest: verificationContextManifest
       });
       await context.emit_managed_progress?.({
         phase: "run_item",

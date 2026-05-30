@@ -2664,7 +2664,8 @@ const patternDeepWorkPhaseNames = ["plan", "execute", "verify", "publish"] as co
 function normalizePatternDeepWorkPhaseIntent(
   value: unknown,
   path: string,
-  diagnostics: GraphDiagnostic[]
+  diagnostics: GraphDiagnostic[],
+  contractLabel = "pattern_deep_work"
 ): PatternDeepWorkPhaseIntent | undefined {
   if (value === undefined) {
     return undefined;
@@ -2674,7 +2675,7 @@ function normalizePatternDeepWorkPhaseIntent(
   if (!record) {
     diagnostics.push({
       path,
-      message: "pattern_deep_work phase intent must be an object."
+      message: `${contractLabel} phase intent must be an object.`
     });
     return undefined;
   }
@@ -2694,7 +2695,8 @@ function normalizePatternDeepWorkPhaseIntent(
 function normalizePatternDeepWorkPhaseRuntime(
   value: unknown,
   path: string,
-  diagnostics: GraphDiagnostic[]
+  diagnostics: GraphDiagnostic[],
+  contractLabel = "pattern_deep_work"
 ): PatternDeepWorkPhaseRuntime | undefined {
   if (value === undefined) {
     return undefined;
@@ -2704,7 +2706,7 @@ function normalizePatternDeepWorkPhaseRuntime(
   if (!record) {
     diagnostics.push({
       path,
-      message: "pattern_deep_work phase runtime must be an object."
+      message: `${contractLabel} phase runtime must be an object.`
     });
     return undefined;
   }
@@ -2720,7 +2722,8 @@ function normalizePatternDeepWorkPhaseRuntime(
 function normalizePatternDeepWorkPhases(
   value: unknown,
   path: string,
-  diagnostics: GraphDiagnostic[]
+  diagnostics: GraphDiagnostic[],
+  contractLabel = "pattern_deep_work"
 ): PatternDeepWorkConfig["phases"] | undefined {
   if (value === undefined) {
     return undefined;
@@ -2730,7 +2733,7 @@ function normalizePatternDeepWorkPhases(
   if (!record) {
     diagnostics.push({
       path,
-      message: "pattern_deep_work.phases must be an object."
+      message: `${contractLabel}.phases must be an object.`
     });
     return undefined;
   }
@@ -2749,7 +2752,7 @@ function normalizePatternDeepWorkPhases(
     if (!phaseRecord) {
       diagnostics.push({
         path: phasePath,
-        message: "pattern_deep_work phase overrides must be objects."
+        message: `${contractLabel} phase overrides must be objects.`
       });
       continue;
     }
@@ -2761,9 +2764,9 @@ function normalizePatternDeepWorkPhases(
       diagnostics
     );
 
-    const intent = normalizePatternDeepWorkPhaseIntent(phaseRecord.intent, `${phasePath}.intent`, diagnostics);
+    const intent = normalizePatternDeepWorkPhaseIntent(phaseRecord.intent, `${phasePath}.intent`, diagnostics, contractLabel);
     const support = normalizeNodeSupport(phaseRecord.support, `${phasePath}.support`, diagnostics);
-    const runtime = normalizePatternDeepWorkPhaseRuntime(phaseRecord.runtime, `${phasePath}.runtime`, diagnostics);
+    const runtime = normalizePatternDeepWorkPhaseRuntime(phaseRecord.runtime, `${phasePath}.runtime`, diagnostics, contractLabel);
     const model = readOptionalString(phaseRecord.model, `${phasePath}.model`, diagnostics);
     const reasoning_effort = readEnumValue(
       phaseRecord.reasoning_effort,
@@ -3088,11 +3091,17 @@ function normalizePatternWorkListItemWorker(
   }
 
   if (kind === "deep_work") {
-    pushUnknownKeyDiagnostics(record, path, ["kind", "completion"], diagnostics);
+    pushUnknownKeyDiagnostics(record, path, ["kind", "completion", "phases"], diagnostics);
     const completion = normalizeWorkListDeepWorkCompletion(
       record.completion,
       `${path}.completion`,
       diagnostics
+    );
+    const phases = normalizePatternDeepWorkPhases(
+      record.phases,
+      `${path}.phases`,
+      diagnostics,
+      "pattern_work_list.item_worker"
     );
 
     if (!completion) {
@@ -3101,7 +3110,8 @@ function normalizePatternWorkListItemWorker(
 
     return {
       kind,
-      completion
+      completion,
+      ...(phases ? { phases } : {})
     };
   }
 

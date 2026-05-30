@@ -25,6 +25,7 @@ Rule: authoring rationale belongs outside graph JSON; runtime-facing fields must
 | AI check `rubric` | read-only evaluator | Observable judgment standard tied to artifacts, workspace state, and evidence. | Private reasoning, implementation preference, compiled-prompt judgment, or producer work. |
 | deep-work criterion `rubric` | criterion evaluator | Scored evidence standard for the current candidate or artifact. | Authoring plan, graph topology, or retry mechanics. |
 | deep-work `phases.*.intent` | one managed phase | Additive phase-specific objective, evidence, or boundary. | Replacement parent contract, lifecycle explanation, or generic guidance repeated in every phase. |
+| work-list deep-work `item_worker.phases.*.intent` | one managed item phase | Additive item-phase objective, evidence, or boundary for the current frozen item. | Duplicated parent/item goals, lifecycle explanation, graph mechanics, or text that weakens frozen-item constraints. |
 | context `what` / `why` | worker reading a pointer | What the pointer contains and why it matters for this node's task. | Provenance/debug chatter, "required by this graph", or downstream-node explanations. |
 | artifact `description` | publisher, verifier, reviewer | Durable output contract and what the artifact proves. | Internal lowering details, graph-addressable mechanics, or write-command instructions. |
 

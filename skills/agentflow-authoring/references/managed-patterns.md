@@ -54,7 +54,7 @@ Author `what_counts_as_one_item` and `done_when` in domain terms. If items are P
 
 The planner writes only `work-list.json`; runtime validates sequential `w1`, `w2`, `w3` ids and freezes the list before execution. Runtime then launches one managed item execution per frozen item. Agents do not check off items manually. Runtime records item status in the ledger and publishes stable artifacts: `summary` and `work_items`.
 
-Use `item_worker.kind: "agent"` for one-pass item execution. Use `item_worker.kind: "deep_work"` when each item needs criteria, scorecard feedback, item-level semantic verification, and bounded retries before publishing. Work-list rubric criteria can target `workspace`, `item_handoff`, or `work_list_ledger`.
+Use `item_worker.kind: "agent"` for one-pass item execution. Use `item_worker.kind: "deep_work"` when each item needs plan/execute/verify/publish phases, criteria, scorecard feedback, item-level semantic verification, and bounded retries before publishing. Deep-work item workers may set optional `item_worker.phases.plan/execute/verify/publish` with the same additive semantics as top-level `pattern_deep_work.phases`: phase intent appends to the parent/item contract, phase support merges only for that phase, and phase model/reasoning/sandbox/profile applies only to that phase. Work-list rubric criteria can target `workspace`, `item_handoff`, or `work_list_ledger`.
 
 Downstream nodes should reference stable artifacts such as `my_work_list.work_items`; do not depend on dynamic item ids like `my_work_list.w3`.
 

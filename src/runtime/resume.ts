@@ -74,6 +74,7 @@ function fingerprintCompiledNode(node: CompiledExecutableNode): string {
     skills: node.skills,
     cli: node.cli,
     declared_artifacts: node.declared_artifacts,
+    ...(node.managed_runtime ? { managed_runtime: node.managed_runtime } : {}),
     ...(node.lowered_from ? { lowered_from: node.lowered_from } : {})
   };
 

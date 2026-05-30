@@ -71,6 +71,68 @@ function isWorkListItemInvocation(invocation: AgentInvocation): boolean {
   return Boolean(invocation.artifacts && Object.prototype.hasOwnProperty.call(invocation.artifacts, "item_result"));
 }
 
+function isWorkListItemPlanInvocation(invocation: AgentInvocation): boolean {
+  return invocation.nodeGoal?.includes("Plan frozen work-list item") === true;
+}
+
+function isWorkListItemExecuteInvocation(invocation: AgentInvocation): boolean {
+  return invocation.nodeGoal?.includes("Execute frozen work-list item") === true;
+}
+
+async function writeItemCyclePlan(invocation: AgentInvocation): Promise<void> {
+  await writeFile(join(invocation.outputDir, "item-cycle-plan.md"), "# Item Cycle Plan\n\nPlan the current item.\n", "utf8");
+}
+
+async function writeDraftItemArtifacts(invocation: AgentInvocation, options: {
+  itemId?: string;
+  completed?: boolean;
+  summary?: string;
+  validationMessage?: string;
+} = {}): Promise<void> {
+  const itemId = options.itemId ?? (invocation.nodeGoal?.includes("`w2`") ? "w2" : "w1");
+  const completed = options.completed ?? true;
+  await writeFile(
+    join(invocation.outputDir, "item-work-notes.md"),
+    completed ? "# Item Work Notes\n\nExecuted with evidence.\n" : "# Item Work Notes\n\nBlocked pending retry evidence.\n",
+    "utf8"
+  );
+  await writeFile(
+    join(invocation.outputDir, "draft-item-handoff.md"),
+    completed ? "# Draft Item Handoff\n\nCompleted with evidence.\n" : "# Draft Item Handoff\n\nBlocked pending retry evidence.\n",
+    "utf8"
+  );
+  await writeFile(join(invocation.outputDir, "draft-item-result.json"), `${JSON.stringify({
+    id: itemId,
+    status: completed ? "completed" : "blocked",
+    summary: options.summary ?? (completed ? "Produced the evidence handoff." : "This cycle intentionally lacks completion evidence."),
+    validation: itemValidationEvidence(
+      options.validationMessage ?? (completed ? "Runtime gate can verify this result." : "Runtime gate should reject this cycle."),
+      { blocked: !completed }
+    ),
+    risks: [],
+    downstream_implications: ["Downstream nodes can consume work_items after completion."]
+  }, null, 2)}\n`, "utf8");
+  await writeFile(join(invocation.outputDir, "draft-item-validation.md"), "Validation: runtime gate checks draft item evidence.\n", "utf8");
+}
+
+async function writeFinalItemArtifacts(invocation: AgentInvocation, options: {
+  itemId?: string;
+  summary?: string;
+  validationMessage?: string;
+} = {}): Promise<void> {
+  const itemId = options.itemId ?? (invocation.nodeGoal?.includes("`w2`") ? "w2" : "w1");
+  await writeFile(join(invocation.outputDir, "item-handoff.md"), "# Item Handoff\n\nCompleted with evidence.\n", "utf8");
+  await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
+    id: itemId,
+    status: "completed",
+    summary: options.summary ?? "Produced the evidence handoff.",
+    validation: itemValidationEvidence(options.validationMessage ?? "Runtime finalizer can verify this result."),
+    risks: [],
+    downstream_implications: ["Downstream nodes can consume work_items."]
+  }, null, 2)}\n`, "utf8");
+  await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: runtime finalizer verifies item-result.json.\n", "utf8");
+}
+
 function itemValidationEvidence(
   message: string,
   options: { blocked?: boolean } = {}
@@ -124,17 +186,12 @@ function buildHarness(): HarnessAdapter {
 
       if (invocation.nodeGoal?.includes("work_list_json")) {
         await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        await writeItemCyclePlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
+        await writeDraftItemArtifacts(invocation);
       } else if (isWorkListItemInvocation(invocation)) {
-        await writeFile(join(invocation.outputDir, "item-handoff.md"), "# Item Handoff\n\nCompleted with evidence.\n", "utf8");
-        await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
-          id: "w1",
-          status: "completed",
-          summary: "Produced the evidence handoff.",
-          validation: itemValidationEvidence("Runtime finalizer can verify this result."),
-          risks: [],
-          downstream_implications: ["Downstream nodes can consume work_items."]
-        }, null, 2)}\n`, "utf8");
-        await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: runtime finalizer verifies item-result.json.\n", "utf8");
+        await writeFinalItemArtifacts(invocation);
       } else if (invocation.nodeGoal?.includes("final public artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item.\n", "utf8");
       }
@@ -179,28 +236,21 @@ function buildDeepWorkHarness(state: { runItemsCalls: number }): HarnessAdapter 
 
       if (invocation.nodeGoal?.includes("work_list_json")) {
         await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
-      } else if (isWorkListItemInvocation(invocation)) {
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        await writeItemCyclePlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
         state.runItemsCalls += 1;
         const completed = state.runItemsCalls > 1;
-        await writeFile(
-          join(invocation.outputDir, "item-handoff.md"),
-          completed
-            ? "# Item Handoff\n\nCompleted with evidence after retry.\n"
-            : "# Item Handoff\n\nBlocked pending retry evidence.\n",
-          "utf8"
-        );
-        await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
-          id: "w1",
-          status: completed ? "completed" : "blocked",
+        await writeDraftItemArtifacts(invocation, {
+          completed,
           summary: completed ? "Produced the evidence handoff." : "First cycle intentionally lacks completion evidence.",
-          validation: itemValidationEvidence(
-            completed ? "Runtime gate can verify this result." : "Runtime gate should reject this cycle.",
-            { blocked: !completed }
-          ),
-          risks: [],
-          downstream_implications: ["Downstream nodes can consume work_items after completion."]
-        }, null, 2)}\n`, "utf8");
-        await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: runtime gate checks item-result.json.\n", "utf8");
+          validationMessage: completed ? "Runtime gate can verify this result." : "Runtime gate should reject this cycle."
+        });
+      } else if (isWorkListItemInvocation(invocation)) {
+        await writeFinalItemArtifacts(invocation, {
+          summary: "Produced the evidence handoff.",
+          validationMessage: "Runtime finalizer can verify this result."
+        });
       } else if (invocation.nodeGoal?.includes("final public artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after retry.\n", "utf8");
       }
@@ -263,17 +313,17 @@ function buildParallelCriteriaHarness(state: { activeChecks: number; maxActiveCh
 
       if (invocation.nodeGoal?.includes("work_list_json")) {
         await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        await writeItemCyclePlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
+        await writeDraftItemArtifacts(invocation, {
+          validationMessage: "Runtime finalizer can verify this result."
+        });
       } else if (isWorkListItemInvocation(invocation)) {
-        await writeFile(join(invocation.outputDir, "item-handoff.md"), "# Item Handoff\n\nCompleted with evidence.\n", "utf8");
-        await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
-          id: "w1",
-          status: "completed",
+        await writeFinalItemArtifacts(invocation, {
           summary: "Produced the evidence handoff.",
-          validation: itemValidationEvidence("Runtime finalizer can verify this result."),
-          risks: [],
-          downstream_implications: ["Downstream nodes can consume work_items."]
-        }, null, 2)}\n`, "utf8");
-        await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: runtime finalizer verifies item-result.json.\n", "utf8");
+          validationMessage: "Runtime finalizer can verify this result."
+        });
       } else if (invocation.nodeGoal?.includes("final public artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item.\n", "utf8");
       }
@@ -341,20 +391,122 @@ function buildLowRequiredCriterionHarness(state: { itemRuns: number }): HarnessA
 
       if (invocation.nodeGoal?.includes("work_list_json")) {
         await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
-      } else if (isWorkListItemInvocation(invocation)) {
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        await writeItemCyclePlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
         state.itemRuns += 1;
-        await writeFile(join(invocation.outputDir, "item-handoff.md"), `# Item Handoff\n\nCompleted with evidence on run ${state.itemRuns}.\n`, "utf8");
+        await writeDraftItemArtifacts(invocation, {
+          summary: `Produced the evidence handoff on run ${state.itemRuns}.`
+        });
+      } else if (isWorkListItemInvocation(invocation)) {
+        await writeFinalItemArtifacts(invocation, {
+          summary: `Produced the evidence handoff on run ${state.itemRuns}.`
+        });
+      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+        await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after criterion retry.\n", "utf8");
+      }
+
+      const result = {
+        status: "passed" as const,
+        exitCode: 0,
+        transcript: { last_message: "done" }
+      };
+      await markInvocationRuntimeReady(invocation, result);
+      return result;
+    },
+    async cancel() {
+      return;
+    }
+  };
+}
+
+function buildPhasedDeepWorkHarness(state: {
+  agentPhases: string[];
+  aiCheckModels: Array<string | undefined>;
+  planModel?: string;
+  executeReasoning?: string;
+  publishSandbox?: string;
+}): HarnessAdapter {
+  const deliveryHarness = createPassingDeliveryHarness("codex-cli");
+  return {
+    kind: "codex-cli",
+    capabilities: getHarnessCapabilities("codex-cli")!,
+    async run(invocation: AgentInvocation) {
+      if (invocation.promptKind === "delivery_curator") {
+        return deliveryHarness.run(invocation);
+      }
+
+      if (invocation.promptKind === "ai_check") {
+        state.aiCheckModels.push(invocation.model);
+        expect(invocation.nodeGoal).toContain("VERIFY_PHASE_MARKER");
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: {
+            last_message: [
+              "```json",
+              JSON.stringify({ passed: true, score: 1, summary: "Verify phase accepted item evidence.", issues: [] }),
+              "```"
+            ].join("\n")
+          }
+        };
+      }
+
+      if (invocation.promptKind === "outcome_verification") {
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: {
+            last_message: [
+              "```json",
+              JSON.stringify({ passed: true, summary: "Phased item verifier accepted final artifacts.", findings: [] }),
+              "```"
+            ].join("\n")
+          }
+        };
+      }
+
+      if (invocation.nodeGoal?.includes("work_list_json")) {
+        await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
+      } else if (invocation.nodeGoal?.includes("Plan frozen work-list item")) {
+        state.agentPhases.push("plan");
+        state.planModel = invocation.model;
+        expect(invocation.nodeGoal).toContain("PLAN_PHASE_MARKER");
+        expect(invocation.nodeGoal).not.toContain("EXECUTE_PHASE_MARKER");
+        await writeFile(join(invocation.outputDir, "item-cycle-plan.md"), "# Item Cycle Plan\n\nPlan evidence.\n", "utf8");
+      } else if (invocation.nodeGoal?.includes("Execute frozen work-list item")) {
+        state.agentPhases.push("execute");
+        state.executeReasoning = invocation.reasoningEffort;
+        expect(invocation.nodeGoal).toContain("EXECUTE_PHASE_MARKER");
+        expect(invocation.nodeGoal).not.toContain("PUBLISH_PHASE_MARKER");
+        await writeFile(join(invocation.outputDir, "item-work-notes.md"), "# Item Work Notes\n\nExecuted the planned item delta.\n", "utf8");
+        await writeFile(join(invocation.outputDir, "draft-item-handoff.md"), "# Draft Item Handoff\n\nDraft evidence.\n", "utf8");
+        await writeFile(join(invocation.outputDir, "draft-item-result.json"), `${JSON.stringify({
+          id: "w1",
+          status: "completed",
+          summary: "Draft item result.",
+          validation: itemValidationEvidence("Draft validation evidence."),
+          risks: [],
+          downstream_implications: ["Publish can finalize the accepted evidence."]
+        }, null, 2)}\n`, "utf8");
+        await writeFile(join(invocation.outputDir, "draft-item-validation.md"), "Draft validation evidence.\n", "utf8");
+      } else if (isWorkListItemInvocation(invocation)) {
+        state.agentPhases.push("publish");
+        state.publishSandbox = invocation.sandbox;
+        expect(invocation.nodeGoal).toContain("PUBLISH_PHASE_MARKER");
+        expect(invocation.nodeGoal).not.toContain("PLAN_PHASE_MARKER");
+        await writeFile(join(invocation.outputDir, "item-handoff.md"), "# Item Handoff\n\nFinal accepted evidence.\n", "utf8");
         await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
           id: "w1",
           status: "completed",
-          summary: `Produced the evidence handoff on run ${state.itemRuns}.`,
-          validation: itemValidationEvidence("Runtime finalizer can verify this result."),
+          summary: "Published final item evidence.",
+          validation: itemValidationEvidence("Published final validation evidence."),
           risks: [],
           downstream_implications: ["Downstream nodes can consume work_items."]
         }, null, 2)}\n`, "utf8");
-        await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: runtime finalizer verifies item-result.json.\n", "utf8");
+        await writeFile(join(invocation.outputDir, "item-validation.md"), "Published validation evidence.\n", "utf8");
       } else if (invocation.nodeGoal?.includes("final public artifacts")) {
-        await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after criterion retry.\n", "utf8");
+        await writeFile(join(invocation.outputDir, "summary.md"), "Completed one phased deep-work item.\n", "utf8");
       }
 
       const result = {
@@ -557,24 +709,23 @@ function buildDeepWorkOutcomeRetryHarness(state: { runItemsCalls: number; reject
 
       if (invocation.nodeGoal?.includes("work_list_json")) {
         await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
-      } else if (isWorkListItemInvocation(invocation)) {
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        await writeItemCyclePlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
         state.runItemsCalls += 1;
-        await writeFile(
-          join(invocation.outputDir, "item-handoff.md"),
-          `# Item Handoff\n\nCompleted with ${state.runItemsCalls > 1 ? "repaired" : "initial"} semantic evidence.\n`,
-          "utf8"
-        );
-        await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
-          id: "w1",
-          status: "completed",
+        await writeDraftItemArtifacts(invocation, {
           summary: state.runItemsCalls > 1
             ? "Produced the repaired evidence handoff."
             : "Produced an initial handoff that verifier will reject.",
-          validation: itemValidationEvidence("Outcome verifier checks semantic evidence."),
-          risks: [],
-          downstream_implications: ["Downstream nodes can consume work_items after verification."]
-        }, null, 2)}\n`, "utf8");
-        await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: outcome verifier checks semantic evidence.\n", "utf8");
+          validationMessage: "Outcome verifier checks semantic evidence."
+        });
+      } else if (isWorkListItemInvocation(invocation)) {
+        await writeFinalItemArtifacts(invocation, {
+          summary: state.runItemsCalls > 1
+            ? "Produced the repaired evidence handoff."
+            : "Produced an initial handoff that verifier will reject.",
+          validationMessage: "Outcome verifier checks semantic evidence."
+        });
       } else if (invocation.nodeGoal?.includes("final public artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after verifier retry.\n", "utf8");
       }
@@ -600,6 +751,7 @@ describe("runtime pattern_work_list", () => {
     const runRoot = join(tempRoot, "run");
     await mkdir(repoDir, { recursive: true });
     await initGitRepo(repoDir);
+    await writeFile(join(repoDir, "phase-support.md"), "Execute-only support context.\n", "utf8");
 
     const graph = compileGraph({
       version: "1",
@@ -1266,7 +1418,163 @@ describe("runtime pattern_work_list", () => {
     const itemAttempts = attempts.filter((attempt) =>
       attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1"
     );
-    expect(itemAttempts.map((attempt) => attempt.outcome)).toEqual(["passed", "passed"]);
+    expect(itemAttempts.map((attempt) => attempt.outcome)).toEqual(["failed", "passed"]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("runs deep-work item phases with matching phase intent and policy", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-phased-deep-runtime-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-work-list-phased-deep",
+      intent: {
+        goal: "Exercise work-list item deep-work phase behavior.",
+        acceptance_criteria: ["The work-list pattern runs item plan, execute, verify, and publish phases."]
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli", model: "default-model", reasoning_effort: "medium", sandbox: "workspace-write" },
+        planner: { harness: "codex-cli", model: "planner-profile-model", sandbox: "read-only" },
+        supervisor: { harness: "codex-cli", sandbox: "read-only" }
+      },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_work_list",
+            id: "deliver",
+            runtime: { repo: "main", profile: "default" },
+            intent: {
+              goal: "Deliver a bounded phased deep-work item.",
+              acceptance_criteria: ["The work_items artifact lists completed items."],
+              constraints: []
+            },
+            work_list: {
+              planning_goal: "Discover the ordered runtime-test items.",
+              item_guidance: {
+                what_counts_as_one_item: "One coherent runtime-test unit.",
+                done_when: ["The item has evidence and validation."]
+              },
+              item_worker: {
+                kind: "deep_work",
+                phases: {
+                  plan: {
+                    runtime: { profile: "planner" },
+                    intent: {
+                      goal: "PLAN_PHASE_MARKER map item evidence before editing."
+                    }
+                  },
+                  execute: {
+                    reasoning_effort: "high",
+                    support: {
+                      context: [
+                        {
+                          name: "execute_phase_context",
+                          kind: "workspace_file",
+                          path: "phase-support.md",
+                          what: "EXECUTE_SUPPORT_CONTEXT_MARKER",
+                          why: "The execute phase needs this extra pointer; other item phases should not receive it."
+                        }
+                      ]
+                    },
+                    intent: {
+                      goal: "EXECUTE_PHASE_MARKER implement only the planned item delta."
+                    }
+                  },
+                  verify: {
+                    model: "verify-phase-model",
+                    intent: {
+                      goal: "VERIFY_PHASE_MARKER require criterion evidence to cite draft outputs."
+                    }
+                  },
+                  publish: {
+                    sandbox: "read-only",
+                    intent: {
+                      goal: "PUBLISH_PHASE_MARKER write the accepted final item handoff only."
+                    }
+                  }
+                },
+                completion: {
+                  max_cycles: 1,
+                  pass_threshold: 1,
+                  criteria: [
+                    {
+                      id: "item_contract",
+                      kind: "rubric",
+                      target: "item_handoff",
+                      rubric: "The item handoff satisfies the frozen item contract.",
+                      weight: 1,
+                      required: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const state = {
+      agentPhases: [] as string[],
+      aiCheckModels: [] as Array<string | undefined>,
+      planModel: undefined as string | undefined,
+      executeReasoning: undefined as string | undefined,
+      publishSandbox: undefined as string | undefined
+    };
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: {
+        "codex-cli": buildPhasedDeepWorkHarness(state)
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(state.agentPhases).toEqual(["plan", "execute", "publish"]);
+    expect(state.planModel).toBe("planner-profile-model");
+    expect(state.executeReasoning).toBe("high");
+    expect(state.aiCheckModels).toEqual(["verify-phase-model"]);
+    expect(state.publishSandbox).toBe("read-only");
+
+    const attempts = await readRunExecutionAttempts(runRoot);
+    const phaseAttempts = attempts
+      .filter((attempt) => attempt.authored_id.startsWith("deliver__managed__pattern_work_list__run_items__item_w1__"))
+      .sort((left, right) => left.started_at.localeCompare(right.started_at))
+      .map((attempt) => attempt.authored_id);
+    expect(phaseAttempts).toEqual([
+      "deliver__managed__pattern_work_list__run_items__item_w1__plan",
+      "deliver__managed__pattern_work_list__run_items__item_w1__execute",
+      "deliver__managed__pattern_work_list__run_items__item_w1__publish"
+    ]);
+    const executeAttempt = attempts.find((attempt) =>
+      attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1__execute"
+    );
+    const planAttempt = attempts.find((attempt) =>
+      attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1__plan"
+    );
+    const publishAttempt = attempts.find((attempt) =>
+      attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1__publish"
+    );
+    expect(executeAttempt).toBeDefined();
+    expect(planAttempt).toBeDefined();
+    expect(publishAttempt).toBeDefined();
+    const executeContext = await readFile(join(executeAttempt!.execution_dir, "agent", "context.md"), "utf8");
+    const planContext = await readFile(join(planAttempt!.execution_dir, "agent", "context.md"), "utf8");
+    const publishContext = await readFile(join(publishAttempt!.execution_dir, "agent", "context.md"), "utf8");
+    expect(executeContext).toContain("EXECUTE_SUPPORT_CONTEXT_MARKER");
+    expect(planContext).not.toContain("EXECUTE_SUPPORT_CONTEXT_MARKER");
+    expect(publishContext).not.toContain("EXECUTE_SUPPORT_CONTEXT_MARKER");
 
     await rm(tempRoot, { recursive: true, force: true });
   });
