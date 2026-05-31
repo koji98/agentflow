@@ -1,0 +1,31 @@
+{
+  "validation_commands": [
+    "npm test"
+  ],
+  "required_changed_files": [
+    "src/duration.js"
+  ],
+  "allowed_changed_globs": [
+    "src/duration.js"
+  ],
+  "forbidden_changed_globs": [
+    "task.md",
+    "package.json",
+    "test/*.test.js"
+  ],
+  "expected_file_substrings": [
+    {
+      "path": "src/duration.js",
+      "contains": "ms"
+    },
+    {
+      "path": "src/duration.js",
+      "contains": "throw"
+    }
+  ],
+  "quality_anchors": [
+    "The parser should support ms, s, m, and h units.",
+    "Invalid durations should throw a clear error.",
+    "The implementation should avoid duplicating unit-specific parsing logic."
+  ]
+}

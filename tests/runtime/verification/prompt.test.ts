@@ -122,13 +122,13 @@ describe("renderOutcomeVerificationPrompt", () => {
   it("treats inlined declared artifacts as authoritative presence evidence", () => {
     const prompt = renderOutcomeVerificationPrompt(buildInput());
 
-    expect(prompt).toContain("The Declared Artifacts section below is authoritative for artifact presence.");
-    expect(prompt).toContain("size plus content or metadata");
-    expect(prompt).toContain("treat that artifact as present; do not claim it is missing");
-    expect(prompt).toContain("Only fail for a missing declared artifact when the artifact is absent from the Declared Artifacts section");
-    expect(prompt).toContain("defer to the Completion Packet artifact findings");
-    expect(prompt).toContain("judge the material observed values");
-    expect(prompt).toContain("different line breaks, bullets, punctuation, or prose wrapping");
+    expect(prompt).toContain("### Mechanical Readiness");
+    expect(prompt).toContain("### Artifact Judgment");
+    expect(prompt).toContain("Declared artifact snippets are authoritative for artifact presence.");
+    expect(prompt).toContain("### Evidence Precedence");
+    expect(prompt).toContain("Captured execution evidence is the primary source for commands the agent actually ran.");
+    expect(prompt).toContain("### Blocker Standard");
+    expect(prompt).toContain("Set passed=false only when there is strong, concrete, actionable blocker evidence");
   });
 
   it("renders completion packet facts before artifact snippets", () => {
@@ -211,6 +211,13 @@ describe("renderOutcomeVerificationPrompt", () => {
     expect(prompt).toContain("Preview: image; width=2; height=3");
     expect(prompt).toContain("This non-text artifact is not inlined");
     expect(prompt).not.toContain("�PNG");
+  });
+
+  it("tells verifiers to prefer the final completion packet over stale embedded check output", () => {
+    const prompt = renderOutcomeVerificationPrompt(buildInput());
+
+    expect(prompt).toContain("If an artifact quotes an earlier incomplete `af complete check` result");
+    expect(prompt).toContain("when the final Completion Packet is ready and has no matching artifact finding");
   });
 
   it("flags missing diff capture in degraded mode", () => {

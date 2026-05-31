@@ -711,26 +711,10 @@ function buildManagedWorkListItemGoal(options: {
     "Done when:",
     ...options.config.item_guidance.done_when.map((entry) => `- ${entry}`),
     "",
+    "## Item Output Contract",
     "Write exactly these declared item artifacts:",
     "- `item_handoff`: Markdown with item goal, changes/results, evidence, validation, risks, and downstream implications.",
-    [
-      "- `item_result`: JSON with this exact shape:",
-      "  ```json",
-      "  {",
-      `    "id": "${options.item.id}",`,
-      "    \"status\": \"completed\",",
-      "    \"summary\": \"Concrete summary of the completed item outcome.\",",
-      "    \"validation\": {",
-      "      \"passed\": [\"Exact command/check/manual result evidence that passed.\"],",
-      "      \"failed_then_fixed\": [],",
-      "      \"unavailable\": [],",
-      "      \"blocked\": []",
-      "    },",
-      "    \"risks\": [],",
-      "    \"downstream_implications\": []",
-      "  }",
-      "  ```"
-    ].join("\n"),
+    "- `item_result`: JSON object using the active item-result contract: field id set to the current frozen item id, completed status, concrete summary, validation object, risks, and downstream implications. The validation object has passed, failed_then_fixed, unavailable, and blocked keys; each value is an array of short evidence strings. Use failed_then_fixed, not fixed. Do not use field item_id.",
     "- `item_validation`: Markdown with validation commands, checks, manual evidence, unavailable validation, and reruns.",
     "",
     "If the item requires branch, base, PR, or workspace evidence, use inspectable local workspace evidence unless the graph explicitly says otherwise. Remote-only branch or PR updates are not a substitute for local branch/base evidence.",
@@ -776,7 +760,7 @@ function buildManagedWorkListItemPlanGoal(options: {
   return [
     `Plan frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
     "",
-    "You are planning one cycle for a managed work-list item. Do not edit source files in this phase.",
+    "You are planning one cycle for a work-list item. Do not edit source files in this phase.",
     `Parent work-list goal: ${options.config.parent_intent.goal}`,
     `Current item goal: ${options.item.goal}`,
     `Current item rationale: ${options.item.rationale}`,
@@ -789,7 +773,9 @@ function buildManagedWorkListItemPlanGoal(options: {
     "",
     "Output contract:",
     "Publish only the `item_cycle_plan` artifact.",
-    "Include sections: Objective, Relevant evidence, Planned material delta, Criterion evidence map, Validation plan, and Risks or constraints."
+    "Include sections: Objective, Relevant evidence, Planned material delta, Criterion evidence map, Validation plan, and Risks or constraints.",
+    "Preserve exact task-specific names, labels, commands, and required phrases from the parent work-list and current item contract in the plan.",
+    "The `item_cycle_plan` artifact is the durable planning record; do not create a milestone solely to restate the plan. If you do create a milestone, complete it before running `af complete check`."
   ].join("\n");
 }
 
@@ -803,7 +789,10 @@ function buildManagedWorkListItemExecuteGoal(options: {
   return [
     `Execute frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
     "",
-    "You are executing one planned cycle for a managed work-list item. Follow the item cycle plan in context.",
+    "You are executing one planned cycle for a work-list item. Follow the item cycle plan in context.",
+    "Satisfy the item contract, not only the visible tests; handle edge cases directly implied by the goal, acceptance criteria, and local code.",
+    "Keep edits scoped; add/edit tests only when the item asks or repo contract expects them.",
+    "Preserve API semantics with nullish or explicit checks; avoid truthiness and absence-check ceremony unless null and absence must differ; prefer direct formulas over expanded arithmetic; use helpers/constants only when they clarify; round money with integer cents or Number.EPSILON; make rejection errors name expected formats or valid values.",
     "If evidence shows the plan is wrong, make the smallest justified deviation and record why in work notes.",
     `Parent work-list goal: ${options.config.parent_intent.goal}`,
     `Current item goal: ${options.item.goal}`,
@@ -854,7 +843,7 @@ function buildManagedWorkListItemVerifyGoal(options: {
   return [
     `Verify frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
     "",
-    "You are evaluating draft evidence for one managed work-list item cycle.",
+    "You are evaluating draft evidence for one work-list item cycle.",
     "Grade only the current item evidence, draft artifacts, validation evidence, and relevant ledger/prior-item pointers.",
     `Parent work-list goal: ${options.config.parent_intent.goal}`,
     `Current item goal: ${options.item.goal}`,

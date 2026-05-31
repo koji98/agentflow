@@ -2894,6 +2894,10 @@ async function defaultAgentExecutor(
   const agentGraphConstraints = substituteOptionalTextArray(context.graph_intent.constraints, promptTokens);
   const agentNodeAcceptanceCriteria = substituteOptionalTextArray(context.node.intent.acceptance_criteria, promptTokens);
   const agentNodeConstraints = substituteOptionalTextArray(context.node.intent.constraints, promptTokens);
+  const agentGraphGoal = substituteAgentflowTokens(context.graph_intent.goal, promptTokens);
+  const agentNodeGoal = context.node.intent.goal
+    ? substituteAgentflowTokens(context.node.intent.goal, promptTokens)
+    : undefined;
   const promptPath = resolveExecutionAgentPromptPath(context.execution_dir);
   context.attempt.prompt_path = promptPath;
   const agentInvocation: AgentInvocation = {
@@ -2913,10 +2917,10 @@ async function defaultAgentExecutor(
     ...(context.node.effective_policy.reasoning_effort
       ? { reasoningEffort: context.node.effective_policy.reasoning_effort }
       : {}),
-    graphGoal: substituteAgentflowTokens(context.graph_intent.goal, promptTokens),
+    graphGoal: agentGraphGoal,
     ...(agentGraphAcceptanceCriteria ? { graphAcceptanceCriteria: agentGraphAcceptanceCriteria } : {}),
     ...(agentGraphConstraints ? { graphConstraints: agentGraphConstraints } : {}),
-    ...(context.node.intent.goal ? { nodeGoal: substituteAgentflowTokens(context.node.intent.goal, promptTokens) } : {}),
+    ...(agentNodeGoal ? { nodeGoal: agentNodeGoal } : {}),
     ...(agentNodeAcceptanceCriteria ? { nodeAcceptanceCriteria: agentNodeAcceptanceCriteria } : {}),
     ...(agentNodeConstraints ? { nodeConstraints: agentNodeConstraints } : {}),
     contextPacketPath: context.context_packet_path,

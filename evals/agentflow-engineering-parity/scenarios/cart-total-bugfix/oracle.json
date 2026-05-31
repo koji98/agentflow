@@ -1,0 +1,35 @@
+{
+  "validation_commands": [
+    "npm test"
+  ],
+  "required_changed_files": [
+    "src/cart.js"
+  ],
+  "allowed_changed_globs": [
+    "src/cart.js"
+  ],
+  "forbidden_changed_globs": [
+    "task.md",
+    "package.json",
+    "test/*.test.js"
+  ],
+  "expected_file_substrings": [
+    {
+      "path": "src/cart.js",
+      "contains": "quantity"
+    },
+    {
+      "path": "src/cart.js",
+      "contains": "discountPercent"
+    },
+    {
+      "path": "src/cart.js",
+      "contains": "taxRate"
+    }
+  ],
+  "quality_anchors": [
+    "Calculate subtotal using price times quantity.",
+    "Apply percentage discount before tax.",
+    "Round the final total to cents."
+  ]
+}

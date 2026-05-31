@@ -1051,6 +1051,28 @@ async function buildValidationEvidence(options: {
   });
 }
 
+function shouldRequireValidationEvidence(node: BuildCompletionPacketOptions["node"]): boolean {
+  const managed = node.managed_runtime;
+  if (!managed) {
+    return true;
+  }
+  return !(
+    managed.phase === "plan" &&
+    (managed.kind === "pattern_work_list" || managed.kind === "pattern_deep_work")
+  );
+}
+
+function shouldRequireMilestoneEvidence(node: BuildCompletionPacketOptions["node"]): boolean {
+  const managed = node.managed_runtime;
+  if (!managed) {
+    return true;
+  }
+  return !(
+    managed.phase === "plan" &&
+    (managed.kind === "pattern_work_list" || managed.kind === "pattern_deep_work")
+  );
+}
+
 function observationRelevant(observation: OperatorObservation, options: BuildCompletionPacketOptions): boolean {
   if (observation.status !== "active") {
     return false;
@@ -1069,7 +1091,7 @@ function observationSummary(observations: OperatorObservation[], options: BuildC
   const latest = active.slice(-5).map((observation) => ({
     observation_id: observation.observation_id,
     kind: observation.kind,
-    summary: observation.summary,
+    message: observation.message,
     author: observation.author,
     severity: observation.severity,
     status: observation.status,
@@ -1102,6 +1124,7 @@ function decideCompletionStatus(options: {
   artifactFindings: CompletionArtifactFinding[];
   validationEvidence: CompletionValidationEvidence[];
   milestones: CompletionMilestoneSummary;
+  requireMilestoneEvidence: boolean;
   activeBlockers: RuntimeLogEntry[];
   observations: OperatorObservation[];
   authorityRequests: BuildCompletionPacketOptions["authorityRequests"];
@@ -1122,7 +1145,7 @@ function decideCompletionStatus(options: {
       incomplete = true;
       reasons.push("af orient was not run for this agent node.");
     }
-    if (options.milestones.total === 0) {
+    if (options.requireMilestoneEvidence && options.milestones.total === 0) {
       incomplete = true;
       reasons.push("No milestones were created for this agent node.");
     }
@@ -1164,7 +1187,7 @@ function decideCompletionStatus(options: {
   for (const observation of options.observations) {
     if (observation.kind === "blocker" || observation.blocking === true) {
       incomplete = true;
-      reasons.push(observation.summary);
+      reasons.push(observation.message);
     }
   }
 
@@ -1259,16 +1282,18 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
     log.type === "finding" &&
     (log.finding_kind === "blocker" || log.blocking === true)
   );
-  const validationEvidence = await buildValidationEvidence({
-    acceptanceCriteria: [
-      options.node.intent.goal,
-      ...options.node.intent.acceptance_criteria,
-      ...options.node.intent.constraints
-    ],
-    attempt: options.attempt,
-    logs,
-    milestones: milestones.milestones
-  });
+  const validationEvidence = shouldRequireValidationEvidence(options.node)
+    ? await buildValidationEvidence({
+        acceptanceCriteria: [
+          options.node.intent.goal,
+          ...options.node.intent.acceptance_criteria,
+          ...options.node.intent.constraints
+        ],
+        attempt: options.attempt,
+        logs,
+        milestones: milestones.milestones
+      })
+    : [];
   const activeObservations = (options.observations ?? []).filter((observation) =>
     observationRelevant(observation, options)
   );
@@ -1281,6 +1306,7 @@ export async function buildCompletionPacket(options: BuildCompletionPacketOption
     artifactFindings,
     validationEvidence,
     milestones,
+    requireMilestoneEvidence: shouldRequireMilestoneEvidence(options.node),
     activeBlockers,
     observations: activeObservations,
     authorityRequests: options.authorityRequests ?? [],

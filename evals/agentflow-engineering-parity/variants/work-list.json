@@ -1,0 +1,5 @@
+{
+  "id": "work-list",
+  "description": "Current Agentflow pattern_work_list prompt and harness behavior on the same engineering task fixtures.",
+  "graph_template": "templates/work-list.graph.template.json"
+}

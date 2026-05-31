@@ -1,0 +1,8 @@
+{
+  "name": "stale-docs-code-conflict-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

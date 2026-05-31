@@ -64,7 +64,9 @@ Important launch behavior:
 - `workspace_backend: "worktree"` creates isolated git worktrees and cleans them up at terminal state.
 - `workspace_backend: "inplace"` runs directly against the configured repo path.
 - Codex CLI and Cursor CLI receive the same Agentflow context, `af` runtime CLI, plugin tool, artifact, timeout, and sandbox contract.
-- Harness-native config is isolated by default. Declare Codex MCP/plugins or Cursor config/permissions in `profiles.*.harness_config` when they are part of the intended run; use `isolation: "inherit_user"` only when accepting non-reproducible local harness behavior.
+- Normal worker harnesses inherit native Codex/Cursor config by default to preserve direct-run quality. Set `profiles.*.harness_config.isolation: "isolated"` when reproducibility is more important than native harness parity. Runtime trust checks still force isolated config.
+- Same-node primitive-agent retries start fresh native harness sessions. Captured native session/chat ids are audit metadata only; retry continuity comes from Agentflow-owned attempt memory and `af orient`, not hidden harness conversation state.
+- Agentflow does not turn on Codex Goal mode for normal workers. The authored node contract plus `af orient` are the Agentflow goal mechanism; Codex Goal mode belongs in direct-harness engineering-parity eval baselines only.
 - `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.
 - `checkpoint` nodes are planned human gates inside repeat bodies; they prompt on a TTY when reached and feed pass, deny, or abort back into the graph.
 - Supervisor authority pauses are not graph nodes; they require a typed runtime `AuthorityRequest`. Local context, validation, artifact, workspace, graph-contract, repo/sandbox/scope, and recoverable environment failures recover autonomously or fail with evidence instead of asking a human.
@@ -142,9 +144,9 @@ On retries, `af orient` starts with retry orientation and runtime-authored attem
 Operators can add non-pausing live feedback with:
 
 ```bash
-agentflow observe add --run <run-root> --kind observation --summary "Reviewer note"
-agentflow observe add --run <run-root> --kind blocker --summary "Backend worker unavailable" --blocking --blocked-on backend-worker
-agentflow observe resolve --run <run-root> --observation <id> --resolution "Worker restored"
+agentflow observe --run <run-root> "Reviewer note"
+agentflow observe --run <run-root> --blocking "Backend worker unavailable" --blocked-on backend-worker
+agentflow observe resolve --run <run-root> <id> "Worker restored"
 ```
 
 `af orient` and `af complete check` surface active observations relevant to the current node. Observations are evidence, not graph edits; they do not change acceptance criteria, repo authority, sandbox, or declared artifacts.

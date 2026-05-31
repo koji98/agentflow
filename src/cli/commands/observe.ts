@@ -152,19 +152,17 @@ function defaultAuthor(): string {
 
 export const observeCommand = {
   name: "observe",
-  summary: "Add, list, or resolve live human observations for a run without pausing it.",
-  usage: "agentflow observe <add|list|resolve> --run <run-root-or-id> [options]",
+  summary: "Record, list, or resolve live human observations for a run without pausing it.",
+  usage: "agentflow observe --run <run-root-or-id> <message> [options]\n       agentflow observe list --run <run-root-or-id> [options]\n       agentflow observe resolve --run <run-root-or-id> <observation-id> <message> [options]",
   examples: [
-    "agentflow observe add --run .agentflow/runs/<run-id> --kind observation --summary \"Backend worker is running\"",
-    "agentflow observe add --run <run-id> --kind blocker --summary \"Export worker is unavailable\" --blocked-on backend_worker --recoverable-by operator",
+    "agentflow observe --run .agentflow/runs/<run-id> \"Backend worker is running\"",
+    "agentflow observe --run <run-id> --blocking \"Export worker is unavailable\" --blocked-on backend_worker --recoverable-by operator",
     "agentflow observe list --run <run-id> --active",
-    "agentflow observe resolve --run <run-id> --observation <obs-id> --resolution resolved --summary \"Worker restored\""
+    "agentflow observe resolve --run <run-id> <obs-id> \"Worker restored\""
   ] as const,
   optionNames: [
     "run",
     "kind",
-    "summary",
-    "body",
     "node",
     "attempt",
     "evidence",
@@ -174,7 +172,6 @@ export const observeCommand = {
     "blocked-on",
     "recoverable-by",
     "active",
-    "observation",
     "resolution",
     "help"
   ] as const,
@@ -189,15 +186,11 @@ export const observeCommand = {
     _signal?: AbortSignal,
     positionals: readonly string[] = []
   ) {
-    const subcommand = positionals[0];
-    if (!subcommand || !["add", "list", "resolve"].includes(subcommand) || positionals.length > 1) {
+    const subcommand = positionals[0] === "list" || positionals[0] === "resolve" ? positionals[0] : undefined;
+    if (positionals[0] === "add") {
       return {
         exitCode: 2,
-        stdout: renderObserveUsageError(
-          subcommand
-            ? `Unexpected observe subcommand or positional arguments: ${positionals.join(", ")}`
-            : "Missing observe subcommand."
-        )
+        stdout: renderObserveUsageError(`Unexpected observe subcommand or positional arguments: ${positionals.join(", ")}`)
       };
     }
 
@@ -210,20 +203,20 @@ export const observeCommand = {
     }
     const runRoot = await resolveRunRoot(runInput, currentWorkingDirectory);
 
-    if (subcommand === "add") {
-      const kind = stringOption(options, "kind");
-      const summary = stringOption(options, "summary");
+    if (!subcommand) {
+      const message = positionals.join(" ").trim();
+      const kind = stringOption(options, "kind") ?? (booleanOption(options, "blocking") ? "blocker" : "observation");
       const severity = stringOption(options, "severity") ?? "info";
-      if (!kind || !findingKinds.includes(kind as ObservationKind)) {
+      if (!message) {
+        return {
+          exitCode: 2,
+          stdout: renderObserveUsageError("Observation message is required.")
+        };
+      }
+      if (!findingKinds.includes(kind as ObservationKind)) {
         return {
           exitCode: 2,
           stdout: renderObserveUsageError(`--kind must be one of: ${findingKinds.join(", ")}.`)
-        };
-      }
-      if (!summary) {
-        return {
-          exitCode: 2,
-          stdout: renderObserveUsageError("--summary <text> is required.")
         };
       }
       if (severity !== "info" && severity !== "warning" && severity !== "error") {
@@ -234,7 +227,6 @@ export const observeCommand = {
       }
 
       const runId = await runIdForRunRoot(runRoot);
-      const body = stringOption(options, "body");
       const node = stringOption(options, "node");
       const attempt = stringOption(options, "attempt");
       const blockedOn = stringOption(options, "blocked-on");
@@ -244,8 +236,7 @@ export const observeCommand = {
         author: stringOption(options, "author") ?? defaultAuthor(),
         kind: kind as ObservationKind,
         severity,
-        summary,
-        ...(body ? { body } : {}),
+        message,
         ...(node ? { node } : {}),
         ...(attempt ? { attempt } : {}),
         evidence: parseEvidence(evidenceOptionValues(options)),
@@ -258,7 +249,7 @@ export const observeCommand = {
       return {
         exitCode: 0,
         output: {
-          command: "observe add",
+          command: "observe",
           status: "recorded",
           run_root: runRoot,
           observations_path,
@@ -268,6 +259,12 @@ export const observeCommand = {
     }
 
     if (subcommand === "list") {
+      if (positionals.length > 1) {
+        return {
+          exitCode: 2,
+          stdout: renderObserveUsageError(`Unexpected observe subcommand or positional arguments: ${positionals.join(", ")}`)
+        };
+      }
       const node = stringOption(options, "node");
       const observations = (await readOperatorObservations(runRoot))
         .filter((observation) => matchesListFilters(observation, {
@@ -287,13 +284,13 @@ export const observeCommand = {
       };
     }
 
-    const observationId = stringOption(options, "observation");
-    const resolution = stringOption(options, "resolution");
-    const summary = stringOption(options, "summary");
+    const observationId = positionals[1];
+    const message = positionals.slice(2).join(" ").trim();
+    const resolution = stringOption(options, "resolution") ?? "resolved";
     if (!observationId) {
       return {
         exitCode: 2,
-        stdout: renderObserveUsageError("--observation <observation-id> is required.")
+        stdout: renderObserveUsageError("Observation id is required.")
       };
     }
     if (resolution !== "resolved" && resolution !== "superseded") {
@@ -302,17 +299,17 @@ export const observeCommand = {
         stdout: renderObserveUsageError("--resolution must be one of: resolved, superseded.")
       };
     }
-    if (!summary) {
+    if (!message) {
       return {
         exitCode: 2,
-        stdout: renderObserveUsageError("--summary <text> is required.")
+        stdout: renderObserveUsageError("Resolution message is required.")
       };
     }
     const observation = await resolveOperatorObservation({
       runRoot,
       observationId,
       status: resolution,
-      summary
+      message
     });
 
     return {

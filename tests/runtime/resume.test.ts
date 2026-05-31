@@ -156,7 +156,7 @@ function createWorkListResumeHarness(): HarnessAdapter {
                 await writeWorkListItemDrafts(invocation);
             } else if (isWorkListItemPublishInvocation(invocation)) {
                 await writeWorkListItemFinals(invocation);
-            } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+            } else if (invocation.nodeGoal?.includes("final artifacts")) {
                 await writeFile(join(invocation.outputDir, "summary.md"), "Completed the work-list resume fixture.\n", "utf8");
             }
 

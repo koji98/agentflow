@@ -694,7 +694,7 @@ function buildDeliverySourcePacket(options: {
           node: observation.observation_id,
           execution_id: observation.observation_id,
           status: observation.status,
-          summary: sanitizeDeliveryEvidenceText(observation.summary)
+          summary: sanitizeDeliveryEvidenceText(observation.message)
         }))
       ],
       recovered: model.recovered_issues.map((entry) => sourceFailure(entry, deliveryDir)),
@@ -997,7 +997,7 @@ function renderDecisionLog(evidence: DeliveryEvidence, model: DeliveryModel): st
   if (evidence.operator_observations.length > 0) {
     lines.push("## Human Observations", "");
     for (const observation of evidence.operator_observations) {
-      lines.push(`- \`${observation.status}\` \`${observation.kind}\` by \`${observation.author}\`: ${observation.summary}`);
+      lines.push(`- \`${observation.status}\` \`${observation.kind}\` by \`${observation.author}\`: ${observation.message}`);
     }
     lines.push("");
   }

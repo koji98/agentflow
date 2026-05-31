@@ -1,0 +1,5 @@
+{
+  "id": "deep-work",
+  "description": "Current Agentflow pattern_deep_work prompt and harness behavior on the same engineering task fixtures.",
+  "graph_template": "templates/deep-work.graph.template.json"
+}

@@ -273,6 +273,19 @@ describe("af runtime CLI", () => {
             "--evidence",
             "The handoff content is ready and validation evidence is logged."
         ])).resolves.toMatchObject({ exitCode: 0 });
+        await expect(executeAfCli([
+            "milestone",
+            "log",
+            "m1",
+            "--kind",
+            "validation",
+            "--command",
+            "fixture-lookup --case overlap",
+            "--result",
+            "pass",
+            "--summary",
+            "Late exact command evidence was attached before readiness."
+        ])).resolves.toMatchObject({ exitCode: 0 });
         await expect(withStdin("ready\n", () => executeAfCli(["artifact", "write", "handoff"])))
             .resolves.toMatchObject({ exitCode: 0 });
         await expect(readFile(join(runtime.output, "handoff.md"), "utf8")).resolves.toBe("ready\n");
@@ -297,7 +310,7 @@ describe("af runtime CLI", () => {
             author: "human",
             kind: "blocker",
             severity: "error",
-            summary: "Routed export worker is unavailable",
+            message: "Routed export worker is unavailable",
             node: "main",
             blocking: true,
             blockedOn: "operator_managed_backend_worker",
@@ -325,12 +338,16 @@ describe("af runtime CLI", () => {
             expect.objectContaining({
                 id: "m1",
                 status: "completed",
-                logs: [
+                logs: expect.arrayContaining([
                     expect.objectContaining({
                         kind: "validation",
                         command: "npm test"
+                    }),
+                    expect.objectContaining({
+                        kind: "validation",
+                        command: "fixture-lookup --case overlap"
                     })
-                ]
+                ])
             })
         ]);
         await expect(executeAfCli([

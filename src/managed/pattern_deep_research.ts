@@ -126,19 +126,18 @@ function materialInputSummary(materials: ResearchMaterial[]): string[] {
 
 function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepResearchAngle, index: number): string {
   return renderPrompt([
-    body("You are a research angle worker investigating one assigned angle for a larger managed research workflow. Your private report will be synthesized later, so gather useful evidence and preserve uncertainty clearly."),
+    body("You are investigating one assigned research angle for a larger research effort. Your report will be combined later, so gather useful evidence and preserve uncertainty clearly."),
     section("Assigned Angle", [
       `Angle id: ${angle.id}`,
       angle.prompt,
       "This assigned angle is your controlling objective. Do not let the broader workflow goal shift your focus.",
       "Do not duplicate other angle workers unless overlap is needed to explain a conflict."
     ]),
-    section("Final Managed Workflow Contract", [
-      "This is a private helper node inside a managed workflow. The final managed node owns the public artifact shape and final acceptance criteria below.",
-      "Use this contract as background for what your angle evidence must support, not as permission to broaden the assigned angle.",
+    section("Final Research Contract", [
+      "Use this final research contract as background for what your angle evidence must support, not as permission to broaden the assigned angle.",
       `Goal: ${config.intent.goal}`,
       ...formatList("Final acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored research contract.")
     ]),
     section("Research Method", [
       ...disposableInvestigationWorkspaceLines(),
@@ -146,11 +145,11 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
       "Prefer authoritative local/source evidence when the question is repo-specific.",
       "Use external or web context when docs, package behavior, standards, release notes, or broader comparisons would materially improve the answer.",
       "Preserve source paths, commands, URLs, and uncertainty so final synthesis can audit the claim.",
-      "Do not change graph intent, node intent, repo authority, sandbox, or declared artifacts."
+      "Do not change the research goal, repo authority, sandbox, or declared artifacts."
     ]),
     section("Output Contract", [
       `Publish the \`angle_report_${zeroPad(index + 1)}\` artifact; the Declared Artifacts table shows the exact command.`,
-      "This is a private research artifact for synthesis, not the final public handoff.",
+      "This report is research evidence for later synthesis, not the final research handoff.",
       "Do not create a report file in the repo workspace; stream the final Markdown directly to `af artifact write`.",
       "Do not create links to other angle reports; you may reference related findings in prose.",
       `The assigned angle id is ${angle.id}. Use that value in the report heading or metadata.`,
@@ -160,7 +159,7 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
     section("Quality Bar", [
       "Do not produce a shallow summary. Produce the most useful evidence-backed answer for this angle.",
       "Mark uncertainty instead of guessing. Include minority or conflicting evidence when it matters.",
-      `Final reminder: complete angle \`${angle.id}\`, not the entire research workflow.`
+      `Final reminder: complete angle \`${angle.id}\`, not the entire research effort.`
     ])
   ]);
 }
@@ -174,12 +173,12 @@ function buildSynthesisPrompt(
   const inputCount = materials.length;
   return renderPrompt([
     body(`You are a research synthesis worker combining ${inputCount} research reports into one higher-signal synthesis report.`),
-    section("Final Managed Workflow Contract", [
-      "This is a private synthesis step inside a larger managed research workflow. The final public result will be published later.",
-      "Use the final contract to preserve relevant evidence, but do not format this private synthesis as the final public artifact unless the private output contract below says so.",
+    section("Final Research Contract", [
+      "This synthesis is research evidence for the final research artifact.",
+      "Use the final contract to preserve relevant evidence, but do not format this synthesis as the final research artifact unless the output contract below says so.",
       `Goal: ${config.intent.goal}`,
       ...formatList("Final acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored research contract.")
     ]),
     section("Assigned Input Set", [
       "Synthesize exactly these input reports. If an input is itself a synthesis report, preserve its full underlying angle coverage.",
@@ -197,7 +196,7 @@ function buildSynthesisPrompt(
     ]),
     section("Output Contract", [
       `Publish the \`synthesis_report_${zeroPad(layer)}_${zeroPad(group)}\` artifact; the Declared Artifacts table shows the exact command.`,
-      "This is a private synthesis artifact for the final publisher, not the final public handoff.",
+      "This synthesis report is research evidence for the final publisher, not the final research handoff.",
       "Include findings, evidence, sources, conflicts, uncertainty, confidence, and collapsed duplicates in Markdown."
     ])
   ]);
@@ -209,13 +208,13 @@ function buildFinalPrompt(
   inputCount: number
 ): string {
   return renderPrompt([
-    body(`You are the final research publisher for a managed deep research result from ${inputCount} research report${inputCount === 1 ? "" : "s"}. Create the complete, coherent research artifact that downstream work can rely on.`),
-    section("Managed Workflow Contract", [
-      "This final publisher owns the managed workflow's single public artifact contract.",
-      "Raw angle reports and synthesis reports are internal working inputs only. Do not expose them as separate deliverables.",
+    body(`You are the final research publisher for ${inputCount} research report${inputCount === 1 ? "" : "s"}. Create the complete, coherent research artifact that downstream work can rely on.`),
+    section("Research Contract", [
+      "Write the single final research artifact.",
+      "Use angle reports and synthesis reports as source evidence; do not expose them as separate deliverables.",
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored research contract.")
     ]),
     section("Current Context", [
       ...disposableInvestigationWorkspaceLines(),
@@ -228,10 +227,10 @@ function buildFinalPrompt(
       "Write a holistic, sufficiently detailed, conflict-resolved answer that covers every angle. Do not merely copy raw reports through.",
       "Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file.",
       "End with the integrated conclusion, controlling decisions, unresolved uncertainty, risks, and downstream implications.",
-      "Do not create angle-specific public artifacts, evidence-link tables, packets, or companion files."
+      "Do not create angle-specific final artifacts, evidence-link tables, packets, or companion files."
     ]),
-    section("Declared Public Artifacts", [
-      "Publish the declared public artifact.",
+    section("Declared Final Artifact", [
+      "Publish the declared final artifact.",
       ...formatArtifactContract(publicArtifacts)
     ]),
     section("Quality Bar", [

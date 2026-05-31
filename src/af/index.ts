@@ -738,7 +738,8 @@ function commandHelp(commandPath: string): string | undefined {
       "  af milestone complete m1 --evidence \"Relevant source, tests, and validation path identified\"",
       "",
       "Safety:",
-      "  Milestones are audit evidence and completion gates, not chain-of-thought logs."
+      "  Milestones are audit evidence and completion gates, not chain-of-thought logs.",
+      "  You may add late evidence to active or completed milestones until af complete check reports ready."
     ],
     spawn: [
       "af spawn - start a focused helper agent.",
@@ -989,7 +990,7 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
     "## Active Runtime State",
     `- Supervisor recovery: ${metadata.supervisor_recovery_envelope ? metadata.supervisor_recovery_envelope.retry_directive.summary : "none"}`,
     `- Operator observations: ${activeObservations.length === 0 ? "none" : String(activeObservations.length)}`,
-    ...activeObservations.slice(-5).map((observation) => `  - ${observation.kind}: ${observation.summary}`),
+    ...activeObservations.slice(-5).map((observation) => `  - ${observation.kind}: ${observation.message}`),
     "",
     "## Declared Artifacts",
     ...renderArtifactTable(metadata),
@@ -1649,8 +1650,8 @@ async function commandMilestone(
   const milestone = findMilestone(state, id);
 
   if (subcommand === "log") {
-    if (milestone.status !== "active") {
-      throw new Error(`Milestone "${id}" is ${milestone.status}; log evidence on an active milestone.`);
+    if (milestone.status === "blocked") {
+      throw new Error(`Milestone "${id}" is blocked; unblock by resolving the blocker, not by appending evidence.`);
     }
     const kind = optionString(options, "kind");
     if (!kind || !milestoneLogKinds.includes(kind as RuntimeMilestoneLogKind)) {

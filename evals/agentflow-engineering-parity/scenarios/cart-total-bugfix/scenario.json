@@ -1,0 +1,43 @@
+{
+  "id": "cart-total-bugfix",
+  "bucket": "engineering-parity",
+  "difficulty": "medium",
+  "description": "Fix a cart total bug with quantity, discount, and tax behavior.",
+  "workflow": {
+    "graph_template": "../../templates/primitive-agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "repo",
+    "init_git": true
+  },
+  "metadata": {
+    "validation_command": "npm test"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "npm test"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "task.md",
+        "package.json"
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "engineering-parity": {}
+  }
+}

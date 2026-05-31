@@ -45,6 +45,7 @@ Validation renders every scenario x variant graph template with a representative
 Agentflow keeps a layered eval system:
 
 - `evals/agentflow-validation`: five broad sentinel scenarios that prove the full product mission end to end.
+- `evals/agentflow-engineering-parity`: direct-vs-Agentflow engineering tasks for primitive and managed worker shapes; each trial runs Agentflow and a clean direct Codex baseline against the same fixture, with Codex Goal mode used only as an optional external baseline when available.
 - Focused suites such as prompt regression, workflow quality, capability workflows, and real-world issues: smaller regression and capability coverage.
 - Repeated trials: stochastic reliability measurement before releases.
 - Human QA runs: periodic checks that scenarios remain fair, solvable, and hard to game.
@@ -382,7 +383,7 @@ Review `report.md` first, then failing `scorecard.json`, `criteria-results.json`
 ## Built-In Suites
 
 - `evals/agentflow-validation`: flagship five-scenario sentinel suite for full Agentflow mission validation. Run `agentflow eval validate evals/agentflow-validation` before broad eval changes and run the two simulated sentinel scenarios as fast regression gates when practical. Release confidence requires `npm run validate:release-confidence`, which runs all five sentinels with three trials.
-- `evals/agentflow-prompt-regression`: strict release gate for solved prompt behavior; use `npm run validate:prompts` before shipping prompt changes. Prompt-regression gates use default isolated harness config; profiles with `harness_config.isolation: "inherit_user"` are intentionally non-reproducible and do not belong in this release gate.
+- `evals/agentflow-prompt-regression`: strict release gate for solved prompt behavior; use `npm run validate:prompts` before shipping prompt changes. Prompt-regression scenarios that compare prompt text or deterministic trajectories should pin `harness_config.isolation: "isolated"` when native user harness config would make the run non-reproducible.
 - `evals/agentflow-workflow-quality`: lightweight dogfood capability suite.
 - `evals/agentflow-capability-workflows`: harder local-repo prompt/context suite generated with `npm run setup:eval-repos`.
 - `evals/agentflow-realworld-issues`: pinned MIT real-world issue suite generated with `npm run setup:realworld-evals`.

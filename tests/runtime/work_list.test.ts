@@ -192,7 +192,7 @@ function buildHarness(): HarnessAdapter {
         await writeDraftItemArtifacts(invocation);
       } else if (isWorkListItemInvocation(invocation)) {
         await writeFinalItemArtifacts(invocation);
-      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item.\n", "utf8");
       }
 
@@ -251,7 +251,7 @@ function buildDeepWorkHarness(state: { runItemsCalls: number }): HarnessAdapter 
           summary: "Produced the evidence handoff.",
           validationMessage: "Runtime finalizer can verify this result."
         });
-      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after retry.\n", "utf8");
       }
 
@@ -324,7 +324,7 @@ function buildParallelCriteriaHarness(state: { activeChecks: number; maxActiveCh
           summary: "Produced the evidence handoff.",
           validationMessage: "Runtime finalizer can verify this result."
         });
-      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item.\n", "utf8");
       }
 
@@ -402,7 +402,7 @@ function buildLowRequiredCriterionHarness(state: { itemRuns: number }): HarnessA
         await writeFinalItemArtifacts(invocation, {
           summary: `Produced the evidence handoff on run ${state.itemRuns}.`
         });
-      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after criterion retry.\n", "utf8");
       }
 
@@ -505,7 +505,7 @@ function buildPhasedDeepWorkHarness(state: {
           downstream_implications: ["Downstream nodes can consume work_items."]
         }, null, 2)}\n`, "utf8");
         await writeFile(join(invocation.outputDir, "item-validation.md"), "Published validation evidence.\n", "utf8");
-      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one phased deep-work item.\n", "utf8");
       }
 
@@ -565,7 +565,7 @@ function buildTwoItemHarness(state: { itemOrder: string[]; secondSawPriorHandoff
           downstream_implications: ["Downstream nodes can consume work_items."]
         }, null, 2)}\n`, "utf8");
         await writeFile(join(invocation.outputDir, "item-validation.md"), `Validation: ${itemId} item result is present.\n`, "utf8");
-      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed two frozen work-list items.\n", "utf8");
       }
 
@@ -644,7 +644,7 @@ function buildTwoItemParentRetryHarness(state: { itemOrder: string[]; w2Attempts
           downstream_implications: ["Downstream nodes can consume work_items."]
         }, null, 2)}\n`, "utf8");
         await writeFile(join(invocation.outputDir, "item-validation.md"), `Validation: ${itemId} item result is ${shouldComplete ? "complete" : "blocked"}.\n`, "utf8");
-      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed two frozen work-list items after preserving prior progress.\n", "utf8");
       }
 
@@ -726,7 +726,7 @@ function buildDeepWorkOutcomeRetryHarness(state: { runItemsCalls: number; reject
             : "Produced an initial handoff that verifier will reject.",
           validationMessage: "Outcome verifier checks semantic evidence."
         });
-      } else if (invocation.nodeGoal?.includes("final public artifacts")) {
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
         await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after verifier retry.\n", "utf8");
       }
 
@@ -809,14 +809,24 @@ describe("runtime pattern_work_list", () => {
     const workItems = JSON.parse(await readFile(publishAttempt!.artifacts.work_items, "utf8")) as {
       status: string;
       item_count: number;
-      items: Array<{ id: string; status: string }>;
+      items: Array<{
+        id: string;
+        status: string;
+        validation: { passed: string[]; failed_then_fixed: string[]; unavailable: string[]; blocked: string[] };
+      }>;
     };
     expect(workItems).toEqual(expect.objectContaining({
       status: "completed",
       item_count: 1
     }));
     expect(workItems.items).toEqual([
-      expect.objectContaining({ id: "w1", status: "completed" })
+      expect.objectContaining({
+        id: "w1",
+        status: "completed",
+        validation: expect.objectContaining({
+          passed: ["Runtime finalizer can verify this result."]
+        })
+      })
     ]);
     const itemProgress = run.events.filter((event) =>
       event.type === "managed.progress" &&
@@ -914,6 +924,17 @@ describe("runtime pattern_work_list", () => {
     const firstItemPrompt = await readFile(firstItemAttempt!.prompt_path!, "utf8");
     expect(firstItemPrompt).toContain("Parent work-list goal: Deliver a two-item runtime-test work list.");
     expect(firstItemPrompt).not.toContain("You are the runtime coordinator for a managed work-list pattern.");
+    expect(firstItemPrompt).not.toContain("managed work-list item");
+    expect(firstItemPrompt).not.toContain("public artifact");
+    expect(firstItemPrompt).not.toContain("downstream graph node");
+    expect(firstItemPrompt).toContain("## Item Output Contract");
+    expect(firstItemPrompt).toContain("field id set to the current frozen item id");
+    expect(firstItemPrompt).toContain("passed, failed_then_fixed, unavailable, and blocked keys");
+    expect(firstItemPrompt).toContain("Use failed_then_fixed, not fixed.");
+    expect(firstItemPrompt).toContain("add/edit tests only when the task asks or repo contract expects them");
+    expect(firstItemPrompt).toContain("Do not use field item_id.");
+    expect(firstItemPrompt).not.toContain("JSON with this exact shape");
+    expect(firstItemPrompt).not.toContain('"failed_then_fixed": []');
     const publishAttempt = attempts.find((attempt) => attempt.authored_id === "deliver");
     const workItems = JSON.parse(await readFile(publishAttempt!.artifacts.work_items, "utf8")) as {
       item_count: number;
@@ -1569,6 +1590,9 @@ describe("runtime pattern_work_list", () => {
     expect(executeAttempt).toBeDefined();
     expect(planAttempt).toBeDefined();
     expect(publishAttempt).toBeDefined();
+    const planPrompt = await readFile(join(planAttempt!.execution_dir, "agent", "prompt.md"), "utf8");
+    expect(planPrompt).toContain("Preserve exact task-specific names, labels, commands, and required phrases from the parent work-list and current item contract in the plan.");
+    expect(planPrompt).toContain("The `item_cycle_plan` artifact is the durable planning record; do not create a milestone solely to restate the plan.");
     const executeContext = await readFile(join(executeAttempt!.execution_dir, "agent", "context.md"), "utf8");
     const planContext = await readFile(join(planAttempt!.execution_dir, "agent", "context.md"), "utf8");
     const publishContext = await readFile(join(publishAttempt!.execution_dir, "agent", "context.md"), "utf8");

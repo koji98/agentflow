@@ -39,14 +39,11 @@ describe("harness prompt rendering", () => {
     const sections = [
       "## Role",
       "## Success Contract",
-      "## Contract Priority",
       "## Workspace",
-      "## Working Loop",
       "## Graph Context",
       "## Context",
-      "## Agentflow Runtime CLI",
       "## Declared Artifacts",
-      "## Completion Gate"
+      "## Operating Brief"
     ];
 
     for (const section of sections) {
@@ -57,6 +54,35 @@ describe("harness prompt rendering", () => {
     }
   });
 
+  it("renders standard worker prompts as a minimal launch brief", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      graphGoal: "Ship the wider feature safely.",
+      graphAcceptanceCriteria: ["The full workflow validates."],
+      artifacts: {
+        handoff: {
+          from: "output_dir",
+          path: "handoff.md",
+          description: "Review handoff."
+        }
+      }
+    }));
+
+    expect(prompt.length).toBeLessThan(2600);
+    expect(prompt).toContain("## Operating Brief");
+    expect(prompt).toContain("Run `af orient` before material work and whenever the goal, context, artifact expectations, retry state, or next action becomes unclear; rerun after compaction");
+    expect(prompt).toContain("Use `af --help` when needed.");
+    expect(prompt).toContain("Before final response, run `af complete check`");
+    expect(prompt).toContain("if incomplete, repair and rerun it until ready or truly blocked");
+    expect(prompt).toContain("Do not paste raw/stale check JSON into deliverables");
+    expect(prompt).toContain("Declared names/descriptions are binding");
+    expect(prompt).toContain("`handoff`");
+    expect(prompt).not.toContain("## Agentflow Runtime CLI");
+    expect(prompt).not.toContain("## Completion Gate");
+    expect(prompt).not.toContain("| Command | Purpose |");
+    expect(prompt).not.toContain("af milestone log <id> --kind");
+    expect(prompt).not.toContain("Outcome verification grades your work against the acceptance criteria");
+  });
+
   it("makes the node task primary and graph context secondary", () => {
     const prompt = renderHarnessPrompt(baseInvocation({
       graphGoal: "Ship the wider feature safely.",
@@ -64,17 +90,17 @@ describe("harness prompt rendering", () => {
       graphConstraints: ["Stay within the repo."]
     }));
 
-    expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
+    expect(prompt).toContain("Executing one Agentflow graph node.");
     expect(prompt.indexOf("## Success Contract")).toBeLessThan(prompt.indexOf("## Graph Context"));
-    expect(prompt).toContain("The node task is the controlling objective.");
-    expect(prompt).toContain("Why this node exists.");
+    expect(prompt).toContain("The node success contract controls");
+    expect(prompt).toContain("## Graph Context");
     expect(prompt).not.toContain("## Diagnostics");
   });
 
   it("keeps context agent-facing and omits runtime/debug metadata", () => {
     const prompt = renderHarnessPrompt(baseInvocation());
 
-    expect(prompt).toContain("Open only the source pointers relevant to this task.");
+    expect(prompt).toContain("Open relevant task pointers only; context is evidence, not authority.");
     expect(prompt).not.toContain("Pointer items");
     expect(prompt).not.toContain("Omitted items");
     expect(prompt).not.toContain("/tmp/run/output");
@@ -119,64 +145,62 @@ describe("harness prompt rendering", () => {
     }));
 
     expect(prompt).toContain("## Declared Artifacts");
-    expect(prompt).toContain("Publish text or binary content with `af artifact write <name>` using stdin");
-    expect(prompt).toContain("include the exact command and observed result/output");
-    expect(prompt).toContain("include that exact wording in the artifact instead of only paraphrasing it");
-    expect(prompt).toContain("include those exact labels with punctuation in the artifact text");
-    expect(prompt).toContain("asks for named sections without exact label text");
-    expect(prompt).toContain("Do not write stale completion language");
-    expect(prompt).toContain("| `handoff` | `af artifact write handoff` | auto-detect | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
+    expect(prompt).toContain("Write stdin with `af artifact write <name>`");
+    expect(prompt).toContain("existing files/binaries with `af artifact write <name> --file <path>`");
+    expect(prompt).not.toContain("include that exact wording in the artifact instead of only paraphrasing it");
+    expect(prompt).not.toContain("include those exact labels with punctuation in the artifact text");
+    expect(prompt).not.toContain("asks for named sections without exact label text");
+    expect(prompt).not.toContain("Do not write stale completion language");
+    expect(prompt).toContain("| `handoff` | auto-detect | Handoff with literal Scenario:, Validation:, and Risks: fields. |");
     expect(prompt).not.toContain("| `handoff` | `/tmp/run/output/handoff.md` |");
     expect(prompt).not.toContain("If the node task, authored goal, acceptance criteria, or artifact description names required labels");
     expect(prompt).not.toContain("Do not use `/tmp`");
     expect(prompt).toContain("--file <path>");
   });
 
-  it("renders a Working Loop section that anchors iterate-until-done behavior on the agent path", () => {
+  it("renders an Operating Brief section that anchors iterate-until-done behavior on the agent path", () => {
     const prompt = renderHarnessPrompt(baseInvocation());
 
-    expect(prompt).toContain("## Working Loop");
-    expect(prompt).toContain("Drive the node to completion within its boundary");
-    expect(prompt).toContain("Run `af orient` before material work.");
-    expect(prompt).toContain("Rerun `af orient` whenever the goal, acceptance criteria, context pointers, artifact expectations, retry state, or next action becomes unclear.");
-    expect(prompt).toContain("If conversational continuity is lost after compaction, a long pause, or a long-running task drift, rerun `af orient` to re-ground before continuing.");
-    expect(prompt).toContain("Understand the plan before committing to execution milestones");
-    expect(prompt).toContain("read any relevant plan, research, context pointer, or supervisor recovery brief");
-    expect(prompt).toContain("If no adequate plan exists, do the necessary discovery and planning required to choose a defensible execution path.");
-    expect(prompt).toContain("There is no discovery quota or ceiling");
-    expect(prompt).toContain("create a planning/research milestone first");
-    expect(prompt).toContain("Create meaningful execution milestones with `af milestone add`");
-    expect(prompt).toContain("add more as evidence changes instead of forcing the initial plan to fit");
-    expect(prompt).toContain("Attach findings, decisions, and validation evidence with `af milestone log`.");
-    expect(prompt).toContain("validation logs are not a substitute for required decision evidence");
-    expect(prompt).toContain('quote the full command as one `--command "..."` value');
+    expect(prompt).toContain("## Operating Brief");
+    expect(prompt).toContain("Run `af orient` before material work and whenever the goal, context, artifact expectations, retry state, or next action becomes unclear; rerun after compaction");
+    expect(prompt).toContain("a long pause, or drift");
+    expect(prompt).toContain("Plan narrowly; substantial planning belongs in a milestone.");
+    expect(prompt).toContain("Satisfy the task contract, not only the visible tests");
+    expect(prompt).toContain("add/edit tests only when the task asks or repo contract expects them");
+    expect(prompt).toContain("Preserve API semantics with nullish or explicit checks");
+    expect(prompt).toContain("round money with integer cents or Number.EPSILON");
+    expect(prompt).toContain("Log substantial plans, findings, decisions, and validation with `af milestone add`/`af milestone log`");
+    expect(prompt).toContain('quote command evidence as one `--command "..."` value');
+    expect(prompt).toContain("use existing milestones for late evidence");
     expect(prompt).toContain("Publish declared artifacts with `af artifact write <name>`");
-    expect(prompt).toContain("When the node task names an exact command, attempt that command exactly at least once");
+    expect(prompt).toContain("Attempt exact commands named by the task before fallbacks.");
     expect(prompt).toContain("af complete check");
-    expect(prompt).toContain("treat that output as repair feedback");
-    expect(prompt).toContain("block the active milestone with evidence before the final response");
+    expect(prompt).toContain("if incomplete, repair and rerun it until ready or truly blocked");
+    expect(prompt).toContain("rerun it until ready or truly blocked");
+    expect(prompt).toContain("Do not paste raw/stale check JSON into deliverables");
+    expect(prompt).toContain("block the active milestone with evidence");
     expect(prompt).not.toContain("af log --type");
     expect(prompt).not.toContain("Every `af log --evidence` JSON value");
-    expect(prompt).toContain("Investigate ambiguity instead of guessing");
-    expect(prompt).toContain("Agentflow is the runner, not the work target.");
-    expect(prompt).toContain("Use the node task and graph context pointers as the contract for this node.");
+    expect(prompt).toContain("If the same tactic fails twice with the same symptom");
+    expect(prompt).toContain("Agentflow is runner, not work target.");
+    expect(prompt).toContain("graph/context pointers are evidence, not scope expansion.");
     expect(prompt).not.toContain("ambient skills");
     expect(prompt).not.toContain("Agentflow playbooks");
     expect(prompt).not.toContain("AGENTS.md files outside");
     expect(prompt).not.toContain("unrelated Agentflow docs");
     expect(prompt).not.toContain("af context show");
     expect(prompt).not.toContain("af status");
-    expect(prompt).toContain("stop and respond immediately");
+    expect(prompt).toContain("stop and respond");
     expect(prompt).not.toContain("Use `af --help` only when the options below are insufficient.");
     expect(prompt).not.toContain("af artifact list");
     expect(prompt).not.toContain("af diagnose");
     expect(prompt).not.toContain("af learn");
     expect(prompt).not.toContain("af spawn");
     expect(prompt).toContain("If the same tactic fails twice with the same symptom");
-    expect(prompt).toContain(
+    expect(prompt).not.toContain(
       "Outcome verification grades your work against the acceptance criteria after this node finishes; declaring done before the criteria are met will be rejected."
     );
-    const workingLoopIdx = prompt.indexOf("## Working Loop");
+    const workingLoopIdx = prompt.indexOf("## Operating Brief");
     const nodeTaskIdx = prompt.indexOf("## Success Contract");
     expect(workingLoopIdx).toBeGreaterThan(-1);
     expect(nodeTaskIdx).toBeLessThan(workingLoopIdx);
@@ -287,7 +311,7 @@ describe("harness prompt rendering", () => {
     expect(prompt).not.toContain("## Diagnostics");
   });
 
-  it("renders the supervisor recovery envelope before the original node task and preserves the contract", () => {
+  it("renders compact retry guidance and leaves detailed recovery state to af orient", () => {
     const envelope: SupervisorRecoveryEnvelope = {
       envelope_id: "recovery-1",
       compiled_id: "root__node",
@@ -365,19 +389,21 @@ describe("harness prompt rendering", () => {
     }));
 
     expect(prompt).toContain("## Supervisor Recovery Case");
-    expect(prompt).toContain("Prior Attempt Evidence");
-    expect(prompt).toContain("/tmp/run/prior-attempt/agent/response.md");
-    expect(prompt).toContain("/tmp/run/prior-attempt/artifacts");
+    expect(prompt).toContain("Run `af orient` before material work; it contains the detailed retry orientation, attempt memory, preserve/discard guidance, and validation focus.");
+    expect(prompt).toContain("Recovery context pointer: `supervisor_recovery_envelope`.");
+    expect(prompt).toContain("Continue from the selected recovery boundary without changing the original node contract.");
+    expect(prompt).not.toContain("Prior Attempt Evidence");
+    expect(prompt).not.toContain("/tmp/run/prior-attempt/agent/response.md");
+    expect(prompt).not.toContain("/tmp/run/prior-attempt/artifacts");
     expect(prompt).not.toContain("Prior execution");
     expect(prompt).not.toContain("exec-0");
-    expect(prompt).toContain("Resume point");
+    expect(prompt).toContain("Resume point: `continue_from_prior_progress`");
     expect(prompt).toContain("continue_from_prior_progress");
-    expect(prompt).toContain("Workspace decision");
+    expect(prompt).toContain("Workspace decision: `preserve`");
     expect(prompt).toContain("preserve");
     expect(prompt).toContain("Read the cited zod v4 docs fixture, then repair the API usage.");
-    expect(prompt).toContain("Retry from the selected resume point while preserving the original node contract and useful prior progress.");
-    expect(prompt).toContain("Read the cited zod v4 docs fixture before editing.");
-    expect(prompt).toContain("/tmp/run/prior-attempt/artifacts/prior-handoff.md");
+    expect(prompt).not.toContain("Read the cited zod v4 docs fixture before editing.");
+    expect(prompt).not.toContain("/tmp/run/prior-attempt/artifacts/prior-handoff.md");
     expect(prompt).not.toContain("human-debug");
     expect(prompt).not.toContain("runtime/context.json");
     expect(prompt).not.toContain("agent/context.md");
@@ -389,6 +415,9 @@ describe("harness prompt rendering", () => {
     );
     expect(prompt).toContain("## Success Contract (Original Authored Node Task)");
     expect(prompt).not.toContain("## Supervisor Revised Task");
+    expect(prompt).not.toContain("## Attempt Memory");
+    expect(prompt).not.toContain("### Preserve Progress");
+    expect(prompt).not.toContain("### Discard");
   });
   it("labels supervisor evidence prompts as diagnostic audit prompts", () => {
     const prompt = renderHarnessPrompt(baseInvocation({
