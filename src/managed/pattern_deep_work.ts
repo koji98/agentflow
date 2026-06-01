@@ -115,7 +115,7 @@ function formatPublicArtifacts(artifacts: Record<string, ArtifactDefinition>): s
 
 function formatDraftArtifacts(artifacts: Record<string, ArtifactDefinition>): string[] {
   return Object.keys(artifacts).flatMap((name) => [
-    `- ${draftArtifactName(name)}: publish this declared artifact as the draft for public artifact \`${name}\`.`
+    `- ${draftArtifactName(name)}: publish this declared artifact as the draft for final artifact \`${name}\`.`
   ]);
 }
 
@@ -204,7 +204,7 @@ function formatPhaseContract(config: PatternDeepWorkConfig, phase: PatternDeepWo
   }
 
   const lines = [
-    "This phase contract is additive. It does not replace or weaken the managed workflow contract, completion criteria, threshold, or constraints."
+    "This phase intent is additive. It does not replace or weaken the task contract, completion criteria, threshold, or constraints."
   ];
 
   if (intent.goal) {
@@ -229,12 +229,11 @@ function buildPlanPrompt(
   cycleCount: number
 ): string {
   return renderPrompt([
-    body("You are an implementation planner preparing the next cycle of a managed work loop. You do not edit files in this phase. Your job is to understand the contract, feedback, and repository state well enough to give the execution agent the smallest credible plan."),
-    section("Managed Workflow Contract", [
-      "This managed workflow node has one public contract: the goal, acceptance criteria, constraints, and declared public artifacts below. Internal plans, notes, scorecards, and drafts are private working material.",
+    body("You are an implementation planner preparing the next focused work cycle. Do not edit files in this phase. Understand the task, feedback, and repository state well enough to give the execution agent the smallest credible plan."),
+    section("Task Contract", [
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
     ]),
     section("Completion Model", [
       `Maximum cycles: ${cycleCount}`,
@@ -243,11 +242,11 @@ function buildPlanPrompt(
     ]),
     ...formatPhaseContract(config, "plan"),
     section("Planning Task", [
-      "This prompt and context pointer packet are sufficient for the planning phase.",
+      "Use the provided context pointers for the planning phase.",
       "Read the task context, any prior failed scorecard, criterion verification records, command output excerpts, and current workspace state available to you.",
       "If prior scorecards, work notes, criterion records, or repeat history are omitted because no prior cycle exists, treat that as expected first-cycle state.",
-      "Do not wait for, search globally for, or report a blocker solely because first-cycle private materials are missing.",
-      "Identify the concrete gap between the current state and the managed workflow contract.",
+      "Do not wait for, search globally for, or report a blocker solely because first-cycle prior materials are missing.",
+      "Identify the concrete gap between the current state and the task contract.",
       "Define the smallest credible next plan that can satisfy failed criteria without widening scope.",
       "Map every completion criterion to the evidence the execution phase should produce or inspect.",
       "Name the expected material delta for this cycle so retries can distinguish real progress from repeated spin.",
@@ -257,7 +256,9 @@ function buildPlanPrompt(
     ]),
     section("Output Contract", [
       "Publish the `cycle_plan` artifact.",
-      "Include sections: `Objective`, `Relevant evidence`, `Planned material delta`, `Criterion evidence map`, `Validation plan`, and `Risks or constraints`."
+      "Include sections: `Objective`, `Relevant evidence`, `Planned material delta`, `Criterion evidence map`, `Validation plan`, and `Risks or constraints`.",
+      "Preserve exact task-specific names, labels, commands, and required phrases from the task contract in the plan.",
+      "The `cycle_plan` artifact is the durable planning record; do not create a milestone solely to restate the plan. If you do create a milestone, complete it before running `af complete check`."
     ])
   ]);
 }
@@ -268,11 +269,11 @@ function buildGenerateValidatePrompt(
 ): string {
   return renderPrompt([
     body("You are an implementation agent responsible for completing and validating this work cycle. Do not stop at a plausible change. Work until you have verified the candidate satisfies the goal, acceptance criteria, and constraints, or until you have concrete evidence of what remains."),
-    section("Managed Workflow Contract", [
-      "This is one cycle inside a managed work loop. If the completion criteria do not pass, another cycle may use your notes and feedback to continue. Write concrete validation evidence and residual risks so the next cycle can improve rather than restart.",
+    section("Task Contract", [
+      "If completion criteria do not pass, a later cycle may use your notes and feedback to continue. Write concrete validation evidence and residual risks so the next cycle can improve rather than restart.",
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
     ]),
     section("Completion Criteria", [
       `Pass threshold: ${config.completion.pass_threshold}`,
@@ -281,6 +282,9 @@ function buildGenerateValidatePrompt(
     ...formatPhaseContract(config, "execute"),
     section("Execution Task", [
       "Follow the cycle plan in context.",
+      "Satisfy the task contract, not only the visible tests; handle edge cases directly implied by the goal, acceptance criteria, and local code.",
+      "Keep edits scoped; add/edit tests only when the task asks or repo contract expects them.",
+      "Preserve API semantics with nullish or explicit checks; avoid truthiness and absence-check ceremony unless null and absence must differ; prefer direct formulas over expanded arithmetic; use helpers/constants only when they clarify; round money with integer cents or Number.EPSILON; make rejection errors name expected formats or valid values.",
       "If evidence shows the plan is wrong, make the smallest justified deviation and record why in work notes.",
       "Inspect enough repository context to follow local patterns before editing.",
       "When draft artifacts rely on upstream research, plans, tests, or prior context, cite concrete evidence names, paths, commands, or packet fields instead of using generic references like prior research.",
@@ -293,7 +297,7 @@ function buildGenerateValidatePrompt(
     section("Output Contract", [
       "Publish the `work_notes` artifact with what changed, validation attempted, and remaining risks.",
       "Include the plan followed, any justified deviations, exact validation evidence, and the current criterion evidence map.",
-      "Also write draft versions of every public artifact so completion criteria can grade them before final publication.",
+      "Also write draft versions of every final artifact so completion criteria can grade them before final publication.",
       "Draft handoffs and summaries should include enough evidence citations for an evaluator to see why the change, validation, and risk claims are supported.",
       ...formatDraftArtifacts(publicArtifacts)
     ])
@@ -303,7 +307,7 @@ function buildGenerateValidatePrompt(
 function buildRubricGoal(criterion: PatternDeepWorkRubricCriterion): string {
   const targetDescription = criterion.target === "workspace"
     ? "the current workspace candidate, work notes, validation evidence, and draft artifacts"
-    : `draft public artifact \`${criterion.target.slice("artifact:".length)}\` and its supporting evidence`;
+    : `draft artifact \`${criterion.target.slice("artifact:".length)}\` and its supporting evidence`;
 
   return renderPrompt([
     body(`You are an evidence-based evaluator for completion criterion \`${criterion.id}\`.`),
@@ -316,7 +320,7 @@ function buildRubricGoal(criterion: PatternDeepWorkRubricCriterion): string {
     section("Evaluation Guidance", [
       `Grade only ${targetDescription}.`,
       "Give full credit when the evidence satisfies the criterion.",
-      "Do not invent issues, penalize harmless style differences, or require work outside the managed workflow contract.",
+      "Do not invent issues, penalize harmless style differences, or require work outside the task contract.",
       "Do withhold credit for missing evidence, violated constraints, failed validation, or unsupported claims.",
       "Use score 0.85 or higher when the criterion is clearly satisfied; set `passed` true when the criterion is adequately satisfied."
     ]),
@@ -342,11 +346,11 @@ function buildFinalPublishPrompt(
   publicArtifacts: Record<string, ArtifactDefinition>
 ): string {
   return renderPrompt([
-    body("You are publishing the final public artifacts from the latest passing managed work cycle. Downstream work will read only these public artifacts, so make them complete, concrete, and evidence-backed."),
-    section("Managed Workflow Contract", [
+    body("You are publishing the final artifacts from the latest passing work cycle. Make them complete, concrete, and evidence-backed."),
+    section("Task Contract", [
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...formatList("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
     ]),
     section("Current Context", [
       "Use the latest passing completion scorecard, work notes, and draft artifact materials.",
@@ -354,13 +358,14 @@ function buildFinalPublishPrompt(
     ]),
     ...formatPhaseContract(config, "publish"),
     section("Required Summary Shape", [
-      "Preserve task-specific identifiers and phrases from the managed workflow goal when they are part of the requested public output.",
-      "Include a clearly labeled `Scorecard Evidence` or `Completion Scorecard` section in the Markdown summary.",
+      "Preserve task-specific identifiers and phrases from the task goal when they are part of the requested final output.",
+      "When a final artifact description names literal labels or fields, include those labels in that artifact; do not replace them with nearby section names.",
+      "In the Markdown summary, include a clearly labeled scorecard evidence or completion scorecard section.",
       "That section must cite the score, threshold, criterion results, validation command/result, and evidence paths available in context.",
       "Keep claims bounded to the scorecard and validation evidence; do not claim broader success."
     ]),
-    section("Declared Public Artifacts", [
-      "Publish the declared public artifacts.",
+    section("Declared Final Artifacts", [
+      "Publish the declared final artifacts.",
       ...formatPublicArtifacts(publicArtifacts),
       "The `packet` artifact must include completion score, criterion results, validation evidence, residual risks, and next actions."
     ])
@@ -499,7 +504,7 @@ function buildDraftArtifacts(publicArtifacts: Record<string, ArtifactDefinition>
       {
         from: "output_dir",
         path: draftArtifactPath(name, artifact),
-        description: `Draft content for public artifact ${name}.`
+        description: `Draft content for final artifact ${name}.`
       }
     ])
   );
@@ -585,7 +590,7 @@ function buildCriterionNode(
       goal: buildRubricGoalWithPhase(config, criterion),
       acceptance_criteria: [
         "The evaluator returns valid JSON with passed, score, summary, and issues fields.",
-        "The evaluator grades only evidence in context and does not require work outside the managed workflow contract."
+        "The evaluator grades only evidence in context and does not require work outside the task contract."
       ],
       constraints: verifyConfig.intent.constraints
     }
@@ -710,10 +715,15 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
     ...planShared,
     support: mergeSupportContext(planShared.support, buildPlanContext(config, generateValidateId, gateId)),
     artifacts: outputDirArtifact("cycle_plan", "cycle-plan.md", "Focused plan for the next deep work cycle."),
+    managed_runtime: {
+      kind: "pattern_deep_work",
+      root_id: config.id,
+      phase: "plan"
+    },
     intent: {
       goal: buildPlanPrompt(planConfig, config.completion.max_cycles),
       acceptance_criteria: [
-        "The plan addresses the managed workflow contract and any prior failed completion criteria.",
+        "The plan addresses the task contract and any prior failed completion criteria.",
         "The plan identifies focused validation the execution agent should run when feasible.",
         "The plan does not edit the workspace."
       ],
@@ -742,7 +752,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
       acceptance_criteria: [
         "The cycle implements the plan or records why the plan had to change.",
         "Focused validation is run when feasible, with exact results recorded in work notes and draft artifacts.",
-        "Draft public artifacts exist so completion criteria can grade the result."
+        "Draft final artifacts exist so completion criteria can grade the result."
       ],
       constraints: executeConfig.intent.constraints
     }
@@ -815,7 +825,7 @@ export function buildPatternDeepWork(config: PatternDeepWorkConfig): SequenceNod
           goal: buildFinalPublishPrompt(publishConfig, publicArtifacts),
           acceptance_criteria: [
             ...publishConfig.intent.acceptance_criteria,
-            "The public artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success.",
+            "The final artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success.",
             "The packet preserves completion score, criterion results, validation evidence, residual risks, and next actions."
           ],
           constraints: publishConfig.intent.constraints

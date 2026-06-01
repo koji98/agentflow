@@ -16,7 +16,7 @@ export const managedPatternDescriptors = [
     runtime_shape: "compiled-subgraph",
     orchestration: {
       summary:
-        "Run authored research angles in parallel, synthesize at most three reports at a time in balanced batches, then publish the declared public artifacts.",
+        "Run authored research angles in parallel, synthesize at most three reports at a time in balanced batches, then publish the declared final artifacts.",
       planner: false,
       fan_out: true,
       council: false,
@@ -45,7 +45,7 @@ export const managedPatternDescriptors = [
     },
     phases: [
       { id: "plan", label: "Plan Cycle", summary: "Plan the smallest credible next move from context, scorecards, and prior feedback without editing.", mode: "single-agent" },
-      { id: "generate_validate", label: "Generate And Validate", summary: "Do or revise the work, run focused validation when feasible, and draft public artifacts.", mode: "single-agent" },
+      { id: "generate_validate", label: "Generate And Validate", summary: "Do or revise the work, run focused validation when feasible, and draft final artifacts.", mode: "single-agent" },
       { id: "criteria", label: "Completion Criteria", summary: "Run command criteria and targeted rubric checks in parallel.", mode: "parallel-agents" },
       { id: "gate", label: "Completion Gate", summary: "Aggregate a deterministic weighted scorecard and loop on misses.", mode: "repair-loop" },
       { id: "publish", label: "Publish Work", summary: "Write final declared artifacts from the latest passing cycle.", mode: "single-agent" }
@@ -73,7 +73,7 @@ export const managedPatternDescriptors = [
       { id: "criteria", label: "Item Criteria", summary: "When deep_work is selected, run command criteria and targeted rubric checks for the current item.", mode: "parallel-agents" },
       { id: "gate", label: "Item Gate", summary: "When deep_work is selected, aggregate a per-item scorecard and retry only that item on misses.", mode: "repair-loop" },
       { id: "verify", label: "Verify Item Ledger", summary: "Deterministically verify every frozen item completed before publication.", mode: "deterministic-check" },
-      { id: "publish", label: "Publish Work List", summary: "Write final stable public artifacts from the verified item ledger.", mode: "single-agent" }
+      { id: "publish", label: "Publish Work List", summary: "Write final stable artifacts from the verified item ledger.", mode: "single-agent" }
     ]
   })
 ] as const satisfies readonly ManagedPatternDescriptor[];

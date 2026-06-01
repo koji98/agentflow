@@ -121,8 +121,8 @@ describe("runtime checks", () => {
 
     expect(rendered).toContain("## Role");
     expect(rendered).toContain("You are an AI evaluator executing one read-only check node");
-    expect(rendered).toContain("Sandbox: read-only - cannot modify the workspace");
-    expect(rendered).toContain("# Context Manifest");
+    expect(rendered).toContain("Sandbox: read-only");
+    expect(rendered).toContain("## Pointers");
     expect(rendered).not.toContain("Context packet:");
     expect(rendered).not.toContain("Context provenance:");
     expect(rendered).toContain("## Output");

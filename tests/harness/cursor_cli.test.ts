@@ -123,7 +123,10 @@ describe("cursor cli harness", () => {
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 10,
-        signal: undefined
+        signal: undefined,
+        harnessConfig: {
+          isolation: "isolated"
+        }
       });
 
       expect(result.status).toBe("failed");
@@ -457,7 +460,10 @@ process.stdout.write(JSON.stringify({
           }
         },
         timeoutSec: 10,
-        signal: undefined
+        signal: undefined,
+        harnessConfig: {
+          isolation: "isolated"
+        }
       });
 
       const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
@@ -480,22 +486,21 @@ process.stdout.write(JSON.stringify({
       );
       expect(argv).not.toContain("--force");
       expect(prompt).toContain("## Role");
-      expect(prompt).toContain("Agentflow is a local graph runner for long-running engineering work.");
-      expect(prompt).toContain("You are executing one node in a wider Agentflow graph.");
+      expect(prompt).toContain("Executing one Agentflow graph node.");
       expect(prompt).toContain("## Success Contract");
       expect(prompt).toContain("Review the change.");
       expect(prompt).toContain("## Context");
-      expect(prompt).toContain("# Context Manifest");
+      expect(prompt).toContain("## Pointers");
       expect(prompt).not.toContain("Context packet:");
       expect(prompt).not.toContain(join(executionDir, "runtime", "context.json"));
       expect(prompt).not.toContain("Context provenance:");
-      expect(prompt).toContain("Sandbox: read-only - cannot modify the workspace");
+      expect(prompt).toContain("Sandbox: read-only");
       expect(prompt).toContain("## Declared Artifacts");
       expect(prompt).toContain("read-only sandbox prevents file writes");
       expect(prompt).toContain("`review_report`");
       expect(prompt).toContain("Markdown review report for downstream nodes.");
-      expect(prompt).toContain("## Completion Gate");
-      expect(prompt).toContain("captured as the reserved `agent_response` artifact");
+      expect(prompt).toContain("## Operating Brief");
+      expect(prompt).toContain("Before final response, run `af complete check`");
       expect(env).toEqual({
         AGENTFLOW_WORKSPACE: repoDir,
         AGENTFLOW_OUTPUT_DIR: outputDir,
@@ -581,7 +586,10 @@ process.stdout.write(JSON.stringify({
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 10,
-        signal: undefined
+        signal: undefined,
+        harnessConfig: {
+          isolation: "isolated"
+        }
       });
 
       expect(result.status).toBe("passed");
@@ -681,7 +689,10 @@ process.stdout.write(JSON.stringify({
         outputDir: executionDir,
         artifacts: {},
         timeoutSec: 10,
-        signal: undefined
+        signal: undefined,
+        harnessConfig: {
+          isolation: "isolated"
+        }
       });
 
       expect(result.status).toBe("passed");
@@ -772,7 +783,7 @@ process.stdout.write(JSON.stringify({
     }
   });
 
-  it("inherits user cursor config only when the profile explicitly opts in", async () => {
+  it("inherits user cursor config by default for normal worker prompts", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-inherit-user-"));
     const repoDir = join(tempRoot, "repo");
     const executionDir = join(tempRoot, "execution");
@@ -808,16 +819,130 @@ process.stdout.write(JSON.stringify({
         artifacts: {},
         timeoutSec: 10,
         signal: undefined,
-        harnessConfig: {
-          isolation: "inherit_user"
-        }
       });
 
       const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
 
       expect(result.status).toBe("passed");
       expect(env.CURSOR_CONFIG_DIR).toBe(userCursorConfigDir);
+      expect(result.metadata?.native_harness).toEqual(expect.objectContaining({
+        config_isolation: "inherit_user",
+        session_id: "session-1"
+      }));
       expect(result.metadata).not.toHaveProperty("cursor_config_dir");
+    } finally {
+      if (previousEnvPath === undefined) {
+        delete process.env.MOCK_ENV_PATH;
+      } else {
+        process.env.MOCK_ENV_PATH = previousEnvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("records native Cursor session ids as audit metadata without resuming them", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-native-session-audit-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCursorBinary(tempRoot);
+    const harness = createCursorCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    process.env.MOCK_ARGV_PATH = mock.argv_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-native-session-audit",
+        executionId: "exec-native-session-audit",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        nodeGoal: "Capture native Cursor session metadata without using it as retry memory.",
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+
+      expect(result.status).toBe("passed");
+      expect(argv).not.toContain("--resume");
+      expect(argv).not.toContain("--continue");
+      expect(result.metadata?.native_harness).toEqual(expect.objectContaining({
+        session_id: "session-1"
+      }));
+      expect(result.metadata?.native_harness).not.toHaveProperty("resume");
+    } finally {
+      if (previousArgvPath === undefined) {
+        delete process.env.MOCK_ARGV_PATH;
+      } else {
+        process.env.MOCK_ARGV_PATH = previousArgvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps explicit isolated cursor config for normal workers when authored", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-cursor-explicit-isolated-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    const userCursorConfigDir = join(tempRoot, "user-cursor-config");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCursorBinary(tempRoot);
+    const harness = createCursorCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousEnvPath = process.env.MOCK_ENV_PATH;
+    process.env.MOCK_ENV_PATH = mock.env_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-isolated",
+        executionId: "exec-isolated",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-cursor",
+        baseEnv: {
+          ...process.env,
+          CURSOR_CONFIG_DIR: userCursorConfigDir
+        },
+        nodeGoal: "Use isolated Cursor configuration.",
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined,
+        harnessConfig: {
+          isolation: "isolated"
+        }
+      });
+
+      const env = JSON.parse(await readFile(mock.env_path, "utf8")) as Record<string, string>;
+
+      expect(result.status).toBe("passed");
+      expect(env.CURSOR_CONFIG_DIR).toBe(join(executionDir, ".cursor-config"));
+      expect(env.CURSOR_CONFIG_DIR).not.toBe(userCursorConfigDir);
+      expect(result.metadata?.native_harness).toEqual(expect.objectContaining({
+        config_isolation: "isolated"
+      }));
     } finally {
       if (previousEnvPath === undefined) {
         delete process.env.MOCK_ENV_PATH;

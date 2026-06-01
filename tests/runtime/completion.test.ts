@@ -501,6 +501,55 @@ describe("completion packet", () => {
             status: "missing_required_content"
         }));
     });
+    it("does not require implementation validation evidence for managed planning phases", async () => {
+        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "work-list.json");
+        await writeFile(artifactPath, `${JSON.stringify({
+            planning_summary: "Plan the bounded task.",
+            ordering_rationale: "One item is enough.",
+            items: [{
+                id: "w1",
+                title: "Implement",
+                goal: "Run the implementation item.",
+                acceptance_criteria: ["Implementation evidence exists."],
+                constraints: ["Stay scoped."],
+                validation_expectations: ["Run npm test during item execution."],
+                handoff_focus: ["Validation evidence."],
+                rationale: "The planner delegates implementation validation."
+            }]
+        })}\n`, "utf8");
+        await writeOrientInvocation(executionDir);
+        await rm(join(runRoot, "runtime", "milestones", "exec__ship__attempt_1.json"), { force: true });
+        const packet = await buildCompletionPacket({
+            runRoot,
+            node: makeNode({
+                managed_runtime: {
+                    kind: "pattern_work_list",
+                    root_id: "work",
+                    phase: "plan"
+                },
+                intent: {
+                    goal: "Plan the work list. The downstream implementation must run `npm test`.",
+                    acceptance_criteria: ["The planner publishes the machine-readable list."],
+                    constraints: []
+                },
+                declared_artifacts: {
+                    work_list_json: {
+                        from: "output_dir",
+                        path: "work-list.json",
+                        description: "Machine-readable planned work-list items."
+                    }
+                }
+            }),
+            attempt: makeAttempt(executionDir, {
+                artifacts: { work_list_json: artifactPath }
+            }),
+            workspacePath: workspace,
+            sandbox: "workspace-write"
+        });
+        expect(packet.completion_status).toBe("ready_for_verification");
+        expect(packet.validation_evidence).toEqual([]);
+        expect(packet.milestones.total).toBe(0);
+    });
     it("does not treat runtime command references as required artifact content", async () => {
         const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
         await writeFile(artifactPath, [

@@ -4043,7 +4043,8 @@ describe("runtime engine", () => {
         expect(evidenceInvocations.length).toBeGreaterThan(1);
         const secondPrompt = renderHarnessPrompt(nodeInvocations[1]!);
         expect(secondPrompt).toContain("## Supervisor Recovery Case");
-        expect(secondPrompt).toContain("## Attempt Memory");
+        expect(secondPrompt).not.toContain("## Attempt Memory");
+        expect(secondPrompt).toContain("Run `af orient` before material work; it contains the detailed retry orientation, attempt memory, preserve/discard guidance, and validation focus.");
         expect(nodeInvocations[1]!.attemptMemoryMarkdown).toContain("# Attempt Memory");
         expect(nodeInvocations[1]!.attemptMemoryPath).toContain("attempt-memory.json");
         expect(nodeInvocations[1]!.attemptMemoryMarkdownPath).toContain("attempt-memory.md");
@@ -4051,7 +4052,7 @@ describe("runtime engine", () => {
         await expect(readFile(nodeInvocations[1]!.attemptMemoryMarkdownPath!, "utf8")).resolves.toContain("Resume point");
         expect(secondPrompt).toContain("## Success Contract (Original Authored Node Task)");
         expect(secondPrompt.indexOf("## Supervisor Recovery Case")).toBeLessThan(secondPrompt.indexOf("## Graph Context"));
-        expect(secondPrompt).toContain("Preserve the original node intent, sandbox, repo authority, and declared artifacts.");
+        expect(secondPrompt).toContain("Continue from the selected recovery boundary without changing the original node contract.");
         expect(secondPrompt).toContain("Prior attempt artifacts are evidence only");
         const retryManifest = await readFile(nodeInvocations[1]!.contextManifestPath, "utf8");
         expect(retryManifest).toContain("supervisor_recovery_envelope");

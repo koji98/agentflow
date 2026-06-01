@@ -47,7 +47,7 @@ function buildDocument(stepOverrides = {}) {
                             "The research artifact answers all authored angles.",
                             "The research artifact preserves evidence, uncertainty, confidence, and next actions."
                         ],
-                        constraints: ["Do not change the graph contract."]
+                        constraints: ["Do not change the public API contract."]
                     },
                     research: {
                         angles: [
@@ -101,7 +101,7 @@ describe("deep research managed pattern", () => {
             "market_scan__managed__pattern_deep_research__angle_02",
             "market_scan__managed__pattern_deep_research__angle_03"
         ]);
-        expect(JSON.stringify(fanout.steps[0])).toContain("research angle worker");
+        expect(JSON.stringify(fanout.steps[0])).toContain("investigating one assigned research angle");
         if (fanout.steps[0]?.type !== "agent") {
             throw new Error("Expected first angle to be an agent.");
         }
@@ -124,6 +124,9 @@ describe("deep research managed pattern", () => {
         expect(fanout.steps[0].intent.goal).toContain("This attempt runs in a disposable investigation workspace.");
         expect(fanout.steps[0].intent.goal).toContain("Temporary exploratory edits are allowed only when they materially help the investigation.");
         expect(fanout.steps[0].intent.goal).toContain("Do not create a report file in the repo workspace");
+        expect(fanout.steps[0].intent.goal).not.toContain("internal research artifact");
+        expect(fanout.steps[0].intent.goal).not.toContain("public artifact");
+        expect(fanout.steps[0].intent.goal).not.toContain("graph contract");
         expect(JSON.stringify(fanout.steps[0])).not.toContain("expert");
         expect(finalNode).toEqual(expect.objectContaining({
             id: "market_scan",
@@ -134,6 +137,9 @@ describe("deep research managed pattern", () => {
         }));
         expect(Object.keys(finalNode.artifacts ?? {}).sort()).toEqual(["research"]);
         expect(JSON.stringify(finalNode)).toContain("final research publisher");
+        expect(JSON.stringify(finalNode)).not.toContain("internal inputs only");
+        expect(JSON.stringify(finalNode)).not.toContain("public artifacts");
+        expect(JSON.stringify(finalNode)).not.toContain("graph contract");
         expect(JSON.stringify(finalNode)).not.toContain("expert");
     });
     it("adds balanced synthesis layers when more than three angle reports need synthesis", () => {
@@ -241,7 +247,7 @@ describe("deep research managed pattern", () => {
         ]);
         expect(finalNode.intent.goal).toContain("Write `research.md` as the only final file");
         expect(finalNode.intent.goal).toContain("Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file");
-        expect(finalNode.intent.goal).toContain("Do not create angle-specific public artifacts, evidence-link tables, packets, or companion files");
+        expect(finalNode.intent.goal).toContain("Do not create angle-specific final artifacts, evidence-link tables, packets, or companion files");
         expect(finalNode.intent.goal).not.toContain("Evidence Link Ownership");
         expect(finalNode.intent.goal).not.toContain("Research Evidence");
         expect(finalNode.intent.goal).not.toContain("runtime prepends");
@@ -249,7 +255,15 @@ describe("deep research managed pattern", () => {
         expect(finalNode.intent.goal).not.toContain("Report Pointer Path");
         expect(finalNode.intent.goal).not.toContain("`Pointer` value");
         expect(finalNode.intent.goal).not.toContain("angle_01_report");
-        expect(finalNode.intent.goal).toContain("Do not expose them as separate deliverables");
+        expect(finalNode.intent.goal).toContain("do not expose them as separate deliverables");
+        expect(finalNode.intent.goal).not.toContain("managed workflow");
+        expect(finalNode.intent.goal).not.toContain("public artifact shape");
+        expect(finalNode.intent.goal).not.toContain("synthesis node");
+        const loweredPromptText = JSON.stringify(workflow);
+        expect(loweredPromptText).not.toContain("private helper node");
+        expect(loweredPromptText).not.toContain("inside a managed workflow");
+        expect(loweredPromptText).not.toContain("private synthesis step");
+        expect(loweredPromptText).not.toContain("final managed node");
         expect(finalNode.intent.goal).toContain("not a high-level abstract");
         expect(finalNode.intent.goal).toContain("holistic, sufficiently detailed, conflict-resolved answer");
         expect(finalNode.intent.goal).not.toContain("Do not author raw angle links yourself");

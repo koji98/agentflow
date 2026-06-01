@@ -67,7 +67,7 @@ export const builtInAgentArtifactRepairPolicy: Required<ArtifactRepairPolicy> = 
   max_attempts: 1
 };
 export const builtInHarnessConfig: EffectiveHarnessConfig = {
-  isolation: "isolated"
+  isolation: "inherit_user"
 };
 
 function mergeUnknownRecordMaps(
@@ -186,7 +186,8 @@ function canInheritLaunchHarnessConfig(
 function resolveHarnessConfig(
   launchProfile: GraphProfile | undefined,
   overlayProfile: GraphProfile | undefined,
-  harness: HarnessName | undefined
+  harness: HarnessName | undefined,
+  defaultIsolation: HarnessIsolationMode = builtInHarnessConfig.isolation
 ): EffectiveHarnessConfig | undefined {
   if (!harness) {
     return undefined;
@@ -202,9 +203,16 @@ function resolveHarnessConfig(
   const cursor = harness === "cursor-cli"
     ? mergeCursorHarnessConfig(launchConfig?.cursor, overlayConfig?.cursor)
     : undefined;
+  const impliedIsolation: HarnessIsolationMode =
+    harness === "cursor-cli" &&
+    !overlayConfig?.isolation &&
+    !launchConfig?.isolation &&
+    cursor !== undefined
+      ? "isolated"
+      : defaultIsolation;
 
   return {
-    isolation: overlayConfig?.isolation ?? launchConfig?.isolation ?? builtInHarnessConfig.isolation,
+    isolation: overlayConfig?.isolation ?? launchConfig?.isolation ?? impliedIsolation,
     ...(codex ? { codex } : {}),
     ...(cursor ? { cursor } : {})
   };
@@ -368,7 +376,12 @@ export function resolveNodePolicy(
 
   if (node.type === "agent" || isAiCheck(node)) {
     harness = node_profile?.harness ?? launch_profile?.harness;
-    harness_config = resolveHarnessConfig(launch_profile, node_profile, harness);
+    harness_config = resolveHarnessConfig(
+      launch_profile,
+      node_profile,
+      harness,
+      isAiCheck(node) ? "isolated" : builtInHarnessConfig.isolation
+    );
     model =
       node.type === "agent"
         ? (
@@ -463,7 +476,13 @@ export function resolveSupervisorPolicy(
   }
 
   const harness = supervisor_profile.harness ?? launch_profile?.harness;
-  const harness_config = resolveHarnessConfig(launch_profile, supervisor_profile, harness);
+  const resolved_harness_config = resolveHarnessConfig(launch_profile, supervisor_profile, harness, "isolated");
+  const harness_config = resolved_harness_config
+    ? {
+        ...resolved_harness_config,
+        isolation: "isolated" as const
+      }
+    : undefined;
   const timeout_sec = builtInTimeoutSeconds;
   const model =
     supervisor_profile.model ??

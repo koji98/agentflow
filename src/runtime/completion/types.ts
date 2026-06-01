@@ -126,8 +126,7 @@ export interface OperatorObservation {
   author: string;
   kind: ObservationKind;
   severity: "info" | "warning" | "error";
-  summary: string;
-  body?: string;
+  message: string;
   node?: string;
   attempt?: string;
   evidence?: CompletionEvidence[];
@@ -135,7 +134,7 @@ export interface OperatorObservation {
   blocked_on?: string;
   recoverable_by?: string;
   status: "active" | "resolved" | "superseded";
-  resolution_summary?: string;
+  resolution_message?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -184,7 +183,7 @@ export interface CompletionRuntimeLogSummary {
 export interface CompletionOperatorObservationSummary {
   active: number;
   blocking: number;
-  latest: Array<Pick<OperatorObservation, "observation_id" | "kind" | "summary" | "author" | "severity" | "status"> & {
+  latest: Array<Pick<OperatorObservation, "observation_id" | "kind" | "message" | "author" | "severity" | "status"> & {
     target?: string;
   }>;
 }

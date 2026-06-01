@@ -18,7 +18,7 @@ Rule: authoring rationale belongs outside graph JSON; runtime-facing fields must
 | `intent.goal` | all executable nodes or one executing node | The outcome, decision, or deliverable the runtime reader owns. | Graph topology, pattern choice, node mechanics, file-by-file recipes. |
 | `intent.acceptance_criteria` | worker and verifier | Observable success evidence, validation expectations, quality bars. | Generic working-loop instructions, authoring rationale, hidden implementation preferences. |
 | `intent.constraints` | worker and supervisor | Prohibition-style boundaries beginning with `Do not`. | Positive requirements, topology explanations, or "this graph should..." prose. |
-| `research.angles[].prompt` | one research angle worker | A controlling evidence lens, decision boundary, sources, uncertainty to preserve. | "Angle 1", deep-research mechanics, private reports, synthesis nodes, public artifact choices. |
+| `research.angles[].prompt` | one research angle worker | A controlling evidence lens, decision boundary, sources, uncertainty to preserve. | "Angle 1", deep-research mechanics, private reports, internal synthesis mechanics, final artifact choices. |
 | `work_list.planning_goal` | work-list planner | How to discover the finite ordered list. | Pre-baked item rows, managed-pattern rationale, "use this node to..." phrasing. |
 | `what_counts_as_one_item` | work-list planner and item worker | Item boundary in reviewable outcome terms. | Dynamic graph ids, downstream-node mechanics, implementation-step scripts. |
 | `done_when` | item worker and verifier | Evidence each item must leave behind. | Artifact command instructions or graph-addressability mechanics. |
@@ -36,7 +36,7 @@ Bad research angle:
 ```json
 {
   "id": "api",
-  "prompt": "Use pattern_deep_research to produce a private angle report for the synthesis node."
+  "prompt": "Use the deep-research pattern to route a private report into internal synthesis."
 }
 ```
 

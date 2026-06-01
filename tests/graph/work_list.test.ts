@@ -121,15 +121,24 @@ describe("pattern work list", () => {
     expect(planNode).toEqual(expect.objectContaining({
       type: "agent",
       id: "deliver_stack__managed__pattern_work_list__plan",
+      managed_runtime: expect.objectContaining({
+        kind: "pattern_work_list",
+        root_id: "deliver_stack",
+        phase: "plan"
+      }),
       artifacts: expect.objectContaining({
         work_list_json: expect.objectContaining({ path: "work-list.json" })
       })
     }));
     expect(planNode.artifacts).not.toHaveProperty("work_list_md");
     expect(planPrompt).toContain("runtime will freeze this list before execution");
+    expect(planPrompt).toContain("Do not run or log implementation validation as blocked during planning");
     expect(planPrompt).toContain("Use sequential ids starting at `w1`");
     expect(planPrompt).toContain("planning_summary");
     expect(planPrompt).toContain("ordering_rationale");
+    expect(planPrompt).not.toContain("managed work-list pattern");
+    expect(planPrompt).not.toContain("managed node");
+    expect(planPrompt).not.toContain("runtime coordinator");
 
     expect(freezeNode).toEqual(expect.objectContaining({
       type: "exec",
@@ -161,8 +170,11 @@ describe("pattern work list", () => {
       })
     }));
     expect(runPrompt).toContain("Worker kind: agent.");
-    expect(runPrompt).toContain("runtime owns item status");
+    expect(runPrompt).toContain("owns item status and aggregation");
     expect(runPrompt).toContain("Do not add, remove, split, merge, or reorder");
+    expect(runPrompt).not.toContain("runtime coordinator");
+    expect(runPrompt).not.toContain("managed work-list pattern");
+    expect(runPrompt).not.toContain("internal item attempts");
 
     expect(finalizeNode).toEqual(expect.objectContaining({
       type: "exec",
@@ -187,9 +199,12 @@ describe("pattern work list", () => {
         }
       }
     }));
-    expect(publishPrompt).toContain("stable artifacts, not the internal item attempts");
+    expect(publishPrompt).toContain("verified work item evidence");
     expect(publishPrompt).toContain("The `work_items` artifact is forwarded by the runtime");
     expect(publishPrompt).not.toContain("The `packet` artifact");
+    expect(publishPrompt).not.toContain("managed work-list pattern");
+    expect(publishPrompt).not.toContain("Downstream graph nodes");
+    expect(publishPrompt).not.toContain("internal item attempts");
   });
 
   it("supports a deep_work item worker with item handoff and ledger rubric targets", () => {

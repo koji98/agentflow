@@ -1,0 +1,43 @@
+{
+  "id": "duration-parser-refactor",
+  "bucket": "engineering-parity",
+  "difficulty": "medium",
+  "description": "Refactor a duration parser while preserving a small public API.",
+  "workflow": {
+    "graph_template": "../../templates/primitive-agent.graph.template.json",
+    "harness": "codex-cli",
+    "workspace_backend": "inplace"
+  },
+  "environment": {
+    "repo": "repo",
+    "init_git": true
+  },
+  "metadata": {
+    "validation_command": "npm test"
+  },
+  "criteria": {
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "npm test"
+          ]
+        }
+      ]
+    },
+    "workspace": {
+      "forbidden_edits": [
+        "task.md",
+        "package.json"
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
+    "engineering-parity": {}
+  }
+}

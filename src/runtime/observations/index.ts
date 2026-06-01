@@ -60,7 +60,7 @@ function normalizeObservation(value: unknown): OperatorObservation | undefined {
   const author = stringValue(value.author);
   const kind = stringValue(value.kind);
   const severity = stringValue(value.severity);
-  const summary = stringValue(value.summary);
+  const message = stringValue(value.message);
   const status = stringValue(value.status);
   const createdAt = stringValue(value.created_at);
 
@@ -71,7 +71,7 @@ function normalizeObservation(value: unknown): OperatorObservation | undefined {
     !findingKinds.includes(kind as ObservationKind) ||
     !severity ||
     !(severity === "info" || severity === "warning" || severity === "error") ||
-    !summary ||
+    !message ||
     !status ||
     !(status === "active" || status === "resolved" || status === "superseded") ||
     !createdAt
@@ -80,12 +80,11 @@ function normalizeObservation(value: unknown): OperatorObservation | undefined {
   }
 
   const runId = stringValue(value.run_id);
-  const body = stringValue(value.body);
   const node = stringValue(value.node);
   const attempt = stringValue(value.attempt);
   const blockedOn = stringValue(value.blocked_on);
   const recoverableBy = stringValue(value.recoverable_by);
-  const resolutionSummary = stringValue(value.resolution_summary);
+  const resolutionMessage = stringValue(value.resolution_message);
   const updatedAt = stringValue(value.updated_at);
 
   return {
@@ -94,8 +93,7 @@ function normalizeObservation(value: unknown): OperatorObservation | undefined {
     author,
     kind: kind as ObservationKind,
     severity,
-    summary,
-    ...(body ? { body } : {}),
+    message,
     ...(node ? { node } : {}),
     ...(attempt ? { attempt } : {}),
     evidence: normalizeEvidence(value.evidence),
@@ -103,7 +101,7 @@ function normalizeObservation(value: unknown): OperatorObservation | undefined {
     ...(blockedOn ? { blocked_on: blockedOn } : {}),
     ...(recoverableBy ? { recoverable_by: recoverableBy } : {}),
     status,
-    ...(resolutionSummary ? { resolution_summary: resolutionSummary } : {}),
+    ...(resolutionMessage ? { resolution_message: resolutionMessage } : {}),
     created_at: createdAt,
     ...(updatedAt ? { updated_at: updatedAt } : {})
   };
@@ -155,8 +153,7 @@ export function createOperatorObservation(options: {
   author: string;
   kind: ObservationKind;
   severity: OperatorObservation["severity"];
-  summary: string;
-  body?: string;
+  message: string;
   node?: string;
   attempt?: string;
   evidence?: CompletionEvidence[];
@@ -172,8 +169,7 @@ export function createOperatorObservation(options: {
     author: options.author,
     kind: options.kind,
     severity: options.severity,
-    summary: options.summary,
-    ...(options.body ? { body: options.body } : {}),
+    message: options.message,
     ...(options.node ? { node: options.node } : {}),
     ...(options.attempt ? { attempt: options.attempt } : {}),
     evidence: options.evidence ?? [],
@@ -189,7 +185,7 @@ export async function resolveOperatorObservation(options: {
   runRoot: string;
   observationId: string;
   status: "resolved" | "superseded";
-  summary: string;
+  message: string;
   now?: Date;
 }): Promise<OperatorObservation> {
   const observations = await readOperatorObservations(options.runRoot);
@@ -204,7 +200,7 @@ export async function resolveOperatorObservation(options: {
   const updated: OperatorObservation = {
     ...existing,
     status: options.status,
-    resolution_summary: options.summary,
+    resolution_message: options.message,
     updated_at: (options.now ?? new Date()).toISOString()
   };
   await appendOperatorObservation(options.runRoot, updated);

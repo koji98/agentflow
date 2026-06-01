@@ -1,0 +1,33 @@
+{
+  "validation_commands": [
+    "npm test"
+  ],
+  "required_changed_files": [
+    "src/retry.js",
+    "docs/retry-policy.md"
+  ],
+  "allowed_changed_globs": [
+    "src/retry.js",
+    "docs/retry-policy.md"
+  ],
+  "forbidden_changed_globs": [
+    "task.md",
+    "package.json",
+    "test/*.test.js"
+  ],
+  "expected_file_substrings": [
+    {
+      "path": "src/retry.js",
+      "contains": "1000"
+    },
+    {
+      "path": "docs/retry-policy.md",
+      "contains": "seconds"
+    }
+  ],
+  "quality_anchors": [
+    "The implementation should treat Retry-After values as seconds.",
+    "Docs should be updated to match the tested contract.",
+    "The fix should not change public function names."
+  ]
+}

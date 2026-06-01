@@ -29,18 +29,15 @@ describe("agentflow observe", () => {
     await rm(tempRoot, { recursive: true, force: true });
   });
 
-  it("adds, lists, and resolves live observations without pausing the run", async () => {
+  it("adds, lists, and resolves live observations with message-first syntax", async () => {
     const added = await executeCli([
       "observe",
-      "add",
       "--run",
       "run-123",
-      "--kind",
-      "blocker",
-      "--summary",
       "Routed export worker is unavailable",
       "--node",
       "ship_artifacts_ui",
+      "--blocking",
       "--blocked-on",
       "operator_managed_backend_worker",
       "--recoverable-by",
@@ -55,13 +52,14 @@ describe("agentflow observe", () => {
 
     expect(added.exitCode).toBe(0);
     const addPayload = JSON.parse(added.stdout) as {
-      observation: { observation_id: string; status: string; kind: string; blocking: boolean };
+      observation: { observation_id: string; status: string; kind: string; blocking: boolean; message: string };
       observations_path: string;
     };
     expect(addPayload.observation).toEqual(expect.objectContaining({
       status: "active",
       kind: "blocker",
-      blocking: true
+      blocking: true,
+      message: "Routed export worker is unavailable"
     }));
 
     const listed = await executeCli(["observe", "list", "--run", runRoot, "--active"], tempRoot);
@@ -76,11 +74,7 @@ describe("agentflow observe", () => {
       "resolve",
       "--run",
       runRoot,
-      "--observation",
       addPayload.observation.observation_id,
-      "--resolution",
-      "resolved",
-      "--summary",
       "Worker restarted"
     ], tempRoot);
     expect(resolved.exitCode).toBe(0);
@@ -94,15 +88,70 @@ describe("agentflow observe", () => {
     expect(ledgerLines).toHaveLength(2);
   });
 
-  it("rejects unknown observation kinds before writing evidence", async () => {
-    const result = await executeCli([
+  it("joins multiple positional message words for quick observations", async () => {
+    const added = await executeCli([
+      "observe",
+      "--run",
+      runRoot,
+      "Use",
+      "generated",
+      "types"
+    ], tempRoot);
+
+    expect(added.exitCode).toBe(0);
+    const payload = JSON.parse(added.stdout) as {
+      observation: { kind: string; severity: string; message: string };
+    };
+    expect(payload.observation).toEqual(expect.objectContaining({
+      kind: "observation",
+      severity: "info",
+      message: "Use generated types"
+    }));
+  });
+
+  it("rejects old add, summary, and body observe surfaces", async () => {
+    const addResult = await executeCli([
       "observe",
       "add",
       "--run",
       runRoot,
+      "Old add syntax"
+    ], tempRoot);
+
+    expect(addResult.exitCode).toBe(2);
+    expect(addResult.stdout).toContain("Unexpected observe subcommand");
+
+    const summaryResult = await executeCli([
+      "observe",
+      "--run",
+      runRoot,
+      "--summary",
+      "Old summary syntax"
+    ], tempRoot);
+
+    expect(summaryResult.exitCode).toBe(2);
+    expect(summaryResult.stdout).toContain("Unexpected option(s): --summary");
+
+    const bodyResult = await executeCli([
+      "observe",
+      "--run",
+      runRoot,
+      "--body",
+      "Old body syntax",
+      "Message"
+    ], tempRoot);
+
+    expect(bodyResult.exitCode).toBe(2);
+    expect(bodyResult.stdout).toContain("Unexpected option(s): --body");
+  });
+
+  it("rejects unknown observation kinds before writing evidence", async () => {
+    const result = await executeCli([
+      "observe",
+      "--run",
+      runRoot,
       "--kind",
       "contract_change",
-      "--summary",
       "Change the graph goal"
     ], tempRoot);
 
@@ -110,4 +159,3 @@ describe("agentflow observe", () => {
     expect(result.stdout).toContain("--kind must be one of: observation, issue, risk, blocker");
   });
 });
-

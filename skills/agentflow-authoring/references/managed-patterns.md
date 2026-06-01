@@ -1,6 +1,6 @@
 # Managed Patterns
 
-Use managed patterns when the lifecycle is standard and the operator wants inspectable lowered nodes with stable declared artifacts. For how parent fields lower into the actual AI prompts, see `prompt-translation.md`.
+Use managed patterns when the lifecycle is standard and the operator wants inspectable lowered nodes with stable declared artifacts. The prompts should still read like native-quality worker briefs: task contract first, phase or item focus second, and Agentflow mechanics behind runtime state, `af orient`, and verification.
 
 ## `pattern_deep_research`
 
@@ -16,7 +16,7 @@ Good for:
 
 Angles should be controlling axes, not generic subtopics. Good angles name the assigned lens and evidence boundary, such as product contract, privacy/access contract, API convention fit, UI workflow rehearsal, correctness findings, code-quality findings, or risk register.
 
-The stable output is always `research`, written at `research.md`. That report is the complete research handoff, not a high-level abstract. Raw angle reports remain internal run evidence and may conflict; the final publisher owns the downstream contract by rewriting them into one coherent, sufficiently detailed answer. Synthesis reports are internal working notes for the publisher, not downstream evidence links. There is no public `packet` artifact for deep research.
+The stable output is always `research`, written at `research.md`. That report is the complete research handoff, not a high-level abstract. Raw angle reports remain run evidence and may conflict; the final publisher rewrites them into one coherent, sufficiently detailed answer. Synthesis reports are working evidence for the publisher, not downstream evidence links. There is no final `packet` artifact for deep research.
 
 Angle and synthesis workers may reference related findings in prose, but they should not create cross-angle links or companion public files. If a detail matters downstream, it belongs in `research.md`.
 

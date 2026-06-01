@@ -51,7 +51,7 @@ It explicitly does not include `AGENTFLOW_CREDENTIAL_*` values or raw `AGENTFLOW
 
 ## Harness Config Isolation
 
-Harness-native config is profile authority. Ambient Codex or Cursor user config is not used by default, and node definitions do not carry their own `harness_config`.
+Primitive worker harnesses preserve the native Codex/Cursor experience by default. Normal `agent` nodes and artifact-repair workers inherit the user's harness config unless a profile explicitly sets `harness_config.isolation: "isolated"`. Node definitions still do not carry their own `harness_config`.
 
 Profiles may declare:
 
@@ -76,7 +76,7 @@ Profiles may declare:
 }
 ```
 
-`isolation` defaults to `isolated`. Launch profile config is inherited only when the effective harness matches; node and supervisor profiles then overlay it. Object maps merge by key, arrays replace, and the more specific profile wins. Validation fails unknown `harness_config` keys and harness-specific config under the wrong effective harness.
+`isolation` defaults to `inherit_user` for normal worker prompts. Launch profile config is inherited only when the effective harness matches; node and supervisor profiles then overlay it. Object maps merge by key, arrays replace, and the more specific profile wins. Validation fails unknown `harness_config` keys and harness-specific config under the wrong effective harness.
 
 In Codex isolated mode, Agentflow creates a temporary `CODEX_HOME`, links auth when available, and passes only declared `codex.config`, `codex.mcp_servers`, `codex.plugins`, and `codex.notify` values. If no MCP servers or plugins are declared, isolated Codex runs have none by default.
 
@@ -84,9 +84,13 @@ In Cursor isolated mode, Agentflow creates a generated `CURSOR_CONFIG_DIR`, writ
 
 If Cursor reports that sandbox mode is enabled but unavailable on the host, the Cursor harness treats it as a transient launch failure once: it waits 7 minutes and retries the same launch command. If the retry still fails, Agentflow records a trusted harness configuration failure, not an agent-recoverable task failure. The supervisor must not keep retrying the same node or silently disable sandboxing. Disable Cursor sandboxing only through the authored launch profile, for example by choosing a profile whose authority intentionally maps to disabled sandbox behavior.
 
-`isolation: "inherit_user"` is an explicit reproducibility tradeoff. Codex runs keep the user's `CODEX_HOME`; Cursor runs keep the user's `CURSOR_CONFIG_DIR` and ambient CLI config. Agentflow still supplies required workspace, sandbox, output, context, runtime CLI, and plugin-tool environment. Use this only when the local harness-native setup is part of the intended run, and exclude those profiles from prompt-regression release gates.
+`isolation: "inherit_user"` is the normal worker parity mode. Codex runs keep the user's `CODEX_HOME`; Cursor runs keep the user's `CURSOR_CONFIG_DIR` and ambient CLI config. Agentflow still supplies required workspace, sandbox, output, context, runtime CLI, and plugin-tool environment. Use `isolation: "isolated"` when reproducibility is more important than native harness parity.
 
-Verifier, AI-check, and supervisor-evidence invocations always force isolated no-external-tool harness config, even if their profile asks to inherit user config. Those prompts are runtime trust checks, not worker capability nodes.
+Verifier, AI-check, supervisor-evidence, and delivery-curator invocations always force isolated no-external-tool harness config, even if their profile asks to inherit user config. Those prompts are runtime trust checks, not worker capability nodes.
+
+Primitive worker attempts record native harness metadata when the CLI exposes it, including session or chat ids. Agentflow treats those ids as audit/debug evidence only. Retries start a fresh native harness session and continue from Agentflow-owned evidence: `events.jsonl`, artifacts, milestones, attempt memory, supervisor recovery decisions, and `af orient`.
+
+Agentflow does not activate Codex Goal mode for normal workers. The node contract and `af orient` are Agentflow's goal surface; Codex Goal mode is only an external baseline in engineering-parity evals when comparing Agentflow against direct native harness behavior.
 
 ## Generated Tool Directory
 

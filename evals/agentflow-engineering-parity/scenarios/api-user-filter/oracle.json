@@ -1,0 +1,31 @@
+{
+  "validation_commands": [
+    "npm test"
+  ],
+  "required_changed_files": [
+    "src/users.js"
+  ],
+  "allowed_changed_globs": [
+    "src/users.js"
+  ],
+  "forbidden_changed_globs": [
+    "task.md",
+    "package.json",
+    "test/*.test.js"
+  ],
+  "expected_file_substrings": [
+    {
+      "path": "src/users.js",
+      "contains": "active"
+    },
+    {
+      "path": "src/users.js",
+      "contains": "localeCompare"
+    }
+  ],
+  "quality_anchors": [
+    "Boolean query values must be parsed deliberately.",
+    "Filtering by role and active status should compose.",
+    "Sorting by name should be stable and not mutate the original list."
+  ]
+}

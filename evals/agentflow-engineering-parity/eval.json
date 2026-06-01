@@ -1,0 +1,53 @@
+{
+  "version": "1",
+  "suite_id": "agentflow-engineering-parity",
+  "objective": "Compare primitive and managed Agentflow worker runs against direct Codex on real local engineering tasks. Agentflow must match or beat direct Codex implementation quality while preserving compact prompts, inherited native worker config, exact-session metadata, durable artifacts, verification, and delivery.",
+  "default_trials": 3,
+  "scenarios": [
+    "scenarios/cart-total-bugfix/scenario.json",
+    "scenarios/api-user-filter/scenario.json",
+    "scenarios/settings-schema-defaults/scenario.json",
+    "scenarios/duration-parser-refactor/scenario.json",
+    "scenarios/stale-docs-code-conflict/scenario.json",
+    "scenarios/frontend-tabs-reducer/scenario.json"
+  ],
+  "variants": [
+    "variants/current.json",
+    "variants/deep-work.json",
+    "variants/work-list.json"
+  ],
+  "criteria": [
+    {
+      "id": "outcome",
+      "kind": "outcome",
+      "required": true
+    },
+    {
+      "id": "artifact",
+      "kind": "artifact",
+      "required": true
+    },
+    {
+      "id": "workspace",
+      "kind": "workspace",
+      "required": true
+    },
+    {
+      "id": "delivery",
+      "kind": "delivery",
+      "required": true
+    },
+    {
+      "id": "engineering-parity",
+      "kind": "custom_script",
+      "command": "node graders/engineering-parity.mjs",
+      "required": true,
+      "timeout_sec": 1800
+    }
+  ],
+  "thresholds": {
+    "pass_rate": 1,
+    "max_blocker_rate": 0,
+    "min_average_score": 4
+  }
+}

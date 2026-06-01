@@ -1,0 +1,5 @@
+{
+  "id": "current",
+  "description": "Current primitive Agentflow worker prompt and harness behavior.",
+  "graph_template": "templates/primitive-agent.graph.template.json"
+}

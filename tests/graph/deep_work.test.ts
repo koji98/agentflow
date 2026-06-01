@@ -142,17 +142,28 @@ describe("pattern deep work", () => {
         expect(planNode).toEqual(expect.objectContaining({
             type: "agent",
             id: "implement_checkout__managed__pattern_deep_work__plan",
+            managed_runtime: expect.objectContaining({
+                kind: "pattern_deep_work",
+                root_id: "implement_checkout",
+                phase: "plan"
+            }),
             artifacts: expect.objectContaining({
                 cycle_plan: expect.objectContaining({ path: "cycle-plan.md" })
             })
         }));
         expect(planPrompt).toContain("implementation planner");
-        expect(planPrompt).toContain("You do not edit files in this phase.");
+        expect(planPrompt).toContain("Do not edit files in this phase.");
         expect(planPrompt).toContain("treat that as expected first-cycle state");
-        expect(planPrompt).toContain("This prompt and context pointer packet are sufficient for the planning phase.");
+        expect(planPrompt).toContain("Use the provided context pointers for the planning phase.");
+        expect(planPrompt).toContain("Preserve exact task-specific names, labels, commands, and required phrases from the task contract in the plan.");
+        expect(planPrompt).toContain("The `cycle_plan` artifact is the durable planning record; do not create a milestone solely to restate the plan.");
+        expect(planPrompt).not.toContain("managed workflow");
+        expect(planPrompt).not.toContain("public artifact");
+        expect(planPrompt).not.toContain("private working material");
+        expect(planPrompt).not.toContain("This prompt and context pointer packet");
         expect(planPrompt).not.toContain("ambient Codex");
         expect(planPrompt).not.toContain("Agentflow playbooks");
-        expect(planPrompt).toContain("Do not wait for, search globally for, or report a blocker solely because first-cycle private materials are missing.");
+        expect(planPrompt).toContain("Do not wait for, search globally for, or report a blocker solely because first-cycle prior materials are missing.");
         expect(planPrompt).not.toContain("senior");
         expect(generateValidateNode).toEqual(expect.objectContaining({
             type: "agent",
@@ -164,8 +175,15 @@ describe("pattern deep work", () => {
             })
         }));
         expect(generateValidatePrompt).toContain("implementation agent responsible for completing and validating this work cycle");
+        expect(generateValidatePrompt).toContain("Satisfy the task contract, not only the visible tests");
+        expect(generateValidatePrompt).toContain("add/edit tests only when the task asks or repo contract expects them");
+        expect(generateValidatePrompt).toContain("Preserve API semantics with nullish or explicit checks");
+        expect(generateValidatePrompt).toContain("round money with integer cents or Number.EPSILON");
         expect(generateValidatePrompt).toContain("cite concrete evidence names, paths, commands, or packet fields");
         expect(generateValidatePrompt).toContain("Draft handoffs and summaries should include enough evidence citations");
+        expect(generateValidatePrompt).not.toContain("managed workflow");
+        expect(generateValidatePrompt).not.toContain("public artifact");
+        expect(generateValidatePrompt).not.toContain("private working material");
         expect(generateValidatePrompt).not.toContain("meticulous");
         if (!criteriaPanel || criteriaPanel.type !== "parallel") {
             throw new Error("Expected completion criteria to run in parallel.");
@@ -224,12 +242,17 @@ describe("pattern deep work", () => {
             }),
             intent: expect.objectContaining({
                 acceptance_criteria: expect.arrayContaining([
-                    "The public artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success."
+                    "The final artifacts are consistent with the latest passing completion scorecard and do not claim unsupported success."
                 ])
             })
         }));
-        expect(JSON.stringify(finalNode)).toContain("publishing the final public artifacts from the latest passing managed work cycle");
-        expect(JSON.stringify(finalNode)).toContain("Scorecard Evidence");
+        const finalPrompt = JSON.stringify(finalNode);
+        expect(finalPrompt).not.toContain("managed workflow");
+        expect(finalPrompt).not.toContain("public artifacts");
+        expect(finalPrompt).not.toContain("Downstream work will read only");
+        expect(JSON.stringify(finalNode)).toContain("publishing the final artifacts from the latest passing work cycle");
+        expect(JSON.stringify(finalNode)).toContain("scorecard evidence or completion scorecard section");
+        expect(JSON.stringify(finalNode)).toContain("When a final artifact description names literal labels or fields");
         expect(JSON.stringify(finalNode)).toContain("score, threshold, criterion results, validation command/result, and evidence paths");
     });
     it("compiles pattern_deep_work so downstream nodes depend on the final published artifacts", () => {

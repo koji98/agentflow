@@ -48,7 +48,7 @@ describe("graph profile resolution", () => {
             workspace_backend: "inplace",
             harness: "codex-cli",
             harness_config: {
-                isolation: "isolated"
+                isolation: "inherit_user"
             },
             reasoning_effort: builtInCodexReasoningEffort,
             timeout_sec: builtInTimeoutSeconds,

@@ -56,7 +56,7 @@ function resolveHarnessConfig(invocation: AgentInvocation): NonNullable<AgentInv
   }
 
   return invocation.harnessConfig ?? {
-    isolation: "isolated"
+    isolation: "inherit_user"
   };
 }
 
@@ -238,6 +238,29 @@ function cursorPermissionEntry(kind: "Read" | "Write", path: string): string {
   return `${kind}(${path})`;
 }
 
+function extractNativeSessionId(outputJson: Record<string, unknown> | undefined): string | undefined {
+  const candidates = [
+    outputJson?.session_id,
+    outputJson?.chat_id,
+    outputJson?.conversation_id
+  ];
+  const match = candidates.find((candidate): candidate is string =>
+    typeof candidate === "string" && candidate.trim().length > 0
+  );
+  return match?.trim();
+}
+
+function formatNativeHarnessMetadata(options: {
+  harnessConfig: NonNullable<AgentInvocation["harnessConfig"]>;
+  sessionId: string | undefined;
+}): Record<string, unknown> {
+  return {
+    harness: "cursor-cli",
+    config_isolation: options.harnessConfig.isolation,
+    ...(options.sessionId ? { session_id: options.sessionId } : {})
+  };
+}
+
 async function createCursorConfig(
   invocation: AgentInvocation,
   harnessConfig: NonNullable<AgentInvocation["harnessConfig"]>
@@ -396,6 +419,7 @@ export function createCursorCliHarness(
           const stderr = Buffer.concat(stderrChunks).toString("utf8");
           const exitCode = typeof code === "number" ? code : 1;
           const cursorOutput = normalizeCursorOutput(stdout, exitCode);
+          const nativeSessionId = extractNativeSessionId(cursorOutput.output_json);
           const structuredOutputError =
             !termination.state.canceled && !termination.state.timed_out
               ? cursorOutput.error
@@ -433,6 +457,10 @@ export function createCursorCliHarness(
             metadata: {
               binary,
               args: metadataArgs,
+              native_harness: formatNativeHarnessMetadata({
+                harnessConfig,
+                sessionId: nativeSessionId
+              }),
               ...(cursorConfig
                 ? {
                     cursor_config_dir: cursorConfig.config_dir,

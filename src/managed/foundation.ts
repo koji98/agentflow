@@ -147,8 +147,8 @@ function defaultArtifactDescription(name: string, path: string): string {
 
 export function defaultManagedPublicArtifacts(): Record<string, ArtifactDefinition> {
   return mergeArtifacts(
-    outputDirArtifact("summary", "summary.md", "Human-readable final summary for the managed pattern."),
-    outputDirArtifact("packet", "packet.json", "Machine-readable final packet for downstream Agentflow nodes.")
+    outputDirArtifact("summary", "summary.md", "Human-readable final summary."),
+    outputDirArtifact("packet", "packet.json", "Machine-readable final evidence packet.")
   );
 }
 
@@ -190,7 +190,7 @@ export function artifactContext(
     node,
     artifact,
     what: options.what ?? `Artifact "${artifact}" produced by node "${node}".`,
-    why: options.why ?? "This downstream managed node needs the producer artifact as evidence for its own contract.",
+    why: options.why ?? "This task needs the producer artifact as evidence for its contract.",
     ...(options.iteration !== undefined ? { iteration: options.iteration } : {}),
     ...(options.attempt !== undefined ? { attempt: options.attempt } : {}),
     ...(options.if_available !== undefined ? { if_available: options.if_available } : {})
@@ -203,7 +203,7 @@ export function workspaceFileContext(name: string, path: string): Extract<Contex
     from: "workspace_file",
     path,
     what: `Workspace file ${path}.`,
-    why: "This managed node needs this workspace file as evidence for its own contract."
+    why: "This task needs this workspace file as evidence for its contract."
   };
 }
 

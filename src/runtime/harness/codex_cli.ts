@@ -54,8 +54,26 @@ function resolveHarnessConfig(invocation: AgentInvocation): NonNullable<AgentInv
   }
 
   return invocation.harnessConfig ?? {
-    isolation: "isolated"
+    isolation: "inherit_user"
   };
+}
+
+function extractNativeSessionId(...records: Array<Record<string, unknown> | undefined>): string | undefined {
+  for (const record of records) {
+    const candidates = [
+      record?.session_id,
+      record?.conversation_id,
+      record?.thread_id
+    ];
+    const match = candidates.find((candidate): candidate is string =>
+      typeof candidate === "string" && candidate.trim().length > 0
+    );
+    if (match) {
+      return match.trim();
+    }
+  }
+
+  return undefined;
 }
 
 function formatTomlKey(key: string): string {
@@ -192,42 +210,52 @@ function buildCodexArgs(
   const last_message_path = join(invocation.outputDir, "last_message.txt");
   const executionRoot = deriveHarnessExecutionRoot(invocation.outputDir);
   const addedDirs = new Set<string>();
-  const pushAddDir = (path: string | undefined) => {
+  const pushAddDir = (args: string[], path: string | undefined) => {
     if (!path || addedDirs.has(path)) {
       return;
     }
     addedDirs.add(path);
     args.push("--add-dir", path);
   };
-  const args = [
-    "exec",
+  const globalArgs = [
     "--cd",
     invocation.repoPath,
     "--sandbox",
     invocation.sandbox
   ];
-  pushAddDir(executionRoot);
-  pushAddDir(invocation.outputDir);
-  pushAddDir(invocation.runtimeDir);
-  args.push("--output-last-message", last_message_path);
-  pushCodexConfigArgs(args, harnessConfig);
+  pushAddDir(globalArgs, executionRoot);
+  pushAddDir(globalArgs, invocation.outputDir);
+  pushAddDir(globalArgs, invocation.runtimeDir);
+  const commandArgs = ["exec", "--output-last-message", last_message_path];
+  pushCodexConfigArgs(commandArgs, harnessConfig);
 
   if (invocation.skipGitRepoCheck) {
-    args.push("--skip-git-repo-check");
+    commandArgs.push("--skip-git-repo-check");
   }
 
   if (invocation.model && invocation.model !== "auto") {
-    args.push("-m", invocation.model);
+    commandArgs.push("-m", invocation.model);
   }
 
   if (invocation.reasoningEffort) {
-    args.push("-c", `model_reasoning_effort="${invocation.reasoningEffort}"`);
+    commandArgs.push("-c", `model_reasoning_effort="${invocation.reasoningEffort}"`);
   }
 
-  args.push("-");
+  commandArgs.push("-");
   return {
-    args,
+    args: [...globalArgs, ...commandArgs],
     last_message_path
+  };
+}
+
+function formatNativeHarnessMetadata(options: {
+  harnessConfig: NonNullable<AgentInvocation["harnessConfig"]>;
+  sessionId: string | undefined;
+}): Record<string, unknown> {
+  return {
+    harness: "codex-cli",
+    config_isolation: options.harnessConfig.isolation,
+    ...(options.sessionId ? { session_id: options.sessionId } : {})
   };
 }
 
@@ -336,6 +364,8 @@ export function createCodexCliHarness(
           }
 
           const output_json = parseJsonRecord(last_message) ?? parseJsonRecord(stdout);
+          const stdout_json = parseJsonRecord(stdout);
+          const nativeSessionId = extractNativeSessionId(output_json, stdout_json);
 
           resolve({
             status:
@@ -350,6 +380,10 @@ export function createCodexCliHarness(
             metadata: {
               binary,
               args,
+              native_harness: formatNativeHarnessMetadata({
+                harnessConfig,
+                sessionId: nativeSessionId
+              }),
               timed_out: termination.state.timed_out,
               force_killed: termination.state.force_killed
             },

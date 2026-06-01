@@ -1,0 +1,113 @@
+{
+  "version": "1",
+  "graph_id": "engineering-parity-{{scenario.id}}-{{variant.id}}-{{trial.index}}",
+  "intent": {
+    "goal": "Complete the local engineering task described in task.md with direct-harness quality.",
+    "acceptance_criteria": [
+      "The implementation satisfies task.md.",
+      "The repository validation command passes.",
+      "The handoff artifact explains changed files, validation evidence, and remaining risks."
+    ],
+    "constraints": [
+      "Use only the local fixture repository.",
+      "Do not change task.md.",
+      "Do not broaden the task beyond the requested engineering fix."
+    ]
+  },
+  "repos": {
+    "main": {
+      "path": "{{environment.repo}}"
+    }
+  },
+  "defaults": {
+    "launch_profile": "default",
+    "workspace_backend": "{{workflow.workspace_backend}}"
+  },
+  "profiles": {
+    "default": {
+      "harness": "{{workflow.harness}}",
+      "model": "auto",
+      "sandbox": "workspace-write"
+    },
+    "supervisor": {
+      "harness": "codex-cli",
+      "sandbox": "read-only"
+    }
+  },
+  "supervision": {
+    "profile": "supervisor",
+    "max_total_interventions": 0
+  },
+  "graph": {
+    "type": "sequence",
+    "id": "root",
+    "steps": [
+      {
+        "type": "pattern_deep_work",
+        "id": "deep_work_worker",
+        "intent": {
+          "goal": "Read task.md, complete the requested engineering change in this repository, run the requested validation, and publish a concise handoff artifact.",
+          "acceptance_criteria": [
+            "The implementation satisfies task.md.",
+            "The validation command `{{scenario.metadata.validation_command}}` passes or the handoff explains the concrete blocker with evidence.",
+            "The handoff artifact lists changed files, validation commands and results, and any remaining risks."
+          ],
+          "constraints": [
+            "Do not edit task.md.",
+            "Do not edit files outside the task scope.",
+            "Do not use network access."
+          ]
+        },
+        "runtime": {
+          "repo": "main"
+        },
+        "support": {
+          "context": [
+            {
+              "name": "task",
+              "kind": "workspace_file",
+              "path": "task.md",
+              "what": "Neutral engineering task for this local fixture.",
+              "why": "It defines the requested implementation change and validation command."
+            }
+          ]
+        },
+        "artifacts": {
+          "handoff": {
+            "from": "output_dir",
+            "path": "handoff.md",
+            "description": "Concise engineering handoff with changed files, validation evidence, and remaining risks."
+          }
+        },
+        "completion": {
+          "max_cycles": 2,
+          "pass_threshold": 0.9,
+          "criteria": [
+            {
+              "id": "validation",
+              "kind": "command",
+              "command": "{{scenario.metadata.validation_command}}",
+              "weight": 0.45,
+              "required": true
+            },
+            {
+              "id": "task_contract",
+              "kind": "rubric",
+              "target": "workspace",
+              "rubric": "The implementation satisfies task.md, preserves contract-implied edge cases, keeps changes in scope, and does not edit task.md.",
+              "weight": 0.4,
+              "required": true
+            },
+            {
+              "id": "handoff",
+              "kind": "rubric",
+              "target": "artifact:handoff",
+              "rubric": "The handoff lists changed files, exact validation commands and results, and remaining risks or blockers.",
+              "weight": 0.15
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

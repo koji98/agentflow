@@ -1088,7 +1088,7 @@ describe("formatToolContract", () => {
         expect(prompt).toContain("## Managed Plugin Tools");
         expect(prompt).toContain("| `babysit-poll` | Poll a PR. Origin: from plugin \"babysit\" (tool: poll). | Run `babysit-poll --help` before first use. |");
         expect(prompt).toContain("run `<tool> --help` before first use");
-        expect(prompt).toContain("| `af complete check` | Verify mechanical readiness before final response; fix any reported incompleteness and rerun. |");
+        expect(prompt).toContain("Before final response, run `af complete check`");
         expect(prompt).not.toContain("Use `af --help` only when the options below are insufficient.");
     });
     it("renders graph and node intent into agent prompts", () => {

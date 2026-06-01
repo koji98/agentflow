@@ -80,7 +80,7 @@ function workflowNodeId(rootId: string, suffix: string): string {
 
 export function defaultPatternWorkListPublicArtifacts(): Record<string, ArtifactDefinition> {
   return mergeArtifacts(
-    outputDirArtifact("summary", "summary.md", "Human-readable final summary for the managed work list."),
+    outputDirArtifact("summary", "summary.md", "Human-readable final summary for the completed work list."),
     outputDirArtifact("work_items", "work-items.json", "Machine-readable index of frozen work-list items, item outcomes, validation evidence, and residual risks.")
   );
 }
@@ -110,11 +110,11 @@ function formatCriteria(criteria: PatternWorkListCompletionCriterion[]): string[
 
 function buildPlannerPrompt(config: PatternWorkListConfig): string {
   return renderPrompt([
-    body("You are the planner for a managed work-list pattern. Your job is to discover the finite ordered list of work items required to satisfy this node contract. Do not edit product or source files in this phase."),
-    section("Managed Node Contract", [
+    body("You are planning a finite ordered list of work items required to satisfy this task. Do not edit product or source files in this phase."),
+    section("Task Contract", [
       `Goal: ${config.intent.goal}`,
       ...listOrFallback("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...listOrFallback("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...listOrFallback("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
     ]),
     section("Planning Goal", [
       config.work_list.planning_goal
@@ -124,10 +124,11 @@ function buildPlannerPrompt(config: PatternWorkListConfig): string {
       ...listOrFallback("Done when", config.work_list.item_guidance.done_when, "The item is completed with evidence and a handoff.")
     ]),
     section("Planning Rules", [
-      "Plan only work needed for the managed node goal.",
+      "Plan only work needed for the task goal.",
       "Create reviewable items that are coherent enough to complete independently, but not so broad that evidence becomes vague.",
       "Order items so each item can use earlier item handoffs as evidence.",
       "Do not create speculative future work, unrelated cleanup, or optional polish items.",
+      "Do not run or log implementation validation as blocked during planning; assign validation commands and evidence expectations to the planned items.",
       "The runtime will freeze this list before execution; later workers cannot add, remove, split, merge, or reorder items."
     ]),
     section("Output Contract", [
@@ -144,7 +145,7 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
   const workerLines = worker.kind === "agent"
     ? [
         "Worker kind: agent.",
-        "The runtime will launch one managed item worker per frozen item.",
+        "The runtime will launch one item worker per frozen item.",
         "Each item worker uses the standard Agentflow work loop: orient, create milestones, attach evidence, validate, write item handoff, and complete."
       ]
     : [
@@ -161,11 +162,11 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
       ];
 
   return renderPrompt([
-    body("You are the runtime coordinator for a managed work-list pattern. The runtime launches one item worker per frozen item. This prompt documents the item-worker contract; the runtime owns item status and aggregation."),
-    section("Managed Node Contract", [
+    body("You are running the frozen work list. The runtime launches one item worker per frozen item and owns item status and aggregation."),
+    section("Task Contract", [
       `Goal: ${config.intent.goal}`,
       ...listOrFallback("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...listOrFallback("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...listOrFallback("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
     ]),
     section("Frozen List Discipline", [
       "Read the frozen work list and current ledger from context.",
@@ -181,7 +182,7 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
     section("Retry And Preservation", [
       "On retry, inspect attempt memory and prior item evidence before editing.",
       "Preserve completed, in-scope item work unless the verifier or supervisor identifies it as contaminated or based on a bad premise.",
-      "Focus item retries on the failed, blocked, or semantically rejected item; do not redo completed items just because the work-list node restarted.",
+      "Focus item retries on the failed, blocked, or semantically rejected item; do not redo completed items just because the parent task restarted.",
       "If a later item fails, keep earlier accepted item evidence as the starting point for the retry."
     ]),
     section("Output Contract", [
@@ -199,19 +200,19 @@ function buildPublisherPrompt(
   publicArtifacts: Record<string, ArtifactDefinition>
 ): string {
   return renderPrompt([
-    body("You are publishing the final public artifacts for a managed work-list pattern. Downstream graph nodes will use these stable artifacts, not the internal item attempts."),
-    section("Managed Node Contract", [
+    body("You are publishing final artifacts from verified work item evidence."),
+    section("Task Contract", [
       `Goal: ${config.intent.goal}`,
       ...listOrFallback("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
-      ...listOrFallback("Constraints", config.intent.constraints, "Stay inside the authored graph contract.")
+      ...listOrFallback("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
     ]),
     section("Source Evidence", [
       "Use the verified work-items artifact, frozen work list, and item handoffs from context.",
       "Do not claim completion for items that the verified work-items artifact does not mark completed.",
       "Preserve residual risks and downstream implications."
     ]),
-    section("Declared Public Artifacts", [
-      "Publish the declared public artifacts.",
+    section("Declared Final Artifacts", [
+      "Publish the declared final artifacts.",
       ...formatPublicArtifacts(publicArtifacts),
       "The `work_items` artifact is forwarded by the runtime from the deterministic verifier; do not rewrite it.",
       "The `summary` artifact should summarize the frozen list, completed items, validation evidence, risks, and downstream constraints."
@@ -345,6 +346,26 @@ function stringArray(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim()) : [];
 }
 
+function validationEvidence(value, itemId) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail("Frozen item " + itemId + " result is missing structured validation evidence.");
+  }
+  const validation = {
+    passed: stringArray(value.passed),
+    failed_then_fixed: stringArray(value.failed_then_fixed),
+    unavailable: stringArray(value.unavailable),
+    blocked: stringArray(value.blocked)
+  };
+  if (
+    validation.passed.length === 0 &&
+    validation.failed_then_fixed.length === 0 &&
+    validation.unavailable.length === 0
+  ) {
+    fail("Frozen item " + itemId + " result is missing validation evidence.");
+  }
+  return validation;
+}
+
 const frozen = readJson("frozen work list", process.env.AGENTFLOW_CONTEXT_FROZEN_WORK_LIST);
 const results = readJson("item results", process.env.AGENTFLOW_CONTEXT_ITEM_RESULTS);
 const itemHandoffsPath = process.env.AGENTFLOW_CONTEXT_ITEM_HANDOFFS;
@@ -379,7 +400,7 @@ const verifiedItems = frozen.items.map((item) => {
     goal: item.goal,
     status: "completed",
     summary,
-    validation: Array.isArray(result.validation) ? result.validation : [],
+    validation: validationEvidence(result.validation, item.id),
     risks: stringArray(result.risks),
     downstream_implications: stringArray(result.downstream_implications),
     ...(result.scorecard ? { scorecard: result.scorecard } : {}),
@@ -482,10 +503,15 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
     artifacts: mergeArtifacts(
       outputDirArtifact("work_list_json", "work-list.json", "Machine-readable planned work-list items.")
     ),
+    managed_runtime: {
+      kind: "pattern_work_list",
+      root_id: config.id,
+      phase: "plan"
+    },
     intent: {
       goal: buildPlannerPrompt(config),
       acceptance_criteria: [
-        "The work list is finite, ordered, and scoped to the managed node contract.",
+        "The work list is finite, ordered, and scoped to the task contract.",
         "The machine-readable list uses sequential ids w1, w2, w3, and so on.",
         "The machine-readable list includes planning_summary, ordering_rationale, and per-item rationale.",
         "The planner does not edit product or source files."
@@ -577,7 +603,7 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       acceptance_criteria: [
         "The verified work item index includes exactly the frozen item ids.",
         "Every item is marked completed with summary and validation evidence.",
-        "No dynamic item ids are exposed as graph-addressable artifacts."
+        "The final work item index exposes only the stable completed item evidence."
       ],
       constraints: config.intent.constraints
     }
@@ -603,8 +629,8 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       goal: buildPublisherPrompt(config, publicArtifacts),
       acceptance_criteria: [
         ...config.intent.acceptance_criteria,
-        "The final public artifacts summarize the frozen list, completed items, validation evidence, residual risks, and downstream constraints.",
-        "The public artifacts do not expose dynamic item refs as graph-addressable dependencies."
+        "The final artifacts summarize the frozen list, completed items, validation evidence, residual risks, and downstream constraints.",
+        "The final artifacts expose only the stable completed item evidence."
       ],
       constraints: config.intent.constraints
     }

@@ -52,7 +52,7 @@ If the brief is missing or vague, use `agentflow-intake` first. If a graph is al
 
 - Node goals read like a shell script or file-by-file implementation plan.
 - Runtime-facing prose mentions graph mechanics, managed-pattern internals, compiled prompts, downstream nodes, or `af` commands instead of the actual work.
-- Research angles describe the deep-research pattern, angle report mechanics, or synthesis nodes instead of the angle's evidence lens.
+- Research angles describe deep-research mechanics, report routing, or internal synthesis mechanics instead of the angle's evidence lens.
 - A check depends on a script or file the agent might not need to create.
 - Downstream nodes depend on raw logs or assumed workspace state instead of artifacts.
 - Downstream nodes use `workspace_file` for files expected to be produced earlier in the run.

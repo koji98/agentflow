@@ -1,0 +1,31 @@
+{
+  "validation_commands": [
+    "npm test"
+  ],
+  "required_changed_files": [
+    "src/tabs.js"
+  ],
+  "allowed_changed_globs": [
+    "src/tabs.js"
+  ],
+  "forbidden_changed_globs": [
+    "task.md",
+    "package.json",
+    "test/*.test.js"
+  ],
+  "expected_file_substrings": [
+    {
+      "path": "src/tabs.js",
+      "contains": "selectedId"
+    },
+    {
+      "path": "src/tabs.js",
+      "contains": "filter"
+    }
+  ],
+  "quality_anchors": [
+    "Closing the selected tab should select a neighboring remaining tab.",
+    "Closing a non-selected tab should preserve the current selection.",
+    "The reducer should not mutate the previous state."
+  ]
+}
