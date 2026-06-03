@@ -138,6 +138,14 @@ import {
 } from "./scheduler.js";
 import { isManagedWorkListRunItemsNode, runManagedWorkListItems } from "../managed/work_list_items.js";
 import {
+  deepWorkCriterionContractFindings,
+  managedContractFailureJsonPath,
+  missingDeepWorkScorecardFinding,
+  readManagedContractFailurePacket,
+  writeManagedContractFailurePacket,
+  type ManagedContractFinding
+} from "../managed/contract_failures.js";
+import {
   appendFailedSupervisorRecoveryCycle,
   applyRuntimeOverlayBeforeRetry,
   computeRetryDelayMs,
@@ -1007,6 +1015,7 @@ interface ManagedCriterionSnapshot {
   score: number;
   summary?: string;
   evidence_path?: string;
+  issues?: string[];
 }
 
 interface ManagedScorecardSnapshot {
@@ -1027,7 +1036,10 @@ function normalizeManagedCriterion(value: unknown): ManagedCriterionSnapshot | u
     passed: value.passed === true,
     score: Math.max(0, Math.min(1, rawScore)),
     ...(typeof value.summary === "string" ? { summary: value.summary } : {}),
-    ...(typeof value.evidence_path === "string" ? { evidence_path: value.evidence_path } : {})
+    ...(typeof value.evidence_path === "string" ? { evidence_path: value.evidence_path } : {}),
+    ...(Array.isArray(value.issues)
+      ? { issues: value.issues.filter((issue): issue is string => typeof issue === "string") }
+      : {})
   };
 }
 
@@ -1054,6 +1066,37 @@ async function readManagedScorecard(path: string | undefined): Promise<ManagedSc
   }
 }
 
+async function activeManagedContractFailureSummary(attempt: RuntimeNodeAttempt): Promise<{
+  findings: ManagedContractFinding[];
+  path: string;
+} | undefined> {
+  const packet = await readManagedContractFailurePacket(attempt.execution_dir);
+  if (!packet || packet.findings.length === 0) {
+    return undefined;
+  }
+  return {
+    findings: packet.findings,
+    path: managedContractFailureJsonPath(attempt.execution_dir)
+  };
+}
+
+async function persistDeepWorkContractFindings(options: {
+  attempt: RuntimeNodeAttempt;
+  findings: ManagedContractFinding[];
+}): Promise<{ findings: ManagedContractFinding[]; path: string } | undefined> {
+  if (options.findings.length === 0) {
+    return undefined;
+  }
+  const written = await writeManagedContractFailurePacket({
+    executionDir: options.attempt.execution_dir,
+    findings: options.findings
+  });
+  return {
+    findings: written.packet.findings,
+    path: written.jsonPath
+  };
+}
+
 async function buildManagedCompletionSummary(options: {
   session: RuntimeSession;
   node: CompiledExecutableNode;
@@ -1067,13 +1110,26 @@ async function buildManagedCompletionSummary(options: {
   ) {
     const requiredArtifacts = ["item_handoffs", "item_results", "item_validation"];
     const missing = requiredArtifacts.filter((name) => !options.artifacts[name]);
+    const contractFailure = await activeManagedContractFailureSummary(options.attempt);
     return {
       active: true,
       managed_kind: "pattern_work_list",
-      ready_for_publish: missing.length === 0,
-      blocking_criteria: missing.map((name) => `${name}_missing`),
+      ready_for_publish: missing.length === 0 && !contractFailure,
+      blocking_criteria: [
+        ...missing.map((name) => `${name}_missing`),
+        ...(contractFailure ? ["managed_contract_failure"] : [])
+      ],
       material_delta: [],
-      evidence_refs: requiredArtifacts.flatMap((name) => options.artifacts[name] ? [options.artifacts[name]] : [])
+      evidence_refs: [
+        ...requiredArtifacts.flatMap((name) => options.artifacts[name] ? [options.artifacts[name]] : []),
+        ...(contractFailure ? [contractFailure.path] : [])
+      ],
+      ...(contractFailure
+        ? {
+            contract_findings: contractFailure.findings,
+            contract_failure_path: contractFailure.path
+          }
+        : {})
     };
   }
 
@@ -1090,15 +1146,30 @@ async function buildManagedCompletionSummary(options: {
     ? options.session.repeat_scopes.get(options.attempt.repeat_scope_id)?.max_attempts
     : undefined;
   if (!currentScorecard) {
+    const contractFailure = await persistDeepWorkContractFindings({
+      attempt: options.attempt,
+      findings: [missingDeepWorkScorecardFinding({
+        phase: managed.phase,
+        ...(options.artifacts.completion_scorecard ? { scorecardPath: options.artifacts.completion_scorecard } : {})
+      })]
+    });
     return {
       active: true,
       managed_kind: managed.managed_kind,
       ...(options.attempt.iteration_index !== undefined ? { cycle: options.attempt.iteration_index } : {}),
       ...(cycleLimit !== undefined ? { cycle_limit: cycleLimit } : {}),
       ready_for_publish: false,
-      blocking_criteria: managed.phase.includes("completion_gate") ? ["completion_scorecard_missing"] : [],
+      blocking_criteria: managed.phase.includes("completion_gate")
+        ? ["completion_scorecard_missing", ...(contractFailure ? ["managed_contract_failure"] : [])]
+        : [],
       material_delta: [],
-      evidence_refs: []
+      evidence_refs: contractFailure ? [contractFailure.path] : [],
+      ...(contractFailure
+        ? {
+            contract_findings: contractFailure.findings,
+            contract_failure_path: contractFailure.path
+          }
+        : {})
     };
   }
 
@@ -1153,6 +1224,13 @@ async function buildManagedCompletionSummary(options: {
     ...failingRequired,
     ...regressions.map((regression) => regression.criterion)
   ])];
+  const contractFailure = await persistDeepWorkContractFindings({
+    attempt: options.attempt,
+    findings: deepWorkCriterionContractFindings({
+      phase: managed.phase,
+      scorecard: currentScorecard
+    })
+  });
 
   return {
     active: true,
@@ -1161,13 +1239,23 @@ async function buildManagedCompletionSummary(options: {
     ...(cycleLimit !== undefined ? { cycle_limit: cycleLimit } : {}),
     failing_required_criteria: failingRequired,
     regressions,
-    blocking_criteria: blockingCriteria,
-    ready_for_publish: currentScorecard.passed && blockingCriteria.length === 0,
+    blocking_criteria: [
+      ...blockingCriteria,
+      ...(contractFailure ? ["managed_contract_failure"] : [])
+    ],
+    ready_for_publish: currentScorecard.passed && blockingCriteria.length === 0 && !contractFailure,
     material_delta: materialDelta,
     evidence_refs: [
       currentScorecard.path,
-      ...currentScorecard.criteria.flatMap((criterion) => criterion.evidence_path ? [criterion.evidence_path] : [])
-    ]
+      ...currentScorecard.criteria.flatMap((criterion) => criterion.evidence_path ? [criterion.evidence_path] : []),
+      ...(contractFailure ? [contractFailure.path] : [])
+    ],
+    ...(contractFailure
+      ? {
+          contract_findings: contractFailure.findings,
+          contract_failure_path: contractFailure.path
+        }
+      : {})
   };
 }
 

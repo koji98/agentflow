@@ -348,7 +348,7 @@ function stringArray(value) {
 
 function validationEvidence(value, itemId) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    fail("Frozen item " + itemId + " result is missing structured validation evidence.");
+    fail("Frozen item " + itemId + " result validation must be an object with passed, failed_then_fixed, unavailable, and blocked arrays.");
   }
   const validation = {
     passed: stringArray(value.passed),
@@ -356,12 +356,20 @@ function validationEvidence(value, itemId) {
     unavailable: stringArray(value.unavailable),
     blocked: stringArray(value.blocked)
   };
+  for (const key of ["passed", "failed_then_fixed", "unavailable", "blocked"]) {
+    if (!Array.isArray(value[key])) {
+      fail("Frozen item " + itemId + " result validation." + key + " must be an array.");
+    }
+  }
   if (
     validation.passed.length === 0 &&
     validation.failed_then_fixed.length === 0 &&
     validation.unavailable.length === 0
   ) {
-    fail("Frozen item " + itemId + " result is missing validation evidence.");
+    if (validation.blocked.length > 0) {
+      fail("Frozen item " + itemId + " result is completed but only provides blocked validation.");
+    }
+    fail("Frozen item " + itemId + " result is missing usable validation evidence.");
   }
   return validation;
 }
@@ -381,11 +389,22 @@ if (!itemHandoffsPath || !fs.existsSync(itemHandoffsPath)) {
   fail("Missing item-handoffs.md artifact.");
 }
 
+for (const result of results.items) {
+  if (result && typeof result === "object" && typeof result.item_id === "string") {
+    fail("item-results.json uses stale field item_id for item " + result.item_id + "; use id.");
+  }
+}
 const resultsById = new Map(results.items.map((item) => [item && item.id, item]));
 const verifiedItems = frozen.items.map((item) => {
   const result = resultsById.get(item.id);
   if (!result || typeof result !== "object") {
     fail("Missing result for frozen item " + item.id + ".");
+  }
+  if (typeof result.item_id === "string") {
+    fail("Frozen item " + item.id + " result uses stale field item_id; use id.");
+  }
+  if (result.id !== item.id) {
+    fail("Frozen item " + item.id + " result id does not match the frozen list.");
   }
   if (result.status !== "completed") {
     fail("Frozen item " + item.id + " is " + (result.status || "missing status") + ", not completed.");
@@ -393,6 +412,12 @@ const verifiedItems = frozen.items.map((item) => {
   const summary = typeof result.summary === "string" ? result.summary.trim() : "";
   if (summary.length === 0) {
     fail("Frozen item " + item.id + " needs a result summary.");
+  }
+  if (!Array.isArray(result.risks)) {
+    fail("Frozen item " + item.id + " result risks must be an array.");
+  }
+  if (!Array.isArray(result.downstream_implications)) {
+    fail("Frozen item " + item.id + " result downstream_implications must be an array.");
   }
   return {
     id: item.id,

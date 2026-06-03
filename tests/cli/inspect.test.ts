@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { resolveRunArtifactPaths } from "../../src/artifacts/paths.js";
 import { inspectCommand } from "../../src/cli/commands/inspect.js";
 import type { RuntimeNodeAttempt } from "../../src/runtime/attempts.js";
+import { writeManagedContractFailurePacket } from "../../src/runtime/managed/contract_failures.js";
 import type { RuntimeStateSnapshot } from "../../src/runtime/session.js";
 
 async function writeJson(path: string, value: unknown): Promise<void> {
@@ -163,13 +164,29 @@ describe("inspect command", () => {
       outcome: "passed",
       attempt_index: 2
     }));
-    await writeAttempt(runRoot, "002-broken", baseAttempt({
+    const activeFailureAttempt = await writeAttempt(runRoot, "002-broken", baseAttempt({
       compiled_id: "root__broken",
       authored_id: "broken",
       execution_id: "exec-active-fail",
       status: "failed",
       outcome: "failed"
     }), "active failure\n");
+    await writeManagedContractFailurePacket({
+      executionDir: activeFailureAttempt.execution_dir,
+      findings: {
+        managed_kind: "pattern_work_list",
+        phase: "item_publish",
+        item_id: "w2",
+        artifact_name: "item_result",
+        artifact_path: join(activeFailureAttempt.execution_dir, "artifacts", "item-result.json"),
+        failure_kind: "schema_mismatch",
+        message: "item-result.json is missing a non-empty summary for item w2.",
+        expected: "Completed managed item results include a concrete non-empty summary.",
+        retry_boundary: "current_item",
+        required_next_action: "Add a concrete summary to item-result.json for item w2.",
+        evidence_refs: [join(activeFailureAttempt.execution_dir, "artifacts", "item-result.json")]
+      }
+    });
 
     const result = await inspectCommand.run({}, tempRoot, undefined, ["run"]);
     expect(result.exitCode).toBe(0);
@@ -194,6 +211,22 @@ describe("inspect command", () => {
         stderr_tail: "old recovered failure\n"
       })
     ]);
+    expect(output.active_managed_contract_failures).toEqual([
+      expect.objectContaining({
+        authored_id: "broken",
+        execution_id: "exec-active-fail",
+        findings: [
+          expect.objectContaining({
+            managed_kind: "pattern_work_list",
+            phase: "item_publish",
+            item_id: "w2",
+            artifact_name: "item_result",
+            failure_kind: "schema_mismatch"
+          })
+        ]
+      })
+    ]);
+    expect(output.historical_managed_contract_failure_count).toBe(0);
     expect(output.delivery_status).toBe("pending");
     expect(output.review_ready).toBe(false);
     expect(output.review_brief).toBeUndefined();

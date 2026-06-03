@@ -550,6 +550,62 @@ describe("completion packet", () => {
         expect(packet.validation_evidence).toEqual([]);
         expect(packet.milestones.total).toBe(0);
     });
+    it("treats active managed contract findings as completion blockers", async () => {
+        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "item-result.json");
+        await writeFile(artifactPath, "{\"id\":\"w1\",\"status\":\"completed\"}\n", "utf8");
+        const packet = await buildCompletionPacket({
+            runRoot,
+            node: makeNode({
+                managed_runtime: {
+                    kind: "pattern_work_list",
+                    root_id: "work",
+                    phase: "run_items"
+                },
+                declared_artifacts: {
+                    item_result: {
+                        from: "output_dir",
+                        path: "item-result.json",
+                        description: "Structured work-list item result."
+                    }
+                }
+            }),
+            attempt: makeAttempt(executionDir, {
+                artifacts: { item_result: artifactPath }
+            }),
+            workspacePath: workspace,
+            sandbox: "workspace-write",
+            managed: {
+                active: true,
+                managed_kind: "pattern_work_list",
+                ready_for_publish: false,
+                contract_findings: [
+                    {
+                        managed_kind: "pattern_work_list",
+                        phase: "item_publish",
+                        item_id: "w1",
+                        artifact_name: "item_result",
+                        artifact_path: artifactPath,
+                        failure_kind: "schema_mismatch",
+                        message: "item-result.json is missing summary.",
+                        expected: "Completed item results include a non-empty summary.",
+                        retry_boundary: "current_item",
+                        required_next_action: "Repair item-result.json for item w1.",
+                        evidence_refs: [artifactPath]
+                    }
+                ],
+                evidence_refs: [artifactPath]
+            }
+        });
+        expect(packet.completion_status).toBe("incomplete");
+        expect(packet.managed.contract_findings).toEqual([
+            expect.objectContaining({
+                phase: "item_publish",
+                artifact_name: "item_result",
+                failure_kind: "schema_mismatch"
+            })
+        ]);
+        expect(packet.blocking_reasons.join("\n")).toContain("item-result.json is missing summary.");
+    });
     it("does not treat runtime command references as required artifact content", async () => {
         const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
         await writeFile(artifactPath, [

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeAfCli, runAfCli } from "../../src/af/index.js";
 import type { ArtifactDefinition } from "../../src/graph/authored.js";
 import { startSpawnBroker } from "../../src/runtime/harness/spawn_broker.js";
+import { writeManagedContractFailurePacket } from "../../src/runtime/managed/contract_failures.js";
 import { appendOperatorObservation, createOperatorObservation } from "../../src/runtime/observations/index.js";
 interface TestRuntimePaths {
     root: string;
@@ -389,6 +390,36 @@ describe("af runtime CLI", () => {
             exitCode: 2,
             stdout: expect.stringContaining("_helper-run is internal Agentflow runtime transport")
         });
+    });
+    it("shows active managed contract failures in orient without raw debug noise", async () => {
+        const runtime = await createRuntime(tempRoot);
+        const executionDir = dirname(runtime.output);
+        await writeManagedContractFailurePacket({
+            executionDir,
+            findings: {
+                managed_kind: "pattern_work_list",
+                phase: "item_publish",
+                item_id: "w2",
+                artifact_name: "item_result",
+                artifact_path: join(runtime.output, "item-result.json"),
+                failure_kind: "schema_mismatch",
+                message: "item-result.json is missing a non-empty summary for item w2.",
+                expected: "Completed managed item results include a concrete non-empty summary.",
+                retry_boundary: "current_item",
+                required_next_action: "Add a concrete summary to item-result.json for item w2.",
+                evidence_refs: [join(runtime.output, "item-result.json")]
+            }
+        });
+
+        process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
+        const orient = await executeAfCli(["orient"]);
+        expect(orient.exitCode).toBe(0);
+        expect(orient.stdout).toContain("## Managed Contract Failure");
+        expect(orient.stdout).toContain("item_publish");
+        expect(orient.stdout).toContain("item_result");
+        expect(orient.stdout).toContain("item-result.json is missing a non-empty summary");
+        expect(orient.stdout).toContain("managed-contract-failure.md");
+        expect(orient.stdout).not.toContain("human-debug");
     });
     it("publishes declared binary artifacts from stdin and from a file without changing bytes", async () => {
         const pngBytes = Buffer.from([

@@ -3,6 +3,7 @@ import type { CompiledExecutableNode } from "../../graph/compiled.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
 import type { AuthorityRequest } from "../authority.js";
 import type { SupervisorRecoveryEnvelope } from "../../supervisor/types.js";
+import type { ManagedContractFinding } from "../managed/contract_failures.js";
 
 export const completionStatuses = ["ready_for_verification", "incomplete", "blocked"] as const;
 export type CompletionStatus = (typeof completionStatuses)[number];
@@ -211,6 +212,8 @@ export interface CompletionManagedSummary {
   ready_for_publish?: boolean;
   material_delta?: string[];
   evidence_refs?: string[];
+  contract_findings?: ManagedContractFinding[];
+  contract_failure_path?: string;
 }
 
 export interface CompletionHelperSummary {
