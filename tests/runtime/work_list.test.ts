@@ -269,6 +269,157 @@ function buildDeepWorkHarness(state: { runItemsCalls: number }): HarnessAdapter 
   };
 }
 
+function buildDraftContractFailureHarness(state: { executeCalls: number; sawContractFailureContext: boolean }): HarnessAdapter {
+  const deliveryHarness = createPassingDeliveryHarness("codex-cli");
+  return {
+    kind: "codex-cli",
+    capabilities: getHarnessCapabilities("codex-cli")!,
+    async run(invocation: AgentInvocation) {
+      if (invocation.promptKind === "delivery_curator") {
+        return deliveryHarness.run(invocation);
+      }
+
+      if (invocation.promptKind === "outcome_verification") {
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: {
+            last_message: [
+              "```json",
+              JSON.stringify({ passed: true, summary: "Work-list contract-failure retry verifier accepted the artifacts.", findings: [] }),
+              "```"
+            ].join("\n")
+          }
+        };
+      }
+
+      if (invocation.nodeGoal?.includes("work_list_json")) {
+        await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        await writeItemCyclePlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
+        state.executeCalls += 1;
+        if (state.executeCalls > 1 && invocation.contextManifest?.includes("managed_contract_failure")) {
+          state.sawContractFailureContext = true;
+        }
+        await writeFile(join(invocation.outputDir, "item-work-notes.md"), "# Item Work Notes\n\nExecuted with evidence.\n", "utf8");
+        await writeFile(join(invocation.outputDir, "draft-item-handoff.md"), "# Draft Item Handoff\n\nCompleted with evidence.\n", "utf8");
+        await writeFile(
+          join(invocation.outputDir, "draft-item-result.json"),
+          state.executeCalls === 1
+            ? "{\n  \"id\": \"w1\",\n  \"status\": \"completed\"\n"
+            : `${JSON.stringify({
+                id: "w1",
+                status: "completed",
+                summary: "Produced the repaired evidence handoff.",
+                validation: itemValidationEvidence("Runtime gate can verify this repaired result."),
+                risks: [],
+                downstream_implications: ["Downstream nodes can consume work_items after completion."]
+              }, null, 2)}\n`,
+          "utf8"
+        );
+        await writeFile(join(invocation.outputDir, "draft-item-validation.md"), "Validation: runtime gate checks draft item evidence.\n", "utf8");
+      } else if (isWorkListItemInvocation(invocation)) {
+        await writeFinalItemArtifacts(invocation, {
+          summary: "Produced the repaired evidence handoff.",
+          validationMessage: "Runtime finalizer can verify this result."
+        });
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
+        await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after contract repair.\n", "utf8");
+      }
+
+      const result = {
+        status: "passed" as const,
+        exitCode: 0,
+        transcript: { last_message: "done" }
+      };
+      await markInvocationRuntimeReady(invocation, result);
+      return result;
+    },
+    async cancel() {
+      return;
+    }
+  };
+}
+
+function buildFinalContractFailureHarness(state: { publishCalls: number; sawContractFailureContext: boolean }): HarnessAdapter {
+  const deliveryHarness = createPassingDeliveryHarness("codex-cli");
+  return {
+    kind: "codex-cli",
+    capabilities: getHarnessCapabilities("codex-cli")!,
+    async run(invocation: AgentInvocation) {
+      if (invocation.promptKind === "delivery_curator") {
+        return deliveryHarness.run(invocation);
+      }
+
+      if (invocation.promptKind === "outcome_verification") {
+        return {
+          status: "passed",
+          exitCode: 0,
+          transcript: {
+            last_message: [
+              "```json",
+              JSON.stringify({ passed: true, summary: "Final item-result contract repair verifier accepted the artifacts.", findings: [] }),
+              "```"
+            ].join("\n")
+          }
+        };
+      }
+
+      if (invocation.nodeGoal?.includes("work_list_json")) {
+        await writeFile(join(invocation.outputDir, "work-list.json"), plannedWorkListJson(), "utf8");
+      } else if (isWorkListItemPlanInvocation(invocation)) {
+        if (state.publishCalls > 0 && invocation.contextManifest?.includes("item_result")) {
+          state.sawContractFailureContext = true;
+        }
+        await writeItemCyclePlan(invocation);
+      } else if (isWorkListItemExecuteInvocation(invocation)) {
+        await writeDraftItemArtifacts(invocation, {
+          summary: "Produced draft evidence ready for publication.",
+          validationMessage: "Runtime gate can verify this result."
+        });
+      } else if (isWorkListItemInvocation(invocation)) {
+        state.publishCalls += 1;
+        await writeFile(join(invocation.outputDir, "item-handoff.md"), "# Item Handoff\n\nCompleted with evidence.\n", "utf8");
+        await writeFile(
+          join(invocation.outputDir, "item-result.json"),
+          state.publishCalls === 1
+            ? `${JSON.stringify({
+                item_id: "w1",
+                status: "completed",
+                validation: itemValidationEvidence("Runtime finalizer needs summary and id evidence."),
+                risks: [],
+                downstream_implications: ["Downstream nodes can consume work_items."]
+              }, null, 2)}\n`
+            : `${JSON.stringify({
+                id: "w1",
+                status: "completed",
+                summary: "Produced the repaired final item result.",
+                validation: itemValidationEvidence("Runtime finalizer can verify this repaired result."),
+                risks: [],
+                downstream_implications: ["Downstream nodes can consume work_items."]
+              }, null, 2)}\n`,
+          "utf8"
+        );
+        await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: runtime finalizer verifies item-result.json.\n", "utf8");
+      } else if (invocation.nodeGoal?.includes("final artifacts")) {
+        await writeFile(join(invocation.outputDir, "summary.md"), "Completed one frozen work-list item after final result repair.\n", "utf8");
+      }
+
+      const result = {
+        status: "passed" as const,
+        exitCode: 0,
+        transcript: { last_message: "done" }
+      };
+      await markInvocationRuntimeReady(invocation, result);
+      return result;
+    },
+    async cancel() {
+      return;
+    }
+  };
+}
+
 function buildParallelCriteriaHarness(state: { activeChecks: number; maxActiveChecks: number }): HarnessAdapter {
   const deliveryHarness = createPassingDeliveryHarness("codex-cli");
   return {
@@ -1128,6 +1279,228 @@ describe("runtime pattern_work_list", () => {
     expect(workItems.items).toEqual([
       expect.objectContaining({ id: "w1", status: "completed", summary: "Produced the evidence handoff." })
     ]);
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("turns malformed draft item results into structured managed contract retry input", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-draft-contract-failure-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-work-list-draft-contract-failure",
+      intent: {
+        goal: "Exercise structured managed contract retry evidence.",
+        acceptance_criteria: ["The work-list pattern retries only the current item with precise contract failure evidence."]
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli", sandbox: "workspace-write" },
+        supervisor: { harness: "codex-cli", sandbox: "read-only" }
+      },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_work_list",
+            id: "deliver",
+            runtime: { repo: "main", profile: "default" },
+            intent: {
+              goal: "Deliver a bounded runtime-test work list with draft contract repair.",
+              acceptance_criteria: ["The work_items artifact lists completed items."],
+              constraints: []
+            },
+            work_list: {
+              planning_goal: "Discover the ordered runtime-test items.",
+              item_guidance: {
+                what_counts_as_one_item: "One coherent runtime-test unit.",
+                done_when: ["The item has evidence and validation."]
+              },
+              item_worker: {
+                kind: "deep_work",
+                completion: {
+                  max_cycles: 2,
+                  pass_threshold: 1,
+                  criteria: [
+                    {
+                      id: "command_ok",
+                      kind: "command",
+                      command: "true",
+                      weight: 1,
+                      required: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const state = { executeCalls: 0, sawContractFailureContext: false };
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: {
+        "codex-cli": buildDraftContractFailureHarness(state)
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(state.executeCalls).toBe(2);
+    expect(state.sawContractFailureContext).toBe(true);
+    const attempts = await readRunExecutionAttempts(runRoot);
+    const executeAttempts = attempts
+      .filter((attempt) => attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1__execute")
+      .sort((left, right) => left.attempt_index - right.attempt_index);
+    expect(executeAttempts).toHaveLength(2);
+    const failurePacket = JSON.parse(await readFile(
+      join(executeAttempts[0]!.execution_dir, "runtime", "managed-contract-failure.json"),
+      "utf8"
+    )) as {
+      findings: Array<{
+        managed_kind: string;
+        phase: string;
+        item_id?: string;
+        artifact_name?: string;
+        failure_kind: string;
+        retry_boundary: string;
+        required_next_action: string;
+      }>;
+    };
+    expect(failurePacket.findings).toEqual([
+      expect.objectContaining({
+        managed_kind: "pattern_work_list",
+        phase: "item_execute",
+        item_id: "w1",
+        artifact_name: "draft_item_result",
+        failure_kind: "invalid_json",
+        retry_boundary: "current_item",
+        required_next_action: expect.stringContaining("draft-item-result.json")
+      })
+    ]);
+    const retryContext = await readFile(join(executeAttempts[1]!.execution_dir, "agent", "context.md"), "utf8");
+    expect(retryContext).toContain("managed_contract_failure");
+    expect(retryContext).toContain("draft_item_result");
+    expect(retryContext).not.toContain("human-debug");
+
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("turns malformed final item results into structured managed contract retry input", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-work-list-final-contract-failure-"));
+    const repoDir = join(tempRoot, "repo");
+    const runRoot = join(tempRoot, "run");
+    await mkdir(repoDir, { recursive: true });
+    await initGitRepo(repoDir);
+
+    const graph = compileGraph({
+      version: "1",
+      graph_id: "runtime-work-list-final-contract-failure",
+      intent: {
+        goal: "Exercise structured final item-result contract retry evidence.",
+        acceptance_criteria: ["The work-list pattern retries only the current item when final item-result contract validation fails."]
+      },
+      repos: { main: { path: "." } },
+      defaults: { launch_profile: "default", workspace_backend: "inplace" },
+      profiles: {
+        default: { harness: "codex-cli", sandbox: "workspace-write" },
+        supervisor: { harness: "codex-cli", sandbox: "read-only" }
+      },
+      supervision: { profile: "supervisor", max_total_interventions: 0 },
+      graph: {
+        type: "sequence",
+        id: "root",
+        steps: [
+          {
+            type: "pattern_work_list",
+            id: "deliver",
+            runtime: { repo: "main", profile: "default" },
+            intent: {
+              goal: "Deliver a bounded runtime-test work list with final result repair.",
+              acceptance_criteria: ["The work_items artifact lists completed items."],
+              constraints: []
+            },
+            work_list: {
+              planning_goal: "Discover the ordered runtime-test items.",
+              item_guidance: {
+                what_counts_as_one_item: "One coherent runtime-test unit.",
+                done_when: ["The item has evidence and validation."]
+              },
+              item_worker: {
+                kind: "deep_work",
+                completion: {
+                  max_cycles: 2,
+                  pass_threshold: 1,
+                  criteria: [
+                    {
+                      id: "command_ok",
+                      kind: "command",
+                      command: "true",
+                      weight: 1,
+                      required: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    const state = { publishCalls: 0, sawContractFailureContext: false };
+    const run = await runCompiledGraph({
+      run_root: runRoot,
+      compiled_graph: graph,
+      repo_sources: { main: repoDir },
+      harnesses: {
+        "codex-cli": buildFinalContractFailureHarness(state)
+      }
+    });
+
+    expect(run.outcome).toBe("passed");
+    expect(state.publishCalls).toBe(2);
+    expect(state.sawContractFailureContext).toBe(true);
+    const attempts = await readRunExecutionAttempts(runRoot);
+    const publishAttempts = attempts
+      .filter((attempt) => attempt.authored_id === "deliver__managed__pattern_work_list__run_items__item_w1__publish")
+      .sort((left, right) => left.attempt_index - right.attempt_index);
+    expect(publishAttempts).toHaveLength(2);
+    const failurePacket = JSON.parse(await readFile(
+      join(publishAttempts[0]!.execution_dir, "runtime", "managed-contract-failure.json"),
+      "utf8"
+    )) as {
+      findings: Array<{
+        phase: string;
+        artifact_name?: string;
+        failure_kind: string;
+        message: string;
+      }>;
+    };
+    expect(failurePacket.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        phase: "item_publish",
+        artifact_name: "item_result",
+        failure_kind: "schema_mismatch",
+        message: expect.stringContaining("item_id")
+      }),
+      expect.objectContaining({
+        phase: "item_publish",
+        artifact_name: "item_result",
+        failure_kind: "schema_mismatch",
+        message: expect.stringContaining("summary")
+      })
+    ]));
 
     await rm(tempRoot, { recursive: true, force: true });
   });

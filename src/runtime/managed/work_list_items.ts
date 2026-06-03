@@ -29,6 +29,12 @@ import {
 } from "../completion/index.js";
 import type { ContextPacketMaterializedItem } from "../context/packet.js";
 import { RuntimeFailureError } from "../failure.js";
+import {
+  ManagedContractFailureError,
+  managedContractFailureSummary,
+  writeManagedContractFailurePacket,
+  type ManagedContractFinding
+} from "./contract_failures.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter, type HarnessResult } from "../harness/types.js";
 import { readOperatorObservations } from "../observations/index.js";
 import { prepareAgentTools } from "../tools/setup.js";
@@ -209,8 +215,280 @@ async function readTextFileOptional(filePath: string | undefined): Promise<strin
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function managedWorkListErrorMessage(error: unknown): string {
+  if (error instanceof ManagedContractFailureError) {
+    return managedContractFailureSummary(error.findings);
+  }
   return error instanceof Error ? error.message : String(error);
+}
+
+function workListContractFinding(options: {
+  phase: string;
+  itemId: string;
+  artifactName: string;
+  artifactPath: string;
+  failureKind: ManagedContractFinding["failure_kind"];
+  message: string;
+  expected: string;
+  requiredNextAction: string;
+  evidenceRefs?: string[];
+}): ManagedContractFinding {
+  return {
+    managed_kind: "pattern_work_list",
+    phase: options.phase,
+    item_id: options.itemId,
+    artifact_name: options.artifactName,
+    artifact_path: options.artifactPath,
+    failure_kind: options.failureKind,
+    message: options.message,
+    expected: options.expected,
+    retry_boundary: "current_item",
+    required_next_action: options.requiredNextAction,
+    evidence_refs: options.evidenceRefs ?? [options.artifactPath]
+  };
+}
+
+async function ensureManagedArtifactPresent(options: {
+  phase: string;
+  item: ManagedWorkListFrozenItem;
+  artifactName: string;
+  artifactPath: string;
+  fileName: string;
+}): Promise<ManagedContractFinding | undefined> {
+  try {
+    await access(options.artifactPath);
+    return undefined;
+  } catch {
+    return workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "missing_artifact",
+      message: `${options.fileName} was not published for work-list item ${options.item.id}.`,
+      expected: `${options.fileName} must be present before the managed item can be accepted.`,
+      requiredNextAction: `Publish ${options.fileName} for item ${options.item.id}.`
+    });
+  }
+}
+
+async function readManagedJsonArtifact(options: {
+  phase: string;
+  item: ManagedWorkListFrozenItem;
+  artifactName: string;
+  artifactPath: string;
+  fileName: string;
+}): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(options.artifactPath, "utf8")) as unknown;
+  } catch (error) {
+    throw new ManagedContractFailureError(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: error instanceof SyntaxError ? "invalid_json" : "unreadable_artifact",
+      message: `${options.fileName} for work-list item ${options.item.id} could not be parsed: ${error instanceof Error ? error.message : String(error)}.`,
+      expected: `${options.fileName} must be valid JSON using the managed work-list item result contract.`,
+      requiredNextAction: `Repair ${options.fileName} for item ${options.item.id} so it is valid JSON with id, completed status, summary, validation, risks, and downstream_implications.`
+    }));
+  }
+}
+
+function validateManagedItemValidationContract(options: {
+  phase: string;
+  item: ManagedWorkListFrozenItem;
+  artifactName: string;
+  artifactPath: string;
+  fileName: string;
+  value: unknown;
+  findings: ManagedContractFinding[];
+}): ManagedWorkListItemValidation | undefined {
+  if (!isRecord(options.value)) {
+    options.findings.push(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "schema_mismatch",
+      message: `${options.fileName} validation must be an object with passed, failed_then_fixed, unavailable, and blocked arrays.`,
+      expected: "Completed item validation includes structured arrays for passed, failed_then_fixed, unavailable, and blocked evidence.",
+      requiredNextAction: `Rewrite the validation object in ${options.fileName} for item ${options.item.id}.`
+    }));
+    return undefined;
+  }
+
+  const validation = {
+    passed: stringArray(options.value.passed),
+    failed_then_fixed: stringArray(options.value.failed_then_fixed),
+    unavailable: stringArray(options.value.unavailable),
+    blocked: stringArray(options.value.blocked)
+  };
+
+  for (const key of ["passed", "failed_then_fixed", "unavailable", "blocked"] as const) {
+    if (!Array.isArray(options.value[key])) {
+      options.findings.push(workListContractFinding({
+        phase: options.phase,
+        itemId: options.item.id,
+        artifactName: options.artifactName,
+        artifactPath: options.artifactPath,
+        failureKind: "schema_mismatch",
+        message: `${options.fileName} validation.${key} must be an array.`,
+        expected: "Every validation channel is represented as an array of evidence strings.",
+        requiredNextAction: `Set validation.${key} to an array in ${options.fileName} for item ${options.item.id}.`
+      }));
+    }
+  }
+
+  if (
+    validation.passed.length === 0 &&
+    validation.failed_then_fixed.length === 0 &&
+    validation.unavailable.length === 0
+  ) {
+    options.findings.push(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: validation.blocked.length > 0 ? "contract_mismatch" : "schema_mismatch",
+      message: validation.blocked.length > 0
+        ? `${options.fileName} marks item ${options.item.id} completed but only provides blocked validation.`
+        : `${options.fileName} is missing usable validation evidence for completed item ${options.item.id}.`,
+      expected: "Completed item results include at least one passed, failed_then_fixed, or unavailable validation evidence entry.",
+      requiredNextAction: `Update validation in ${options.fileName} for item ${options.item.id} with completed-work evidence or do not mark the item completed.`
+    }));
+    return undefined;
+  }
+
+  return validation;
+}
+
+function validateManagedWorkListItemResultContract(options: {
+  phase: string;
+  item: ManagedWorkListFrozenItem;
+  artifactName: string;
+  artifactPath: string;
+  fileName: string;
+  value: unknown;
+}): ManagedWorkListItemResult {
+  const findings: ManagedContractFinding[] = [];
+  if (!isRecord(options.value)) {
+    throw new ManagedContractFailureError(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "schema_mismatch",
+      message: `${options.fileName} must be a JSON object for work-list item ${options.item.id}.`,
+      expected: `${options.fileName} includes id, status completed, summary, validation, risks, and downstream_implications.`,
+      requiredNextAction: `Rewrite ${options.fileName} as a managed item result JSON object for item ${options.item.id}.`
+    }));
+  }
+
+  if (typeof options.value.item_id === "string") {
+    findings.push(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "schema_mismatch",
+      message: `${options.fileName} uses stale field item_id; managed item results must use id.`,
+      expected: `The item result id field equals "${options.item.id}" and no item_id field is used.`,
+      requiredNextAction: `Replace item_id with id in ${options.fileName} for item ${options.item.id}.`
+    }));
+  }
+
+  if (options.value.id !== options.item.id) {
+    findings.push(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "contract_mismatch",
+      message: `${options.fileName} id "${typeof options.value.id === "string" ? options.value.id : String(options.value.id)}" does not match frozen item "${options.item.id}".`,
+      expected: `The item result id exactly matches frozen item "${options.item.id}".`,
+      requiredNextAction: `Set id to "${options.item.id}" in ${options.fileName}.`
+    }));
+  }
+
+  if (options.value.status !== "completed") {
+    findings.push(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "contract_mismatch",
+      message: `${options.fileName} status is "${typeof options.value.status === "string" ? options.value.status : String(options.value.status)}", not completed.`,
+      expected: "Only completed managed item results can be accepted; blocked work must retry or fail the item.",
+      requiredNextAction: `Complete item ${options.item.id} and publish ${options.fileName} with status "completed", or let the item fail with runtime evidence.`
+    }));
+  }
+
+  if (typeof options.value.summary !== "string" || options.value.summary.trim().length === 0) {
+    findings.push(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "schema_mismatch",
+      message: `${options.fileName} is missing a non-empty summary for item ${options.item.id}.`,
+      expected: "Completed managed item results include a concrete non-empty summary.",
+      requiredNextAction: `Add a concrete summary to ${options.fileName} for item ${options.item.id}.`
+    }));
+  }
+
+  const validation = validateManagedItemValidationContract({
+    phase: options.phase,
+    item: options.item,
+    artifactName: options.artifactName,
+    artifactPath: options.artifactPath,
+    fileName: options.fileName,
+    value: options.value.validation,
+    findings
+  });
+
+  if (!Array.isArray(options.value.risks)) {
+    findings.push(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "schema_mismatch",
+      message: `${options.fileName} risks must be an array.`,
+      expected: "Managed item results include risks as an array of strings; use an empty array when no active risks remain.",
+      requiredNextAction: `Set risks to an array in ${options.fileName} for item ${options.item.id}.`
+    }));
+  }
+
+  if (!Array.isArray(options.value.downstream_implications)) {
+    findings.push(workListContractFinding({
+      phase: options.phase,
+      itemId: options.item.id,
+      artifactName: options.artifactName,
+      artifactPath: options.artifactPath,
+      failureKind: "schema_mismatch",
+      message: `${options.fileName} downstream_implications must be an array.`,
+      expected: "Managed item results include downstream_implications as an array of strings; use an empty array when none apply.",
+      requiredNextAction: `Set downstream_implications to an array in ${options.fileName} for item ${options.item.id}.`
+    }));
+  }
+
+  if (findings.length > 0 || !validation) {
+    throw new ManagedContractFailureError(findings);
+  }
+
+  return {
+    id: options.value.id as string,
+    status: options.value.status as string,
+    summary: options.value.summary as string,
+    validation,
+    risks: stringArray(options.value.risks),
+    downstream_implications: stringArray(options.value.downstream_implications)
+  };
 }
 
 function stringArray(value: unknown): string[] {
@@ -598,6 +876,8 @@ async function writeManagedItemContext(options: {
   ledgerPath: string;
   priorHandoffsPath?: string;
   priorScorecardPath?: string;
+  managedContractFailurePath?: string;
+  managedContractFailureSummary?: string;
   extraRows?: Array<{
     name: string;
     kind: string;
@@ -651,6 +931,17 @@ async function writeManagedItemContext(options: {
           pointer: options.priorScorecardPath,
           what: "Most recent failed scorecard for this item.",
           why: "The retry should address concrete item-level feedback."
+        }]
+      : []),
+    ...(options.managedContractFailurePath
+      ? [{
+          name: "managed_contract_failure",
+          kind: "runtime_contract_failure",
+          pointer: options.managedContractFailurePath,
+          what: options.managedContractFailureSummary
+            ? `Structured runtime-owned managed contract failure from the previous item attempt: ${options.managedContractFailureSummary}`
+            : "Structured runtime-owned managed contract failure from the previous item attempt.",
+          why: "The retry should repair this exact managed artifact contract issue before continuing."
         }]
       : []),
     ...managedItemContextRows(options.itemNode.context, options.parentContext.workspace_path),
@@ -971,7 +1262,7 @@ function buildManagedWorkListItemPhaseNode(options: {
   }, options.worker, options.phase);
 }
 
-async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkListFrozenItem): Promise<{
+async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkListFrozenItem, phase = "item_publish"): Promise<{
   handoffPath: string;
   resultPath: string;
   validationPath: string;
@@ -980,42 +1271,29 @@ async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkList
   const handoffPath = join(outputDir, "item-handoff.md");
   const resultPath = join(outputDir, "item-result.json");
   const validationPath = join(outputDir, "item-validation.md");
-  try {
-    await access(handoffPath);
-    await access(resultPath);
-    await access(validationPath);
-  } catch {
-    throw new RuntimeFailureError(
-      "artifact_contract_failure",
-      `Managed work-list item ${item.id} did not publish item_handoff, item_result, and item_validation.`
-    );
+  const missing = (await Promise.all([
+    ensureManagedArtifactPresent({ phase, item, artifactName: "item_handoff", artifactPath: handoffPath, fileName: "item-handoff.md" }),
+    ensureManagedArtifactPresent({ phase, item, artifactName: "item_result", artifactPath: resultPath, fileName: "item-result.json" }),
+    ensureManagedArtifactPresent({ phase, item, artifactName: "item_validation", artifactPath: validationPath, fileName: "item-validation.md" })
+  ])).filter((finding): finding is ManagedContractFinding => Boolean(finding));
+  if (missing.length > 0) {
+    throw new ManagedContractFailureError(missing);
   }
 
-  const result = await readJsonFile<ManagedWorkListItemResult>("item result", resultPath);
-  if (result.id !== item.id) {
-    throw new RuntimeFailureError("artifact_contract_failure", `Item result id "${result.id}" does not match frozen item "${item.id}".`);
-  }
-  if (result.status !== "completed") {
-    throw new RuntimeFailureError("artifact_contract_failure", `Item ${item.id} result status is "${result.status}", not completed.`);
-  }
-  if (typeof result.summary !== "string" || result.summary.trim().length === 0) {
-    throw new RuntimeFailureError("artifact_contract_failure", `Item ${item.id} result is missing a summary.`);
-  }
-  const validation = normalizeManagedWorkListItemValidation(result.validation);
-  if (!validation) {
-    throw new RuntimeFailureError("artifact_contract_failure", `Item ${item.id} result is missing validation evidence.`);
-  }
+  const result = validateManagedWorkListItemResultContract({
+    phase,
+    item,
+    artifactName: "item_result",
+    artifactPath: resultPath,
+    fileName: "item-result.json",
+    value: await readManagedJsonArtifact({ phase, item, artifactName: "item_result", artifactPath: resultPath, fileName: "item-result.json" })
+  });
 
   return {
     handoffPath,
     resultPath,
     validationPath,
-    result: {
-      ...result,
-      validation,
-      risks: Array.isArray(result.risks) ? result.risks : [],
-      downstream_implications: Array.isArray(result.downstream_implications) ? result.downstream_implications : []
-    }
+    result
   };
 }
 
@@ -1030,41 +1308,32 @@ async function readManagedDraftItemArtifacts(outputDir: string, item: ManagedWor
   const resultPath = join(outputDir, "draft-item-result.json");
   const validationPath = join(outputDir, "draft-item-validation.md");
   const workNotesPath = join(outputDir, "item-work-notes.md");
-  try {
-    await access(handoffPath);
-    await access(resultPath);
-    await access(validationPath);
-    await access(workNotesPath);
-  } catch {
-    throw new RuntimeFailureError(
-      "artifact_contract_failure",
-      `Managed work-list item ${item.id} execution phase did not publish item_work_notes, draft_item_handoff, draft_item_result, and draft_item_validation.`
-    );
+  const phase = "item_execute";
+  const missing = (await Promise.all([
+    ensureManagedArtifactPresent({ phase, item, artifactName: "item_work_notes", artifactPath: workNotesPath, fileName: "item-work-notes.md" }),
+    ensureManagedArtifactPresent({ phase, item, artifactName: "draft_item_handoff", artifactPath: handoffPath, fileName: "draft-item-handoff.md" }),
+    ensureManagedArtifactPresent({ phase, item, artifactName: "draft_item_result", artifactPath: resultPath, fileName: "draft-item-result.json" }),
+    ensureManagedArtifactPresent({ phase, item, artifactName: "draft_item_validation", artifactPath: validationPath, fileName: "draft-item-validation.md" })
+  ])).filter((finding): finding is ManagedContractFinding => Boolean(finding));
+  if (missing.length > 0) {
+    throw new ManagedContractFailureError(missing);
   }
 
-  const result = await readJsonFile<ManagedWorkListItemResult>("draft item result", resultPath);
-  if (result.id !== item.id) {
-    throw new RuntimeFailureError("artifact_contract_failure", `Draft item result id "${result.id}" does not match frozen item "${item.id}".`);
-  }
-  if (result.status !== "completed") {
-    throw new RuntimeFailureError("artifact_contract_failure", `Draft item ${item.id} result status is "${result.status}", not completed.`);
-  }
-  const validation = normalizeManagedWorkListItemValidation(result.validation);
-  if (!validation) {
-    throw new RuntimeFailureError("artifact_contract_failure", `Draft item ${item.id} result is missing validation evidence.`);
-  }
+  const result = validateManagedWorkListItemResultContract({
+    phase,
+    item,
+    artifactName: "draft_item_result",
+    artifactPath: resultPath,
+    fileName: "draft-item-result.json",
+    value: await readManagedJsonArtifact({ phase, item, artifactName: "draft_item_result", artifactPath: resultPath, fileName: "draft-item-result.json" })
+  });
 
   return {
     handoffPath,
     resultPath,
     validationPath,
     workNotesPath,
-    result: {
-      ...result,
-      validation,
-      risks: Array.isArray(result.risks) ? result.risks : [],
-      downstream_implications: Array.isArray(result.downstream_implications) ? result.downstream_implications : []
-    }
+    result
   };
 }
 
@@ -1650,6 +1919,25 @@ function contextRow(name: string, kind: string, pointer: string, what: string, w
   return { name, kind, pointer, what, why };
 }
 
+async function persistManagedContractFailureFromError(
+  error: unknown,
+  executionDir: string
+): Promise<{ jsonPath: string; markdownPath: string; findings: ManagedContractFinding[] } | undefined> {
+  if (!(error instanceof ManagedContractFailureError)) {
+    return undefined;
+  }
+
+  const written = await writeManagedContractFailurePacket({
+    executionDir,
+    findings: error.findings
+  });
+  return {
+    jsonPath: written.jsonPath,
+    markdownPath: written.markdownPath,
+    findings: written.packet.findings
+  };
+}
+
 async function runManagedWorkListDeepWorkItemCycle(options: {
   context: RuntimeNodeExecutorContext<CompiledAgentNode>;
   harnesses: Partial<Record<HarnessName, HarnessAdapter>>;
@@ -1664,6 +1952,8 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
   runtimeLedgerPath: string;
   priorHandoffsPath?: string;
   lastScorecardPath?: string;
+  lastContractFailurePath?: string;
+  lastContractFailureSummary?: string;
   cycle: number;
   maxCycles: number;
   maxConcurrency?: number;
@@ -1673,6 +1963,8 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
   scorecardPath?: string;
   cycles?: unknown[];
   lastFailure?: string;
+  contractFailurePath?: string;
+  contractFailureFindings?: ManagedContractFinding[];
 }> {
   const runPhase = async (
     phase: PatternDeepWorkPhaseName,
@@ -1701,6 +1993,8 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
       ledgerPath: options.runtimeLedgerPath,
       ...(options.priorHandoffsPath ? { priorHandoffsPath: options.priorHandoffsPath } : {}),
       ...(options.lastScorecardPath ? { priorScorecardPath: options.lastScorecardPath } : {}),
+      ...(options.lastContractFailurePath ? { managedContractFailurePath: options.lastContractFailurePath } : {}),
+      ...(options.lastContractFailureSummary ? { managedContractFailureSummary: options.lastContractFailureSummary } : {}),
       extraRows
     });
     const contextManifest = await readContextManifestContent(phaseContext.manifestPath);
@@ -1770,7 +2064,16 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
   try {
     draftArtifacts = await readManagedDraftItemArtifacts(resolveExecutionArtifactsDirectory(executeRun.phaseDir), options.item);
   } catch (error) {
-    return { lastFailure: managedWorkListErrorMessage(error) };
+    const contractFailure = await persistManagedContractFailureFromError(error, executeRun.phaseDir);
+    return {
+      lastFailure: managedWorkListErrorMessage(error),
+      ...(contractFailure
+        ? {
+            contractFailurePath: contractFailure.markdownPath,
+            contractFailureFindings: contractFailure.findings
+          }
+        : {})
+    };
   }
 
   const verifyNode = buildManagedWorkListItemPhaseNode({
@@ -1794,6 +2097,8 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
     ledgerPath: options.runtimeLedgerPath,
     ...(options.priorHandoffsPath ? { priorHandoffsPath: options.priorHandoffsPath } : {}),
     ...(options.lastScorecardPath ? { priorScorecardPath: options.lastScorecardPath } : {}),
+    ...(options.lastContractFailurePath ? { managedContractFailurePath: options.lastContractFailurePath } : {}),
+    ...(options.lastContractFailureSummary ? { managedContractFailureSummary: options.lastContractFailureSummary } : {}),
     extraRows: [
       contextRow("item_cycle_plan", "artifact", planPath, "Focused plan for this work-list item cycle.", "The verifier uses this to judge planned vs actual item evidence."),
       contextRow("item_work_notes", "artifact", draftArtifacts.workNotesPath, "Execution notes for this item cycle.", "The verifier uses this to inspect validation and deviations."),
@@ -1863,10 +2168,17 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
   try {
     itemArtifacts = await readManagedItemArtifacts(parentArtifactsRoot, options.item);
   } catch (error) {
+    const contractFailure = await persistManagedContractFailureFromError(error, publishRun.phaseDir);
     return {
       scorecardPath: scorecard.scorecardPath,
       cycles,
-      lastFailure: managedWorkListErrorMessage(error)
+      lastFailure: managedWorkListErrorMessage(error),
+      ...(contractFailure
+        ? {
+            contractFailurePath: contractFailure.markdownPath,
+            contractFailureFindings: contractFailure.findings
+          }
+        : {})
     };
   }
 
@@ -1963,6 +2275,9 @@ export async function runManagedWorkListItems(
       : 1;
     let accepted: ManagedWorkListItemResult | undefined;
     let lastScorecardPath: string | undefined;
+    let lastContractFailurePath: string | undefined;
+    let lastContractFailureSummary: string | undefined;
+    let lastContractFailureFindings: ManagedContractFinding[] | undefined;
     let lastFailure = "";
 
     for (let cycle = 1; cycle <= maxCycles; cycle += 1) {
@@ -2020,6 +2335,8 @@ export async function runManagedWorkListItems(
           runtimeLedgerPath,
           ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
           ...(lastScorecardPath ? { lastScorecardPath } : {}),
+          ...(lastContractFailurePath ? { lastContractFailurePath } : {}),
+          ...(lastContractFailureSummary ? { lastContractFailureSummary } : {}),
           cycle,
           maxCycles,
           ...(config.criteria_concurrency !== undefined ? { maxConcurrency: config.criteria_concurrency } : {})
@@ -2029,6 +2346,18 @@ export async function runManagedWorkListItems(
           lastFailure = deepWorkResult.lastFailure ?? `Item ${item.id} deep-work cycle failed.`;
           if (deepWorkResult.scorecardPath) {
             lastScorecardPath = deepWorkResult.scorecardPath;
+          }
+          if (deepWorkResult.contractFailurePath) {
+            lastContractFailurePath = deepWorkResult.contractFailurePath;
+            lastContractFailureSummary = managedContractFailureSummary(deepWorkResult.contractFailureFindings ?? []);
+          } else {
+            lastContractFailurePath = undefined;
+            lastContractFailureSummary = undefined;
+          }
+          if (deepWorkResult.contractFailureFindings) {
+            lastContractFailureFindings = deepWorkResult.contractFailureFindings;
+          } else {
+            lastContractFailureFindings = undefined;
           }
           await writeManagedItemAttemptResult({
             attempt: itemAttempt,
@@ -2080,7 +2409,9 @@ export async function runManagedWorkListItems(
           frozenPath: frozenPath!,
           ledgerPath: runtimeLedgerPath,
           ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
-          ...(lastScorecardPath ? { priorScorecardPath: lastScorecardPath } : {})
+          ...(lastScorecardPath ? { priorScorecardPath: lastScorecardPath } : {}),
+          ...(lastContractFailurePath ? { managedContractFailurePath: lastContractFailurePath } : {}),
+          ...(lastContractFailureSummary ? { managedContractFailureSummary: lastContractFailureSummary } : {})
         });
         const contextManifest = await readContextManifestContent(itemContext.manifestPath);
         const harnessResult = await runManagedWorkListItemAgent({
@@ -2110,6 +2441,12 @@ export async function runManagedWorkListItems(
             item
           );
         } catch (error) {
+          const contractFailure = await persistManagedContractFailureFromError(error, itemExecutionDir);
+          if (contractFailure) {
+            lastContractFailurePath = contractFailure.markdownPath;
+            lastContractFailureSummary = managedContractFailureSummary(contractFailure.findings);
+            lastContractFailureFindings = contractFailure.findings;
+          }
           lastFailure = managedWorkListErrorMessage(error);
           continue;
         }
@@ -2212,6 +2549,12 @@ export async function runManagedWorkListItems(
     }
 
     if (!accepted) {
+      if (lastContractFailureFindings && lastContractFailureFindings.length > 0) {
+        await writeManagedContractFailurePacket({
+          executionDir: context.execution_dir,
+          findings: lastContractFailureFindings
+        });
+      }
       ledger = {
         ...ledger,
         status: "failed",

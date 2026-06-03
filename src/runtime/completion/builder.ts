@@ -1196,9 +1196,16 @@ function decideCompletionStatus(options: {
       ...(options.managed.failing_required_criteria ?? []),
       ...(options.managed.blocking_criteria ?? [])
     ];
+    const managedContractFindings = options.managed.contract_findings ?? [];
+    for (const finding of managedContractFindings) {
+      reasons.push(finding.message);
+    }
     if (managedBlockers.length > 0 || options.managed.ready_for_publish === false) {
       incomplete = true;
       reasons.push(`Managed completion is not publish-ready: ${managedBlockers.join(", ") || "required criteria unresolved"}.`);
+    }
+    if (managedContractFindings.length > 0) {
+      incomplete = true;
     }
   }
 

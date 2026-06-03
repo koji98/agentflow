@@ -12,6 +12,11 @@ import {
 } from "../../artifacts/reader.js";
 import { operatorObservationsPath, readOperatorObservations } from "../../runtime/observations/index.js";
 import type { RuntimeNodeAttempt } from "../../runtime/attempts.js";
+import {
+  managedContractFailureJsonPath,
+  readManagedContractFailurePacket,
+  type ManagedContractFinding
+} from "../../runtime/managed/contract_failures.js";
 import { createRunTerminalFields, createSupervisorDisplayFields } from "../run_output.js";
 import { renderCommandUsageError } from "../command_support.js";
 
@@ -30,6 +35,16 @@ export interface NodeStderrTail {
   stderr_log_path?: string;
   stderr_tail?: string;
   truncated?: boolean;
+}
+
+export interface ManagedContractFailureSummary {
+  authored_id: string;
+  compiled_id: string;
+  execution_dir: string;
+  execution_id: string;
+  attempt_index: number;
+  packet_path: string;
+  findings: ManagedContractFinding[];
 }
 
 function renderInspectUsageError(message: string): string {
@@ -85,6 +100,26 @@ async function summarizeFailedNodes(attempts: RuntimeNodeAttempt[]): Promise<Nod
       return summary;
     })
   );
+}
+
+async function summarizeManagedContractFailures(attempts: RuntimeNodeAttempt[]): Promise<ManagedContractFailureSummary[]> {
+  const summaries: ManagedContractFailureSummary[] = [];
+  for (const attempt of attempts) {
+    const packet = await readManagedContractFailurePacket(attempt.execution_dir);
+    if (!packet || packet.findings.length === 0) {
+      continue;
+    }
+    summaries.push({
+      authored_id: attempt.authored_id,
+      compiled_id: attempt.compiled_id,
+      execution_dir: attempt.execution_dir,
+      execution_id: attempt.execution_id,
+      attempt_index: attempt.attempt_index,
+      packet_path: managedContractFailureJsonPath(attempt.execution_dir),
+      findings: packet.findings
+    });
+  }
+  return summaries;
 }
 
 function isActiveFailedAttempt(
@@ -238,6 +273,10 @@ export const inspectCommand = {
       summarizeFailedNodes(activeFailedAttempts),
       summarizeFailedNodes(historicalFailedAttempts)
     ]);
+    const [activeManagedContractFailures, historicalManagedContractFailures] = await Promise.all([
+      summarizeManagedContractFailures(activeFailedAttempts),
+      summarizeManagedContractFailures(historicalFailedAttempts)
+    ]);
     const terminalFields = state
       ? createRunTerminalFields(state, attempts, events)
       : undefined;
@@ -293,6 +332,8 @@ export const inspectCommand = {
         historical_failed_attempt_count: historicalFailedAttempts.length,
         failed_node_stderr_tails: failedNodeStderrTails,
         historical_failed_attempt_stderr_tails: historicalFailedAttemptStderrTails,
+        active_managed_contract_failures: activeManagedContractFailures,
+        historical_managed_contract_failure_count: historicalManagedContractFailures.length,
         artifacts: {
           run_file: artifactPaths.run_file,
           authored_graph_file: artifactPaths.authored_graph_file,

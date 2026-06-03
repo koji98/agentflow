@@ -48,6 +48,11 @@ import {
 import { readOperatorObservations } from "../runtime/observations/index.js";
 import type { AttemptMemory } from "../runtime/attempt_memory.js";
 import { renderAttemptEvidenceMarkdown } from "../runtime/attempt_evidence.js";
+import {
+  managedContractFailureMarkdownPath,
+  readManagedContractFailurePacket,
+  type ManagedContractFailurePacket
+} from "../runtime/managed/contract_failures.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -944,13 +949,37 @@ function renderRetryOrientation(
   ];
 }
 
+function renderManagedContractFailureOrientation(
+  metadata: RuntimeMetadata,
+  packet: ManagedContractFailurePacket | undefined
+): string[] {
+  if (!packet || packet.findings.length === 0) {
+    return [];
+  }
+
+  const executionDir = dirname(metadata.output_dir);
+  return [
+    "## Managed Contract Failure",
+    `- Failure packet: \`${managedContractFailureMarkdownPath(executionDir)}\``,
+    "- Required next action: repair the managed artifact contract issue below before continuing.",
+    "",
+    "| Phase | Item | Artifact | Failure | Retry Boundary |",
+    "| --- | --- | --- | --- | --- |",
+    ...packet.findings.map((finding) =>
+      `| ${markdownCell(finding.phase)} | ${markdownCell(finding.item_id)} | ${markdownCell(finding.artifact_name)} | ${markdownCell(finding.message)} | ${markdownCell(finding.retry_boundary)} |`
+    )
+  ];
+}
+
 async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
-  const [graph, state, observations, milestoneState, manifest] = await Promise.all([
+  const executionDir = dirname(metadata.output_dir);
+  const [graph, state, observations, milestoneState, manifest, managedContractFailure] = await Promise.all([
     readCompiledGraph(metadata.run_root).catch(() => undefined),
     readRunState(metadata.run_root).catch(() => undefined),
     readOperatorObservations(metadata.run_root),
     readMilestoneState(metadata),
-    readFile(metadata.context_manifest_path, "utf8").catch(() => "")
+    readFile(metadata.context_manifest_path, "utf8").catch(() => ""),
+    readManagedContractFailurePacket(executionDir).catch(() => undefined)
   ]);
   const attemptMemory = metadata.attempt_memory_path
     ? await readJsonFile<AttemptMemory>(metadata.attempt_memory_path).catch(() => undefined)
@@ -991,6 +1020,8 @@ async function commandOrient(metadata: RuntimeMetadata): Promise<AfResult> {
     `- Supervisor recovery: ${metadata.supervisor_recovery_envelope ? metadata.supervisor_recovery_envelope.retry_directive.summary : "none"}`,
     `- Operator observations: ${activeObservations.length === 0 ? "none" : String(activeObservations.length)}`,
     ...activeObservations.slice(-5).map((observation) => `  - ${observation.kind}: ${observation.message}`),
+    "",
+    ...renderManagedContractFailureOrientation(metadata, managedContractFailure),
     "",
     "## Declared Artifacts",
     ...renderArtifactTable(metadata),
