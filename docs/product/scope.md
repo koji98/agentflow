@@ -2,6 +2,8 @@
 
 Agentflow v1 is the supervised runtime for delegating substantial coding work to external agent harnesses without losing intent, evidence, or reviewability.
 
+Agentflow v1 is not an always-on agent service. It is not an event-driven daemon, queue, issue watcher, autonomous PR factory, remote devbox, or background monitor. Operators launch, inspect, resume, and evaluate explicit graph runs through the CLI; external schedulers or integrations may invoke those commands, but they are outside the v1 product contract.
+
 The product surface is intentionally centered on four layers:
 
 1. Authored intent: a graph that states goal, constraints, acceptance criteria, repos, profiles, tools, and outcome nodes.

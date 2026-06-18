@@ -7,11 +7,12 @@ Agentflow docs are split by audience so readers do not have to infer whether a p
 Use `product/` when authoring, operating, or evaluating Agentflow workflows:
 
 1. `product/scope.md`: active product boundary and release bar.
-2. `product/operations.md`: validation, launch, resume, inspection, and delivery workflows.
-3. `product/evals.md`: eval suite authoring and operation.
-4. `product/plugins.md`: plugin workflow and tool contracts.
-5. `product/managed-patterns.md`: reusable managed workflow patterns.
-6. `product/patterns/`: pattern-specific authoring guides.
+2. `product/loop-model.md`: worker, verifier, supervisor, managed, and eval loops.
+3. `product/operations.md`: validation, launch, resume, inspection, and delivery workflows.
+4. `product/evals.md`: eval suite authoring and operation.
+5. `product/plugins.md`: plugin workflow and tool contracts.
+6. `product/managed-patterns.md`: reusable managed workflow patterns.
+7. `product/patterns/`: pattern-specific authoring guides.
 
 ## Technical Docs
 
