@@ -5,6 +5,7 @@ These docs explain how to use Agentflow well: what belongs in the graph contract
 ## Read By Task
 
 - New to Agentflow: read `scope.md`, then the root `README.md`.
+- Understanding Agentflow's loop model: read `loop-model.md`.
 - Launching or inspecting runs: read `operations.md`.
 - Authoring eval suites: read `evals.md`.
 - Building or consuming plugins: read `plugins.md`.
@@ -13,6 +14,7 @@ These docs explain how to use Agentflow well: what belongs in the graph contract
 ## Reference Pages
 
 - `scope.md`: active product surface and what is intentionally out of scope.
+- `loop-model.md`: how worker, verifier, supervisor, managed, and eval loops fit together.
 - `operations.md`: commands, run lifecycle, delivery review, and troubleshooting.
 - `evals.md`: suites, scenarios, variants, criteria, trajectory checks, simulation, reports, and comparison.
 - `plugins.md`: plugin manifests, workflow exports, CLI tool exports, credentials, and consumer usage.

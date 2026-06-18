@@ -691,7 +691,7 @@ describe("delivery package", () => {
         expect(validationLedger.recovered_issues).toEqual([]);
     });
 
-    it("fails delivery when curated review hides an active failure", async () => {
+    it("falls back to deterministic delivery when curated review hides an active failure", async () => {
         const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-curation-fail-"));
         await writeRunScaffold(runRoot);
         const attempts: RuntimeNodeAttempt[] = [
@@ -775,7 +775,7 @@ describe("delivery package", () => {
             }
         };
 
-        await expect(writeDeliveryPackage({
+        const manifest = await writeDeliveryPackage({
             run_root: runRoot,
             graph: checkGraph,
             state: baseState({
@@ -811,25 +811,26 @@ describe("delivery package", () => {
             interventions: [],
             curator,
             curation_retry_backoff_ms: 0
-        })).rejects.toThrow(/curated delivery failed verification/u);
+        });
         expect(calls).toBe(2);
+        expect(manifest.curation.status).toBe("passed");
+        expect(manifest.curation.fallback_reason).toContain("missing_active_failure");
         const verdict = await readJson<{ passed: boolean; findings: Array<{ kind: string }> }>(
             join(runRoot, "delivery", "evidence", "curation-verdict.json")
         );
-        expect(verdict.passed).toBe(false);
-        expect(verdict.findings).toEqual(expect.arrayContaining([
-            expect.objectContaining({ kind: "missing_active_failure" })
-        ]));
-        const manifest = await readJson<{ delivery_status: string; review_ready: boolean }>(
+        expect(verdict.passed).toBe(true);
+        expect(verdict.findings).toEqual([]);
+        const writtenManifest = await readJson<{ delivery_status: string; review_ready: boolean }>(
             join(runRoot, "delivery", "manifest.json")
         );
-        expect(manifest).toEqual(expect.objectContaining({
-            delivery_status: "failed",
-            review_ready: false
+        expect(writtenManifest).toEqual(expect.objectContaining({
+            delivery_status: "passed",
+            review_ready: true
         }));
         const reviewBrief = await readFile(join(runRoot, "delivery", "01-review-brief.md"), "utf8");
-        expect(reviewBrief).toContain("Delivery curation failed verification");
+        expect(reviewBrief).toContain("Deterministic delivery fallback was used");
         expect(reviewBrief).toContain("Graph status: `failed`");
+        expect(reviewBrief).toContain("required evidence is still missing");
     });
 
     it("retries curation once with verifier findings before accepting delivery", async () => {

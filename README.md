@@ -1,8 +1,8 @@
 # Agentflow
 
-Agentflow is a local-first runtime for supervised agent workflows in real repositories.
+Agentflow is a local-first supervised loop runtime for agent workflows in real repositories.
 
-You write a graph that states the intent, authority, context, tools, validation, and artifacts for the work. Agentflow validates that contract, runs substantial nodes through agent harnesses such as Codex CLI or Cursor CLI, supervises failures, and produces a durable delivery package for review.
+You write a graph that states the intent, authority, context, tools, validation, and artifacts for the work. Agentflow turns that graph into an explicit loop: graph contract -> agent attempt -> mechanical completion -> fresh verification -> causal recovery -> delivery evidence. It validates the contract, runs substantial nodes through agent harnesses such as Codex CLI or Cursor CLI, supervises failures, and produces a durable delivery package for review.
 
 Agentflow exists because long-running agent work needs more than an ad hoc prompt. Teams need the original intent preserved, the right context pointed to clearly, failures repaired without losing the thread, and final evidence organized so a human can review the result.
 

@@ -190,6 +190,7 @@ export interface DeliveryPackageManifest {
     prompt_path?: string;
     response_path?: string;
     failure?: string;
+    fallback_reason?: string;
   };
 }
 
@@ -1647,6 +1648,200 @@ function renderDeliveryFailureLearnings(options: {
   ].join("\n");
 }
 
+function tableCell(value: string): string {
+  return value.replace(/\|/gu, "\\|").replace(/\r?\n/gu, " ").trim();
+}
+
+function renderDeterministicReviewBrief(options: {
+  manifest: DeliveryPackageManifest;
+  source: DeliverySourcePacket;
+  failedVerdict: DeliveryCurationVerdict;
+}): string {
+  const { manifest, source, failedVerdict } = options;
+  const deliveryDir = dirname(manifest.manifest_path);
+  const validationLines = [
+    ...source.validation.milestone_validation_logs.map((log) => {
+      const command = log.command ? ` Command: \`${log.command}\`.` : "";
+      const result = log.result ? ` Result: \`${log.result}\`.` : "";
+      return `\`${log.execution_id}\` milestone \`${log.milestone_id}\`: ${log.summary}${command}${result}`;
+    }),
+    ...source.validation.outcome_verifications.map((verification) =>
+      `\`${verification.node}\` outcome verification: ${verification.summary} Result: \`${verification.passed ? "pass" : "fail"}\`. Evidence: ${markdownLink(deliveryDir, "verifier evidence", verification.evidence_path)}`
+    )
+  ];
+  const changedLines = source.changed_files.flatMap((entry) =>
+    entry.files.length > 0
+      ? entry.files.map((file) => `\`${entry.repo}/${file}\``)
+      : [`\`${entry.repo}\`: no changed files recorded.`]
+  );
+
+  return [
+    "# Review Brief",
+    "",
+    "## Outcome",
+    "",
+    `Graph status: \`${manifest.graph_status}\`. Delivery status: \`passed\`. Review ready: \`true\`.`,
+    "Deterministic delivery fallback was used because AI curation did not produce a verifier-accepted handoff.",
+    "",
+    "## Reviewer Decision",
+    "",
+    source.failures.active.length > 0
+      ? "Do not approve the graph result until active failures are addressed. The delivery package itself is review-ready."
+      : "Review the changed files, final artifacts, validation evidence, and risks before approving the graph result.",
+    "",
+    "## What To Inspect First",
+    "",
+    `- ${markdownLink(deliveryDir, "Validation ledger", manifest.evidence_files.validation_ledger)}`,
+    `- ${markdownLink(deliveryDir, "Change map", manifest.evidence_files.change_map)}`,
+    `- ${markdownLink(deliveryDir, "Audit index", manifest.sections.audit_index)}`,
+    "",
+    "## Success Contract",
+    "",
+    `- Goal: ${source.intent.goal}`,
+    ...markdownList(source.intent.acceptance_criteria.map((item) => `Acceptance: ${item}`), "No graph acceptance criteria were recorded."),
+    ...markdownList(source.intent.constraints.map((item) => `Constraint: ${item}`), "No graph constraints were recorded."),
+    "",
+    "## Changed Files",
+    "",
+    ...markdownList(changedLines, "No workspace change evidence was recorded."),
+    "",
+    "## Final Declared Artifacts",
+    "",
+    ...markdownList(
+      source.final_declared_artifacts.map((artifact) =>
+        `\`${artifact.id}\` at \`${artifact.relative_path}\`: ${artifact.description}`
+      ),
+      "No final declared artifacts were recorded."
+    ),
+    "",
+    "## Validation Evidence",
+    "",
+    ...markdownList(validationLines, "No validation evidence was recorded."),
+    "",
+    "## Active Failures And Risks",
+    "",
+    ...markdownList(
+      [
+        ...source.failures.active.map((failure) => `\`${failure.node}\`: ${failure.summary}`),
+        ...source.workspace_improvements.map((item) => `Risk/improvement candidate \`${item.area}\`: ${item.recommendation}`)
+      ],
+      "No active failures remain."
+    ),
+    "",
+    "## Recovered Issues",
+    "",
+    ...markdownList(
+      source.failures.recovered.map((failure) => `\`${failure.node}\`: ${failure.summary}`),
+      "No recovered issues were recorded."
+    ),
+    "",
+    "## Historical Attempts",
+    "",
+    ...markdownList(
+      source.failures.historical.map((failure) => `\`${failure.node}\`: ${failure.summary}`),
+      "No historical failed attempts were recorded."
+    ),
+    "",
+    "## Supervisor And Human Interventions",
+    "",
+    ...markdownList(
+      source.interventions.map((intervention) => `\`${intervention.action}\`: ${intervention.reason}`),
+      "No supervisor or human interventions were recorded."
+    ),
+    "",
+    "## Supporting Evidence",
+    "",
+    `- ${markdownLink(deliveryDir, "Run learnings", manifest.sections.run_learnings)}`,
+    `- ${markdownLink(deliveryDir, "Delivery source", manifest.evidence_files.delivery_source_markdown)}`,
+    `- ${markdownLink(deliveryDir, "Curation verdict", manifest.evidence_files.curation_verdict)}`,
+    ...failedVerdict.findings.map((finding) => `- Prior curation finding \`${finding.kind}\`: ${finding.message}`)
+  ].join("\n");
+}
+
+function renderDeterministicRunLearnings(options: {
+  manifest: DeliveryPackageManifest;
+  source: DeliverySourcePacket;
+  failedVerdict: DeliveryCurationVerdict;
+}): string {
+  const { manifest, source, failedVerdict } = options;
+  const deliveryDir = dirname(manifest.manifest_path);
+  const improvementRows = source.workspace_improvements.length > 0
+    ? source.workspace_improvements.map((entry) =>
+      `| ${tableCell(entry.area)} | ${tableCell(entry.recommendation)} | ${tableCell(entry.evidence)} | ${entry.priority} | ${entry.confidence} | ${tableCell(entry.done_when)} |`
+    )
+    : ["| none | No workspace improvement was inferred from deterministic evidence. | none | low | high | No action required. |"];
+  const curationFindingRows = failedVerdict.findings.length > 0
+    ? failedVerdict.findings.map((finding) =>
+      `| delivery | Keep deterministic fallback available when AI curation misses the contract. | ${tableCell(finding.kind)} | medium | high | Deterministic delivery verifies successfully. |`
+    )
+    : [];
+
+  return [
+    "# Run Learnings",
+    "",
+    "## Where Agents Struggled",
+    "",
+    ...markdownList(
+      [
+        ...source.failures.active.map((failure) => `Active failure \`${failure.node}\`: ${failure.summary}`),
+        ...source.failures.recovered.map((failure) => `Recovered issue \`${failure.node}\`: ${failure.summary}`),
+        ...failedVerdict.findings.map((finding) => `Delivery curation finding \`${finding.kind}\`: ${finding.message}`)
+      ],
+      "No concrete agent struggle was inferred from deterministic evidence."
+    ),
+    "",
+    "## Workspace Improvements",
+    "",
+    "| Area | Recommendation | Evidence | Priority | Confidence | Done When |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...improvementRows,
+    ...curationFindingRows,
+    "",
+    "## Graph Prompt And Support Improvements",
+    "",
+    "- Use explicit artifact and validation contracts so deterministic delivery can build a complete handoff even when AI curation fails.",
+    "",
+    "## Plugin Skill And Eval Opportunities",
+    "",
+    "- Add or update delivery-curation eval coverage for any prior curation finding that recurs.",
+    "",
+    "## What Worked",
+    "",
+    "- Deterministic delivery source evidence was sufficient to produce a verifier-accepted fallback handoff.",
+    "",
+    "## Evidence Links",
+    "",
+    `- ${markdownLink(deliveryDir, "Validation ledger", manifest.evidence_files.validation_ledger)}`,
+    `- ${markdownLink(deliveryDir, "Curation verdict", manifest.evidence_files.curation_verdict)}`,
+    `- ${markdownLink(deliveryDir, "Audit index", manifest.sections.audit_index)}`
+  ].join("\n");
+}
+
+async function applyDeterministicDeliveryFallback(options: {
+  manifest: DeliveryPackageManifest;
+  source: DeliverySourcePacket;
+  failedVerdict: DeliveryCurationVerdict;
+}): Promise<DeliveryCurationVerdict> {
+  const reviewBrief = renderDeterministicReviewBrief(options);
+  const runLearnings = renderDeterministicRunLearnings(options);
+  await Promise.all([
+    writeText(options.manifest.sections.review_brief, reviewBrief),
+    writeText(options.manifest.sections.run_learnings, runLearnings)
+  ]);
+  return verifyCuratedDelivery({
+    source: options.source,
+    review_brief_markdown: reviewBrief,
+    run_learnings_markdown: runLearnings,
+    review_brief_path: options.manifest.sections.review_brief,
+    run_learnings_path: options.manifest.sections.run_learnings,
+    delivery_dir: dirname(options.manifest.manifest_path),
+    curator_metadata: {
+      deterministic_fallback: true,
+      prior_findings: options.failedVerdict.findings.map((finding) => finding.kind)
+    }
+  });
+}
+
 export async function writeDeliveryPackage(options: {
   run_root: string;
   graph: CompiledGraph;
@@ -1778,6 +1973,19 @@ export async function writeDeliveryPackage(options: {
   if (!verdict) {
     throw new Error("Delivery curation did not produce a verdict.");
   }
+  let fallbackReason: string | undefined;
+  if (!verdict.passed) {
+    const curatorVerdict = verdict;
+    const fallbackVerdict = await applyDeterministicDeliveryFallback({
+      manifest,
+      source,
+      failedVerdict: verdict
+    });
+    if (fallbackVerdict.passed) {
+      fallbackReason = verdict.findings.map((finding) => finding.kind).join(", ") || "curation_failed";
+    }
+    verdict = fallbackVerdict;
+  }
 
   const completedManifest: DeliveryPackageManifest = {
     ...manifest,
@@ -1786,6 +1994,7 @@ export async function writeDeliveryPackage(options: {
     curation: {
       ...manifest.curation,
       status: verdict.passed ? "passed" : "failed",
+      ...(fallbackReason ? { fallback_reason: fallbackReason } : {}),
       ...(verdict.passed ? {} : { failure: verdict.findings.map((finding) => finding.message).join("; ") })
     }
   };
