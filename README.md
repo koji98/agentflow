@@ -99,9 +99,11 @@ Human pause is reserved for trusted typed `AuthorityRequest` records from runtim
 
 ## Setup
 
-Agentflow is a Node project. Use Node `>=20.7.0`.
+Agentflow is a Node project. Use Node 24 LTS. With `nvm`, run:
 
 ```bash
+nvm install
+nvm use
 npm install
 npm run build
 npm run setup:link
@@ -109,7 +111,7 @@ agentflow --help
 agentflow graph-help
 ```
 
-`npm run setup:link` links the built package so local usage matches how operators invoke Agentflow: `agentflow ...`. The repository still has development scripts, but examples and docs should use the linked CLI for Agentflow commands.
+`npm run setup:link` links the built package so local usage matches how operators invoke Agentflow: `agentflow ...`. The linked CLI uses the `node` executable on your current `PATH`, so run `nvm use` before invoking `agentflow` in a new shell, or set Node 24 as your default. The repository still has development scripts, but examples and docs should use the linked CLI for Agentflow commands.
 
 To remove the linked CLI:
 
