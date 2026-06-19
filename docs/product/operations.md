@@ -65,6 +65,7 @@ Important launch behavior:
 - `workspace_backend: "inplace"` runs directly against the configured repo path.
 - Codex CLI and Cursor CLI receive the same Agentflow context, `af` runtime CLI, plugin tool, artifact, timeout, and sandbox contract.
 - Normal worker harnesses inherit native Codex/Cursor config by default to preserve direct-run quality. Set `profiles.*.harness_config.isolation: "isolated"` when reproducibility is more important than native harness parity. Runtime trust checks still force isolated config.
+- Codex CLI profiles default native `approval_policy` to `"never"` so non-interactive harness runs do not stop for Codex approval prompts. Use the graph `sandbox` to set node authority; override `profiles.*.harness_config.codex.config.approval_policy` only for intentional direct-harness parity experiments.
 - Same-node primitive-agent retries start fresh native harness sessions. Captured native session/chat ids are audit metadata only; retry continuity comes from Agentflow-owned attempt memory and `af orient`, not hidden harness conversation state.
 - Agentflow does not turn on Codex Goal mode for normal workers. The authored node contract plus `af orient` are the Agentflow goal mechanism; Codex Goal mode belongs in direct-harness engineering-parity eval baselines only.
 - `model: "auto"` leaves model selection to the configured harness. It does not switch between Codex CLI and Cursor CLI; choose the harness through `profiles`.

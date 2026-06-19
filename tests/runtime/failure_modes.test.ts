@@ -257,7 +257,12 @@ describe("runtime failure modes", () => {
                 nodeConstraints: ["Do not edit files."],
                 rubric: "Return a structured verdict.",
                 harnessConfig: {
-                    isolation: "isolated"
+                    isolation: "isolated",
+                    codex: {
+                        config: {
+                            approval_policy: "never"
+                        }
+                    }
                 }
             }));
             expect(attempts[0]?.result_path).toBeDefined();

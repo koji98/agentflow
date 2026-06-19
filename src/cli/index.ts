@@ -220,6 +220,7 @@ function renderGraphHelp(): string {
     "- launch profile and workspace backend come from graph defaults.",
     "- executable nodes select repo/profile in runtime.",
     "- normal worker profiles inherit native Codex/Cursor config by default; set harness_config.isolation = isolated for reproducible worker launches.",
+    "- codex-cli profiles default codex.config.approval_policy to never so Agentflow owns recovery and authority pauses.",
     "- codex-cli profiles may set skip_git_repo_check for intentional non-git workspace roots.",
     "- profiles, exec nodes, and deterministic check nodes may set env_files for repo-local dotenv-style command environment.",
     "- profiles and agent nodes may set artifact_repair.max_attempts from 0 to 3; agent nodes default to one repair attempt.",

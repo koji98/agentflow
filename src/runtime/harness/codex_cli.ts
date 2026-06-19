@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { getHarnessCapabilities } from "../../graph/harness_capabilities.js";
+import { builtInCodexApprovalPolicy } from "../../graph/profiles.js";
 import { createProcessTerminationController } from "../process_control.js";
 import { startSpawnBroker } from "./spawn_broker.js";
 import {
@@ -46,16 +47,31 @@ function isTrustCheckPrompt(invocation: AgentInvocation): boolean {
   );
 }
 
+function withCodexApprovalDefault(
+  config: NonNullable<AgentInvocation["harnessConfig"]>
+): NonNullable<AgentInvocation["harnessConfig"]> {
+  return {
+    ...config,
+    codex: {
+      ...(config.codex ?? {}),
+      config: {
+        approval_policy: builtInCodexApprovalPolicy,
+        ...(config.codex?.config ?? {})
+      }
+    }
+  };
+}
+
 function resolveHarnessConfig(invocation: AgentInvocation): NonNullable<AgentInvocation["harnessConfig"]> {
   if (isTrustCheckPrompt(invocation)) {
-    return {
+    return withCodexApprovalDefault({
       isolation: "isolated"
-    };
+    });
   }
 
-  return invocation.harnessConfig ?? {
+  return withCodexApprovalDefault(invocation.harnessConfig ?? {
     isolation: "inherit_user"
-  };
+  });
 }
 
 function extractNativeSessionId(...records: Array<Record<string, unknown> | undefined>): string | undefined {

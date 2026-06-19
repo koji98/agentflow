@@ -48,7 +48,12 @@ describe("graph profile resolution", () => {
             workspace_backend: "inplace",
             harness: "codex-cli",
             harness_config: {
-                isolation: "inherit_user"
+                isolation: "inherit_user",
+                codex: {
+                    config: {
+                        approval_policy: "never"
+                    }
+                }
             },
             reasoning_effort: builtInCodexReasoningEffort,
             timeout_sec: builtInTimeoutSeconds,
@@ -445,7 +450,12 @@ describe("graph profile resolution", () => {
             profile_name: "supervisor",
             harness: "codex-cli",
             harness_config: {
-                isolation: "isolated"
+                isolation: "isolated",
+                codex: {
+                    config: {
+                        approval_policy: "never"
+                    }
+                }
             },
             model: "gpt-5.2",
             reasoning_effort: "high",

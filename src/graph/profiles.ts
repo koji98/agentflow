@@ -63,6 +63,12 @@ export interface LaunchOverrides {
 // graph progress should be bounded by node goals and completion checks, not a short wall-clock budget.
 export const builtInTimeoutSeconds = 21600;
 export const builtInCodexReasoningEffort: ReasoningEffort = "medium";
+export const builtInCodexApprovalPolicy = "never";
+export const builtInCodexHarnessConfig: CodexHarnessConfig = {
+  config: {
+    approval_policy: builtInCodexApprovalPolicy
+  }
+};
 export const builtInAgentArtifactRepairPolicy: Required<ArtifactRepairPolicy> = {
   max_attempts: 1
 };
@@ -198,7 +204,10 @@ function resolveHarnessConfig(
     : undefined;
   const overlayConfig = filterHarnessConfigForHarness(overlayProfile?.harness_config, harness);
   const codex = harness === "codex-cli"
-    ? mergeCodexHarnessConfig(launchConfig?.codex, overlayConfig?.codex)
+    ? mergeCodexHarnessConfig(
+        mergeCodexHarnessConfig(builtInCodexHarnessConfig, launchConfig?.codex),
+        overlayConfig?.codex
+      )
     : undefined;
   const cursor = harness === "cursor-cli"
     ? mergeCursorHarnessConfig(launchConfig?.cursor, overlayConfig?.cursor)
