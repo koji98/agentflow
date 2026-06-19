@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Local-first graph executor for coding agents.",
   "engines": {
-    "node": ">=20.7.0"
+    "node": ">=24.0.0"
   },
   "bin": {
     "agentflow": "./dist/cli/index.js",
