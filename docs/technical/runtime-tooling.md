@@ -76,9 +76,9 @@ Profiles may declare:
 }
 ```
 
-`isolation` defaults to `inherit_user` for normal worker prompts. Launch profile config is inherited only when the effective harness matches; node and supervisor profiles then overlay it. Object maps merge by key, arrays replace, and the more specific profile wins. Validation fails unknown `harness_config` keys and harness-specific config under the wrong effective harness.
+`isolation` defaults to `inherit_user` for normal worker prompts. Launch profile config is inherited only when the effective harness matches; node and supervisor profiles then overlay it. Object maps merge by key, arrays replace, and the more specific profile wins. Codex profiles start with `codex.config.approval_policy = "never"` unless a profile explicitly overrides that key, which keeps Codex approval prompts out of non-interactive Agentflow runs. Validation fails unknown `harness_config` keys and harness-specific config under the wrong effective harness.
 
-In Codex isolated mode, Agentflow creates a temporary `CODEX_HOME`, links auth when available, and passes only declared `codex.config`, `codex.mcp_servers`, `codex.plugins`, and `codex.notify` values. If no MCP servers or plugins are declared, isolated Codex runs have none by default.
+In Codex isolated mode, Agentflow creates a temporary `CODEX_HOME`, links auth when available, and passes only the effective `codex.config`, `codex.mcp_servers`, `codex.plugins`, and `codex.notify` values. If no MCP servers or plugins are declared, isolated Codex runs have none by default.
 
 In Cursor isolated mode, Agentflow creates a generated `CURSOR_CONFIG_DIR`, writes the Agentflow workspace and sandbox permissions, then merges declared `cursor.config` and `cursor.permissions`. Cursor `inherit_user` cannot combine with declared `cursor.config` or `cursor.permissions` because Agentflow would have no generated config file to merge into.
 

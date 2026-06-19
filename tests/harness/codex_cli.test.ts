@@ -373,6 +373,54 @@ describe("codex cli harness", () => {
     }
   });
 
+  it("defaults codex invocations to never ask for approval", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-default-approval-"));
+    const repoDir = join(tempRoot, "repo");
+    const executionDir = join(tempRoot, "execution");
+    await mkdir(repoDir, { recursive: true });
+    await mkdir(executionDir, { recursive: true });
+
+    const mock = await createMockCodexBinary(tempRoot);
+    const harness = createCodexCliHarness({
+      binary: mock.binary_path
+    });
+
+    const previousArgvPath = process.env.MOCK_ARGV_PATH;
+    process.env.MOCK_ARGV_PATH = mock.argv_path;
+
+    try {
+      const result = await harness.run({
+        runId: "run-default-approval",
+        executionId: "exec-default-approval",
+        repoAlias: "main",
+        repoPath: repoDir,
+        sandbox: "workspace-write",
+        model: "gpt-5-codex",
+        nodeGoal: "Use the Codex approval default.",
+        contextPacketPath: join(executionDir, "runtime", "context.json"),
+        contextManifestPath: join(executionDir, "agent", "context.md"),
+        contextManifest: "",
+        outputDir: executionDir,
+        artifacts: {},
+        timeoutSec: 10,
+        signal: undefined
+      });
+
+      const argv = JSON.parse(await readFile(mock.argv_path, "utf8")) as string[];
+
+      expect(result.status).toBe("passed");
+      expect(argv).toEqual(expect.arrayContaining(["-c", 'approval_policy="never"']));
+    } finally {
+      if (previousArgvPath === undefined) {
+        delete process.env.MOCK_ARGV_PATH;
+      } else {
+        process.env.MOCK_ARGV_PATH = previousArgvPath;
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("passes declared codex harness config without stripping MCP, plugins, or notify", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-codex-declared-config-"));
     const repoDir = join(tempRoot, "repo");
