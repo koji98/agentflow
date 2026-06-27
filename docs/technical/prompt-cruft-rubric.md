@@ -13,6 +13,7 @@ A prompt change must satisfy every check:
 - Does not make agents inspect irrelevant surfaces by default.
 - Does not teach implementation details that should be owned by `af`, validation, managed compilation, or supervisor recovery.
 - Does not hide requirements that belong in graph authoring, artifact descriptions, or eval fixtures.
+- Does not name, hint at, or optimize for a specific eval scenario, fixture repo, package, file path, hidden oracle, or expected tactic unless that wording is a general Agentflow contract.
 - Is shorter and more specific than the failure mode warrants.
 
 Alpha rule: do not add backwards-compatible prompt layers, prompt aliases, legacy prompt packs, or tolerated stale schemas. Replace obsolete prompt text directly.
@@ -40,5 +41,6 @@ Before merging prompt text, answer:
 - What failure did we observe?
 - Why is prompt text the right layer instead of graph validation, `af`, supervisor recovery, managed compilation, or a grader?
 - Which test or eval will fail if this text regresses?
+- Would this wording help a different workflow with the same failure class, or is it overfit to one benchmark fixture?
 - What section owns this instruction?
 - What existing sentence can be deleted or narrowed?

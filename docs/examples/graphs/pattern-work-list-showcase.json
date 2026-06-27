@@ -75,7 +75,7 @@
             "done_when": [
               "The observation is grounded in the provided docs pointer.",
               "Relevant evidence is cited.",
-              "The item handoff records result, evidence, risks, and downstream implications."
+              "The item result records result, evidence, risks, and downstream implications."
             ]
           },
           "item_worker": {

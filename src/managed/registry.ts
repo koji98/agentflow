@@ -37,30 +37,30 @@ export const managedPatternDescriptors = [
     runtime_shape: "compiled-subgraph",
     orchestration: {
       summary:
-        "Plan the next cycle, generate and validate the candidate, evaluate completion criteria, aggregate a deterministic scorecard, repeat with feedback when criteria miss, then publish declared artifacts.",
+        "Plan the next cycle, generate and validate the candidate, evaluate completion criteria, aggregate a deterministic scorecard, repeat with feedback when criteria miss, then write the runtime packet and promote declared user artifacts.",
       planner: true,
       fan_out: true,
       council: false,
       validation: true
     },
     phases: [
-      { id: "plan", label: "Plan Cycle", summary: "Plan the smallest credible next move from context, scorecards, and prior feedback without editing.", mode: "single-agent" },
-      { id: "generate_validate", label: "Generate And Validate", summary: "Do or revise the work, run focused validation when feasible, and draft final artifacts.", mode: "single-agent" },
+      { id: "plan", label: "Plan Work", summary: "Plan the work needed to satisfy the full task from current state without editing.", mode: "single-agent" },
+      { id: "generate_validate", label: "Generate And Validate", summary: "Do or revise the work, run focused validation when feasible, and draft user-authored final artifacts.", mode: "single-agent" },
       { id: "criteria", label: "Completion Criteria", summary: "Run command criteria and targeted rubric checks in parallel.", mode: "parallel-agents" },
       { id: "gate", label: "Completion Gate", summary: "Aggregate a deterministic weighted scorecard and loop on misses.", mode: "repair-loop" },
-      { id: "publish", label: "Publish Work", summary: "Write final declared artifacts from the latest passing cycle.", mode: "single-agent" }
+      { id: "publish", label: "Finalize Work", summary: "Write the runtime-owned packet and promote accepted user-authored drafts from the latest passing cycle.", mode: "deterministic-check" }
     ]
   }),
   definePattern({
     kind: "pattern_work_list",
     label: "Pattern Work List",
     summary:
-      "Managed work-list pattern that plans a finite ordered list, freezes it, executes items sequentially with an agent or deep-work item worker, verifies item completion, and publishes stable handoff artifacts.",
+      "Managed work-list pattern that plans a finite ordered list, freezes it, executes items sequentially with an agent or deep-work item worker, verifies item completion, and publishes stable work-item evidence.",
     contract_status: "implemented",
     runtime_shape: "compiled-subgraph",
     orchestration: {
       summary:
-        "Plan the ordered item list, deterministically freeze it, launch one managed execution per frozen item, verify all items completed, then publish stable summary and work-items artifacts.",
+        "Plan the ordered item list, deterministically freeze it, launch one managed execution per frozen item, verify all items completed, then publish stable work-items artifacts and any user-authored finals.",
       planner: true,
       fan_out: false,
       council: false,
@@ -69,11 +69,11 @@ export const managedPatternDescriptors = [
     phases: [
       { id: "plan", label: "Plan Work List", summary: "Discover the finite ordered list of work items needed for the node contract.", mode: "single-agent" },
       { id: "freeze", label: "Freeze Work List", summary: "Validate and freeze sequential item ids, concrete item goals, and acceptance criteria.", mode: "deterministic-check" },
-      { id: "run_items", label: "Run Items", summary: "Launch one managed item execution per frozen item and aggregate accepted handoffs.", mode: "single-agent" },
+      { id: "run_items", label: "Run Items", summary: "Launch one managed item execution per frozen item and aggregate accepted structured item results.", mode: "single-agent" },
       { id: "criteria", label: "Item Criteria", summary: "When deep_work is selected, run command criteria and targeted rubric checks for the current item.", mode: "parallel-agents" },
       { id: "gate", label: "Item Gate", summary: "When deep_work is selected, aggregate a per-item scorecard and retry only that item on misses.", mode: "repair-loop" },
       { id: "verify", label: "Verify Item Ledger", summary: "Deterministically verify every frozen item completed before publication.", mode: "deterministic-check" },
-      { id: "publish", label: "Publish Work List", summary: "Write final stable artifacts from the verified item ledger.", mode: "single-agent" }
+      { id: "publish", label: "Publish Work List", summary: "Skip by default; write user-authored final artifacts from the verified item ledger when declared.", mode: "single-agent" }
     ]
   })
 ] as const satisfies readonly ManagedPatternDescriptor[];

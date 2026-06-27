@@ -3,6 +3,23 @@
   "bucket": "validation-completion",
   "difficulty": "hard",
   "description": "Agent must make a clear fix and rerun focused validation.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Agent must make a clear fix and rerun focused validation.",
+    "scenario_type": "regression:validation-completion",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,13 +30,37 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["focused validation passed"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "focused validation passed"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "`node scripts/fail-then-pass.mjs` fails until `fix.txt` contains `fixed=true`. Create that file, rerun the validation command, and include `focused validation passed` in the handoff.",
-      "required_contains": ["focused validation passed", "node scripts/fail-then-pass.mjs", "Validation:"],
-      "required_workspace_files": [{ "path": "fix.txt", "contains": ["fixed=true"] }]
+      "required_contains": [
+        "focused validation passed",
+        "node scripts/fail-then-pass.mjs",
+        "Validation:"
+      ],
+      "required_workspace_files": [
+        {
+          "path": "fix.txt",
+          "contains": [
+            "fixed=true"
+          ]
+        }
+      ]
     }
   }
 }

@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { ArtifactDefinition, ContextItem } from "../../graph/authored.js";
 import type { CompiledAgentNode, CompiledGraph, ResolvedSkill, ResolvedTool } from "../../graph/compiled.js";
 import type { EffectiveNodePolicy } from "../../graph/profiles.js";
 import type { HarnessName } from "../../graph/schema.js";
+import { managedPromptContract } from "../../managed/foundation.js";
 import type { PatternDeepWorkPhaseName, PatternDeepWorkPhaseOverride } from "../../managed/pattern_deep_work.js";
 import { resolveSubpathWithinRoot } from "../../path_rules.js";
 import { readRunExecutionAttempts } from "../../artifacts/reader.js";
@@ -27,7 +28,8 @@ import {
   persistCompletionPacket,
   type CompletionPacket
 } from "../completion/index.js";
-import type { ContextPacketMaterializedItem } from "../context/packet.js";
+import { renderContextManifest } from "../context/manifest.js";
+import type { ContextPacket, ContextPacketMaterializedItem, ContextPriorityBucket } from "../context/packet.js";
 import { RuntimeFailureError } from "../failure.js";
 import {
   ManagedContractFailureError,
@@ -77,8 +79,6 @@ interface ManagedWorkListItemResult {
   risks: string[];
   downstream_implications: string[];
   accepted_attempt_path?: string;
-  item_handoff_path?: string;
-  item_validation_path?: string;
   scorecard_path?: string;
   cycles?: unknown[];
 }
@@ -108,8 +108,6 @@ interface ManagedWorkListItemScorecard {
 
 interface ManagedWorkListPriorProgress {
   accepted_results: ManagedWorkListItemResult[];
-  accepted_handoffs: string[];
-  accepted_validation: string[];
 }
 
 interface ManagedWorkListPhaseTemplate {
@@ -611,30 +609,20 @@ async function reusableScorecardPath(scorecardPath: string | undefined): Promise
 
 function itemArtifactDefinitions(): Record<string, ArtifactDefinition> {
   return {
-    item_handoff: {
-      from: "output_dir",
-      path: "item-handoff.md",
-      description: "Human-readable handoff for this frozen work-list item."
-    },
     item_result: {
       from: "output_dir",
       path: "item-result.json",
-      description: "Structured result for this frozen work-list item."
-    },
-    item_validation: {
-      from: "output_dir",
-      path: "item-validation.md",
-      description: "Validation evidence for this frozen work-list item."
+      description: "Structured result, validation evidence, risks, and downstream implications for this frozen work-list item."
     }
   };
 }
 
 function itemPlanArtifactDefinitions(): Record<string, ArtifactDefinition> {
   return {
-    item_cycle_plan: {
+    plan: {
       from: "output_dir",
-      path: "item-cycle-plan.md",
-      description: "Focused plan for the current work-list item cycle."
+      path: "plan.md",
+      description: "Execution plan for satisfying this frozen work-list item from the current state."
     }
   };
 }
@@ -644,22 +632,12 @@ function itemDraftArtifactDefinitions(): Record<string, ArtifactDefinition> {
     item_work_notes: {
       from: "output_dir",
       path: "item-work-notes.md",
-      description: "Execution notes for the current work-list item cycle."
-    },
-    draft_item_handoff: {
-      from: "output_dir",
-      path: "draft-item-handoff.md",
-      description: "Draft item handoff to be graded before final publication."
+      description: "Execution notes and validation evidence for the current work-list item result."
     },
     draft_item_result: {
       from: "output_dir",
       path: "draft-item-result.json",
-      description: "Draft structured item result to be graded before final publication."
-    },
-    draft_item_validation: {
-      from: "output_dir",
-      path: "draft-item-validation.md",
-      description: "Draft validation evidence to be graded before final publication."
+      description: "Draft structured item result, validation evidence, risks, and downstream implications to be graded before final publication."
     }
   };
 }
@@ -719,7 +697,6 @@ async function writeManagedWorkListReuseDecision(options: {
       tools: options.node.tools
     }),
     validation_refs: [
-      ...(options.result.item_validation_path ? [options.result.item_validation_path] : []),
       ...(options.result.scorecard_path ? [options.result.scorecard_path] : []),
       ...options.result.validation.passed,
       ...options.result.validation.failed_then_fixed,
@@ -810,39 +787,20 @@ async function writeManagedItemAttemptResult(options: {
   return completed;
 }
 
-function renderManagedItemContextManifest(rows: Array<{
+interface ManagedItemContextRow {
   name: string;
   kind: string;
   pointer: string;
   what: string;
   why: string;
-}>): string {
-  const lines = [
-    "# Context Manifest",
-    "",
-    "Context entries are pointers. Agentflow does not copy or truncate source context into this prompt package.",
-    "",
-    "## Pointers",
-    "",
-    "| Name | Kind | Pointer | What | Why |",
-    "| --- | --- | --- | --- | --- |"
-  ];
-
-  rows.forEach((row) => {
-    lines.push(`| \`${row.name}\` | \`${row.kind}\` | \`${row.pointer}\` | ${row.what} | ${row.why} |`);
-  });
-
-  return `${lines.join("\n")}\n`;
+  priorityBucket?: ContextPriorityBucket;
+  priorityReason?: string;
+  isBroadReference?: boolean;
+  sourceAuthoredOrder?: number;
 }
 
-function managedItemContextRows(context: ContextItem[], workspacePath: string): Array<{
-  name: string;
-  kind: string;
-  pointer: string;
-  what: string;
-  why: string;
-}> {
-  return context.map((item) => {
+function managedItemContextRows(context: ContextItem[], workspacePath: string): ManagedItemContextRow[] {
+  return context.map((item, index) => {
     if ("from" in item) {
       const pointer = item.from === "workspace_file" || item.from === "workspace_glob"
         ? resolveSubpathWithinRoot(workspacePath, item.path, `context ${item.name}`)
@@ -852,7 +810,13 @@ function managedItemContextRows(context: ContextItem[], workspacePath: string): 
         kind: item.from,
         pointer,
         what: item.what,
-        why: item.why
+        why: item.why,
+        priorityBucket: item.from === "workspace_glob" ? "reference_set" : "task_context",
+        priorityReason: item.from === "workspace_glob"
+          ? "Authored workspace glob context; use as a selective search/open index."
+          : "Authored context for this work-list item.",
+        isBroadReference: item.from === "workspace_glob",
+        sourceAuthoredOrder: index
       };
     }
 
@@ -861,7 +825,10 @@ function managedItemContextRows(context: ContextItem[], workspacePath: string): 
       kind: "artifact_ref",
       pointer: item.ref,
       what: item.what,
-      why: item.why
+      why: item.why,
+      priorityBucket: "task_context",
+      priorityReason: "Authored artifact context for this work-list item.",
+      sourceAuthoredOrder: index
     };
   });
 }
@@ -874,17 +841,11 @@ async function writeManagedItemContext(options: {
   item: ManagedWorkListFrozenItem;
   frozenPath: string;
   ledgerPath: string;
-  priorHandoffsPath?: string;
+  priorResultsPath?: string;
   priorScorecardPath?: string;
   managedContractFailurePath?: string;
   managedContractFailureSummary?: string;
-  extraRows?: Array<{
-    name: string;
-    kind: string;
-    pointer: string;
-    what: string;
-    why: string;
-  }>;
+  extraRows?: ManagedItemContextRow[];
 }): Promise<{ packetPath: string; manifestPath: string; currentItemPath: string }> {
   const runtimeDir = join(options.executionDir, "runtime");
   const agentDir = join(options.executionDir, "agent");
@@ -899,29 +860,37 @@ async function writeManagedItemContext(options: {
       kind: "runtime_work_list_item",
       pointer: currentItemPath,
       what: "The current frozen work-list item contract.",
-      why: "The item worker must complete exactly this item."
+      why: "The item worker must complete exactly this item.",
+      priorityBucket: "current_work" as const,
+      priorityReason: "Current frozen work-list item defines the immediate unit of work."
     },
     {
       name: "frozen_work_list",
       kind: "artifact",
       pointer: options.frozenPath,
       what: "Runtime-validated frozen work list.",
-      why: "The item worker must not add, remove, split, merge, or reorder items."
+      why: "The item worker must not add, remove, split, merge, or reorder items.",
+      priorityBucket: "progress_state" as const,
+      priorityReason: "Frozen work-list state is continuation context, not the first repair instruction."
     },
     {
       name: "work_list_ledger",
       kind: "runtime_ledger",
       pointer: options.ledgerPath,
       what: "Current runtime-owned item ledger.",
-      why: "The item worker can see prior accepted item status without manually checking off work."
+      why: "The item worker can see prior accepted item status without manually checking off work.",
+      priorityBucket: "progress_state" as const,
+      priorityReason: "Work-list ledger records progress state for continuation."
     },
-    ...(options.priorHandoffsPath
+    ...(options.priorResultsPath
       ? [{
-          name: "prior_completed_item_handoffs",
-          kind: "runtime_handoff",
-          pointer: options.priorHandoffsPath,
-          what: "Accepted handoffs from earlier frozen items.",
-          why: "Later items may build on earlier item evidence."
+          name: "prior_completed_item_results",
+          kind: "runtime_item_results",
+          pointer: options.priorResultsPath,
+          what: "Accepted structured results from earlier frozen items.",
+          why: "Later items may build on earlier item evidence.",
+          priorityBucket: "progress_state" as const,
+          priorityReason: "Prior completed item results are progress state."
         }]
       : []),
     ...(options.priorScorecardPath
@@ -930,7 +899,9 @@ async function writeManagedItemContext(options: {
           kind: "runtime_scorecard",
           pointer: options.priorScorecardPath,
           what: "Most recent failed scorecard for this item.",
-          why: "The retry should address concrete item-level feedback."
+          why: "The retry should address concrete item-level feedback.",
+          priorityBucket: "read_first" as const,
+          priorityReason: "Failed item scorecard is retry feedback to inspect before continuing."
         }]
       : []),
     ...(options.managedContractFailurePath
@@ -941,7 +912,11 @@ async function writeManagedItemContext(options: {
           what: options.managedContractFailureSummary
             ? `Structured runtime-owned managed contract failure from the previous item attempt: ${options.managedContractFailureSummary}`
             : "Structured runtime-owned managed contract failure from the previous item attempt.",
-          why: "The retry should repair this exact managed artifact contract issue before continuing."
+          why: "The retry should repair this exact managed artifact contract issue before continuing.",
+          priorityBucket: "read_first" as const,
+          priorityReason: options.managedContractFailureSummary
+            ? `Managed contract failure is the immediate retry repair target: ${options.managedContractFailureSummary}`
+            : "Managed contract failure is the immediate retry repair target."
         }]
       : []),
     ...managedItemContextRows(options.itemNode.context, options.parentContext.workspace_path),
@@ -950,24 +925,36 @@ async function writeManagedItemContext(options: {
 
   const packetPath = resolveExecutionRuntimeContextPath(options.executionDir);
   const manifestPath = resolveExecutionAgentContextPath(options.executionDir);
-  const packet = {
+  const rankCounts = new Map<ContextPriorityBucket, number>();
+  const materials: ContextPacketMaterializedItem[] = rows.map((row) => {
+    const bucket = row.priorityBucket ?? "task_context";
+    const rank = rankCounts.get(bucket) ?? 0;
+    rankCounts.set(bucket, rank + 1);
+    return {
+      key: row.name,
+      source: {
+        name: row.name,
+        from: row.kind,
+        path: row.pointer,
+        what: row.what,
+        why: row.why
+      } as unknown as ContextPacketMaterializedItem["source"],
+      pointer_path: row.pointer,
+      description: row.what,
+      priority_bucket: bucket,
+      priority_rank: rank,
+      priority_reason: row.priorityReason ?? row.why,
+      ...(row.isBroadReference !== undefined ? { is_broad_reference: row.isBroadReference } : {}),
+      ...(row.sourceAuthoredOrder !== undefined ? { source_authored_order: row.sourceAuthoredOrder } : {})
+    };
+  });
+  const packet: ContextPacket = {
     execution_id: options.executionId,
     compiled_id: options.itemNode.compiled_id,
     authored_id: options.itemNode.authored_id,
     repo_alias: options.itemNode.repo,
     workspace_path: options.parentContext.workspace_path,
-    materials: rows.map((row) => ({
-      key: row.name,
-      source: {
-        name: row.name,
-        from: "workspace_file",
-        path: row.pointer,
-        what: row.what,
-        why: row.why
-      },
-      pointer_path: row.pointer,
-      description: row.what
-    })),
+    materials,
     omitted: [],
     totals: {
       pointer_count: rows.length,
@@ -977,7 +964,7 @@ async function writeManagedItemContext(options: {
   await mkdir(dirname(packetPath), { recursive: true });
   await mkdir(dirname(manifestPath), { recursive: true });
   await writeFile(packetPath, `${JSON.stringify(packet, null, 2)}\n`, "utf8");
-  await writeFile(manifestPath, renderManagedItemContextManifest(rows), "utf8");
+  await writeFile(manifestPath, renderContextManifest(packet), "utf8");
   return { packetPath, manifestPath, currentItemPath };
 }
 
@@ -1004,9 +991,7 @@ function buildManagedWorkListItemGoal(options: {
     "",
     "## Item Output Contract",
     "Write exactly these declared item artifacts:",
-    "- `item_handoff`: Markdown with item goal, changes/results, evidence, validation, risks, and downstream implications.",
     "- `item_result`: JSON object using the active item-result contract: field id set to the current frozen item id, completed status, concrete summary, validation object, risks, and downstream implications. The validation object has passed, failed_then_fixed, unavailable, and blocked keys; each value is an array of short evidence strings. Use failed_then_fixed, not fixed. Do not use field item_id.",
-    "- `item_validation`: Markdown with validation commands, checks, manual evidence, unavailable validation, and reruns.",
     "",
     "If the item requires branch, base, PR, or workspace evidence, use inspectable local workspace evidence unless the graph explicitly says otherwise. Remote-only branch or PR updates are not a substitute for local branch/base evidence.",
     "",
@@ -1051,22 +1036,23 @@ function buildManagedWorkListItemPlanGoal(options: {
   return [
     `Plan frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
     "",
-    "You are planning one cycle for a work-list item. Do not edit source files in this phase.",
+    "You are planning the work needed to satisfy this frozen item from the current state. Do not edit source files in this phase.",
     `Parent work-list goal: ${options.config.parent_intent.goal}`,
     `Current item goal: ${options.item.goal}`,
     `Current item rationale: ${options.item.rationale}`,
-    `Cycle: ${options.cycle} of ${options.maxCycles}`,
     "",
-    "Map the current item contract to evidence, planned material delta, validation strategy, risks, and likely files or areas to inspect.",
-    "If prior scorecard feedback is present, plan directly against that feedback.",
-    "Keep the plan narrow to the current item. Do not plan later frozen items.",
+    "Map the current item contract to evidence, planned material change, validation strategy, risks, and likely files or areas to inspect.",
+    "Use prior scorecard feedback as gap evidence; do not shrink the item task to only the last failed check.",
+    "Keep the plan scoped to the current frozen item. Do not plan later frozen items or mutate the frozen list.",
+    "Aim to complete this item in the next execution. If full item completion is not feasible now, plan the most complete useful slice and state the remaining gap explicitly.",
     ...phaseContractLines(options.worker, "plan"),
     "",
     "Output contract:",
-    "Publish only the `item_cycle_plan` artifact.",
-    "Include sections: Objective, Relevant evidence, Planned material delta, Criterion evidence map, Validation plan, and Risks or constraints.",
+    "Publish only the `plan` artifact.",
+    "Write it to `plan.md` as the executor handoff for this frozen item, not as the final item result.",
+    "Include sections: Task target, Current state, Gap, Execution plan, Validation plan, Expected material change, Remaining gap, and Risks or constraints.",
     "Preserve exact task-specific names, labels, commands, and required phrases from the parent work-list and current item contract in the plan.",
-    "The `item_cycle_plan` artifact is the durable planning record; do not create a milestone solely to restate the plan. If you do create a milestone, complete it before running `af complete check`."
+    "Do not create a milestone solely to restate the plan. If you do create a milestone, complete it before running `af complete check`."
   ].join("\n");
 }
 
@@ -1080,20 +1066,21 @@ function buildManagedWorkListItemExecuteGoal(options: {
   return [
     `Execute frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
     "",
-    "You are executing one planned cycle for a work-list item. Follow the item cycle plan in context.",
+    "You are responsible for satisfying this frozen item from the current state.",
+    "Use `plan.md` as guidance, not as a limit.",
+    "The parent work-list contract and current frozen item contract control when `plan.md` is incomplete, stale, too small, or contradicted by repository evidence.",
     "Satisfy the item contract, not only the visible tests; handle edge cases directly implied by the goal, acceptance criteria, and local code.",
     "Keep edits scoped; add/edit tests only when the item asks or repo contract expects them.",
-    "Preserve API semantics with nullish or explicit checks; avoid truthiness and absence-check ceremony unless null and absence must differ; prefer direct formulas over expanded arithmetic; use helpers/constants only when they clarify; round money with integer cents or Number.EPSILON; make rejection errors name expected formats or valid values.",
-    "If evidence shows the plan is wrong, make the smallest justified deviation and record why in work notes.",
+    "If evidence shows the plan is wrong, make the task-justified adjustment needed to satisfy the item and record why in work notes.",
     `Parent work-list goal: ${options.config.parent_intent.goal}`,
     `Current item goal: ${options.item.goal}`,
-    `Cycle: ${options.cycle} of ${options.maxCycles}`,
     "",
-    "Produce draft item evidence for grading. Do not publish final item artifacts in this phase.",
+    "Produce draft item evidence after doing the item work. Do not publish final item artifacts in this phase.",
     ...phaseContractLines(options.worker, "execute"),
     "",
     "Output contract:",
-    "Publish `item_work_notes`, `draft_item_handoff`, `draft_item_result`, and `draft_item_validation`.",
+    "Publish `item_work_notes` and `draft_item_result`.",
+    "`item_work_notes` should include what changed, why any deviations from `plan.md` were needed, validation evidence, remaining risks, and any remaining gap.",
     "The draft item result JSON uses the same shape as the final item result and must use the current frozen item id."
   ].join("\n");
 }
@@ -1109,18 +1096,15 @@ function buildManagedWorkListItemPublishGoal(options: {
     `Publish frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
     "",
     "You are publishing final item artifacts from the latest passing item scorecard.",
-    "Use the cycle plan, draft item artifacts, scorecard, and validation evidence in context.",
+    "Use `plan.md`, draft item artifacts, scorecard, and validation evidence in context.",
     "Do not claim success beyond the accepted item evidence.",
     `Parent work-list goal: ${options.config.parent_intent.goal}`,
     `Current item goal: ${options.item.goal}`,
-    `Cycle: ${options.cycle} of ${options.maxCycles}`,
     ...phaseContractLines(options.worker, "publish"),
     "",
     "Output contract:",
     "Publish exactly these final declared item artifacts:",
-    "- `item_handoff`: Markdown with item goal, final results, evidence, validation, risks, and downstream implications.",
-    "- `item_result`: JSON with id, status completed, summary, validation, risks, and downstream_implications.",
-    "- `item_validation`: Markdown with exact validation evidence and any unavailable validation."
+    "- `item_result`: JSON with id, status completed, summary, validation, risks, and downstream_implications."
   ].join("\n");
 }
 
@@ -1134,11 +1118,10 @@ function buildManagedWorkListItemVerifyGoal(options: {
   return [
     `Verify frozen work-list item \`${options.item.id}\`: ${options.item.title}.`,
     "",
-    "You are evaluating draft evidence for one work-list item cycle.",
+    "You are evaluating draft evidence for the current frozen item result.",
     "Grade only the current item evidence, draft artifacts, validation evidence, and relevant ledger/prior-item pointers.",
     `Parent work-list goal: ${options.config.parent_intent.goal}`,
     `Current item goal: ${options.item.goal}`,
-    `Cycle: ${options.cycle} of ${options.maxCycles}`,
     ...phaseContractLines(options.worker, "verify")
   ].join("\n");
 }
@@ -1182,7 +1165,7 @@ function buildManagedWorkListItemNode(options: {
       goal: buildManagedWorkListItemGoal(options),
       acceptance_criteria: [
         ...options.item.acceptance_criteria,
-        "The item handoff cites concrete evidence and downstream implications.",
+        "The item result JSON cites concrete evidence and downstream implications.",
         "The item result JSON matches the current frozen item id and marks completed work only when evidence exists."
       ],
       constraints: [
@@ -1216,15 +1199,24 @@ function buildManagedWorkListItemPhaseNode(options: {
   maxCycles: number;
 }): CompiledAgentNode {
   const baseNode = buildManagedWorkListItemNode(options);
-  const phaseGoal = options.phase === "plan"
+  const phasePrompt = options.phase === "plan"
     ? buildManagedWorkListItemPlanGoal(options)
     : options.phase === "execute"
       ? buildManagedWorkListItemExecuteGoal(options)
       : options.phase === "verify"
         ? buildManagedWorkListItemVerifyGoal(options)
-      : options.phase === "publish"
-        ? buildManagedWorkListItemPublishGoal(options)
-        : baseNode.intent.goal;
+        : options.phase === "publish"
+          ? buildManagedWorkListItemPublishGoal(options)
+          : baseNode.intent.goal;
+  const phaseGoal = options.phase === "plan"
+    ? `Plan the work needed to satisfy frozen work-list item ${options.item.id} from the current state.`
+    : options.phase === "execute"
+      ? `Satisfy frozen work-list item ${options.item.id} from the current state using plan.md as guidance.`
+      : options.phase === "verify"
+        ? `Evaluate the current draft evidence for frozen work-list item ${options.item.id}.`
+        : options.phase === "publish"
+          ? `Publish the accepted final result for frozen work-list item ${options.item.id}.`
+          : baseNode.intent.goal;
   const artifacts = options.phase === "plan"
     ? itemPlanArtifactDefinitions()
     : options.phase === "execute"
@@ -1249,6 +1241,12 @@ function buildManagedWorkListItemPhaseNode(options: {
         ...(options.worker.phases?.[options.phase]?.intent?.constraints ?? [])
       ]
     },
+    managed_prompt: managedPromptContract(`item_${options.phase}`, phaseGoal, [
+      {
+        title: "Item Phase Instructions",
+        lines: phasePrompt.split("\n")
+      }
+    ]),
     declared_artifacts: artifacts,
     managed_runtime: {
       kind: "pattern_work_list",
@@ -1263,18 +1261,12 @@ function buildManagedWorkListItemPhaseNode(options: {
 }
 
 async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkListFrozenItem, phase = "item_publish"): Promise<{
-  handoffPath: string;
   resultPath: string;
-  validationPath: string;
   result: ManagedWorkListItemResult;
 }> {
-  const handoffPath = join(outputDir, "item-handoff.md");
   const resultPath = join(outputDir, "item-result.json");
-  const validationPath = join(outputDir, "item-validation.md");
   const missing = (await Promise.all([
-    ensureManagedArtifactPresent({ phase, item, artifactName: "item_handoff", artifactPath: handoffPath, fileName: "item-handoff.md" }),
-    ensureManagedArtifactPresent({ phase, item, artifactName: "item_result", artifactPath: resultPath, fileName: "item-result.json" }),
-    ensureManagedArtifactPresent({ phase, item, artifactName: "item_validation", artifactPath: validationPath, fileName: "item-validation.md" })
+    ensureManagedArtifactPresent({ phase, item, artifactName: "item_result", artifactPath: resultPath, fileName: "item-result.json" })
   ])).filter((finding): finding is ManagedContractFinding => Boolean(finding));
   if (missing.length > 0) {
     throw new ManagedContractFailureError(missing);
@@ -1290,30 +1282,22 @@ async function readManagedItemArtifacts(outputDir: string, item: ManagedWorkList
   });
 
   return {
-    handoffPath,
     resultPath,
-    validationPath,
     result
   };
 }
 
 async function readManagedDraftItemArtifacts(outputDir: string, item: ManagedWorkListFrozenItem): Promise<{
-  handoffPath: string;
   resultPath: string;
-  validationPath: string;
   workNotesPath: string;
   result: ManagedWorkListItemResult;
 }> {
-  const handoffPath = join(outputDir, "draft-item-handoff.md");
   const resultPath = join(outputDir, "draft-item-result.json");
-  const validationPath = join(outputDir, "draft-item-validation.md");
   const workNotesPath = join(outputDir, "item-work-notes.md");
   const phase = "item_execute";
   const missing = (await Promise.all([
     ensureManagedArtifactPresent({ phase, item, artifactName: "item_work_notes", artifactPath: workNotesPath, fileName: "item-work-notes.md" }),
-    ensureManagedArtifactPresent({ phase, item, artifactName: "draft_item_handoff", artifactPath: handoffPath, fileName: "draft-item-handoff.md" }),
-    ensureManagedArtifactPresent({ phase, item, artifactName: "draft_item_result", artifactPath: resultPath, fileName: "draft-item-result.json" }),
-    ensureManagedArtifactPresent({ phase, item, artifactName: "draft_item_validation", artifactPath: validationPath, fileName: "draft-item-validation.md" })
+    ensureManagedArtifactPresent({ phase, item, artifactName: "draft_item_result", artifactPath: resultPath, fileName: "draft-item-result.json" })
   ])).filter((finding): finding is ManagedContractFinding => Boolean(finding));
   if (missing.length > 0) {
     throw new ManagedContractFailureError(missing);
@@ -1329,9 +1313,7 @@ async function readManagedDraftItemArtifacts(outputDir: string, item: ManagedWor
   });
 
   return {
-    handoffPath,
     resultPath,
-    validationPath,
     workNotesPath,
     result
   };
@@ -1381,8 +1363,6 @@ async function collectReusableManagedWorkListResult(
   frozenItem: ManagedWorkListFrozenItem
 ): Promise<{
   result: ManagedWorkListItemResult;
-  handoff: string;
-  validation: string;
 } | undefined> {
   if (!isReusableManagedWorkListResult(result, frozenItem)) {
     return undefined;
@@ -1391,13 +1371,7 @@ async function collectReusableManagedWorkListResult(
     return undefined;
   }
 
-  const handoff = await readTextFileOptional(result.item_handoff_path);
-  const validation = await readTextFileOptional(result.item_validation_path);
-  if (!handoff || !validation) {
-    return undefined;
-  }
-
-  return { result, handoff, validation };
+  return { result };
 }
 
 async function loadPriorManagedWorkListProgressFromAggregate(options: {
@@ -1414,8 +1388,6 @@ async function loadPriorManagedWorkListProgressFromAggregate(options: {
   );
   const previousById = new Map((previous.items ?? []).map((item) => [item.id, item]));
   const acceptedResults: ManagedWorkListItemResult[] = [];
-  const acceptedHandoffs: string[] = [];
-  const acceptedValidation: string[] = [];
 
   for (const frozenItem of options.frozen.items) {
     const reusable = await collectReusableManagedWorkListResult(previousById.get(frozenItem.id), frozenItem);
@@ -1424,8 +1396,6 @@ async function loadPriorManagedWorkListProgressFromAggregate(options: {
     }
 
     acceptedResults.push(reusable.result);
-    acceptedHandoffs.push(reusable.handoff);
-    acceptedValidation.push(reusable.validation);
   }
 
   if (acceptedResults.length === 0) {
@@ -1433,9 +1403,7 @@ async function loadPriorManagedWorkListProgressFromAggregate(options: {
   }
 
   return {
-    accepted_results: acceptedResults,
-    accepted_handoffs: acceptedHandoffs,
-    accepted_validation: acceptedValidation
+    accepted_results: acceptedResults
   };
 }
 
@@ -1450,8 +1418,6 @@ async function loadPriorManagedWorkListProgressFromLedger(options: {
   );
   const ledgerById = new Map((ledger.items ?? []).map((item) => [item.id, item]));
   const acceptedResults: ManagedWorkListItemResult[] = [];
-  const acceptedHandoffs: string[] = [];
-  const acceptedValidation: string[] = [];
 
   for (const frozenItem of options.frozen.items) {
     const ledgerItem = ledgerById.get(frozenItem.id);
@@ -1468,17 +1434,13 @@ async function loadPriorManagedWorkListProgressFromLedger(options: {
     );
     const reusable = await collectReusableManagedWorkListResult({
       ...artifacts.result,
-      accepted_attempt_path: ledgerItem.accepted_attempt_path,
-      item_handoff_path: artifacts.handoffPath,
-      item_validation_path: artifacts.validationPath
+      accepted_attempt_path: ledgerItem.accepted_attempt_path
     }, frozenItem);
     if (!reusable) {
       break;
     }
 
     acceptedResults.push(reusable.result);
-    acceptedHandoffs.push(reusable.handoff);
-    acceptedValidation.push(reusable.validation);
   }
 
   if (acceptedResults.length === 0) {
@@ -1486,9 +1448,7 @@ async function loadPriorManagedWorkListProgressFromLedger(options: {
   }
 
   return {
-    accepted_results: acceptedResults,
-    accepted_handoffs: acceptedHandoffs,
-    accepted_validation: acceptedValidation
+    accepted_results: acceptedResults
   };
 }
 
@@ -1497,7 +1457,7 @@ async function loadPriorManagedWorkListProgress(options: {
   frozen: ManagedWorkListFrozen;
 }): Promise<ManagedWorkListPriorProgress> {
   if (options.context.attempt.attempt_index <= 1) {
-    return { accepted_results: [], accepted_handoffs: [], accepted_validation: [] };
+    return { accepted_results: [] };
   }
 
   const attempts = await readRunExecutionAttempts(options.context.run_root);
@@ -1524,7 +1484,7 @@ async function loadPriorManagedWorkListProgress(options: {
     }
   }
 
-  return { accepted_results: [], accepted_handoffs: [], accepted_validation: [] };
+  return { accepted_results: [] };
 }
 
 async function runManagedWorkListItemAgent(options: {
@@ -1581,6 +1541,7 @@ async function runManagedWorkListItemAgent(options: {
     ...(options.context.graph_intent.acceptance_criteria ? { graphAcceptanceCriteria: options.context.graph_intent.acceptance_criteria } : {}),
     ...(options.context.graph_intent.constraints ? { graphConstraints: options.context.graph_intent.constraints } : {}),
     nodeGoal: options.itemNode.intent.goal,
+    ...(options.itemNode.managed_prompt ? { managedPrompt: options.itemNode.managed_prompt } : {}),
     nodeAcceptanceCriteria: options.itemNode.intent.acceptance_criteria,
     nodeConstraints: options.itemNode.intent.constraints,
     contextPacketPath: options.contextPacketPath,
@@ -1691,9 +1652,7 @@ async function verifyManagedWorkListItemAttempt(options: {
     contextManifest: options.contextManifest,
     agentResponseArtifactPath: resolveExecutionAgentResponsePath(options.itemAttempt.execution_dir),
     declaredArtifactPaths: {
-      item_handoff: options.itemArtifacts.handoffPath,
-      item_result: options.itemArtifacts.resultPath,
-      item_validation: options.itemArtifacts.validationPath
+      item_result: options.itemArtifacts.resultPath
     },
     completionPacket: options.completionPacket,
     harness,
@@ -1759,9 +1718,7 @@ async function evaluateManagedWorkListItemCriteria(options: {
             ...(options.context.runtime_env ?? {}),
             AGENTFLOW_OUTPUT_DIR: criterionDir,
             AGENTFLOW_CONTEXT_CURRENT_ITEM: join(options.itemExecutionDir, "runtime", "current-item.json"),
-            AGENTFLOW_CONTEXT_ITEM_HANDOFF: options.itemArtifacts.handoffPath,
             AGENTFLOW_CONTEXT_ITEM_RESULT: options.itemArtifacts.resultPath,
-            AGENTFLOW_CONTEXT_ITEM_VALIDATION: options.itemArtifacts.validationPath,
             AGENTFLOW_CONTEXT_WORK_LIST_LEDGER: options.ledgerPath
           },
           timeout_sec: options.itemNode.effective_policy.timeout_sec,
@@ -1798,6 +1755,7 @@ async function evaluateManagedWorkListItemCriteria(options: {
           ...(options.itemNode.effective_policy.reasoning_effort ? { reasoning_effort: options.itemNode.effective_policy.reasoning_effort } : {}),
           ...(options.itemNode.effective_policy.harness_config ? { harness_config: options.itemNode.effective_policy.harness_config } : {}),
           ...(options.itemNode.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
+          evaluator_surface: "managed_criterion",
           rubric: criterion.rubric,
           graph_goal: options.context.graph_intent.goal,
           ...(options.context.graph_intent.acceptance_criteria ? { graph_acceptance_criteria: options.context.graph_intent.acceptance_criteria } : {}),
@@ -1811,6 +1769,7 @@ async function evaluateManagedWorkListItemCriteria(options: {
           ].join("\n"),
           node_acceptance_criteria: options.item.acceptance_criteria,
           node_constraints: options.itemNode.intent.constraints,
+          ...(options.itemNode.managed_prompt ? { managed_prompt: options.itemNode.managed_prompt } : {}),
           context_packet_path: options.contextPacketPath,
           context_manifest_path: options.contextManifestPath,
           context_manifest: options.contextManifest,
@@ -1909,14 +1868,24 @@ async function evaluateManagedWorkListItemCriteria(options: {
   return { passed, scorecardPath, scorecard };
 }
 
-function contextRow(name: string, kind: string, pointer: string, what: string, why: string): {
-  name: string;
-  kind: string;
-  pointer: string;
-  what: string;
-  why: string;
-} {
-  return { name, kind, pointer, what, why };
+function contextRow(
+  name: string,
+  kind: string,
+  pointer: string,
+  what: string,
+  why: string,
+  priorityBucket?: ContextPriorityBucket,
+  priorityReason?: string
+): ManagedItemContextRow {
+  return {
+    name,
+    kind,
+    pointer,
+    what,
+    why,
+    ...(priorityBucket ? { priorityBucket } : {}),
+    ...(priorityReason ? { priorityReason } : {})
+  };
 }
 
 async function persistManagedContractFailureFromError(
@@ -1950,7 +1919,7 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
   itemExecutionId: string;
   frozenPath: string;
   runtimeLedgerPath: string;
-  priorHandoffsPath?: string;
+  priorResultsPath?: string;
   lastScorecardPath?: string;
   lastContractFailurePath?: string;
   lastContractFailureSummary?: string;
@@ -1991,7 +1960,7 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
       item: options.item,
       frozenPath: options.frozenPath,
       ledgerPath: options.runtimeLedgerPath,
-      ...(options.priorHandoffsPath ? { priorHandoffsPath: options.priorHandoffsPath } : {}),
+      ...(options.priorResultsPath ? { priorResultsPath: options.priorResultsPath } : {}),
       ...(options.lastScorecardPath ? { priorScorecardPath: options.lastScorecardPath } : {}),
       ...(options.lastContractFailurePath ? { managedContractFailurePath: options.lastContractFailurePath } : {}),
       ...(options.lastContractFailureSummary ? { managedContractFailureSummary: options.lastContractFailureSummary } : {}),
@@ -2037,11 +2006,11 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
   if (planRun.result.status !== "passed") {
     return { lastFailure: planRun.result.stderr ?? planRun.result.stdout ?? `Item ${options.item.id} plan phase failed.` };
   }
-  const planPath = join(resolveExecutionArtifactsDirectory(planRun.phaseDir), "item-cycle-plan.md");
+  const planPath = join(resolveExecutionArtifactsDirectory(planRun.phaseDir), "plan.md");
   try {
     await access(planPath);
   } catch {
-    return { lastFailure: `Item ${options.item.id} plan phase did not publish item_cycle_plan.` };
+    return { lastFailure: `Item ${options.item.id} plan phase did not publish plan.md.` };
   }
 
   const executeNode = buildManagedWorkListItemPhaseNode({
@@ -2054,7 +2023,7 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
     maxCycles: options.maxCycles
   });
   const executeRun = await runPhase("execute", executeNode, [
-    contextRow("item_cycle_plan", "artifact", planPath, "Focused plan for this work-list item cycle.", "The execution phase should follow or explicitly justify deviations from this plan.")
+    contextRow("plan", "artifact", planPath, "Execution plan for this frozen work-list item.", "Use this as guidance; the frozen item contract controls if the plan is incomplete or contradicted by evidence.")
   ]);
   if (executeRun.result.status !== "passed") {
     return { lastFailure: executeRun.result.stderr ?? executeRun.result.stdout ?? `Item ${options.item.id} execute phase failed.` };
@@ -2095,16 +2064,14 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
     item: options.item,
     frozenPath: options.frozenPath,
     ledgerPath: options.runtimeLedgerPath,
-    ...(options.priorHandoffsPath ? { priorHandoffsPath: options.priorHandoffsPath } : {}),
+    ...(options.priorResultsPath ? { priorResultsPath: options.priorResultsPath } : {}),
     ...(options.lastScorecardPath ? { priorScorecardPath: options.lastScorecardPath } : {}),
     ...(options.lastContractFailurePath ? { managedContractFailurePath: options.lastContractFailurePath } : {}),
     ...(options.lastContractFailureSummary ? { managedContractFailureSummary: options.lastContractFailureSummary } : {}),
     extraRows: [
-      contextRow("item_cycle_plan", "artifact", planPath, "Focused plan for this work-list item cycle.", "The verifier uses this to judge planned vs actual item evidence."),
-      contextRow("item_work_notes", "artifact", draftArtifacts.workNotesPath, "Execution notes for this item cycle.", "The verifier uses this to inspect validation and deviations."),
-      contextRow("draft_item_handoff", "artifact", draftArtifacts.handoffPath, "Draft item handoff.", "The verifier grades this draft before final publication."),
-      contextRow("draft_item_result", "artifact", draftArtifacts.resultPath, "Draft structured item result.", "The verifier grades this draft before final publication."),
-      contextRow("draft_item_validation", "artifact", draftArtifacts.validationPath, "Draft validation evidence.", "The verifier grades this draft before final publication.")
+      contextRow("plan", "artifact", planPath, "Execution plan for this frozen work-list item.", "The verifier uses this to judge planned vs actual item evidence."),
+      contextRow("item_work_notes", "artifact", draftArtifacts.workNotesPath, "Execution notes for this item result.", "The verifier uses this to inspect validation and deviations."),
+      contextRow("draft_item_result", "artifact", draftArtifacts.resultPath, "Draft structured item result.", "The verifier grades this draft before final publication.")
     ]
   });
   const verifyManifest = await readContextManifestContent(verifyContext.manifestPath);
@@ -2136,39 +2103,18 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
     };
   }
 
-  const publishNode = buildManagedWorkListItemPhaseNode({
-    parentNode: options.context.node,
-    item: options.item,
-    config: options.config,
-    worker: options.worker,
-    phase: "publish",
-    cycle: options.cycle,
-    maxCycles: options.maxCycles
-  });
   const parentArtifactsRoot = resolveExecutionArtifactsDirectory(options.itemExecutionDir);
-  const publishRun = await runPhase("publish", publishNode, [
-    contextRow("item_cycle_plan", "artifact", planPath, "Focused plan for this work-list item cycle.", "The publisher should preserve planned scope and justified deviations."),
-    contextRow("item_scorecard", "artifact", scorecard.scorecardPath, "Passing item scorecard.", "The publisher must only finalize accepted evidence."),
-    contextRow("item_work_notes", "artifact", draftArtifacts.workNotesPath, "Execution notes for this item cycle.", "The publisher uses these notes for final validation evidence."),
-    contextRow("draft_item_handoff", "artifact", draftArtifacts.handoffPath, "Accepted draft item handoff.", "The publisher turns this into the final handoff."),
-    contextRow("draft_item_result", "artifact", draftArtifacts.resultPath, "Accepted draft structured item result.", "The publisher turns this into the final item result."),
-    contextRow("draft_item_validation", "artifact", draftArtifacts.validationPath, "Accepted draft validation evidence.", "The publisher turns this into final validation evidence.")
-  ], parentArtifactsRoot);
+  await mkdir(parentArtifactsRoot, { recursive: true });
+  await copyFile(draftArtifacts.resultPath, join(parentArtifactsRoot, "item-result.json"));
   await mkdir(join(options.itemExecutionDir, "agent"), { recursive: true });
-  await writeFile(join(options.itemExecutionDir, "agent", "response.md"), publishRun.result.transcript?.last_message ?? publishRun.result.stdout ?? "", "utf8");
-  if (publishRun.result.status !== "passed") {
-    return {
-      scorecardPath: scorecard.scorecardPath,
-      cycles,
-      lastFailure: publishRun.result.stderr ?? publishRun.result.stdout ?? `Item ${options.item.id} publish phase failed.`
-    };
-  }
+  const promotionMessage = `Accepted item ${options.item.id} draft result after passing item criteria.`;
+  await writeFile(join(options.itemExecutionDir, "agent", "response.md"), `${promotionMessage}\n`, "utf8");
 
   let itemArtifacts: Awaited<ReturnType<typeof readManagedItemArtifacts>>;
   try {
     itemArtifacts = await readManagedItemArtifacts(parentArtifactsRoot, options.item);
   } catch (error) {
-    const contractFailure = await persistManagedContractFailureFromError(error, publishRun.phaseDir);
+    const contractFailure = await persistManagedContractFailureFromError(error, options.itemExecutionDir);
     return {
       scorecardPath: scorecard.scorecardPath,
       cycles,
@@ -2184,11 +2130,15 @@ async function runManagedWorkListDeepWorkItemCycle(options: {
 
   const completedItemAttempt = await writeManagedItemAttemptResult({
     attempt: options.itemAttempt,
-    result: publishRun.result,
+    result: {
+      status: "passed",
+      exitCode: 0,
+      stdout: promotionMessage,
+      stderr: "",
+      transcript: { last_message: promotionMessage }
+    },
     artifacts: {
-      item_handoff: itemArtifacts.handoffPath,
-      item_result: itemArtifacts.resultPath,
-      item_validation: itemArtifacts.validationPath
+      item_result: itemArtifacts.resultPath
     }
   });
 
@@ -2222,8 +2172,6 @@ export async function runManagedWorkListItems(
 
   const priorProgress = await loadPriorManagedWorkListProgress({ context, frozen });
   const acceptedResults: ManagedWorkListItemResult[] = [...priorProgress.accepted_results];
-  const acceptedHandoffs: string[] = [...priorProgress.accepted_handoffs];
-  const acceptedValidation: string[] = [...priorProgress.accepted_validation];
   let ledger = {
     schema_version: 1,
     status: "running",
@@ -2306,11 +2254,11 @@ export async function runManagedWorkListItems(
         cycle
       });
       await writeManagedItemAttemptStart(itemAttempt);
-      const priorHandoffsPath = acceptedHandoffs.length > 0
-        ? join(runtimeDir, `prior-handoffs-before-${item.id}.md`)
+      const priorResultsPath = acceptedResults.length > 0
+        ? join(runtimeDir, `prior-results-before-${item.id}.json`)
         : undefined;
-      if (priorHandoffsPath) {
-        await writeFile(priorHandoffsPath, acceptedHandoffs.join("\n\n"), "utf8");
+      if (priorResultsPath) {
+        await writeFile(priorResultsPath, `${JSON.stringify({ items: acceptedResults }, null, 2)}\n`, "utf8");
       }
       let itemArtifacts: Awaited<ReturnType<typeof readManagedItemArtifacts>>;
       let completedItemAttempt: RuntimeNodeAttempt;
@@ -2333,7 +2281,7 @@ export async function runManagedWorkListItems(
           itemExecutionId,
           frozenPath: frozenPath!,
           runtimeLedgerPath,
-          ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
+          ...(priorResultsPath ? { priorResultsPath } : {}),
           ...(lastScorecardPath ? { lastScorecardPath } : {}),
           ...(lastContractFailurePath ? { lastContractFailurePath } : {}),
           ...(lastContractFailureSummary ? { lastContractFailureSummary } : {}),
@@ -2343,7 +2291,7 @@ export async function runManagedWorkListItems(
         });
 
         if (!deepWorkResult.completedItemAttempt || !deepWorkResult.itemArtifacts) {
-          lastFailure = deepWorkResult.lastFailure ?? `Item ${item.id} deep-work cycle failed.`;
+          lastFailure = deepWorkResult.lastFailure ?? `Item ${item.id} deep-work item attempt failed.`;
           if (deepWorkResult.scorecardPath) {
             lastScorecardPath = deepWorkResult.scorecardPath;
           }
@@ -2385,15 +2333,13 @@ export async function runManagedWorkListItems(
           item,
           frozenPath: frozenPath!,
           ledgerPath: runtimeLedgerPath,
-          ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
+          ...(priorResultsPath ? { priorResultsPath } : {}),
           ...(lastScorecardPath ? { priorScorecardPath: lastScorecardPath } : {}),
           extraRows: [
             ...(scorecardPath
               ? [contextRow("item_scorecard", "artifact", scorecardPath, "Passing item scorecard.", "The outcome verifier checks final item claims against this accepted scorecard.")]
               : []),
-            contextRow("item_handoff", "artifact", itemArtifacts.handoffPath, "Final item handoff.", "The outcome verifier checks this final item artifact."),
-            contextRow("item_result", "artifact", itemArtifacts.resultPath, "Final structured item result.", "The outcome verifier checks this final item artifact."),
-            contextRow("item_validation", "artifact", itemArtifacts.validationPath, "Final item validation evidence.", "The outcome verifier checks this final item artifact.")
+            contextRow("item_result", "artifact", itemArtifacts.resultPath, "Final structured item result.", "The outcome verifier checks this final item artifact.")
           ]
         });
         verificationContextPacketPath = verificationContext.packetPath;
@@ -2408,7 +2354,7 @@ export async function runManagedWorkListItems(
           item,
           frozenPath: frozenPath!,
           ledgerPath: runtimeLedgerPath,
-          ...(priorHandoffsPath ? { priorHandoffsPath } : {}),
+          ...(priorResultsPath ? { priorResultsPath } : {}),
           ...(lastScorecardPath ? { priorScorecardPath: lastScorecardPath } : {}),
           ...(lastContractFailurePath ? { managedContractFailurePath: lastContractFailurePath } : {}),
           ...(lastContractFailureSummary ? { managedContractFailureSummary: lastContractFailureSummary } : {})
@@ -2454,9 +2400,7 @@ export async function runManagedWorkListItems(
           attempt: completedItemAttempt,
           result: harnessResult,
           artifacts: {
-            item_handoff: itemArtifacts.handoffPath,
-            item_result: itemArtifacts.resultPath,
-            item_validation: itemArtifacts.validationPath
+            item_result: itemArtifacts.resultPath
           }
         });
         verificationContextPacketPath = itemContext.packetPath;
@@ -2520,14 +2464,10 @@ export async function runManagedWorkListItems(
       accepted = {
         ...itemArtifacts.result,
         accepted_attempt_path: itemExecutionDir,
-        item_handoff_path: itemArtifacts.handoffPath,
-        item_validation_path: itemArtifacts.validationPath,
         ...(scorecardPath ? { scorecard_path: scorecardPath } : {}),
         ...(cycles ? { cycles } : {})
       };
       acceptedResults.push(accepted);
-      acceptedHandoffs.push(await readFile(itemArtifacts.handoffPath, "utf8"));
-      acceptedValidation.push(await readFile(itemArtifacts.validationPath, "utf8"));
       ledger = {
         ...ledger,
         items: ledger.items.map((entry) =>
@@ -2564,8 +2504,6 @@ export async function runManagedWorkListItems(
       };
       await writeFile(runtimeLedgerPath, `${JSON.stringify(ledger, null, 2)}\n`, "utf8");
       await writeFile(join(outputDir, "item-results.json"), `${JSON.stringify({ items: acceptedResults }, null, 2)}\n`, "utf8");
-      await writeFile(join(outputDir, "item-handoffs.md"), acceptedHandoffs.join("\n\n"), "utf8");
-      await writeFile(join(outputDir, "item-validation.md"), acceptedValidation.join("\n\n"), "utf8");
       await context.emit_managed_progress?.({
         phase: "run_item",
         status: "item_failed",
@@ -2587,8 +2525,6 @@ export async function runManagedWorkListItems(
   }
 
   await writeFile(join(outputDir, "item-results.json"), `${JSON.stringify({ items: acceptedResults }, null, 2)}\n`, "utf8");
-  await writeFile(join(outputDir, "item-handoffs.md"), acceptedHandoffs.join("\n\n"), "utf8");
-  await writeFile(join(outputDir, "item-validation.md"), acceptedValidation.join("\n\n"), "utf8");
   await context.emit_managed_progress?.({
     phase: "run_items",
     status: "items_completed",

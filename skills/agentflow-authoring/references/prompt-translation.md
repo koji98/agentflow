@@ -2,6 +2,8 @@
 
 Use this when authoring or reviewing a graph for prompt quality. Agentflow graph JSON is not the prompt, but every AI-backed execution surface is compiled from a small set of graph inputs. Write those inputs for the agent that will execute them.
 
+Graph JSON is prompt source code. Prompt-facing fields should contain only the runtime reader's task contract, evidence, context reason, artifact meaning, or rubric. Keep graph-building semantics such as topology, node ids, managed-pattern rationale, publisher mechanics, downstream routing, and "why we chose Agentflow" in authoring notes outside the graph.
+
 ## Universal Mapping
 
 | Authored graph input | Prompt surface it becomes | Authoring implication |
@@ -117,6 +119,7 @@ Authors do not write these prompts directly, but graph quality determines whethe
 ## Prompt Engineering Checks
 
 - The top-level graph intent should still be useful if injected into every downstream AI prompt.
+- Prompt-facing graph fields should make sense to the runtime reader without knowing how the graph was authored.
 - The node goal should answer “what outcome should this agent create?” before “what files might it touch?”
 - Acceptance criteria should be evidence-producing and reviewable.
 - Constraints should prevent bad work without over-prescribing implementation tactics.

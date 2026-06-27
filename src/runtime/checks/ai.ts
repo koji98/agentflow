@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import type { CliHint } from "../../graph/authored.js";
+import type { CliHint, ManagedPromptContract } from "../../graph/authored.js";
 import type { ResolvedSkill } from "../../graph/compiled.js";
 import type { EffectiveHarnessConfig } from "../../graph/profiles.js";
 import type { ReasoningEffort } from "../../graph/schema.js";
@@ -12,6 +12,7 @@ import {
   type HarnessAdapter,
   type HarnessResult
 } from "../harness/types.js";
+import { writePromptDiagnostics } from "../harness/prompt_diagnostics.js";
 
 export interface AiCheckResult {
   passed: boolean;
@@ -21,10 +22,14 @@ export interface AiCheckResult {
   raw?: Record<string, unknown>;
 }
 
+export type AiEvaluatorSurface = "ai_check" | "managed_criterion" | "eval_quality_judge";
+
 export interface RunAiCheckInvocation {
   harness: HarnessAdapter;
   run_id: string;
   execution_id: string;
+  compiled_id?: string;
+  authored_id?: string;
   repo_alias: string;
   repo_path: string;
   model: string | undefined;
@@ -32,6 +37,8 @@ export interface RunAiCheckInvocation {
   harness_config?: EffectiveHarnessConfig;
   base_env?: NodeJS.ProcessEnv;
   skip_git_repo_check?: boolean;
+  evaluator_surface?: AiEvaluatorSurface;
+  quality_threshold?: number;
   rubric: string | undefined;
   graph_goal?: string;
   graph_acceptance_criteria?: string[];
@@ -39,6 +46,7 @@ export interface RunAiCheckInvocation {
   node_goal?: string;
   node_acceptance_criteria?: string[];
   node_constraints?: string[];
+  managed_prompt?: ManagedPromptContract;
   output_schema?: string;
   context_packet_path: string;
   context_manifest_path: string;
@@ -129,6 +137,14 @@ function createHarnessFailureResult(message: string): AiCheckResult {
   };
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function readMetadataFlag(
   metadata: HarnessResult["metadata"],
   key: string
@@ -165,18 +181,7 @@ function summarizeHarnessFailure(harness_result: HarnessResult): string {
   return `AI check harness exited with status ${harness_result.status}.`;
 }
 
-export function parseAiCheckResult(payload: unknown): AiCheckResult {
-  const record =
-    typeof payload === "string"
-      ? parseStructuredPayload(payload)
-      : payload && typeof payload === "object" && !Array.isArray(payload)
-        ? payload as Record<string, unknown>
-        : undefined;
-
-  if (!record) {
-    return createMalformedResult("AI check output was not valid structured JSON.");
-  }
-
+function parseStandardAiCheckResult(record: Record<string, unknown>): AiCheckResult {
   if (typeof record.passed !== "boolean") {
     return createMalformedResult("AI check output must include boolean passed.", record);
   }
@@ -188,6 +193,102 @@ export function parseAiCheckResult(payload: unknown): AiCheckResult {
     ...(Array.isArray(record.issues) ? { issues: record.issues } : {}),
     raw: record
   };
+}
+
+function parseManagedCriterionResult(record: Record<string, unknown>): AiCheckResult {
+  if (typeof record.passed !== "boolean") {
+    return createMalformedResult("Managed criterion output must include boolean passed.", record);
+  }
+  if (typeof record.score !== "number" || record.score < 0 || record.score > 1) {
+    return createMalformedResult("Managed criterion output must include score as a number from 0 to 1.", record);
+  }
+  if (typeof record.summary !== "string" || record.summary.trim().length === 0) {
+    return createMalformedResult("Managed criterion output must include non-empty string summary.", record);
+  }
+  if (!Array.isArray(record.issues)) {
+    return createMalformedResult("Managed criterion output must include issues as an array.", record);
+  }
+
+  return {
+    passed: record.passed,
+    score: record.score,
+    summary: record.summary,
+    issues: record.issues,
+    raw: record
+  };
+}
+
+function parseEvalQualityJudgeResult(
+  record: Record<string, unknown>,
+  qualityThreshold: number | undefined
+): AiCheckResult {
+  if (typeof record.passed_quality_bar !== "boolean") {
+    return createMalformedResult("Eval quality judge output must include boolean passed_quality_bar.", record);
+  }
+  if (typeof record.score !== "number" || record.score < 1 || record.score > 5) {
+    return createMalformedResult("Eval quality judge output score must be a number from 1 to 5.", record);
+  }
+  if (!isRecord(record.dimension_scores)) {
+    return createMalformedResult("Eval quality judge output must include dimension_scores as an object.", record);
+  }
+  if (Object.values(record.dimension_scores).some((value) => typeof value !== "number" || value < 1 || value > 5)) {
+    return createMalformedResult("Eval quality judge dimension_scores values must be numbers from 1 to 5.", record);
+  }
+  if (!Array.isArray(record.blockers)) {
+    return createMalformedResult("Eval quality judge output must include blockers as an array.", record);
+  }
+  if (typeof record.rationale !== "string" || record.rationale.trim().length === 0) {
+    return createMalformedResult("Eval quality judge output must include non-empty string rationale.", record);
+  }
+  const promptFeedback = record.prompt_feedback;
+  if (!isRecord(promptFeedback)) {
+    return createMalformedResult("Eval quality judge output must include prompt_feedback as an object.", record);
+  }
+  for (const key of ["helpful_sections", "noisy_sections", "missing_guidance"]) {
+    if (!Array.isArray(promptFeedback[key])) {
+      return createMalformedResult(`Eval quality judge prompt_feedback.${key} must be an array.`, record);
+    }
+  }
+
+  const threshold = qualityThreshold ?? 4;
+  const blockers = stringArray(record.blockers);
+  const passed = record.passed_quality_bar && record.score >= threshold && blockers.length === 0;
+
+  return {
+    passed,
+    score: record.score,
+    summary: record.rationale,
+    issues: blockers,
+    raw: record
+  };
+}
+
+export function parseAiCheckResult(
+  payload: unknown,
+  options: {
+    evaluator_surface?: AiEvaluatorSurface;
+    quality_threshold?: number;
+  } = {}
+): AiCheckResult {
+  const record =
+    typeof payload === "string"
+      ? parseStructuredPayload(payload)
+      : payload && typeof payload === "object" && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : undefined;
+
+  if (!record) {
+    return createMalformedResult("AI check output was not valid structured JSON.");
+  }
+
+  switch (options.evaluator_surface ?? "ai_check") {
+    case "managed_criterion":
+      return parseManagedCriterionResult(record);
+    case "eval_quality_judge":
+      return parseEvalQualityJudgeResult(record, options.quality_threshold);
+    case "ai_check":
+      return parseStandardAiCheckResult(record);
+  }
 }
 
 async function readContextManifest(path: string): Promise<string> {
@@ -236,6 +337,8 @@ export async function runAiCheck(
       model: invocation.model,
       ...(invocation.reasoning_effort ? { reasoningEffort: invocation.reasoning_effort } : {}),
       ...(invocation.base_env ? { baseEnv: invocation.base_env } : {}),
+      ...(invocation.evaluator_surface ? { aiEvaluatorSurface: invocation.evaluator_surface } : {}),
+      ...(invocation.quality_threshold !== undefined ? { aiCheckQualityThreshold: invocation.quality_threshold } : {}),
       ...(invocation.rubric ? { rubric: invocation.rubric } : {}),
       ...(invocation.graph_goal ? { graphGoal: invocation.graph_goal } : {}),
       ...(invocation.graph_acceptance_criteria
@@ -247,6 +350,7 @@ export async function runAiCheck(
         ? { nodeAcceptanceCriteria: invocation.node_acceptance_criteria }
         : {}),
       ...(invocation.node_constraints ? { nodeConstraints: invocation.node_constraints } : {}),
+      ...(invocation.managed_prompt ? { managedPrompt: invocation.managed_prompt } : {}),
       ...(invocation.output_schema ? { aiCheckOutputSchema: invocation.output_schema } : {}),
       contextPacketPath: invocation.context_packet_path,
       contextManifestPath: invocation.context_manifest_path,
@@ -267,6 +371,17 @@ export async function runAiCheck(
       const renderedPrompt = renderHarnessPrompt(harnessInvocation);
       await mkdir(dirname(invocation.prompt_path), { recursive: true });
       await writeFile(invocation.prompt_path, `${renderedPrompt}\n`, "utf8");
+      await writePromptDiagnostics({
+        invocation: harnessInvocation,
+        prompt: `${renderedPrompt}\n`,
+        renderer: "renderHarnessPrompt",
+        promptPath: invocation.prompt_path,
+        metadata: {
+          harness: invocation.harness.kind,
+          ...(invocation.compiled_id ? { compiledId: invocation.compiled_id } : {}),
+          ...(invocation.authored_id ? { authoredId: invocation.authored_id } : {})
+        }
+      });
       promptSha256 = createHash("sha256").update(`${renderedPrompt}\n`).digest("hex");
     }
 
@@ -299,7 +414,10 @@ export async function runAiCheck(
     harness_result.outputJson ??
     harness_result.stdout ??
     "";
-  const parsedEvaluation = parseAiCheckResult(rawPayload);
+  const parsedEvaluation = parseAiCheckResult(rawPayload, {
+    ...(invocation.evaluator_surface ? { evaluator_surface: invocation.evaluator_surface } : {}),
+    ...(invocation.quality_threshold !== undefined ? { quality_threshold: invocation.quality_threshold } : {})
+  });
   const evaluation =
     harness_result.status !== "passed"
       ? createHarnessFailureResult(summarizeHarnessFailure(harness_result))

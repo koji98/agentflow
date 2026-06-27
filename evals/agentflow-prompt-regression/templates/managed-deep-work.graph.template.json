@@ -70,7 +70,7 @@
           "summary": {
             "from": "output_dir",
             "path": "summary.md",
-            "description": "Managed prompt-regression summary with literal Scenario:, Evidence:, Validation:, Risks:, and Completion: fields."
+            "description": "Managed prompt-regression summary bounded to accepted scorecard and validation evidence."
           }
         },
         "runtime": {

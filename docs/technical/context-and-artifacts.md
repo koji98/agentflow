@@ -23,7 +23,7 @@ Executable nodes receive authored context through `support.context`. Each entry 
 Context kinds are:
 
 - `workspace_file`: one required static file from the selected repo workspace.
-- `workspace_glob`: one required static glob from the selected repo workspace; it must match at least one non-ignored file.
+- `workspace_glob`: one required static glob from the selected repo workspace; it must match at least one non-ignored file. At runtime it appears to the agent as one generated glob index pointer, not one row per matched file.
 - `plugin_file`: one required static plugin-owned file forwarded by a plugin workflow.
 - `ref`: a prior node artifact reference such as `design_spec.spec` or bare `design_spec`.
 
@@ -59,6 +59,16 @@ At execution time, `resolveExecutionContext` writes audience-specific files unde
 
 Agentflow does not copy authored context text into attempt-local source clones and does not truncate source context. The prompt includes only available actionable pointers and omits optional omissions, digests, byte sizes, packet paths, and provenance paths. Each runtime context item points back to the source workspace file, artifact file, plugin file, or runtime-generated file.
 
+`agent/context.md` is priority-sectioned when context has more than ordinary task pointers:
+
+- `Read First`: retry/recovery evidence and immediate repair feedback.
+- `Current Work`: the pointer that defines the active unit of work.
+- `Task Context`: authored files, plugin files, and ordinary artifact refs.
+- `Progress State`: runtime state useful for continuation.
+- `Reference Sets`: broad file sets such as workspace globs.
+
+If a node only has simple task context, `agent/context.md` may stay as a compact `Pointers` table. Priority is advisory; it tells the worker where to start without expanding authority or preventing targeted search.
+
 ```mermaid
 flowchart TD
   start["Node attempt"] --> item{"Context item type"}
@@ -67,13 +77,14 @@ flowchart TD
   item --> plugin["Plugin file"]
   item --> ref["Prior artifact ref"]
   glob --> sort["List repo files, sort, cap by max_files"]
+  sort --> glob_index["Write runtime/globs/<name>.md index"]
   ref --> attempts["Select producer attempt by iteration/attempt selector"]
   attempts --> artifact{"Artifact path exists?"}
   artifact -- yes --> pointer["Record pointer and runtime/debug metadata"]
   artifact -- no --> omit["Omit if if_available, otherwise fail context resolution"]
   file --> pointer
   plugin --> pointer
-  sort --> pointer
+  glob_index --> pointer
   pointer --> write["Write agent context, runtime context, debug provenance"]
 ```
 
@@ -89,6 +100,8 @@ flowchart TD
 - missing static workspace/plugin context as blockers
 
 Workspace globs skip common dependency and generated roots by default, including `.git`, `.agentflow`, `node_modules`, `.venv`, `venv`, `.tox`, cache directories, build output, coverage, `vendor`, `third_party`, `generated`, `gen`, `__generated__`, and Bazel output. Authors can intentionally opt into one of those roots by starting the authored context path inside that root, such as `.venv/*eval*.md`; broad globs like `**/*eval*` still skip those roots.
+
+At runtime, each authored `workspace_glob` writes one attempt-local index file under `context/runtime/globs/<context-name>.md`. The index records the source pattern, matches found, matches included after `max_files`, limit status, ignored-root behavior, and a file table with paths, sizes, and digests. `runtime/context.json` and `human-debug/context-provenance.json` preserve file-level path/digest/size metadata for every included match.
 
 ## Repeat Selectors
 

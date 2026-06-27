@@ -7,6 +7,7 @@ Before launch, verify:
 - Top-level intent names a concrete goal, acceptance criteria, and `Do not ...` constraints.
 - Top-level intent is useful to every executable node because it is injected into every node prompt.
 - Top-level intent describes the product/workflow thesis, target user or operator need, and global quality bar when relevant; it does not narrate graph topology.
+- Prompt-facing graph fields contain no graph-construction semantics: no authoring rationale, node topology, managed-pattern mechanics, downstream routing, publisher mechanics, or Agentflow vocabulary unless Agentflow itself is the product being changed.
 - Each executable node has meaningful `intent.goal` and non-empty `acceptance_criteria`.
 - Every graph-level and node-level constraint string starts with `Do not`; move positive success requirements to `acceptance_criteria`.
 - Nodes own outcomes, not microscopic operations.

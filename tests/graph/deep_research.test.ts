@@ -120,13 +120,18 @@ describe("deep research managed pattern", () => {
                 }
             }));
         }
-        expect(fanout.steps[0].intent.goal).toContain("The assigned angle id is angle_01.");
-        expect(fanout.steps[0].intent.goal).toContain("This attempt runs in a disposable investigation workspace.");
-        expect(fanout.steps[0].intent.goal).toContain("Temporary exploratory edits are allowed only when they materially help the investigation.");
-        expect(fanout.steps[0].intent.goal).toContain("Do not create a report file in the repo workspace");
-        expect(fanout.steps[0].intent.goal).not.toContain("internal research artifact");
-        expect(fanout.steps[0].intent.goal).not.toContain("public artifact");
-        expect(fanout.steps[0].intent.goal).not.toContain("graph contract");
+        const anglePrompt = JSON.stringify(fanout.steps[0].managed_prompt);
+        expect(fanout.steps[0].intent.goal).toContain("Investigate assigned research angle angle_01");
+        expect(fanout.steps[0].intent.goal).not.toContain("This attempt runs in a disposable investigation workspace.");
+        expect(anglePrompt).toContain("The assigned angle id is angle_01.");
+        expect(anglePrompt).toContain("This attempt runs in a disposable investigation workspace.");
+        expect(anglePrompt).toContain("Temporary exploratory edits are allowed only when they materially help the investigation.");
+        expect(anglePrompt).toContain("Do not create a report file in the repo workspace");
+        expect(anglePrompt).toContain("Cite original source evidence such as repository paths, commands, URLs, documents, or observed outputs");
+        expect(anglePrompt).toContain("do not cite internal angle or synthesis report artifacts as the source for a claim");
+        expect(anglePrompt).not.toContain("internal research artifact");
+        expect(anglePrompt).not.toContain("public artifact");
+        expect(anglePrompt).not.toContain("graph contract");
         expect(JSON.stringify(fanout.steps[0])).not.toContain("expert");
         expect(finalNode).toEqual(expect.objectContaining({
             id: "market_scan",
@@ -182,6 +187,8 @@ describe("deep research managed pattern", () => {
         ]);
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("research synthesis worker");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Produce a complete synthesis for the assigned input reports");
+        expect(JSON.stringify(synthesisLayer.steps[0])).toContain("preserve original source paths, commands, URLs, documents, or observed outputs instead of citing the input report itself");
+        expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Resolve conflicts inside this synthesis when the input evidence is sufficient");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("Assigned Input Set");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("angle_01: Investigate the local architecture");
         expect(JSON.stringify(synthesisLayer.steps[0])).toContain("angle_02: Compare managed pattern behavior");
@@ -245,33 +252,40 @@ describe("deep research managed pattern", () => {
             "angle_01_report",
             "angle_02_report"
         ]);
-        expect(finalNode.intent.goal).toContain("Write `research.md` as the only final file");
-        expect(finalNode.intent.goal).toContain("Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file");
-        expect(finalNode.intent.goal).toContain("Do not create angle-specific final artifacts, evidence-link tables, packets, or companion files");
-        expect(finalNode.intent.goal).not.toContain("Evidence Link Ownership");
-        expect(finalNode.intent.goal).not.toContain("Research Evidence");
-        expect(finalNode.intent.goal).not.toContain("runtime prepends");
-        expect(finalNode.intent.goal).not.toContain("Write `summary.md`");
-        expect(finalNode.intent.goal).not.toContain("Report Pointer Path");
-        expect(finalNode.intent.goal).not.toContain("`Pointer` value");
-        expect(finalNode.intent.goal).not.toContain("angle_01_report");
-        expect(finalNode.intent.goal).toContain("do not expose them as separate deliverables");
-        expect(finalNode.intent.goal).not.toContain("managed workflow");
-        expect(finalNode.intent.goal).not.toContain("public artifact shape");
-        expect(finalNode.intent.goal).not.toContain("synthesis node");
+        const finalPrompt = JSON.stringify(finalNode.managed_prompt);
+        expect(finalNode.intent.goal).toContain("Publish research.md as the complete source-cited, conflict-resolved research artifact.");
+        expect(finalNode.intent.goal).not.toContain("Write `research.md` as the only final file");
+        expect(finalPrompt).toContain("Write `research.md` as the only final file");
+        expect(finalPrompt).toContain("Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file");
+        expect(finalPrompt).toContain("Do not create angle-specific final artifacts, evidence-link tables, packets, or companion files");
+        expect(finalPrompt).not.toContain("Evidence Link Ownership");
+        expect(finalPrompt).not.toContain("Research Evidence");
+        expect(finalPrompt).not.toContain("runtime prepends");
+        expect(finalPrompt).not.toContain("Write `summary.md`");
+        expect(finalPrompt).not.toContain("Report Pointer Path");
+        expect(finalPrompt).not.toContain("`Pointer` value");
+        expect(finalPrompt).not.toContain("angle_01_report");
+        expect(finalPrompt).toContain("Treat the provided research reports as evidence-gathering scaffolding");
+        expect(finalPrompt).toContain("do not cite, link, or mention their artifact names as sources in the final artifact");
+        expect(finalPrompt).toContain("Cite original source evidence such as repository paths, commands, URLs, documents, or observed outputs");
+        expect(finalPrompt).toContain("carry forward the source-level citation rather than citing the internal report");
+        expect(finalPrompt).toContain("Do not include sections named angle reports, synthesis reports, raw reports, or internal reports");
+        expect(finalPrompt).not.toContain("managed workflow");
+        expect(finalPrompt).not.toContain("public artifact shape");
+        expect(finalPrompt).not.toContain("synthesis node");
         const loweredPromptText = JSON.stringify(workflow);
         expect(loweredPromptText).not.toContain("private helper node");
         expect(loweredPromptText).not.toContain("inside a managed workflow");
         expect(loweredPromptText).not.toContain("private synthesis step");
         expect(loweredPromptText).not.toContain("final managed node");
-        expect(finalNode.intent.goal).toContain("not a high-level abstract");
-        expect(finalNode.intent.goal).toContain("holistic, sufficiently detailed, conflict-resolved answer");
-        expect(finalNode.intent.goal).not.toContain("Do not author raw angle links yourself");
-        expect(finalNode.intent.goal).not.toContain("Selected Public Angle");
-        expect(finalNode.intent.goal).not.toContain("as_artifact");
-        expect(finalNode.intent.goal).not.toContain("Context Pointer Name");
-        expect(finalNode.intent.goal).not.toContain("Synthesis Report |");
-        expect(finalNode.intent.goal).not.toContain("Runtime-Forwarded Raw Angle Artifacts");
+        expect(finalPrompt).toContain("not a high-level abstract");
+        expect(finalPrompt).toContain("holistic, sufficiently detailed, conflict-resolved answer");
+        expect(finalPrompt).not.toContain("Do not author raw angle links yourself");
+        expect(finalPrompt).not.toContain("Selected Public Angle");
+        expect(finalPrompt).not.toContain("as_artifact");
+        expect(finalPrompt).not.toContain("Context Pointer Name");
+        expect(finalPrompt).not.toContain("Synthesis Report |");
+        expect(finalPrompt).not.toContain("Runtime-Forwarded Raw Angle Artifacts");
     });
     it("compiles pattern_deep_research so downstream nodes depend on the final public artifacts", () => {
         const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults({

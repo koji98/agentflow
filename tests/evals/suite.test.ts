@@ -76,6 +76,13 @@ async function writeMinimalV1Suite(root: string): Promise<string> {
         bucket: "valid-hard-execution",
         difficulty: "hard",
         description: "Node must publish a real handoff artifact.",
+        measurement: {
+            claim: "Agentflow should produce a validated handoff artifact without scope drift.",
+            scenario_type: "regression",
+            metrics: ["outcome", "artifact", "workspace", "trajectory", "delivery"],
+            expected_failure_modes: ["missing artifact", "forbidden workspace edit", "missing trajectory event"],
+            tweak_signal: "Failure points to artifact guidance, runtime evidence, context packaging, or delivery curation."
+        },
         environment: {
             repo: "repo",
             init_git: true,
@@ -167,7 +174,7 @@ describe("eval suite v1 loading", () => {
             ["current", "current"],
             ["candidate", "candidate"]
         ]);
-        expect(loaded.scenarios).toHaveLength(28);
+        expect(loaded.scenarios).toHaveLength(29);
         expect(loaded.criteria.map((criterion) => [criterion.id, criterion.kind])).toEqual([
             ["outcome", "outcome"],
             ["artifact", "artifact"],
@@ -221,6 +228,12 @@ describe("eval suite v1 loading", () => {
         expect(loaded.suite.source_reference).toContain("Demystifying evals for AI agents");
         expect(loaded.suite.source_reference).toContain("ADK");
         expect(loaded.scenarios.map((entry) => entry.id)).toEqual(["artifact-discipline"]);
+        expect(scenario.measurement).toEqual(expect.objectContaining({
+            claim: expect.stringContaining("validated handoff"),
+            scenario_type: "regression",
+            metrics: expect.arrayContaining(["outcome", "artifact", "trajectory"]),
+            tweak_signal: expect.stringContaining("artifact guidance")
+        }));
         expect(loaded.variants.map((entry) => entry.id)).toEqual(["current"]);
         expect(loaded.criteria.map((entry) => [entry.id, entry.kind])).toContainEqual(["artifact-quality", "quality"]);
         expect(scenario.environment.simulation?.tool_calls.map((entry) => entry.id)).toEqual(["docs-503", "docs-ok"]);
@@ -324,6 +337,7 @@ describe("eval suite v1 loading", () => {
         expect(messages).toContain("pass_rate");
         expect(messages).toContain('Unknown field "unexpected_suite_field" is not part of the eval contract.');
         expect(messages).toContain('Unknown field "unexpected_scenario_field" is not part of the eval contract.');
+        expect(messages).toContain("Eval scenario requires measurement object.");
         expect(messages).toContain("Duplicate scenario id");
         expect(messages).toContain("Duplicate variant id");
         expect(messages).toContain("Duplicate criterion id");
@@ -347,6 +361,13 @@ describe("eval suite v1 loading", () => {
             bucket: "realworld-regression",
             difficulty: "hard",
             description: "Node must fix a pinned real-world issue.",
+            measurement: {
+                claim: "Agentflow should solve the pinned issue while preserving scope.",
+                scenario_type: "realworld-regression",
+                metrics: ["outcome", "workspace", "quality"],
+                expected_failure_modes: ["focused test failed", "package manifest changed", "unsupported handoff claim"],
+                tweak_signal: "Failure points to prompt/context grounding, validation evidence, or overfit grader assumptions."
+            },
             environment: {
                 repo: "repo",
                 init_git: true
@@ -393,6 +414,13 @@ describe("eval suite v1 loading", () => {
             bucket: "realworld-regression",
             difficulty: "hard",
             description: "bad metadata",
+            measurement: {
+                claim: "Invalid metadata fixture.",
+                scenario_type: "realworld-regression",
+                metrics: ["metadata"],
+                expected_failure_modes: ["metadata invalid"],
+                tweak_signal: "Fix scenario metadata."
+            },
             environment: { repo: "repo" },
             workflow: { graph_template: "graph.template.json", harness: "codex-cli" },
             criteria: { outcome: {}, deterministic: {} },
@@ -425,6 +453,13 @@ describe("eval suite v1 loading", () => {
             bucket: "realworld-regression",
             difficulty: "hard",
             description: "missing patch",
+            measurement: {
+                claim: "Missing patch fixture.",
+                scenario_type: "realworld-regression",
+                metrics: ["metadata"],
+                expected_failure_modes: ["patch missing"],
+                tweak_signal: "Fix scenario metadata."
+            },
             environment: { repo: "repo" },
             workflow: { graph_template: "graph.template.json", harness: "codex-cli" },
             criteria: { outcome: {}, deterministic: {} },
@@ -448,6 +483,30 @@ describe("eval suite v1 loading", () => {
         }, null, 2)}\n`);
         const missingPatch = await loadEvalSuite(tempRoot, suiteDir);
         expect(missingPatch.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain("Real-world regression patch does not exist");
+    });
+    it("requires every checked-in scenario to declare its measurement contract", async () => {
+        for (const suitePath of [
+            "evals/agentflow-prompt-regression",
+            "evals/agentflow-workflow-quality",
+            "evals/agentflow-capability-workflows",
+            "evals/agentflow-engineering-parity",
+            "evals/agentflow-realworld-issues",
+            "evals/agentflow-validation"
+        ]) {
+            const loaded = await loadEvalSuite(process.cwd(), suitePath);
+            expect(loaded.diagnostics).toEqual([]);
+            for (const scenario of loaded.scenarios) {
+                expect(scenario.measurement, `${suitePath}:${scenario.id}`).toEqual(expect.objectContaining({
+                    claim: expect.any(String),
+                    scenario_type: expect.any(String),
+                    metrics: expect.any(Array),
+                    expected_failure_modes: expect.any(Array),
+                    tweak_signal: expect.any(String)
+                }));
+                expect(scenario.measurement.metrics.length, `${suitePath}:${scenario.id}`).toBeGreaterThan(0);
+                expect(scenario.measurement.expected_failure_modes.length, `${suitePath}:${scenario.id}`).toBeGreaterThan(0);
+            }
+        }
     });
     it("parses strict judge JSON and rejects malformed judge scores", () => {
         expect(parseJudgeResult(JSON.stringify({

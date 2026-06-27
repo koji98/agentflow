@@ -2,6 +2,15 @@
 
 Ask only questions that change graph shape, authority, evidence, or assurance.
 
+## Bounded Grill-Me Protocol
+
+- Run at most 3 rounds.
+- Ask at most 10 questions per round.
+- Do not ask every question in this file by rote. Pick the questions that would change the graph contract, authority model, evidence surface, or assurance profile.
+- After each round, summarize the answers into decided facts, remaining uncertainty, and the next highest-value question area.
+- Stop early when the workflow brief is coherent enough for authoring, even if fewer than 3 rounds have been used.
+- If the user declines more questions, produce the best brief possible and mark unresolved items as open questions.
+
 ## Outcome
 
 - What should be true at the end that is not true now?

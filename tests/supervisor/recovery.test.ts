@@ -121,6 +121,21 @@ function wrongDirectionVerifierResult(): RuntimeNodeExecutionResult {
         }
     };
 }
+function incompleteCompletionResult(root: string, reasons: string[]): RuntimeNodeExecutionResult {
+    return {
+        status: "failed",
+        outcome: "failed",
+        result: {
+            completion: {
+                completion_status: "incomplete",
+                blocking_reasons: reasons,
+                packet_path: join(root, "runtime", "completion-packet.json")
+            }
+        },
+        stdout: "",
+        stderr: ""
+    };
+}
 describe("supervisor recovery cycle", () => {
     it("writes a case file, parallel evidence patches, a recovery plan, and retry envelope", async () => {
         const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-cycle-"));
@@ -180,9 +195,70 @@ describe("supervisor recovery cycle", () => {
             sandbox: true,
             declared_artifacts: true
         });
+        expect(recovery.recovery_envelope?.retry_directive.must_do[0]).toContain("Address verifier finding");
+        expect(recovery.recovery_envelope?.retry_directive.validation_focus.join("\n")).toContain("verifier finding");
         await expect(readFile(recovery.intervention.artifact_paths.case_file_json, "utf8")).resolves.toContain("exact failed prompt");
         await expect(readFile(recovery.intervention.artifact_paths.case_file_json, "utf8")).resolves.toContain(runtimeAttempt.prompt_sha256!);
         await expect(readFile(recovery.intervention.artifact_paths.recovery_plan_markdown, "utf8")).resolves.toContain("Apply action: `retry_with_evidence`");
+        const envelopeMarkdown = await readFile(recovery.intervention.artifact_paths.recovery_envelope_markdown, "utf8");
+        expect(envelopeMarkdown).toContain("This is a retry. The original task contract is unchanged.");
+        expect(envelopeMarkdown.indexOf("## Prior Failure")).toBeLessThan(envelopeMarkdown.indexOf("## What Changed"));
+        expect(envelopeMarkdown.indexOf("## What Changed")).toBeLessThan(envelopeMarkdown.indexOf("## Required Next Action"));
+        expect(envelopeMarkdown.indexOf("## Required Next Action")).toBeLessThan(envelopeMarkdown.indexOf("## Read First"));
+        expect(envelopeMarkdown.indexOf("## Read First")).toBeLessThan(envelopeMarkdown.indexOf("## Preserve Progress"));
+        expect(envelopeMarkdown.indexOf("## Preserve Progress")).toBeLessThan(envelopeMarkdown.indexOf("## Discard / Do Not Redo"));
+        expect(envelopeMarkdown.indexOf("## Discard / Do Not Redo")).toBeLessThan(envelopeMarkdown.indexOf("## Validation Before Completion"));
+        expect(envelopeMarkdown.indexOf("## Audit Metadata")).toBeGreaterThan(envelopeMarkdown.indexOf("## Validation Before Completion"));
+        expect(envelopeMarkdown).not.toContain("exact failed prompt");
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("derives retry guidance from incomplete completion blockers", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-completion-guidance-"));
+        const runtimeAttempt = attempt(tempRoot);
+        const runtimeResult: RuntimeNodeExecutionResult = {
+            status: "failed",
+            outcome: "failed",
+            result: {
+                completion: {
+                    completion_status: "incomplete",
+                    blocking_reasons: ["Missing expected artifact: handoff"],
+                    packet_path: join(tempRoot, "runtime", "completion-packet.json")
+                }
+            },
+            stdout: "",
+            stderr: ""
+        };
+        await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+        const classification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult
+        });
+        const recovery = await runSupervisorRecoveryCycle({
+            action: "run_diagnostic",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: runtimeResult,
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification,
+            failure_fingerprint: "fingerprint-completion",
+            repeated_fingerprint_count: 1,
+            prior_interventions: [],
+            workspace_path: tempRoot
+        });
+        expect(recovery.recovery_plan.apply_action).toBe("retry_with_evidence");
+        expect(recovery.recovery_envelope?.required_next_action).toContain("Repair completion blocker: Missing expected artifact: handoff");
+        expect(recovery.recovery_envelope?.retry_directive.validation_focus.join("\n")).toContain("af complete check");
+        const envelopeMarkdown = await readFile(recovery.intervention.artifact_paths.recovery_envelope_markdown, "utf8");
+        expect(envelopeMarkdown).toContain("Repair completion blocker: Missing expected artifact: handoff");
+        expect(envelopeMarkdown).not.toContain("completion-packet.json");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("fails contractually instead of repeating the same fingerprint strategy without material delta", async () => {
@@ -235,8 +311,111 @@ describe("supervisor recovery cycle", () => {
         });
         expect(secondRecovery.recovery_plan.apply_action).toBe("fail_contract_gap");
         expect(secondRecovery.recovery_plan.terminal_reason).toContain("Repeated failure fingerprint");
+        expect(secondRecovery.recovery_plan.recovery_learning).toEqual(expect.objectContaining({
+            prior_failure_fingerprint: "fingerprint-anti-spin",
+            prior_selected_strategy: "retry_with_evidence",
+            diagnosis: "material_delta_irrelevant",
+            material_delta_used: "unknown"
+        }));
         expect(secondRecovery.recovery_envelope).toBeUndefined();
         expect(secondRecovery.intervention.status).toBe("failed");
+        await expect(readFile(secondRecovery.intervention.artifact_paths.recovery_plan_markdown, "utf8")).resolves.toContain("## Recovery Learning");
+        expect(secondRecovery.intervention.evidence.recovery_learning).toEqual(expect.objectContaining({
+            diagnosis: "material_delta_irrelevant"
+        }));
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("allows one stricter retry when the worker ignored recovery guidance before terminally blocking the loop", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-recovery-ignored-guidance-"));
+        const runtimeAttempt = attempt(tempRoot);
+        const firstResult = incompleteCompletionResult(tempRoot, ["Missing expected artifact: handoff"]);
+        await writeFile(runtimeAttempt.prompt_path!, "exact failed prompt\n", "utf8");
+        const firstClassification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: firstResult
+        });
+        const firstRecovery = await runSupervisorRecoveryCycle({
+            action: "run_diagnostic",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: firstResult,
+            decision_id: "decision-1",
+            intervention_id: "intervention-1",
+            classification: firstClassification,
+            failure_fingerprint: "fingerprint-ignored-guidance",
+            repeated_fingerprint_count: 1,
+            prior_interventions: [],
+            workspace_path: tempRoot
+        });
+        expect(firstRecovery.recovery_plan.apply_action).toBe("retry_with_evidence");
+        expect(firstRecovery.recovery_envelope?.required_next_action).toContain("Missing expected artifact: handoff");
+
+        const ignoredResult = incompleteCompletionResult(tempRoot, ["af orient was not run for this agent node."]);
+        const ignoredClassification = classifyNodeFailure({
+            node: node(),
+            attempt: runtimeAttempt,
+            result: ignoredResult
+        });
+        const secondRecovery = await runSupervisorRecoveryCycle({
+            action: "run_diagnostic",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: ignoredResult,
+            decision_id: "decision-2",
+            intervention_id: "intervention-2",
+            classification: ignoredClassification,
+            failure_fingerprint: "fingerprint-ignored-guidance",
+            repeated_fingerprint_count: 2,
+            prior_interventions: [firstRecovery.intervention],
+            workspace_path: tempRoot
+        });
+        expect(secondRecovery.recovery_plan.apply_action).toBe("retry_with_evidence");
+        expect(secondRecovery.recovery_plan.recovery_learning).toEqual(expect.objectContaining({
+            diagnosis: "guidance_ignored",
+            followed_required_next_action: "no",
+            followed_validation_gate: "no",
+            material_delta_used: "no",
+            repeated_forbidden_tactic: "yes"
+        }));
+        expect(secondRecovery.recovery_envelope?.required_next_action).toContain("previous retry missed the recovery directive");
+        expect(secondRecovery.recovery_envelope?.required_next_action).toContain("af orient");
+        expect(secondRecovery.recovery_envelope?.retry_directive.validation_focus.join("\n")).toContain("af complete check");
+
+        const thirdRecovery = await runSupervisorRecoveryCycle({
+            action: "run_diagnostic",
+            run_id: "run-1",
+            graph_intent: {
+                goal: "Graph goal.",
+                acceptance_criteria: ["Graph acceptance stays intact."],
+                constraints: []
+            },
+            node: node(),
+            attempt: runtimeAttempt,
+            result: ignoredResult,
+            decision_id: "decision-3",
+            intervention_id: "intervention-3",
+            classification: ignoredClassification,
+            failure_fingerprint: "fingerprint-ignored-guidance",
+            repeated_fingerprint_count: 3,
+            prior_interventions: [firstRecovery.intervention, secondRecovery.intervention],
+            workspace_path: tempRoot
+        });
+        expect(thirdRecovery.recovery_plan.apply_action).toBe("fail_contract_gap");
+        expect(thirdRecovery.recovery_plan.terminal_reason).toContain("Repeated failure fingerprint");
+        expect(thirdRecovery.recovery_envelope).toBeUndefined();
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("does not pause when helper output uses the old authority boolean", async () => {

@@ -3,6 +3,23 @@
   "bucket": "context-authority",
   "difficulty": "hard",
   "description": "Agent must inspect pointer provenance before relying on context evidence.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Agent must inspect pointer provenance before relying on context evidence.",
+    "scenario_type": "regression:context-authority",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,13 +30,33 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["provenance"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "provenance"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Inspect the agent context brief before writing the handoff. The handoff must include the word `provenance` and explain which pointer source you relied on.",
-      "required_contains": ["provenance", "Scenario:", "Evidence:"],
-      "required_af": ["orient", "complete check"]
+      "required_contains": [
+        "provenance",
+        "Scenario:",
+        "Evidence:"
+      ],
+      "required_af": [
+        "orient",
+        "complete check"
+      ]
     }
   }
 }

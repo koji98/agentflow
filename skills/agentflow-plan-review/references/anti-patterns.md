@@ -2,6 +2,7 @@
 
 - Prose plan disguised as graph: many nodes, no durable artifacts.
 - Implementation script graph: exact edit steps instead of outcome contracts.
+- Graph-semantics leak: prompt-facing fields explain graph topology, node choice, managed-pattern lifecycle, downstream routing, publisher mechanics, or authoring rationale instead of the runtime reader's outcome, evidence, and boundaries.
 - Constraint drift: graph or node constraints that do not start with `Do not`, or positive requirements placed in constraints instead of acceptance criteria.
 - Brittle check: command expects a file or script the agent may never need.
 - Context flood: broad globs instead of curated source, docs, or artifacts.

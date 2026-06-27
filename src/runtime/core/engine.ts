@@ -52,7 +52,7 @@ import {
   peekNextAttemptIndexes,
   type RuntimeNodeAttempt
 } from "../attempts.js";
-import { runAiCheck } from "../checks/ai.js";
+import { runAiCheck, type AiEvaluatorSurface } from "../checks/ai.js";
 import { runDeterministicCheck, runLocalProcess } from "../checks/deterministic.js";
 import { resolveExecutionContext } from "../context/resolve.js";
 import { buildAttemptMemory, writeAttemptMemory } from "../attempt_memory.js";
@@ -68,6 +68,7 @@ import {
 } from "../events.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter, type HarnessResult } from "../harness/types.js";
 import { substituteAgentflowTokens } from "../harness/tokens.js";
+import { writePromptDiagnostics } from "../harness/prompt_diagnostics.js";
 import {
   buildRuntimeStateSnapshot,
   completeRepeatIteration,
@@ -1108,7 +1109,7 @@ async function buildManagedCompletionSummary(options: {
     options.node.managed_runtime?.kind === "pattern_work_list" &&
     options.node.managed_runtime.phase === "run_items"
   ) {
-    const requiredArtifacts = ["item_handoffs", "item_results", "item_validation"];
+    const requiredArtifacts = ["item_results"];
     const missing = requiredArtifacts.filter((name) => !options.artifacts[name]);
     const contractFailure = await activeManagedContractFailureSummary(options.attempt);
     return {
@@ -2717,11 +2718,18 @@ async function defaultCheckExecutor(
   );
   const promptPath = resolveExecutionAgentPromptPath(context.execution_dir);
   context.attempt.prompt_path = promptPath;
+  const evaluatorSurface: AiEvaluatorSurface =
+    context.node.managed_runtime?.kind === "pattern_deep_work"
+    && context.node.managed_runtime.phase === "verify"
+      ? "managed_criterion"
+      : "ai_check";
 
   const aiCheckResult = await runAiCheck({
     harness,
     run_id: context.run_id,
     execution_id: context.attempt.execution_id,
+    compiled_id: context.node.compiled_id,
+    authored_id: context.node.authored_id,
     repo_alias: context.node.repo,
     repo_path: context.workspace_path,
     model: context.node.effective_policy.model,
@@ -2733,6 +2741,7 @@ async function defaultCheckExecutor(
       ? { reasoning_effort: context.node.effective_policy.reasoning_effort }
       : {}),
     ...(context.node.effective_policy.skip_git_repo_check ? { skip_git_repo_check: true } : {}),
+    evaluator_surface: evaluatorSurface,
     rubric: renderedAiCheckRubric,
     graph_goal: substituteAgentflowTokens(context.graph_intent.goal, aiCheckPromptTokens),
     ...(renderedGraphAcceptanceCriteria ? { graph_acceptance_criteria: renderedGraphAcceptanceCriteria } : {}),
@@ -2740,6 +2749,7 @@ async function defaultCheckExecutor(
     ...(context.node.intent.goal ? { node_goal: substituteAgentflowTokens(context.node.intent.goal, aiCheckPromptTokens) } : {}),
     ...(renderedNodeAcceptanceCriteria ? { node_acceptance_criteria: renderedNodeAcceptanceCriteria } : {}),
     ...(renderedNodeConstraints ? { node_constraints: renderedNodeConstraints } : {}),
+    ...(context.node.managed_prompt ? { managed_prompt: context.node.managed_prompt } : {}),
     context_packet_path: context.context_packet_path,
     context_manifest_path: context.context_manifest_path,
     prompt_path: promptPath,
@@ -3009,6 +3019,7 @@ async function defaultAgentExecutor(
     ...(agentGraphAcceptanceCriteria ? { graphAcceptanceCriteria: agentGraphAcceptanceCriteria } : {}),
     ...(agentGraphConstraints ? { graphConstraints: agentGraphConstraints } : {}),
     ...(agentNodeGoal ? { nodeGoal: agentNodeGoal } : {}),
+    ...(context.node.managed_prompt ? { managedPrompt: context.node.managed_prompt } : {}),
     ...(agentNodeAcceptanceCriteria ? { nodeAcceptanceCriteria: agentNodeAcceptanceCriteria } : {}),
     ...(agentNodeConstraints ? { nodeConstraints: agentNodeConstraints } : {}),
     contextPacketPath: context.context_packet_path,
@@ -3036,6 +3047,17 @@ async function defaultAgentExecutor(
   const renderedPrompt = renderHarnessPrompt(agentInvocation);
   await mkdir(dirname(promptPath), { recursive: true });
   await writeFile(promptPath, `${renderedPrompt}\n`, "utf8");
+  await writePromptDiagnostics({
+    invocation: agentInvocation,
+    prompt: `${renderedPrompt}\n`,
+    renderer: "renderHarnessPrompt",
+    promptPath,
+    metadata: {
+      harness: harness.kind,
+      compiledId: context.node.compiled_id,
+      authoredId: context.node.authored_id
+    }
+  });
   context.attempt.prompt_sha256 = createHash("sha256").update(`${renderedPrompt}\n`).digest("hex");
 
   const harnessResult = await harness.run(agentInvocation);

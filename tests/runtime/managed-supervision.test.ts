@@ -53,7 +53,7 @@ function buildHarness(): HarnessAdapter {
             if (invocation.promptKind === "supervisor_evidence") {
                 return harnessOk(invocation, JSON.stringify({
                     claims: ["Managed completion failed because the required criterion still fails."],
-                    retry_guidance: ["Change the managed work cycle before retrying the gate."],
+                    retry_guidance: ["Make a material task change before retrying the gate."],
                     conflicts: [],
                     confidence: "high"
                 }));
@@ -69,31 +69,37 @@ function buildHarness(): HarnessAdapter {
                     "```"
                 ].join("\n"));
             }
-            if (invocation.nodeGoal.includes("cycle_plan")) {
-                await writeFile(join(invocation.outputDir, "cycle-plan.md"), [
-                    "Objective",
-                    "Plan another managed work cycle.",
+            if (invocation.managedPrompt?.phase === "plan") {
+                await writeFile(join(invocation.outputDir, "plan.md"), [
+                    "Task target",
+                    "Plan the current task attempt.",
                     "",
-                    "Relevant evidence",
+                    "Current state",
                     "The required managed criterion still needs execution evidence.",
                     "",
-                    "Planned material delta",
-                    "Keep the next cycle focused on the required criterion.",
+                    "Gap",
+                    "The current result does not satisfy the required criterion.",
                     "",
-                    "Criterion evidence map",
+                    "Execution plan",
                     "always_fail requires a passing command result.",
                     "",
                     "Validation plan",
                     "Run the managed completion criteria after execution.",
                     "",
+                    "Expected material change",
+                    "Produce evidence that changes the required criterion outcome.",
+                    "",
+                    "Remaining gap",
+                    "The required criterion will remain unresolved until execution produces passing evidence.",
+                    "",
                     "Risks or constraints",
                     "Stay inside the authored graph contract."
                 ].join("\n"), "utf8");
             }
-            if (invocation.nodeGoal.includes("work_notes")) {
+            if (invocation.managedPrompt?.phase === "execute") {
                 await writeFile(join(invocation.outputDir, "work-notes.md"), [
-                    "Plan followed",
-                    "Followed the managed cycle plan.",
+                    "Plan.md use",
+                    "Used plan.md as guidance; no deviations from plan.md were needed.",
                     "",
                     "What changed",
                     "Changed nothing useful.",

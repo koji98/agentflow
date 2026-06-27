@@ -10,10 +10,10 @@ import type {
 import {
   artifactContext,
   body,
+  managedPromptContract,
   managedId,
   mergeSupportContext,
   outputDirArtifact,
-  renderPrompt,
   section,
   sharedAgentBase,
   type ManagedPatternAgentOptions,
@@ -124,8 +124,8 @@ function materialInputSummary(materials: ResearchMaterial[]): string[] {
   });
 }
 
-function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepResearchAngle, index: number): string {
-  return renderPrompt([
+function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepResearchAngle, index: number) {
+  return managedPromptContract("angle", `Investigate assigned research angle ${angle.id}.`, [
     body("You are investigating one assigned research angle for a larger research effort. Your report will be combined later, so gather useful evidence and preserve uncertainty clearly."),
     section("Assigned Angle", [
       `Angle id: ${angle.id}`,
@@ -145,6 +145,7 @@ function buildAnglePrompt(config: PatternDeepResearchConfig, angle: PatternDeepR
       "Prefer authoritative local/source evidence when the question is repo-specific.",
       "Use external or web context when docs, package behavior, standards, release notes, or broader comparisons would materially improve the answer.",
       "Preserve source paths, commands, URLs, and uncertainty so final synthesis can audit the claim.",
+      "Cite original source evidence such as repository paths, commands, URLs, documents, or observed outputs; do not cite internal angle or synthesis report artifacts as the source for a claim.",
       "Do not change the research goal, repo authority, sandbox, or declared artifacts."
     ]),
     section("Output Contract", [
@@ -169,9 +170,9 @@ function buildSynthesisPrompt(
   materials: ResearchMaterial[],
   layer: number,
   group: number
-): string {
+){
   const inputCount = materials.length;
-  return renderPrompt([
+  return managedPromptContract("synthesis", `Synthesize ${inputCount} assigned research report inputs.`, [
     body(`You are a research synthesis worker combining ${inputCount} research reports into one higher-signal synthesis report.`),
     section("Final Research Contract", [
       "This synthesis is research evidence for the final research artifact.",
@@ -189,8 +190,9 @@ function buildSynthesisPrompt(
       "Produce a complete synthesis for the assigned input reports, not a high-level abstract.",
       "Preserve every major finding from the input material.",
       "Collapse redundant claims while keeping the strongest provenance.",
-      "Keep evidence attached to claims; do not detach conclusions from sources.",
-      "Surface conflicts, weak evidence, missing coverage, and uncertainty.",
+      "Keep evidence attached to claims; preserve original source paths, commands, URLs, documents, or observed outputs instead of citing the input report itself.",
+      "Resolve conflicts inside this synthesis when the input evidence is sufficient; when it is not, state the unresolved conflict, what evidence disagrees, and what remains uncertain.",
+      "Surface weak evidence, missing coverage, and uncertainty.",
       "Do not discard a unique major finding just because it appears in only one report.",
       "Do not reduce the synthesis to a thin summary. Preserve enough detail for the final publisher to write the complete research artifact without reopening every input report."
     ]),
@@ -206,12 +208,13 @@ function buildFinalPrompt(
   config: PatternDeepResearchConfig,
   publicArtifacts: Record<string, ArtifactDefinition>,
   inputCount: number
-): string {
-  return renderPrompt([
+){
+  return managedPromptContract("publish", "Publish the final source-cited, conflict-resolved research artifact.", [
     body(`You are the final research publisher for ${inputCount} research report${inputCount === 1 ? "" : "s"}. Create the complete, coherent research artifact that downstream work can rely on.`),
     section("Research Contract", [
       "Write the single final research artifact.",
-      "Use angle reports and synthesis reports as source evidence; do not expose them as separate deliverables.",
+      "Treat the provided research reports as evidence-gathering scaffolding; do not cite, link, or mention their artifact names as sources in the final artifact.",
+      "Cite original source evidence such as repository paths, commands, URLs, documents, or observed outputs for important claims.",
       `Goal: ${config.intent.goal}`,
       ...formatList("Acceptance criteria", config.intent.acceptance_criteria, "Use the graph and node acceptance criteria."),
       ...formatList("Constraints", config.intent.constraints, "Stay inside the authored research contract.")
@@ -220,6 +223,7 @@ function buildFinalPrompt(
       ...disposableInvestigationWorkspaceLines(),
       "Use the research reports in context as evidence.",
       "Resolve disagreements explicitly. Preserve uncertainty and cite the evidence behind important claims.",
+      "When an internal report cites a source, carry forward the source-level citation rather than citing the internal report.",
       "Collapse redundancy, but keep all major findings and the strongest provenance for each claim."
     ]),
     section("Research Artifact Shape", [
@@ -227,6 +231,7 @@ function buildFinalPrompt(
       "Write a holistic, sufficiently detailed, conflict-resolved answer that covers every angle. Do not merely copy raw reports through.",
       "Include all information needed by downstream planning, implementation, review, or decision nodes inside this one file.",
       "End with the integrated conclusion, controlling decisions, unresolved uncertainty, risks, and downstream implications.",
+      "Do not include sections named angle reports, synthesis reports, raw reports, or internal reports.",
       "Do not create angle-specific final artifacts, evidence-link tables, packets, or companion files."
     ]),
     section("Declared Final Artifact", [
@@ -287,13 +292,14 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
       managed_runtime: deepResearchRuntime(config, "angle"),
       artifacts: buildAngleArtifacts(index),
       intent: {
-        goal: buildAnglePrompt(config, angle, index),
+        goal: `Investigate assigned research angle ${angle.id} and publish sourced angle evidence for later synthesis.`,
         acceptance_criteria: [
           "The angle report answers the assigned angle with sourced evidence.",
           "The angle report preserves enough provenance, uncertainty, and confidence for final synthesis."
         ],
         constraints: config.intent.constraints
-      }
+      },
+      managed_prompt: buildAnglePrompt(config, angle, index)
     };
   });
 
@@ -336,13 +342,14 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         support: mergeSupportContext(agentShared.support, materialContexts(groupMaterials)),
         artifacts: buildSynthesisArtifacts(layer, group),
         intent: {
-          goal: buildSynthesisPrompt(config, groupMaterials, layer, group),
+          goal: `Synthesize the assigned research inputs into source-cited, conflict-aware synthesis evidence.`,
           acceptance_criteria: [
             "The synthesis preserves all major findings from its input research reports.",
             "The synthesis collapses redundant claims without dropping provenance, uncertainty, or conflicts."
           ],
           constraints: config.intent.constraints
-        }
+        },
+        managed_prompt: buildSynthesisPrompt(config, groupMaterials, layer, group)
       };
     });
 
@@ -392,10 +399,11 @@ export function buildPatternDeepResearch(config: PatternDeepResearchConfig): Seq
         ),
         artifacts: publicArtifacts,
         intent: {
-          goal: buildFinalPrompt(config, publicArtifacts, materials.length),
+          goal: "Publish research.md as the complete source-cited, conflict-resolved research artifact.",
           acceptance_criteria: config.intent.acceptance_criteria,
           constraints: config.intent.constraints
-        }
+        },
+        managed_prompt: buildFinalPrompt(config, publicArtifacts, materials.length)
       }
     ]
   };

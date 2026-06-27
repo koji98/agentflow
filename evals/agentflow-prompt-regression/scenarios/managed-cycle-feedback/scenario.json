@@ -3,6 +3,23 @@
   "bucket": "supervisor-managed",
   "difficulty": "hard",
   "description": "Managed deep work should preserve cycle feedback for the next plan.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Managed deep work should preserve cycle feedback for the next plan.",
+    "scenario_type": "regression:supervisor-managed",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/managed-deep-work.graph.template.json",
     "harness": "codex-cli",
@@ -13,13 +30,33 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "summary", "contains": ["Scenario:", "Evidence:", "Validation:"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "summary",
+          "contains": [
+            "Scenario:",
+            "Evidence:",
+            "Validation:"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "artifact": "summary",
       "task": "Produce managed cycle evidence for `managed-cycle-feedback`. The public summary must include Scenario:, Evidence:, Validation:, Risks:, and Completion: fields and must explain how cycle feedback was used.",
-      "required_contains": ["managed-cycle-feedback", "Scenario:", "Evidence:", "Validation:"]
+      "required_contains": [
+        "managed-cycle-feedback",
+        "Scenario:",
+        "Evidence:",
+        "Validation:"
+      ]
     }
   }
 }

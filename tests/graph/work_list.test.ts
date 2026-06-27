@@ -34,7 +34,7 @@ function buildPatternStep(overrides = {}) {
         done_when: [
           "The item goal is satisfied.",
           "Relevant validation has been run or clearly explained.",
-          "The item handoff records evidence, risks, and downstream implications."
+          "The item result records evidence, risks, and downstream implications."
         ]
       },
       item_worker: {
@@ -81,7 +81,7 @@ function buildDocument(steps: unknown[]) {
 }
 
 describe("pattern work list", () => {
-  it("lowers an agent item worker into plan, freeze, run, verify, and publish phases", () => {
+  it("lowers an agent item worker into plan, freeze, run, and deterministic finalization phases", () => {
     const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([buildPatternStep()])));
     expect(normalized.diagnostics).toEqual([]);
     expect(normalized.lowered_managed_nodes).toEqual([
@@ -105,7 +105,6 @@ describe("pattern work list", () => {
       "deliver_stack__managed__pattern_work_list__plan",
       "deliver_stack__managed__pattern_work_list__freeze",
       "deliver_stack__managed__pattern_work_list__run_items",
-      "deliver_stack__managed__pattern_work_list__finalize",
       "deliver_stack"
     ]);
 
@@ -113,10 +112,8 @@ describe("pattern work list", () => {
     const freezeNode = workflow.steps[1];
     const runItemsNode = workflow.steps[2];
     const finalizeNode = workflow.steps[3];
-    const publishNode = workflow.steps[4];
     const planPrompt = JSON.stringify(planNode);
     const runPrompt = JSON.stringify(runItemsNode);
-    const publishPrompt = JSON.stringify(publishNode);
 
     expect(planNode).toEqual(expect.objectContaining({
       type: "agent",
@@ -164,50 +161,32 @@ describe("pattern work list", () => {
         })
       }),
       artifacts: expect.objectContaining({
-        item_handoffs: expect.objectContaining({ path: "item-handoffs.md" }),
-        item_results: expect.objectContaining({ path: "item-results.json" }),
-        item_validation: expect.objectContaining({ path: "item-validation.md" })
+        item_results: expect.objectContaining({ path: "item-results.json" })
       })
     }));
+    expect(runItemsNode.artifacts).not.toHaveProperty("item_handoffs");
+    expect(runItemsNode.artifacts).not.toHaveProperty("item_validation");
     expect(runPrompt).toContain("Worker kind: agent.");
     expect(runPrompt).toContain("owns item status and aggregation");
     expect(runPrompt).toContain("Do not add, remove, split, merge, or reorder");
+    expect(runPrompt).toContain("writes one structured item result artifact");
     expect(runPrompt).not.toContain("runtime coordinator");
     expect(runPrompt).not.toContain("managed work-list pattern");
     expect(runPrompt).not.toContain("internal item attempts");
 
     expect(finalizeNode).toEqual(expect.objectContaining({
+      id: "deliver_stack",
       type: "exec",
       command: "node",
       artifacts: expect.objectContaining({
         work_items: expect.objectContaining({ path: "work-items.json" })
       })
     }));
+    expect(finalizeNode.artifacts).not.toHaveProperty("summary");
     expect(JSON.stringify(finalizeNode)).toContain("not completed");
-
-    expect(publishNode).toEqual(expect.objectContaining({
-      id: "deliver_stack",
-      type: "agent",
-      artifacts: expect.objectContaining({
-        summary: expect.objectContaining({ path: "summary.md" }),
-        work_items: expect.objectContaining({ path: "work-items.json" })
-      }),
-      managed_artifact_forwards: {
-        work_items: {
-          node: "deliver_stack__managed__pattern_work_list__finalize",
-          artifact: "work_items"
-        }
-      }
-    }));
-    expect(publishPrompt).toContain("verified work item evidence");
-    expect(publishPrompt).toContain("The `work_items` artifact is forwarded by the runtime");
-    expect(publishPrompt).not.toContain("The `packet` artifact");
-    expect(publishPrompt).not.toContain("managed work-list pattern");
-    expect(publishPrompt).not.toContain("Downstream graph nodes");
-    expect(publishPrompt).not.toContain("internal item attempts");
   });
 
-  it("supports a deep_work item worker with item handoff and ledger rubric targets", () => {
+  it("supports a deep_work item worker with item-result and ledger rubric evidence", () => {
     const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
       buildPatternStep({
         work_list: {
@@ -234,7 +213,7 @@ describe("pattern work list", () => {
                   id: "handoff_quality",
                   kind: "rubric",
                   target: "item_handoff",
-                  rubric: "The item handoff cites evidence and risks.",
+                  rubric: "The item result cites evidence and risks.",
                   weight: 0.3
                 },
                 {
@@ -286,11 +265,11 @@ describe("pattern work list", () => {
         })
       }),
       artifacts: expect.objectContaining({
-        item_handoffs: expect.objectContaining({ path: "item-handoffs.md" }),
-        item_results: expect.objectContaining({ path: "item-results.json" }),
-        item_validation: expect.objectContaining({ path: "item-validation.md" })
+        item_results: expect.objectContaining({ path: "item-results.json" })
       })
     }));
+    expect(runItemsNode.artifacts).not.toHaveProperty("item_handoffs");
+    expect(runItemsNode.artifacts).not.toHaveProperty("item_validation");
     const prompt = JSON.stringify(runItemsNode);
     expect(prompt).toContain("Worker kind: deep_work.");
     expect(prompt).toContain("Maximum item cycles: 2");
@@ -298,6 +277,60 @@ describe("pattern work list", () => {
     expect(prompt).toContain("target item_handoff");
     expect(prompt).toContain("target work_list_ledger");
     expect(workflow.steps.map((step) => step.id)).not.toContain("deliver_stack__managed__pattern_work_list__completion_gate");
+  });
+
+  it("keeps the work-list publisher only for explicitly authored final artifacts", () => {
+    const normalized = normalizeAuthoredGraphDocument(withNodeIntentDefaults(buildDocument([
+      buildPatternStep({
+        artifacts: {
+          summary: {
+            from: "output_dir",
+            path: "summary.md",
+            description: "Human-readable summary explicitly requested by this graph."
+          }
+        }
+      })
+    ])));
+    expect(normalized.diagnostics).toEqual([]);
+    const root = normalized.document?.graph;
+    if (!root || root.type !== "sequence") {
+      throw new Error("Expected normalized graph root to be a sequence.");
+    }
+    const workflow = root.steps[0];
+    if (!workflow || workflow.type !== "sequence") {
+      throw new Error("Expected pattern_work_list to lower into a sequence workflow.");
+    }
+
+    expect(workflow.steps.map((step) => step.id)).toEqual([
+      "deliver_stack__managed__pattern_work_list__plan",
+      "deliver_stack__managed__pattern_work_list__freeze",
+      "deliver_stack__managed__pattern_work_list__run_items",
+      "deliver_stack__managed__pattern_work_list__finalize",
+      "deliver_stack"
+    ]);
+    const finalizeNode = workflow.steps[3];
+    const publishNode = workflow.steps[4];
+    expect(finalizeNode).toEqual(expect.objectContaining({
+      type: "exec",
+      artifacts: {
+        work_items: expect.objectContaining({ path: "work-items.json" })
+      }
+    }));
+    expect(publishNode).toEqual(expect.objectContaining({
+      id: "deliver_stack",
+      type: "agent",
+      artifacts: expect.objectContaining({
+        summary: expect.objectContaining({ path: "summary.md" }),
+        work_items: expect.objectContaining({ path: "work-items.json" })
+      }),
+      managed_artifact_forwards: {
+        work_items: {
+          node: "deliver_stack__managed__pattern_work_list__finalize",
+          artifact: "work_items"
+        }
+      }
+    }));
+    expect(JSON.stringify(publishNode)).toContain("Write only user-authored final artifacts");
   });
 
   it("carries deep_work item phase overrides in the managed runtime config", () => {

@@ -3,6 +3,28 @@
   "bucket": "realworld-regression",
   "difficulty": "hard",
   "description": "Fix validator.js isSlug so dots and special characters are rejected consistently without breaking normal slug characters.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Fix validator.js isSlug so dots and special characters are rejected consistently without breaking normal slug characters.",
+    "scenario_type": "realworld-capability:realworld-regression",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "workspace scope",
+      "supervisor recovery",
+      "delivery auditability",
+      "custom deterministic checks",
+      "scenario-specific checks"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "workspace changes are missing, forbidden, or out of scope",
+      "expected supervisor recovery, learning, or authority behavior is missing",
+      "delivery package is missing, unsupported, or not review-ready",
+      "scenario-specific deterministic or quality criterion failed"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/realworld-agent.graph.template.json",
     "harness": "codex-cli",

@@ -681,6 +681,7 @@ function compileExecutableNode(
     declared_artifacts: node.artifacts ?? {},
     ...(node.managed_artifact_forwards ? { managed_artifact_forwards: node.managed_artifact_forwards } : {}),
     ...(managedRuntime ? { managed_runtime: managedRuntime } : {}),
+    ...(node.managed_prompt ? { managed_prompt: node.managed_prompt } : {}),
     skills: resolvedSkills,
     cli: expandedSupport.cli,
     ...(lowered_from ? { lowered_from } : {}),

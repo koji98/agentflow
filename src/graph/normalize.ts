@@ -83,10 +83,9 @@ import {
   type PatternWorkListItemWorker,
   type PatternWorkListRubricCriterion
 } from "../managed/pattern_work_list.js";
-import {
-  defaultManagedPublicArtifacts,
-  type ManagedPatternAgentOptions,
-  type ManagedPatternRuntime
+import type {
+  ManagedPatternAgentOptions,
+  ManagedPatternRuntime
 } from "../managed/foundation.js";
 
 export interface LoweredManagedNode {
@@ -2820,15 +2819,14 @@ function normalizePatternDeepWorkNode(
     runtime_extra_keys: ["max_concurrency"]
   });
   const agentOptions = normalizeManagedAgentOptions(record, path, diagnostics);
-  const publicArtifacts = {
-    ...defaultManagedPublicArtifacts(),
-    ...(base?.artifacts ?? {})
-  };
+  const rubricTargetArtifacts = Object.fromEntries(
+    Object.entries(base?.artifacts ?? {}).filter(([name]) => name !== "packet")
+  );
   const completion = normalizePatternDeepWorkCompletion(
     record.completion,
     `${path}.completion`,
     diagnostics,
-    publicArtifacts
+    rubricTargetArtifacts
   );
   const phases = normalizePatternDeepWorkPhases(record.phases, `${path}.phases`, diagnostics);
   const runtime = normalizeManagedRuntime(record.runtime, `${path}.runtime`, diagnostics);

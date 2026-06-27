@@ -99,7 +99,24 @@ describe("eval trace packets", () => {
                 }
             }
         })}\n`, "utf8");
-        await writeFile(paths.interventions_file, "", "utf8");
+        await writeFile(paths.interventions_file, `${JSON.stringify({
+            intervention_id: "intervention-1",
+            decision_id: "decision-1",
+            action: "run_diagnostic",
+            status: "passed",
+            evidence: {
+                failure_fingerprint: "fingerprint-1",
+                recovery_plan: { apply_action: "retry_with_evidence" },
+                recovery_learning: {
+                    diagnosis: "guidance_ignored",
+                    followed_required_next_action: "no",
+                    followed_validation_gate: "no",
+                    material_delta_used: "no",
+                    repeated_forbidden_tactic: "yes"
+                }
+            },
+            artifact_paths: {}
+        })}\n`, "utf8");
         await writeJson(join(runRoot, "delivery", "manifest.json"), {
             graph_status: "passed",
             delivery_status: "passed",
@@ -132,6 +149,38 @@ describe("eval trace packets", () => {
         });
         const toolDir = resolveExecutionHumanDebugToolDirectory(executionDir);
         await mkdir(toolDir, { recursive: true });
+        await writeJson(join(executionDir, "human-debug", "prompt-diagnostics.json"), {
+            version: "1",
+            prompt_kind: "agent",
+            renderer: "renderHarnessPrompt",
+            execution_id: "exec__ship__attempt_1",
+            sandbox: "workspace-write",
+            total_chars: 1200,
+            sections: [{ name: "Context", chars: 400 }],
+            context_pointer_count: 3,
+            context_pointer_kinds: ["workspace_file", "runtime_supervisor_recovery"],
+            context_priority_bucket_counts: {
+                read_first: 1,
+                current_work: 0,
+                task_context: 2,
+                progress_state: 0,
+                reference_set: 0
+            },
+            context_read_first_count: 1,
+            context_glob_set_count: 0,
+            context_glob_match_count: 0,
+            context_glob_included_count: 0,
+            context_limited_glob_count: 0,
+            context_uses_flat_glob_expansion: false,
+            tool_count: 0,
+            skill_count: 0,
+            cli_hint_count: 1,
+            declared_artifact_count: 0,
+            has_supervisor_recovery: true,
+            orient_required_by_prompt: true,
+            complete_check_required_by_prompt: true,
+            warnings: ["context_many_pointers"]
+        });
         await writeFile(join(toolDir, "index.jsonl"), `${JSON.stringify({
             kind: "af",
             argv: ["complete", "check"],
@@ -176,6 +225,28 @@ describe("eval trace packets", () => {
                 fallback_if_repeated: "repair_validation_strategy"
             })
         ]);
+        expect(packet.supervisor.recovery_learning).toEqual([
+            expect.objectContaining({
+                diagnosis: "guidance_ignored",
+                followed_required_next_action: "no",
+                repeated_forbidden_tactic: "yes"
+            })
+        ]);
+        expect(packet.prompt_diagnostics).toEqual(expect.objectContaining({
+            count: 1,
+            total_chars: 1200,
+            max_prompt_chars: 1200,
+            context_pointer_count: 3,
+            context_read_first_count: 1,
+            warnings: ["context_many_pointers"],
+            warning_counts: { context_many_pointers: 1 }
+        }));
+        expect(packet.prompt_diagnostics.entries[0]).toEqual(expect.objectContaining({
+            path: expect.stringContaining("prompt-diagnostics.json"),
+            prompt_kind: "agent",
+            has_supervisor_recovery: true
+        }));
+        expect(packet.metrics.prompt_diagnostics_count).toBe(1);
         expect(packet.delivery).toEqual(expect.objectContaining({
             graph_status: "passed",
             delivery_status: "passed",

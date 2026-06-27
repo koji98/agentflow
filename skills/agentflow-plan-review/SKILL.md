@@ -22,7 +22,7 @@ Use `agentflow-authoring` when no graph exists yet. Use `agentflow-operations` f
 
 1. Read the graph and intended workflow brief if available.
 2. Review contract shape: top-level intent, node intent, constraints, acceptance criteria, repos, profiles, supervision, and delivery; see `references/review-rubric.md`.
-3. Review whether authored fields will compile into strong AI prompts for each prompt-backed node type, including prompt-facing prose purity; use `references/prompt-translation-review.md`.
+3. Review whether authored fields will compile into strong AI prompts for each prompt-backed node type, including prompt-facing prose purity and graph-semantics leakage; use `references/prompt-translation-review.md`.
 4. Review composition fit against the assurance profile.
 5. Review deterministic checks for stable-outcome discipline; use `references/anti-patterns.md` to identify brittle graph designs.
 6. Review artifacts, context, and downstream refs.
@@ -36,6 +36,7 @@ Use `agentflow-authoring` when no graph exists yet. Use `agentflow-operations` f
 - Treat broad context as a defect unless it is intentionally bounded, pointer-based, and explained with clear `what` and `why`.
 - Treat deterministic checks as brittle when they depend on an optional implementation tactic.
 - Treat graph-authoring or managed-pattern language in prompt-facing fields as a defect. Runtime prose should speak to the executing agent, verifier, researcher, planner, item worker, or reviewer.
+- Treat graph-construction semantics in graph JSON as a defect: authoring rationale, topology narration, node ids, managed-pattern lifecycle explanation, publisher mechanics, downstream routing, and `af` command instructions should not appear in prompt-facing fields unless the product task is Agentflow itself.
 - Do not redesign the whole graph unless the current shape cannot satisfy the brief.
 
 ## Red Flags
@@ -54,7 +55,8 @@ Before approving the plan:
 - [ ] Findings are actionable and tied to graph text.
 - [ ] Every graph-level and node-level constraint starts with `Do not`; positive requirements are acceptance criteria, not constraints.
 - [ ] Prompt-backed nodes receive the intended role, success contract, support tables, artifact contract, and evaluation contract after lowering.
-- [ ] Runtime-facing prose does not mention graph construction mechanics, managed-pattern internals, compiled prompts, downstream-node mechanics, or `af` commands as task instructions.
+- [ ] Runtime-facing prose does not mention graph construction mechanics, managed-pattern internals, compiled prompts, downstream-node mechanics, publisher mechanics, or `af` commands as task instructions.
+- [ ] Every prompt-facing field was read as LLM input, not as authoring notes, and any graph-semantics leakage is reported as a finding.
 - [ ] The graph preserves agent autonomy inside explicit authority boundaries.
 - [ ] Checks, artifacts, and context all serve the stated outcome.
 - [ ] Required validation commands are listed.

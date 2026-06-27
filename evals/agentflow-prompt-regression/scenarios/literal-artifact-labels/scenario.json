@@ -3,6 +3,23 @@
   "bucket": "artifact-completion",
   "difficulty": "medium",
   "description": "Agent must copy required artifact labels exactly.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Agent must copy required artifact labels exactly.",
+    "scenario_type": "regression:artifact-completion",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,12 +30,35 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["Scenario:", "Evidence:", "Validation:", "Risks:", "Completion:"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "Scenario:",
+            "Evidence:",
+            "Validation:",
+            "Risks:",
+            "Completion:"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Produce the prompt-regression handoff. The artifact must include the literal labels `Scenario:`, `Evidence:`, `Validation:`, `Risks:`, and `Completion:` exactly as written, with real content after each label.",
-      "required_contains": ["Scenario:", "Evidence:", "Validation:", "Risks:", "Completion:"]
+      "required_contains": [
+        "Scenario:",
+        "Evidence:",
+        "Validation:",
+        "Risks:",
+        "Completion:"
+      ]
     }
   }
 }

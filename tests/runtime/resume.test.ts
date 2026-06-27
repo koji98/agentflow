@@ -10,6 +10,7 @@ import { getHarnessCapabilities } from "../../src/graph/harness_capabilities.js"
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
 import { readExecutionManifest } from "../../src/artifacts/reader.js";
+import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
 import { resumeCompiledGraph, runCompiledGraph } from "../../src/runtime/core/engine.js";
 import type { AgentInvocation, HarnessAdapter } from "../../src/runtime/harness/types.js";
 import { createResumedRuntimeSession } from "../../src/runtime/resume.js";
@@ -51,7 +52,7 @@ function resumeWorkListJson(): string {
                 id: "w1",
                 title: "Complete resume fixture item",
                 goal: "Complete the bounded resume fixture item.",
-                acceptance_criteria: ["The item handoff is present."],
+                acceptance_criteria: ["The item result is present."],
                 constraints: [],
                 validation_expectations: ["The item criterion passes."],
                 handoff_focus: ["Downstream nodes need the accepted item result."],
@@ -62,20 +63,19 @@ function resumeWorkListJson(): string {
 }
 
 function isWorkListItemPlanInvocation(invocation: AgentInvocation): boolean {
-    return invocation.nodeGoal?.includes("Plan frozen work-list item") === true;
+    return invocation.managedPrompt?.phase === "item_plan";
 }
 
 function isWorkListItemExecuteInvocation(invocation: AgentInvocation): boolean {
-    return invocation.nodeGoal?.includes("Execute frozen work-list item") === true;
+    return invocation.managedPrompt?.phase === "item_execute";
 }
 
-function isWorkListItemPublishInvocation(invocation: AgentInvocation): boolean {
-    return invocation.nodeGoal?.includes("Publish frozen work-list item") === true;
+function isWorkListPlannerInvocation(invocation: AgentInvocation): boolean {
+    return Boolean(invocation.artifacts && Object.prototype.hasOwnProperty.call(invocation.artifacts, "work_list_json"));
 }
 
 async function writeWorkListItemDrafts(invocation: AgentInvocation): Promise<void> {
-    await writeFile(join(invocation.outputDir, "item-work-notes.md"), "# Item Work Notes\n\nExecuted resume fixture item.\n", "utf8");
-    await writeFile(join(invocation.outputDir, "draft-item-handoff.md"), "# Draft Item Handoff\n\nFixture item is complete.\n", "utf8");
+    await writeFile(join(invocation.outputDir, "item-work-notes.md"), "# Item Work Notes\n\nWhat changed\nExecuted resume fixture item.\n\nPlan.md deviations\nNo deviations from plan.md were needed.\n\nValidation evidence\nThe fixture criterion passed.\n", "utf8");
     await writeFile(join(invocation.outputDir, "draft-item-result.json"), `${JSON.stringify({
         id: "w1",
         status: "completed",
@@ -89,25 +89,6 @@ async function writeWorkListItemDrafts(invocation: AgentInvocation): Promise<voi
         risks: [],
         downstream_implications: ["Downstream nodes can consume the work_items ledger."]
     }, null, 2)}\n`, "utf8");
-    await writeFile(join(invocation.outputDir, "draft-item-validation.md"), "Validation: fixture criterion passed.\n", "utf8");
-}
-
-async function writeWorkListItemFinals(invocation: AgentInvocation): Promise<void> {
-    await writeFile(join(invocation.outputDir, "item-handoff.md"), "# Item Handoff\n\nFixture item is complete.\n", "utf8");
-    await writeFile(join(invocation.outputDir, "item-result.json"), `${JSON.stringify({
-        id: "w1",
-        status: "completed",
-        summary: "Completed the resume fixture item.",
-        validation: {
-            passed: ["The fixture criterion passed."],
-            failed_then_fixed: [],
-            unavailable: [],
-            blocked: []
-        },
-        risks: [],
-        downstream_implications: ["Downstream nodes can consume the work_items ledger."]
-    }, null, 2)}\n`, "utf8");
-    await writeFile(join(invocation.outputDir, "item-validation.md"), "Validation: fixture criterion passed.\n", "utf8");
 }
 
 function createWorkListResumeHarness(): HarnessAdapter {
@@ -148,16 +129,38 @@ function createWorkListResumeHarness(): HarnessAdapter {
                 };
             }
 
-            if (invocation.nodeGoal?.includes("work_list_json")) {
+            if (isWorkListPlannerInvocation(invocation)) {
                 await writeFile(join(invocation.outputDir, "work-list.json"), resumeWorkListJson(), "utf8");
             } else if (isWorkListItemPlanInvocation(invocation)) {
-                await writeFile(join(invocation.outputDir, "item-cycle-plan.md"), "# Item Cycle Plan\n\nPlan the fixture item.\n", "utf8");
+                await writeFile(join(invocation.outputDir, "plan.md"), [
+                    "# Item Plan",
+                    "",
+                    "Task target",
+                    "Satisfy the resume fixture item.",
+                    "",
+                    "Current state",
+                    "The item is ready for execution.",
+                    "",
+                    "Gap",
+                    "Execution evidence still needs to be produced.",
+                    "",
+                    "Execution plan",
+                    "Produce the draft item result.",
+                    "",
+                    "Validation plan",
+                    "Run the item criterion.",
+                    "",
+                    "Expected material change",
+                    "The item result records supported completion evidence.",
+                    "",
+                    "Remaining gap",
+                    "None expected after successful execution.",
+                    "",
+                    "Risks or constraints",
+                    "Stay scoped to the frozen item."
+                ].join("\n"), "utf8");
             } else if (isWorkListItemExecuteInvocation(invocation)) {
                 await writeWorkListItemDrafts(invocation);
-            } else if (isWorkListItemPublishInvocation(invocation)) {
-                await writeWorkListItemFinals(invocation);
-            } else if (invocation.nodeGoal?.includes("final artifacts")) {
-                await writeFile(join(invocation.outputDir, "summary.md"), "Completed the work-list resume fixture.\n", "utf8");
             }
 
             const result = {
@@ -202,13 +205,24 @@ async function createResumeFixture(options: {
             main: repoDir
         },
         executors: {
-            exec: async () => ({
-                status: "passed",
-                outcome: "passed",
-                stdout: "",
-                stderr: "",
-                result: { ok: true }
-            })
+            exec: async (context) => {
+                const outputDir = resolveExecutionArtifactsDirectory(context.execution_dir);
+                for (const [name, artifact] of Object.entries(context.node.declared_artifacts)) {
+                    if (artifact.from !== "output_dir") {
+                        continue;
+                    }
+                    const artifactPath = join(outputDir, artifact.path);
+                    await mkdir(dirname(artifactPath), { recursive: true });
+                    await writeFile(artifactPath, `${JSON.stringify({ name, ok: true }, null, 2)}\n`, "utf8");
+                }
+                return {
+                    status: "passed",
+                    outcome: "passed",
+                    stdout: "",
+                    stderr: "",
+                    result: { ok: true }
+                };
+            }
         },
         harnesses: {
             "codex-cli": {
@@ -264,7 +278,60 @@ async function createResumeFixture(options: {
                                 "Completion Scorecard": "Completion score 1 met threshold 1.",
                                 "Scorecard Evidence": "Fixture scorecard evidence is present."
                               }, null, 2)}\n`
-                            : [
+                            : name === "plan"
+                              ? [
+                                  "# plan",
+                                  "",
+                                  "Task target",
+                                  "Satisfy the fixture contract.",
+                                  "",
+                                  "Current state",
+                                  "The test harness supplies passing runtime evidence.",
+                                  "",
+                                  "Gap",
+                                  "No source change is required for this fixture.",
+                                  "",
+                                  "Execution plan",
+                                  "Use the fixture command result.",
+                                  "",
+                                  "Validation plan",
+                                  "Run the fixture command.",
+                                  "",
+                                  "Expected material change",
+                                  "The fixture records passing evidence.",
+                                  "",
+                                  "Remaining gap",
+                                  "None expected after fixture execution.",
+                                  "",
+                                  "Risks or constraints",
+                                  "No fixture constraints are at risk."
+                                ].join("\n") + "\n"
+                              : name === "work_notes"
+                                ? [
+                                    "# work_notes",
+                                    "",
+                                    "What changed",
+                                    "The fixture completed.",
+                                    "",
+                                    "Plan.md deviations",
+                                    "No deviations from plan.md were needed.",
+                                    "",
+                                    "Validation evidence",
+                                    "Fixture validation passed.",
+                                    "",
+                                    "Remaining risks",
+                                    "No fixture risks.",
+                                    "",
+                                    "Remaining gap",
+                                    "No fixture gap remains.",
+                                    "",
+                                    "Scorecard Evidence",
+                                    "Completion score 1 met threshold 1.",
+                                    "",
+                                    "Completion Scorecard",
+                                    "Completion score 1 met threshold 1."
+                                  ].join("\n") + "\n"
+                                : [
                                 `# ${name}`,
                                 "",
                                 "## Objective",
@@ -1000,7 +1067,7 @@ describe("runtime resume", () => {
                                             id: "fixture_rubric",
                                             kind: "rubric",
                                             target: "item_handoff",
-                                            rubric: "The item handoff proves the fixture item is complete.",
+                                            rubric: "The item result proves the fixture item is complete.",
                                             weight: 1,
                                             required: true
                                         }

@@ -121,6 +121,9 @@ describe("runtime checks", () => {
 
     expect(rendered).toContain("## Role");
     expect(rendered).toContain("You are an AI evaluator executing one read-only check node");
+    expect(rendered).toContain("## Evaluation Target");
+    expect(rendered).toContain("What is being judged: this authored read-only AI check node.");
+    expect(rendered).toContain("Target: the Check Task and Rubric below.");
     expect(rendered).toContain("Sandbox: read-only");
     expect(rendered).toContain("## Pointers");
     expect(rendered).not.toContain("Context packet:");
@@ -131,7 +134,7 @@ describe("runtime checks", () => {
     expect((rendered.match(/## Context/g) ?? []).length).toBe(1);
   });
 
-  it("lets eval judges override the AI check output schema without losing raw JSON", async () => {
+  it("lets eval judges use their surface-specific schema without being coerced into AI check shape", async () => {
     let capturedInvocation: Parameters<HarnessAdapter["run"]>[0] | undefined;
     const harness = createHarness("codex-cli", async (invocation) => {
       capturedInvocation = invocation;
@@ -152,6 +155,8 @@ describe("runtime checks", () => {
       model: "gpt-5-judge",
       node_goal: "Judge the trial.",
       rubric: "Use the eval judge schema.",
+      evaluator_surface: "eval_quality_judge",
+      quality_threshold: 4,
       output_schema: outputSchema,
       context_packet_path: "/tmp/runtime/context.json",
       context_manifest_path: "/tmp/agent/context.md",
@@ -160,15 +165,53 @@ describe("runtime checks", () => {
       signal: undefined
     });
 
-    expect(renderHarnessPrompt(capturedInvocation!)).toContain(outputSchema);
-    expect(result.evaluation.passed).toBe(false);
-    expect(result.evaluation.summary).toContain("boolean passed");
+    const prompt = renderHarnessPrompt(capturedInvocation!);
+    expect(prompt).toContain(outputSchema);
+    expect(prompt).toContain("What is being judged: one eval quality criterion for one completed trial trace packet.");
+    expect(prompt).toContain("Quality threshold: 4");
+    expect(result.evaluation.passed).toBe(true);
+    expect(result.evaluation.summary).toBe("ok");
     expect(result.evaluation.raw).toEqual(
       expect.objectContaining({
         passed_quality_bar: true,
         score: 4
       })
     );
+  });
+
+  it("fails managed criterion outputs closed when required schema fields are missing", async () => {
+    const harness = createHarness("codex-cli", async () => {
+      return {
+        status: "passed",
+        exitCode: 0,
+        stdout: '{"passed":true,"summary":"missing score","issues":[]}'
+      };
+    });
+
+    const result = await runAiCheck({
+      harness,
+      run_id: "run-managed",
+      execution_id: "exec-managed",
+      repo_alias: "main",
+      repo_path: process.cwd(),
+      model: "gpt-5-judge",
+      node_goal: "Grade this criterion.",
+      rubric: "Criterion rubric.",
+      evaluator_surface: "managed_criterion",
+      context_packet_path: "/tmp/runtime/context.json",
+      context_manifest_path: "/tmp/agent/context.md",
+      output_dir: "/tmp",
+      timeout_sec: 30,
+      signal: undefined
+    });
+
+    expect(result.evaluation).toEqual(
+      expect.objectContaining({
+        passed: false,
+        summary: expect.stringContaining("score as a number from 0 to 1")
+      })
+    );
+    expect(result.evaluation.raw).toEqual(expect.objectContaining({ passed: true }));
   });
 
   it("writes AI check prompts to the provided prompt path for audit parity with agent nodes", async () => {

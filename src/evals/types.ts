@@ -126,6 +126,14 @@ export interface EvalScenarioWorkflow {
   launch_profile?: string;
 }
 
+export interface EvalScenarioMeasurement {
+  claim: string;
+  scenario_type: string;
+  metrics: string[];
+  expected_failure_modes: string[];
+  tweak_signal: string;
+}
+
 export interface EvalExpectedArtifact {
   name: string;
   contains?: string[];
@@ -135,6 +143,9 @@ export interface EvalExpectedSupervisor {
   classifications?: string[];
   gatherers?: string[];
   apply_actions?: string[];
+  forbidden_apply_actions?: string[];
+  recovery_diagnoses?: string[];
+  forbidden_recovery_diagnoses?: string[];
 }
 
 export interface EvalScenarioRealWorldMetadata {
@@ -166,6 +177,7 @@ export interface EvalScenario {
   bucket: string;
   difficulty: string;
   description: string;
+  measurement: EvalScenarioMeasurement;
   scenario_dir: string;
   graph_template_path: string;
   environment: EvalScenarioEnvironment;
@@ -276,6 +288,44 @@ export interface EvalTraceAttempt {
   artifacts?: Record<string, string>;
 }
 
+export interface EvalTracePromptDiagnosticEntry {
+  path: string;
+  prompt_kind?: string;
+  renderer?: string;
+  total_chars?: number;
+  context_pointer_count?: number;
+  context_read_first_count?: number;
+  context_glob_set_count?: number;
+  context_glob_match_count?: number;
+  context_glob_included_count?: number;
+  context_limited_glob_count?: number;
+  has_supervisor_recovery?: boolean;
+  warnings: string[];
+}
+
+export interface EvalTracePromptDiagnosticsSummary {
+  count: number;
+  total_chars: number;
+  max_prompt_chars: number;
+  context_pointer_count: number;
+  context_read_first_count: number;
+  context_glob_set_count: number;
+  context_glob_match_count: number;
+  context_glob_included_count: number;
+  context_limited_glob_count: number;
+  warnings: string[];
+  warning_counts: Record<string, number>;
+  entries: EvalTracePromptDiagnosticEntry[];
+}
+
+export interface EvalTraceRecoveryLearning {
+  diagnosis?: string;
+  followed_required_next_action?: string;
+  followed_validation_gate?: string;
+  material_delta_used?: string;
+  repeated_forbidden_tactic?: string;
+}
+
 export interface EvalTrajectoryEvent {
   order: number;
   kind: string;
@@ -323,9 +373,11 @@ export interface EvalTracePacket {
       material_delta_count?: number;
       fallback_if_repeated?: string;
     }>;
+    recovery_learning: EvalTraceRecoveryLearning[];
     intervention_count: number;
     recovery_count: number;
   };
+  prompt_diagnostics: EvalTracePromptDiagnosticsSummary;
   delivery: {
     manifest_path?: string;
     review_brief_path?: string;
@@ -343,6 +395,11 @@ export interface EvalTracePacket {
     recovery_cycles: number;
     simulation_events: number;
     trajectory_events: number;
+    prompt_diagnostics_count: number;
+    prompt_diagnostics_warnings: number;
+    prompt_diagnostics_total_chars: number;
+    prompt_diagnostics_max_chars: number;
+    recovery_learning_records: number;
     duration_ms?: number;
   };
 }
@@ -365,6 +422,11 @@ export interface EvalScorecard {
     recovery_cycles: number;
     duration_ms?: number;
     blockers: number;
+    prompt_diagnostics_count?: number;
+    prompt_diagnostics_warnings?: number;
+    prompt_diagnostics_total_chars?: number;
+    prompt_diagnostics_max_chars?: number;
+    recovery_learning_records?: number;
   };
   prompt_feedback: {
     helpful_sections: string[];

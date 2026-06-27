@@ -31,7 +31,7 @@ Supported criteria:
 - `command`: deterministic shell command. Passes with score `1` when the command passes and score `0` when it fails.
 - `rubric`: AI score from `0` to `1` against a declared target. Use `target: "workspace"` for the current candidate as a whole, or `target: "artifact:<name>"` for one draft graph-addressable artifact.
 
-Criteria weights must sum to `1`. Required criteria are hard blockers. Passing requires no required blockers and `total_score >= pass_threshold`.
+Criteria weights must sum to `1`. Required criteria are hard blockers. Passing requires no required blockers and `total_score >= pass_threshold`. `pass_threshold` also gates every required criterion score, so a required rubric criterion below threshold keeps the loop retrying even if the evaluator returned `passed: true`.
 
 For code work, use criteria that reflect the real review bar: correctness, existing repo conventions, privacy/security when relevant, no AI slop, validation evidence, and handoff quality. Do not spread weights evenly by habit; higher-risk criteria should carry higher weight.
 
@@ -39,21 +39,20 @@ For code work, use criteria that reflect the real review bar: correctness, exist
 
 Default graph-addressable artifacts:
 
-- `summary`: final human-readable handoff.
-- `packet`: final machine-readable scorecard, criterion results, validation evidence, residual risks, and next actions.
+- `packet`: final machine-readable scorecard, criterion results, validation evidence, promoted artifact refs, and residual risks.
 
-Authors can add or override artifacts with the normal `artifacts` field. Targeted rubric criteria can grade default artifacts or authored artifacts.
+Authors can add artifacts with the normal `artifacts` field. Targeted rubric criteria can grade user-authored artifacts before promotion. Add a human-readable `summary` artifact only when the graph explicitly needs one; `packet` is runtime-owned and is not drafted or graded before the completion gate.
 
 ## Runtime Shape
 
 The pattern lowers into:
 
 1. A repeat loop.
-2. A planning agent that reads task context, prior scorecards, criterion feedback, and command output, then writes `cycle-plan.md` without editing the workspace.
-3. A generate-and-validate agent that follows the plan, edits the workspace when needed, uses available CLIs naturally, runs focused validation when feasible, and writes work notes plus draft graph-addressable artifacts.
+2. A planning agent that reads task context, prior scorecards, criterion feedback, command output, and current workspace state, then writes `plan.md` without editing the workspace.
+3. A generate-and-validate agent that uses `plan.md` as guidance, adapts when workspace evidence contradicts it, edits the workspace when needed, uses available CLIs naturally, runs focused validation when feasible, and writes work notes plus draft user-authored final artifacts after doing the work.
 4. Parallel completion criteria.
 5. A deterministic scorecard gate.
-6. A final graph-addressable artifact publisher from the latest passing cycle.
+6. A deterministic finalizer that writes the runtime-owned `packet` and promotes accepted user-authored draft artifacts from the latest passing cycle.
 
 The normal supervisor still handles internal runtime failures. Criterion misses are loop feedback and do not spend supervisor budget while cycles remain. If the repeat exhausts, Agentflow persists the latest completion scorecard into the attempt completion packet, emits supervisor-visible managed completion evidence, and lets the supervisor drive a causal recovery only when it can make a real material delta.
 
@@ -70,7 +69,7 @@ Use `phases` when planning, execution, verification, and publication need differ
 - `runtime.profile`: phase-specific profile; phase-level repo switching is not supported.
 - `model`, `reasoning_effort`, `sandbox`: phase-specific prompt-backed execution policy.
 
-Phase overrides inherit the parent managed contract. They append to the built-in phase contract and do not create separate graph-addressable artifacts, change completion criteria, weaken constraints, or switch repos. Keep them narrow: planning improves the next plan, execution completes and validates the selected plan, verification judges current evidence, and publication only publishes claims supported by the passing scorecard.
+Phase overrides inherit the parent managed contract. They append to the built-in phase contract and do not create separate graph-addressable artifacts, change completion criteria, weaken constraints, or switch repos. Keep them narrow: planning improves the next plan, execution completes and validates the selected plan, verification judges current evidence, and finalization only exposes runtime-owned evidence plus accepted user-authored drafts supported by the passing scorecard.
 
 ## Example
 
@@ -105,6 +104,13 @@ Phase overrides inherit the parent managed contract. They append to the built-in
       }
     ]
   },
+  "artifacts": {
+    "summary": {
+      "from": "output_dir",
+      "path": "summary.md",
+      "description": "Human-readable handoff requested by this graph."
+    }
+  },
   "completion": {
     "max_cycles": 3,
     "pass_threshold": 0.85,
@@ -137,7 +143,7 @@ Phase overrides inherit the parent managed contract. They append to the built-in
       "intent": {
         "goal": "Plan from the latest scorecard and avoid designing unrelated architecture.",
         "acceptance_criteria": [
-          "Name the smallest credible validation command."
+          "Name the strongest focused validation command."
         ]
       }
     },

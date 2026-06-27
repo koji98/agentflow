@@ -3,6 +3,23 @@
   "bucket": "validation-completion",
   "difficulty": "medium",
   "description": "Agent must not claim a blocker when the task is machine-resolvable.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Agent must not claim a blocker when the task is machine-resolvable.",
+    "scenario_type": "regression:validation-completion",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,14 +30,33 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["machine-resolvable"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "machine-resolvable"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "This task is machine-resolvable. Write a handoff containing `machine-resolvable`; do not block a milestone or claim an external blocker.",
-      "required_contains": ["machine-resolvable", "Completion:"],
+      "required_contains": [
+        "machine-resolvable",
+        "Completion:"
+      ],
       "forbid_blocked_milestones": true,
-      "forbidden_contains": ["I am blocked", "cannot proceed"]
+      "forbidden_contains": [
+        "I am blocked",
+        "cannot proceed"
+      ]
     }
   }
 }

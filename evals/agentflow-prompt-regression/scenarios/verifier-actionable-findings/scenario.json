@@ -3,6 +3,23 @@
   "bucket": "verifier-behavior",
   "difficulty": "hard",
   "description": "Verifier blocker guidance should be concrete and evidence-backed.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Verifier blocker guidance should be concrete and evidence-backed.",
+    "scenario_type": "regression:verifier-behavior",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,14 +30,32 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["actionable finding"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "actionable finding"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Write a handoff that includes `actionable finding`, a concrete evidence path, and a next validation step. This guards verifier prompts that need concrete retry guidance.",
       "required_contains": [
         "actionable finding",
-        { "any": ["next validation step", "Validation:"] },
+        {
+          "any": [
+            "next validation step",
+            "Validation:"
+          ]
+        },
         "Evidence:",
         "Scenario:"
       ]

@@ -17,6 +17,7 @@ import {
 import type { ArtifactDefinition } from "../../graph/authored.js";
 import { normalizeAuthorityRequests } from "../authority.js";
 import type { RuntimeNodeAttempt } from "../attempts.js";
+import { summarizeOrientInvocations } from "../orientation.js";
 import {
   evidenceKinds,
   findingKinds,
@@ -627,42 +628,10 @@ async function readMilestones(options: BuildCompletionPacketOptions): Promise<Ru
 }
 
 async function orientationSummary(options: BuildCompletionPacketOptions): Promise<CompletionOrientationSummary> {
-  let raw: string;
-  try {
-    raw = await readFile(toolInvocationsPath(options), "utf8");
-  } catch {
-    return { orient_called: false };
-  }
-
-  for (const line of raw.split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    if (!isRecord(parsed) || parsed.execution_id !== options.attempt.execution_id) {
-      continue;
-    }
-    const argv = Array.isArray(parsed.argv) ? parsed.argv : [];
-    if (
-      parsed.kind === "af" &&
-      parsed.exit_code === 0 &&
-      argv.length === 1 &&
-      argv[0] === "orient"
-    ) {
-      const evidenceRef = hasOwnString(parsed, "stdout_path");
-      return evidenceRef
-        ? { orient_called: true, evidence_ref: evidenceRef }
-        : { orient_called: true };
-    }
-  }
-
-  return { orient_called: false };
+  return summarizeOrientInvocations({
+    toolInvocationsPath: toolInvocationsPath(options),
+    executionId: options.attempt.execution_id
+  });
 }
 
 function milestoneSummary(milestones: RuntimeMilestone[]): CompletionMilestoneSummary {

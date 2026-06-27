@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import type { AuthoredGraphDocument } from "../../src/graph/authored.js";
 import { compileAuthoredGraph } from "../../src/graph/compile.js";
 import { normalizeAuthoredGraphDocument } from "../../src/graph/normalize.js";
 import { resolveLaunchConfig } from "../../src/graph/profiles.js";
-import { resolveExecutionArtifactsDirectory } from "../../src/artifacts/paths.js";
+import { resolveExecutionArtifactsDirectory, resolveExecutionRuntimeContextPath } from "../../src/artifacts/paths.js";
 import { closeNodeAttempt, createAttemptRegistry, openNodeAttempt } from "../../src/runtime/attempts.js";
 import { resolveExecutionContext } from "../../src/runtime/context/resolve.js";
 import type { SupervisorRecoveryEnvelope } from "../../src/supervisor/types.js";
@@ -252,7 +252,15 @@ describe("context resolution", () => {
             from: "runtime_supervisor_recovery"
         }));
         const recoveryBrief = await readFile(resolved.packet.materials[0]!.pointer_path, "utf8");
+        expect(recoveryBrief).toContain("This is a retry. The original task contract is unchanged.");
         expect(recoveryBrief).toContain("The original goal, acceptance criteria, constraints, repo authority, sandbox, and declared artifacts are unchanged.");
+        expect(recoveryBrief.indexOf("## Prior Failure")).toBeLessThan(recoveryBrief.indexOf("## What Changed"));
+        expect(recoveryBrief.indexOf("## What Changed")).toBeLessThan(recoveryBrief.indexOf("## Required Next Action"));
+        expect(recoveryBrief.indexOf("## Required Next Action")).toBeLessThan(recoveryBrief.indexOf("## Read First"));
+        expect(recoveryBrief.indexOf("## Read First")).toBeLessThan(recoveryBrief.indexOf("## Preserve Progress"));
+        expect(recoveryBrief.indexOf("## Preserve Progress")).toBeLessThan(recoveryBrief.indexOf("## Discard / Do Not Redo"));
+        expect(recoveryBrief.indexOf("## Discard / Do Not Redo")).toBeLessThan(recoveryBrief.indexOf("## Validation Before Completion"));
+        expect(recoveryBrief.indexOf("## Audit Metadata")).toBeGreaterThan(recoveryBrief.indexOf("## Validation Before Completion"));
         expect(recoveryBrief).toContain("Prior Attempt Evidence");
         expect(recoveryBrief).toContain(join(tempRoot, "prior-attempt", "agent", "response.md"));
         expect(recoveryBrief).not.toContain("Prior execution");
@@ -375,6 +383,7 @@ describe("context resolution", () => {
         expect(manifest).toContain("Context entries are pointers.");
         expect(manifest).toContain("## Pointers");
         expect(manifest).toContain("| Name | Kind | Pointer | What | Why |");
+        expect(manifest).not.toContain("## Task Context");
         expect(manifest).not.toContain("Omitted items");
         expect(manifest).not.toContain("Pointer items");
         expect(manifest).toContain("src.txt");
@@ -1291,9 +1300,185 @@ describe("context resolution", () => {
             },
             attempts: createAttemptRegistry()
         });
-        expect(resolved.packet.materials).toHaveLength(2);
-        const pointerContents = await Promise.all(resolved.packet.materials.map((item) => readFile(item.pointer_path, "utf8")));
-        expect(pointerContents).toEqual(["a-first\n", "m-middle\n"]);
+        expect(resolved.packet.materials).toHaveLength(1);
+        expect(resolved.packet.materials[0]).toEqual(expect.objectContaining({
+            key: "markdown",
+            priority_bucket: "reference_set",
+            is_broad_reference: true,
+            source_authored_order: 0,
+            match_count: 3,
+            included_count: 2
+        }));
+        const indexText = await readFile(resolved.packet.materials[0]!.pointer_path, "utf8");
+        expect(indexText).toContain("# Context Glob: markdown");
+        expect(indexText).toContain("Pattern: `*.md`");
+        expect(indexText).toContain("Matches found: 3");
+        expect(indexText).toContain("Matches included: 2");
+        expect(indexText).toContain("Limit: 2");
+        expect(indexText).toContain("This set was limited from 3 matches to 2 included files.");
+        expect(indexText).toContain("| 1 | `a-first.md` |");
+        expect(indexText).toContain("| 2 | `m-middle.md` |");
+        expect(indexText).not.toContain("z-last.md");
+        const manifest = await readFile(resolved.manifest_path, "utf8");
+        expect(manifest).toContain("## Reference Sets");
+        expect(manifest).toContain("| `markdown` | `workspace_glob` | `runtime/globs/markdown.md` | 2 of 3 | This context is required by the test scenario. |");
+        expect(manifest).not.toContain("a-first.md");
+        expect(resolved.packet.totals).toEqual({
+            pointer_count: 1,
+            file_count: 2
+        });
+        await rm(tempRoot, { recursive: true, force: true });
+    });
+    it("renders mixed context into priority sections and keeps glob file provenance in runtime state", async () => {
+        const tempRoot = await mkdtemp(join(tmpdir(), "agentflow-context-priority-"));
+        const repoDir = join(tempRoot, "repo");
+        const producerDir = join(tempRoot, "producer");
+        await mkdir(join(repoDir, "docs"), { recursive: true });
+        await mkdir(resolveExecutionArtifactsDirectory(producerDir), { recursive: true });
+        await writeFile(join(repoDir, "requirements.md"), "requirements\n", "utf8");
+        await writeFile(join(repoDir, "docs", "a.md"), "a doc\n", "utf8");
+        await writeFile(join(repoDir, "docs", "b.md"), "b doc\n", "utf8");
+        await writeFile(join(resolveExecutionArtifactsDirectory(producerDir), "handoff.md"), "upstream handoff\n", "utf8");
+        const graph = compileGraph({
+            version: "1",
+            graph_id: "context-priority",
+            repos: {
+                main: { path: "." }
+            },
+            defaults: {
+                launch_profile: "default"
+            },
+            profiles: {
+                default: {
+                    harness: "codex-cli"
+                }
+            },
+            graph: {
+                type: "sequence",
+                id: "root",
+                steps: [
+                    {
+                        type: "exec",
+                        id: "producer",
+                        command: "placeholder",
+                        artifacts: {
+                            handoff: {
+                                from: "output_dir",
+                                path: "handoff.md",
+                                description: "Producer handoff."
+                            }
+                        }
+                    },
+                    {
+                        type: "exec",
+                        id: "consumer",
+                        command: "placeholder",
+                        support: {
+                            context: [
+                                {
+                                    kind: "artifact",
+                                    ref: "producer.handoff",
+                                    name: "producer_handoff",
+                                    what: "Upstream handoff.",
+                                    why: "It defines the current repair target."
+                                },
+                                {
+                                    name: "requirements",
+                                    kind: "workspace_file",
+                                    path: "requirements.md",
+                                    what: "Requirements.",
+                                    why: "They constrain the task."
+                                },
+                                {
+                                    name: "docs",
+                                    kind: "workspace_glob",
+                                    path: "docs/*.md",
+                                    what: "Reference docs.",
+                                    why: "Search selectively when requirements need more detail."
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        });
+        const producerNode = graph.nodes.find((node) => node.authored_id === "producer")!;
+        const consumerNode = graph.nodes.find((node) => node.authored_id === "consumer")!;
+        const attempts = createAttemptRegistry();
+        const producerAttempt = openNodeAttempt(attempts, producerNode, producerDir);
+        closeNodeAttempt(attempts, producerAttempt.execution_id, {
+            status: "passed",
+            outcome: "passed",
+            artifacts: {
+                handoff: join(resolveExecutionArtifactsDirectory(producerDir), "handoff.md")
+            }
+        });
+        const executionDir = join(tempRoot, "consumer");
+        const resolved = await resolveExecutionContext({
+            compiled_graph: graph,
+            node: consumerNode,
+            execution_id: "exec__consumer__attempt_1",
+            execution_dir: executionDir,
+            workspace_path: repoDir,
+            repo_workspaces: {
+                main: repoDir
+            },
+            attempts
+        });
+        const manifest = await readFile(resolved.manifest_path, "utf8");
+        expect(manifest).toContain("Open read-first pointers before broad search unless the task clearly requires discovery.");
+        expect(manifest).toContain("## Current Work");
+        expect(manifest).toContain("## Task Context");
+        expect(manifest).toContain("## Reference Sets");
+        expect(manifest.indexOf("## Current Work")).toBeLessThan(manifest.indexOf("## Task Context"));
+        expect(manifest.indexOf("## Task Context")).toBeLessThan(manifest.indexOf("## Reference Sets"));
+        expect(manifest).toContain("| `producer_handoff` | `artifact` |");
+        expect(manifest).toContain("| `requirements` | `workspace_file` |");
+        expect(manifest).toContain("| `docs` | `workspace_glob` | `runtime/globs/docs.md` | 2 of 2 | Search selectively when requirements need more detail. |");
+        expect(manifest).not.toContain("human-debug");
+        const contextPacket = JSON.parse(await readFile(resolveExecutionRuntimeContextPath(executionDir), "utf8")) as {
+            materials: Array<{
+                key: string;
+                priority_bucket?: string;
+                priority_rank?: number;
+                source_authored_order?: number;
+                match_count?: number;
+                included_count?: number;
+                glob_files?: Array<{ path: string; resolved_path: string; digest: string; size_bytes: number }>;
+            }>;
+        };
+        expect(contextPacket.materials.map((item) => [item.key, item.priority_bucket, item.priority_rank])).toEqual([
+            ["producer_handoff", "current_work", 0],
+            ["requirements", "task_context", 0],
+            ["docs", "reference_set", 0]
+        ]);
+        const globMaterial = contextPacket.materials.find((item) => item.key === "docs")!;
+        expect(globMaterial).toEqual(expect.objectContaining({
+            source_authored_order: 2,
+            match_count: 2,
+            included_count: 2
+        }));
+        expect(globMaterial.glob_files).toEqual([
+            expect.objectContaining({
+                path: "docs/a.md",
+                resolved_path: join(repoDir, "docs", "a.md"),
+                digest: expect.any(String),
+                size_bytes: (await stat(join(repoDir, "docs", "a.md"))).size
+            }),
+            expect.objectContaining({
+                path: "docs/b.md",
+                resolved_path: join(repoDir, "docs", "b.md"),
+                digest: expect.any(String),
+                size_bytes: (await stat(join(repoDir, "docs", "b.md"))).size
+            })
+        ]);
+        const provenance = JSON.parse(await readFile(resolved.provenance_path, "utf8")) as {
+            workspace_context: Array<{ key: string; files?: Array<{ size_bytes?: number }> }>;
+        };
+        expect(provenance.workspace_context.find((entry) => entry.key === "docs")?.files).toEqual([
+            expect.objectContaining({ path: "docs/a.md", size_bytes: (await stat(join(repoDir, "docs", "a.md"))).size }),
+            expect.objectContaining({ path: "docs/b.md", size_bytes: (await stat(join(repoDir, "docs", "b.md"))).size })
+        ]);
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("filters glob inputs through root ignore files and hard runtime excludes", async () => {
@@ -1358,7 +1543,11 @@ describe("context resolution", () => {
             attempts: createAttemptRegistry()
         });
         expect(resolved.packet.materials).toHaveLength(1);
-        expect(await readFile(resolved.packet.materials[0]!.pointer_path, "utf8")).toBe("keep\n");
+        const indexText = await readFile(resolved.packet.materials[0]!.pointer_path, "utf8");
+        expect(indexText).toContain("| 1 | `src/keep.md` |");
+        expect(indexText).not.toContain("ignored-dir/skip.md");
+        expect(indexText).not.toContain("node_modules/skip.md");
+        expect(indexText).not.toContain(".agentflow/skip.md");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("lets explicit file inputs bypass ignore filtering", async () => {
@@ -1474,9 +1663,9 @@ describe("context resolution", () => {
             },
             attempts: createAttemptRegistry()
         });
-        expect(resolved.packet.materials).toHaveLength(5);
+        expect(resolved.packet.materials).toHaveLength(1);
         expect(resolved.packet.totals).toEqual({
-            pointer_count: 5,
+            pointer_count: 1,
             file_count: 5
         });
         await rm(tempRoot, { recursive: true, force: true });

@@ -1,7 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 
-import type { ArtifactDefinition } from "../../graph/authored.js";
+import type { ArtifactDefinition, ManagedPromptContract } from "../../graph/authored.js";
 import type { CliHint } from "../../graph/authored.js";
 import type { ResolvedSkill, ResolvedTool } from "../../graph/compiled.js";
 import type { HarnessCapabilities } from "../../graph/harness_capabilities.js";
@@ -13,6 +13,7 @@ import type {
 } from "../../supervisor/types.js";
 
 export type HarnessKind = "codex-cli" | "cursor-cli";
+export type AiEvaluatorSurface = "ai_check" | "managed_criterion" | "eval_quality_judge";
 
 export interface ArtifactRepairPromptContext {
   repairAttempt: number;
@@ -48,8 +49,11 @@ export interface AgentInvocation {
   nodeGoal?: string;
   nodeAcceptanceCriteria?: string[];
   nodeConstraints?: string[];
+  managedPrompt?: ManagedPromptContract;
   rubric?: string;
   aiCheckOutputSchema?: string;
+  aiEvaluatorSurface?: AiEvaluatorSurface;
+  aiCheckQualityThreshold?: number;
   contextPacketPath: string;
   contextManifestPath: string;
   contextManifest: string;
@@ -425,6 +429,26 @@ function formatGraphContext(invocation: AgentInvocation): string[] {
   ];
 }
 
+function formatManagedPromptContract(invocation: AgentInvocation): string[] {
+  const prompt = invocation.managedPrompt;
+  if (!prompt) {
+    return [];
+  }
+
+  const sections = prompt.sections.flatMap((section) => [
+    "",
+    `### ${section.title}`,
+    ...section.lines
+  ]);
+
+  return [
+    "## Phase Brief",
+    `- Phase: ${prompt.phase}`,
+    `- Task: ${prompt.task}`,
+    ...sections
+  ];
+}
+
 function formatSupervisorRecoveryEnvelope(invocation: AgentInvocation): string[] {
   const envelope = invocation.supervisorRecoveryEnvelope;
 
@@ -563,6 +587,39 @@ function formatNodeTask(
   return lines;
 }
 
+function formatAiEvaluatorTarget(invocation: AgentInvocation): string[] {
+  switch (invocation.aiEvaluatorSurface ?? "ai_check") {
+    case "managed_criterion":
+      return [
+        "## Evaluation Target",
+        "- What is being judged: one managed completion criterion.",
+        "- Target: the criterion target described in the Check Task and Rubric, not the whole managed lifecycle.",
+        "- Allowed evidence: the provided context pointers, work notes, draft artifacts, validation evidence, and workspace evidence refs when present.",
+        "- Out of scope: new implementation work, unrelated downstream graph work, broad lifecycle grading, or claims unsupported by the provided evidence.",
+        "- Result controls: managed scorecard aggregation and retry feedback for this criterion."
+      ];
+    case "eval_quality_judge":
+      return [
+        "## Evaluation Target",
+        "- What is being judged: one eval quality criterion for one completed trial trace packet.",
+        "- Target: the scenario, variant, trial, trace packet, and declared eval evidence named in the Check Task and context.",
+        "- Allowed evidence: the judge packet, trace packet, run-root artifacts, prompt diagnostics, and local trial files referenced by context.",
+        "- Out of scope: rerunning the workflow, doing the task yourself, de-anonymizing variants, or letting quality scores excuse deterministic blockers.",
+        "- Result controls: eval scorecard quality grading only; it does not change the completed run outcome.",
+        `- Quality threshold: ${invocation.aiCheckQualityThreshold ?? 4}`
+      ];
+    case "ai_check":
+      return [
+        "## Evaluation Target",
+        "- What is being judged: this authored read-only AI check node.",
+        "- Target: the Check Task and Rubric below.",
+        "- Allowed evidence: graph context when relevant, the context pointers in this prompt, and workspace files needed for the check.",
+        "- Out of scope: modifying the workspace, redoing upstream work, or grading unrelated graph tasks.",
+        "- Result controls: this check node's pass/fail result."
+      ];
+  }
+}
+
 export function renderHarnessPrompt(invocation: AgentInvocation): string {
   const graphContext = formatGraphContext(invocation);
   const toolContract = formatToolContract(invocation.tools);
@@ -646,6 +703,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
       "Agentflow is a local graph runner for long-running engineering work.",
       "You are an AI evaluator executing one read-only check node in a wider Agentflow graph.",
       "Evaluate the check task below. Never modify the workspace. Your only output is structured JSON describing your judgment.",
+      "",
+      ...formatAiEvaluatorTarget(invocation),
       "",
       ...checkTask,
       "",
@@ -735,6 +794,7 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
 
   const hasSupervisorRecoveryEnvelope = Boolean(invocation.supervisorRecoveryEnvelope);
   const supervisorRecoveryEnvelope = formatSupervisorRecoveryEnvelope(invocation);
+  const managedPrompt = formatManagedPromptContract(invocation);
   const nodeTask = formatNodeTask(invocation, {
     title: hasSupervisorRecoveryEnvelope ? "Success Contract (Original Authored Node Task)" : "Success Contract",
     emptyGoal: "Complete the authored node intent goal.",
@@ -752,6 +812,8 @@ export function renderHarnessPrompt(invocation: AgentInvocation): string {
     "",
     ...nodeTask,
     "",
+    ...managedPrompt,
+    ...(managedPrompt.length > 0 ? [""] : []),
     ...supervisorRecoveryEnvelope,
     ...(supervisorRecoveryEnvelope.length > 0 ? [""] : []),
     ...formatWorkspaceContract(invocation),

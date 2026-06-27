@@ -3,6 +3,23 @@
   "bucket": "verifier-behavior",
   "difficulty": "medium",
   "description": "Verifier should prefer captured node evidence over verifier-side rerun failures.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Verifier should prefer captured node evidence over verifier-side rerun failures.",
+    "scenario_type": "regression:verifier-behavior",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect prompt diagnostics, context priority, glob/index packaging, read-first behavior, and prompt noise before changing task logic."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -16,20 +33,48 @@
         {
           "id": "captured-evidence-ok",
           "command": "prompt-validate",
-          "match": { "argv_exact": ["--case", "captured"] },
-          "response": { "stdout": "captured node evidence passed\n" }
+          "match": {
+            "argv_exact": [
+              "--case",
+              "captured"
+            ]
+          },
+          "response": {
+            "stdout": "captured node evidence passed\n"
+          }
         }
       ]
     }
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["captured node evidence passed"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "captured node evidence passed"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
-      "task": "Run `prompt-validate --case captured`, include `captured node evidence passed` in the handoff, and do not ask the verifier to rerun it.",
-      "required_contains": ["captured node evidence passed", "Validation:"],
-      "required_simulation": [{ "command": "prompt-validate", "rule_id": "captured-evidence-ok" }]
+      "task": "For this scenario, the exact validation command is `prompt-validate --case captured`. Run that command, not the default fixture validation script. Include `captured node evidence passed` in the handoff, and do not ask the verifier to rerun it.",
+      "required_contains": [
+        "captured node evidence passed",
+        "Validation:"
+      ],
+      "required_simulation": [
+        {
+          "command": "prompt-validate",
+          "rule_id": "captured-evidence-ok"
+        }
+      ]
     }
   }
 }

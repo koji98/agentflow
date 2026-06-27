@@ -10,6 +10,7 @@ import type { CompiledAgentNode } from "../graph/compiled.js";
 import type { EffectiveSupervisorPolicy } from "../graph/profiles.js";
 import type { HarnessName } from "../graph/schema.js";
 import { listAttemptsForCompiledNode, type RuntimeNodeAttempt } from "../runtime/attempts.js";
+import { writePromptDiagnostics } from "../runtime/harness/prompt_diagnostics.js";
 import { renderHarnessPrompt, type AgentInvocation, type HarnessAdapter } from "../runtime/harness/types.js";
 import type { RuntimeSession } from "../runtime/session.js";
 import { prepareAgentTools } from "../runtime/tools/setup.js";
@@ -291,7 +292,19 @@ export async function runRepairArtifactIntervention(options: {
       ...(options.supervisor_policy ? { supervisor_policy: options.supervisor_policy } : {}),
       ...(options.signal ? { signal: options.signal } : {})
     });
-    await writeFile(promptPath, `${renderHarnessPrompt(unavailableInvocation)}\n`, "utf8");
+    const renderedPrompt = renderHarnessPrompt(unavailableInvocation);
+    await writeFile(promptPath, `${renderedPrompt}\n`, "utf8");
+    await writePromptDiagnostics({
+      invocation: unavailableInvocation,
+      prompt: `${renderedPrompt}\n`,
+      renderer: "renderHarnessPrompt",
+      promptPath,
+      metadata: {
+        ...(harnessName ? { harness: harnessName } : {}),
+        compiledId: options.node.compiled_id,
+        authoredId: options.node.authored_id
+      }
+    });
     const stillMissing = await collectStillMissing(options.missing_artifacts);
     const reason = "Artifact repair could not run because the resolved harness adapter is unavailable.";
     await Promise.all([
@@ -402,7 +415,19 @@ export async function runRepairArtifactIntervention(options: {
     ...(options.supervisor_policy ? { supervisor_policy: options.supervisor_policy } : {}),
     ...(options.signal ? { signal: options.signal } : {})
   });
-  await writeFile(promptPath, `${renderHarnessPrompt(invocation)}\n`, "utf8");
+  const renderedPrompt = renderHarnessPrompt(invocation);
+  await writeFile(promptPath, `${renderedPrompt}\n`, "utf8");
+  await writePromptDiagnostics({
+    invocation,
+    prompt: `${renderedPrompt}\n`,
+    renderer: "renderHarnessPrompt",
+    promptPath,
+    metadata: {
+      harness: harness.kind,
+      compiledId: options.node.compiled_id,
+      authoredId: options.node.authored_id
+    }
+  });
   const result = await harness.run(invocation);
   const stillMissing = await collectStillMissing(options.missing_artifacts);
   const status =

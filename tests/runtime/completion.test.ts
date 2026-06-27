@@ -58,7 +58,7 @@ function makeAttempt(executionDir: string, overrides: Partial<RuntimeNodeAttempt
         ...overrides
     };
 }
-async function writeOrientInvocation(executionDir: string): Promise<void> {
+async function writeOrientInvocation(executionDir: string, overrides: Record<string, unknown> = {}): Promise<void> {
     const toolDir = resolveExecutionHumanDebugToolDirectory(executionDir);
     await mkdir(toolDir, { recursive: true });
     await writeFile(join(toolDir, "index.jsonl"), `${JSON.stringify({
@@ -67,8 +67,21 @@ async function writeOrientInvocation(executionDir: string): Promise<void> {
         kind: "af",
         tool: "af",
         argv: ["orient"],
-        exit_code: 0
+        exit_code: 0,
+        ...overrides
     })}\n`, "utf8");
+}
+async function writeOrientInvocationLedger(executionDir: string, records: Array<Record<string, unknown>>): Promise<void> {
+    const toolDir = resolveExecutionHumanDebugToolDirectory(executionDir);
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(join(toolDir, "index.jsonl"), records.map((record) => JSON.stringify({
+        execution_id: "exec__ship__attempt_1",
+        kind: "af",
+        tool: "af",
+        argv: ["orient"],
+        exit_code: 0,
+        ...record
+    })).join("\n") + "\n", "utf8");
 }
 async function writeCompletedMilestone(runRoot: string, runtimeDir?: string): Promise<void> {
     const milestoneRoot = join(runtimeDir ?? join(runRoot, "runtime"), "milestones");
@@ -146,6 +159,45 @@ describe("completion packet", () => {
         expect(packet.completion_status).toBe("incomplete");
         expect(packet.orientation.orient_called).toBe(false);
         expect(packet.blocking_reasons).toContain("af orient was not run for this agent node.");
+    });
+    it("summarizes successful af orient calls with count, timestamps, modes, and latest evidence", async () => {
+        await writeOrientInvocationLedger(executionDir, [
+            {
+                ts: "2026-05-03T12:00:10.000Z",
+                orientation_mode: "startup_restore",
+                output_path: join(resolveExecutionHumanDebugToolDirectory(executionDir), "0001-output.json")
+            },
+            {
+                ts: "2026-05-03T12:00:20.000Z",
+                orientation_mode: "startup_restore",
+                exit_code: 1,
+                output_path: join(resolveExecutionHumanDebugToolDirectory(executionDir), "0002-output.json")
+            },
+            {
+                ts: "2026-05-03T12:02:10.000Z",
+                orientation_mode: "refresh_full",
+                output_path: join(resolveExecutionHumanDebugToolDirectory(executionDir), "0003-output.json")
+            }
+        ]);
+        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "implementation-summary.md");
+        await writeFile(artifactPath, "real handoff\n", "utf8");
+        const packet = await buildCompletionPacket({
+            runRoot,
+            node: makeNode(),
+            attempt: makeAttempt(executionDir, {
+                artifacts: { implementation_summary: artifactPath }
+            }),
+            workspacePath: workspace,
+            sandbox: "workspace-write"
+        });
+        expect(packet.orientation).toEqual(expect.objectContaining({
+            orient_called: true,
+            orient_call_count: 2,
+            first_orient_at: "2026-05-03T12:00:10.000Z",
+            last_orient_at: "2026-05-03T12:02:10.000Z",
+            evidence_ref: join(resolveExecutionHumanDebugToolDirectory(executionDir), "0003-output.json")
+        }));
+        expect(packet.orientation.modes_seen).toEqual(["startup_restore", "refresh_full"]);
     });
     it("requires completed milestones before agent completion", async () => {
         await rm(join(runRoot, "runtime", "milestones", "exec__ship__attempt_1.json"), { force: true });
@@ -702,10 +754,10 @@ describe("completion packet", () => {
         ]);
     });
     it("does not require operational command literals from managed criteria text in artifacts", async () => {
-        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "cycle-plan.md");
+        const artifactPath = join(resolveExecutionArtifactsDirectory(executionDir), "plan.md");
         await writeFile(artifactPath, [
-            "Objective",
-            "Plan another cycle.",
+            "Task target",
+            "Plan the current work.",
             "",
             "Validation plan",
             "Run the managed completion criteria after execution."
@@ -715,7 +767,7 @@ describe("completion packet", () => {
             node: makeNode({
                 intent: {
                     goal: [
-                        "Prepare the next managed work cycle.",
+                        "Prepare the next deep work plan.",
                         "Completion Model:",
                         "- always_fail (required, weight 1): command `exit 1`"
                     ].join("\n"),
@@ -723,15 +775,15 @@ describe("completion packet", () => {
                     constraints: []
                 },
                 declared_artifacts: {
-                    cycle_plan: {
+                    plan: {
                         from: "output_dir",
-                        path: "cycle-plan.md",
-                        description: "Focused plan for the next deep work cycle."
+                        path: "plan.md",
+                        description: "Execution plan for satisfying the deep work task from the current state."
                     }
                 }
             }),
             attempt: makeAttempt(executionDir, {
-                artifacts: { cycle_plan: artifactPath }
+                artifacts: { plan: artifactPath }
             }),
             workspacePath: workspace,
             sandbox: "workspace-write"
@@ -759,7 +811,7 @@ describe("completion packet", () => {
                     work_notes: {
                         from: "output_dir",
                         path: "work-notes.md",
-                        description: "Notes from the current deep work cycle."
+                        description: "Notes and validation evidence from the current deep work result."
                     },
                     draft_summary: {
                         from: "output_dir",

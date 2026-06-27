@@ -83,6 +83,35 @@ describe("harness prompt rendering", () => {
     expect(prompt).not.toContain("Outcome verification grades your work against the acceptance criteria");
   });
 
+  it("renders managed phase guidance as a separate phase brief after the success contract", () => {
+    const prompt = renderHarnessPrompt(baseInvocation({
+      nodeGoal: "Execute the compact managed phase task.",
+      managedPrompt: {
+        phase: "execute",
+        task: "Satisfy the current managed phase from the current state.",
+        sections: [
+          {
+            title: "Phase Rules",
+            lines: [
+              "- Use `plan.md` as guidance, not as a limit.",
+              "- Cite concrete validation evidence before completion."
+            ]
+          }
+        ]
+      }
+    }));
+
+    expect(prompt).toContain("## Success Contract");
+    expect(prompt).toContain("Execute the compact managed phase task.");
+    expect(prompt).toContain("## Phase Brief");
+    expect(prompt).toContain("- Phase: execute");
+    expect(prompt).toContain("- Task: Satisfy the current managed phase from the current state.");
+    expect(prompt).toContain("### Phase Rules");
+    expect(prompt).toContain("Use `plan.md` as guidance, not as a limit.");
+    expect(prompt.indexOf("## Success Contract")).toBeLessThan(prompt.indexOf("## Phase Brief"));
+    expect(prompt.indexOf("## Phase Brief")).toBeLessThan(prompt.indexOf("## Workspace"));
+  });
+
   it("makes the node task primary and graph context secondary", () => {
     const prompt = renderHarnessPrompt(baseInvocation({
       graphGoal: "Ship the wider feature safely.",

@@ -4038,8 +4038,8 @@ describe("runtime engine", () => {
                 "codex-cli": harness
             }
         });
-        expect(run.outcome).toBe("failed");
-        expect(nodeInvocations).toHaveLength(2);
+        expect(run.outcome).toBe("passed");
+        expect(nodeInvocations).toHaveLength(3);
         expect(evidenceInvocations.length).toBeGreaterThan(1);
         const secondPrompt = renderHarnessPrompt(nodeInvocations[1]!);
         expect(secondPrompt).toContain("## Supervisor Recovery Case");
@@ -4054,6 +4054,10 @@ describe("runtime engine", () => {
         expect(secondPrompt.indexOf("## Supervisor Recovery Case")).toBeLessThan(secondPrompt.indexOf("## Graph Context"));
         expect(secondPrompt).toContain("Continue from the selected recovery boundary without changing the original node contract.");
         expect(secondPrompt).toContain("Prior attempt artifacts are evidence only");
+        const thirdPrompt = renderHarnessPrompt(nodeInvocations[2]!);
+        expect(thirdPrompt).toContain("Repeated symptom count: `2`");
+        expect(thirdPrompt).toContain("The previous retry missed the recovery directive");
+        expect(thirdPrompt).toContain("run `af orient`");
         const retryManifest = await readFile(nodeInvocations[1]!.contextManifestPath, "utf8");
         expect(retryManifest).toContain("supervisor_recovery_envelope");
         const retryPacket = JSON.parse(await readFile(nodeInvocations[1]!.contextPacketPath, "utf8")) as {
@@ -4079,14 +4083,16 @@ describe("runtime engine", () => {
                 })
             }),
             expect.objectContaining({
-                type: "supervisor.intervention.completed",
+                type: "supervisor.retry_scheduled",
                 payload: expect.objectContaining({
-                    action: "run_diagnostic",
-                    apply_action: "fail_contract_gap"
+                    repeated_fingerprint_count: 2,
+                    resume_decision: expect.objectContaining({
+                        required_next_action: expect.stringContaining("previous retry missed the recovery directive")
+                    })
                 })
             })
         ]));
-        expect(run.events.filter((event) => event.type === "supervisor.retry_scheduled")).toHaveLength(1);
+        expect(run.events.filter((event) => event.type === "supervisor.retry_scheduled")).toHaveLength(2);
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("resolves large authored context as pointers without repair retries", async () => {
@@ -4152,13 +4158,18 @@ describe("runtime engine", () => {
         expect(invocations).toHaveLength(1);
         const prompt = renderHarnessPrompt(invocations[0]!);
         expect(prompt).not.toContain("## Supervisor Recovery Case");
-        expect(prompt).toContain("markdown_1");
-        expect(prompt).toContain("markdown_3");
+        expect(prompt).toContain("## Reference Sets");
+        expect(prompt).toContain("| `markdown` | `workspace_glob` | `runtime/globs/markdown.md` | 3 of 3 | This context is required by the test scenario. |");
+        expect(prompt).not.toContain("markdown_1");
         const attempts = await readRunExecutionAttempts(runRoot);
         expect(attempts.map((attempt) => attempt.status)).toEqual(["passed"]);
         const manifest = await readFile(attempts[0]!.context_manifest_path!, "utf8");
-        expect(manifest).toContain("markdown_1");
+        expect(manifest).toContain("runtime/globs/markdown.md");
         expect(manifest).not.toContain("supervisor_context_repair");
+        const globIndex = await readFile(join(attempts[0]!.execution_dir, "context", "runtime", "globs", "markdown.md"), "utf8");
+        expect(globIndex).toContain("Matches included: 3");
+        expect(globIndex).toContain("`first.md`");
+        expect(globIndex).toContain("`second.md`");
         await rm(tempRoot, { recursive: true, force: true });
     });
     it("fails contractually without pausing when no typed authority request exists", async () => {

@@ -333,6 +333,13 @@ describe("graph validation", () => {
                                         acceptance_criteria: ["The managed work produces a summary."],
                                         constraints: ["Do not edit lockfiles."]
                                     },
+                                    artifacts: {
+                                        summary: {
+                                            from: "output_dir",
+                                            path: "summary.md",
+                                            description: "Explicit nested managed summary artifact."
+                                        }
+                                    },
                                     completion: {
                                         max_cycles: 1,
                                         pass_threshold: 1,

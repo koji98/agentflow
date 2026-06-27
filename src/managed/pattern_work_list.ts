@@ -10,12 +10,12 @@ import type { PatternDeepWorkPhaseName, PatternDeepWorkPhaseOverride } from "./p
 import {
   artifactContext,
   body,
+  managedPromptContract,
   managedId,
   mergeArtifacts,
   mergeSupportContext,
   maxConcurrency,
   outputDirArtifact,
-  renderPrompt,
   section,
   sharedAgentBase,
   sharedNonPromptNodeBase,
@@ -79,9 +79,12 @@ function workflowNodeId(rootId: string, suffix: string): string {
 }
 
 export function defaultPatternWorkListPublicArtifacts(): Record<string, ArtifactDefinition> {
-  return mergeArtifacts(
-    outputDirArtifact("summary", "summary.md", "Human-readable final summary for the completed work list."),
-    outputDirArtifact("work_items", "work-items.json", "Machine-readable index of frozen work-list items, item outcomes, validation evidence, and residual risks.")
+  return outputDirArtifact("work_items", "work-items.json", "Machine-readable index of frozen work-list items, item outcomes, validation evidence, and residual risks.");
+}
+
+function userAuthoredFinalArtifacts(artifacts: Record<string, ArtifactDefinition> | undefined): Record<string, ArtifactDefinition> {
+  return Object.fromEntries(
+    Object.entries(artifacts ?? {}).filter(([name]) => name !== "work_items")
   );
 }
 
@@ -108,8 +111,8 @@ function formatCriteria(criteria: PatternWorkListCompletionCriterion[]): string[
   });
 }
 
-function buildPlannerPrompt(config: PatternWorkListConfig): string {
-  return renderPrompt([
+function buildPlannerPrompt(config: PatternWorkListConfig) {
+  return managedPromptContract("plan", "Plan the finite ordered work-list needed to satisfy the parent task.", [
     body("You are planning a finite ordered list of work items required to satisfy this task. Do not edit product or source files in this phase."),
     section("Task Contract", [
       `Goal: ${config.intent.goal}`,
@@ -126,7 +129,7 @@ function buildPlannerPrompt(config: PatternWorkListConfig): string {
     section("Planning Rules", [
       "Plan only work needed for the task goal.",
       "Create reviewable items that are coherent enough to complete independently, but not so broad that evidence becomes vague.",
-      "Order items so each item can use earlier item handoffs as evidence.",
+      "Order items so each item can use earlier item results as evidence.",
       "Do not create speculative future work, unrelated cleanup, or optional polish items.",
       "Do not run or log implementation validation as blocked during planning; assign validation commands and evidence expectations to the planned items.",
       "The runtime will freeze this list before execution; later workers cannot add, remove, split, merge, or reorder items."
@@ -140,13 +143,13 @@ function buildPlannerPrompt(config: PatternWorkListConfig): string {
   ]);
 }
 
-function buildRunnerPrompt(config: PatternWorkListConfig): string {
+function buildRunnerPrompt(config: PatternWorkListConfig) {
   const worker = config.work_list.item_worker;
   const workerLines = worker.kind === "agent"
     ? [
         "Worker kind: agent.",
         "The runtime will launch one item worker per frozen item.",
-        "Each item worker uses the standard Agentflow work loop: orient, create milestones, attach evidence, validate, write item handoff, and complete."
+        "Each item worker uses the standard Agentflow work loop: orient, create milestones, attach evidence, validate, write one structured item result, and complete."
       ]
     : [
         "Worker kind: deep_work.",
@@ -154,14 +157,14 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
         `Pass threshold for each item gate: ${worker.completion.pass_threshold}`,
         ...formatCriteria(worker.completion.criteria),
         "The runtime will run a bounded deep-work lifecycle for each frozen item before moving to the next item.",
-        "Each item cycle runs planning, execution, verification, and publishing phases.",
+        "Each item cycle runs planning, execution, verification, and deterministic finalization phases.",
         "Item deep-work phases may add phase-specific intent, support, model, reasoning effort, sandbox, or profile policy.",
         "Phase intent is additive to the parent work-list contract and current frozen item contract.",
         "Use prior item scorecard feedback when present, but do not mutate the frozen list between cycles.",
         "If an item cannot be completed, record the concrete blocker and evidence instead of silently changing scope."
       ];
 
-  return renderPrompt([
+  return managedPromptContract("run_items", "Run frozen work-list items without mutating the frozen list.", [
     body("You are running the frozen work list. The runtime launches one item worker per frozen item and owns item status and aggregation."),
     section("Task Contract", [
       `Goal: ${config.intent.goal}`,
@@ -171,7 +174,7 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
     section("Frozen List Discipline", [
       "Read the frozen work list and current ledger from context.",
       "Do not add, remove, split, merge, or reorder work-list items.",
-      "Use prior completed item handoffs as pointer evidence for later items.",
+      "Use prior completed item results as pointer evidence for later items.",
       "If the frozen list is wrong, record the concrete blocker instead of silently changing it."
     ]),
     section("Item Guidance", [
@@ -186,7 +189,7 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
       "If a later item fails, keep earlier accepted item evidence as the starting point for the retry."
     ]),
     section("Output Contract", [
-      "Each item worker writes the item handoff, item result, and item validation artifacts in its own item execution directory.",
+      "Each item worker writes one structured item result artifact in its own item execution directory.",
       "The item result validation field is an object with passed, failed_then_fixed, unavailable, and blocked arrays. A completed item needs concrete evidence recorded under passed, failed_then_fixed, or unavailable.",
       "The runtime aggregates accepted item artifacts into final work-list artifacts.",
       "The final runtime step fails unless every frozen item is marked completed with evidence.",
@@ -198,8 +201,8 @@ function buildRunnerPrompt(config: PatternWorkListConfig): string {
 function buildPublisherPrompt(
   config: PatternWorkListConfig,
   publicArtifacts: Record<string, ArtifactDefinition>
-): string {
-  return renderPrompt([
+){
+  return managedPromptContract("publish", "Publish user-authored final artifacts from verified work item evidence.", [
     body("You are publishing final artifacts from verified work item evidence."),
     section("Task Contract", [
       `Goal: ${config.intent.goal}`,
@@ -207,7 +210,7 @@ function buildPublisherPrompt(
       ...listOrFallback("Constraints", config.intent.constraints, "Stay inside the authored task contract.")
     ]),
     section("Source Evidence", [
-      "Use the verified work-items artifact, frozen work list, and item handoffs from context.",
+      "Use the verified work-items artifact, frozen work list, and accepted item result evidence from context.",
       "Do not claim completion for items that the verified work-items artifact does not mark completed.",
       "Preserve residual risks and downstream implications."
     ]),
@@ -215,7 +218,7 @@ function buildPublisherPrompt(
       "Publish the declared final artifacts.",
       ...formatPublicArtifacts(publicArtifacts),
       "The `work_items` artifact is forwarded by the runtime from the deterministic verifier; do not rewrite it.",
-      "The `summary` artifact should summarize the frozen list, completed items, validation evidence, risks, and downstream constraints."
+      "Write only user-authored final artifacts that are declared on this node."
     ])
   ]);
 }
@@ -323,10 +326,11 @@ console.log("Frozen " + items.length + " work-list item(s).");
 `;
 }
 
-function buildFinalizeScript(): string {
+function buildFinalizeScript(workItemsPath: string): string {
   return String.raw`
 const fs = require("node:fs");
 const path = require("node:path");
+const workItemsPath = ${JSON.stringify(workItemsPath)};
 
 function fail(message) {
   console.error(message);
@@ -376,7 +380,6 @@ function validationEvidence(value, itemId) {
 
 const frozen = readJson("frozen work list", process.env.AGENTFLOW_CONTEXT_FROZEN_WORK_LIST);
 const results = readJson("item results", process.env.AGENTFLOW_CONTEXT_ITEM_RESULTS);
-const itemHandoffsPath = process.env.AGENTFLOW_CONTEXT_ITEM_HANDOFFS;
 const outputDir = process.env.AGENTFLOW_OUTPUT_DIR;
 if (!outputDir) fail("Missing AGENTFLOW_OUTPUT_DIR.");
 if (!frozen || !Array.isArray(frozen.items) || frozen.items.length === 0) {
@@ -384,9 +387,6 @@ if (!frozen || !Array.isArray(frozen.items) || frozen.items.length === 0) {
 }
 if (!results || !Array.isArray(results.items)) {
   fail('item-results.json must be an object with an "items" array.');
-}
-if (!itemHandoffsPath || !fs.existsSync(itemHandoffsPath)) {
-  fail("Missing item-handoffs.md artifact.");
 }
 
 for (const result of results.items) {
@@ -444,11 +444,11 @@ const workItems = {
   status: "completed",
   completed_at: new Date().toISOString(),
   item_count: verifiedItems.length,
-  item_handoffs_path: itemHandoffsPath,
   items: verifiedItems
 };
 fs.mkdirSync(outputDir, { recursive: true });
-fs.writeFileSync(path.join(outputDir, "work-items.json"), JSON.stringify(workItems, null, 2) + "\n");
+fs.mkdirSync(path.dirname(path.join(outputDir, workItemsPath)), { recursive: true });
+fs.writeFileSync(path.join(outputDir, workItemsPath), JSON.stringify(workItems, null, 2) + "\n");
 console.log("Verified " + verifiedItems.length + " completed work-list item(s).");
 `;
 }
@@ -478,14 +478,6 @@ function buildFinalizeContext(
     artifactContext("item_results", runItemsId, "item_results", {
       what: "Structured item results written by the item worker.",
       why: "The finalizer uses this to verify every frozen item completed."
-    }),
-    artifactContext("item_handoffs", runItemsId, "item_handoffs", {
-      what: "Human-readable item handoffs written by the item worker.",
-      why: "The finalizer and publisher need item evidence for the final handoff."
-    }),
-    artifactContext("item_validation", runItemsId, "item_validation", {
-      what: "Validation evidence for the executed work-list items.",
-      why: "The finalizer and publisher need validation evidence for completed items."
     })
   ];
 }
@@ -500,10 +492,6 @@ function buildPublishContext(
       what: "Runtime-validated frozen work list.",
       why: "The publisher needs the fixed item order and contracts."
     }),
-    artifactContext("item_handoffs", runItemsId, "item_handoffs", {
-      what: "Human-readable item handoffs.",
-      why: "The publisher needs item evidence for the final summary and packet."
-    }),
     artifactContext("verified_work_items", finalizeId, "work_items", {
       what: "Runtime-verified completed work item index.",
       why: "The publisher must only claim completed items from this verified artifact."
@@ -516,9 +504,11 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
   const planId = workflowNodeId(config.id, "plan");
   const freezeId = workflowNodeId(config.id, "freeze");
   const runItemsId = workflowNodeId(config.id, "run_items");
-  const finalizeId = workflowNodeId(config.id, "finalize");
   const agentShared = sharedAgentBase(config);
   const publicArtifacts = mergeArtifacts(defaultPatternWorkListPublicArtifacts(), config.artifacts ?? {});
+  const userArtifacts = userAuthoredFinalArtifacts(config.artifacts);
+  const hasPublisher = Object.keys(userArtifacts).length > 0;
+  const finalizeId = hasPublisher ? workflowNodeId(config.id, "finalize") : config.id;
 
   const planNode: AgentNode = {
     type: "agent",
@@ -534,7 +524,7 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       phase: "plan"
     },
     intent: {
-      goal: buildPlannerPrompt(config),
+      goal: "Plan the finite ordered work-list needed to satisfy the task. Do not edit product or source files in this planning phase.",
       acceptance_criteria: [
         "The work list is finite, ordered, and scoped to the task contract.",
         "The machine-readable list uses sequential ids w1, w2, w3, and so on.",
@@ -542,7 +532,8 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
         "The planner does not edit product or source files."
       ],
       constraints: config.intent.constraints
-    }
+    },
+    managed_prompt: buildPlannerPrompt(config)
   };
 
   const freezeNode: ExecNode = {
@@ -583,9 +574,7 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       buildRunnerContext(freezeId)
     ),
     artifacts: mergeArtifacts(
-      outputDirArtifact("item_handoffs", "item-handoffs.md", "Human-readable handoffs for every frozen work-list item."),
-      outputDirArtifact("item_results", "item-results.json", "Structured result for every frozen work-list item."),
-      outputDirArtifact("item_validation", "item-validation.md", "Validation evidence for the executed work-list items.")
+      outputDirArtifact("item_results", "item-results.json", "Structured result for every frozen work-list item.")
     ),
     managed_runtime: {
       kind: "pattern_work_list",
@@ -601,14 +590,15 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       }
     },
     intent: {
-      goal: buildRunnerPrompt(config),
+      goal: "Run the frozen work-list items and publish structured item results without mutating the frozen list.",
       acceptance_criteria: [
         "Every frozen work-list item has a result entry.",
         "Completed items include evidence, validation, risks, and downstream implications.",
         "The worker does not add, remove, split, merge, or reorder frozen work-list items."
       ],
       constraints: config.intent.constraints
-    }
+    },
+    managed_prompt: buildRunnerPrompt(config)
   };
 
   const finalizeNode: ExecNode = {
@@ -621,8 +611,10 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       buildFinalizeContext(freezeId, runItemsId)
     ),
     command: "node",
-    args: ["-e", buildFinalizeScript()],
-    artifacts: outputDirArtifact("work_items", "work-items.json", "Runtime-verified completed work item index."),
+    args: ["-e", buildFinalizeScript(publicArtifacts.work_items!.path)],
+    artifacts: hasPublisher
+      ? { work_items: publicArtifacts.work_items! }
+      : publicArtifacts,
     intent: {
       goal: "Verify every frozen work-list item completed and publish the stable work item index.",
       acceptance_criteria: [
@@ -634,7 +626,8 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
     }
   };
 
-  const publishNode: AgentNode = {
+  const publishNode: AgentNode | undefined = hasPublisher
+    ? {
     type: "agent",
     id: config.id,
     ...(config.label ? { label: config.label } : { label: "Publish Work List" }),
@@ -651,15 +644,17 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       }
     },
     intent: {
-      goal: buildPublisherPrompt(config, publicArtifacts),
+      goal: "Publish user-authored final artifacts from the verified work-items evidence without rewriting the runtime-owned work_items artifact.",
       acceptance_criteria: [
         ...config.intent.acceptance_criteria,
-        "The final artifacts summarize the frozen list, completed items, validation evidence, residual risks, and downstream constraints.",
+        "The user-authored final artifacts are grounded in the verified work-items evidence.",
         "The final artifacts expose only the stable completed item evidence."
       ],
       constraints: config.intent.constraints
-    }
-  };
+    },
+    managed_prompt: buildPublisherPrompt(config, publicArtifacts)
+  }
+    : undefined;
 
   return {
     type: "sequence",
@@ -670,7 +665,7 @@ export function buildPatternWorkList(config: PatternWorkListConfig): SequenceNod
       freezeNode,
       runItemsNode,
       finalizeNode,
-      publishNode
+      ...(publishNode ? [publishNode] : [])
     ]
   };
 }

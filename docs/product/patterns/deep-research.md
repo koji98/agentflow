@@ -40,11 +40,11 @@ The pattern lowers into:
 2. Balanced synthesis layers when there are more than three research reports.
 3. Final graph-addressable artifact publisher.
 
-Each synthesis node consumes at most three research reports. Groups are split as evenly as possible, so seven angles become synthesis groups of `2`, `2`, and `3`, not `3`, `3`, and `1`. Synthesis preserves major findings, collapses duplicate claims, keeps provenance, and carries conflicts or uncertainty forward.
+Each synthesis node consumes at most three research reports. Groups are split as evenly as possible, so seven angles become synthesis groups of `2`, `2`, and `3`, not `3`, `3`, and `1`. Synthesis preserves major findings, collapses duplicate claims, keeps original source-level provenance, and resolves conflicts when the evidence is sufficient instead of deferring every disagreement to the final publisher.
 
 Angle and synthesis artifacts are internal Markdown evidence in the run tree. They support the final contract but do not need to match final graph-addressable formatting. Research helpers run in internal disposable investigation workspaces that protect the source workspace. They may make temporary exploratory edits or run probes when that materially helps the investigation, but those changes are discarded and must not be presented as delivered implementation work. Graph authors do not configure this; `workspace_backend` remains only `inplace` or `worktree`.
 
-The final publisher resolves contradictions, cites evidence, captures uncertainty, and writes exactly one graph-addressable file: `research.md`. That file is the full research report. It should rewrite the angle and synthesis findings into one coherent, sufficiently detailed, conflict-resolved answer without relying on linked raw reports.
+The final publisher resolves contradictions, cites original source evidence, captures uncertainty, and writes exactly one graph-addressable file: `research.md`. That file is the full research report. It should rewrite the angle and synthesis findings into one coherent, sufficiently detailed, conflict-resolved answer without relying on linked raw reports. Final citations should point to source paths, commands, URLs, documents, or observed outputs, not to internal angle or synthesis artifacts.
 
 Angle and synthesis workers may reference related angle findings in prose, but they should not create links to other angle reports or produce companion graph-addressable files.
 

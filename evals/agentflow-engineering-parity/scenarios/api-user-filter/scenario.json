@@ -3,6 +3,25 @@
   "bucket": "engineering-parity",
   "difficulty": "medium",
   "description": "Fix API query behavior for active filtering and stable sorting.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Fix API query behavior for active filtering and stable sorting.",
+    "scenario_type": "parity:engineering-parity",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "workspace scope",
+      "delivery auditability",
+      "direct Codex parity"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "workspace changes are missing, forbidden, or out of scope",
+      "delivery package is missing, unsupported, or not review-ready",
+      "Agentflow underperforms the direct Codex baseline on deterministic or quality evidence"
+    ],
+    "tweak_signal": "Inspect Agentflow versus direct Codex deltas, prompt/context overhead, scope control, validation evidence, and delivery auditability before changing runtime behavior."
+  },
   "workflow": {
     "graph_template": "../../templates/primitive-agent.graph.template.json",
     "harness": "codex-cli",

@@ -309,7 +309,9 @@ export async function runQualityCriterion(options: {
     ...(options.criterion.reasoning_effort ? { reasoning_effort: options.criterion.reasoning_effort } : {}),
     skip_git_repo_check: true,
     node_goal: [
-      "Grade this Agentflow workflow trial using only the referenced local files.",
+      "Grade this eval quality criterion for one completed Agentflow workflow trial.",
+      "Judge the trace packet and declared eval artifacts; do not rerun the workflow or do the task yourself.",
+      "Quality scores cannot excuse deterministic blockers recorded in the trace packet or criterion evidence.",
       "Return strict JSON with passed_quality_bar, score, dimension_scores, blockers, rationale, and prompt_feedback.",
       "The trace packet is embedded in the context packet and the trial root is available for inspecting run-root artifacts.",
       `Criterion: ${options.criterion.id}`,
@@ -318,6 +320,8 @@ export async function runQualityCriterion(options: {
       `Trial: ${options.trial_id}`
     ].join("\n"),
     rubric,
+    evaluator_surface: "eval_quality_judge",
+    quality_threshold: options.criterion.threshold ?? 4,
     output_schema: JSON.stringify({
       passed_quality_bar: true,
       score: 4,
@@ -342,11 +346,7 @@ export async function runQualityCriterion(options: {
 
   await writeFile(resolve(options.output_dir, "ai-check-result.json"), `${JSON.stringify(aiResult, null, 2)}\n`, "utf8");
 
-  const parsed = parseJudgeResult(
-    typeof aiResult.evaluation.raw === "string"
-      ? aiResult.evaluation.raw
-      : JSON.stringify(aiResult.evaluation.raw ?? aiResult.evaluation)
-  );
+  const parsed = parseJudgeResult(JSON.stringify(aiResult.evaluation.raw ?? aiResult.evaluation));
 
   if (aiResult.harness_result.status !== "passed" || !parsed.result) {
     return criterionErrorResult({
@@ -358,7 +358,15 @@ export async function runQualityCriterion(options: {
 
   const payload: EvalJudgePayload = parsed.result;
   const threshold = options.criterion.threshold ?? 4;
-  const passed = payload.passed_quality_bar && payload.score >= threshold && payload.blockers.length === 0;
+  const deterministicBlockers =
+    options.trace_packet.outcome.status === "passed"
+      ? []
+      : [`Trace outcome status is ${options.trace_packet.outcome.status}; quality scoring cannot override a non-passing run outcome.`];
+  const blockers = [...deterministicBlockers, ...payload.blockers];
+  const passed = deterministicBlockers.length === 0
+    && payload.passed_quality_bar
+    && payload.score >= threshold
+    && payload.blockers.length === 0;
 
   return {
     id: options.criterion.id,
@@ -366,11 +374,11 @@ export async function runQualityCriterion(options: {
     required: options.criterion.required,
     status: passed ? "passed" : "failed",
     passed,
-    blockers: payload.blockers,
+    blockers,
     assertions: [{
       id: "quality_threshold",
       passed,
-      evidence: `score=${payload.score}; threshold=${threshold}; passed_quality_bar=${payload.passed_quality_bar}`
+      evidence: `score=${payload.score}; threshold=${threshold}; passed_quality_bar=${payload.passed_quality_bar}; deterministic_blockers=${deterministicBlockers.length}`
     }],
     output_dir: options.output_dir,
     score: payload.score,

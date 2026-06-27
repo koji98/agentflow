@@ -3,6 +3,23 @@
   "bucket": "supervisor-managed",
   "difficulty": "hard",
   "description": "Managed loop exhaustion should leave repairable evidence instead of silent terminal drift.",
+  "measurement": {
+    "claim": "Agentflow should satisfy this scenario's observable workflow contract: Managed loop exhaustion should leave repairable evidence instead of silent terminal drift.",
+    "scenario_type": "regression:supervisor-managed",
+    "metrics": [
+      "final outcome",
+      "artifact evidence",
+      "delivery auditability",
+      "prompt/context regression"
+    ],
+    "expected_failure_modes": [
+      "final outcome differs from expected status",
+      "required artifact is missing, stale, placeholder, or unsupported",
+      "delivery package is missing, unsupported, or not review-ready",
+      "prompt, context, orientation, or runtime trajectory regressed"
+    ],
+    "tweak_signal": "Inspect supervisor classification, material delta, recovery learning, authority policy, retry packet shape, and whether the agent used recovery evidence."
+  },
   "workflow": {
     "graph_template": "../../templates/agent.graph.template.json",
     "harness": "codex-cli",
@@ -13,20 +30,42 @@
     "init_git": true
   },
   "criteria": {
-    "outcome": { "status": "passed" },
-    "artifact": { "required": [{ "name": "handoff", "contains": ["repairable evidence"] }] },
-    "delivery": { "required": true },
+    "outcome": {
+      "status": "passed"
+    },
+    "artifact": {
+      "required": [
+        {
+          "name": "handoff",
+          "contains": [
+            "repairable evidence"
+          ]
+        }
+      ]
+    },
+    "delivery": {
+      "required": true
+    },
     "prompt-regression": {
       "task": "Write a managed-loop-exhaustion evidence handoff. It must contain `repairable evidence`, the exact phrase `failed criterion shape`, and the exact phrase `next forward action` rather than silently terminating.",
       "required_contains": [
         "repairable evidence",
         {
           "any": [
-            { "text": "failed criterion", "case_sensitive": false },
-            { "text": "failure shape", "case_sensitive": false }
+            {
+              "text": "failed criterion",
+              "case_sensitive": false
+            },
+            {
+              "text": "failure shape",
+              "case_sensitive": false
+            }
           ]
         },
-        { "text": "next forward action", "case_sensitive": false },
+        {
+          "text": "next forward action",
+          "case_sensitive": false
+        },
         "Scenario:"
       ]
     }

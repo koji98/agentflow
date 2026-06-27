@@ -13,6 +13,7 @@ import {
   inspectArtifactFile
 } from "../../artifacts/metadata.js";
 import type { AgentInvocation, HarnessAdapter } from "../harness/types.js";
+import { writePromptDiagnostics } from "../harness/prompt_diagnostics.js";
 import type { CompletionPacket } from "../completion/index.js";
 import type { NodeWorkspaceChangeArtifacts } from "../workspace/types.js";
 import {
@@ -553,7 +554,11 @@ function buildPromptCompletionPacket(packet: CompletionPacket): OutcomeVerificat
       summary: finding.summary
     })),
     orientation: {
-      orient_called: packet.orientation.orient_called
+      orient_called: packet.orientation.orient_called,
+      orient_call_count: packet.orientation.orient_call_count,
+      ...(packet.orientation.first_orient_at ? { first_orient_at: packet.orientation.first_orient_at } : {}),
+      ...(packet.orientation.last_orient_at ? { last_orient_at: packet.orientation.last_orient_at } : {}),
+      modes_seen: packet.orientation.modes_seen
     },
     milestones: {
       total: packet.milestones.total,
@@ -654,6 +659,31 @@ export async function runOutcomeVerification(
 
   await mkdir(dirname(promptPath), { recursive: true });
   await writeFile(promptPath, prompt, "utf8");
+  await writePromptDiagnostics({
+    invocation: buildVerifierInvocation({
+      prompt,
+      attempt: options.attempt,
+      node: options.node,
+      workspacePath: options.workspacePath,
+      contextPacketPath: options.contextPacketPath,
+      contextManifestPath: options.contextManifestPath,
+      contextManifest: options.contextManifest,
+      outputDir: buildVerifierOutputDir(options.attempt),
+      runId: options.runId,
+      ...(options.baseEnv ? { baseEnv: options.baseEnv } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.runtimeDir ? { runtimeDir: options.runtimeDir } : {}),
+      ...(options.supervisorPolicy ? { supervisorPolicy: options.supervisorPolicy } : {})
+    }),
+    prompt,
+    renderer: "renderOutcomeVerificationPrompt",
+    promptPath,
+    metadata: {
+      harness: options.harness.kind,
+      compiledId: options.node.compiled_id,
+      authoredId: options.node.authored_id
+    }
+  });
 
   const startedAt = nowMs(options.now);
   const metadataBase = {

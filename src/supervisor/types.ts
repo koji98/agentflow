@@ -315,6 +315,36 @@ export interface SupervisorInterventionDecision {
   fallback_if_repeated: SupervisorApplyAction | "fail_contract_gap";
 }
 
+export type SupervisorRecoveryFollowStatus = "yes" | "no" | "partial" | "unknown";
+
+export type SupervisorRecoveryRepeatedFailureDiagnosis =
+  | "guidance_ignored"
+  | "guidance_insufficient"
+  | "material_delta_irrelevant"
+  | "target_wrong"
+  | "boundary_wrong"
+  | "validation_gate_weak"
+  | "new_worker_error"
+  | "contract_gap"
+  | "authority_gap";
+
+export interface SupervisorRecoveryLearningRecord {
+  prior_failure_fingerprint: string;
+  prior_selected_strategy?: SupervisorApplyAction;
+  prior_restart_boundary?: SupervisorRestartBoundary;
+  prior_workspace_decision?: SupervisorWorkspaceDecision;
+  prior_material_delta: SupervisorMaterialDelta[];
+  prior_required_next_action?: string;
+  prior_validation_gate: string[];
+  retry_attempt_outcome: string;
+  followed_required_next_action: SupervisorRecoveryFollowStatus;
+  followed_validation_gate: SupervisorRecoveryFollowStatus;
+  material_delta_used: SupervisorRecoveryFollowStatus;
+  repeated_forbidden_tactic: SupervisorRecoveryFollowStatus;
+  diagnosis: SupervisorRecoveryRepeatedFailureDiagnosis;
+  evidence: string[];
+}
+
 export type SupervisorRequirementEvidenceStatus =
   | "available"
   | "missing"
@@ -441,6 +471,7 @@ export interface SupervisorRecoveryPlan {
     summary: string;
     evidence_to_read: string[];
   };
+  recovery_learning?: SupervisorRecoveryLearningRecord;
   pause_request?: {
     reason: string;
     unblock_request: string;
