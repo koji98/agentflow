@@ -433,6 +433,168 @@ describe("delivery package", () => {
             })
         ]));
     });
+
+    it("links outcome verification evidence to the verifier artifact", async () => {
+        const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-verifier-link-"));
+        const executionDir = join(runRoot, "nodes", "001-implement", "executions", "001-exec");
+        await mkdir(join(executionDir, "runtime"), { recursive: true });
+        await mkdir(join(executionDir, "human-debug", "verifier"), { recursive: true });
+        await writeRunScaffold(runRoot);
+        await writeFile(join(executionDir, "runtime", "verifier.json"), "{}\n", "utf8");
+        await writeFile(join(executionDir, "human-debug", "verifier", "verdict.md"), "# Verifier Verdict\n", "utf8");
+
+        const attempts: RuntimeNodeAttempt[] = [{
+            execution_id: "exec-1",
+            compiled_id: "root__implement",
+            authored_id: "implement",
+            kind: "agent",
+            repo_alias: "main",
+            execution_dir: executionDir,
+            attempt_index: 1,
+            status: "passed",
+            outcome: "passed",
+            started_at: "2026-04-24T00:00:00.000Z",
+            ended_at: "2026-04-24T00:00:01.000Z",
+            artifacts: {},
+            metadata: {
+                outcome_verification: {
+                    passed: true,
+                    summary: "Verifier accepted the final attempt.",
+                    findings: [],
+                    blockers: [],
+                    verifier_metadata: {
+                        harness: "codex-cli",
+                        duration_ms: 10,
+                        prompt_path: join(executionDir, "human-debug", "verifier", "prompt.md"),
+                        response_path: join(executionDir, "human-debug", "verifier", "response.md"),
+                        attempt_count: 1,
+                        truncated_artifacts: [],
+                        workspace_diff_status: "absent",
+                        parse_status: "ok"
+                    }
+                }
+            }
+        }];
+
+        await writeDeliveryPackage({
+            run_root: runRoot,
+            graph,
+            state: baseState({
+                node_statuses: { root__implement: "passed" },
+                latest_execution_by_compiled_id: {
+                    root__implement: {
+                        execution_id: "exec-1",
+                        compiled_id: "root__implement",
+                        authored_id: "implement",
+                        kind: "agent",
+                        status: "passed",
+                        attempt_index: 1,
+                        started_at: "2026-04-24T00:00:00.000Z",
+                        ended_at: "2026-04-24T00:00:01.000Z"
+                    }
+                }
+            }),
+            attempts,
+            events: [],
+            interventions: [],
+            curator: buildPassingCurator()
+        });
+
+        const source = await readJson<{
+            validation: {
+                outcome_verifications: Array<{ evidence_path: string; verifier_evidence_path?: string }>;
+            };
+        }>(join(runRoot, "delivery", "evidence", "delivery-source.json"));
+        expect(source.validation.outcome_verifications[0]?.evidence_path).toBe("evidence/validation-ledger.json");
+        expect(source.validation.outcome_verifications[0]?.verifier_evidence_path).toBe("../nodes/001-implement/executions/001-exec/human-debug/verifier/verdict.md");
+    });
+
+    it("surfaces node change evidence when final workspace status is clean", async () => {
+        const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-node-changes-"));
+        const executionDir = join(runRoot, "nodes", "001-implement", "executions", "001-exec");
+        const changeDir = join(executionDir, "workspace-changes");
+        await mkdir(changeDir, { recursive: true });
+        await writeRunScaffold(runRoot);
+        await writeFile(join(changeDir, "changed-files.json"), `${JSON.stringify([
+            { path: "src/checkout.ts", change_kind: "tracked" }
+        ], null, 2)}\n`, "utf8");
+
+        const attempts: RuntimeNodeAttempt[] = [{
+            execution_id: "exec-1",
+            compiled_id: "root__implement",
+            authored_id: "implement",
+            kind: "agent",
+            repo_alias: "main",
+            execution_dir: executionDir,
+            attempt_index: 1,
+            status: "passed",
+            outcome: "passed",
+            started_at: "2026-04-24T00:00:00.000Z",
+            ended_at: "2026-04-24T00:00:01.000Z",
+            artifacts: {},
+            metadata: {
+                node_workspace_changes: {
+                    baseline_path: join(changeDir, "baseline.json"),
+                    after_path: join(changeDir, "after.json"),
+                    status_path: join(changeDir, "status.txt"),
+                    diff_patch_path: join(changeDir, "diff.patch"),
+                    changed_files_path: join(changeDir, "changed-files.json"),
+                    changed_file_count: 1,
+                    status: "captured"
+                }
+            }
+        }];
+
+        await writeDeliveryPackage({
+            run_root: runRoot,
+            graph,
+            state: baseState({
+                workspace_change_artifacts: {},
+                node_statuses: { root__implement: "passed" },
+                latest_execution_by_compiled_id: {
+                    root__implement: {
+                        execution_id: "exec-1",
+                        compiled_id: "root__implement",
+                        authored_id: "implement",
+                        kind: "agent",
+                        status: "passed",
+                        attempt_index: 1,
+                        started_at: "2026-04-24T00:00:00.000Z",
+                        ended_at: "2026-04-24T00:00:01.000Z"
+                    }
+                }
+            }),
+            attempts,
+            events: [],
+            interventions: [],
+            curator: buildPassingCurator()
+        });
+
+        const source = await readJson<{
+            changed_files: unknown[];
+            node_changed_files: Array<{
+                node: string;
+                execution_id: string;
+                files: Array<{ path: string; change_kind: string }>;
+                diff_path: string;
+            }>;
+        }>(join(runRoot, "delivery", "evidence", "delivery-source.json"));
+        expect(source.changed_files).toEqual([]);
+        expect(source.node_changed_files).toEqual([
+            expect.objectContaining({
+                node: "implement",
+                execution_id: "exec-1",
+                files: [{ path: "src/checkout.ts", change_kind: "tracked" }],
+                diff_path: "../nodes/001-implement/executions/001-exec/workspace-changes/diff.patch",
+                changed_files_path: "../nodes/001-implement/executions/001-exec/workspace-changes/changed-files.json"
+            })
+        ]);
+
+        const sourceMarkdown = await readFile(join(runRoot, "delivery", "evidence", "delivery-source.md"), "utf8");
+        expect(sourceMarkdown).toContain("### Node Change Evidence");
+        expect(sourceMarkdown).toContain("`src/checkout.ts`");
+    });
+
     it("records binary declared artifact metadata in delivery evidence without reading it as text", async () => {
         const runRoot = await mkdtemp(join(tmpdir(), "agentflow-delivery-binary-"));
         const executionDir = join(runRoot, "nodes", "001-capture", "executions", "001-exec");

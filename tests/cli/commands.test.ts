@@ -50,11 +50,11 @@ process.stdin.on("end", () => {
     process.stdout.write(message);
   };
   const bullet = (items, empty) => items.length > 0 ? items.map((item) => "- " + item) : ["- " + empty];
-  if (prompt.includes("Agentflow outcome verifier")) {
+  if (prompt.includes("You are an external outcome verifier")) {
     finish("\`\`\`json\\n" + JSON.stringify({ passed: true, summary: "Mock verifier accepts the attempt.", findings: [], blockers: [] }, null, 2) + "\\n\`\`\`\\n");
     return;
   }
-  if (prompt.includes("Agentflow delivery curator")) {
+  if (prompt.includes("You are the delivery curator")) {
     const sourcePath = process.env.AGENTFLOW_CONTEXT_PACKET;
     if (!sourcePath) {
       throw new Error("AGENTFLOW_CONTEXT_PACKET is required for delivery curation.");

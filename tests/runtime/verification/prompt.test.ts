@@ -77,6 +77,13 @@ function buildInput(overrides: Partial<OutcomeVerificationPromptInput> = {}): Ou
 }
 
 describe("renderOutcomeVerificationPrompt", () => {
+  it("frames verifier work without runtime product branding", () => {
+    const prompt = renderOutcomeVerificationPrompt(buildInput());
+    expect(prompt).toContain("You are an external outcome verifier.");
+    expect(prompt).toContain("You did not write this code.");
+    expect(prompt).not.toContain("Agentflow");
+  });
+
   it("renders graph and node intent including acceptance criteria and constraints", () => {
     const prompt = renderOutcomeVerificationPrompt(buildInput());
     expect(prompt).toContain("Make widgets pass acceptance.");

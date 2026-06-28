@@ -459,7 +459,7 @@ describe("plugin tool compilation", () => {
             .resolves.toEqual(expect.arrayContaining([
             expect.objectContaining({
                 path: "$.tools.af",
-                message: expect.stringContaining("reserved for Agentflow runtime commands")
+                message: expect.stringContaining("reserved for task runtime commands")
             })
         ]));
     });
@@ -637,10 +637,13 @@ describe("prepareAgentTools", () => {
         expect(setup.tool_state_path).toBe(join(executionDir, "runtime/tools/state.json"));
         const wrapperSource = await readFile(join(setup.bin_dir, "babysit-poll"), "utf8");
         expect(wrapperSource.startsWith("#!/usr/bin/env bash\n")).toBe(true);
+        expect(wrapperSource).toContain("Managed plugin tool wrapper");
+        expect(wrapperSource).not.toContain("Agentflow plugin tool wrapper");
         expect(wrapperSource).toContain("launcher.mjs");
         expect(wrapperSource).toContain("babysit-poll");
         const afSource = await readFile(join(setup.bin_dir, "af"), "utf8");
-        expect(afSource).toContain("Agentflow runtime CLI wrapper");
+        expect(afSource).toContain("Task runtime CLI wrapper");
+        expect(afSource).not.toContain("Agentflow runtime CLI wrapper");
         const wrapperResult = await execFileAsync(join(setup.bin_dir, "babysit-poll"), ["--token", "secret-value"]);
         expect(wrapperResult.stdout.trim()).toBe("plugin");
         const toolDebugDir = join(executionDir, "human-debug/tools");
@@ -989,7 +992,8 @@ describe("prepareAgentTools", () => {
         const result = await execFileAsync(join(setup.bin_dir, "helpful"), ["--help"]);
         expect(result.stdout).toContain("Usage:");
         expect(result.stdout).toContain("Options:");
-        expect(result.stdout).toContain("Agentflow configured defaults:");
+        expect(result.stdout).toContain("Runtime configured defaults:");
+        expect(result.stdout).not.toContain("Agentflow configured defaults:");
         expect(result.stdout).toContain("mode: check");
         expect(result.stdout).toContain("token: <redacted>");
     });

@@ -133,7 +133,7 @@ export function renderContextManifest(packet: ContextPacket): string {
   const lines = [
     "# Context Manifest",
     "",
-    "Context entries are pointers. Agentflow does not copy or truncate source context into this prompt package.",
+    "Context entries are pointers. The runtime does not copy or truncate source context into this prompt package.",
     ""
   ];
 

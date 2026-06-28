@@ -84,7 +84,7 @@ function buildToolWrapper(launcherPath: string, callableName: string): string {
   const execLine = ["exec", quotedNode, quotedLauncher, quotedCallable, '"$@"'].join(" ");
   return [
     "#!/usr/bin/env bash",
-    "# Agentflow plugin tool wrapper. Generated per execution; do not edit.",
+    "# Managed plugin tool wrapper. Generated per execution; do not edit.",
     "set -eu",
     execLine,
     ""
@@ -115,7 +115,7 @@ function buildAfWrapper(): string {
 
   return [
     "#!/usr/bin/env bash",
-    "# Agentflow runtime CLI wrapper. Generated per execution; do not edit.",
+    "# Task runtime CLI wrapper. Generated per execution; do not edit.",
     "set -eu",
     execLine,
     ""
@@ -143,7 +143,7 @@ function buildToolLauncher(): string {
     "const toolName = process.argv[2];",
     "const tool = config.tools[toolName];",
     "if (!tool) {",
-    "  console.error(`Unknown Agentflow tool: ${toolName}`);",
+    "  console.error(`Unknown managed tool: ${toolName}`);",
     "  process.exit(127);",
     "}",
     "",
@@ -304,7 +304,7 @@ function buildToolLauncher(): string {
     "  if (result.stderr) {",
     "    process.stderr.write(result.stderr);",
     "  }",
-    "  process.stdout.write('\\nAgentflow configured defaults:\\n');",
+    "  process.stdout.write('\\nRuntime configured defaults:\\n');",
     "  const configEntries = Object.entries(tool.config || {});",
     "  if (configEntries.length === 0) {",
     "    process.stdout.write('  (none)\\n');",
@@ -528,7 +528,7 @@ export async function prepareAgentTools(
 
   for (const tool of options.node.tools) {
     if (tool.callable_name === "af") {
-      throw new Error('Plugin tool callable name "af" is reserved for the Agentflow runtime CLI.');
+      throw new Error('Plugin tool callable name "af" is reserved for the task runtime CLI.');
     }
     const wrapperPath = join(bin_dir, tool.callable_name);
     await writeFile(wrapperPath, buildToolWrapper(launcher_path, tool.callable_name), "utf8");

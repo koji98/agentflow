@@ -140,7 +140,7 @@ process.stdin.on("end", () => {
     runAf(["artifact", "write", name], content);
   };
 
-  if (prompt.includes("Agentflow outcome verifier")) {
+  if (prompt.includes("You are an external outcome verifier")) {
     const verifierJson = JSON.stringify({
       passed: true,
       summary: "Golden verifier accepts agent attempt.",
@@ -151,7 +151,7 @@ process.stdin.on("end", () => {
     return;
   }
 
-  if (prompt.includes("Agentflow delivery curator")) {
+  if (prompt.includes("You are the delivery curator")) {
     const source = readDeliverySource();
     const artifacts = source.final_declared_artifacts.length > 0
       ? source.final_declared_artifacts.map((artifact) => "- \`" + artifact.id + "\`: [" + artifact.declared_path + "](" + artifact.relative_path + ")")

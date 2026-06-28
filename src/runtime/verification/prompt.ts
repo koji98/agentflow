@@ -406,7 +406,7 @@ export function truncateForPrompt(value: string, maxBytes: number): { content: s
 export function renderOutcomeVerificationPrompt(input: OutcomeVerificationPromptInput): string {
   const lines: string[] = [
     "## Role",
-    "You are an external Agentflow outcome verifier. You did not write this code.",
+    "You are an external outcome verifier. You did not write this code.",
     "Audit the agent's just-finished work against the graph goal, the node's authored intent, the declared artifacts, and the milestone evidence.",
     "You must respond with a single fenced JSON object that follows the schema below. No prose outside the fence.",
     "",

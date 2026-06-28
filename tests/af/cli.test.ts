@@ -191,6 +191,11 @@ describe("af runtime CLI", () => {
         delete process.env.AGENTFLOW_RUNTIME_METADATA;
         const topLevel = await executeAfCli(["--help"]);
         expect(topLevel.exitCode).toBe(0);
+        expect(topLevel.stdout).toContain("Task runtime CLI (`af`)");
+        expect(topLevel.stdout).toContain("Use it to orient to the node contract");
+        expect(topLevel.stdout).not.toContain("Agentflow runtime CLI");
+        expect(topLevel.stdout).not.toContain("Agentflow agents");
+        expect(topLevel.stdout).not.toContain("Agentflow runtime metadata");
         expect(topLevel.stdout).toContain("Usage:");
         expect(topLevel.stdout).toContain("af <command> [subcommand] --help");
         expect(topLevel.stdout).toContain("Exit codes:");
@@ -222,7 +227,7 @@ describe("af runtime CLI", () => {
         process.env.AGENTFLOW_RUNTIME_METADATA = runtime.metadata;
         const orient = await executeAfCli(["orient"]);
         expect(orient.exitCode).toBe(0);
-        expect(orient.stdout).toContain("# Agentflow Orientation");
+        expect(orient.stdout).toContain("# Task Orientation");
         expect(orient.stdout).toContain("Orientation mode: `startup_restore`");
         expect(orient.stdout).toContain("No recovery, blockers, or prior progress are active.");
         expect(orient.stdout).toContain("Do the task from the prompt. Record real progress and validation as you work, then run `af complete check` before final response.");
@@ -413,7 +418,7 @@ describe("af runtime CLI", () => {
             "helper_test"
         ])).resolves.toMatchObject({
             exitCode: 2,
-            stdout: expect.stringContaining("_helper-run is internal Agentflow runtime transport")
+            stdout: expect.stringContaining("_helper-run is internal task runtime transport")
         });
     });
     it("renders exact next commands for active milestones in orientation and completion output", async () => {
@@ -468,7 +473,7 @@ describe("af runtime CLI", () => {
         await writeFile(runtime.contextManifest, [
             "# Context Manifest",
             "",
-            "Context entries are pointers. Agentflow does not copy or truncate source context into this prompt package.",
+            "Context entries are pointers. The runtime does not copy or truncate source context into this prompt package.",
             "",
             "Open read-first pointers before broad search unless the task clearly requires discovery. Use reference sets as search spaces, not as linear reading lists.",
             "",
@@ -1280,7 +1285,7 @@ describe("af runtime CLI", () => {
                 output_path: expect.stringContaining("human-debug/tools/0001-output.json")
             })
         ]);
-        await expect(readFile(records[0]!.output_path!, "utf8")).resolves.toContain("# Agentflow Orientation");
+        await expect(readFile(records[0]!.output_path!, "utf8")).resolves.toContain("# Task Orientation");
     });
     it("spawns a helper with its own metadata and waits for the helper artifact", async () => {
         const runtime = await createRuntime(tempRoot, undefined, { af_command_policy: "orchestrator" });

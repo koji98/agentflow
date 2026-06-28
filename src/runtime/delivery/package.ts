@@ -668,6 +668,14 @@ function buildDeliverySourcePacket(options: {
       workspace_path: change.workspace_path,
       files: change.changed_files
     })),
+    node_changed_files: evidence.node_workspace_changes.map((entry) => ({
+      node: entry.authored_id,
+      execution_id: entry.execution_id,
+      ...attemptPathForExecution(evidence, deliveryDir, entry.execution_id),
+      diff_path: relativeMarkdownPath(deliveryDir, entry.artifacts.diff_patch_path),
+      changed_files_path: relativeMarkdownPath(deliveryDir, entry.artifacts.changed_files_path),
+      files: entry.changed_files
+    })),
     validation: {
       milestone_validation_logs: model.milestone_validation_logs.map((log) => ({
         execution_id: log.execution_id,
@@ -685,7 +693,8 @@ function buildDeliverySourcePacket(options: {
         summary: sanitizeDeliveryEvidenceText(entry.summary),
         findings_count: entry.findings_count,
         blockers_count: entry.blockers_count,
-        evidence_path: relativeMarkdownPath(deliveryDir, manifest.evidence_files.validation_ledger)
+        evidence_path: relativeMarkdownPath(deliveryDir, manifest.evidence_files.validation_ledger),
+        verifier_evidence_path: relativeMarkdownPath(deliveryDir, entry.verify_outcome_markdown_path)
       }))
     },
     failures: {
@@ -766,6 +775,16 @@ function renderDeliverySourceMarkdown(source: DeliverySourcePacket): string {
           ""
         ])
       : ["- No workspace change captures were recorded."]),
+    "",
+    "### Node Change Evidence",
+    "",
+    ...(source.node_changed_files.length > 0
+      ? source.node_changed_files.flatMap((change) => [
+          `- \`${change.node}\` (${change.execution_id}): ${change.files.length} changed file(s). Diff: [patch](${change.diff_path}); files: [json](${change.changed_files_path}).`,
+          ...change.files.map((file) => `  - \`${file.path}\` (${file.change_kind})`)
+        ])
+      : ["- No per-node change snapshots were recorded."]),
+    "",
     "## Validation",
     "",
     ...(source.validation.milestone_validation_logs.length > 0
@@ -973,7 +992,7 @@ function renderDecisionLog(evidence: DeliveryEvidence, model: DeliveryModel): st
         lines.push(`- Published declared artifacts: ${declaredArtifacts.map((name) => `\`${name}\``).join(", ")}.`);
       }
       if (toolInvocationCount > 0) {
-        lines.push(`- Agentflow-provided tool invocations recorded: \`${toolInvocationCount}\`.`);
+        lines.push(`- Runtime-provided tool invocations recorded: \`${toolInvocationCount}\`.`);
       }
       lines.push(`- Summary: ${entry.summary}`, "");
     }
@@ -1097,7 +1116,7 @@ async function buildArtifactTaxonomy(options: {
       artifactEntry({
         path: entry.invocation_path,
         label: `${entry.authored_id} tool invocation ledger`,
-        purpose: "Canonical JSONL ledger of Agentflow-provided `af` and plugin tool calls for this execution."
+        purpose: "Canonical JSONL ledger of runtime-provided `af` and plugin tool calls for this execution."
       })
     )
   );
@@ -1247,14 +1266,14 @@ async function buildArtifactTaxonomy(options: {
           ? [{
               path: record.input_path,
               label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} input`,
-              purpose: "Raw invocation input for a single Agentflow-provided tool invocation."
+              purpose: "Raw invocation input for a single runtime-provided tool invocation."
             }]
           : []),
         ...(typeof record.output_path === "string"
           ? [{
               path: record.output_path,
               label: `${entry.authored_id} ${String(record.tool ?? record.kind ?? "tool")} output`,
-              purpose: "Raw invocation output for a single Agentflow-provided tool invocation."
+              purpose: "Raw invocation output for a single runtime-provided tool invocation."
             }]
           : [])
       ])
@@ -1540,7 +1559,7 @@ function renderDeliveryFailureReviewBrief(options: {
     "## Outcome",
     "",
     `Graph status: \`${manifest.graph_status}\`. Delivery status: \`failed\`. Review ready: \`false\`.`,
-    "Agentflow reached terminal graph state but could not verify the curated human handoff.",
+    "The graph reached terminal state but delivery could not verify the curated human handoff.",
     "",
     "## Reviewer Decision",
     "",
@@ -1560,8 +1579,11 @@ function renderDeliveryFailureReviewBrief(options: {
     "",
     "## Changed Files",
     "",
-    source.changed_files.length > 0
-      ? source.changed_files.map((entry) => `- \`${entry.repo}\`: ${entry.files.length} changed file(s).`).join("\n")
+    source.changed_files.length > 0 || source.node_changed_files.length > 0
+      ? [
+          ...source.changed_files.map((entry) => `- \`${entry.repo}\`: ${entry.files.length} workspace changed file(s).`),
+          ...source.node_changed_files.map((entry) => `- \`${entry.node}\`: ${entry.files.length} node changed file(s). Evidence: [node diff](${entry.diff_path})`)
+        ].join("\n")
       : "- No workspace change evidence was recorded.",
     "",
     "## Final Declared Artifacts",
@@ -1666,13 +1688,18 @@ function renderDeterministicReviewBrief(options: {
       return `\`${log.execution_id}\` milestone \`${log.milestone_id}\`: ${log.summary}${command}${result}`;
     }),
     ...source.validation.outcome_verifications.map((verification) =>
-      `\`${verification.node}\` outcome verification: ${verification.summary} Result: \`${verification.passed ? "pass" : "fail"}\`. Evidence: ${markdownLink(deliveryDir, "verifier evidence", verification.evidence_path)}`
+      `\`${verification.node}\` outcome verification: ${verification.summary} Result: \`${verification.passed ? "pass" : "fail"}\`. Evidence: [validation ledger](${verification.evidence_path})`
     )
   ];
   const changedLines = source.changed_files.flatMap((entry) =>
     entry.files.length > 0
       ? entry.files.map((file) => `\`${entry.repo}/${file}\``)
       : [`\`${entry.repo}\`: no changed files recorded.`]
+  );
+  const nodeChangedLines = source.node_changed_files.flatMap((entry) =>
+    entry.files.length > 0
+      ? entry.files.map((file) => `\`${file.path}\` (${entry.node}; ${file.change_kind})`)
+      : [`\`${entry.node}\`: no per-node changed files recorded.`]
   );
 
   return [
@@ -1703,7 +1730,7 @@ function renderDeterministicReviewBrief(options: {
     "",
     "## Changed Files",
     "",
-    ...markdownList(changedLines, "No workspace change evidence was recorded."),
+    ...markdownList([...changedLines, ...nodeChangedLines], "No workspace or node change evidence was recorded."),
     "",
     "## Final Declared Artifacts",
     "",

@@ -311,7 +311,7 @@ export async function runQualityCriterion(options: {
     ...(options.criterion.reasoning_effort ? { reasoning_effort: options.criterion.reasoning_effort } : {}),
     skip_git_repo_check: true,
     node_goal: [
-      "Grade this eval quality criterion for one completed Agentflow workflow trial.",
+      "Grade this eval quality criterion for one completed workflow trial.",
       "Judge the trace packet and declared eval artifacts; do not rerun the workflow or do the task yourself.",
       "Quality scores cannot excuse deterministic blockers recorded in the trace packet or criterion evidence.",
       "Return strict JSON with passed_quality_bar, score, dimension_scores, blockers, rationale, and prompt_feedback.",
